@@ -2,6 +2,7 @@ name: Build
 on:
   push:
     branches: [master, gh-actions]
+    tags: ['v*']
   pull_request:
     branches: [master]
 jobs:
@@ -256,3 +257,25 @@ jobs:
           name: RWE Installer ${{ runner.os }} MinGW64 ${{ matrix.configuration }}
           path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}.exe
           if-no-files-found: error
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-windows-msvc
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: download MSVC Release zip
+        uses: actions/download-artifact@v4
+        with:
+          name: RWE Zip Windows MSVC Release
+          path: dist
+      - name: download MSVC Release installer
+        uses: actions/download-artifact@v4
+        with:
+          name: RWE Installer Windows MSVC Release
+          path: dist
+      - name: create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
