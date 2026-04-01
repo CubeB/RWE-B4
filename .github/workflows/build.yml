@@ -98,6 +98,51 @@ jobs:
           popd
       - name: test rwe
         run: ./build/rwe_test
+      - name: build AppImage
+        if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
+        run: |
+          # Install into AppDir layout
+          mkdir -p AppDir/usr/bin AppDir/usr/share/rwe
+          cp build/rwe build/rwe_bridge AppDir/usr/bin/
+          cp -r shaders AppDir/usr/share/rwe/
+          cp LICENSE README.md AppDir/usr/share/rwe/
+
+          # Create desktop entry
+          mkdir -p AppDir/usr/share/applications
+          cat > AppDir/usr/share/applications/rwe.desktop <<'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=Robot War Engine
+          Exec=rwe
+          Icon=rwe
+          Categories=Game;StrategyGame;
+          DESKTOP
+          sed -i 's/^          //' AppDir/usr/share/applications/rwe.desktop
+
+          # Placeholder icon (required by linuxdeploy)
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          convert -size 256x256 xc:'#2a4a6b' -fill white -gravity center \
+            -pointsize 72 -annotate 0 'RWE' \
+            AppDir/usr/share/icons/hicolor/256x256/apps/rwe.png
+
+          # Download linuxdeploy
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+
+          # Build AppImage
+          VERSION=$(git describe --tags --always)
+          export VERSION
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --desktop-file AppDir/usr/share/applications/rwe.desktop \
+            --output appimage
+      - name: upload AppImage artifact
+        if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
+        uses: actions/upload-artifact@v6
+        with:
+          name: RWE AppImage
+          path: Robot_War_Engine-*.AppImage
+          if-no-files-found: error
   build-windows-msvc:
     strategy:
       matrix:
@@ -259,7 +304,7 @@ jobs:
           if-no-files-found: error
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-windows-msvc
+    needs: [build-linux, build-windows-msvc]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -273,6 +318,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: RWE Installer Windows MSVC Release
+          path: dist
+      - name: download AppImage
+        uses: actions/download-artifact@v4
+        with:
+          name: RWE AppImage
           path: dist
       - name: create release
         uses: softprops/action-gh-release@v2
