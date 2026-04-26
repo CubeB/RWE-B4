@@ -762,6 +762,7 @@ set(TEST_FILES
     src/rwe/pathfinding/pathfinding_utils.test.cpp
     src/rwe/rc_gen_optional.h
     src/rwe/sim/GameHash_util.test.cpp
+    src/rwe/sim/cob.test.cpp
     src/rwe/sim/SimAngle.test.cpp
     src/rwe/sim/SimVector.test.cpp
     src/rwe/sim/UnitState_util.test.cpp

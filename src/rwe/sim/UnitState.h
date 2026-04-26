@@ -18,6 +18,7 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitFireOrders.h>
 #include <rwe/sim/UnitMesh.h>
+#include <rwe/sim/UnitMovementOrders.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitWeapon.h>
 #include <variant>
@@ -261,6 +262,11 @@ namespace rwe
         std::array<std::optional<UnitWeapon>, 3> weapons;
 
         UnitFireOrders fireOrders{UnitFireOrders::FireAtWill};
+        UnitMovementOrders moveOrders{UnitMovementOrders::Maneuver};
+
+        bool cobBusy{false};
+        bool buggerOffActive{false};
+        bool armored{false};
 
         unsigned int buildTimeCompleted{0};
 
