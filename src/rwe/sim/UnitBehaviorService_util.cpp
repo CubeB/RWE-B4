@@ -111,6 +111,14 @@ namespace rwe
         SimVector xzDestination(destination.x, 0_ss, destination.z);
         auto xzDirection = xzDestination - xzPosition;
 
+        // Already at destination horizontally — hold heading and stop.
+        // Reaches here when an aircraft is ordered to attack the ground
+        // directly below it, or when a unit is exactly on its target.
+        if (xzDirection.lengthSquared() == 0_ss)
+        {
+            return SteeringInfo{unit.rotation, 0_ss};
+        }
+
         // scale desired speed proportionally to how aligned we are
         // with the target direction
         auto normalizedUnitDirection = UnitState::toDirection(unit.rotation);

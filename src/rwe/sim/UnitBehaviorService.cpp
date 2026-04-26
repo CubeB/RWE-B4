@@ -525,10 +525,13 @@ namespace rwe
         auto direction = match(
             weaponDefinition.physicsType,
             [&](const ProjectilePhysicsTypeLineOfSight&) {
-                return (fireInfo->targetPosition - firingPoint).normalized();
+                // Fallback to the unit's facing when firing piece coincides
+                // with target position (e.g. bomber attacking ground directly
+                // beneath itself). Without the guard, normalize throws.
+                return (fireInfo->targetPosition - firingPoint).normalizedOr(UnitState::toDirection(unit.rotation));
             },
             [&](const ProjectilePhysicsTypeTracking&) {
-                return (fireInfo->targetPosition - firingPoint).normalized();
+                return (fireInfo->targetPosition - firingPoint).normalizedOr(UnitState::toDirection(unit.rotation));
             },
             [&](const ProjectilePhysicsTypeBallistic&) {
                 return toDirection(fireInfo->heading + unit.rotation, -fireInfo->pitch);
