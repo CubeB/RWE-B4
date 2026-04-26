@@ -17,6 +17,7 @@
 #include <rwe/game/GameCameraState.h>
 #include <rwe/game/GameMediaDatabase.h>
 #include <rwe/game/GameNetworkService.h>
+#include <rwe/game/GameSpeed.h>
 #include <rwe/game/InGameSoundsInfo.h>
 #include <rwe/game/Particle.h>
 #include <rwe/game/PlayerCommand.h>
@@ -293,6 +294,9 @@ namespace rwe
 
         int millisecondsBuffer{0};
 
+        GameSpeed gameSpeed;
+        bool paused{false};
+
         std::vector<FlashEffect> flashes;
         bool guiVisible{true};
 
@@ -473,7 +477,7 @@ namespace rwe
 
         void processPlayerCommands(const std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>& commands);
 
-        void processPlayerCommand(const PlayerCommand& playerCommand);
+        void processPlayerCommand(PlayerId issuingPlayer, const PlayerCommand& playerCommand);
 
         void processUnitCommand(const PlayerUnitCommand& unitCommand);
 
@@ -484,6 +488,8 @@ namespace rwe
         }
 
         void renderUi();
+
+        void renderOverlay();
 
         void renderMinimap();
 

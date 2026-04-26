@@ -139,6 +139,12 @@ namespace rwe
         {
             cmd->mutable_unpause();
         }
+
+        void operator()(const PlayerSetGameSpeedCommand& c)
+        {
+            auto& out = *cmd->mutable_set_game_speed();
+            out.set_speed_index(c.speedIndex);
+        }
     };
 
     void serializeVector(const SimVector& v, proto::SimVector& out)
@@ -205,6 +211,11 @@ namespace rwe
         if (cmd.has_unpause())
         {
             return PlayerUnpauseGameCommand();
+        }
+
+        if (cmd.has_set_game_speed())
+        {
+            return PlayerSetGameSpeedCommand{cmd.set_game_speed().speed_index()};
         }
 
         if (cmd.has_unit_command())

@@ -291,6 +291,11 @@ namespace rwe
         renderWorld();
         sceneContext.graphics->disableDepthBuffer();
 
+        if (guiVisible)
+        {
+            renderOverlay();
+        }
+
         // oh yeah also regulate sound
         std::scoped_lock<std::mutex> lock(playingUnitChannelsLock);
         auto volume = computeSoundVolume(playingUnitChannels.size());
@@ -511,6 +516,28 @@ namespace rwe
         }
 
         currentPanel->render(chromeUiRenderService);
+    }
+
+    void GameScene::renderOverlay()
+    {
+        // These overlays must render AFTER renderWorld, otherwise the world
+        // pass overwrites the center of the screen where they sit.
+
+        // Speed indicator: TA shows "+N" / "-N" relative to default 1.0x speed.
+        if (!gameSpeed.isDefault())
+        {
+            int offset = gameSpeed.displayOffset();
+            std::string speedText = (offset > 0 ? "+" : "") + std::to_string(offset);
+            float centerX = static_cast<float>(sceneContext.viewport->width()) / 2.0f;
+            chromeUiRenderService.drawTextCenteredX(centerX, GuiSizeTop + 8, speedText, *guiFont);
+        }
+
+        if (paused)
+        {
+            float centerX = static_cast<float>(sceneContext.viewport->width()) / 2.0f;
+            float centerY = static_cast<float>(sceneContext.viewport->height()) / 2.0f;
+            chromeUiRenderService.drawTextCenteredX(centerX, centerY, "Paused", *guiFont);
+        }
     }
 
     void GameScene::renderMinimap()
@@ -1279,6 +1306,35 @@ namespace rwe
                 }
             }
         }
+        else if (keysym.key == SDLK_EQUALS || keysym.key == SDLK_KP_PLUS)
+        {
+            // Speed up: locally-issued, host-authoritatively applied via lockstep.
+            // Any client may emit; processPlayerCommand drops it unless issued by host.
+            localPlayerCommandBuffer.push_back(PlayerSetGameSpeedCommand{gameSpeed.increased().index()});
+        }
+        else if (keysym.key == SDLK_MINUS || keysym.key == SDLK_KP_MINUS)
+        {
+            // Slow down: see SDLK_EQUALS comment.
+            localPlayerCommandBuffer.push_back(PlayerSetGameSpeedCommand{gameSpeed.decreased().index()});
+        }
+        else if (keysym.key == SDLK_PAUSE)
+        {
+            // Toggle the local paused flag immediately so the tick loop can
+            // resume on unpause; the lockstep-routed command handler is what
+            // drives the tick loop and would otherwise never run while paused.
+            // Pause/unpause is scene state (not deterministic sim state), so
+            // toggling locally is fine; the command still goes through the
+            // command stream so peers stay in sync.
+            paused = !paused;
+            if (paused)
+            {
+                localPlayerCommandBuffer.push_back(PlayerPauseGameCommand{});
+            }
+            else
+            {
+                localPlayerCommandBuffer.push_back(PlayerUnpauseGameCommand{});
+            }
+        }
     }
 
     void GameScene::onKeyUp(const SDL_KeyboardEvent& keysym)
@@ -1763,7 +1819,16 @@ namespace rwe
 
     void GameScene::update(int millisecondsElapsed)
     {
-        millisecondsBuffer += millisecondsElapsed;
+        // Pause halts simulation tick dispatch by not advancing the
+        // scaled-time accumulator. Speed scales the accumulator using
+        // integer arithmetic to keep determinism friendly: at perMille
+        // == 1000 we accumulate 1ms per real ms; at 100 we accumulate
+        // 0.1ms per real ms; at 5000 we accumulate 5ms per real ms.
+        // The sim tick threshold (SimMillisecondsPerTick) is unchanged.
+        if (!paused)
+        {
+            millisecondsBuffer += (millisecondsElapsed * gameSpeed.perMille()) / 1000;
+        }
 
         auto cameraConstraint = computeCameraConstraint(simulation.terrain, worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
 
@@ -2034,18 +2099,30 @@ namespace rwe
         const SceneTime frameCheckInterval(5);
         auto highSceneTime = averageSceneTime + frameTolerance;
         auto lowSceneTime = averageSceneTime <= frameTolerance ? SceneTime{0} : averageSceneTime - frameTolerance;
-        for (; millisecondsBuffer >= SimMillisecondsPerTick; millisecondsBuffer -= SimMillisecondsPerTick)
+        // Cap the number of sim ticks we dispatch per frame to prevent
+        // a runaway "spiral of death" if frame times spike at high speeds.
+        const int maxTicksPerFrame = 10;
+        int ticksThisFrame = 0;
+        for (; millisecondsBuffer >= SimMillisecondsPerTick && ticksThisFrame < maxTicksPerFrame; millisecondsBuffer -= SimMillisecondsPerTick)
         {
             if (sceneTime % frameCheckInterval != SceneTime(0) || sceneTime <= highSceneTime)
             {
                 tryTickGame();
+                ++ticksThisFrame;
 
                 // simulate an extra frame to catch up every so often
-                if (sceneTime % frameCheckInterval == SceneTime(0) && sceneTime < lowSceneTime)
+                if (sceneTime % frameCheckInterval == SceneTime(0) && sceneTime < lowSceneTime && ticksThisFrame < maxTicksPerFrame)
                 {
                     tryTickGame();
+                    ++ticksThisFrame;
                 }
             }
+        }
+        // If we hit the cap, drain the buffer so we don't carry over
+        // unbounded backlog into the next frame.
+        if (ticksThisFrame >= maxTicksPerFrame)
+        {
+            millisecondsBuffer = 0;
         }
 
         renderDebugWindow();
@@ -3055,11 +3132,11 @@ namespace rwe
 
     void GameScene::processPlayerCommands(const std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>& commands)
     {
-        for (const auto& [_, playerCommands] : commands)
+        for (const auto& [issuingPlayer, playerCommands] : commands)
         {
             for (const auto& command : playerCommands)
             {
-                processPlayerCommand(command);
+                processPlayerCommand(issuingPlayer, command);
             }
         }
     }
@@ -3583,18 +3660,37 @@ namespace rwe
         return panel;
     }
 
-    void GameScene::processPlayerCommand(const PlayerCommand& playerCommand)
+    void GameScene::processPlayerCommand(PlayerId issuingPlayer, const PlayerCommand& playerCommand)
     {
         match(
             playerCommand,
             [&](const PlayerUnitCommand& c) {
                 processUnitCommand(c);
             },
-            [](const PlayerPauseGameCommand&) {
-                // TODO
+            [&](const PlayerPauseGameCommand&) {
+                // Pause is open to any player. The local player toggles
+                // `paused` immediately in the key handler so the tick loop
+                // can resume to process the unpause; ignoring the round-tripped
+                // command here prevents a stale pause from re-applying after
+                // the user has already unpaused.
+                if (issuingPlayer != localPlayerId)
+                {
+                    paused = true;
+                }
             },
-            [](const PlayerUnpauseGameCommand&) {
-                // TODO
+            [&](const PlayerUnpauseGameCommand&) {
+                if (issuingPlayer != localPlayerId)
+                {
+                    paused = false;
+                }
+            },
+            [&](const PlayerSetGameSpeedCommand& c) {
+                // Host-authoritative: only honor speed changes from player 0.
+                // Non-host requests are silently dropped.
+                if (issuingPlayer == PlayerId(0))
+                {
+                    gameSpeed = GameSpeed(c.speedIndex);
+                }
             });
     }
 

@@ -63,5 +63,10 @@ namespace rwe
     {
     };
 
-    using PlayerCommand = std::variant<PlayerUnitCommand, PlayerPauseGameCommand, PlayerUnpauseGameCommand>;
+    struct PlayerSetGameSpeedCommand
+    {
+        int speedIndex;
+    };
+
+    using PlayerCommand = std::variant<PlayerUnitCommand, PlayerPauseGameCommand, PlayerUnpauseGameCommand, PlayerSetGameSpeedCommand>;
 }

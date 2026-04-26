@@ -733,6 +733,8 @@ set(TEST_FILES
     src/rwe/cob/cob_util.test.cpp
     src/rwe/collections/MinHeap.test.cpp
     src/rwe/collections/VectorMap.test.cpp
+    src/rwe/game/GameSpeed.test.cpp
+    src/rwe/game/PlayerCommand_speed.test.cpp
     src/rwe/game/dump_util.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp
     src/rwe/geometry/Circle2f.test.cpp
