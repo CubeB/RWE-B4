@@ -40,6 +40,7 @@
             pkg-config
             git
             gnumake
+            gdb
 
             protobuf
 
