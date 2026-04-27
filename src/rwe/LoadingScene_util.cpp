@@ -321,6 +321,14 @@ namespace rwe
 
         u.soundCategory = fbi.soundCategory;
 
+        // AI classification metadata. Stored on the UnitDefinition so
+        // future Phase 2 work (UnitClassifier, fog-of-war) can read them
+        // without re-parsing FBIs.
+        u.tedClass = fbi.tedClass;
+        u.category = fbi.category;
+        u.sightDistance = fbi.sightDistance;
+        u.radarDistance = fbi.radarDistance;
+
         u.yardMapContainsGeo = false;
 
         auto movementClassId = movementClassDatabase.resolveMovementClassByName(fbi.movementClass);

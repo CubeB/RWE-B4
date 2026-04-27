@@ -130,5 +130,24 @@ namespace rwe
         bool showPlayerName;
 
         std::string soundCategory;
+
+        // ---- AI/LOS classification fields (parsed from FBI) ----
+        // These are read-only metadata — they do not affect physics or
+        // command processing. Future LOS and AI Classifier subsystems
+        // will read them.
+
+        // Coarse TA class hint, e.g. "KBOT", "TANK", "SHIP", "PLANE",
+        // "COMMANDER", "METAL", "ENERGY". Empty if absent in the FBI.
+        std::string tedClass;
+
+        // Verbatim TA category list. Space-separated tokens such as
+        // "LEVEL1 KBOT WEAPON CONSTRUCT". Empty if absent.
+        std::string category;
+
+        // Sight / radar radii in TA "elmos". 0 = no LOS / no radar.
+        // Consumed by the future fog-of-war subsystem; today RWE has no
+        // LOS implementation so these values are stored but not used.
+        unsigned int sightDistance{0};
+        unsigned int radarDistance{0};
     };
 }
