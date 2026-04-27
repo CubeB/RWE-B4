@@ -308,6 +308,14 @@ namespace rwe
         bool buggerOffActive{false};
         bool armored{false};
 
+        /**
+         * Number of enemy units this unit has killed.
+         * Used by the COB VeteranLevel query to compute veterancy tier.
+         * Self-damage / friendly-fire kills are counted (matches TA behavior).
+         * Environmental deaths (e.g., feature damage) do not credit anyone.
+         */
+        unsigned int kills{0};
+
         unsigned int buildTimeCompleted{0};
 
         bool activated{false};

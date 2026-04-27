@@ -90,6 +90,7 @@ namespace rwe
             u.cobBusy,
             u.buggerOffActive,
             u.armored,
+            u.kills,
             u.buildTimeCompleted,
             u.activated,
             u.isSufficientlyPowered,
@@ -149,6 +150,7 @@ namespace rwe
     {
         GameHash h = combineHashes(
             projectile.owner,
+            projectile.attacker,
             projectile.position,
             projectile.origin,
             projectile.velocity,

@@ -167,6 +167,14 @@ namespace rwe
         {
             weaponDefinition.physicsType = ProjectilePhysicsTypeLineOfSight();
         }
+        else if (tdf.dropped)
+        {
+            // Bombs in TA set both `ballistic=1` and `dropped=1`. The `dropped`
+            // flag identifies bombsight semantics (release-when-overhead,
+            // inherit aircraft velocity), and supersedes the ballistic
+            // aim-then-launch flow.
+            weaponDefinition.physicsType = ProjectilePhysicsTypeBomb();
+        }
         else if (tdf.ballistic)
         {
             weaponDefinition.physicsType = ProjectilePhysicsTypeBallistic();

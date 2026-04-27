@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <rwe/util/SpanStream.h>
 #include <rwe/LoadingScene_util.h>
+#include <rwe/ai/AiPlayerController.h>
+#include <rwe/ai/AiTuningProfile.h>
 #include <rwe/atlas_util.h>
 #include <rwe/collections/SimpleVectorMap.h>
 #include <rwe/game/FeatureMediaInfo.h>
@@ -229,6 +231,34 @@ namespace rwe
         if (!localPlayerId)
         {
             throw std::runtime_error("No local player!");
+        }
+
+        // Instantiate one AiPlayerController per Computer player.
+        // The controller's RNG is sub-seeded from simulation.rng so its
+        // sequence is part of the seeded sim and survives replays
+        // (docs/ai-architecture-proposal.md §12-Q6).
+        for (Index i = 0; i < getSize(simulation.players); ++i)
+        {
+            const auto& player = simulation.players[i];
+            if (player.type != GamePlayerType::Computer)
+            {
+                continue;
+            }
+            PlayerId aiPlayerId(i);
+
+            // For Phase 1 every AI runs the Standard tuning profile.
+            // A future commit will (a) wire in ota.aiProfile lookup and
+            // (b) expose a difficulty selector in the lobby.
+            auto profile = makeDefaultStandardProfile();
+
+            // Pull a single value from the sim RNG to seed the AI's
+            // sub-RNG. This keeps AI choices reproducible across clients
+            // that share `simulation.rng`'s seed.
+            const std::uint64_t aiSeed = static_cast<std::uint64_t>(simulation.rng());
+
+            simulation.addAiController(
+                aiPlayerId,
+                std::make_unique<AiPlayerController>(aiPlayerId, std::move(profile), aiSeed));
         }
 
         auto gameNetworkService = std::make_unique<GameNetworkService>(*localPlayerId, std::stoi(gameParameters.localNetworkPort), endpointInfos, playerCommandService.get());

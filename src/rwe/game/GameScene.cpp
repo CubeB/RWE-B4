@@ -2239,7 +2239,12 @@ namespace rwe
             gameNetworkService->submitCommands(sceneTime, std::vector<PlayerCommand>());
         }
 
-        // Queue up commands from the computer players
+        // Queue up commands from the computer players. The AI runs inside
+        // the simulation (one tick ahead of this drain) and writes its
+        // PlayerCommands into `simulation.aiPendingCommands`. We pull them
+        // here and push them through the same PlayerCommandService channel
+        // human input uses, so MP/replay/desync detection treats AI
+        // identically to a remote human.
         for (Index i = 0; i < getSize(simulation.players); ++i)
         {
             PlayerId id(i);
@@ -2248,8 +2253,8 @@ namespace rwe
             {
                 if (playerCommandService->bufferedCommandCount(id) == 0)
                 {
-                    // TODO: implement computer AI logic to decide commands here
-                    playerCommandService->pushCommands(id, std::vector<PlayerCommand>());
+                    auto aiCommands = simulation.takeAiCommandsForPlayer(id);
+                    playerCommandService->pushCommands(id, aiCommands);
                 }
             }
         }

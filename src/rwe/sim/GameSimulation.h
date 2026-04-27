@@ -1,10 +1,12 @@
 #pragma once
 
+#include <memory>
 #include <random>
 #include <rwe/cob/CobUnitId.h>
 #include <rwe/collections/SimpleVectorMap.h>
 #include <rwe/collections/VectorMap.h>
 #include <rwe/game/PlayerColorIndex.h>
+#include <rwe/game/PlayerCommand.h>
 #include <rwe/geometry/BoundingBox3x.h>
 #include <rwe/pathfinding/PathFindingService.h>
 #include <rwe/sim/FeatureDefinition.h>
@@ -27,9 +29,12 @@
 #include <rwe/sim/UnitState.h>
 #include <set>
 #include <unordered_map>
+#include <vector>
 
 namespace rwe
 {
+    class AiPlayerController;
+
     constexpr int MaxUtilizableWindSpeed = 5000;
 
     enum class GamePlayerStatus
@@ -292,7 +297,39 @@ namespace rwe
 
         GameTime nextWindSpeedChange;
 
+        // Computer-player controllers, owned by the simulation per the
+        // locked decision in docs/ai-architecture-proposal.md §12-Q4.
+        // Pointed-to via unique_ptr so the AI subsystem header is not
+        // forced into every TU that pulls in GameSimulation.h.
+        // Iterated in deterministic key order via `aiPlayerOrder`.
+        std::unordered_map<PlayerId, std::unique_ptr<AiPlayerController>> aiControllers;
+
+        // Sorted list of AI player ids that mirrors the `aiControllers` keys.
+        // Maintained when AIs are registered so per-tick iteration order is
+        // independent of the unordered_map's hash ordering.
+        std::vector<PlayerId> aiPlayerOrder;
+
+        // Commands the AI controllers want issued, keyed by the AI's
+        // PlayerId. Drained each scene tick by GameScene::update via
+        // takeAiCommandsForPlayer(). One element per tick — accumulate, then
+        // drain, then refill.
+        std::unordered_map<PlayerId, std::vector<PlayerCommand>> aiPendingCommands;
+
         explicit GameSimulation(MapTerrain&& terrain, unsigned char surfaceMetal, int minWindSpeed, int maxWindSpeed);
+
+        // GameSimulation owns AiPlayerController via unique_ptr. We need an
+        // explicit destructor because AiPlayerController is forward-declared
+        // here; the definition becomes available only in GameSimulation.cpp,
+        // which is where the destructor body is generated.
+        ~GameSimulation();
+        GameSimulation(GameSimulation&&) noexcept;
+        // Move-assignment is disabled: the const minWindSpeed / maxWindSpeed
+        // members make it ill-formed, and existing call sites only ever
+        // move-construct (LoadingScene -> GameScene). Copy operations are
+        // implicitly deleted by the unique_ptr storage.
+        GameSimulation& operator=(GameSimulation&&) = delete;
+        GameSimulation(const GameSimulation&) = delete;
+        GameSimulation& operator=(const GameSimulation&) = delete;
 
         std::optional<FeatureId> addFeature(MapFeature&& newFeature);
 
@@ -391,11 +428,11 @@ namespace rwe
 
         void requestPath(UnitId unitId);
 
-        Projectile createProjectileFromWeapon(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit);
+        Projectile createProjectileFromWeapon(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker = std::nullopt, std::optional<SimVector> inheritedVelocity = std::nullopt);
 
-        Projectile createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit);
+        Projectile createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker = std::nullopt, std::optional<SimVector> inheritedVelocity = std::nullopt);
 
-        void spawnProjectile(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit);
+        void spawnProjectile(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker = std::nullopt, std::optional<SimVector> inheritedVelocity = std::nullopt);
 
         WinStatus computeWinStatus() const;
 
@@ -436,7 +473,20 @@ namespace rwe
 
         void killUnit(UnitId unitId);
 
+        /**
+         * Kill a unit and credit the kill to the supplied attacker, if any.
+         * Self-damage / friendly-fire kills are credited (matches TA behavior).
+         * The attacker must be a living unit; dead/missing attackers are not credited.
+         */
+        void killUnit(UnitId unitId, std::optional<UnitId> attacker);
+
         void applyDamage(UnitId unitId, unsigned int damagePoints);
+
+        /**
+         * Apply damage and, if the unit is killed, credit the attacker.
+         * Same crediting rules as killUnit(UnitId, std::optional<UnitId>).
+         */
+        void applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker);
 
         void applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile);
 
@@ -465,5 +515,23 @@ namespace rwe
         std::optional<FeatureDefinitionId> tryGetFeatureDefinitionId(const std::string& featureName) const;
 
         const FeatureDefinition& getFeatureDefinition(FeatureDefinitionId featureDefinitionId) const;
+
+        // Register an AI controller for `playerId`. The simulation takes
+        // ownership. Multiple registrations for the same playerId replace
+        // the previous controller. Must be called only at game setup time;
+        // there is no thread-safety on this map.
+        void addAiController(PlayerId playerId, std::unique_ptr<AiPlayerController> controller);
+
+        // Drain and return the commands the AI controller for `playerId`
+        // has accumulated. Returns an empty vector if no commands are
+        // pending or no AI is registered. After draining, the per-player
+        // queue is empty.
+        std::vector<PlayerCommand> takeAiCommandsForPlayer(PlayerId playerId);
+
+        // Run all AI controllers in deterministic key order. Each
+        // controller appends its decided commands into
+        // `aiPendingCommands[playerId]`.
+        // Called once per sim tick at the top of `tick()`.
+        void runAiControllers();
     };
 }

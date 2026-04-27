@@ -45,6 +45,12 @@ namespace rwe
             },
             [&](const ProjectilePhysicsTypeBallistic&) {
                 return computeBallisticHeadingAndPitch(rotation, from, to, speed, gravity, zOffset);
+            },
+            [&](const ProjectilePhysicsTypeBomb&) {
+                // Bombs don't actually use this aim — their release is decided
+                // by the bombsight predicate in tryFireWeapon. We return a
+                // line-of-sight aim so the COB AimWeapon dance doesn't choke.
+                return computeLineOfSightHeadingAndPitch(rotation, from, to);
             });
     }
 
@@ -290,6 +296,43 @@ namespace rwe
         // on the cruise altitude so units that hover high don't loop too tight.
         auto altitudeFloor = unitDefinition.cruiseAltitude * 8_ss;
         return rweMax(weaponMaxRange, altitudeFloor);
+    }
+
+    SimVector predictBombImpactPoint(const SimVector& bomberPosition, const SimVector& bomberVelocity, SimScalar groundY)
+    {
+        // The bomb's per-tick fall is governed by the ballistic gravity used
+        // in updateProjectiles: dvy/dt = -112/(30*30) (per-tick²). Integrating
+        // y(t) = h - (1/2) g t² with h = bomberPosition.y - groundY gives
+        //   t_impact = sqrt(2h / g).
+        auto h = bomberPosition.y - groundY;
+        if (h <= 0_ss)
+        {
+            // Aircraft is at or below the ground — bomb impacts immediately
+            // at the bomber's current XZ.
+            return SimVector(bomberPosition.x, groundY, bomberPosition.z);
+        }
+
+        auto gravity = 112_ss / (30_ss * 30_ss);
+        // Solve t for h - (1/2) g t² = 0 => t = sqrt(2 h / g).
+        auto tSquared = (2_ss * h) / gravity;
+        auto t = rweSqrt(tSquared);
+
+        SimVector impact(
+            bomberPosition.x + (bomberVelocity.x * t),
+            groundY,
+            bomberPosition.z + (bomberVelocity.z * t));
+        return impact;
+    }
+
+    bool bombsightInReleaseWindow(
+        const SimVector& bomberPosition,
+        const SimVector& bomberVelocity,
+        const SimVector& targetPosition,
+        SimScalar releaseRadius)
+    {
+        auto impact = predictBombImpactPoint(bomberPosition, bomberVelocity, targetPosition.y);
+        SimVector dxz(impact.x - targetPosition.x, 0_ss, impact.z - targetPosition.z);
+        return dxz.lengthSquared() <= (releaseRadius * releaseRadius);
     }
 
     bool stepAttackRunPhase(

@@ -141,6 +141,7 @@ namespace rwe
     {
         nlohmann::json j{
             {"owner", dumpJson(projectile.owner)},
+            {"attacker", projectile.attacker ? dumpJson(*projectile.attacker) : nlohmann::json(nullptr)},
             {"position", dumpJson(projectile.position)},
             {"origin", dumpJson(projectile.origin)},
             {"velocity", dumpJson(projectile.velocity)},
