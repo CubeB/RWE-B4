@@ -371,9 +371,45 @@ namespace rwe
 
     bool GameSimulation::containsAnyGeoMatch(const Grid<YardMapCell>& yardMap, unsigned int x, unsigned int y) const
     {
-        return geoGrid.any2(x, y, yardMap, [](const bool& geo, const YardMapCell& cell) {
-            return geo && isGeo(cell);
-        });
+        // Iterate explicitly with per-cell bounds checks against the underlying
+        // vector size. The build cursor can hover with a footprint that extends
+        // past geoGrid's edge (geoGrid is one cell smaller than the heightmap),
+        // and Grid::any2 / Grid::get would otherwise walk off the end.
+        const int geoW = geoGrid.getWidth();
+        const int geoH = geoGrid.getHeight();
+        const int yardW = yardMap.getWidth();
+        const int yardH = yardMap.getHeight();
+        const int baseX = static_cast<int>(x);
+        const int baseY = static_cast<int>(y);
+        const auto& geoVec = geoGrid.getVector();
+        const size_t geoSize = geoVec.size();
+
+        for (int dy = 0; dy < yardH; ++dy)
+        {
+            const int gy = baseY + dy;
+            if (gy < 0 || gy >= geoH)
+            {
+                continue;
+            }
+            for (int dx = 0; dx < yardW; ++dx)
+            {
+                const int gx = baseX + dx;
+                if (gx < 0 || gx >= geoW)
+                {
+                    continue;
+                }
+                const size_t idx = static_cast<size_t>(gy) * static_cast<size_t>(geoW) + static_cast<size_t>(gx);
+                if (idx >= geoSize)
+                {
+                    continue;
+                }
+                if (geoVec[idx] && isGeo(yardMap.get(dx, dy)))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     bool GameSimulation::isCollisionAt(const DiscreteRect& rect) const
