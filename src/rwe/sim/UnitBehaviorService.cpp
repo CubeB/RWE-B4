@@ -90,6 +90,10 @@ namespace rwe
                     },
                     [&](const AirMovementStateLanding&) {
                         // do nothing
+                    },
+                    [&](const AirMovementStateAttackRun&) {
+                        // Attack run drives its own steering inside handleAttackOrder.
+                        // No clearing here, otherwise we'd erase the target each tick.
                     });
             });
 
@@ -147,6 +151,10 @@ namespace rwe
                     },
                     [&](const AirMovementStateTakingOff&) {
                         // do nothing
+                    },
+                    [&](const AirMovementStateAttackRun&) {
+                        // Order list is empty but we're still in an attack run.
+                        // Attack run will return to Flying on its own update tick.
                     });
             }
             else
@@ -224,6 +232,10 @@ namespace rwe
                                 p.movementState = AirMovementStateLanding();
                                 unitInfo.state->deactivate();
                             }
+                        },
+                        [&](const AirMovementStateAttackRun&) {
+                            // Attack run does not transition out via this dispatcher.
+                            // Termination back to Flying is handled in handleAttackOrder.
                         });
                 });
         }
@@ -599,6 +611,30 @@ namespace rwe
                         auto direction = *m.targetPosition - unitInfo.state->position;
                         auto targetAngle = UnitState::toRotation(direction);
                         unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, targetAngle, turnRateThisFrame);
+                    },
+                    [&](const AirMovementStateAttackRun& m) {
+                        SimVector heading;
+                        if (m.phase == AirMovementStateAttackRun::Phase::Departing)
+                        {
+                            // Steer along the run-out vector once we're past the target.
+                            heading = m.runOutDirection;
+                        }
+                        else
+                        {
+                            // Approaching / Engaging: aim at last known target position.
+                            heading = m.lastKnownTargetPos - unitInfo.state->position;
+                            heading.y = 0_ss;
+                            if (heading.lengthSquared() == 0_ss)
+                            {
+                                heading = m.runOutDirection;
+                            }
+                        }
+                        if (heading.lengthSquared() == 0_ss)
+                        {
+                            return;
+                        }
+                        auto targetAngle = UnitState::toRotation(heading);
+                        unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, targetAngle, turnRateThisFrame);
                     });
             });
     }
@@ -621,6 +657,9 @@ namespace rwe
                     },
                     [&](const AirMovementStateLanding&) {
                         // do nothing
+                    },
+                    [&](AirMovementStateAttackRun& m) {
+                        m.currentVelocity = computeNewAttackRunVelocity(*unitInfo.state, *unitInfo.definition, m);
                     });
             });
     }
@@ -698,6 +737,13 @@ namespace rwe
                     },
                     [&](const AirMovementStateLanding&) {
                         descendToGroundLevel(unitInfo);
+                    },
+                    [&](const AirMovementStateAttackRun& m) {
+                        // Move the unit along the attack-run velocity, then keep
+                        // it at cruise altitude based on the new XZ position.
+                        auto newPosition = unitInfo.state->position + m.currentVelocity;
+                        newPosition.y = getTargetAltitude(sim->terrain, newPosition.x, newPosition.z, *unitInfo.definition);
+                        tryApplyMovementToPosition(unitInfo, newPosition);
                     });
             });
     }
@@ -887,6 +933,13 @@ namespace rwe
             return true;
         }
 
+        // Aircraft execute attack runs rather than the ground-unit
+        // approach/aim/fire pattern.
+        if (unitInfo.definition->canFly)
+        {
+            return attackTargetAir(unitInfo, target);
+        }
+
         const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType);
 
         auto targetPosition = getTargetPosition(target);
@@ -911,6 +964,113 @@ namespace rwe
                     [&](const UnitId& u) { unitInfo.state->setWeaponTarget(i, u); },
                     [&](const SimVector& v) { unitInfo.state->setWeaponTarget(i, v); });
             }
+        }
+
+        return false;
+    }
+
+    bool UnitBehaviorService::attackTargetAir(UnitInfo unitInfo, const AttackTarget& target)
+    {
+        // Resolve the target position. If the target has gone away, drop the order.
+        auto targetPosition = getTargetPosition(target);
+        if (!targetPosition)
+        {
+            unitInfo.state->clearWeaponTargets();
+            // Reset to plain Flying so the aircraft will drift back to base on idle.
+            if (auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics))
+            {
+                if (std::holds_alternative<AirMovementStateAttackRun>(airPhysics->movementState))
+                {
+                    airPhysics->movementState = AirMovementStateFlying();
+                }
+            }
+            return true;
+        }
+
+        // If we're not airborne yet, request takeoff and wait.
+        auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
+        if (airPhysics == nullptr)
+        {
+            auto groundPhysics = std::get_if<UnitPhysicsInfoGround>(&unitInfo.state->physics);
+            if (groundPhysics != nullptr)
+            {
+                groundPhysics->steeringInfo.shouldTakeOff = true;
+            }
+            return false;
+        }
+
+        // If we're taking off or landing, wait until the transition completes
+        // (the air-state machine will end up in Flying). Don't fire yet.
+        if (std::holds_alternative<AirMovementStateTakingOff>(airPhysics->movementState)
+            || std::holds_alternative<AirMovementStateLanding>(airPhysics->movementState))
+        {
+            unitInfo.state->clearWeaponTargets();
+            return false;
+        }
+
+        const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType);
+
+        // If we're currently in plain Flying, kick off an attack run.
+        if (std::holds_alternative<AirMovementStateFlying>(airPhysics->movementState))
+        {
+            AirMovementStateAttackRun runState(target);
+            // Cache target position at cruise altitude so steering doesn't dive.
+            auto altitude = getTargetAltitude(sim->terrain, targetPosition->x, targetPosition->z, *unitInfo.definition);
+            runState.lastKnownTargetPos = SimVector(targetPosition->x, altitude, targetPosition->z);
+            runState.runOutDirection = UnitState::toDirection(unitInfo.state->rotation);
+            runState.runOutDistance = defaultAttackRunOutDistance(*unitInfo.definition, weaponDefinition.maxRange);
+            runState.phase = AirMovementStateAttackRun::Phase::Approaching;
+            airPhysics->movementState = runState;
+        }
+
+        auto attackRun = std::get_if<AirMovementStateAttackRun>(&airPhysics->movementState);
+        if (attackRun == nullptr)
+        {
+            // Defensive: nothing to do.
+            return false;
+        }
+
+        // Refresh cached target position (target may move).
+        auto altitude = getTargetAltitude(sim->terrain, targetPosition->x, targetPosition->z, *unitInfo.definition);
+        attackRun->lastKnownTargetPos = SimVector(targetPosition->x, altitude, targetPosition->z);
+        attackRun->target = target;
+
+        auto previousPhase = attackRun->phase;
+
+        // If we just transitioned into Engaging, capture the run-out direction
+        // before stepping. Approaching's phase change to Engaging happens in
+        // stepAttackRunPhase.
+        bool weaponsHot = stepAttackRunPhase(unitInfo.state->position, *targetPosition, weaponDefinition.maxRange, *attackRun);
+
+        if (previousPhase == AirMovementStateAttackRun::Phase::Approaching
+            && attackRun->phase == AirMovementStateAttackRun::Phase::Engaging)
+        {
+            // Capture the engagement heading: prefer the direction we're
+            // already moving in so the line-up stays smooth. If we're
+            // not moving yet, fall back to the line through the target.
+            SimVector heading = attackRun->currentVelocity;
+            heading.y = 0_ss;
+            if (heading.lengthSquared() == 0_ss)
+            {
+                heading = SimVector(targetPosition->x - unitInfo.state->position.x, 0_ss, targetPosition->z - unitInfo.state->position.z);
+            }
+            attackRun->runOutDirection = heading.normalizedOr(UnitState::toDirection(unitInfo.state->rotation));
+        }
+
+        if (weaponsHot)
+        {
+            // Weapons hot: have all weapons fire on the target.
+            for (unsigned int i = 0; i < 2; ++i)
+            {
+                match(
+                    target,
+                    [&](const UnitId& u) { unitInfo.state->setWeaponTarget(i, u); },
+                    [&](const SimVector& v) { unitInfo.state->setWeaponTarget(i, v); });
+            }
+        }
+        else
+        {
+            unitInfo.state->clearWeaponTargets();
         }
 
         return false;
@@ -1542,6 +1702,9 @@ namespace rwe
             },
             [&](AirMovementStateLanding& m) {
                 m.shouldAbort = true;
+            },
+            [&](const AirMovementStateAttackRun&) {
+                // Aircraft is mid-attack-run; the run handler decides where to fly.
             });
 
         return false;

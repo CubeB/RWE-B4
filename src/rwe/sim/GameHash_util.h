@@ -30,6 +30,7 @@ namespace rwe
     GameHash computeHashOf(const AirMovementStateTakingOff& p);
     GameHash computeHashOf(const AirMovementStateLanding& p);
     GameHash computeHashOf(const AirMovementStateFlying& p);
+    GameHash computeHashOf(const AirMovementStateAttackRun& p);
 
     GameHash computeHashOf(const SteeringInfo& s);
 

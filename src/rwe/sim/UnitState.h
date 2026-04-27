@@ -192,7 +192,47 @@ namespace rwe
         bool shouldAbort{false};
     };
 
-    using AirMovementState = std::variant<AirMovementStateTakingOff, AirMovementStateFlying, AirMovementStateLanding>;
+    /**
+     * State for Total Annihilation-style aircraft attack runs.
+     *
+     * The attack run is divided into three phases:
+     *  - Approaching: fly toward the target at cruise altitude with no braking.
+     *  - Engaging:    weapons-hot, hold the run-out heading so the unit blows
+     *                 through the target rather than orbiting it.
+     *  - Departing:   continue past the target along runOutDirection until far
+     *                 enough away to loop back (or terminate).
+     */
+    struct AirMovementStateAttackRun
+    {
+        enum class Phase
+        {
+            Approaching,
+            Engaging,
+            Departing,
+        };
+
+        /** Target unit or ground location. Mirrors AttackOrder::target. */
+        AttackTarget target;
+
+        /** The most recently observed XZ position of the target (at cruise altitude on Y). */
+        SimVector lastKnownTargetPos{0_ss, 0_ss, 0_ss};
+
+        /** Captured at the start of Engaging. Unit XZ direction; defines the flyby line. */
+        SimVector runOutDirection{0_ss, 0_ss, 1_ss};
+
+        /** How far past the target to fly before looping or terminating. */
+        SimScalar runOutDistance{0_ss};
+
+        Phase phase{Phase::Approaching};
+
+        /** Current air velocity in game units/tick. */
+        SimVector currentVelocity{0_ss, 0_ss, 0_ss};
+
+        AirMovementStateAttackRun() : target(SimVector(0_ss, 0_ss, 0_ss)) {}
+        explicit AirMovementStateAttackRun(const AttackTarget& t) : target(t) {}
+    };
+
+    using AirMovementState = std::variant<AirMovementStateTakingOff, AirMovementStateFlying, AirMovementStateLanding, AirMovementStateAttackRun>;
 
     struct UnitPhysicsInfoAir
     {

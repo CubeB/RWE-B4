@@ -241,6 +241,106 @@ namespace rwe
         }
     }
 
+    SimVector computeAttackRunTargetPoint(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateAttackRun& physics)
+    {
+        if (physics.phase == AirMovementStateAttackRun::Phase::Departing)
+        {
+            // Steer toward the far side of the run-out vector.
+            auto distance = physics.runOutDistance;
+            return physics.lastKnownTargetPos + (physics.runOutDirection * distance);
+        }
+
+        if (physics.phase == AirMovementStateAttackRun::Phase::Engaging)
+        {
+            // Hold heading: aim a fixed lookahead distance ahead of the unit
+            // along the run-out vector. This keeps the aircraft committed to the
+            // line through the target rather than orbiting above it.
+            auto lookahead = unitDefinition.maxVelocity * 30_ss;
+            return unit.position + (physics.runOutDirection * lookahead);
+        }
+
+        // Approaching: aim directly at the target.
+        return physics.lastKnownTargetPos;
+    }
+
+    SimVector computeNewAttackRunVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateAttackRun& physics)
+    {
+        auto targetPoint = computeAttackRunTargetPoint(unit, unitDefinition, physics);
+
+        auto rawDirection = targetPoint - unit.position;
+        auto direction = rawDirection.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
+
+        // Always accelerate toward max velocity along the desired direction.
+        // Unlike computeNewAirUnitVelocity, no deceleration near the target.
+        auto targetVelocity = direction * unitDefinition.maxVelocity;
+        auto velocityDelta = targetVelocity - physics.currentVelocity;
+        auto deltaDirection = velocityDelta.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
+
+        auto newVelocity = physics.currentVelocity + (deltaDirection * unitDefinition.acceleration);
+        if (newVelocity.lengthSquared() > (unitDefinition.maxVelocity * unitDefinition.maxVelocity))
+        {
+            newVelocity = newVelocity.normalized() * unitDefinition.maxVelocity;
+        }
+        return newVelocity;
+    }
+
+    SimScalar defaultAttackRunOutDistance(const UnitDefinition& unitDefinition, SimScalar weaponMaxRange)
+    {
+        // Run out at least one weapon range past the target, with a floor based
+        // on the cruise altitude so units that hover high don't loop too tight.
+        auto altitudeFloor = unitDefinition.cruiseAltitude * 8_ss;
+        return rweMax(weaponMaxRange, altitudeFloor);
+    }
+
+    bool stepAttackRunPhase(
+        const SimVector& unitPosition,
+        const SimVector& targetPosition,
+        SimScalar weaponMaxRange,
+        AirMovementStateAttackRun& runState)
+    {
+        SimVector xzUnit(unitPosition.x, 0_ss, unitPosition.z);
+        SimVector xzTarget(targetPosition.x, 0_ss, targetPosition.z);
+        auto xzDistanceSquared = xzUnit.distanceSquared(xzTarget);
+        auto maxRangeSquared = weaponMaxRange * weaponMaxRange;
+
+        switch (runState.phase)
+        {
+            case AirMovementStateAttackRun::Phase::Approaching:
+            {
+                if (xzDistanceSquared <= maxRangeSquared)
+                {
+                    runState.phase = AirMovementStateAttackRun::Phase::Engaging;
+                    return true;
+                }
+                return false;
+            }
+            case AirMovementStateAttackRun::Phase::Engaging:
+            {
+                // Detect that the unit has flown past the target along
+                // the run-out direction.
+                SimVector toUnitFromTarget(unitPosition.x - targetPosition.x, 0_ss, unitPosition.z - targetPosition.z);
+                auto passed = (toUnitFromTarget.x * runState.runOutDirection.x) + (toUnitFromTarget.z * runState.runOutDirection.z);
+                if (passed > 0_ss)
+                {
+                    runState.phase = AirMovementStateAttackRun::Phase::Departing;
+                    return false;
+                }
+                return true;
+            }
+            case AirMovementStateAttackRun::Phase::Departing:
+            {
+                SimVector toUnitFromTarget(unitPosition.x - targetPosition.x, 0_ss, unitPosition.z - targetPosition.z);
+                auto runOutSquared = runState.runOutDistance * runState.runOutDistance;
+                if (toUnitFromTarget.lengthSquared() >= runOutSquared)
+                {
+                    runState.phase = AirMovementStateAttackRun::Phase::Approaching;
+                }
+                return false;
+            }
+        }
+        return false;
+    }
+
     Rectangle2x<SimScalar> toWorldXZRect(const MapTerrain& terrain, const DiscreteRect& footprintRect)
     {
         auto topLeftWorld = terrain.heightmapIndexToWorldCorner(footprintRect.x, footprintRect.y);
