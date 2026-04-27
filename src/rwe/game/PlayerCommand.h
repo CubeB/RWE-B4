@@ -45,7 +45,11 @@ namespace rwe
             bool on;
         };
 
-        using Command = std::variant<IssueOrder, ModifyBuildQueue, Stop, SetFireOrders, SetOnOff>;
+        struct SelfDestruct
+        {
+        };
+
+        using Command = std::variant<IssueOrder, ModifyBuildQueue, Stop, SetFireOrders, SetOnOff, SelfDestruct>;
 
         UnitId unit;
         Command command;

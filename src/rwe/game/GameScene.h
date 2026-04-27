@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <deque>
 #include <fstream>
 #include <functional>
@@ -254,6 +255,11 @@ namespace rwe
         std::optional<FeatureId> hoveredFeature;
         std::unordered_set<UnitId> selectedUnits;
 
+        // Control groups are scene/UI state, not part of the deterministic sim.
+        // Index 0 = group bound to key '1', index 9 = group bound to key '0'.
+        static constexpr int ControlGroupCount = 10;
+        std::array<std::unordered_set<UnitId>, ControlGroupCount> controlGroups;
+
         std::optional<HoverBuildInfo> hoverBuildInfo;
 
         bool occupiedGridVisible{false};
@@ -427,6 +433,8 @@ namespace rwe
 
         void localPlayerStopUnit(UnitId unitId);
 
+        void localPlayerSelfDestructUnit(UnitId unitId);
+
         void localPlayerSetFireOrders(UnitId unitId, UnitFireOrders orders);
 
         void localPlayerSetOnOff(UnitId unitId, bool on);
@@ -514,6 +522,8 @@ namespace rwe
         std::optional<UnitId> getSingleSelectedUnit() const;
 
         void selectUnitsInBandbox(const DiscreteRect& box);
+
+        void selectAllOnScreen();
 
         void toggleUnitSelection(const UnitId& unitId);
 

@@ -1227,7 +1227,14 @@ namespace rwe
 
     void GameScene::onKeyDown(const SDL_KeyboardEvent& keysym)
     {
-        currentPanel->keyDown(KeyEvent(keysym.key));
+        // Suppress UI panel key activation when Ctrl is held — Ctrl+letter is
+        // hotkey territory (Ctrl+A select-all, Ctrl+S stop, Ctrl+D self-destruct,
+        // etc.), and the panel's letter-bound buttons (e.g. ATTACK on plain "A")
+        // would otherwise also fire.
+        if (!isCtrlDown())
+        {
+            currentPanel->keyDown(KeyEvent(keysym.key));
+        }
 
         if (keysym.key == SDLK_UP)
         {
@@ -1333,6 +1340,170 @@ namespace rwe
             else
             {
                 localPlayerCommandBuffer.push_back(PlayerUnpauseGameCommand{});
+            }
+        }
+        else if (keysym.key == SDLK_A && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+A: select all own units visible on screen.
+            selectAllOnScreen();
+        }
+        else if (keysym.key == SDLK_S && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+S: stop all selected units.
+            // Routes through the deterministic command queue so MP peers
+            // see the same stop in the same tick.
+            cursorMode.next(NormalCursorMode());
+            for (const auto& unitId : selectedUnits)
+            {
+                localPlayerStopUnit(unitId);
+            }
+        }
+        else if (keysym.key == SDLK_D && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+D: self-destruct selected units (TA behaviour).
+            // Routes through the deterministic command queue so the
+            // explosion happens at the same game tick on all peers.
+            for (const auto& unitId : selectedUnits)
+            {
+                const auto& unit = tryGetUnit(unitId);
+                if (unit && unit->get().isAlive() && unit->get().isOwnedBy(localPlayerId))
+                {
+                    localPlayerSelfDestructUnit(unitId);
+                }
+            }
+        }
+        else if (keysym.key == SDLK_Z && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+Z: enter attack-ground cursor mode.
+            // The next left-click on the terrain issues an AttackOrder targeting
+            // the ground coordinate (handled by the AttackCursorMode mouse handler).
+            if (sounds.specialOrders)
+            {
+                playUiSound(*sounds.specialOrders);
+            }
+            if (std::holds_alternative<AttackCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(AttackCursorMode());
+            }
+        }
+        else if (keysym.key == SDLK_W && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+W: guard/defend cursor mode.
+            // TA's "wait" order is not a separate sim order type in RWE;
+            // the closest equivalent is the guard/defend mode.
+            if (sounds.specialOrders)
+            {
+                playUiSound(*sounds.specialOrders);
+            }
+            if (std::holds_alternative<GuardCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(GuardCursorMode());
+            }
+        }
+        else if (keysym.key == SDLK_F && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+F: fight (move-attack) cursor mode.
+            // RWE does not have a dedicated FightOrder type yet; the attack
+            // cursor mode is the closest available analogue.
+            if (sounds.specialOrders)
+            {
+                playUiSound(*sounds.specialOrders);
+            }
+            if (std::holds_alternative<AttackCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(AttackCursorMode());
+            }
+        }
+        else if (keysym.key == SDLK_P && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+P: patrol cursor mode.
+            // RWE does not have a dedicated PatrolOrder type yet; the move
+            // cursor mode is the closest available analogue (issues a MoveOrder
+            // when the destination is clicked).
+            if (sounds.specialOrders)
+            {
+                playUiSound(*sounds.specialOrders);
+            }
+            if (std::holds_alternative<MoveCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(MoveCursorMode());
+            }
+        }
+        else
+        {
+            // Control groups: keys 1-0 map to groups 0-9.
+            // Ctrl+digit  → bind current selection to group (replace).
+            // Shift+digit → add current selection to group.
+            // Digit alone → recall group (replace current selection).
+            // Ctrl+Shift+digit is treated the same as Shift+digit (add).
+            std::optional<int> groupIndex;
+            if (keysym.key >= SDLK_1 && keysym.key <= SDLK_9)
+            {
+                groupIndex = keysym.key - SDLK_1; // 0-8
+            }
+            else if (keysym.key == SDLK_0)
+            {
+                groupIndex = 9; // '0' maps to group index 9
+            }
+
+            if (groupIndex)
+            {
+                auto idx = *groupIndex;
+                if (isCtrlDown() && isShiftDown())
+                {
+                    // Ctrl+Shift+digit: add selection to control group.
+                    for (const auto& unitId : selectedUnits)
+                    {
+                        controlGroups[idx].insert(unitId);
+                    }
+                }
+                else if (isCtrlDown())
+                {
+                    // Ctrl+digit: bind (replace) control group with current selection.
+                    controlGroups[idx] = selectedUnits;
+                }
+                else if (isShiftDown())
+                {
+                    // Shift+digit: add current selection to control group.
+                    for (const auto& unitId : selectedUnits)
+                    {
+                        controlGroups[idx].insert(unitId);
+                    }
+                }
+                else
+                {
+                    // Digit alone: recall control group.
+                    // Filter out any units that are now dead or no longer owned
+                    // by the local player so stale IDs do not pollute the set.
+                    std::unordered_set<UnitId> liveUnits;
+                    for (const auto& unitId : controlGroups[idx])
+                    {
+                        auto unitRef = tryGetUnit(unitId);
+                        if (unitRef && unitRef->get().isAlive() && unitRef->get().isOwnedBy(localPlayerId))
+                        {
+                            liveUnits.insert(unitId);
+                        }
+                    }
+                    // Prune the stored group to remove dead entries.
+                    controlGroups[idx] = liveUnits;
+                    replaceUnitSelection(liveUnits);
+                }
             }
         }
     }
@@ -2660,6 +2831,11 @@ namespace rwe
         }
     }
 
+    void GameScene::localPlayerSelfDestructUnit(UnitId unitId)
+    {
+        localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SelfDestruct()));
+    }
+
     void GameScene::localPlayerSetFireOrders(UnitId unitId, UnitFireOrders orders)
     {
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SetFireOrders{orders}));
@@ -3455,6 +3631,41 @@ namespace rwe
         }
     }
 
+    void GameScene::selectAllOnScreen()
+    {
+        // Compute the camera's visible world rectangle directly. Matrix-based
+        // projection here doesn't perform the perspective divide (see
+        // Matrix4x.h:506), so we'd otherwise have no reliable on-screen test.
+        const auto cameraPos = worldCameraState.getRoundedPosition();
+        const float halfWidth = worldCameraState.scaleDimension(worldViewport.width()) / 2.0f;
+        const float halfHeight = worldCameraState.scaleDimension(worldViewport.height()) / 2.0f;
+        const float minX = cameraPos.x - halfWidth;
+        const float maxX = cameraPos.x + halfWidth;
+        const float minZ = cameraPos.z - halfHeight;
+        const float maxZ = cameraPos.z + halfHeight;
+
+        std::unordered_set<UnitId> units;
+        for (const auto& e : simulation.units)
+        {
+            const auto& unitDefinition = simulation.unitDefinitions.at(e.second.unitType);
+            if (!e.second.isSelectableBy(unitDefinition, localPlayerId))
+            {
+                continue;
+            }
+
+            const auto worldPos = simVectorToFloat(e.second.position);
+            if (worldPos.x < minX || worldPos.x > maxX
+                || worldPos.z < minZ || worldPos.z > maxZ)
+            {
+                continue;
+            }
+
+            units.insert(e.first);
+        }
+
+        replaceUnitSelection(units);
+    }
+
     void GameScene::toggleUnitSelection(const rwe::UnitId& unitId)
     {
         auto it = selectedUnits.find(unitId);
@@ -3547,7 +3758,16 @@ namespace rwe
         }
         else if (auto unitId = getSingleSelectedUnit(); unitId)
         {
-            const auto& unit = getUnit(*unitId);
+            // Use tryGetUnit: when several units in the selection self-destruct
+            // in the same tick, the first UnitDiedEvent triggers this callback
+            // while the remaining selected units have already been removed from
+            // the simulation but not yet from selectedUnits.
+            auto unitRef = tryGetUnit(*unitId);
+            if (!unitRef)
+            {
+                return;
+            }
+            const auto& unit = unitRef->get();
             fireOrders.next(unit.fireOrders);
             onOff.next(unit.activated);
 
@@ -3726,6 +3946,13 @@ namespace rwe
                 else
                 {
                     simulation.deactivateUnit(unitCommand.unit);
+                }
+            },
+            [&](const PlayerUnitCommand::SelfDestruct&) {
+                auto unit = tryGetUnit(unitCommand.unit);
+                if (unit && unit->get().isAlive())
+                {
+                    simulation.killUnit(unitCommand.unit);
                 }
             });
     }

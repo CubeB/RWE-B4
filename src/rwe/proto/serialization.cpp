@@ -111,6 +111,11 @@ namespace rwe
             auto& out = *cmd->mutable_set_on_off();
             out.set_ison(c.on);
         }
+
+        void operator()(const PlayerUnitCommand::SelfDestruct&)
+        {
+            cmd->mutable_self_destruct();
+        }
     };
 
     class WritePlayerCommandVisitor
@@ -252,6 +257,11 @@ namespace rwe
         if (cmd.has_set_on_off())
         {
             return PlayerUnitCommand(UnitId(cmd.unit()), PlayerUnitCommand::SetOnOff{cmd.set_on_off().ison()});
+        }
+
+        if (cmd.has_self_destruct())
+        {
+            return PlayerUnitCommand(UnitId(cmd.unit()), PlayerUnitCommand::SelfDestruct());
         }
 
         throw std::runtime_error("Failed to deserialize unit command");
