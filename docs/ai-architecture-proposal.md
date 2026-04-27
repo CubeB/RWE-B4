@@ -1,0 +1,723 @@
+# RWE Skirmish AI Architecture — Design Proposal
+
+Status: design proposal, not implementation. Author: rts-ai-architect agent. Date: 2026-04-26.
+
+This document proposes a layered, deterministic, Sorian-style skirmish AI for the Robot War Engine (RWE). It is intended to be readable end-to-end in roughly twenty minutes and concrete enough that follow-up implementation tasks can act on it directly.
+
+The current state: there is no computer player. `src/rwe/game/GameScene.cpp:2071-2084` enumerates `GamePlayerType::Computer` players and pushes empty command vectors with the comment `// TODO: implement computer AI logic to decide commands here`. Players themselves can already be marked Computer through the launcher (`LoadingScene.cpp:207`) and per-map resource overrides exist in OTA (`computerMetal`, `computerEnergy`, `aiProfile`). Everything else is greenfield.
+
+---
+
+## 1. Goals and non-goals
+
+### Goals (Must Have)
+
+- **Functional opponent.** From a single Commander, the AI builds a viable economy, expands metal extraction, builds factories, defends its base, scouts, and launches attacks against the human. A human at the lowest difficulty can lose a five-minute game if they idle.
+- **Same-channel parity with humans.** The AI emits `PlayerCommand` values into the same `PlayerCommandService` pipeline humans use, so multiplayer (replays, netcode, desync detection) keeps working with zero new plumbing.
+- **Deterministic across clients.** AI decisions for a given `PlayerId` produce identical command streams given identical sim state and seeded RNG.
+- **Tunable, data-driven.** Build orders, threat weights, retreat thresholds, platoon compositions, and tier transitions are expressed in a config (TDF or JSON), not hard-coded.
+- **Layered, Sorian-style.** Strategic / Economy / Build / Platoon / Threat / Tactical separation, so a future contributor can swap, say, the Build Manager without touching threat code.
+- **Difficulty scaling without hard cheats by default.** Scale via parameter tuning (build aggressiveness, scouting radius, reaction time). A separable, off-by-default "resource cheat" knob is provided for the highest tiers.
+
+### Non-goals (Won't Do, This Pass)
+
+- **Adaptive learning across games / PvP-grade play.** No reinforcement learning, no opponent modelling beyond a few rolling counters. We aim to be the *most fun* punching bag for one to four humans, not to win SC2-tier tournaments.
+- **Perfect micro.** No sub-tick reaction, no frame-perfect kiting, no APM throttle theatrics. Tactical layer optimises for "doesn't look stupid" not "world champion".
+- **Naval or amphibious mastery.** First-class targets are land + air. Naval support is scoped only as much as a few TA stock maps demand (T1 boatyard + cons-ship parity); deep naval doctrine is deferred.
+- **Cooperative ally micro (multi-AI teamwork).** AIs on the same team will not collude beyond "don't shoot each other" until a follow-up.
+- **TA `.AI` profile binary parity.** See §10. We will not parse the original `.AI` weighted-list files; we will accept the OTA `aiProfile` *string* as a name to look up our own RWE-native config.
+
+### Difficulty tiers (proposed)
+
+Four tiers, picked at lobby time. All tiers run the same code; they differ only in `AiTuningProfile` parameters.
+
+| Tier   | Build aggression | Scout cadence | Cheating | Notes                                                |
+|--------|------------------|---------------|----------|------------------------------------------------------|
+| Easy   | Low              | Sparse        | None     | Builds slowly, attacks late, holds back army.        |
+| Normal | Medium           | Regular       | None     | The reference experience.                            |
+| Hard   | High             | Aggressive    | None     | Tighter build orders, earlier raids.                 |
+| Brutal | High             | Aggressive    | Resource bonus (×1.25 metal/energy income, off by default) | Optional, opt-in cheat. |
+
+---
+
+## 2. High-level architecture
+
+Sorian-style hierarchy. Each "manager" has a single responsibility and a defined update cadence. Managers communicate by writing into a shared `AiBlackboard` value type (a struct of small POD blackboard slices); no hidden global state.
+
+```
+                                 +--------------------------+
+                                 |   StrategicManager       |     (every 1 s of sim time)
+                                 |  - GamePhase: Opening,   |
+                                 |    Boom, Attack, Defend, |
+                                 |    Tech, Endgame         |
+                                 |  - AttackTriggerScore    |
+                                 +-----------+--------------+
+                                             |
+                       +---------------------+---------------------+
+                       |                     |                     |
+              +--------v-------+   +---------v---------+   +-------v-------+
+              | EconomyManager |   |  BuildManager     |   | ArmyManager   |
+              | (per 0.5 s)    |   |  (per tick)       |   |  (per 0.25 s) |
+              | - target M/E   |   |  - active build   |   | - platoons    |
+              |   surplus      |   |    queues per     |   | - missions    |
+              | - BP allocation|   |    builder        |   |               |
+              +--------+-------+   +-------+-----------+   +-------+-------+
+                       |                   |                       |
+                       |             +-----v------+         +------v------+
+                       |             | BuildJob   |         | Platoon SM  |
+                       |             | scheduler  |         | (Forming,   |
+                       |             +-----+------+         | Moving, etc)|
+                       |                   |                +------+------+
+                       |                   |                       |
+                       +-------------------v-----------------------+
+                                           |
+                                +----------v-----------+
+                                |  TacticalLayer       | (per tick, per platoon/unit)
+                                |  - target select     |
+                                |  - retreat triggers  |
+                                |  - issues UnitOrder  |
+                                +----------+-----------+
+                                           |
+                                +----------v-----------+
+                                |  CommandEmitter      | (per tick)
+                                |  serialises into     |
+                                |  PlayerCommand vec   |
+                                +----------+-----------+
+                                           |
+                                  pushCommands(...)
+                                           |
+                                           v
+                                   PlayerCommandService
+```
+
+Cross-cutting providers (read-mostly, always on):
+
+- **PerceivedWorldModel** — what the AI knows about the map and enemies (mirrors sim today; will degrade with fog of war later — §8).
+- **ThreatMap** — multi-layer influence grid; rebuilt every 1 s (§5).
+- **ScoutManager** — drives intel gathering, owned by ArmyManager but its outputs flow into PerceivedWorldModel.
+- **AiTuningProfile** — the immutable parameter bundle (loaded once per match).
+
+### Update cadence summary
+
+| Component             | Cadence                  | Why                                  |
+|-----------------------|--------------------------|--------------------------------------|
+| StrategicManager      | every 30 ticks (~1 s)    | Slow, high-level                     |
+| EconomyManager        | every 15 ticks (~0.5 s)  | React to stalls quickly              |
+| BuildManager          | every tick               | Issues build commands as BP frees up |
+| ThreatMap rebuild     | every 30 ticks           | Expensive; periodic                  |
+| ArmyManager           | every 8 ticks (~0.25 s)  | Reasonable mission cadence           |
+| Platoon update        | every 8 ticks            | Movement / retreat decisions         |
+| TacticalLayer         | every tick               | Targeting, micro                     |
+| CommandEmitter        | every tick               | Drains queued intents                |
+
+`SceneTickInterval` is 1/30 s (deduced from `GameScene::SecondsPerTick`); cadences expressed in ticks are exact and deterministic.
+
+---
+
+## 3. Data structures and types
+
+A new subsystem at `src/rwe/ai/`. Files live alongside tests using the existing `[Component].test.cpp` convention.
+
+Proposed file layout (no implementation yet, just shape):
+
+```
+src/rwe/ai/
+    AiPlayerController.h / .cpp    -- one per AI player; owns the managers
+    AiBlackboard.h
+    AiTuningProfile.h / .cpp       -- loaded from RWE-native config; see §6
+    AiIds.h                        -- PlatoonId, TaskId, BuildJobId
+    PerceivedWorldModel.h / .cpp
+    ThreatMap.h / .cpp             -- §5
+    StrategicManager.h / .cpp
+    EconomyManager.h / .cpp
+    BuildManager.h / .cpp
+    BuildOrder.h / .cpp            -- conditional build templates
+    ArmyManager.h / .cpp
+    Platoon.h / .cpp               -- state-machine platoon
+    PlatoonComposition.h           -- "tier-1 raider squad" templates
+    TacticalLayer.h / .cpp
+    ScoutManager.h / .cpp
+    CommandEmitter.h / .cpp
+    UnitClassifier.h / .cpp        -- bucket UnitDefinition into roles/categories
+    AiPlayerController.test.cpp
+    ThreatMap.test.cpp
+    BuildOrder.test.cpp
+    Platoon.test.cpp
+```
+
+### Opaque IDs (new)
+
+Pattern follows `src/rwe/sim/UnitId.h` exactly:
+
+```cpp
+namespace rwe
+{
+    struct PlatoonIdTag;
+    using PlatoonId = OpaqueId<unsigned int, PlatoonIdTag>;
+
+    struct BuildJobIdTag;
+    using BuildJobId = OpaqueId<unsigned int, BuildJobIdTag>;
+
+    struct AiTaskIdTag;
+    using AiTaskId = OpaqueId<unsigned int, AiTaskIdTag>;
+}
+```
+
+### Top-level controller
+
+One per AI player. Lives at scene level (see §4 for which parts ride in `sim/`).
+
+```cpp
+class AiPlayerController
+{
+public:
+    AiPlayerController(PlayerId playerId, AiTuningProfile profile, std::uint64_t seed);
+
+    // Called from GameScene::update where the existing TODO sits (line 2080).
+    // Returns the commands the AI wants to push this scene tick.
+    std::vector<PlayerCommand> tick(const GameSimulation& sim, SceneTime now);
+
+private:
+    PlayerId playerId;
+    AiTuningProfile profile;
+    std::minstd_rand rng;       // sub-seeded from sim-side rng for AI-only choices
+    AiBlackboard blackboard;
+    PerceivedWorldModel world;
+    ThreatMap threat;
+    StrategicManager strategic;
+    EconomyManager economy;
+    BuildManager build;
+    ArmyManager army;
+    ScoutManager scout;
+    TacticalLayer tactical;
+    CommandEmitter emitter;
+};
+```
+
+### Platoon (state-machine variant)
+
+Follows the variant-based unit-state pattern already used for `CursorMode`, `UnitOrder`, etc.
+
+```cpp
+struct PlatoonStateForming    { SimVector rallyPoint; };
+struct PlatoonStateMoving     { SimVector destination; };
+struct PlatoonStateEngaging   { UnitId primaryTarget; };
+struct PlatoonStateRetreating { SimVector retreatPoint; };
+struct PlatoonStateDisbanding {};
+
+using PlatoonState = std::variant<
+    PlatoonStateForming,
+    PlatoonStateMoving,
+    PlatoonStateEngaging,
+    PlatoonStateRetreating,
+    PlatoonStateDisbanding>;
+
+struct Platoon
+{
+    PlatoonId id;
+    PlatoonState state;
+    std::vector<UnitId> members;
+    std::optional<AiTaskId> assignedMission;
+    PlatoonCompositionTemplate template_;   // see §7
+    SceneTime stateEnteredAt;
+};
+```
+
+### Threat map
+
+```cpp
+class ThreatMap
+{
+public:
+    enum class Layer
+    {
+        AntiGround,
+        AntiAir,
+        AntiNaval,
+        Economic,
+        Intel,
+    };
+
+    struct Cell { std::array<SimScalar, 5> layers{}; };
+
+    explicit ThreatMap(int widthCells, int heightCells, SimScalar cellSizeWorld);
+
+    void rebuild(const PerceivedWorldModel& world, PlayerId aiOwner);
+    void decay(SimScalar factor);     // 0..1
+
+    SimScalar sample(Layer layer, const SimVector& worldPos) const;
+    SimScalar sampleRadius(Layer layer, const SimVector& center, SimScalar radius) const;
+
+private:
+    int width, height;
+    SimScalar cellSize;
+    std::vector<Cell> cells;          // row-major; deterministic iteration order
+};
+```
+
+### Build order
+
+```cpp
+struct BuildCondition  // conjunction of these checked vs blackboard
+{
+    std::optional<SimScalar> minMetalIncome;
+    std::optional<SimScalar> minEnergyIncome;
+    std::optional<int>       minOwnedOfType;     // pair: unitType, count
+    std::optional<int>       maxOwnedOfType;
+    std::optional<SimScalar> enemyThreatBelow;
+    std::optional<GamePhase> requiredPhase;
+    std::vector<std::string> allOf;              // string predicates ("commander_alive")
+};
+
+struct BuildStep
+{
+    std::string unitType;   // e.g. "ARMSOLAR"
+    int          count;
+    int          priority;   // 0..1000
+    BuildCondition when;
+};
+
+struct BuildOrderTemplate
+{
+    std::string name;       // "ARM_LAND_OPENING_NORMAL"
+    std::vector<BuildStep> steps;
+};
+```
+
+### Blackboard
+
+A small POD struct, mostly counters. Read-mostly, refilled at the top of each `tick()`. This is what managers gossip through instead of reaching into each other's internals.
+
+```cpp
+struct AiBlackboard
+{
+    GamePhase phase{GamePhase::Opening};
+    SimScalar metalIncome{0_ss};
+    SimScalar energyIncome{0_ss};
+    SimScalar metalDrain{0_ss};
+    SimScalar energyDrain{0_ss};
+    SimScalar storedMetal{0_ss};
+    SimScalar storedEnergy{0_ss};
+    int ownedBuildersIdle{0};
+    std::unordered_map<std::string, int> ownedUnitCounts;  // by unitType
+    SimScalar totalEnemyThreat{0_ss};
+    SimScalar baseThreatNearCommander{0_ss};
+    std::optional<UnitId> commanderUnitId;
+    SimVector centerOfMass{0_ss, 0_ss, 0_ss};
+    SceneTime lastScoutedAt{0};
+};
+```
+
+---
+
+## 4. Determinism plan
+
+The most important design constraint. Decisions must produce identical outputs on every client.
+
+### What lives in `sim/` (deterministic)
+
+Anything that mutates simulation state, or whose output feeds simulation state, must be compiled into the deterministic sim. That means:
+
+- All AI manager update logic that produces `PlayerCommand`s.
+- ThreatMap construction and sampling.
+- BuildManager scheduling.
+- TacticalLayer target selection.
+- Platoon state-machine transitions.
+
+Everything in the list above is allowed only the same primitives the existing `sim/` code uses: `SimScalar`, `SimVector`, `SimAngle`, integer math, `simulation.rng` (a `std::minstd_rand`, see `GameSimulation.h:242`), and ordered containers (`std::map`, sorted vectors). **Important caveat:** `SimScalar` is currently `OpaqueField<float, ...>` (`src/rwe/sim/SimScalar.h:7-8`) — a float wrapper, not literal fixed-point. The codebase relies on every client running the same arch + binary for determinism. AI code does not need to make this *worse*; it just needs to use the same primitives so that when the eventual fixed-point migration happens, AI follows for free.
+
+### What may live outside `sim/` (non-deterministic-safe)
+
+- Debug overlays (threat map heatmap renderer, platoon labels).
+- Logging of AI decisions to disk for diagnostics.
+- Tuning profile loading from disk (done once at game start, before sim begins).
+
+### Where the AI hooks in
+
+Two reasonable placements; we propose **B**.
+
+**A. Pure scene-level**: AiPlayerController owned by `GameScene`, called from `GameScene::update` at the existing TODO (`src/rwe/game/GameScene.cpp:2080`). Pros: no surgery to the simulation type. Cons: future replays that don't replay the network would lose the AI; trying to "save mid-game and rejoin" requires AI state to be reconstructable.
+
+**B. Sim-owned controller** (recommended): Add a `std::unordered_map<PlayerId, AiPlayerController> aiControllers` to `GameSimulation`. Call `aiControllers[id].tick(...)` from inside `GameSimulation::tick()` (`src/rwe/sim/GameSimulation.cpp:1651`) before unit behaviour runs. The controller writes commands into a per-player out-buffer that `GameScene::update` reads and pushes into `playerCommandService` next frame. Pros: AI state is part of the sim so checksums/dumps include it; replays work without separate handling. Cons: GameSimulation gains a dependency on `PlayerCommand`/`UnitOrder` (it already has `UnitOrder` as those flow into unit state).
+
+We propose **B with a delayed-emit indirection**: AI runs inside the sim and writes its commands into `aiPendingCommands[playerId]` on the simulation. Each frame, `GameScene::update` drains those into `playerCommandService->pushCommands(id, ...)` *exactly the same way human input is pushed*. Net traffic still uses the existing path (host or each peer can push its own AIs; see §8 cheating-mode for the host-authoritative variant).
+
+Why "AI mirrors human input" is load-bearing:
+
+- `processPlayerCommand` (`src/rwe/game/GameScene.cpp:3663`) and `processUnitCommand` (3697) do not care who issued a command. AI reuses every existing validation, animation, audio cue, and side effect for free.
+- Network proto (`proto/network.proto:53-115`) round-trips `PlayerCommand` already; if we ever want AI runs that share decisions across peers (host-authoritative AI) the wire format requires no change.
+- The same desync detector (`src/rwe/game/GameScene.cpp:2402`) will catch any AI nondeterminism on the day it ships.
+
+### Determinism rules of engagement (short list)
+
+1. Use only `simulation.rng` for any random AI decision. Never `std::random_device`, `std::mt19937` seeded by clock, etc.
+2. No `std::chrono`, no `SDL_GetTicks` in deterministic paths. Use `simulation.gameTime` and `SceneTime`.
+3. Iterate `std::unordered_*` only when the order is irrelevant. When it is relevant (it usually is), copy keys to a vector and `std::sort` by `OpaqueId.value`.
+4. No threading. Managers run in series in `tick()` order.
+5. Use `SimScalar` arithmetic; no implicit-or-explicit `float`/`double` math in scoring functions or threat rebuilds.
+6. Tests must seed with a fixed seed and assert exact command output.
+
+---
+
+## 5. Threat / influence map
+
+### Storage
+
+A 2-D grid over the playable map. We propose **two cells per heightmap tile** of width 16 (i.e. 32 world units per cell). On a 12×12-tile map (192×192 world units) that is 6×6 cells; on a 64×64-tile map that is 32×32 cells. Five layers:
+
+- `AntiGround` — sum of enemy DPS that can hit ground units within range, weighted by uptime.
+- `AntiAir` — same, against air.
+- `AntiNaval` — same, against ships.
+- `Economic` — value of enemy economic structures (mex, fusion, factory) seen in the cell. Higher = juicier raid target.
+- `Intel` — staleness/uncertainty (decays toward 1.0 = "no idea what's there"; 0.0 = "scouted this tick").
+
+Each `Cell` is `std::array<SimScalar, 5>`. Storage:
+
+```
+sizeof(Cell) = 5 * 4 bytes = 20 bytes.
+On a 32x32 cell map: 32*32*20 = 20480 bytes  (~20 KB)
+On a 64x64 cell map: 64*64*20 = 81920 bytes  (~80 KB)
+```
+
+Per AI player. Cheap.
+
+### Cadence
+
+Full rebuild every 30 ticks (~1 s). Between rebuilds we apply a multiplicative decay (`factor = 0.95`) per rebuild on the Intel and Economic layers — older information evaporates. AntiGround/AntiAir/AntiNaval are recomputed from scratch each rebuild based on currently-perceived units, so they don't decay.
+
+A rebuild on a 32×32 grid with ~50 enemy units is O(grid_cells + units * avgRange²/cellSize²) — well under a millisecond.
+
+### Cell lookup
+
+```cpp
+SimScalar threat = threatMap.sample(ThreatMap::Layer::AntiGround, candidatePos);
+SimScalar areaThreat = threatMap.sampleRadius(
+    ThreatMap::Layer::AntiAir, platoonCenter, 256_ss);
+```
+
+### How decisions use it
+
+- ArmyManager scores attack candidates: `score(target) = economic - antiGround*w_ag - antiAir*w_aa`. Sorian's "threat-weighted attack condition" verbatim.
+- BuildManager picks build sites that minimise enemy threat + maximise economic adjacency.
+- ScoutManager picks scouting destinations by maximising the Intel layer (i.e. visit stale cells).
+- TacticalLayer's retreat trigger: if `sampleRadius(AntiGround, platoon, X)` > my-platoon-DPS × `retreatThresholdRatio`, retreat.
+
+---
+
+## 6. Build order system
+
+A hybrid of conditional steps + opening books + tech transitions. Configuration is RWE-native, parsed at game start, *not* shared with TA's `.AI` format (see §10).
+
+### Config sources
+
+Two layers, both data-driven:
+
+1. **`AiTuningProfile`** — a small TDF or JSON loaded from `data/ai/profiles/<name>.tdf` (where `<name>` is what OTA `aiProfile` produces, defaulting to `DEFAULT`). Holds knobs: `attackTriggerScore`, `expansionMexCount`, `defensiveBuildShare`, `tier2TransitionAt`, etc.
+2. **`BuildOrderTemplate` library** — a list of named build orders shipped under `data/ai/build-orders/`. Examples: `ARM_LAND_OPENING_NORMAL.tdf`, `CORE_AIR_RUSH.tdf`. Each entry is a list of `BuildStep`s with `BuildCondition`s (§3 sketch).
+
+`BuildStep::when` predicates that need *runtime* logic beyond what the data can express are kept to a tiny set of named C++ predicates (e.g. `"commander_alive"`, `"under_attack_for_30s"`) — rare, and added only when needed. This is a pragmatic cap on data complexity: most conditions are simple thresholds (income / counts / phase / threat).
+
+### How conditions evaluate
+
+Every BuildManager tick, the active opening book yields its highest-priority `BuildStep` whose `when.match(blackboard)` is true and whose target unit isn't already at-or-above `count`. That step is converted into a `BuildJob` and assigned to an idle builder by EconomyManager.
+
+Tech transitions are not special-cased: they're just BuildSteps gated on `phase == Tech` plus a count of T2 lab built > 0.
+
+### Opening books
+
+Selectable. The StrategicManager picks one at game start based on `AiTuningProfile.openingPreferences` + map size + side. Switching books mid-game is allowed but rare (e.g. on commander loss → "rebuild from base" book).
+
+A representative sketch for ARM normal opening:
+
+```
+1.  ARMSOLAR x4    (priority 900, when: phase=Opening)
+2.  ARMMEX x3      (priority 950, when: ownedOf(ARMMEX)<3 && metalIncome<3)
+3.  ARMLAB x1      (priority 800, when: ownedOf(ARMSOLAR)>=3)
+4.  ARMCK x2       (priority 700, when: ownedOf(ARMLAB)>=1)
+5.  ARMVP x1       (priority 700, when: phase=Boom)
+6.  ARMPW x6       (priority 500, when: ownedOf(ARMVP)>=1, allOf=["under_no_attack"])
+...
+```
+
+(Real values to be playtested in Phase 3.)
+
+### Tech transitions
+
+`StrategicManager` advances `GamePhase` based on counters: opening → boom (after first lab + N mexes), boom → attack (after attack trigger score), attack ↔ defend (toggled on local threat). Each phase change can swap to a different opening book or modify weights.
+
+---
+
+## 7. Platoon abstraction
+
+A platoon is a logical grouping of N units with a shared mission and a state machine. Tactical layer micros within the platoon; platoons exist for the lifetime of the mission.
+
+### Composition templates
+
+```cpp
+struct PlatoonCompositionSlot
+{
+    UnitClass roleClass;        // see UnitClassifier
+    int       minCount;
+    int       targetCount;
+};
+
+struct PlatoonCompositionTemplate
+{
+    std::string name;          // "T1_LAND_RAID"
+    std::vector<PlatoonCompositionSlot> slots;
+    SimScalar  retreatHpRatio;  // 0.4 -> retreat when avg HP < 40%
+    SimScalar  threatRatioThreshold; // engage only if my-DPS > enemy-DPS * 0.7
+};
+```
+
+`UnitClass` is a closed enum over the *roles* the AI cares about: `RaiderLight`, `RaiderHeavy`, `FrontlineKbot`, `FrontlineTank`, `RangedArtillery`, `Aa`, `Air`, `Builder`, `Scout`. A `UnitClassifier` derives this enum from `UnitDefinition` (using `canFly`, `floater`, weapon ranges, weapon target categories) at game-start time and caches the mapping in `unitTypeName -> UnitClass`. This is necessary because TA `Category` is not currently parsed (`src/rwe/io/fbi/io.cpp` does not read `Category`/`TEDClass`).
+
+### State machine (variant)
+
+Already sketched in §3. Transitions:
+
+- `Forming` → `Moving` when `members.size() >= template.minCounts.sum()`.
+- `Moving` → `Engaging` when within combat range of mission target and threat ratio favours engaging.
+- `Engaging` → `Retreating` when `avgHpRatio < template.retreatHpRatio` *or* enemy reinforcements push threat ratio below cutoff.
+- Any → `Disbanding` if commander recall / mission cancellation / fewer than half min counts alive.
+- `Retreating` → `Forming` once at retreat point (or `Disbanding` if too few members).
+
+Mission assignment is done by ArmyManager: it consults StrategicManager's intent (attack/defend/scout/expand-protection), scans ThreatMap for candidates, and assigns. A `Platoon` only knows its current mission and acts on it.
+
+### Forming a platoon
+
+Two routes:
+
+1. **Pre-build** — ArmyManager declares "I want a `T1_LAND_RAID` platoon" and inserts a high-priority BuildStep series into BuildManager (or rather into a shadow queue). When enough members exist (newly built, by query of `ownedUnitCounts`), they are assigned to a fresh PlatoonId.
+2. **Pull-from-pool** — Idle units not assigned to any platoon ("unassigned reserve") are drawn into a forming platoon by best-fit slot match.
+
+### Mission types
+
+A `Mission` is a value type: `MissionAttack(SimVector target)`, `MissionDefend(SimVector point)`, `MissionScout(SimVector waypoint)`, `MissionExpand(SimVector mexLocation)`, `MissionGuardCommander`. ArmyManager owns mission generation and assignment.
+
+---
+
+## 8. Fog of war
+
+We have **no LOS / radar / fog implementation in RWE today**: grepping `src/rwe/` for `losGrid|fogOfWar|sightDistance|radarDistance` finds only weapon `LineOfSight` projectile physics (which is unrelated). So in practice the AI's PerceivedWorldModel and the simulation truth are identical. This is fine for v1 because human players also see everything currently.
+
+We design the *structure* now so it is correct when LOS lands later:
+
+```cpp
+class PerceivedWorldModel
+{
+public:
+    void refresh(const GameSimulation& sim, PlayerId aiOwner);
+
+    // Visible: currently within sight or radar of any unit owned by aiOwner.
+    // Remembered: previously visible, may now be stale.
+    struct PerceivedUnit
+    {
+        UnitId id;
+        std::string unitType;
+        SimVector position;
+        SimScalar hpRatio;
+        SceneTime lastSeen;
+    };
+
+    const std::vector<PerceivedUnit>& visibleEnemies() const;
+    const std::vector<PerceivedUnit>& rememberedEnemies() const;
+
+private:
+    bool cheatModeOmniscient{false};   // see below
+    // ...
+};
+```
+
+In v1 (no LOS), `visibleEnemies()` simply returns every non-allied unit and `rememberedEnemies()` is empty. When LOS arrives, refresh() degrades correctly.
+
+### Cheating-mode toggle
+
+Single boolean per AI player, `cheatModeOmniscient`, on `AiTuningProfile`. When true, PerceivedWorldModel ignores fog and always returns sim truth (which is current behaviour anyway). When false, it filters by LOS once LOS exists. The Brutal tier in §1 sets this to true *and* applies the resource bonus.
+
+We deliberately put the cheat toggle on the perception layer (not as a parallel "cheating brain" elsewhere) so the rest of the AI is unchanged across difficulties.
+
+---
+
+## 9. Integration points with existing code
+
+Concrete file:line references. The AI plugs in cleanly because the project already separated player input from simulation behaviour.
+
+**Primary hook — replaces the current TODO:**
+- `src/rwe/game/GameScene.cpp:2071-2084` (the `for (Index i = 0; i < getSize(simulation.players); ++i)` loop). The empty `pushCommands` here becomes `pushCommands(id, simulation.takeAiCommands(id))`.
+
+**Sim integration (recommended placement B from §4):**
+- `src/rwe/sim/GameSimulation.h:240` (the `struct GameSimulation`) gains `std::unordered_map<PlayerId, AiPlayerController> aiControllers;` and `std::unordered_map<PlayerId, std::vector<PlayerCommand>> aiPendingCommands;`.
+- `src/rwe/sim/GameSimulation.cpp:1651` (`GameSimulation::tick()`) gets a new first call: `runAiControllers();`. That iterates AI controllers in deterministic `PlayerId` order and writes commands into `aiPendingCommands`.
+
+**Lifecycle:**
+- `src/rwe/LoadingScene.cpp:202-228` constructs `GamePlayerInfo` for each player. After this loop, instantiate `AiPlayerController` for every player whose `playerType == GamePlayerType::Computer`. The AI's tuning profile name comes from `OtaSchema.aiProfile` (already parsed at `src/rwe/io/ota/ota.cpp:74`); the AI's resource starts come from `OtaSchema.computerMetal/computerEnergy` (already parsed but currently ignored — `LoadingScene.cpp:208` uses launcher params for both human and computer).
+- The AI's RNG is sub-seeded from `simulation.rng` (`src/rwe/sim/GameSimulation.h:242`) so its sequence is part of the seeded sim and survives replays.
+
+**Commands the AI emits — already exist:**
+- `PlayerUnitCommand::IssueOrder(MoveOrder | AttackOrder | BuildOrder | GuardOrder, Immediate|Queued)` via `src/rwe/game/PlayerCommand.h` and `src/rwe/sim/UnitOrder.h:51`.
+- `PlayerUnitCommand::ModifyBuildQueue` (for queueing units in factories).
+- `PlayerUnitCommand::SetFireOrders` and `SetOnOff` (for toggling fabricators / airbase landing pads etc).
+
+The AI has no need to add new `PlayerCommand` variants in v1.
+
+**Sim queries the AI needs (read-only):**
+- `simulation.units` (`GameSimulation.h:275`) — a `VectorMap<UnitState, UnitIdTag>`. Iteration is deterministic.
+- `simulation.unitDefinitions` (line 248) — keyed by upper-case unit type name (see e.g. `GameSimulation.cpp:268`).
+- `simulation.players` (line 271) — for resource state per player.
+- `simulation.terrain` (`MapTerrain` defined `src/rwe/sim/MapTerrain.h`) — for build site validation, ground heights.
+- `simulation.occupiedGrid` (`OccupiedGrid.h`) — for "is this cell free".
+- `simulation.canBeBuiltAt(...)` (`GameSimulation.h:316`) — exact predicate the AI uses to check build placements.
+- `simulation.metalGrid` (line 267) — to find metal patches for mex placement.
+
+All of these exist *today* and are deterministic-safe.
+
+**Where the AI will eventually need new sim API:**
+- A pathfinding query `tryFindPathFor(UnitId, SimVector)` that the AI can call without committing to movement, for e.g. "is my retreat path blocked?" The current `pathFindingService` is command-driven; a non-mutating preview query would be added under `src/rwe/pathfinding/` with the same A* core.
+- LOS queries when fog of war lands.
+
+---
+
+## 10. Migration from TA's original AI
+
+**Recommendation: do not parse `.AI` files.**
+
+TA shipped `.AI` profile files that listed weighted unit-build preferences in a fixed format. They drove a hard-coded build engine no longer present in RWE. The Sorian-grade architecture proposed here (build orders with conditions, threat maps, platoon templates) is a strict superset; encoding our build logic into the original `.AI` weighted-list format would force us to flatten conditional structure into weights, which is the *exact* behaviour we are trying to leave behind.
+
+**What we keep from TA / OTA:**
+
+- Honour `OtaSchema.aiProfile` (`src/rwe/io/ota/ota.cpp:74`) as the *name* of the RWE-native profile to load. Defaults to `"DEFAULT"` already — perfect mapping.
+- Honour `computerMetal`/`computerEnergy` overrides for computer-controlled players when configured (currently ignored in `LoadingScene.cpp:208`).
+
+**What we discard:**
+
+- The literal `.AI` weighted-list file format. We will not write a parser for it.
+- The original AI's "give the AI extra resources every N seconds" baked-in cheating. We replicate that behaviour optionally as a toggle on `AiTuningProfile`, off by default below Brutal tier.
+
+This is greenfield. RWE itself currently has no AI at all, so there is no backward compatibility to preserve except in mod compatibility. Mods that ship `.AI` files alongside their units will simply have those files ignored; if a mod author wants AI behaviour they author an RWE-native profile. We can ship a small migration note in docs at release.
+
+---
+
+## 11. Phased delivery plan
+
+Each phase is an independently shippable agent task with a working AI at the end of it. Phases are additive — no phase requires throwing away prior work.
+
+### Phase 1 — "Commander idles, builders build"  (≈ 1–2 weeks)
+
+Goal: the AI builds a viable opening base and stops there. Validates the entire integration path.
+
+- Scaffold `src/rwe/ai/` and CMake.
+- Implement `AiPlayerController`, minimal `AiBlackboard`, hook into `GameSimulation::tick`.
+- Drain commands at `GameScene.cpp:2080`.
+- Implement `EconomyManager` with simple reactive logic (build a solar if energy stalls; build a mex if metalIncome < 3 and there's an open spot).
+- Implement `BuildManager` with one hardcoded `BuildOrderTemplate` per side (ARM, CORE).
+- Implement `UnitClassifier` (rough rules, no `Category` parsing).
+- Verify deterministic command stream with a fixed-seed test (`AiPlayerController.test.cpp`): same sim, same seed, same commands.
+
+End state: AI starts with a Commander, builds 4 solars + 3 mex + 1 lab + 2 cons-kbots, then idles.
+
+### Phase 2 — "Threat maps, scouting, expansion"  (≈ 2 weeks)
+
+- Implement `ThreatMap` (5 layers), with rebuild + decay.
+- Implement `PerceivedWorldModel` with the no-LOS shim.
+- Implement `ScoutManager` driving 1–2 Flash/Peewee scouts to maximise Intel-layer staleness.
+- Expand `BuildManager` with conditional `BuildStep`s (count gates, phase gates).
+- Implement `StrategicManager` with `GamePhase` machine: Opening → Boom → ready-to-Attack.
+- Implement secondary expansion: AI builds an extra mex cluster after first lab.
+- Add tunable `AiTuningProfile` parsed from a TDF.
+
+End state: AI has a working economy, knows where the enemy roughly is, and has a small army sitting at base.
+
+### Phase 3 — "Platoons attack"  (≈ 2 weeks)
+
+- Implement `Platoon` and `ArmyManager`.
+- Implement two `PlatoonCompositionTemplate`s: `T1_LAND_RAID`, `T1_DEFENSIVE_LINE`.
+- Implement `TacticalLayer`: target selection, focus-fire helper, retreat trigger keyed on `template.retreatHpRatio` + threat-ratio rule.
+- Implement attack triggers: when `army_DPS > best_target_threat * trigger_ratio`, send a `T1_LAND_RAID` platoon at the highest-`Economic`/lowest-`AntiGround` cell.
+- Add the four difficulty tiers' default profiles to `data/ai/profiles/`.
+- Sorian-style "no all-in if down to one mex": defensive switch when `baseThreatNearCommander` exceeds threshold.
+
+End state: a five-minute AI vs. AI game that actually finishes; Easy is beatable, Hard is hard.
+
+### Phase 4 — "Polish, debug overlays, AI vs AI tuning"  (≈ 1–2 weeks)
+
+- Debug overlays: ImGui windows showing per-AI blackboard, threat heatmap, platoon list with state, current build queue.
+- State logger: a `data/ai/logs/<player>-<seed>.json` dump for each AI run, for offline tuning.
+- AI vs. AI head-to-head harness for tuning loops (deterministic, scriptable).
+- Tune `AiTuningProfile` defaults from playtesting.
+- Implement Brutal tier resource cheat (gated behind config).
+
+End state: shippable. AI plays at four difficulty tiers, is observable in-game, and can be improved by anyone editing TDF profiles.
+
+Future (out of scope for this proposal):
+- Naval doctrine.
+- Air-only build orders.
+- Multi-AI team coordination.
+- LOS-aware perception once fog of war lands.
+- Optional `.AI` file compatibility shim (only if a mod author asks).
+
+---
+
+## 12. Open questions / decisions for the user
+
+These have a recommended default, but we want sign-off because they affect the public surface or the schedule.
+
+### Q1. Do we honour OTA `computerMetal` / `computerEnergy` for the AI?
+
+Recommendation: **yes**, route them through `LoadingScene.cpp:208` so map authors can dial AI starting resources per scenario (this matches TA behaviour and is virtually free). Alternative: ignore the OTA fields and rely solely on `AiTuningProfile`, simpler but loses authoring intent.
+
+### Q2. AI cheating: config flag, or difficulty axis?
+
+**DECIDED (2026-04-26): brand it as a Brutal difficulty axis** — option (a) below, with the option-(b) implementation underneath (independent toggles in `AiTuningProfile`) so modders retain flexibility while UX stays simple.
+
+The proposal makes it a difficulty axis (Brutal tier flips both `cheatModeOmniscient` and a 1.25× resource bonus). Alternative views worth signing off on:
+
+- (a) **Difficulty axis** (recommended). Simple for players: "Brutal cheats, the rest don't."
+- (b) **Independent toggle** in AiTuningProfile. Players/modders can build `Hard+OmniscientButNoResourceBonus` etc. More expressive, harder to message in UI.
+- (c) **Never cheat at all.** Brutal is purely tuning-driven. Cleanest design but means peak difficulty is capped by what good play can do without cheats — usually below where SP players want.
+
+Recommendation: ship (a) as a label, internally implement (b) so we have the flexibility — UI exposes (a), config exposes (b).
+
+### Q3. Build orders: TDF or JSON?
+
+Recommendation: **TDF**, because the project already has a TDF reader (`src/rwe/io/tdf/`) and TA modders are familiar with it. Alternative: JSON via the existing `nlohmann/json` dep — easier to validate and version. We can support both if asked but starting with TDF is consistent.
+
+### Q4. Where does `AiPlayerController` live — `sim/` or scene-level?
+
+**DECIDED (2026-04-26): inside `GameSimulation` (placement B in §4).** AI state participates in the desync detector's JSON dump and replays just work; Phase 1 implementation must respect determinism rules in §4.
+
+Proposal recommends `sim/` (placement B in §4). Alternative is keeping it in `ai/` but instantiated from `GameScene` only. The sim placement is the right answer if we want replay/dump fidelity (which we get for free with the desync detector's existing JSON dump path), but it tightens the layering between `sim/` and `ai/`. Sign-off needed because once committed it's load-bearing.
+
+### Q5. Should we extend the FBI parser now, or live with what we have?
+
+**DECIDED (2026-04-26): extend the FBI parser as part of Phase 1** — option (a) below. Adds a few days to Phase 1 scope but unlocks a clean `UnitClassifier` and benefits non-AI code paths too.
+
+`src/rwe/io/fbi/io.cpp` does not currently read `Category`, `BMCode`, `SightDistance`, `RadarDistance`, `TEDClass`, etc. Phase 2's `UnitClassifier` will be cleaner with `Category` in particular. Options:
+
+- (a) **Extend the parser as part of Phase 1.** Cleanest. Small bit of work.
+- (b) **Defer**, derive categories from existing fields (`canFly`, `floater`, weapon properties). Phase 2 ships sooner, classifier is uglier.
+- Recommendation: (a) — extending the parser is mechanical and benefits non-AI code too.
+
+### Q6. Do we want a per-AI sub-RNG, or share `simulation.rng`?
+
+Sharing is simpler but couples AI command order to sim consumption order; if the sim ever calls `rng()` more or less in unrelated code paths, the AI's choices shift. Sub-seeding gives stability:
+
+```
+ai.rng.seed(simulation.rng()); // pulls one value at construction time, then independent
+```
+
+Recommendation: **sub-seed once**, keep AI's RNG private.
+
+### Q7. Scope check: are we sure naval is non-goal?
+
+Some TA stock maps are mostly water (e.g. *Greenhaven*, *Arctic Plains*). On a heavy-water map a non-naval AI is non-functional. Options:
+
+- (a) AI refuses to play on heavy-water maps (UI warning).
+- (b) Stub naval support: cons-ship + boatyard + a few basic ships in Phase 3.
+- (c) Push naval to Phase 5 / future.
+
+Recommendation: (a) for v1, (b) added in a 4.5 if a tester complains. Sign-off needed because it caps the playable map pool until naval lands.
+
+---
+
+End of proposal. Total: 12 sections, ~3,400 words.
