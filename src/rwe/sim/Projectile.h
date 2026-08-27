@@ -15,6 +15,14 @@ namespace rwe
 
         PlayerId owner;
 
+        /**
+         * The unit that fired this projectile, if any.
+         * Used to credit kills for the COB VeteranLevel query.
+         * std::nullopt for projectiles spawned outside of a firing unit
+         * (e.g., the explodeAs projectile spawned during killUnit).
+         */
+        std::optional<UnitId> attacker;
+
         SimVector position;
         SimVector previousPosition;
 

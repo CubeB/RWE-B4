@@ -172,6 +172,18 @@ set(SOURCE_FILES
     ${IMGUI_SOURCE_FILES}
     src/rwe/AbstractViewport.cpp
     src/rwe/AbstractViewport.h
+    src/rwe/ai/AiBlackboard.h
+    src/rwe/ai/AiIds.h
+    src/rwe/ai/AiPlayerController.cpp
+    src/rwe/ai/AiPlayerController.h
+    src/rwe/ai/AiTuningProfile.cpp
+    src/rwe/ai/AiTuningProfile.h
+    src/rwe/ai/BuildManager.cpp
+    src/rwe/ai/BuildManager.h
+    src/rwe/ai/EconomyManager.cpp
+    src/rwe/ai/EconomyManager.h
+    src/rwe/ai/StrategicManager.cpp
+    src/rwe/ai/StrategicManager.h
     src/rwe/AudioService.cpp
     src/rwe/AudioService.h
     src/rwe/BoxTreeSplit.cpp
@@ -728,11 +740,15 @@ if(WIN32)
 endif()
 
 set(TEST_FILES
+    src/rwe/ai/AiPlayerController.test.cpp
     src/rwe/BoxTreeSplit.test.cpp
     src/rwe/Viewport.test.cpp
     src/rwe/cob/cob_util.test.cpp
     src/rwe/collections/MinHeap.test.cpp
     src/rwe/collections/VectorMap.test.cpp
+    src/rwe/game/GameSpeed.test.cpp
+    src/rwe/game/PlayerCommand_hotkey.test.cpp
+    src/rwe/game/PlayerCommand_speed.test.cpp
     src/rwe/game/dump_util.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp
     src/rwe/geometry/Circle2f.test.cpp
@@ -762,8 +778,11 @@ set(TEST_FILES
     src/rwe/pathfinding/pathfinding_utils.test.cpp
     src/rwe/rc_gen_optional.h
     src/rwe/sim/GameHash_util.test.cpp
+    src/rwe/sim/bombsight.test.cpp
+    src/rwe/sim/cob.test.cpp
     src/rwe/sim/SimAngle.test.cpp
     src/rwe/sim/SimVector.test.cpp
+    src/rwe/sim/UnitBehaviorService_air.test.cpp
     src/rwe/sim/UnitState_util.test.cpp
     src/rwe/sim/util.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp

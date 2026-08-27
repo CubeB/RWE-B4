@@ -86,6 +86,11 @@ namespace rwe
             u.yardOpen,
             u.inCollision,
             u.fireOrders,
+            u.moveOrders,
+            u.cobBusy,
+            u.buggerOffActive,
+            u.armored,
+            u.kills,
             u.buildTimeCompleted,
             u.activated,
             u.isSufficientlyPowered,
@@ -122,6 +127,15 @@ namespace rwe
         return GameHash(0);
     }
 
+    GameHash computeHashOf(const AirMovementStateAttackRun& p)
+    {
+        return combineHashes(
+            p.lastKnownTargetPos,
+            p.runOutDirection,
+            p.runOutDistance,
+            static_cast<uint32_t>(p.phase));
+    }
+
     GameHash computeHashOf(const SteeringInfo& s)
     {
         return combineHashes(s.targetAngle, s.targetSpeed);
@@ -136,6 +150,7 @@ namespace rwe
     {
         GameHash h = combineHashes(
             projectile.owner,
+            projectile.attacker,
             projectile.position,
             projectile.origin,
             projectile.velocity,

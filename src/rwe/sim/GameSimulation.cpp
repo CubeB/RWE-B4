@@ -1,5 +1,6 @@
 #include "GameSimulation.h"
 #include <algorithm>
+#include <rwe/ai/AiPlayerController.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -93,6 +94,73 @@ namespace rwe
           maxWindSpeed(maxWindSpeed),
           nextWindSpeedChange(gameTime)
     {
+    }
+
+    // Out-of-line because `aiControllers` holds unique_ptr<AiPlayerController>
+    // and AiPlayerController is forward-declared in the header. Move-assign
+    // is intentionally absent (declared `=delete` in the header) because the
+    // simulation has const wind-speed members.
+    GameSimulation::~GameSimulation() = default;
+    GameSimulation::GameSimulation(GameSimulation&&) noexcept = default;
+
+    void GameSimulation::addAiController(PlayerId playerId, std::unique_ptr<AiPlayerController> controller)
+    {
+        auto [it, inserted] = aiControllers.emplace(playerId, std::move(controller));
+        if (inserted)
+        {
+            // Maintain a sorted insertion of the new player id so per-tick
+            // iteration is deterministic regardless of hash bucket layout.
+            auto pos = std::lower_bound(
+                aiPlayerOrder.begin(),
+                aiPlayerOrder.end(),
+                playerId,
+                [](PlayerId a, PlayerId b) { return a.value < b.value; });
+            aiPlayerOrder.insert(pos, playerId);
+        }
+        else
+        {
+            // Re-registration replaces the controller but does not change
+            // the iteration order.
+            it->second = std::move(controller);
+        }
+    }
+
+    std::vector<PlayerCommand> GameSimulation::takeAiCommandsForPlayer(PlayerId playerId)
+    {
+        auto it = aiPendingCommands.find(playerId);
+        if (it == aiPendingCommands.end())
+        {
+            return {};
+        }
+        auto out = std::move(it->second);
+        it->second.clear();
+        return out;
+    }
+
+    void GameSimulation::runAiControllers()
+    {
+        for (PlayerId playerId : aiPlayerOrder)
+        {
+            auto controllerIt = aiControllers.find(playerId);
+            if (controllerIt == aiControllers.end() || !controllerIt->second)
+            {
+                continue;
+            }
+
+            // Skip dead AI players — no point spending tick budget on them.
+            const auto& player = getPlayer(playerId);
+            if (player.status != GamePlayerStatus::Alive)
+            {
+                continue;
+            }
+
+            // Find or create the per-player command buffer. We append to it
+            // (rather than overwrite) so multiple managers within the same
+            // tick can each contribute commands without trampling each
+            // other. GameScene drains this buffer once per scene tick.
+            auto& buf = aiPendingCommands[playerId];
+            controllerIt->second->tick(*this, buf);
+        }
     }
 
     std::optional<FeatureId> GameSimulation::addFeature(MapFeature&& newFeature)
@@ -371,9 +439,45 @@ namespace rwe
 
     bool GameSimulation::containsAnyGeoMatch(const Grid<YardMapCell>& yardMap, unsigned int x, unsigned int y) const
     {
-        return geoGrid.any2(x, y, yardMap, [](const bool& geo, const YardMapCell& cell) {
-            return geo && isGeo(cell);
-        });
+        // Iterate explicitly with per-cell bounds checks against the underlying
+        // vector size. The build cursor can hover with a footprint that extends
+        // past geoGrid's edge (geoGrid is one cell smaller than the heightmap),
+        // and Grid::any2 / Grid::get would otherwise walk off the end.
+        const int geoW = geoGrid.getWidth();
+        const int geoH = geoGrid.getHeight();
+        const int yardW = yardMap.getWidth();
+        const int yardH = yardMap.getHeight();
+        const int baseX = static_cast<int>(x);
+        const int baseY = static_cast<int>(y);
+        const auto& geoVec = geoGrid.getVector();
+        const size_t geoSize = geoVec.size();
+
+        for (int dy = 0; dy < yardH; ++dy)
+        {
+            const int gy = baseY + dy;
+            if (gy < 0 || gy >= geoH)
+            {
+                continue;
+            }
+            for (int dx = 0; dx < yardW; ++dx)
+            {
+                const int gx = baseX + dx;
+                if (gx < 0 || gx >= geoW)
+                {
+                    continue;
+                }
+                const size_t idx = static_cast<size_t>(gy) * static_cast<size_t>(geoW) + static_cast<size_t>(gx);
+                if (idx >= geoSize)
+                {
+                    continue;
+                }
+                if (geoVec[idx] && isGeo(yardMap.get(dx, dy)))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     bool GameSimulation::isCollisionAt(const DiscreteRect& rect) const
@@ -678,22 +782,31 @@ namespace rwe
     }
 
     Projectile GameSimulation::createProjectileFromWeapon(
-        PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit)
+        PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity)
     {
-        return createProjectileFromWeapon(owner, weapon.weaponType, position, direction, distanceToTarget, targetUnit);
+        return createProjectileFromWeapon(owner, weapon.weaponType, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity);
     }
 
-    Projectile GameSimulation::createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit)
+    Projectile GameSimulation::createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity)
     {
         const auto& weaponDefinition = weaponDefinitions.at(weaponType);
 
         Projectile projectile;
         projectile.weaponType = weaponType;
         projectile.owner = owner;
+        projectile.attacker = attacker;
         projectile.position = position;
         projectile.previousPosition = position;
         projectile.origin = position;
         projectile.velocity = direction * weaponDefinition.velocity;
+        if (inheritedVelocity)
+        {
+            // Bombs released from bombers inherit the aircraft's velocity at
+            // release. Without this, bombs would fall straight down from the
+            // firing piece while the bomber has already moved past, causing
+            // visible misses. (See bombsight handling in tryFireWeapon.)
+            projectile.velocity = projectile.velocity + *inheritedVelocity;
+        }
 
         projectile.lastSmoke = gameTime;
 
@@ -721,9 +834,9 @@ namespace rwe
         return projectile;
     }
 
-    void GameSimulation::spawnProjectile(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit)
+    void GameSimulation::spawnProjectile(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity)
     {
-        projectiles.emplace(createProjectileFromWeapon(owner, weapon, position, direction, distanceToTarget, targetUnit));
+        projectiles.emplace(createProjectileFromWeapon(owner, weapon, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity));
     }
 
     WinStatus GameSimulation::computeWinStatus() const
@@ -883,6 +996,7 @@ namespace rwe
 
     void GameSimulation::setBuggerOff(UnitId unitId, bool value)
     {
+        getUnitState(unitId).buggerOffActive = value;
         if (value)
         {
             emitBuggerOff(unitId);
@@ -1104,10 +1218,28 @@ namespace rwe
 
     void GameSimulation::killUnit(UnitId unitId)
     {
+        killUnit(unitId, std::nullopt);
+    }
+
+    void GameSimulation::killUnit(UnitId unitId, std::optional<UnitId> attacker)
+    {
         auto& unit = getUnitState(unitId);
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
 
         unit.markAsDead();
+
+        // Credit the kill to the attacker, if any.
+        // Match TA behavior: friendly-fire kills count.
+        // Skip if the attacker is dead or no longer exists, and never
+        // credit a unit for killing itself (suicide / explodeAs).
+        if (attacker && *attacker != unitId)
+        {
+            auto attackerUnit = tryGetUnitState(*attacker);
+            if (attackerUnit && attackerUnit->get().isAlive())
+            {
+                attackerUnit->get().kills += 1;
+            }
+        }
 
         auto deathType = unit.position.y < terrain.getSeaLevel() ? UnitDiedEvent::DeathType::WaterExploded : UnitDiedEvent::DeathType::NormalExploded;
         events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, deathType});
@@ -1116,12 +1248,19 @@ namespace rwe
         if (!unitDefinition.explodeAs.empty())
         {
             auto impactType = unit.position.y < terrain.getSeaLevel() ? ImpactType::Water : ImpactType::Normal;
-            auto projectile = createProjectileFromWeapon(unit.owner, unitDefinition.explodeAs, unit.position, SimVector(0_ss, -1_ss, 0_ss), 0_ss, std::nullopt);
+            // The explodeAs projectile is environmental: deaths it causes
+            // are not credited to anyone (the original unit is already dead).
+            auto projectile = createProjectileFromWeapon(unit.owner, unitDefinition.explodeAs, unit.position, SimVector(0_ss, -1_ss, 0_ss), 0_ss, std::nullopt, std::nullopt);
             doProjectileImpact(projectile, impactType);
         }
     }
 
     void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints)
+    {
+        applyDamage(unitId, damagePoints, std::nullopt);
+    }
+
+    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker)
     {
         auto& unit = getUnitState(unitId);
         if (unit.hitPoints <= damagePoints)
@@ -1133,11 +1272,13 @@ namespace rwe
                 // die quietly without a corpse.
                 // FIXME: units in TA that are not actively receiving build input
                 // die with an explosion, even though they leave no corpse.
+                // Note: under-construction kills are not credited to the attacker
+                // because the unit dies via quietlyKillUnit which has no firing path.
                 quietlyKillUnit(unitId);
             }
             else
             {
-                killUnit(unitId);
+                killUnit(unitId, attacker);
             }
         }
         else
@@ -1220,7 +1361,7 @@ namespace rwe
           auto damageScale = std::clamp(1_ss - (rweSqrt(unitDistanceSquared) / radius), 0_ss, 1_ss);
           auto rawDamage = projectile.getDamage(unit.unitType);
           auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * damageScale);
-          applyDamage(*u, scaledDamage); });
+          applyDamage(*u, scaledDamage, projectile.attacker); });
 
         // Apply damage to flying units
         for (const auto& flyingUnitId : flyingUnitsSet)
@@ -1244,7 +1385,7 @@ namespace rwe
             auto damageScale = std::clamp(1_ss - (rweSqrt(unitDistanceSquared) / radius), 0_ss, 1_ss);
             auto rawDamage = projectile.getDamage(unit.unitType);
             auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * damageScale);
-            applyDamage(flyingUnitId, scaledDamage);
+            applyDamage(flyingUnitId, scaledDamage, projectile.attacker);
         }
     }
 
@@ -1273,6 +1414,12 @@ namespace rwe
             match(
                 weaponDefinition.physicsType,
                 [&](const ProjectilePhysicsTypeBallistic&) {
+                    projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
+                },
+                [&](const ProjectilePhysicsTypeBomb&) {
+                    // Bombs follow the same gravity model as ballistic
+                    // projectiles. Their initial velocity is inherited from
+                    // the aircraft at release time; gravity does the rest.
                     projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
                 },
                 [&](const ProjectilePhysicsTypeLineOfSight&) {
@@ -1650,6 +1797,13 @@ namespace rwe
     void GameSimulation::tick()
     {
         gameTime += GameTime(1);
+
+        // AI runs first so any commands it emits this tick can be drained
+        // by GameScene before unit behaviour runs next tick. This mirrors
+        // the human input pipeline: human commands are processed via
+        // PlayerCommandService at the *start* of tryTickGame, and AI
+        // commands take the same channel.
+        runAiControllers();
 
         updateWind();
 

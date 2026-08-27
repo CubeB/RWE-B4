@@ -835,8 +835,12 @@ namespace rwe
                     coloredMeshbatch.lines.emplace_back(backPosition + pixelOffset, l.color2);
                 },
                 [&](const ProjectileRenderTypeModel& m) {
+                    // Bombs dropped by hovering aircraft can spawn with
+                    // zero velocity for a tick before gravity kicks in;
+                    // fall back to a sane forward direction instead of
+                    // crashing on normalize().
                     auto transform = Matrix4f::translation(position)
-                        * pointDirection(simVectorToFloat(projectile.velocity).normalized())
+                        * pointDirection(simVectorToFloat(projectile.velocity).normalizedOr(Vector3f(0.0f, 0.0f, 1.0f)))
                         * rotationModeToMatrix(m.rotationMode);
                     const auto& modelDefinition = sim.unitModelDefinitions.at(m.objectName);
                     drawProjectileUnitMesh(gameMediaDatabase, viewProjectionMatrix, m.objectName, modelDefinition, transform, PlayerColorIndex(0), false, unitTextureAtlas, unitTeamTextureAtlases, unitMeshBatch);

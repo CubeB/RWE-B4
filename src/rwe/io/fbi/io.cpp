@@ -27,6 +27,15 @@ namespace rwe
         tdf.readOrDefault("Name", u.name);
         tdf.readOrDefault("Description", u.description);
 
+        // AI-relevant classification fields. Defaults (empty string / 0)
+        // mean "not present in the FBI"; consumer code (UnitClassifier,
+        // future LOS system) must treat empty/0 as "fall back to other
+        // signals" rather than as a meaningful zero.
+        tdf.readOrDefault("TEDClass", u.tedClass);
+        tdf.readOrDefault("Category", u.category);
+        tdf.readOrDefault("SightDistance", u.sightDistance, 0u);
+        tdf.readOrDefault("RadarDistance", u.radarDistance, 0u);
+
         tdf.readOrDefault("TurnRate", u.turnRate);
         tdf.readOrDefault("MaxVelocity", u.maxVelocity);
         tdf.readOrDefault("Acceleration", u.acceleration);

@@ -14,6 +14,23 @@ namespace rwe
         std::string name;
         std::string description;
 
+        // Coarse class hint from TA: KBOT / TANK / SHIP / PLANE / COMMANDER
+        // / METAL / ENERGY / etc. Used by the AI's UnitClassifier (Phase 2)
+        // to bucket units into roles. Empty if not present in the FBI.
+        std::string tedClass;
+
+        // Space-separated category list, e.g. "LEVEL1 KBOT WEAPON CONSTRUCT".
+        // The AI's UnitClassifier matches on substrings of this.
+        // Stored verbatim (uppercase or whatever case the FBI used) — the
+        // classifier normalises at use time.
+        std::string category;
+
+        // Sight and radar radii (in TA "elmos"). The fog-of-war system in
+        // Phase 2+ will use these to compute per-player visibility grids.
+        // Both default to 0; LOS code must treat 0 as "no signal".
+        unsigned int sightDistance{0};
+        unsigned int radarDistance{0};
+
         unsigned int turnRate;
         float maxVelocity;
         float acceleration;

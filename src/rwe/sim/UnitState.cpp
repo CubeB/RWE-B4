@@ -78,6 +78,9 @@ namespace rwe
             },
             [&](const AirMovementStateLanding&) {
                 return true;
+            },
+            [&](const AirMovementStateAttackRun&) {
+                return true;
             });
     }
 

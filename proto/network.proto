@@ -98,6 +98,10 @@ message PlayerUnitCommand
         required bool isOn = 1;
     }
 
+    message SelfDestruct
+    {
+    }
+
     required int32 unit = 1;
 
     oneof command {
@@ -106,6 +110,7 @@ message PlayerUnitCommand
         SetFireOrders set_fire_orders = 4;
         SetOnOff set_on_off = 5;
         ModifyBuildQueue modify_build_queue = 6;
+        SelfDestruct self_destruct = 7;
     }
 }
 
@@ -117,6 +122,11 @@ message PlayerUnpauseGameCommand
 {
 }
 
+message PlayerSetGameSpeedCommand
+{
+    required int32 speed_index = 1;
+}
+
 message PlayerCommand
 {
     oneof command
@@ -124,6 +134,7 @@ message PlayerCommand
         PlayerUnitCommand unit_command = 1;
         PlayerPauseGameCommand pause = 2;
         PlayerUnpauseGameCommand unpause = 3;
+        PlayerSetGameSpeedCommand set_game_speed = 4;
     }
 }
 

@@ -116,6 +116,13 @@ namespace rwe
 
         bool attackTarget(UnitInfo unitInfo, const AttackTarget& target);
 
+        /**
+         * Aircraft-specific attack target handler. Drives the AirMovementStateAttackRun
+         * state machine: Approaching -> Engaging -> Departing -> (loop back or terminate).
+         * Returns true when the order is satisfied and the unit should drop the order.
+         */
+        bool attackTargetAir(UnitInfo unitInfo, const AttackTarget& target);
+
         bool buildUnit(UnitInfo unitInfo, const std::string& unitType, const SimVector& position);
 
         UnitCreationStatus createNewUnit(UnitInfo unitInfo, const std::string& unitType, const SimVector& position);

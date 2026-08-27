@@ -105,6 +105,22 @@ namespace rwe
         return nlohmann::json{};
     }
 
+    nlohmann::json dumpJson(const AirMovementStateAttackRun& p)
+    {
+        const char* phaseName = "Approaching";
+        switch (p.phase)
+        {
+            case AirMovementStateAttackRun::Phase::Approaching: phaseName = "Approaching"; break;
+            case AirMovementStateAttackRun::Phase::Engaging:    phaseName = "Engaging";    break;
+            case AirMovementStateAttackRun::Phase::Departing:   phaseName = "Departing";   break;
+        }
+        return nlohmann::json{
+            {"phase", phaseName},
+            {"lastKnownTargetPos", dumpJson(p.lastKnownTargetPos)},
+            {"runOutDirection", dumpJson(p.runOutDirection)},
+        };
+    }
+
     nlohmann::json dumpJson(const SteeringInfo& s)
     {
         return nlohmann::json{
@@ -125,6 +141,7 @@ namespace rwe
     {
         nlohmann::json j{
             {"owner", dumpJson(projectile.owner)},
+            {"attacker", projectile.attacker ? dumpJson(*projectile.attacker) : nlohmann::json(nullptr)},
             {"position", dumpJson(projectile.position)},
             {"origin", dumpJson(projectile.origin)},
             {"velocity", dumpJson(projectile.velocity)},

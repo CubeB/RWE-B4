@@ -291,6 +291,11 @@ namespace rwe
         renderWorld();
         sceneContext.graphics->disableDepthBuffer();
 
+        if (guiVisible)
+        {
+            renderOverlay();
+        }
+
         // oh yeah also regulate sound
         std::scoped_lock<std::mutex> lock(playingUnitChannelsLock);
         auto volume = computeSoundVolume(playingUnitChannels.size());
@@ -511,6 +516,28 @@ namespace rwe
         }
 
         currentPanel->render(chromeUiRenderService);
+    }
+
+    void GameScene::renderOverlay()
+    {
+        // These overlays must render AFTER renderWorld, otherwise the world
+        // pass overwrites the center of the screen where they sit.
+
+        // Speed indicator: TA shows "+N" / "-N" relative to default 1.0x speed.
+        if (!gameSpeed.isDefault())
+        {
+            int offset = gameSpeed.displayOffset();
+            std::string speedText = (offset > 0 ? "+" : "") + std::to_string(offset);
+            float centerX = static_cast<float>(sceneContext.viewport->width()) / 2.0f;
+            chromeUiRenderService.drawTextCenteredX(centerX, GuiSizeTop + 8, speedText, *guiFont);
+        }
+
+        if (paused)
+        {
+            float centerX = static_cast<float>(sceneContext.viewport->width()) / 2.0f;
+            float centerY = static_cast<float>(sceneContext.viewport->height()) / 2.0f;
+            chromeUiRenderService.drawTextCenteredX(centerX, centerY, "Paused", *guiFont);
+        }
     }
 
     void GameScene::renderMinimap()
@@ -1200,7 +1227,14 @@ namespace rwe
 
     void GameScene::onKeyDown(const SDL_KeyboardEvent& keysym)
     {
-        currentPanel->keyDown(KeyEvent(keysym.key));
+        // Suppress UI panel key activation when Ctrl is held — Ctrl+letter is
+        // hotkey territory (Ctrl+A select-all, Ctrl+S stop, Ctrl+D self-destruct,
+        // etc.), and the panel's letter-bound buttons (e.g. ATTACK on plain "A")
+        // would otherwise also fire.
+        if (!isCtrlDown())
+        {
+            currentPanel->keyDown(KeyEvent(keysym.key));
+        }
 
         if (keysym.key == SDLK_UP)
         {
@@ -1276,6 +1310,199 @@ namespace rwe
                 if (commanderUnitId)
                 {
                     startTrackInternal({*commanderUnitId});
+                }
+            }
+        }
+        else if (keysym.key == SDLK_EQUALS || keysym.key == SDLK_KP_PLUS)
+        {
+            // Speed up: locally-issued, host-authoritatively applied via lockstep.
+            // Any client may emit; processPlayerCommand drops it unless issued by host.
+            localPlayerCommandBuffer.push_back(PlayerSetGameSpeedCommand{gameSpeed.increased().index()});
+        }
+        else if (keysym.key == SDLK_MINUS || keysym.key == SDLK_KP_MINUS)
+        {
+            // Slow down: see SDLK_EQUALS comment.
+            localPlayerCommandBuffer.push_back(PlayerSetGameSpeedCommand{gameSpeed.decreased().index()});
+        }
+        else if (keysym.key == SDLK_PAUSE)
+        {
+            // Toggle the local paused flag immediately so the tick loop can
+            // resume on unpause; the lockstep-routed command handler is what
+            // drives the tick loop and would otherwise never run while paused.
+            // Pause/unpause is scene state (not deterministic sim state), so
+            // toggling locally is fine; the command still goes through the
+            // command stream so peers stay in sync.
+            paused = !paused;
+            if (paused)
+            {
+                localPlayerCommandBuffer.push_back(PlayerPauseGameCommand{});
+            }
+            else
+            {
+                localPlayerCommandBuffer.push_back(PlayerUnpauseGameCommand{});
+            }
+        }
+        else if (keysym.key == SDLK_A && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+A: select all own units visible on screen.
+            selectAllOnScreen();
+        }
+        else if (keysym.key == SDLK_S && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+S: stop all selected units.
+            // Routes through the deterministic command queue so MP peers
+            // see the same stop in the same tick.
+            cursorMode.next(NormalCursorMode());
+            for (const auto& unitId : selectedUnits)
+            {
+                localPlayerStopUnit(unitId);
+            }
+        }
+        else if (keysym.key == SDLK_D && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+D: self-destruct selected units (TA behaviour).
+            // Routes through the deterministic command queue so the
+            // explosion happens at the same game tick on all peers.
+            for (const auto& unitId : selectedUnits)
+            {
+                const auto& unit = tryGetUnit(unitId);
+                if (unit && unit->get().isAlive() && unit->get().isOwnedBy(localPlayerId))
+                {
+                    localPlayerSelfDestructUnit(unitId);
+                }
+            }
+        }
+        else if (keysym.key == SDLK_Z && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+Z: enter attack-ground cursor mode.
+            // The next left-click on the terrain issues an AttackOrder targeting
+            // the ground coordinate (handled by the AttackCursorMode mouse handler).
+            if (sounds.specialOrders)
+            {
+                playUiSound(*sounds.specialOrders);
+            }
+            if (std::holds_alternative<AttackCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(AttackCursorMode());
+            }
+        }
+        else if (keysym.key == SDLK_W && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+W: guard/defend cursor mode.
+            // TA's "wait" order is not a separate sim order type in RWE;
+            // the closest equivalent is the guard/defend mode.
+            if (sounds.specialOrders)
+            {
+                playUiSound(*sounds.specialOrders);
+            }
+            if (std::holds_alternative<GuardCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(GuardCursorMode());
+            }
+        }
+        else if (keysym.key == SDLK_F && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+F: fight (move-attack) cursor mode.
+            // RWE does not have a dedicated FightOrder type yet; the attack
+            // cursor mode is the closest available analogue.
+            if (sounds.specialOrders)
+            {
+                playUiSound(*sounds.specialOrders);
+            }
+            if (std::holds_alternative<AttackCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(AttackCursorMode());
+            }
+        }
+        else if (keysym.key == SDLK_P && isCtrlDown() && !isShiftDown())
+        {
+            // Ctrl+P: patrol cursor mode.
+            // RWE does not have a dedicated PatrolOrder type yet; the move
+            // cursor mode is the closest available analogue (issues a MoveOrder
+            // when the destination is clicked).
+            if (sounds.specialOrders)
+            {
+                playUiSound(*sounds.specialOrders);
+            }
+            if (std::holds_alternative<MoveCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(MoveCursorMode());
+            }
+        }
+        else
+        {
+            // Control groups: keys 1-0 map to groups 0-9.
+            // Ctrl+digit  → bind current selection to group (replace).
+            // Shift+digit → add current selection to group.
+            // Digit alone → recall group (replace current selection).
+            // Ctrl+Shift+digit is treated the same as Shift+digit (add).
+            std::optional<int> groupIndex;
+            if (keysym.key >= SDLK_1 && keysym.key <= SDLK_9)
+            {
+                groupIndex = keysym.key - SDLK_1; // 0-8
+            }
+            else if (keysym.key == SDLK_0)
+            {
+                groupIndex = 9; // '0' maps to group index 9
+            }
+
+            if (groupIndex)
+            {
+                auto idx = *groupIndex;
+                if (isCtrlDown() && isShiftDown())
+                {
+                    // Ctrl+Shift+digit: add selection to control group.
+                    for (const auto& unitId : selectedUnits)
+                    {
+                        controlGroups[idx].insert(unitId);
+                    }
+                }
+                else if (isCtrlDown())
+                {
+                    // Ctrl+digit: bind (replace) control group with current selection.
+                    controlGroups[idx] = selectedUnits;
+                }
+                else if (isShiftDown())
+                {
+                    // Shift+digit: add current selection to control group.
+                    for (const auto& unitId : selectedUnits)
+                    {
+                        controlGroups[idx].insert(unitId);
+                    }
+                }
+                else
+                {
+                    // Digit alone: recall control group.
+                    // Filter out any units that are now dead or no longer owned
+                    // by the local player so stale IDs do not pollute the set.
+                    std::unordered_set<UnitId> liveUnits;
+                    for (const auto& unitId : controlGroups[idx])
+                    {
+                        auto unitRef = tryGetUnit(unitId);
+                        if (unitRef && unitRef->get().isAlive() && unitRef->get().isOwnedBy(localPlayerId))
+                        {
+                            liveUnits.insert(unitId);
+                        }
+                    }
+                    // Prune the stored group to remove dead entries.
+                    controlGroups[idx] = liveUnits;
+                    replaceUnitSelection(liveUnits);
                 }
             }
         }
@@ -1763,7 +1990,16 @@ namespace rwe
 
     void GameScene::update(int millisecondsElapsed)
     {
-        millisecondsBuffer += millisecondsElapsed;
+        // Pause halts simulation tick dispatch by not advancing the
+        // scaled-time accumulator. Speed scales the accumulator using
+        // integer arithmetic to keep determinism friendly: at perMille
+        // == 1000 we accumulate 1ms per real ms; at 100 we accumulate
+        // 0.1ms per real ms; at 5000 we accumulate 5ms per real ms.
+        // The sim tick threshold (SimMillisecondsPerTick) is unchanged.
+        if (!paused)
+        {
+            millisecondsBuffer += (millisecondsElapsed * gameSpeed.perMille()) / 1000;
+        }
 
         auto cameraConstraint = computeCameraConstraint(simulation.terrain, worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
 
@@ -2003,7 +2239,12 @@ namespace rwe
             gameNetworkService->submitCommands(sceneTime, std::vector<PlayerCommand>());
         }
 
-        // Queue up commands from the computer players
+        // Queue up commands from the computer players. The AI runs inside
+        // the simulation (one tick ahead of this drain) and writes its
+        // PlayerCommands into `simulation.aiPendingCommands`. We pull them
+        // here and push them through the same PlayerCommandService channel
+        // human input uses, so MP/replay/desync detection treats AI
+        // identically to a remote human.
         for (Index i = 0; i < getSize(simulation.players); ++i)
         {
             PlayerId id(i);
@@ -2012,8 +2253,8 @@ namespace rwe
             {
                 if (playerCommandService->bufferedCommandCount(id) == 0)
                 {
-                    // TODO: implement computer AI logic to decide commands here
-                    playerCommandService->pushCommands(id, std::vector<PlayerCommand>());
+                    auto aiCommands = simulation.takeAiCommandsForPlayer(id);
+                    playerCommandService->pushCommands(id, aiCommands);
                 }
             }
         }
@@ -2034,18 +2275,30 @@ namespace rwe
         const SceneTime frameCheckInterval(5);
         auto highSceneTime = averageSceneTime + frameTolerance;
         auto lowSceneTime = averageSceneTime <= frameTolerance ? SceneTime{0} : averageSceneTime - frameTolerance;
-        for (; millisecondsBuffer >= SimMillisecondsPerTick; millisecondsBuffer -= SimMillisecondsPerTick)
+        // Cap the number of sim ticks we dispatch per frame to prevent
+        // a runaway "spiral of death" if frame times spike at high speeds.
+        const int maxTicksPerFrame = 10;
+        int ticksThisFrame = 0;
+        for (; millisecondsBuffer >= SimMillisecondsPerTick && ticksThisFrame < maxTicksPerFrame; millisecondsBuffer -= SimMillisecondsPerTick)
         {
             if (sceneTime % frameCheckInterval != SceneTime(0) || sceneTime <= highSceneTime)
             {
                 tryTickGame();
+                ++ticksThisFrame;
 
                 // simulate an extra frame to catch up every so often
-                if (sceneTime % frameCheckInterval == SceneTime(0) && sceneTime < lowSceneTime)
+                if (sceneTime % frameCheckInterval == SceneTime(0) && sceneTime < lowSceneTime && ticksThisFrame < maxTicksPerFrame)
                 {
                     tryTickGame();
+                    ++ticksThisFrame;
                 }
             }
+        }
+        // If we hit the cap, drain the buffer so we don't carry over
+        // unbounded backlog into the next frame.
+        if (ticksThisFrame >= maxTicksPerFrame)
+        {
+            millisecondsBuffer = 0;
         }
 
         renderDebugWindow();
@@ -2583,6 +2836,11 @@ namespace rwe
         }
     }
 
+    void GameScene::localPlayerSelfDestructUnit(UnitId unitId)
+    {
+        localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SelfDestruct()));
+    }
+
     void GameScene::localPlayerSetFireOrders(UnitId unitId, UnitFireOrders orders)
     {
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SetFireOrders{orders}));
@@ -3055,11 +3313,11 @@ namespace rwe
 
     void GameScene::processPlayerCommands(const std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>& commands)
     {
-        for (const auto& [_, playerCommands] : commands)
+        for (const auto& [issuingPlayer, playerCommands] : commands)
         {
             for (const auto& command : playerCommands)
             {
-                processPlayerCommand(command);
+                processPlayerCommand(issuingPlayer, command);
             }
         }
     }
@@ -3378,6 +3636,41 @@ namespace rwe
         }
     }
 
+    void GameScene::selectAllOnScreen()
+    {
+        // Compute the camera's visible world rectangle directly. Matrix-based
+        // projection here doesn't perform the perspective divide (see
+        // Matrix4x.h:506), so we'd otherwise have no reliable on-screen test.
+        const auto cameraPos = worldCameraState.getRoundedPosition();
+        const float halfWidth = worldCameraState.scaleDimension(worldViewport.width()) / 2.0f;
+        const float halfHeight = worldCameraState.scaleDimension(worldViewport.height()) / 2.0f;
+        const float minX = cameraPos.x - halfWidth;
+        const float maxX = cameraPos.x + halfWidth;
+        const float minZ = cameraPos.z - halfHeight;
+        const float maxZ = cameraPos.z + halfHeight;
+
+        std::unordered_set<UnitId> units;
+        for (const auto& e : simulation.units)
+        {
+            const auto& unitDefinition = simulation.unitDefinitions.at(e.second.unitType);
+            if (!e.second.isSelectableBy(unitDefinition, localPlayerId))
+            {
+                continue;
+            }
+
+            const auto worldPos = simVectorToFloat(e.second.position);
+            if (worldPos.x < minX || worldPos.x > maxX
+                || worldPos.z < minZ || worldPos.z > maxZ)
+            {
+                continue;
+            }
+
+            units.insert(e.first);
+        }
+
+        replaceUnitSelection(units);
+    }
+
     void GameScene::toggleUnitSelection(const rwe::UnitId& unitId)
     {
         auto it = selectedUnits.find(unitId);
@@ -3470,7 +3763,16 @@ namespace rwe
         }
         else if (auto unitId = getSingleSelectedUnit(); unitId)
         {
-            const auto& unit = getUnit(*unitId);
+            // Use tryGetUnit: when several units in the selection self-destruct
+            // in the same tick, the first UnitDiedEvent triggers this callback
+            // while the remaining selected units have already been removed from
+            // the simulation but not yet from selectedUnits.
+            auto unitRef = tryGetUnit(*unitId);
+            if (!unitRef)
+            {
+                return;
+            }
+            const auto& unit = unitRef->get();
             fireOrders.next(unit.fireOrders);
             onOff.next(unit.activated);
 
@@ -3583,18 +3885,37 @@ namespace rwe
         return panel;
     }
 
-    void GameScene::processPlayerCommand(const PlayerCommand& playerCommand)
+    void GameScene::processPlayerCommand(PlayerId issuingPlayer, const PlayerCommand& playerCommand)
     {
         match(
             playerCommand,
             [&](const PlayerUnitCommand& c) {
                 processUnitCommand(c);
             },
-            [](const PlayerPauseGameCommand&) {
-                // TODO
+            [&](const PlayerPauseGameCommand&) {
+                // Pause is open to any player. The local player toggles
+                // `paused` immediately in the key handler so the tick loop
+                // can resume to process the unpause; ignoring the round-tripped
+                // command here prevents a stale pause from re-applying after
+                // the user has already unpaused.
+                if (issuingPlayer != localPlayerId)
+                {
+                    paused = true;
+                }
             },
-            [](const PlayerUnpauseGameCommand&) {
-                // TODO
+            [&](const PlayerUnpauseGameCommand&) {
+                if (issuingPlayer != localPlayerId)
+                {
+                    paused = false;
+                }
+            },
+            [&](const PlayerSetGameSpeedCommand& c) {
+                // Host-authoritative: only honor speed changes from player 0.
+                // Non-host requests are silently dropped.
+                if (issuingPlayer == PlayerId(0))
+                {
+                    gameSpeed = GameSpeed(c.speedIndex);
+                }
             });
     }
 
@@ -3630,6 +3951,13 @@ namespace rwe
                 else
                 {
                     simulation.deactivateUnit(unitCommand.unit);
+                }
+            },
+            [&](const PlayerUnitCommand::SelfDestruct&) {
+                auto unit = tryGetUnit(unitCommand.unit);
+                if (unit && unit->get().isAlive())
+                {
+                    simulation.killUnit(unitCommand.unit);
                 }
             });
     }

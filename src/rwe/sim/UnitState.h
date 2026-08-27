@@ -18,6 +18,7 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitFireOrders.h>
 #include <rwe/sim/UnitMesh.h>
+#include <rwe/sim/UnitMovementOrders.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitWeapon.h>
 #include <variant>
@@ -191,7 +192,47 @@ namespace rwe
         bool shouldAbort{false};
     };
 
-    using AirMovementState = std::variant<AirMovementStateTakingOff, AirMovementStateFlying, AirMovementStateLanding>;
+    /**
+     * State for Total Annihilation-style aircraft attack runs.
+     *
+     * The attack run is divided into three phases:
+     *  - Approaching: fly toward the target at cruise altitude with no braking.
+     *  - Engaging:    weapons-hot, hold the run-out heading so the unit blows
+     *                 through the target rather than orbiting it.
+     *  - Departing:   continue past the target along runOutDirection until far
+     *                 enough away to loop back (or terminate).
+     */
+    struct AirMovementStateAttackRun
+    {
+        enum class Phase
+        {
+            Approaching,
+            Engaging,
+            Departing,
+        };
+
+        /** Target unit or ground location. Mirrors AttackOrder::target. */
+        AttackTarget target;
+
+        /** The most recently observed XZ position of the target (at cruise altitude on Y). */
+        SimVector lastKnownTargetPos{0_ss, 0_ss, 0_ss};
+
+        /** Captured at the start of Engaging. Unit XZ direction; defines the flyby line. */
+        SimVector runOutDirection{0_ss, 0_ss, 1_ss};
+
+        /** How far past the target to fly before looping or terminating. */
+        SimScalar runOutDistance{0_ss};
+
+        Phase phase{Phase::Approaching};
+
+        /** Current air velocity in game units/tick. */
+        SimVector currentVelocity{0_ss, 0_ss, 0_ss};
+
+        AirMovementStateAttackRun() : target(SimVector(0_ss, 0_ss, 0_ss)) {}
+        explicit AirMovementStateAttackRun(const AttackTarget& t) : target(t) {}
+    };
+
+    using AirMovementState = std::variant<AirMovementStateTakingOff, AirMovementStateFlying, AirMovementStateLanding, AirMovementStateAttackRun>;
 
     struct UnitPhysicsInfoAir
     {
@@ -261,6 +302,19 @@ namespace rwe
         std::array<std::optional<UnitWeapon>, 3> weapons;
 
         UnitFireOrders fireOrders{UnitFireOrders::FireAtWill};
+        UnitMovementOrders moveOrders{UnitMovementOrders::Maneuver};
+
+        bool cobBusy{false};
+        bool buggerOffActive{false};
+        bool armored{false};
+
+        /**
+         * Number of enemy units this unit has killed.
+         * Used by the COB VeteranLevel query to compute veterancy tier.
+         * Self-damage / friendly-fire kills are counted (matches TA behavior).
+         * Environmental deaths (e.g., feature damage) do not credit anyone.
+         */
+        unsigned int kills{0};
 
         unsigned int buildTimeCompleted{0};
 

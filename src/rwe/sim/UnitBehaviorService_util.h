@@ -40,6 +40,65 @@ namespace rwe
 
     SimVector computeNewAirUnitVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateFlying& physics);
 
+    /**
+     * Velocity update for aircraft executing an attack run. Unlike
+     * computeNewAirUnitVelocity, this does NOT decelerate near the target —
+     * the aircraft is meant to fly through the target, not stop on it.
+     */
+    SimVector computeNewAttackRunVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateAttackRun& physics);
+
+    /**
+     * Computes the target XZ position the aircraft should be steering toward
+     * during the given attack run phase.
+     */
+    SimVector computeAttackRunTargetPoint(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateAttackRun& physics);
+
+    /** Default run-out distance (units to fly past the target before looping). */
+    SimScalar defaultAttackRunOutDistance(const UnitDefinition& unitDefinition, SimScalar weaponMaxRange);
+
+    /**
+     * Predicts where a bomb dropped right now would land, given the bomber's
+     * current world position and per-tick velocity. Uses the same gravity
+     * model as ProjectilePhysicsTypeBallistic / Bomb (-112 / (30*30) per tick).
+     *
+     * Returns the world XZ point of impact at altitude `groundY`, computed
+     * deterministically with rweSqrt. Falls back to the bomber's XZ position
+     * if the unit is at or below the ground (degenerate case).
+     */
+    SimVector predictBombImpactPoint(const SimVector& bomberPosition, const SimVector& bomberVelocity, SimScalar groundY);
+
+    /**
+     * Bombsight release predicate. Returns true if a bomb dropped now would
+     * land within `releaseRadius` (XZ) of the target. The predicate is
+     * deterministic and uses fixed-point math throughout.
+     *
+     * The release radius should typically be the weapon's damage radius plus
+     * a tolerance — too small and bombers never find a release window; too
+     * large and bombs miss visibly. The caller is responsible for picking it.
+     */
+    bool bombsightInReleaseWindow(
+        const SimVector& bomberPosition,
+        const SimVector& bomberVelocity,
+        const SimVector& targetPosition,
+        SimScalar releaseRadius);
+
+    /**
+     * Pure state-machine step for an aircraft attack run. Given the unit's
+     * current XZ position, the resolved target XZ position, the weapon's max
+     * range, and the current run state, this advances the run phase and
+     * returns whether weapons should be hot this tick.
+     *
+     * The function does not mutate UnitState; the caller is responsible for
+     * applying weapon target updates and writing the new run state back.
+     *
+     * Returns true if weapons should fire this tick (Engaging phase).
+     */
+    bool stepAttackRunPhase(
+        const SimVector& unitPosition,
+        const SimVector& targetPosition,
+        SimScalar weaponMaxRange,
+        AirMovementStateAttackRun& runState);
+
     SimVector findClosestPointToFootprintXZ(const MapTerrain& terrain, const DiscreteRect& rect, const SimVector& p);
 
     SimVector findClosestPointToFootprintXZForUnit(const MapTerrain& terrain, const DiscreteRect& targetFootprintRect, const SimVector& p, int unitFootprintX, int unitFootprintZ);

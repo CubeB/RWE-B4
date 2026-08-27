@@ -45,7 +45,11 @@ namespace rwe
             bool on;
         };
 
-        using Command = std::variant<IssueOrder, ModifyBuildQueue, Stop, SetFireOrders, SetOnOff>;
+        struct SelfDestruct
+        {
+        };
+
+        using Command = std::variant<IssueOrder, ModifyBuildQueue, Stop, SetFireOrders, SetOnOff, SelfDestruct>;
 
         UnitId unit;
         Command command;
@@ -63,5 +67,10 @@ namespace rwe
     {
     };
 
-    using PlayerCommand = std::variant<PlayerUnitCommand, PlayerPauseGameCommand, PlayerUnpauseGameCommand>;
+    struct PlayerSetGameSpeedCommand
+    {
+        int speedIndex;
+    };
+
+    using PlayerCommand = std::variant<PlayerUnitCommand, PlayerPauseGameCommand, PlayerUnpauseGameCommand, PlayerSetGameSpeedCommand>;
 }

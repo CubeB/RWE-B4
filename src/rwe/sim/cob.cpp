@@ -221,10 +221,12 @@ namespace rwe
                 return static_cast<int>(unit.activated);
             },
             [&](const CobEnvironment::QueryStatus::StandingFireOrders&) {
-                return 0; // TODO
+                const auto& unit = sim.getUnitState(unitId);
+                return static_cast<int>(unit.fireOrders);
             },
             [&](const CobEnvironment::QueryStatus::StandingMoveOrders&) {
-                return 0; // TODO
+                const auto& unit = sim.getUnitState(unitId);
+                return static_cast<int>(unit.moveOrders);
             },
             [&](const CobEnvironment::QueryStatus::Health&) {
                 const auto& unit = sim.getUnitState(unitId);
@@ -236,7 +238,8 @@ namespace rwe
                 return static_cast<int>(unit.inBuildStance);
             },
             [&](const CobEnvironment::QueryStatus::Busy&) {
-                return 0;
+                const auto& unit = sim.getUnitState(unitId);
+                return static_cast<int>(unit.cobBusy);
             },
             [&](const CobEnvironment::QueryStatus::PieceXZ& q) {
                 auto pieceId = q.piece;
@@ -313,19 +316,53 @@ namespace rwe
                 return static_cast<int>(unit.yardOpen);
             },
             [&](const CobEnvironment::QueryStatus::BuggerOff&) {
-                return 0; // TODO
+                const auto& unit = sim.getUnitState(unitId);
+                return static_cast<int>(unit.buggerOffActive);
             },
             [&](const CobEnvironment::QueryStatus::Armored&) {
-                return 0; // TODO
+                const auto& unit = sim.getUnitState(unitId);
+                return static_cast<int>(unit.armored);
             },
             [&](const CobEnvironment::QueryStatus::VeteranLevel&) {
-                return 0; // TODO
+                // TA's VeteranLevel returns an integer veterancy tier rather
+                // than a raw kill count.  We use a simple linear thresholding
+                // scheme: every 4 kills bumps the unit one tier, capped at
+                // tier 3 (the conventional cap used by TA-derived RTS engines
+                // such as Spring's experience tiering).  All arithmetic is
+                // integer-only so behavior is deterministic and platform-
+                // independent.  Tune VeteranKillsPerTier / VeteranMaxTier
+                // here if a per-unit veterancy table is later added.
+                const auto& unit = sim.getUnitState(unitId);
+                constexpr unsigned int VeteranKillsPerTier = 4;
+                constexpr unsigned int VeteranMaxTier = 3;
+                unsigned int tier = unit.kills / VeteranKillsPerTier;
+                if (tier > VeteranMaxTier)
+                {
+                    tier = VeteranMaxTier;
+                }
+                return static_cast<int>(tier);
             },
             [&](const CobEnvironment::QueryStatus::MinId&) {
-                return 0; // TODO
+                std::optional<unsigned int> minId;
+                for (const auto& [id, _] : sim.units)
+                {
+                    if (!minId || id.value < *minId)
+                    {
+                        minId = id.value;
+                    }
+                }
+                return static_cast<int>(minId.value_or(0));
             },
             [&](const CobEnvironment::QueryStatus::MaxId&) {
-                return 0; // TODO
+                std::optional<unsigned int> maxId;
+                for (const auto& [id, _] : sim.units)
+                {
+                    if (!maxId || id.value > *maxId)
+                    {
+                        maxId = id.value;
+                    }
+                }
+                return static_cast<int>(maxId.value_or(0));
             },
             [&](const CobEnvironment::QueryStatus::MyId&) {
                 return static_cast<int>(unitId.value);
@@ -378,17 +415,48 @@ namespace rwe
                     sim.deactivateUnit(unitId);
                 }
             },
-            [&](const CobEnvironment::SetQueryStatus::StandingMoveOrders&) {
-                // TODO
+            [&](const CobEnvironment::SetQueryStatus::StandingMoveOrders& q) {
+                auto& unit = sim.getUnitState(unitId);
+                switch (q.value)
+                {
+                    case 0:
+                        unit.moveOrders = UnitMovementOrders::HoldPosition;
+                        break;
+                    case 1:
+                        unit.moveOrders = UnitMovementOrders::Maneuver;
+                        break;
+                    case 2:
+                        unit.moveOrders = UnitMovementOrders::Roam;
+                        break;
+                    default:
+                        // ignore out-of-range
+                        break;
+                }
             },
-            [&](const CobEnvironment::SetQueryStatus::StandingFireOrders&) {
-                // TODO
+            [&](const CobEnvironment::SetQueryStatus::StandingFireOrders& q) {
+                auto& unit = sim.getUnitState(unitId);
+                switch (q.value)
+                {
+                    case 0:
+                        unit.fireOrders = UnitFireOrders::HoldFire;
+                        break;
+                    case 1:
+                        unit.fireOrders = UnitFireOrders::ReturnFire;
+                        break;
+                    case 2:
+                        unit.fireOrders = UnitFireOrders::FireAtWill;
+                        break;
+                    default:
+                        // ignore out-of-range
+                        break;
+                }
             },
             [&](const CobEnvironment::SetQueryStatus::InBuildStance& q) {
                 sim.setBuildStance(unitId, q.value);
             },
-            [&](const CobEnvironment::SetQueryStatus::Busy&) {
-                // TODO
+            [&](const CobEnvironment::SetQueryStatus::Busy& q) {
+                auto& unit = sim.getUnitState(unitId);
+                unit.cobBusy = q.value;
             },
             [&](const CobEnvironment::SetQueryStatus::YardOpen& q) {
                 sim.setYardOpen(unitId, q.value);
@@ -396,8 +464,9 @@ namespace rwe
             [&](const CobEnvironment::SetQueryStatus::BuggerOff& q) {
                 sim.setBuggerOff(unitId, q.value);
             },
-            [&](const CobEnvironment::SetQueryStatus::Armored&) {
-                // TODO
+            [&](const CobEnvironment::SetQueryStatus::Armored& q) {
+                auto& unit = sim.getUnitState(unitId);
+                unit.armored = q.value;
             });
     }
 

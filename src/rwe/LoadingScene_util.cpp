@@ -167,6 +167,14 @@ namespace rwe
         {
             weaponDefinition.physicsType = ProjectilePhysicsTypeLineOfSight();
         }
+        else if (tdf.dropped)
+        {
+            // Bombs in TA set both `ballistic=1` and `dropped=1`. The `dropped`
+            // flag identifies bombsight semantics (release-when-overhead,
+            // inherit aircraft velocity), and supersedes the ballistic
+            // aim-then-launch flow.
+            weaponDefinition.physicsType = ProjectilePhysicsTypeBomb();
+        }
         else if (tdf.ballistic)
         {
             weaponDefinition.physicsType = ProjectilePhysicsTypeBallistic();
@@ -320,6 +328,14 @@ namespace rwe
         u.showPlayerName = fbi.showPlayerName;
 
         u.soundCategory = fbi.soundCategory;
+
+        // AI classification metadata. Stored on the UnitDefinition so
+        // future Phase 2 work (UnitClassifier, fog-of-war) can read them
+        // without re-parsing FBIs.
+        u.tedClass = fbi.tedClass;
+        u.category = fbi.category;
+        u.sightDistance = fbi.sightDistance;
+        u.radarDistance = fbi.radarDistance;
 
         u.yardMapContainsGeo = false;
 
