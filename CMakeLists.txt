@@ -588,7 +588,7 @@ target_include_directories(librwe PUBLIC "src")
 configure_file("src/rwe/config.h.in" "config/rwe/config.h" @ONLY)
 target_include_directories(librwe PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/config")
 
-target_include_directories(librwe PUBLIC "libs/asio/asio/include")
+target_include_directories(librwe PUBLIC "libs/asio/include")
 add_definitions(-DASIO_STANDALONE)
 if(WIN32)
     # winsock needed for asio on windows
