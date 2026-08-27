@@ -299,6 +299,7 @@ namespace rwe
         u.weapon3 = fbi.weapon3;
 
         u.explodeAs = fbi.explodeAs;
+        u.selfDestructAs = fbi.selfDestructAs;
 
         u.builder = fbi.builder;
         u.buildTime = fbi.buildTime;

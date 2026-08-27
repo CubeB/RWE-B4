@@ -332,6 +332,9 @@ namespace rwe
         /** Capture work applied to this unit so far, see GameSimulation::captureUnit. */
         unsigned int captureProgress{0};
 
+        /** When set, the game time at which this unit will self-destruct. */
+        std::optional<GameTime> selfDestructTime;
+
         bool activated{false};
         bool isSufficientlyPowered{false};
 

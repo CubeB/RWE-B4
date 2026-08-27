@@ -403,6 +403,65 @@ namespace rwe
         return true;
     }
 
+    void GameSimulation::toggleSelfDestruct(UnitId unitId)
+    {
+        auto unitRef = tryGetUnitState(unitId);
+        if (!unitRef || unitRef->get().isDead())
+        {
+            return;
+        }
+        auto& unit = unitRef->get();
+
+        if (unit.selfDestructTime)
+        {
+            unit.selfDestructTime = std::nullopt;
+        }
+        else
+        {
+            unit.selfDestructTime = gameTime + GameTime(SelfDestructCountdownTicks);
+        }
+    }
+
+    void GameSimulation::selfDestructUnit(UnitId unitId)
+    {
+        auto& unit = getUnitState(unitId);
+        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+
+        // Self-destruction leaves nothing to reclaim.
+        unit.markAsDeadNoCorpse();
+        unit.selfDestructTime = std::nullopt;
+
+        events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::SelfDestructed});
+
+        const auto& explosion = unitDefinition.selfDestructAs.empty() ? unitDefinition.explodeAs : unitDefinition.selfDestructAs;
+        if (!explosion.empty())
+        {
+            auto impactType = unit.position.y < terrain.getSeaLevel() ? ImpactType::Water : ImpactType::Normal;
+            auto projectile = createProjectileFromWeapon(unit.owner, explosion, unit.position, SimVector(0_ss, -1_ss, 0_ss), 0_ss, std::nullopt, std::nullopt);
+            doProjectileImpact(projectile, impactType);
+        }
+    }
+
+    void GameSimulation::updateSelfDestructs()
+    {
+        std::vector<UnitId> due;
+        for (const auto& [unitId, unit] : units)
+        {
+            if (unit.isAlive() && unit.selfDestructTime && gameTime >= *unit.selfDestructTime)
+            {
+                due.push_back(unitId);
+            }
+        }
+        for (auto unitId : due)
+        {
+            // A unit may already have been killed by an earlier explosion in this loop.
+            if (getUnitState(unitId).isAlive())
+            {
+                selfDestructUnit(unitId);
+            }
+        }
+    }
+
     PlayerId GameSimulation::addPlayer(const GamePlayerInfo& info)
     {
         PlayerId id(players.size());
@@ -1991,6 +2050,8 @@ namespace rwe
 
             runUnitCobScripts(*this, unitId);
         }
+
+        updateSelfDestructs();
 
         updateProjectiles();
 

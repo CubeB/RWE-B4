@@ -72,6 +72,7 @@ namespace rwe
         tdf.readOrDefault("Weapon3", u.weapon3);
 
         tdf.readOrDefault("ExplodeAs", u.explodeAs);
+        tdf.readOrDefault("SelfDestructAs", u.selfDestructAs);
 
         tdf.readOrDefault("Builder", u.builder);
 

@@ -96,6 +96,7 @@ namespace rwe
         std::string weapon3;
 
         std::string explodeAs;
+        std::string selfDestructAs;
 
         bool builder;
         unsigned int buildTime;

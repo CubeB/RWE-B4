@@ -1,5 +1,6 @@
 #pragma once
 
+#include <rwe/sim/SimTicksPerSecond.h>
 #include <memory>
 #include <random>
 #include <rwe/cob/CobUnitId.h>
@@ -163,6 +164,7 @@ namespace rwe
             NormalExploded,
             WaterExploded,
             Deleted,
+            SelfDestructed,
         };
         DeathType deathType;
     };
@@ -381,6 +383,18 @@ namespace rwe
          */
         bool captureUnit(UnitId targetId, PlayerId captor, unsigned int workAmount);
 
+        /** Length of the self-destruct countdown, as in TA. */
+        static constexpr unsigned int SelfDestructCountdownTicks = 5 * SimTicksPerSecond;
+
+        /** Starts a unit's self-destruct countdown, or cancels it if one is already running. */
+        void toggleSelfDestruct(UnitId unitId);
+
+        /**
+         * Destroys a unit immediately with its SelfDestructAs explosion
+         * (falling back to ExplodeAs). Leaves no wreck.
+         */
+        void selfDestructUnit(UnitId unitId);
+
         PlayerId addPlayer(const GamePlayerInfo& info);
 
         std::optional<UnitId> trySpawnUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<SimAngle> rotation);
@@ -551,6 +565,8 @@ namespace rwe
         void trySpawnFeature(const std::string& featureType, const SimVector& position, SimAngle rotation);
 
         void deleteDeadUnits();
+
+        void updateSelfDestructs();
 
         void deleteDeadProjectiles();
 

@@ -67,6 +67,7 @@ namespace rwe
             {"buildTimeCompleted", dumpJson(u.buildTimeCompleted)},
             {"reclaimProgress", dumpJson(u.reclaimProgress)},
             {"captureProgress", dumpJson(u.captureProgress)},
+            {"selfDestructTime", dumpJson(u.selfDestructTime)},
             {"activated", dumpJson(u.activated)},
             {"isSufficientlyPowered", dumpJson(u.isSufficientlyPowered)},
             {"energyProductionBuffer", dumpJson(u.energyProductionBuffer)},

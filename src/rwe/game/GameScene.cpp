@@ -1041,6 +1041,25 @@ namespace rwe
             }
         }
 
+        // Self-destruct countdowns: seconds remaining, drawn above the unit.
+        for (const auto& [_, unit] : simulation.units)
+        {
+            if (!unit.selfDestructTime || !unit.isAlive())
+            {
+                continue;
+            }
+
+            auto ticksLeft = *unit.selfDestructTime > simulation.gameTime
+                ? (*unit.selfDestructTime - simulation.gameTime).value
+                : 0u;
+            auto secondsLeft = (ticksLeft + SimTicksPerSecond - 1) / SimTicksPerSecond;
+
+            auto uiPos = worldUiRenderService.getInverseViewProjectionMatrix()
+                * viewProjectionMatrix
+                * simVectorToFloat(unit.position);
+            worldUiRenderService.drawTextCentered(uiPos.x, uiPos.y - 24.0f, std::to_string(secondsLeft), *guiFont);
+        }
+
         // Draw build box outline when a unit is selected to be built
         if (hoverBuildInfo)
         {
@@ -3405,20 +3424,30 @@ namespace rwe
                 [&](const UnitDiedEvent& e) {
                     const auto& unitDefinition = simulation.unitDefinitions.at(e.unitType);
 
-                    if (!unitDefinition.explodeAs.empty())
+                    const auto& selfDestructExplosion = unitDefinition.selfDestructAs.empty() ? unitDefinition.explodeAs : unitDefinition.selfDestructAs;
+                    switch (e.deathType)
                     {
-                        switch (e.deathType)
-                        {
-                            case UnitDiedEvent::DeathType::NormalExploded:
+                        case UnitDiedEvent::DeathType::NormalExploded:
+                            if (!unitDefinition.explodeAs.empty())
+                            {
                                 doProjectileImpact(e.position, unitDefinition.explodeAs, ImpactType::Normal);
-                                break;
-                            case UnitDiedEvent::DeathType::WaterExploded:
+                            }
+                            break;
+                        case UnitDiedEvent::DeathType::WaterExploded:
+                            if (!unitDefinition.explodeAs.empty())
+                            {
                                 doProjectileImpact(e.position, unitDefinition.explodeAs, ImpactType::Water);
-                                break;
-                            case UnitDiedEvent::DeathType::Deleted:
-                                // do nothing
-                                break;
-                        }
+                            }
+                            break;
+                        case UnitDiedEvent::DeathType::SelfDestructed:
+                            if (!selfDestructExplosion.empty())
+                            {
+                                doProjectileImpact(e.position, selfDestructExplosion, ImpactType::Normal);
+                            }
+                            break;
+                        case UnitDiedEvent::DeathType::Deleted:
+                            // do nothing
+                            break;
                     }
 
                     deselectUnit(e.unitId);
@@ -4309,11 +4338,8 @@ namespace rwe
                 }
             },
             [&](const PlayerUnitCommand::SelfDestruct&) {
-                auto unit = tryGetUnit(unitCommand.unit);
-                if (unit && unit->get().isAlive())
-                {
-                    simulation.killUnit(unitCommand.unit);
-                }
+                // Starts the countdown, or cancels it if pressed again.
+                simulation.toggleSelfDestruct(unitCommand.unit);
             });
     }
 
