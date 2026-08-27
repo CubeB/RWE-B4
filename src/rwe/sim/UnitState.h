@@ -81,7 +81,6 @@ namespace rwe
     {
         std::variant<UnitId, FeatureId> target;
         std::optional<SimVector> nanoParticleOrigin;
-        std::optional<GameTime> startTime;
     };
 
     using UnitBehaviorState = std::variant<

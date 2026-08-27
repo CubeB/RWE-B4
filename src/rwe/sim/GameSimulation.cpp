@@ -238,6 +238,87 @@ namespace rwe
         return addFeature(std::move(featureInstance));
     }
 
+    unsigned int computeFeatureReclaimWork(const FeatureDefinition& definition)
+    {
+        return std::max(1u, definition.metal + definition.energy);
+    }
+
+    void GameSimulation::deleteFeature(FeatureId id)
+    {
+        auto featureRef = tryGetFeature(id);
+        if (!featureRef)
+        {
+            return;
+        }
+
+        const auto& feature = featureRef->get();
+        const auto& featureDefinition = getFeatureDefinition(feature.featureName);
+        auto footprintRegion = computeFootprintRegion(feature.position, featureDefinition.footprintX, featureDefinition.footprintZ);
+
+        occupiedGrid.forEach(occupiedGrid.clipRegion(footprintRegion), [&](auto& cell) {
+            if (cell.featureId == id)
+            {
+                cell.featureId = std::nullopt;
+            }
+        });
+
+        // Metal and geothermal grids are only ever set by permanent
+        // (indestructible, non-blocking) features, which are never deleted,
+        // so there is nothing to undo there.
+
+        features.remove(id);
+    }
+
+    bool GameSimulation::reclaimFeature(FeatureId featureId, PlayerId reclaimer, unsigned int workAmount)
+    {
+        auto featureRef = tryGetFeature(featureId);
+        if (!featureRef)
+        {
+            // Already gone (someone else finished it, or it was destroyed).
+            return true;
+        }
+
+        auto& feature = featureRef->get();
+        const auto& featureDefinition = getFeatureDefinition(feature.featureName);
+        if (!featureDefinition.reclaimable || workAmount == 0)
+        {
+            return false;
+        }
+
+        auto totalWork = computeFeatureReclaimWork(featureDefinition);
+        auto previousProgress = feature.reclaimProgress;
+        auto newProgress = std::min(totalWork, previousProgress + workAmount);
+        feature.reclaimProgress = newProgress;
+
+        // Credit the slice of the feature's value that this step of work earned.
+        // Computed as a difference of cumulative amounts so that the total handed
+        // out over the whole reclaim is exactly the feature's value.
+        auto cumulative = [&](unsigned int amount, unsigned int progress) {
+            return static_cast<float>(amount) * (static_cast<float>(progress) / static_cast<float>(totalWork));
+        };
+        Metal metalDelta(cumulative(featureDefinition.metal, newProgress) - cumulative(featureDefinition.metal, previousProgress));
+        Energy energyDelta(cumulative(featureDefinition.energy, newProgress) - cumulative(featureDefinition.energy, previousProgress));
+        getPlayer(reclaimer).addResourceDelta(energyDelta, metalDelta, energyDelta, metalDelta);
+
+        if (newProgress < totalWork)
+        {
+            return false;
+        }
+
+        auto position = feature.position;
+        auto rotation = feature.rotation;
+        auto reclamate = featureDefinition.featureReclamate;
+
+        deleteFeature(featureId);
+
+        if (reclamate)
+        {
+            addFeature(MapFeature{*reclamate, position, rotation});
+        }
+
+        return true;
+    }
+
     PlayerId GameSimulation::addPlayer(const GamePlayerInfo& info)
     {
         PlayerId id(players.size());

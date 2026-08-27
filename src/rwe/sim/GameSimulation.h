@@ -49,6 +49,14 @@ namespace rwe
         Computer
     };
 
+    /**
+     * Total worker-time needed to fully reclaim a feature.
+     * Mirrors build costs: a builder contributes workerTimePerTick per tick,
+     * so a commander (worker time 180/s) clears a 400-metal rock in ~2 seconds.
+     * Never zero, so valueless features can still be cleared.
+     */
+    unsigned int computeFeatureReclaimWork(const FeatureDefinition& definition);
+
     struct GamePlayerInfo
     {
         std::optional<std::string> name;
@@ -334,6 +342,18 @@ namespace rwe
         std::optional<FeatureId> addFeature(MapFeature&& newFeature);
 
         std::optional<FeatureId> addFeature(FeatureDefinitionId featureType, int heightmapX, int heightmapZ);
+
+        /** Removes a feature and frees the grid cells it occupied. No-op if the id is stale. */
+        void deleteFeature(FeatureId id);
+
+        /**
+         * Applies workAmount of reclaim work to a feature on behalf of a player,
+         * crediting that player metal and energy in proportion to the work done.
+         * Returns true when the feature is fully reclaimed (it is then removed
+         * and any featureReclamate spawned in its place), or when it no longer
+         * exists. Returns false if the feature is not reclaimable or work remains.
+         */
+        bool reclaimFeature(FeatureId featureId, PlayerId reclaimer, unsigned int workAmount);
 
         PlayerId addPlayer(const GamePlayerInfo& info);
 

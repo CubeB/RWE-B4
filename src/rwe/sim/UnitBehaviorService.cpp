@@ -1252,6 +1252,13 @@ namespace rwe
 
     bool UnitBehaviorService::handleReclaimOrder(UnitInfo unitInfo, const ReclaimOrder& reclaimOrder)
     {
+        if (std::holds_alternative<UnitId>(reclaimOrder.target))
+        {
+            // TODO: reclaiming units is not implemented yet.
+            // Drop the order rather than walking over and getting stuck.
+            return true;
+        }
+
         return reclaimTarget(unitInfo, reclaimOrder.target);
     }
 
@@ -1784,17 +1791,15 @@ namespace rwe
             target,
             [&](const UnitId& targetUnitId) {
                 auto targetUnitRef = sim->tryGetUnitState(targetUnitId);
-                if (targetUnitRef && targetUnitRef->get().isAlive())
-                {
-                    return true;
-                }
+                return targetUnitRef && targetUnitRef->get().isAlive();
             },
             [&](const FeatureId& targetFeatureId) {
                 auto targetFeatureRef = sim->tryGetFeature(targetFeatureId);
-                if (targetFeatureRef)
+                if (!targetFeatureRef)
                 {
-                    return true;
+                    return false;
                 }
+                return sim->getFeatureDefinition(targetFeatureRef->get().featureName).reclaimable;
             });
 
         if (!isValidTarget)
@@ -1820,30 +1825,21 @@ namespace rwe
 
                 reclaimingState.nanoParticleOrigin = getNanoPoint(unitInfo.id);
 
-                if (!reclaimingState.startTime)
-                {
-                    reclaimingState.startTime = sim->gameTime;
-                }
-
                 return match(
                     target,
-                    [&](const UnitId& targetUnitId) {
-                        // TODO: make progress on reclaiming unit
-                        return false;
+                    [&](const UnitId&) {
+                        // TODO: reclaiming units is not implemented yet.
+                        changeState(*unitInfo.state, UnitBehaviorStateIdle());
+                        return true;
                     },
                     [&](const FeatureId& targetFeatureId) {
-                        // FIXME: reclaim time should vary depending on how valuable the feature is
-                        if (sim->gameTime - *reclaimingState.startTime >= GameTime(1 * SimTicksPerSecond))
+                        auto finished = sim->reclaimFeature(targetFeatureId, unitInfo.state->owner, unitInfo.definition->workerTimePerTick);
+                        if (finished)
                         {
-                            // TODO: destroy feature and add resources when reclaiming is done
-                            // finishReclaimingFeature(targetFeatureId);
                             changeState(*unitInfo.state, UnitBehaviorStateIdle());
-                            return true;
                         }
-                        return false;
+                        return finished;
                     });
-
-                return false;
             },
             [&](const auto&) {
                 auto nanoFromPosition = getNanoPoint(unitInfo.id);
