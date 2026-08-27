@@ -24,8 +24,10 @@ Goal: a fork with green CI, a reproducible local build, and a tagged pre-release
 
 - [x] Local toolchain on `D:\` (MSYS2/MinGW64 at `D:\msys64`, Node 24 at `D:\tools\node`).
 - [x] Integration branch `revival` = upstream `master` + `KevinHake/master` (+2: tagged release job, Linux AppImage) + `tgunnoe/feats/next` (+11) + `OskarPedersen/energy-per-shot` (PR #176) + upstream `reclaim` (+5).
-- [ ] Build `revival` locally (MinGW64 Debug), run `rwe_test`, smoke-test a skirmish with real TA data.
-- [ ] Fix anything the reclaim merge broke (written pre‑Boost‑removal; merged clean but unverified).
+- [x] Build `revival` locally (MinGW64 Debug) and run `rwe_test` — 133 test cases / 1,487 assertions pass (2026‑08‑27).
+- [x] Reclaim merge verified: compiles and tests pass alongside `feats/next`.
+- [x] Fix Windows checkout: `libs/asio/asio/include` is a git symlink that materialises as a text file without `core.symlinks`; CMake now uses the real `libs/asio/include`.
+- [ ] Smoke-test a skirmish with real TA data (copy `.hpi/.ufo/.ccx/.gp3` into `%AppData%\RWE\Data`, run `build/rwe.exe`).
 - [ ] Create a GitHub fork, push `revival`, confirm the CI matrix is green.
 - [ ] Reach out: comment on upstream #178 / open a PR for `feats/next` so Kevin Hake and Taylor Gunnoe know the work is being consolidated. Ask whether upstream wants to accept it or whether the fork becomes the new home.
 - [ ] Tag `v0.2.0-pre1` and let Kevin's release job produce Windows zip/installer + Linux AppImage.
