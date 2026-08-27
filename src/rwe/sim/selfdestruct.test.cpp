@@ -125,4 +125,25 @@ namespace rwe
             REQUIRE_FALSE(sim.getUnitState(solarId).selfDestructTime.has_value());
         }
     }
+
+    TEST_CASE("a unit under construction that is destroyed still announces its death", "[selfdestruct]")
+    {
+        // The scene relies on UnitDiedEvent to drop dead units from its
+        // selection and hover state; a quiet death must not skip it.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto solarId = addSolar(sim, player, script);
+        sim.unitDefinitions["solar"].buildTime = 100u;
+        sim.getUnitState(solarId).buildTimeCompleted = 10u;
+        sim.getUnitState(solarId).hitPoints = 5;
+
+        sim.applyDamage(solarId, 5u);
+
+        REQUIRE(sim.getUnitState(solarId).isDead());
+        REQUIRE(lastDeathType(sim) == UnitDiedEvent::DeathType::Deleted);
+        sim.tick();
+        REQUIRE_FALSE(sim.tryGetUnitState(solarId).has_value());
+        REQUIRE(sim.features.begin() == sim.features.end());
+    }
 }

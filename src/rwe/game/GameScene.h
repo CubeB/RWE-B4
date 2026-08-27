@@ -293,6 +293,9 @@ namespace rwe
 
         bool healthBarsVisible{false};
 
+        /** Set once the win/draw condition has been logged, so it is logged only once. */
+        bool gameOverAnnounced{false};
+
         BehaviorSubject<CursorMode> cursorMode{NormalCursorMode()};
 
         std::deque<std::optional<GameSceneTimeAction>> actions;

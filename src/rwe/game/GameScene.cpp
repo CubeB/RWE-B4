@@ -1057,7 +1057,14 @@ namespace rwe
             auto uiPos = worldUiRenderService.getInverseViewProjectionMatrix()
                 * viewProjectionMatrix
                 * simVectorToFloat(unit.position);
-            worldUiRenderService.drawTextCentered(uiPos.x, uiPos.y - 24.0f, std::to_string(secondsLeft), *guiFont);
+            // A red-framed badge so the countdown reads at a glance.
+            const float badgeWidth = 22.0f;
+            const float badgeHeight = 16.0f;
+            auto badgeX = uiPos.x - (badgeWidth / 2.0f);
+            auto badgeY = uiPos.y - 34.0f;
+            worldUiRenderService.fillColor(badgeX, badgeY, badgeWidth, badgeHeight, Color(0, 0, 0, 200));
+            worldUiRenderService.drawBoxOutline(badgeX, badgeY, badgeWidth, badgeHeight, Color(255, 40, 40), 2.0f);
+            worldUiRenderService.drawTextCentered(uiPos.x, badgeY + (badgeHeight / 2.0f), std::to_string(secondsLeft), *guiFont);
         }
 
         // Draw build box outline when a unit is selected to be built
@@ -1472,14 +1479,17 @@ namespace rwe
             // Ctrl+D: self-destruct selected units (TA behaviour).
             // Routes through the deterministic command queue so the
             // explosion happens at the same game tick on all peers.
+            unsigned int toggled = 0;
             for (const auto& unitId : selectedUnits)
             {
                 const auto& unit = tryGetUnit(unitId);
                 if (unit && unit->get().isAlive() && unit->get().isOwnedBy(localPlayerId))
                 {
                     localPlayerSelfDestructUnit(unitId);
+                    ++toggled;
                 }
             }
+            LOG_INFO << "Self-destruct toggled for " << toggled << " selected unit(s)";
         }
         else if (keysym.key == SDLK_Z && isCtrlDown() && !isShiftDown())
         {
@@ -2907,10 +2917,20 @@ namespace rwe
         auto winStatus = simulation.computeWinStatus();
         match(
             winStatus,
-            [&](const WinStatusWon&) {
+            [&](const WinStatusWon& w) {
+                if (!gameOverAnnounced)
+                {
+                    gameOverAnnounced = true;
+                    LOG_INFO << "Game over: player " << w.winner.value << " won at tick " << simulation.gameTime.value << ", exiting in 5 seconds";
+                }
                 delay(SceneTime(5 * 30), [sm = sceneContext.sceneManager]() { sm->requestExit(); });
             },
             [&](const WinStatusDraw&) {
+                if (!gameOverAnnounced)
+                {
+                    gameOverAnnounced = true;
+                    LOG_INFO << "Game over: draw at tick " << simulation.gameTime.value << ", exiting in 5 seconds";
+                }
                 delay(SceneTime(5 * 30), [sm = sceneContext.sceneManager]() { sm->requestExit(); });
             },
             [&](const WinStatusUndecided&) {

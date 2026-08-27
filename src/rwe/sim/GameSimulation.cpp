@@ -334,7 +334,10 @@ namespace rwe
         auto& unit = unitRef->get();
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
 
-        auto totalWork = std::max(1u, unitDefinition.buildTime);
+        // Undoing a unit takes as much work as went into it, so a barely
+        // started nanoframe is cleared in moments while a finished unit takes
+        // its full build time.
+        auto totalWork = std::max(1u, std::min(unitDefinition.buildTime, unit.buildTimeCompleted));
         auto previousProgress = unit.reclaimProgress;
         auto newProgress = std::min(totalWork, previousProgress + workAmount);
         unit.reclaimProgress = newProgress;
@@ -1180,6 +1183,9 @@ namespace rwe
     {
         auto& unit = getUnitState(unitId);
         unit.markAsDeadNoCorpse();
+        // No explosion or wreck, but the scene still has to hear about it so
+        // it drops the unit from the selection, hover state and GUI caches.
+        events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::Deleted});
     }
 
     Matrix4x<SimScalar> GameSimulation::getUnitPieceLocalTransform(UnitId unitId, const std::string& pieceName) const
