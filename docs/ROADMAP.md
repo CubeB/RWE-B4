@@ -43,7 +43,8 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 - [x] Reclaim features: the merged branch only ran a timer. Now work = metal + energy at `workerTimePerTick` per tick, resources credited progressively, feature deleted and `featureReclamate` spawned on completion; progress lives on the feature so several builders can share it. Tested at sim level and through `tick()`. Closes the "corpses clog the battlefield" note from the 2022 blog post.
 - [x] Reclaim units (own or enemy, in range): work = `buildTime`, payout = build cost × fraction actually built, progress on `UnitState` (hashed + dumped), dies without wreck or explosion (`DeathType::Deleted`). Tick-driven test covers a builder reclaiming an enemy solar.
 - [ ] Reclaim polish: play the feature's `seqNameReclamate` animation and reclaim sound; show progress in the unit info panel; auto-reclaim (`autoreclaimable`) when a builder is idle with the area-reclaim command.
-- [ ] Repair, Capture, Patrol, Resurrect (in that order — repair reuses nanolathe/build code; patrol reuses waypoints).
+- [x] Repair: `RepairOrder` heals at the build rate (free, as in TA) or finishes an unfinished unit; REPAIR panel button, repair cursor mode, and left-click-on-damaged-friendly for builders. Also fixed `buildExistingUnit` checking `isBeingBuilt` against the builder's definition instead of the target's.
+- [ ] Capture, Patrol, Resurrect (patrol reuses waypoints; capture mirrors repair with a per-tick capture progress and owner swap; resurrect turns a corpse feature back into a unit).
 - [ ] Transports (load/unload, `TransportCapacity`, `TransportSize`) — currently zero references in the sim.
 - [ ] Self-destruct countdown UI + `Ctrl‑D` toggle (command exists, countdown/blink missing).
 - [ ] COB getters that still `return 0; // TODO` in `src/rwe/sim/cob.cpp` (~8), real allied/team check.
