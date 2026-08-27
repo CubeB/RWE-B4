@@ -354,6 +354,10 @@ namespace rwe
             chromeUiRenderService.drawSpriteAbs(rect.x, rect.y, rect.width, rect.height, *(*logos)->sprites.at(playerColorIndex.value));
         }
 
+        // A stalled resource flashes its bar red, as in TA.
+        const bool stallFlashOn = ((sceneContext.timeService->getTicks() / 250) % 2) == 0;
+        const Color stallColor(255, 40, 40);
+
         // draw energy bar
         {
             const auto& rect = localSideData.energyBar.toDiscreteRect();
@@ -361,7 +365,14 @@ namespace rwe
             auto rectWidth = localPlayer.maxEnergy == Energy(0) ? 0 : (rect.width * std::max(Energy(0), localPlayer.energy).value) / localPlayer.maxEnergy.value;
             const auto& colorIndex = localSideData.energyColor;
             const auto& color = sceneContext.palette->at(colorIndex);
-            chromeUiRenderService.fillColor(rect.x, rect.y, rectWidth, rect.height, color);
+            if (localPlayer.energyStalled && stallFlashOn)
+            {
+                chromeUiRenderService.fillColor(rect.x, rect.y, rect.width, rect.height, stallColor);
+            }
+            else
+            {
+                chromeUiRenderService.fillColor(rect.x, rect.y, rectWidth, rect.height, color);
+            }
         }
         {
             const auto& rect = localSideData.energy0;
@@ -395,7 +406,14 @@ namespace rwe
             auto rectWidth = localPlayer.maxMetal == Metal(0) ? 0 : (rect.width * std::max(Metal(0), localPlayer.metal).value) / localPlayer.maxMetal.value;
             const auto& colorIndex = localSideData.metalColor;
             const auto& color = sceneContext.palette->at(colorIndex);
-            chromeUiRenderService.fillColor(rect.x, rect.y, rectWidth, rect.height, color);
+            if (localPlayer.metalStalled && stallFlashOn)
+            {
+                chromeUiRenderService.fillColor(rect.x, rect.y, rect.width, rect.height, stallColor);
+            }
+            else
+            {
+                chromeUiRenderService.fillColor(rect.x, rect.y, rectWidth, rect.height, color);
+            }
         }
         {
             const auto& rect = localSideData.metal0;

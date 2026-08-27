@@ -90,9 +90,18 @@ namespace rwe
         Metal metalProductionBuffer{0};
         Energy energyProductionBuffer{0};
 
+        /**
+         * Tries to apply a resource change. Income is always accepted. Spending
+         * is accepted only if the stockpile plus this second's income, less what
+         * has already been spent this second, covers it; otherwise nothing is
+         * taken, the player is flagged as stalled, and false is returned. Spending
+         * that cannot be met is still recorded as demand for the resource display.
+         */
         bool addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal);
-        bool recordAndCheckDesire(const Energy& energy);
-        bool recordAndCheckDesire(const Metal& metal);
+        void recordDesire(const Energy& energy);
+        void recordDesire(const Metal& metal);
+        bool canAfford(const Energy& energy) const;
+        bool canAfford(const Metal& metal) const;
         void acceptResource(const Energy& energy);
         void acceptResource(const Metal& metal);
     };

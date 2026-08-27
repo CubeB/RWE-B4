@@ -19,36 +19,66 @@ namespace rwe
 {
     bool GamePlayerInfo::addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal)
     {
-        if (recordAndCheckDesire(apparentEnergy) && recordAndCheckDesire(apparentMetal))
+        recordDesire(apparentEnergy);
+        recordDesire(apparentMetal);
+
+        // Spending is checked against what is actually on hand right now, so
+        // when the stockpile is empty work carries on at the rate income
+        // arrives instead of stopping for a whole second and then bursting.
+        auto energyOk = canAfford(actualEnergy);
+        auto metalOk = canAfford(actualMetal);
+        if (!energyOk)
         {
-            acceptResource(actualEnergy);
-            acceptResource(actualMetal);
-            return true;
+            energyStalled = true;
+        }
+        if (!metalOk)
+        {
+            metalStalled = true;
+        }
+        if (!energyOk || !metalOk)
+        {
+            return false;
         }
 
-        return false;
+        acceptResource(actualEnergy);
+        acceptResource(actualMetal);
+        return true;
     }
 
-    bool GamePlayerInfo::recordAndCheckDesire(const rwe::Energy& energy)
+    void GamePlayerInfo::recordDesire(const rwe::Energy& energy)
     {
-        if (energy >= Energy(0))
+        if (energy < Energy(0))
         {
-            return true;
+            desiredEnergyConsumptionBuffer -= energy;
         }
-
-        desiredEnergyConsumptionBuffer -= energy;
-        return !energyStalled;
     }
 
-    bool GamePlayerInfo::recordAndCheckDesire(const rwe::Metal& metal)
+    void GamePlayerInfo::recordDesire(const rwe::Metal& metal)
     {
-        if (metal >= Metal(0))
+        if (metal < Metal(0))
+        {
+            desiredMetalConsumptionBuffer -= metal;
+        }
+    }
+
+    bool GamePlayerInfo::canAfford(const rwe::Energy& delta) const
+    {
+        if (delta >= Energy(0))
         {
             return true;
         }
+        auto available = energy + energyProductionBuffer - actualEnergyConsumptionBuffer;
+        return available + delta >= Energy(0);
+    }
 
-        desiredMetalConsumptionBuffer -= metal;
-        return !metalStalled;
+    bool GamePlayerInfo::canAfford(const rwe::Metal& delta) const
+    {
+        if (delta >= Metal(0))
+        {
+            return true;
+        }
+        auto available = metal + metalProductionBuffer - actualMetalConsumptionBuffer;
+        return available + delta >= Metal(0);
     }
 
     void GamePlayerInfo::acceptResource(const rwe::Energy& energy)
