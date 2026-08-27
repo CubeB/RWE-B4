@@ -14,7 +14,7 @@ _Last updated: 2026-08-27. Status of the codebase is as of the `revival` integra
 1. **Determinism is load-bearing.** Anything that influences the sim lives in `sim/`, uses `SimScalar`/`simulation.rng`, no wall-clock or unordered iteration. Every merged feature must keep `rwe_test` and the `GameHash` sync checks green.
 2. **Data-driven first.** TA data dictates UI screens and unit behaviour; prefer implementing what the FBI/TDF/GUI files already describe over inventing new config.
 3. **Small, mergeable PRs against a green CI.** The March‑2026 CI matrix (gcc‑14, clang‑18, MSVC 2026, MinGW64, Debug+Release) is the gate.
-4. **Coordinate before duplicating.** Kevin Hake, Taylor Gunnoe and Oskar Pedersen have all been active within the last year — check their forks before starting a feature.
+4. **Personal project, for now.** No upstream coordination or outreach is planned. The forks by Kevin Hake, Taylor Gunnoe and Oskar Pedersen are reference material — check them before starting a feature so their work isn't redone.
 
 ---
 
@@ -28,8 +28,7 @@ Goal: a fork with green CI, a reproducible local build, and a tagged pre-release
 - [x] Reclaim merge verified: compiles and tests pass alongside `feats/next`.
 - [x] Fix Windows checkout: `libs/asio/asio/include` is a git symlink that materialises as a text file without `core.symlinks`; CMake now uses the real `libs/asio/include`.
 - [ ] Smoke-test a skirmish with real TA data (copy `.hpi/.ufo/.ccx/.gp3` into `%AppData%\RWE\Data`, run `build/rwe.exe`).
-- [ ] Create a GitHub fork, push `revival`, confirm the CI matrix is green.
-- [ ] Reach out: comment on upstream #178 / open a PR for `feats/next` so Kevin Hake and Taylor Gunnoe know the work is being consolidated. Ask whether upstream wants to accept it or whether the fork becomes the new home.
+- [ ] Push `revival` to a private GitHub repo (or fork) so the CI matrix runs; confirm it is green.
 - [ ] Tag `v0.2.0-pre1` and let Kevin's release job produce Windows zip/installer + Linux AppImage.
 - [ ] Update `README.md` download section (AppVeyor link is dead-end) and `CLAUDE.md` (says C++17; it is C++20).
 - [ ] Decide on `experimental/sdl-gpu` (Kevin's SDL_gpu + HLSL/SPIR‑V PoC): keep as a branch, do not merge yet.
@@ -98,11 +97,11 @@ Follows `docs/ai-architecture-proposal.md` (tgunnoe). All AI code stays in `sim/
 - [ ] Official Linux (AppImage — job exists) and macOS builds; reproducible builds (#35).
 - [ ] Reduce `GameScene.cpp` (3.8k lines) — split input handling, HUD, and command dispatch.
 
-## Community & release cadence
+## Release cadence
 
-- Post a "project resumed" update on the TAUniverse thread (t=45555) and open a Discussions tab on the fork.
-- Pre-release tag on every merged phase milestone; changelog generated from PR titles.
-- Keep `CLAUDE.md` accurate — contributors (human and AI) rely on it.
+- Pre-release tag on every merged phase milestone; changelog generated from commit titles.
+- Keep `CLAUDE.md` accurate — it is the onboarding doc for AI-assisted work on the codebase.
+- Public announcement (TAUniverse thread t=45555, upstream issues) is deliberately deferred until the project is playable.
 
 ## Issue-to-phase map (open upstream issues)
 
