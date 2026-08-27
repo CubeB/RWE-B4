@@ -2373,17 +2373,34 @@ namespace rwe
         // here and push them through the same PlayerCommandService channel
         // human input uses, so MP/replay/desync detection treats AI
         // identically to a remote human.
+        //
+        // The AI buffer is kept topped up to the same threshold as the
+        // local human buffer. A single frame may dispatch several sim
+        // ticks (catch-up after a slow frame, or any game speed above 1x),
+        // and each tick pops one entry from every player's buffer. If the
+        // AI only had one entry queued, the second tick in a frame would
+        // find its buffer empty and be skipped ("Blocked waiting for
+        // player commands").
         for (Index i = 0; i < getSize(simulation.players); ++i)
         {
             PlayerId id(i);
             const auto& player = simulation.players[i];
-            if (player.type == GamePlayerType::Computer)
+            if (player.type != GamePlayerType::Computer)
             {
-                if (playerCommandService->bufferedCommandCount(id) == 0)
-                {
-                    auto aiCommands = simulation.takeAiCommandsForPlayer(id);
-                    playerCommandService->pushCommands(id, aiCommands);
-                }
+                continue;
+            }
+
+            auto aiBufferedCount = playerCommandService->bufferedCommandCount(id);
+            if (aiBufferedCount <= targetCommandBufferSize)
+            {
+                auto aiCommands = simulation.takeAiCommandsForPlayer(id);
+                playerCommandService->pushCommands(id, aiCommands);
+                ++aiBufferedCount;
+            }
+
+            for (; aiBufferedCount < targetCommandBufferSize; ++aiBufferedCount)
+            {
+                playerCommandService->pushCommands(id, std::vector<PlayerCommand>());
             }
         }
 
