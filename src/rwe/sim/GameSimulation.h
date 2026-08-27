@@ -307,6 +307,9 @@ namespace rwe
         /** The metal value of ordinary ground; cells above this are metal patches. */
         unsigned char surfaceMetal;
 
+        /** Ground height per vision cell, for line-of-sight checks. */
+        Grid<unsigned char> visionHeights;
+
         Grid<bool> geoGrid;
 
         std::vector<GamePlayerInfo> players;
@@ -406,6 +409,10 @@ namespace rwe
 
         /** Length of the self-destruct countdown, as in TA. */
         static constexpr unsigned int SelfDestructCountdownTicks = 5 * SimTicksPerSecond;
+
+        /** Line of sight: how high above the ground a unit looks from, and what height it needs to see at a cell. In heightmap units. */
+        static constexpr int EyeHeightAboveGround = 20;
+        static constexpr int SightTargetHeightAboveGround = 6;
 
         /** Starts a unit's self-destruct countdown, or cancels it if one is already running. */
         void toggleSelfDestruct(UnitId unitId);

@@ -3476,8 +3476,41 @@ namespace rwe
         fogSpriteTime = simulation.gameTime;
 
         const auto& vis = simulation.playerVisibility.at(localPlayerId.value);
-        auto width = vis.explored.getWidth();
-        auto height = vis.explored.getHeight();
+        auto cellsWide = vis.explored.getWidth();
+        auto cellsHigh = vis.explored.getHeight();
+
+        // Render at four texels per vision cell. Each texel blends the four
+        // nearest cells and compares the result against a fixed per-texel
+        // noise threshold, which turns the cell grid into the ragged edge TA
+        // draws instead of a staircase of squares.
+        const int upscale = 4;
+        auto width = cellsWide * upscale;
+        auto height = cellsHigh * upscale;
+
+        auto sampleGrid = [&](const Grid<unsigned char>& grid, float cx, float cy) {
+            // Bilinear sample of a 0/1 grid at cell-space coordinates (cell centres at n + 0.5).
+            auto fx = cx - 0.5f;
+            auto fy = cy - 0.5f;
+            auto x0 = static_cast<int>(std::floor(fx));
+            auto y0 = static_cast<int>(std::floor(fy));
+            auto tx = fx - static_cast<float>(x0);
+            auto ty = fy - static_cast<float>(y0);
+            auto at = [&](int x, int y) {
+                x = std::clamp(x, 0, cellsWide - 1);
+                y = std::clamp(y, 0, cellsHigh - 1);
+                return grid.get(x, y) ? 1.0f : 0.0f;
+            };
+            auto top = (at(x0, y0) * (1.0f - tx)) + (at(x0 + 1, y0) * tx);
+            auto bottom = (at(x0, y0 + 1) * (1.0f - tx)) + (at(x0 + 1, y0 + 1) * tx);
+            return (top * (1.0f - ty)) + (bottom * ty);
+        };
+        auto noiseAt = [](int x, int y) {
+            // Small integer hash -> [0.3, 0.7]; fixed per texel so the edge does not shimmer.
+            auto h = static_cast<unsigned int>(x) * 374761393u + static_cast<unsigned int>(y) * 668265263u;
+            h = (h ^ (h >> 13)) * 1274126177u;
+            h ^= h >> 16;
+            return 0.3f + (static_cast<float>(h & 0xFFFFu) / 65535.0f) * 0.4f;
+        };
 
         std::vector<Color> pixels;
         pixels.reserve(static_cast<size_t>(width) * static_cast<size_t>(height));
@@ -3485,11 +3518,14 @@ namespace rwe
         {
             for (int x = 0; x < width; ++x)
             {
-                if (vis.visible.get(x, y))
+                auto cx = (static_cast<float>(x) + 0.5f) / static_cast<float>(upscale);
+                auto cy = (static_cast<float>(y) + 0.5f) / static_cast<float>(upscale);
+                auto threshold = noiseAt(x, y);
+                if (sampleGrid(vis.visible, cx, cy) > threshold)
                 {
                     pixels.emplace_back(0, 0, 0, 0);
                 }
-                else if (vis.explored.get(x, y))
+                else if (sampleGrid(vis.explored, cx, cy) > threshold)
                 {
                     pixels.emplace_back(0, 0, 0, 120);
                 }
@@ -3500,13 +3536,13 @@ namespace rwe
             }
         }
 
-        SharedTextureHandle texture(sceneContext.graphics->createTexture(width, height, pixels.data()));
+        SharedTextureHandle texture(sceneContext.graphics->createSmoothTexture(width, height, pixels.data()));
 
         // The grid starts at the map's top-left corner and covers whole vision cells,
         // which may extend slightly past the map's edge.
         auto cellWorldUnits = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) * static_cast<float>(PlayerVisibility::VisionCellSizeInTiles);
         auto corner = simVectorToFloat(simulation.terrain.heightmapIndexToWorldCorner(0, 0));
-        auto bounds = Rectangle2f::fromTopLeft(corner.x, corner.z, width * cellWorldUnits, height * cellWorldUnits);
+        auto bounds = Rectangle2f::fromTopLeft(corner.x, corner.z, cellsWide * cellWorldUnits, cellsHigh * cellWorldUnits);
         auto region = Rectangle2f::fromTopLeft(0.0f, 0.0f, 1.0f, 1.0f);
         fogSprite = sceneContext.graphics->createSprite(bounds, region, texture);
     }

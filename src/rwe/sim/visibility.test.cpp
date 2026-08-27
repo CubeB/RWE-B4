@@ -113,6 +113,44 @@ namespace rwe
         }
     }
 
+    TEST_CASE("hills block line of sight", "[visibility]")
+    {
+        auto script = makeEmptyCobScript();
+        // A tall ridge across x = 4..5 tiles (vision cell 2) on an otherwise flat 64x64 map.
+        Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
+        for (int y = 0; y < 64; ++y)
+        {
+            for (int x = 36; x <= 37; ++x)
+            {
+                heights.set(x, y, 120);
+            }
+        }
+        GameSimulation sim(MapTerrain(std::move(heights), 0_ss), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        defineUnit(sim, "scout", /*sight*/ 200u, /*radar*/ 0u, false);
+
+        // Unit at world x = 0 (tile 32); the ridge is at tiles 36..37 (world 64..96).
+        addUnit(sim, "scout", us, SimVector(0_ss, 0_ss, 0_ss), script);
+        sim.tick();
+
+        SECTION("ground on the near side of the ridge is visible")
+        {
+            REQUIRE(sim.isVisibleTo(us, SimVector(40_ss, 0_ss, 0_ss)));
+            REQUIRE(sim.isVisibleTo(us, SimVector(-150_ss, 0_ss, 0_ss)));
+        }
+
+        SECTION("ground behind the ridge is not")
+        {
+            REQUIRE_FALSE(sim.isVisibleTo(us, SimVector(160_ss, 0_ss, 0_ss)));
+            REQUIRE_FALSE(sim.isVisibleTo(us, SimVector(190_ss, 0_ss, 0_ss)));
+        }
+
+        SECTION("the ridge itself can be seen")
+        {
+            REQUIRE(sim.isVisibleTo(us, SimVector(80_ss, 0_ss, 0_ss)));
+        }
+    }
+
     TEST_CASE("radar", "[visibility]")
     {
         auto script = makeEmptyCobScript();

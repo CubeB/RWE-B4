@@ -121,6 +121,7 @@ namespace rwe
           occupiedGrid(this->terrain.getHeightMap().getWidth() - 1, this->terrain.getHeightMap().getHeight() - 1, OccupiedCell()),
           metalGrid(this->terrain.getHeightMap().getWidth() - 1, this->terrain.getHeightMap().getHeight() - 1, surfaceMetal),
           surfaceMetal(surfaceMetal),
+          visionHeights(computeVisionHeights(this->terrain.getHeightMap())),
           geoGrid(this->terrain.getHeightMap().getWidth() - 1, this->terrain.getHeightMap().getHeight() - 1, false),
           minWindSpeed(minWindSpeed),
           maxWindSpeed(maxWindSpeed),
@@ -582,7 +583,9 @@ namespace rwe
 
             if (unitDefinition.sightDistance > 0)
             {
-                vis.revealCircle(cell, toCells(unitDefinition.sightDistance));
+                // Eyes sit a little above the unit; ground is seen if the line
+                // to a point just above it is not blocked by higher ground.
+                vis.revealCircleWithLineOfSight(cell, toCells(unitDefinition.sightDistance), visionHeights, EyeHeightAboveGround, SightTargetHeightAboveGround);
             }
             else
             {

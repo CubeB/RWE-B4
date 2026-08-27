@@ -76,10 +76,82 @@ namespace rwe
         });
     }
 
+    void PlayerVisibility::revealCircleWithLineOfSight(const Point& center, int radius, const Grid<unsigned char>& groundHeights, int eyeHeight, int targetHeight)
+    {
+        if (!contains(center))
+        {
+            return;
+        }
+
+        auto groundAt = [&](int x, int y) {
+            return static_cast<int>(groundHeights.get(x, y));
+        };
+        auto eye = groundAt(center.x, center.y) + eyeHeight;
+
+        forEachCellInCircle(visible, center, radius, [&](int x, int y) {
+            auto dx = x - center.x;
+            auto dy = y - center.y;
+            auto steps = std::max(std::abs(dx), std::abs(dy));
+            auto target = groundAt(x, y) + targetHeight;
+
+            // Walk the line of sight one cell at a time; the ground must stay
+            // below the sight line the whole way.
+            bool clear = true;
+            for (int t = 1; t < steps; ++t)
+            {
+                // Round to nearest cell along the line (integer arithmetic, deterministic).
+                auto sx = center.x + ((dx * t * 2 + (dx >= 0 ? steps : -steps)) / (2 * steps));
+                auto sy = center.y + ((dy * t * 2 + (dy >= 0 ? steps : -steps)) / (2 * steps));
+                // Height of the sight line at this step, in 1/steps units.
+                auto lineHeightScaled = (eye * (steps - t)) + (target * t);
+                if (groundAt(sx, sy) * steps > lineHeightScaled)
+                {
+                    clear = false;
+                    break;
+                }
+            }
+
+            if (clear)
+            {
+                visible.set(x, y, 1);
+                explored.set(x, y, 1);
+            }
+        });
+    }
+
     void PlayerVisibility::radarCircle(const Point& center, int radius)
     {
         forEachCellInCircle(radar, center, radius, [&](int x, int y) {
             radar.set(x, y, 1);
         });
+    }
+
+    Grid<unsigned char> computeVisionHeights(const Grid<unsigned char>& heightmap)
+    {
+        auto cells = PlayerVisibility::VisionCellSizeInTiles;
+        auto width = (heightmap.getWidth() + cells - 1) / cells;
+        auto height = (heightmap.getHeight() + cells - 1) / cells;
+        Grid<unsigned char> result(width, height, static_cast<unsigned char>(0));
+        for (int y = 0; y < height; ++y)
+        {
+            for (int x = 0; x < width; ++x)
+            {
+                unsigned char highest = 0;
+                for (int dy = 0; dy < cells; ++dy)
+                {
+                    for (int dx = 0; dx < cells; ++dx)
+                    {
+                        auto hx = (x * cells) + dx;
+                        auto hy = (y * cells) + dy;
+                        if (hx < heightmap.getWidth() && hy < heightmap.getHeight())
+                        {
+                            highest = std::max(highest, heightmap.get(hx, hy));
+                        }
+                    }
+                }
+                result.set(x, y, highest);
+            }
+        }
+        return result;
     }
 }

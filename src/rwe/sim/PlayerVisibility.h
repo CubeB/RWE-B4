@@ -39,7 +39,18 @@ namespace rwe
         /** Marks every cell within radius (in cells) of the centre as visible and explored. */
         void revealCircle(const Point& center, int radius);
 
+        /**
+         * Like revealCircle, but a cell is only revealed if the straight line
+         * from an eye eyeHeight above the centre cell's ground to a point
+         * targetHeight above the cell's ground clears the ground in between.
+         * Hills and ridges therefore cast shadows.
+         */
+        void revealCircleWithLineOfSight(const Point& center, int radius, const Grid<unsigned char>& groundHeights, int eyeHeight, int targetHeight);
+
         /** Marks every cell within radius (in cells) of the centre as radar-covered. */
         void radarCircle(const Point& center, int radius);
     };
+
+    /** Ground height per vision cell: the highest heightmap sample the cell covers. */
+    Grid<unsigned char> computeVisionHeights(const Grid<unsigned char>& heightmap);
 }
