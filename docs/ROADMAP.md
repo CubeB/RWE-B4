@@ -76,9 +76,10 @@ Follows `docs/ai-architecture-proposal.md` (tgunnoe). All AI code stays in `sim/
 - [x] Phase 1 (merged): commander builds fixed opening — runs on Coast To Coast.
 - [x] Fixed `Blocked waiting for player commands` with a Computer player: the AI buffer was refilled one entry per frame, so any frame dispatching ≥2 sim ticks (catch-up, or game speed > 1×) skipped a tick. AI buffer is now topped up to `targetCommandBufferSize` like the human buffer (`4b0b17a6`). Verified 0 blocked ticks in Debug and Release.
 - [ ] AI in multiplayer: each peer would generate AI commands locally and never send them, so an AI player in a network game will desync. Either run the AI on one host and transmit its commands, or make AI command timing deterministic. Not needed for single-player.
-- [ ] Phase 2: threat map, scouting, expansion, TDF-based tuning profiles.
-- [ ] Phase 3: platoons, attack triggers, Easy/Medium/Hard/Brutal tiers.
-- [ ] Phase 4: debug overlays, logging, tuning; expose AI difficulty in the skirmish setup screen.
+- [x] Phase 2: perception through fog of war (Brutal is omniscient), threat map (anti-ground DPS / economic value / staleness), scouting toward unseen ground, expansion build order (solars, mexes, lab, radar, laser towers facing the enemy, stall reactions), factories producing constructors then raiders/rockets 2:1, idle builders assist the factory.
+- [x] Phase 3 (single-army version): rally point facing the enemy, Defend on intruders, Attack on the most valuable known enemy ground once the army reaches the profile's size, regroup when depleted; Easy/Standard/Hard/Brutal profiles via `--ai-difficulty` (Brutal: omniscient + 1.25× income, applied in the sim).
+- [x] Phase 4 (lite): F10 debug window lists each AI's phase, economy, unit counts, army and target.
+- [ ] AI polish: several platoons with unit-role templates; TDF-loaded profiles and build orders; per-slot difficulty in the lobby; metal makers / storage; use of radar jammers and air; tuning from AI-vs-AI runs.
 - [ ] Deferred (per proposal): naval doctrine, air-only strategies, multi-AI teams.
 
 ## Phase 3 — Multiplayer polish & launcher (≈ 2 months)
