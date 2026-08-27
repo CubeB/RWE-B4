@@ -60,11 +60,11 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 - [ ] Unit info panel completeness (HP, resource make/use, build progress, kills), order buttons wired to every order above.
 - [ ] Build menu paging, queue display, `Shift` queue count badge.
 - [ ] Pause/speed indicators on screen (logic merged; needs HUD).
-- [ ] Resource-stall feedback: when metal/energy hit zero a build proceeds in one-second bursts (full speed for a second, then stalled until income repays the debt), which looks like a stuck nanoframe. Show the TA stall flash on the resource bar and slow the nanolathe continuously instead of bursting (`GamePlayerInfo::addResourceDelta` / `updateResources`).
+- [x] Resource stall: spending is now gated on what is actually on hand at the moment (stock + income so far this second − spent so far), so an empty stockpile throttles building continuously to the income rate instead of one-second bursts; stalled energy/metal bars flash red as in TA.
 - [ ] Focused-control highlight (#5), list-box selected-item brightness (#6).
 
 **Game flow**
-- [ ] End-of-game flow: `computeWinStatus()` already detects Won/Draw, but the app just exits 5 s later. Needs a result screen (score, kills, time) and return to the main menu; a one-player skirmish currently "wins" instantly.
+- [x] End-of-game flow: result panel (VICTORY/DEFEAT/DRAW, game time, units destroyed/lost) instead of exiting; the sim keeps running for spectating; Escape returns to the main menu. Single-player games are never "decided". Per-player kill/loss tallies added to `GamePlayerInfo`.
 - [ ] Line of sight / fog of war / radar & jammers — FBI fields are parsed, sim has no visibility model. This is the largest single gap between "demo" and "game".
 - [ ] Music playback (`AudioService` has no music support) and sound completeness (unit sound types are defined, many unwired).
 

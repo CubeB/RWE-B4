@@ -60,6 +60,8 @@ namespace rwe
             p.maxEnergy,
             p.metalStalled,
             p.energyStalled,
+            p.unitsKilled,
+            p.unitsLost,
             p.desiredMetalConsumptionBuffer,
             p.desiredEnergyConsumptionBuffer,
             p.previousDesiredMetalConsumptionBuffer,

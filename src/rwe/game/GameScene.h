@@ -293,8 +293,9 @@ namespace rwe
 
         bool healthBarsVisible{false};
 
-        /** Set once the win/draw condition has been logged, so it is logged only once. */
-        bool gameOverAnnounced{false};
+        /** Set when the game has been decided; the result is shown until the player leaves. */
+        std::optional<WinStatus> gameOver;
+        GameTime gameOverTime{0};
 
         BehaviorSubject<CursorMode> cursorMode{NormalCursorMode()};
 
@@ -307,6 +308,9 @@ namespace rwe
         BehaviorSubject<bool> onOff{false};
 
         UiFactory uiFactory;
+
+        /** Sound lookup table, kept so a main menu scene can be built on the way out. */
+        TdfBlock* audioLookup;
 
         std::unordered_map<UnitId, UnitGuiInfo> unitGuiInfos;
 
@@ -485,6 +489,10 @@ namespace rwe
         bool isShiftDown() const;
 
         void handleEscapeDown();
+
+        void returnToMainMenu();
+
+        void renderGameOverOverlay();
 
         UnitState& getUnit(UnitId id);
 

@@ -3,6 +3,7 @@
 #include <fstream>
 #include <functional>
 #include <rwe/CroppedViewport.h>
+#include <rwe/MainMenuScene.h>
 #include <rwe/Mesh.h>
 #include <rwe/camera_util.h>
 #include <rwe/game/GameScene_util.h>
@@ -250,6 +251,7 @@ namespace rwe
           guiFont(guiFont),
           localPlayerId(localPlayerId),
           uiFactory(sceneContext.textureService, sceneContext.audioService, audioLookup, sceneContext.vfs, sceneContext.pathMapping, sceneContext.viewport->width(), sceneContext.viewport->height()),
+          audioLookup(audioLookup),
           stateLogStream(std::move(stateLogStream))
     {
     }
@@ -439,6 +441,8 @@ namespace rwe
             auto text = formatResourceDelta(getPlayer(localPlayerId).previousDesiredMetalConsumptionBuffer);
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont, Color(255, 71, 0));
         }
+
+        renderGameOverOverlay();
 
         // render bottom bar
         float bottomXBuffer = GuiSizeLeft;
@@ -2932,28 +2936,27 @@ namespace rwe
 
         updateParticles(gameMediaDatabase, simulation.gameTime, particles);
 
-        auto winStatus = simulation.computeWinStatus();
-        match(
-            winStatus,
-            [&](const WinStatusWon& w) {
-                if (!gameOverAnnounced)
-                {
-                    gameOverAnnounced = true;
-                    LOG_INFO << "Game over: player " << w.winner.value << " won at tick " << simulation.gameTime.value << ", exiting in 5 seconds";
-                }
-                delay(SceneTime(5 * 30), [sm = sceneContext.sceneManager]() { sm->requestExit(); });
-            },
-            [&](const WinStatusDraw&) {
-                if (!gameOverAnnounced)
-                {
-                    gameOverAnnounced = true;
-                    LOG_INFO << "Game over: draw at tick " << simulation.gameTime.value << ", exiting in 5 seconds";
-                }
-                delay(SceneTime(5 * 30), [sm = sceneContext.sceneManager]() { sm->requestExit(); });
-            },
-            [&](const WinStatusUndecided&) {
-                // do nothing, game still in progress
-            });
+        // A game needs an opponent before it can be decided; a lone player
+        // is just exploring the map.
+        if (!gameOver && simulation.players.size() >= 2)
+        {
+            auto winStatus = simulation.computeWinStatus();
+            match(
+                winStatus,
+                [&](const WinStatusWon& w) {
+                    gameOver = winStatus;
+                    gameOverTime = simulation.gameTime;
+                    LOG_INFO << "Game over: player " << w.winner.value << " won at tick " << simulation.gameTime.value;
+                },
+                [&](const WinStatusDraw&) {
+                    gameOver = winStatus;
+                    gameOverTime = simulation.gameTime;
+                    LOG_INFO << "Game over: draw at tick " << simulation.gameTime.value;
+                },
+                [&](const WinStatusUndecided&) {
+                    // do nothing, game still in progress
+                });
+        }
     }
 
     std::optional<UnitId> GameScene::getUnitUnderCursor() const
@@ -3300,6 +3303,12 @@ namespace rwe
 
     void GameScene::handleEscapeDown()
     {
+        if (gameOver)
+        {
+            returnToMainMenu();
+            return;
+        }
+
         match(
             cursorMode.getValue(),
             [this](const NormalCursorMode&) {
@@ -3308,6 +3317,64 @@ namespace rwe
             [this](const auto&) {
                 cursorMode.next(NormalCursorMode());
             });
+    }
+
+    void GameScene::returnToMainMenu()
+    {
+        LOG_INFO << "Returning to the main menu";
+        auto scene = std::make_unique<MainMenuScene>(
+            sceneContext,
+            audioLookup,
+            static_cast<float>(sceneContext.viewport->width()),
+            static_cast<float>(sceneContext.viewport->height()));
+        sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+    }
+
+    void GameScene::renderGameOverOverlay()
+    {
+        if (!gameOver)
+        {
+            return;
+        }
+
+        const auto& localPlayer = getPlayer(localPlayerId);
+        auto title = match(
+            *gameOver,
+            [&](const WinStatusWon& w) { return w.winner == localPlayerId ? std::string("VICTORY") : std::string("DEFEAT"); },
+            [&](const WinStatusDraw&) { return std::string("DRAW"); },
+            [&](const WinStatusUndecided&) { return std::string(); });
+
+        auto totalSeconds = gameOverTime.value / static_cast<unsigned int>(SimTicksPerSecond);
+        auto minutes = totalSeconds / 60;
+        auto seconds = totalSeconds % 60;
+        std::string timeText = "Game time " + std::to_string(minutes) + ":" + (seconds < 10 ? "0" : "") + std::to_string(seconds);
+
+        std::vector<std::string> lines{
+            title,
+            timeText,
+            "Units destroyed: " + std::to_string(localPlayer.unitsKilled),
+            "Units lost: " + std::to_string(localPlayer.unitsLost),
+            "",
+            "Press ESC to return to the main menu",
+        };
+
+        const float lineHeight = 16.0f;
+        const float boxWidth = 300.0f;
+        const float boxHeight = (lines.size() + 2) * lineHeight;
+        auto centerX = worldViewport.left() + (worldViewport.width() / 2.0f);
+        auto centerY = worldViewport.top() + (worldViewport.height() / 2.0f);
+        auto boxX = centerX - (boxWidth / 2.0f);
+        auto boxY = centerY - (boxHeight / 2.0f);
+
+        chromeUiRenderService.fillColor(boxX, boxY, boxWidth, boxHeight, Color(0, 0, 0, 210));
+        chromeUiRenderService.drawBoxOutline(boxX, boxY, boxWidth, boxHeight, title == "VICTORY" ? Color(83, 223, 79) : Color(255, 71, 0), 2.0f);
+
+        auto y = boxY + (lineHeight * 1.5f);
+        for (const auto& line : lines)
+        {
+            chromeUiRenderService.drawTextCentered(centerX, y, line, *guiFont);
+            y += lineHeight;
+        }
     }
 
     UnitState& GameScene::getUnit(UnitId id)

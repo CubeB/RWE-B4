@@ -463,6 +463,7 @@ namespace rwe
         // Self-destruction leaves nothing to reclaim.
         unit.markAsDeadNoCorpse();
         unit.selfDestructTime = std::nullopt;
+        getPlayer(unit.owner).unitsLost += 1;
 
         events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::SelfDestructed});
 
@@ -1213,6 +1214,7 @@ namespace rwe
     {
         auto& unit = getUnitState(unitId);
         unit.markAsDeadNoCorpse();
+        getPlayer(unit.owner).unitsLost += 1;
         // No explosion or wreck, but the scene still has to hear about it so
         // it drops the unit from the selection, hover state and GUI caches.
         events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::Deleted});
@@ -1487,6 +1489,7 @@ namespace rwe
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
 
         unit.markAsDead();
+        getPlayer(unit.owner).unitsLost += 1;
 
         // Credit the kill to the attacker, if any.
         // Match TA behavior: friendly-fire kills count.
@@ -1498,6 +1501,7 @@ namespace rwe
             if (attackerUnit && attackerUnit->get().isAlive())
             {
                 attackerUnit->get().kills += 1;
+                getPlayer(attackerUnit->get().owner).unitsKilled += 1;
             }
         }
 
@@ -1926,8 +1930,14 @@ namespace rwe
 
     void GameSimulation::trySpawnFeature(const std::string& featureType, const SimVector& position, SimAngle rotation)
     {
-        auto featureId = tryGetFeatureDefinitionId(featureType).value();
-        auto feature = MapFeature{featureId, position, rotation};
+        auto featureId = tryGetFeatureDefinitionId(featureType);
+        if (!featureId)
+        {
+            // A unit whose corpse feature is missing from the game data simply
+            // leaves no wreck; that is not worth crashing over.
+            return;
+        }
+        auto feature = MapFeature{*featureId, position, rotation};
 
         addFeature(std::move(feature));
     }

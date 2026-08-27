@@ -126,6 +126,39 @@ namespace rwe
         }
     }
 
+    TEST_CASE("kills and losses are tallied per player", "[selfdestruct]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto enemy = addPlayer(sim);
+        auto attackerId = addSolar(sim, player, script);
+        auto victimId = addSolar(sim, enemy, script);
+        auto frameId = addSolar(sim, enemy, script);
+
+        sim.killUnit(victimId, attackerId);
+        // The corpse feature is not defined in this test; the sim must cope.
+        sim.tick();
+        REQUIRE_FALSE(sim.tryGetUnitState(victimId).has_value());
+        REQUIRE(sim.getPlayer(player).unitsKilled == 1u);
+        REQUIRE(sim.getPlayer(enemy).unitsLost == 1u);
+
+        // A nanoframe dying quietly is still a loss, but nobody's kill.
+        sim.getUnitState(frameId).buildTimeCompleted = 0u;
+        sim.unitDefinitions["solar"].buildTime = 100u;
+        sim.applyDamage(frameId, 1000u, attackerId);
+        REQUIRE(sim.getPlayer(enemy).unitsLost == 2u);
+        REQUIRE(sim.getPlayer(player).unitsKilled == 1u);
+
+        // Self-destruction is a loss too.
+        sim.toggleSelfDestruct(attackerId);
+        for (unsigned int i = 0; i < GameSimulation::SelfDestructCountdownTicks; ++i)
+        {
+            sim.tick();
+        }
+        REQUIRE(sim.getPlayer(player).unitsLost == 1u);
+    }
+
     TEST_CASE("a unit under construction that is destroyed still announces its death", "[selfdestruct]")
     {
         // The scene relies on UnitDiedEvent to drop dead units from its

@@ -39,6 +39,8 @@ namespace rwe
             {"maxEnergy", dumpJson(p.maxEnergy)},
             {"metalStalled", dumpJson(p.metalStalled)},
             {"energyStalled", dumpJson(p.energyStalled)},
+            {"unitsKilled", dumpJson(p.unitsKilled)},
+            {"unitsLost", dumpJson(p.unitsLost)},
             {"desiredMetalConsumptionBuffer", dumpJson(p.desiredMetalConsumptionBuffer)},
             {"desiredEnergyConsumptionBuffer", dumpJson(p.desiredEnergyConsumptionBuffer)},
             {"previousDesiredMetalConsumptionBuffer", dumpJson(p.previousDesiredMetalConsumptionBuffer)},

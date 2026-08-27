@@ -78,6 +78,11 @@ namespace rwe
         bool metalStalled{false};
         bool energyStalled{false};
 
+        /** Enemy (or, with friendly fire, any) units this player's units have destroyed. */
+        unsigned int unitsKilled{0};
+        /** Units this player has lost, by any cause. */
+        unsigned int unitsLost{0};
+
         Metal desiredMetalConsumptionBuffer{0};
         Energy desiredEnergyConsumptionBuffer{0};
 
