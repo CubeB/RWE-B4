@@ -27,7 +27,8 @@ Goal: a fork with green CI, a reproducible local build, and a tagged pre-release
 - [x] Build `revival` locally (MinGW64 Debug) and run `rwe_test` — 133 test cases / 1,487 assertions pass (2026‑08‑27).
 - [x] Reclaim merge verified: compiles and tests pass alongside `feats/next`.
 - [x] Fix Windows checkout: `libs/asio/asio/include` is a git symlink that materialises as a text file without `core.symlinks`; CMake now uses the real `libs/asio/include`.
-- [x] Smoke-test with real TA data (GOG archives at `D:\RWE-Data`, junctioned to `%AppData%\RWE\Data`): main menu loads; `--map "Coast To Coast"` skirmish runs with Human + Computer players, 0 warnings. The Computer player logs occasional `Blocked waiting for player commands` in the Debug build (AI tick hitch; sim continues) — see Phase 2.
+- [x] Smoke-test with real TA data (GOG archives at `D:\RWE-Data`, junctioned to `%AppData%\RWE\Data`): main menu loads; `--map "Coast To Coast"` skirmish runs with Human + Computer players, 0 warnings.
+- [x] Release build (`build-release/`, 40 MB `rwe.exe` vs 192 MB Debug): tests pass, AI skirmish clean. Use this one to play.
 - [ ] Push `revival` to a private GitHub repo (or fork) so the CI matrix runs; confirm it is green.
 - [ ] Tag `v0.2.0-pre1` and let Kevin's release job produce Windows zip/installer + Linux AppImage.
 - [ ] Update `README.md` download section (AppVeyor link is dead-end) and `CLAUDE.md` (says C++17; it is C++20).
@@ -65,7 +66,8 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 Follows `docs/ai-architecture-proposal.md` (tgunnoe). All AI code stays in `sim/` and emits ordinary `PlayerCommand`s, so multiplayer and replays stay deterministic.
 
 - [x] Phase 1 (merged): commander builds fixed opening — runs on Coast To Coast.
-- [ ] Profile the AI tick: a Computer player causes intermittent `Blocked waiting for player commands` in Debug builds (sim recovers, but it is a frame hitch). Check with a Release build first.
+- [x] Fixed `Blocked waiting for player commands` with a Computer player: the AI buffer was refilled one entry per frame, so any frame dispatching ≥2 sim ticks (catch-up, or game speed > 1×) skipped a tick. AI buffer is now topped up to `targetCommandBufferSize` like the human buffer (`4b0b17a6`). Verified 0 blocked ticks in Debug and Release.
+- [ ] AI in multiplayer: each peer would generate AI commands locally and never send them, so an AI player in a network game will desync. Either run the AI on one host and transmit its commands, or make AI command timing deterministic. Not needed for single-player.
 - [ ] Phase 2: threat map, scouting, expansion, TDF-based tuning profiles.
 - [ ] Phase 3: platoons, attack triggers, Easy/Medium/Hard/Brutal tiers.
 - [ ] Phase 4: debug overlays, logging, tuning; expose AI difficulty in the skirmish setup screen.
