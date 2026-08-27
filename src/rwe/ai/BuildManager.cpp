@@ -45,11 +45,11 @@ namespace rwe
 
         if (upper == "CORE")
         {
-            sideUnits = AiSideUnits{"CORMEX", "CORSOLAR", "CORLAB", "CORCK", "CORAK", "CORSTORM", "CORLLT", "CORRAD"};
+            sideUnits = AiSideUnits{"CORMEX", "CORSOLAR", "CORLAB", "CORCK", "CORAK", "CORSTORM", "CORLLT", "CORRAD", "CORMAKR"};
         }
         else
         {
-            sideUnits = AiSideUnits{"ARMMEX", "ARMSOLAR", "ARMLAB", "ARMCK", "ARMPW", "ARMROCK", "ARMLLT", "ARMRAD"};
+            sideUnits = AiSideUnits{"ARMMEX", "ARMSOLAR", "ARMLAB", "ARMCK", "ARMPW", "ARMROCK", "ARMLLT", "ARMRAD", "ARMMAKR"};
         }
 
         // Anything the game data does not define is simply never built.
@@ -67,6 +67,7 @@ namespace rwe
         check(sideUnits.rocketKbot);
         check(sideUnits.lightLaserTower);
         check(sideUnits.radar);
+        check(sideUnits.metalMaker);
     }
 
     std::optional<SimVector> BuildManager::chooseBuildSite(
@@ -158,7 +159,26 @@ namespace rwe
         const auto& def = defIt->second;
         const auto mc = sim.getAdHocMovementClass(def.movementCollisionInfo);
 
+        // Metal under a footprint placed at a cell; only patches count, not the
+        // map's ordinary surface metal.
+        auto patchMetalUnder = [&](const DiscreteRect& rect) {
+            unsigned int total = 0;
+            for (int y = rect.y; y < rect.y + static_cast<int>(rect.height); ++y)
+            {
+                for (int x = rect.x; x < rect.x + static_cast<int>(rect.width); ++x)
+                {
+                    if (x >= 0 && y >= 0 && x < metalGrid.getWidth() && y < metalGrid.getHeight() && metalGrid.get(x, y) > sim.surfaceMetal)
+                    {
+                        total += metalGrid.get(x, y);
+                    }
+                }
+            }
+            return total;
+        };
+
+        // Take the richest buildable patch on the nearest ring that has one.
         std::vector<SimVector> tiedCandidates;
+        unsigned int bestMetal = 0;
         for (int ring = 0; ring <= radiusInTiles; ++ring)
         {
             for (int dz = -ring; dz <= ring; ++dz)
@@ -175,7 +195,7 @@ namespace rwe
                     {
                         continue;
                     }
-                    if (metalGrid.get(gx, gz) == 0)
+                    if (metalGrid.get(gx, gz) <= sim.surfaceMetal)
                     {
                         continue;
                     }
@@ -191,7 +211,17 @@ namespace rwe
                     {
                         continue;
                     }
-                    tiedCandidates.push_back(candidate);
+                    auto metal = patchMetalUnder(rect);
+                    if (metal > bestMetal)
+                    {
+                        bestMetal = metal;
+                        tiedCandidates.clear();
+                        tiedCandidates.push_back(candidate);
+                    }
+                    else if (metal == bestMetal && metal > 0)
+                    {
+                        tiedCandidates.push_back(candidate);
+                    }
                 }
             }
             if (!tiedCandidates.empty())
@@ -208,47 +238,76 @@ namespace rwe
         return tiedCandidates[dist(rng)];
     }
 
-    std::optional<std::string> BuildManager::chooseNextBuilding(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb) const
+    std::vector<std::string> BuildManager::buildPriorities(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb) const
     {
         (void)sim;
         const auto& s = sideUnits;
         // Count what exists or is already going up, so we don't double up.
         auto total = [&](const std::string& t) { return t.empty() ? 0 : countOf(bb.ownedTotalCounts, t); };
 
-        // Keep the lights on first.
-        if (!s.solar.empty() && (bb.energyStalled || total(s.solar) < profile.openingSolarCount))
+        std::vector<std::string> wanted;
+        auto want = [&](const std::string& t) {
+            if (!t.empty() && std::find(wanted.begin(), wanted.end(), t) == wanted.end())
+            {
+                wanted.push_back(t);
+            }
+        };
+
+        // Energy first if the lights are out, otherwise metal first: every
+        // later build is paced by metal income, and the starting stockpile
+        // covers the opening. Each need is listed in turn; the planner takes
+        // the first one it can find a site for, so an opening without a
+        // third metal patch nearby still gets its solars and lab.
+        if (bb.energyStalled)
         {
-            return s.solar;
+            want(s.solar);
         }
-        if (!s.metalExtractor.empty() && total(s.metalExtractor) < profile.openingMetalExtractorCount)
+        if (total(s.metalExtractor) < profile.openingMetalExtractorCount)
         {
-            return s.metalExtractor;
+            want(s.metalExtractor);
         }
-        if (!s.lab.empty() && total(s.lab) < 1)
+        if (total(s.solar) < profile.openingSolarCount)
         {
-            return s.lab;
+            want(s.solar);
         }
-        if (!s.metalExtractor.empty() && bb.metalStalled && total(s.metalExtractor) < profile.targetMetalExtractorCount)
+        // The stall flag flickers off for a moment whenever a build finishes,
+        // so judge metal by the stockpile as well: under a tenth of storage is short.
+        auto metalShort = bb.metalStalled || (bb.metalStorage.value > 0.0f && bb.currentMetal.value < bb.metalStorage.value * 0.1f);
+
+        // Don't sink the commander into a factory while metal is short; more
+        // extractors first, as long as there are patches to take.
+        if (metalShort && total(s.metalExtractor) < profile.targetMetalExtractorCount)
         {
-            return s.metalExtractor;
+            want(s.metalExtractor);
         }
-        if (!s.radar.empty() && total(s.radar) < profile.targetRadarCount && total(s.solar) >= profile.openingSolarCount)
+        if (total(s.lab) < 1)
         {
-            return s.radar;
+            want(s.lab);
         }
-        if (!s.lightLaserTower.empty() && total(s.lightLaserTower) < profile.targetDefenceCount && total(s.lab) >= 1)
+        // Out of patches but swimming in energy: turn energy into metal.
+        auto energyRich = bb.energyStorage.value > 0.0f && bb.currentEnergy.value >= bb.energyStorage.value * 0.8f;
+        if (metalShort && energyRich && total(s.metalMaker) < profile.targetMetalMakerCount && total(s.lab) >= 1)
         {
-            return s.lightLaserTower;
+            want(s.metalMaker);
         }
-        if (!s.solar.empty() && total(s.solar) < profile.targetSolarCount)
+        if (total(s.radar) < profile.targetRadarCount && total(s.solar) >= profile.openingSolarCount)
         {
-            return s.solar;
+            want(s.radar);
         }
-        if (!s.metalExtractor.empty() && total(s.metalExtractor) < profile.targetMetalExtractorCount)
+        // Towers are a luxury while metal is short; the factory needs it more.
+        if (!metalShort && total(s.lightLaserTower) < profile.targetDefenceCount && total(s.lab) >= 1)
         {
-            return s.metalExtractor;
+            want(s.lightLaserTower);
         }
-        return std::nullopt;
+        if (total(s.solar) < profile.targetSolarCount)
+        {
+            want(s.solar);
+        }
+        if (total(s.metalExtractor) < profile.targetMetalExtractorCount)
+        {
+            want(s.metalExtractor);
+        }
+        return wanted;
     }
 
     void BuildManager::planFactories(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const
@@ -323,47 +382,47 @@ namespace rwe
         auto builderId = bb.idleBuilders.front();
         const auto& builder = sim.getUnitState(builderId);
 
-        auto next = chooseNextBuilding(sim, profile, bb);
-        if (!next)
+        for (const auto& next : buildPriorities(sim, profile, bb))
         {
-            // Nothing to build: lend a hand at the factory.
-            if (!bb.factories.empty())
+            std::optional<SimVector> site;
+            if (next == sideUnits.metalExtractor)
             {
-                const auto& factory = sim.getUnitState(bb.factories.front());
-                if (!factory.buildQueue.empty())
+                // Nearby patches first; further afield if there are none.
+                site = chooseMexSite(sim, next, builder.position, profile.maxMexSearchRadius, rng);
+                if (!site)
                 {
-                    outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(GuardOrder(bb.factories.front()), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                    site = chooseMexSite(sim, next, *bb.baseAnchor, profile.expansionMexSearchRadius, rng);
                 }
             }
-            return;
+            else if (next == sideUnits.lightLaserTower && bb.enemyBasePosition)
+            {
+                // Defences go on the side of the base that faces the enemy.
+                auto towards = (*bb.enemyBasePosition - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+                auto anchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
+                site = chooseBuildSite(sim, profile, next, anchor, rng);
+            }
+            else
+            {
+                site = chooseBuildSite(sim, profile, next, *bb.baseAnchor, rng);
+            }
+
+            if (site)
+            {
+                LOG_DEBUG << "AI build: unit " << builderId.value << " to build " << next << " at " << site->x.value << "," << site->z.value;
+                outCommands.push_back(buildCommand(builderId, next, *site));
+                return;
+            }
+            LOG_DEBUG << "AI build: no site found for " << next << " near " << builder.position.x.value << "," << builder.position.z.value;
         }
 
-        std::optional<SimVector> site;
-        if (*next == sideUnits.metalExtractor)
+        // Nothing to build (or nowhere to build it): lend a hand at the factory.
+        if (!bb.factories.empty())
         {
-            auto radius = bb.phase == GamePhase::Opening ? profile.maxMexSearchRadius : profile.expansionMexSearchRadius;
-            site = chooseMexSite(sim, *next, builder.position, radius, rng);
-        }
-        else if (*next == sideUnits.lightLaserTower && bb.enemyBasePosition)
-        {
-            // Defences go on the side of the base that faces the enemy.
-            auto towards = (*bb.enemyBasePosition - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
-            auto anchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
-            site = chooseBuildSite(sim, profile, *next, anchor, rng);
-        }
-        else
-        {
-            site = chooseBuildSite(sim, profile, *next, *bb.baseAnchor, rng);
-        }
-
-        if (site)
-        {
-            LOG_DEBUG << "AI build: unit " << builderId.value << " to build " << *next << " at " << site->x.value << "," << site->z.value;
-            outCommands.push_back(buildCommand(builderId, *next, *site));
-        }
-        else
-        {
-            LOG_DEBUG << "AI build: no site found for " << *next << " near " << builder.position.x.value << "," << builder.position.z.value;
+            const auto& factory = sim.getUnitState(bb.factories.front());
+            if (!factory.buildQueue.empty())
+            {
+                outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(GuardOrder(bb.factories.front()), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+            }
         }
     }
 }

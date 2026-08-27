@@ -25,6 +25,7 @@ namespace rwe
         std::string rocketKbot;
         std::string lightLaserTower;
         std::string radar;
+        std::string metalMaker;
     };
 
     /**
@@ -67,8 +68,8 @@ namespace rwe
 
         void resolveSide(const GameSimulation& sim, PlayerId aiOwner);
 
-        /** What the next idle builder should build, if anything. */
-        std::optional<std::string> chooseNextBuilding(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb) const;
+        /** What the next idle builder should build, most wanted first. */
+        std::vector<std::string> buildPriorities(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb) const;
 
         void planFactories(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const;
     };

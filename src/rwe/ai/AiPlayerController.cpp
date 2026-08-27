@@ -71,9 +71,12 @@ namespace rwe
                     commanderDoing += commander.buildOrderUnitId ? " nanoframe placed" : " no nanoframe";
                 }
             }
+            const auto& player = sim.getPlayer(playerId);
             LOG_INFO << "AI player " << playerId.value << " status: phase " << gamePhaseName(blackboard.phase)
                      << ", metal " << blackboard.currentMetal.value << (blackboard.metalStalled ? "(stalled)" : "")
+                     << " (+" << player.metalProductionBuffer.value << "/-" << player.previousDesiredMetalConsumptionBuffer.value << " per s)"
                      << ", energy " << blackboard.currentEnergy.value << (blackboard.energyStalled ? "(stalled)" : "")
+                     << " (+" << player.energyProductionBuffer.value << "/-" << player.previousDesiredEnergyConsumptionBuffer.value << " per s)"
                      << ", idle builders " << blackboard.idleBuilderCount << ", army " << blackboard.armySize
                      << ", known enemies " << blackboard.knownEnemies.size() << ", units:" << counts << "; " << commanderDoing;
         }

@@ -32,6 +32,7 @@ namespace rwe
         int targetConstructorCount{2};
         int targetDefenceCount{2};
         int targetRadarCount{1};
+        int targetMetalMakerCount{2};
 
         // --- Site search ---
         SimScalar maxMexSearchRadius{512_ss};
