@@ -15,15 +15,28 @@ namespace rwe
 
     void AiPlayerController::tick(const GameSimulation& sim, std::vector<PlayerCommand>& outCommands)
     {
-        // 1. Refresh blackboard from current sim truth.
+        // 1. What do we own, and how is the economy doing?
         economy.refresh(sim, playerId, profile, blackboard);
 
-        // 2. Strategic phase decision (Phase 1: always Opening).
+        // 2. What do we know about the enemy?
+        perception.refresh(sim, playerId, profile, blackboard);
+
+        // 3. Influence map, once a second.
+        ++ticksSinceThreatRebuild;
+        if (threatMap.isEmpty() || ticksSinceThreatRebuild >= profile.threatMapTickInterval)
+        {
+            ticksSinceThreatRebuild = 0;
+            threatMap.rebuild(sim, playerId, blackboard, profile.cheatModeOmniscient);
+        }
+
+        // 4. Which phase of the game are we in?
         strategic.update(profile, blackboard);
 
-        // 3. BuildManager: opening book — mexes, then solar.
+        // 5. Economy and production.
         build.update(sim, playerId, profile, blackboard, rng, outCommands);
 
-        // 4..N: ArmyManager, TacticalLayer, ScoutManager — Phase 3+ deferred.
+        // 6. Eyes and fists.
+        scout.update(sim, profile, threatMap, blackboard, outCommands);
+        army.update(sim, playerId, profile, threatMap, blackboard, outCommands);
     }
 }

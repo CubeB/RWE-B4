@@ -4,6 +4,7 @@
 #include <functional>
 #include <rwe/CroppedViewport.h>
 #include <rwe/MainMenuScene.h>
+#include <rwe/ai/AiPlayerController.h>
 #include <rwe/Mesh.h>
 #include <rwe/camera_util.h>
 #include <rwe/game/GameScene_util.h>
@@ -1363,6 +1364,35 @@ namespace rwe
         ImGui::Begin("Game Debug", &showDebugWindow);
         ImGui::Checkbox("Health bars", &healthBarsVisible);
         ImGui::Checkbox("Fog of war", &fogOfWarEnabled);
+
+        if (!simulation.aiControllers.empty() && ImGui::CollapsingHeader("AI players"))
+        {
+            for (Index i = 0; i < getSize(simulation.players); ++i)
+            {
+                auto it = simulation.aiControllers.find(PlayerId(i));
+                if (it == simulation.aiControllers.end() || !it->second)
+                {
+                    continue;
+                }
+                const auto& ai = *it->second;
+                const auto& bb = ai.getBlackboard();
+                ImGui::Text("Player %d (%s)", static_cast<int>(i), aiDifficultyName(ai.getProfile().difficulty));
+                ImGui::Text("  phase: %s", gamePhaseName(bb.phase));
+                ImGui::Text("  metal %.0f/%.0f%s  energy %.0f/%.0f%s",
+                    bb.currentMetal.value, bb.metalStorage.value, bb.metalStalled ? " (stalled)" : "",
+                    bb.currentEnergy.value, bb.energyStorage.value, bb.energyStalled ? " (stalled)" : "");
+                ImGui::Text("  builders idle %d, factories %d, army %d, scout %s", bb.idleBuilderCount, static_cast<int>(bb.factories.size()), bb.armySize, bb.scoutUnitId ? "yes" : "no");
+                ImGui::Text("  known enemies %d, near base %d, enemy base %s", static_cast<int>(bb.knownEnemies.size()), static_cast<int>(bb.enemiesNearBase.size()), bb.enemyBasePosition ? "known" : "unknown");
+                if (bb.attackTarget)
+                {
+                    ImGui::Text("  attacking %.0f, %.0f", bb.attackTarget->x.value, bb.attackTarget->z.value);
+                }
+                for (const auto& [type, count] : bb.ownedTotalCounts)
+                {
+                    ImGui::Text("    %s x%d", type.c_str(), count);
+                }
+            }
+        }
         if (ImGui::Checkbox("GUI", &guiVisible))
         {
             if (guiVisible)

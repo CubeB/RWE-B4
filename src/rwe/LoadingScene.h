@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <rwe/AudioService.h>
+#include <rwe/ai/AiTuningProfile.h>
 #include <rwe/CursorService.h>
 #include <rwe/LoadingNetworkService.h>
 #include <rwe/SceneContext.h>
@@ -82,6 +83,8 @@ namespace rwe
         std::array<std::optional<PlayerInfo>, 10> players;
         std::string localNetworkPort{"1337"};
         std::optional<std::string> stateLogFile;
+        /** Tuning profile given to every computer player in this game. */
+        AiDifficulty aiDifficulty{AiDifficulty::Standard};
 
         GameParameters(const std::string& mapName, unsigned int schemaIndex);
     };

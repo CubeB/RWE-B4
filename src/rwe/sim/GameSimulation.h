@@ -304,6 +304,9 @@ namespace rwe
 
         Grid<unsigned char> metalGrid;
 
+        /** The metal value of ordinary ground; cells above this are metal patches. */
+        unsigned char surfaceMetal;
+
         Grid<bool> geoGrid;
 
         std::vector<GamePlayerInfo> players;
@@ -406,6 +409,9 @@ namespace rwe
 
         /** Starts a unit's self-destruct countdown, or cancels it if one is already running. */
         void toggleSelfDestruct(UnitId unitId);
+
+        /** Income multiplier for a player: 1 for everyone except cheating computer players. */
+        float resourceBonusFor(PlayerId playerId) const;
 
         /** The vision grid cell containing a world position (may lie outside the grid). */
         Point visionCellAt(const SimVector& position) const;

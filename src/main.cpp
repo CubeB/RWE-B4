@@ -521,6 +521,7 @@ int main(int argc, char* argv[])
                       << "  --help                Show this message\n"
                       << "  --log <path>          Log output file path\n"
                       << "  --state-log <path>    Sim-state log file (desync debugging)\n"
+                      << "  --ai-difficulty <d>   easy | standard | hard | brutal (default: standard)\n"
                       << "  --width <pixels>      Window width (default: 800)\n"
                       << "  --height <pixels>     Window height (default: 600)\n"
                       << "  --fullscreen          Start in fullscreen mode\n"
@@ -553,6 +554,27 @@ int main(int argc, char* argv[])
                     gameParameters->stateLogFile = args.getString("state-log");
                 }
                 gameParameters->localNetworkPort = args.getString("port", "1337");
+                auto difficulty = args.getString("ai-difficulty", "standard");
+                for (auto& c : difficulty)
+                {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                if (difficulty == "easy")
+                {
+                    gameParameters->aiDifficulty = rwe::AiDifficulty::Easy;
+                }
+                else if (difficulty == "hard")
+                {
+                    gameParameters->aiDifficulty = rwe::AiDifficulty::Hard;
+                }
+                else if (difficulty == "brutal")
+                {
+                    gameParameters->aiDifficulty = rwe::AiDifficulty::Brutal;
+                }
+                else
+                {
+                    gameParameters->aiDifficulty = rwe::AiDifficulty::Standard;
+                }
                 unsigned int playerIndex = 0;
                 if (players.size() > 10)
                 {

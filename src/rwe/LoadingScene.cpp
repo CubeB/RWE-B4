@@ -246,10 +246,11 @@ namespace rwe
             }
             PlayerId aiPlayerId(i);
 
-            // For Phase 1 every AI runs the Standard tuning profile.
-            // A future commit will (a) wire in ota.aiProfile lookup and
-            // (b) expose a difficulty selector in the lobby.
-            auto profile = makeDefaultStandardProfile();
+            // Every computer player in a game shares the difficulty chosen for
+            // the game (--ai-difficulty, or rwe.cfg). Per-slot difficulty can
+            // follow once the lobby exposes it.
+            auto profile = makeProfileForDifficulty(gameParameters.aiDifficulty);
+            LOG_INFO << "Player " << i << " is a computer player at " << aiDifficultyName(profile.difficulty) << " difficulty";
 
             // Pull a single value from the sim RNG to seed the AI's
             // sub-RNG. This keeps AI choices reproducible across clients

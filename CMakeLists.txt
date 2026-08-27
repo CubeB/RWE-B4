@@ -172,18 +172,27 @@ set(SOURCE_FILES
     ${IMGUI_SOURCE_FILES}
     src/rwe/AbstractViewport.cpp
     src/rwe/AbstractViewport.h
+    src/rwe/ai/AiBlackboard.cpp
     src/rwe/ai/AiBlackboard.h
     src/rwe/ai/AiIds.h
     src/rwe/ai/AiPlayerController.cpp
     src/rwe/ai/AiPlayerController.h
     src/rwe/ai/AiTuningProfile.cpp
     src/rwe/ai/AiTuningProfile.h
+    src/rwe/ai/ArmyManager.cpp
+    src/rwe/ai/ArmyManager.h
     src/rwe/ai/BuildManager.cpp
     src/rwe/ai/BuildManager.h
     src/rwe/ai/EconomyManager.cpp
     src/rwe/ai/EconomyManager.h
+    src/rwe/ai/PerceptionManager.cpp
+    src/rwe/ai/PerceptionManager.h
+    src/rwe/ai/ScoutManager.cpp
+    src/rwe/ai/ScoutManager.h
     src/rwe/ai/StrategicManager.cpp
     src/rwe/ai/StrategicManager.h
+    src/rwe/ai/ThreatMap.cpp
+    src/rwe/ai/ThreatMap.h
     src/rwe/AudioService.cpp
     src/rwe/AudioService.h
     src/rwe/BoxTreeSplit.cpp
@@ -751,6 +760,7 @@ endif()
 
 set(TEST_FILES
     src/rwe/ai/AiPlayerController.test.cpp
+    src/rwe/ai/AiBehaviour.test.cpp
     src/rwe/BoxTreeSplit.test.cpp
     src/rwe/Viewport.test.cpp
     src/rwe/cob/cob_util.test.cpp

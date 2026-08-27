@@ -119,6 +119,7 @@ namespace rwe
         : terrain(std::move(terrain)),
           occupiedGrid(this->terrain.getHeightMap().getWidth() - 1, this->terrain.getHeightMap().getHeight() - 1, OccupiedCell()),
           metalGrid(this->terrain.getHeightMap().getWidth() - 1, this->terrain.getHeightMap().getHeight() - 1, surfaceMetal),
+          surfaceMetal(surfaceMetal),
           geoGrid(this->terrain.getHeightMap().getWidth() - 1, this->terrain.getHeightMap().getHeight() - 1, false),
           minWindSpeed(minWindSpeed),
           maxWindSpeed(maxWindSpeed),
@@ -434,6 +435,16 @@ namespace rwe
 
         events.push_back(UnitCapturedEvent{targetId, previousOwner, captor});
         return true;
+    }
+
+    float GameSimulation::resourceBonusFor(PlayerId playerId) const
+    {
+        auto it = aiControllers.find(playerId);
+        if (it == aiControllers.end() || !it->second)
+        {
+            return 1.0f;
+        }
+        return it->second->getProfile().resourceCheatMultiplier.value;
     }
 
     void GameSimulation::toggleSelfDestruct(UnitId unitId)
@@ -1915,11 +1926,14 @@ namespace rwe
                 }
             }
 
-            for (auto& player : players)
+            for (Index i = 0; i < getSize(players); ++i)
             {
-                player.metal += player.metalProductionBuffer;
+                auto& player = players[i];
+                // Brutal computer players get a little extra for every unit of income.
+                auto bonus = resourceBonusFor(PlayerId(i));
+                player.metal += Metal(player.metalProductionBuffer.value * bonus);
                 player.metalProductionBuffer = Metal(0);
-                player.energy += player.energyProductionBuffer;
+                player.energy += Energy(player.energyProductionBuffer.value * bonus);
                 player.energyProductionBuffer = Energy(0);
 
                 if (player.metal > Metal(0))
