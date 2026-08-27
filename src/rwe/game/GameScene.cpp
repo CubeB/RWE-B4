@@ -1507,7 +1507,7 @@ namespace rwe
         }
         else if (keysym.key == SDLK_F10)
         {
-            showDebugWindow = true;
+            showDebugWindow = !showDebugWindow;
         }
         else if (keysym.key == SDLK_F1)
         {
@@ -3407,6 +3407,18 @@ namespace rwe
 
     void GameScene::handleEscapeDown()
     {
+        // Escape first closes anything drawn over the game.
+        if (showDebugWindow)
+        {
+            showDebugWindow = false;
+            return;
+        }
+        if (helpVisible)
+        {
+            helpVisible = false;
+            return;
+        }
+
         if (gameOver)
         {
             returnToMainMenu();

@@ -122,7 +122,7 @@ namespace rwe
 
                 if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F11)
                 {
-                    showDebugWindow = true;
+                    showDebugWindow = !showDebugWindow;
                     continue;
                 }
 

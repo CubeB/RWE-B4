@@ -10,22 +10,29 @@ namespace rwe
         ImGui::DestroyContext();
     }
 
+    bool isKeyboardEvent(const SDL_Event& event)
+    {
+        return event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP || event.type == SDL_EVENT_TEXT_INPUT;
+    }
+
+    bool isMouseEvent(const SDL_Event& event)
+    {
+        return event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP || event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL;
+    }
+
     bool wantsEvent(const ImGuiIO& io, const SDL_Event& event)
     {
-        if (io.WantCaptureKeyboard)
+        // Keys are only kept from the game while a text field is being typed
+        // into. Merely having a debug window focused must not swallow Pause,
+        // Escape or the F-keys, or the player cannot get back to the game.
+        if (io.WantTextInput && isKeyboardEvent(event))
         {
-            if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP || event.type == SDL_EVENT_TEXT_INPUT)
-            {
-                return true;
-            }
+            return true;
         }
 
-        if (io.WantCaptureMouse)
+        if (io.WantCaptureMouse && isMouseEvent(event))
         {
-            if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP || event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL)
-            {
-                return true;
-            }
+            return true;
         }
 
         return false;
@@ -33,12 +40,14 @@ namespace rwe
 
     bool ImGuiContext::processEvent(const SDL_Event& event)
     {
-        if (wantsEvent(*io, event))
+        // ImGui always gets to see keyboard and mouse events so its own state
+        // (hover, focus, key chords) stays right; the return value only says
+        // whether the game should ignore the event.
+        if (isKeyboardEvent(event) || isMouseEvent(event))
         {
             ImGui_ImplSDL3_ProcessEvent(&event);
-            return true;
         }
-        return false;
+        return wantsEvent(*io, event);
     }
 
     ImGuiContext::ImGuiContext(const std::string& iniPath, SDL_Window* window, void* glContext) : iniPath(iniPath)
