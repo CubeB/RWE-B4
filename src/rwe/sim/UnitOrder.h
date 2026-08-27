@@ -63,5 +63,15 @@ namespace rwe
         explicit RepairOrder(const UnitId& target) : target(target) {}
     };
 
-    using UnitOrder = std::variant<MoveOrder, AttackOrder, BuildOrder, BuggerOffOrder, CompleteBuildOrder, GuardOrder, ReclaimOrder, RepairOrder>;
+    /**
+     * Move to a point, engaging enemies met on the way. On arrival the order
+     * is re-queued at the back, so a sequence of patrol orders loops forever.
+     */
+    struct PatrolOrder
+    {
+        SimVector destination;
+        explicit PatrolOrder(const SimVector& destination) : destination(destination) {}
+    };
+
+    using UnitOrder = std::variant<MoveOrder, AttackOrder, BuildOrder, BuggerOffOrder, CompleteBuildOrder, GuardOrder, ReclaimOrder, RepairOrder, PatrolOrder>;
 }

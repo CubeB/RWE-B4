@@ -999,6 +999,9 @@ namespace rwe
             },
             [&](const RepairOrder& o) {
                 return handleRepairOrder(unitInfo, o);
+            },
+            [&](const PatrolOrder& o) {
+                return handlePatrolOrder(unitInfo, o);
             });
     }
 
@@ -1293,6 +1296,70 @@ namespace rwe
         }
 
         return repairExistingUnit(unitInfo, repairOrder.target);
+    }
+
+    std::optional<UnitId> UnitBehaviorService::findEnemyInWeaponRange(UnitInfo unitInfo) const
+    {
+        const auto& weapon = unitInfo.state->weapons[0];
+        if (!weapon)
+        {
+            return std::nullopt;
+        }
+        const auto& weaponDefinition = sim->weaponDefinitions.at(weapon->weaponType);
+        auto maxRangeSquared = weaponDefinition.maxRange * weaponDefinition.maxRange;
+
+        std::optional<UnitId> best;
+        std::optional<SimScalar> bestDistanceSquared;
+        for (const auto& [otherId, other] : sim->units)
+        {
+            if (otherId == unitInfo.id || other.isDead() || other.isOwnedBy(unitInfo.state->owner))
+            {
+                continue;
+            }
+
+            auto distanceSquared = unitInfo.state->position.distanceSquared(other.position);
+            if (distanceSquared > maxRangeSquared)
+            {
+                continue;
+            }
+            if (!bestDistanceSquared || distanceSquared < *bestDistanceSquared)
+            {
+                best = otherId;
+                bestDistanceSquared = distanceSquared;
+            }
+        }
+        return best;
+    }
+
+    bool UnitBehaviorService::handlePatrolOrder(UnitInfo unitInfo, const PatrolOrder& patrolOrder)
+    {
+        if (!unitInfo.definition->isMobile)
+        {
+            // Static units cannot patrol; drop the order.
+            return true;
+        }
+
+        // Engage anything hostile in weapon range before carrying on.
+        if (unitInfo.state->fireOrders != UnitFireOrders::HoldFire)
+        {
+            if (auto enemy = findEnemyInWeaponRange(unitInfo))
+            {
+                attackTarget(unitInfo, AttackTarget(*enemy));
+                return false;
+            }
+        }
+
+        if (navigateTo(unitInfo, patrolOrder.destination))
+        {
+            // Reached this waypoint: send it to the back so the route loops.
+            // Copy first: the caller pops the front after we return true.
+            auto destination = patrolOrder.destination;
+            unitInfo.state->orders.push_back(PatrolOrder(destination));
+            sim->events.push_back(UnitArrivedEvent{unitInfo.id});
+            return true;
+        }
+
+        return false;
     }
 
     bool UnitBehaviorService::repairExistingUnit(UnitInfo unitInfo, UnitId targetUnitId)

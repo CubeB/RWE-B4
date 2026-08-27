@@ -19,6 +19,7 @@ namespace rwe
         Guard,
         Repair,
         Reclaim,
+        Patrol,
         Red,
         Green,
         NUM_CURSORS

@@ -61,6 +61,11 @@ namespace rwe
 
         bool handleRepairOrder(UnitInfo unitInfo, const RepairOrder& repairOrder);
 
+        bool handlePatrolOrder(UnitInfo unitInfo, const PatrolOrder& patrolOrder);
+
+        /** Nearest living enemy unit within range of the unit's primary weapon, if any. */
+        std::optional<UnitId> findEnemyInWeaponRange(UnitInfo unitInfo) const;
+
         bool handleBuild(UnitInfo unitInfo, const std::string& unitType);
 
         void clearBuild(UnitInfo unitInfo);

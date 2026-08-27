@@ -675,6 +675,7 @@ namespace rwe
                     }
                     return unitOption->get().position;
                 },
+                [&](const PatrolOrder& o) { return o.destination; },
                 [&](const ReclaimOrder& o) {
                     return match(
                         o.target,
@@ -705,7 +706,8 @@ namespace rwe
                 [&](const CompleteBuildOrder&) { return std::optional<CursorType>(CursorType::Repair); },
                 [&](const GuardOrder&) { return std::optional<CursorType>(CursorType::Guard); },
                 [&](const ReclaimOrder&) { return std::optional<CursorType>(CursorType::Reclaim); },
-                [&](const RepairOrder&) { return std::optional<CursorType>(CursorType::Repair); });
+                [&](const RepairOrder&) { return std::optional<CursorType>(CursorType::Repair); },
+                [&](const PatrolOrder&) { return std::optional<CursorType>(CursorType::Patrol); });
 
             // draw waypoint icons
             if (waypointIcon)
@@ -732,7 +734,8 @@ namespace rwe
                     [&](const CompleteBuildOrder&) { return true; },
                     [&](const GuardOrder&) { return true; },
                     [&](const ReclaimOrder&) { return true; },
-                    [&](const RepairOrder&) { return true; });
+                    [&](const RepairOrder&) { return true; },
+                    [&](const PatrolOrder&) { return true; });
 
                 if (drawLine)
                 {
@@ -1699,6 +1702,30 @@ namespace rwe
                         }
                     }
                 },
+                [&](const PatrolCursorMode&) {
+                    auto coord = getMouseTerrainCoordinate();
+                    if (coord)
+                    {
+                        for (const auto& selectedUnit : selectedUnits)
+                        {
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, PatrolOrder(*coord));
+                            }
+                            else
+                            {
+                                // A fresh patrol loops between the clicked point
+                                // and wherever the unit is standing now.
+                                localPlayerIssueUnitOrder(selectedUnit, PatrolOrder(*coord));
+                                localPlayerEnqueueUnitOrder(selectedUnit, PatrolOrder(getUnit(selectedUnit).position));
+                            }
+                        }
+                        if (!isShiftDown())
+                        {
+                            cursorMode.next(NormalCursorMode());
+                        }
+                    }
+                },
                 [&](const RepairCursorMode&) {
                     for (const auto& selectedUnit : selectedUnits)
                     {
@@ -1862,6 +1889,9 @@ namespace rwe
                     cursorMode.next(NormalCursorMode());
                 },
                 [&](const RepairCursorMode&) {
+                    cursorMode.next(NormalCursorMode());
+                },
+                [&](const PatrolCursorMode&) {
                     cursorMode.next(NormalCursorMode());
                 },
                 [&](const BuildCursorMode&) {
@@ -2330,6 +2360,9 @@ namespace rwe
                 },
                 [&](const RepairCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Repair);
+                },
+                [&](const PatrolCursorMode&) {
+                    sceneContext.cursor->useCursor(CursorType::Patrol);
                 },
                 [&](const BuildCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Normal);
@@ -3547,6 +3580,11 @@ namespace rwe
             p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<RepairCursorMode>(v)); }));
         }
 
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "PATROL"))
+        {
+            p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<PatrolCursorMode>(v)); }));
+        }
+
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "FIREORD"))
         {
             p->get().addSubscription(fireOrders.subscribe([&p = p->get()](const auto& v) {
@@ -3686,6 +3724,22 @@ namespace rwe
             else
             {
                 cursorMode.next(RepairCursorMode());
+            }
+        }
+        else if (matchesWithSidePrefix("PATROL", message))
+        {
+            if (sounds.specialOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.specialOrders);
+            }
+
+            if (std::holds_alternative<PatrolCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(PatrolCursorMode());
             }
         }
         else if (matchesWithSidePrefix("FIREORD", message))

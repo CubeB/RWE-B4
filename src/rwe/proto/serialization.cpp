@@ -77,6 +77,13 @@ namespace rwe
             out.set_unit(o.target.value);
         }
 
+        void operator()(const PatrolOrder& o)
+        {
+            auto& out = *cmd->mutable_patrol();
+            auto& dest = *out.mutable_destination();
+            serializeVector(o.destination, dest);
+        }
+
         void operator()(const ReclaimOrder& o)
         {
             auto& out = *cmd->mutable_reclaim();
@@ -367,6 +374,12 @@ namespace rwe
         {
             const auto& repair = cmd.repair();
             return RepairOrder(UnitId(repair.unit()));
+        }
+
+        if (cmd.has_patrol())
+        {
+            const auto& patrol = cmd.patrol();
+            return PatrolOrder(deserializeVector(patrol.destination()));
         }
 
         if (cmd.has_reclaim())
