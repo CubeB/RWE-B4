@@ -27,7 +27,7 @@ Goal: a fork with green CI, a reproducible local build, and a tagged pre-release
 - [x] Build `revival` locally (MinGW64 Debug) and run `rwe_test` — 133 test cases / 1,487 assertions pass (2026‑08‑27).
 - [x] Reclaim merge verified: compiles and tests pass alongside `feats/next`.
 - [x] Fix Windows checkout: `libs/asio/asio/include` is a git symlink that materialises as a text file without `core.symlinks`; CMake now uses the real `libs/asio/include`.
-- [ ] Smoke-test a skirmish with real TA data (copy `.hpi/.ufo/.ccx/.gp3` into `%AppData%\RWE\Data`, run `build/rwe.exe`).
+- [x] Smoke-test with real TA data (GOG archives at `D:\RWE-Data`, junctioned to `%AppData%\RWE\Data`): main menu loads; `--map "Coast To Coast"` skirmish runs with Human + Computer players, 0 warnings. The Computer player logs occasional `Blocked waiting for player commands` in the Debug build (AI tick hitch; sim continues) — see Phase 2.
 - [ ] Push `revival` to a private GitHub repo (or fork) so the CI matrix runs; confirm it is green.
 - [ ] Tag `v0.2.0-pre1` and let Kevin's release job produce Windows zip/installer + Linux AppImage.
 - [ ] Update `README.md` download section (AppVeyor link is dead-end) and `CLAUDE.md` (says C++17; it is C++20).
@@ -56,7 +56,7 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 - [ ] Focused-control highlight (#5), list-box selected-item brightness (#6).
 
 **Game flow**
-- [ ] Win/loss detection (commander death, all units dead), end-of-game screen, return to menu.
+- [ ] End-of-game flow: `computeWinStatus()` already detects Won/Draw, but the app just exits 5 s later. Needs a result screen (score, kills, time) and return to the main menu; a one-player skirmish currently "wins" instantly.
 - [ ] Line of sight / fog of war / radar & jammers — FBI fields are parsed, sim has no visibility model. This is the largest single gap between "demo" and "game".
 - [ ] Music playback (`AudioService` has no music support) and sound completeness (unit sound types are defined, many unwired).
 
@@ -64,7 +64,8 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 
 Follows `docs/ai-architecture-proposal.md` (tgunnoe). All AI code stays in `sim/` and emits ordinary `PlayerCommand`s, so multiplayer and replays stay deterministic.
 
-- [ ] Phase 1 (merged): commander builds fixed opening — verify it runs on real maps.
+- [x] Phase 1 (merged): commander builds fixed opening — runs on Coast To Coast.
+- [ ] Profile the AI tick: a Computer player causes intermittent `Blocked waiting for player commands` in Debug builds (sim recovers, but it is a frame hitch). Check with a Release build first.
 - [ ] Phase 2: threat map, scouting, expansion, TDF-based tuning profiles.
 - [ ] Phase 3: platoons, attack triggers, Easy/Medium/Hard/Brutal tiers.
 - [ ] Phase 4: debug overlays, logging, tuning; expose AI difficulty in the skirmish setup screen.
