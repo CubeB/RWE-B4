@@ -1,5 +1,9 @@
 #include "AiPlayerController.h"
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/UnitOrder.h>
+#include <rwe/sim/UnitState.h>
+#include <rwe/util/SimpleLogger.h>
+#include <rwe/util/match.h>
 
 namespace rwe
 {
@@ -30,7 +34,49 @@ namespace rwe
         }
 
         // 4. Which phase of the game are we in?
+        auto previousPhase = blackboard.phase;
         strategic.update(profile, blackboard);
+        if (blackboard.phase != previousPhase)
+        {
+            LOG_INFO << "AI player " << playerId.value << " (" << profile.name << "): " << gamePhaseName(previousPhase) << " -> " << gamePhaseName(blackboard.phase)
+                     << " at tick " << sim.gameTime.value << ", army " << blackboard.armySize << ", known enemies " << blackboard.knownEnemies.size();
+        }
+
+        // Periodic status line for play-test logs.
+        if (sim.gameTime.value % (30u * SimTicksPerSecond) == 0)
+        {
+            std::string counts;
+            for (const auto& [type, count] : blackboard.ownedTotalCounts)
+            {
+                counts += " " + type + "x" + std::to_string(count);
+            }
+            std::string commanderDoing = "no commander";
+            if (blackboard.commanderUnitId)
+            {
+                const auto& commander = sim.getUnitState(*blackboard.commanderUnitId);
+                commanderDoing = "commander at " + std::to_string(static_cast<int>(commander.position.x.value)) + "," + std::to_string(static_cast<int>(commander.position.z.value));
+                if (commander.orders.empty())
+                {
+                    commanderDoing += " idle";
+                }
+                else
+                {
+                    commanderDoing += match(
+                        commander.orders.front(),
+                        [](const BuildOrder& o) { return " building " + o.unitType + " at " + std::to_string(static_cast<int>(o.position.x.value)) + "," + std::to_string(static_cast<int>(o.position.z.value)); },
+                        [](const MoveOrder&) { return std::string(" moving"); },
+                        [](const GuardOrder&) { return std::string(" guarding"); },
+                        [](const auto&) { return std::string(" on another order"); });
+                    commanderDoing += std::holds_alternative<NavigationStateMoving>(commander.navigationState.state) ? " (walking)" : " (not walking)";
+                    commanderDoing += commander.buildOrderUnitId ? " nanoframe placed" : " no nanoframe";
+                }
+            }
+            LOG_INFO << "AI player " << playerId.value << " status: phase " << gamePhaseName(blackboard.phase)
+                     << ", metal " << blackboard.currentMetal.value << (blackboard.metalStalled ? "(stalled)" : "")
+                     << ", energy " << blackboard.currentEnergy.value << (blackboard.energyStalled ? "(stalled)" : "")
+                     << ", idle builders " << blackboard.idleBuilderCount << ", army " << blackboard.armySize
+                     << ", known enemies " << blackboard.knownEnemies.size() << ", units:" << counts << "; " << commanderDoing;
+        }
 
         // 5. Economy and production.
         build.update(sim, playerId, profile, blackboard, rng, outCommands);

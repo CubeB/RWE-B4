@@ -543,6 +543,14 @@ namespace rwe
                 return std::make_optional(pos);
             },
             [&](const DiscreteRect& rect) {
+                // As for points: an unreachable footprint is "reached" at the closest point we could get to.
+                if (auto moving = std::get_if<NavigationStateMoving>(&unit.navigationState.state); moving != nullptr && moving->reachableDestination)
+                {
+                    if (auto movingGoal = std::get_if<DiscreteRect>(&moving->movementGoal); movingGoal != nullptr && *movingGoal == rect)
+                    {
+                        return std::make_optional(*moving->reachableDestination);
+                    }
+                }
                 auto footprint = sim.getFootprintXZ(unitDefinition.movementCollisionInfo);
                 return std::make_optional(findClosestPointToFootprintXZForUnit(terrain, rect, unit.position, footprint.first, footprint.second));
             },

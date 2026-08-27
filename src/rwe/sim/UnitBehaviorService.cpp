@@ -1826,8 +1826,13 @@ namespace rwe
         auto footprintRect = sim->computeFootprintRegion(position, targetUnitDefinition.movementCollisionInfo);
         if (navigateTo(unitInfo, footprintRect))
         {
-            // TODO: add an additional distance check here -- we may have done the best
-            // we can to move but been prevented by some obstacle, so we are too far away still.
+            // If we only got "as close as we could" because the site cannot be
+            // reached, give the order up rather than lathing across a wall.
+            if (auto moving = std::get_if<NavigationStateMoving>(&unitInfo.state->navigationState.state); moving != nullptr && moving->reachableDestination)
+            {
+                return UnitCreationStatusFailed();
+            }
+
             changeState(*unitInfo.state, UnitBehaviorStateCreatingUnit{unitType, unitInfo.state->owner, position});
             sim->unitCreationRequests.push_back(unitInfo.id);
         }

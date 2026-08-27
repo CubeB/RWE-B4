@@ -3,6 +3,7 @@
 #include <rwe/pathfinding/UnitPerimeterPathFinder.h>
 #include <rwe/pathfinding/pathfinding_utils.h>
 #include <rwe/util/Index.h>
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -74,10 +75,18 @@ namespace rwe
 
         assert(path.path.size() >= 1);
 
+        LOG_DEBUG << "Path for unit " << unitId.value << " from " << start.x << "," << start.y << " to rect " << goal.x << "," << goal.y << " " << goal.width << "x" << goal.height
+                  << ": " << (path.type == AStarPathType::Complete ? "complete" : (path.exhausted ? "unreachable" : "partial")) << ", " << path.path.size() << " steps";
+
+        // An exhausted search means no cell next to the footprint can be
+        // reached at all (walled in, or the site is on an island).
+        bool unreachable = path.type == AStarPathType::Partial && path.exhausted;
+
         if (path.path.size() == 1)
         {
-            // The path is trivial, we are already at the goal.
-            return UnitPath{std::vector<SimVector>{unit.position}};
+            // The path is trivial, we are already at the goal
+            // (or as close to it as we can get).
+            return UnitPath{std::vector<SimVector>{unit.position}, unreachable};
         }
 
         auto simplifiedPath = runSimplifyPath(path.path);
@@ -88,7 +97,7 @@ namespace rwe
             waypoints.push_back(getWorldCenter(simulation, DiscreteRect(it->x, it->y, start.width, start.height)));
         }
 
-        return UnitPath{std::move(waypoints)};
+        return UnitPath{std::move(waypoints), unreachable};
     }
 
     UnitPath PathFindingService::findPath(const GameSimulation& simulation, UnitId unitId, const SimVector& destination)

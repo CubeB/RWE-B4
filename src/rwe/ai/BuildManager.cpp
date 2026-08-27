@@ -1,6 +1,7 @@
 #include "BuildManager.h"
 #include <algorithm>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/util/SimpleLogger.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
@@ -83,9 +84,10 @@ namespace rwe
         const auto& def = defIt->second;
         const auto mc = sim.getAdHocMovementClass(def.movementCollisionInfo);
 
-        // Leave a lane between buildings so units can still get out.
+        // Lay buildings out on a grid with a two-tile lane between them, wide
+        // enough for a commander to walk through, so nothing gets walled in.
         auto footprint = sim.getFootprintXZ(def.movementCollisionInfo);
-        auto spacingTiles = static_cast<float>(std::max(footprint.first, footprint.second) + 1);
+        auto spacingTiles = static_cast<float>(std::max(footprint.first, footprint.second) + 2);
         const SimScalar spacing = SimScalar(spacingTiles * MapTerrain::HeightTileWidthInWorldUnits.value);
         const SimScalar radius = profile.maxMexSearchRadius;
         const int ringCount = std::max(1, static_cast<int>(radius.value / spacing.value));
@@ -356,7 +358,12 @@ namespace rwe
 
         if (site)
         {
+            LOG_DEBUG << "AI build: unit " << builderId.value << " to build " << *next << " at " << site->x.value << "," << site->z.value;
             outCommands.push_back(buildCommand(builderId, *next, *site));
+        }
+        else
+        {
+            LOG_DEBUG << "AI build: no site found for " << *next << " near " << builder.position.x.value << "," << builder.position.z.value;
         }
     }
 }

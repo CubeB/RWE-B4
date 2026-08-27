@@ -56,7 +56,11 @@ namespace rwe
             {
                 bb.commanderUnitId = unitId;
                 bb.commanderPosition = unit.position;
-                bb.baseAnchor = unit.position;
+                if (!bb.homePosition)
+                {
+                    bb.homePosition = unit.position;
+                }
+                bb.baseAnchor = bb.homePosition;
             }
 
             if (def.builder && !def.isMobile && !def.commander)

@@ -60,6 +60,8 @@ namespace rwe
         int idleBuilderCount{0};
         std::optional<UnitId> commanderUnitId;
         std::optional<SimVector> commanderPosition;
+        /** Where the commander first stood. Buildings are laid out around this, not around the wandering commander. */
+        std::optional<SimVector> homePosition;
         std::optional<SimVector> baseAnchor;
         /** Complete, idle builders including the commander, in id order. */
         std::vector<UnitId> idleBuilders;

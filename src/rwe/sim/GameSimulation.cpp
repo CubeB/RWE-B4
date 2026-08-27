@@ -5,6 +5,7 @@
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService.h>
+#include <rwe/util/SimpleLogger.h>
 #include <rwe/sim/cob.h>
 #include <rwe/sim/movement.h>
 #include <rwe/sim/util.h>
@@ -2132,6 +2133,7 @@ namespace rwe
                 auto newUnitId = trySpawnUnit(s->unitType, s->owner, s->position, std::nullopt);
                 if (!newUnitId)
                 {
+                    LOG_INFO << "Could not place " << s->unitType << " at " << s->position.x.value << "," << s->position.z.value << " for player " << s->owner.value << "; the build order is dropped";
                     s->status = UnitCreationStatusFailed();
                     continue;
                 }

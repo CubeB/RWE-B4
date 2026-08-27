@@ -243,6 +243,54 @@ namespace rwe
         REQUIRE(cell.x > 2);
     }
 
+    TEST_CASE("a build order for a site the builder cannot reach is dropped", "[pathing]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto wall = addWallDef(sim);
+
+        // A builder tank, walled in on all sides.
+        sim.unitDefinitions["tank"] = makeTankDef(10u);
+        auto tankId = addTank(sim, player, 8, 8, script);
+        sim.unitDefinitions["tank"].builder = true;
+        sim.unitDefinitions["tank"].buildDistance = 64_ss;
+        for (int y = 6; y <= 10; ++y)
+        {
+            for (int x = 6; x <= 10; ++x)
+            {
+                if (std::max(std::abs(x - 8), std::abs(y - 8)) == 2)
+                {
+                    placeWall(sim, wall, x, y);
+                }
+            }
+        }
+
+        auto solar = makeTankDef(10u);
+        solar.isMobile = false;
+        solar.canMove = false;
+        solar.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+        sim.unitDefinitions["solar"] = solar;
+
+        sim.getUnitState(tankId).orders.push_back(BuildOrder("solar", cellCenter(sim, 14, 8)));
+
+        for (int i = 0; i < 120 && !sim.getUnitState(tankId).orders.empty(); ++i)
+        {
+            sim.tick();
+        }
+
+        REQUIRE(sim.getUnitState(tankId).orders.empty());
+        REQUIRE(sim.units.tryGet(tankId).has_value());
+        // Nothing was lathed into existence across the wall.
+        int units = 0;
+        for (const auto& [_, u] : sim.units)
+        {
+            (void)u;
+            ++units;
+        }
+        REQUIRE(units == 1);
+    }
+
     TEST_CASE("computeSlopeSpeedFactor", "[pathing]")
     {
         auto script = makeEmptyCobScript();
