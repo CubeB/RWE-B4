@@ -996,6 +996,9 @@ namespace rwe
             },
             [&](const ReclaimOrder& o) {
                 return handleReclaimOrder(unitInfo, o);
+            },
+            [&](const RepairOrder& o) {
+                return handleRepairOrder(unitInfo, o);
             });
     }
 
@@ -1259,6 +1262,57 @@ namespace rwe
         }
 
         return reclaimTarget(unitInfo, reclaimOrder.target);
+    }
+
+    bool UnitBehaviorService::handleRepairOrder(UnitInfo unitInfo, const RepairOrder& repairOrder)
+    {
+        if (repairOrder.target == unitInfo.id)
+        {
+            // A unit cannot repair itself.
+            return true;
+        }
+
+        auto targetRef = sim->tryGetUnitState(repairOrder.target);
+        if (!targetRef || targetRef->get().isDead())
+        {
+            return true;
+        }
+        const auto& target = targetRef->get();
+        const auto& targetDefinition = sim->unitDefinitions.at(target.unitType);
+
+        if (target.isBeingBuilt(targetDefinition))
+        {
+            // Repairing an unfinished unit means finishing its construction.
+            return buildExistingUnit(unitInfo, repairOrder.target);
+        }
+
+        if (target.hitPoints >= targetDefinition.maxHitPoints)
+        {
+            // Nothing to repair.
+            return true;
+        }
+
+        return repairExistingUnit(unitInfo, repairOrder.target);
+    }
+
+    bool UnitBehaviorService::repairExistingUnit(UnitInfo unitInfo, UnitId targetUnitId)
+    {
+        auto targetUnitRef = sim->tryGetUnitState(targetUnitId);
+        if (!targetUnitRef || targetUnitRef->get().isDead())
+        {
+            changeState(*unitInfo.state, UnitBehaviorStateIdle());
+            return true;
+        }
+        auto& targetUnit = targetUnitRef->get();
+
+        // Same reach as building; see the FIXME in buildExistingUnit.
+        if (unitInfo.state->position.distanceSquared(targetUnit.position) > (unitInfo.definition->buildDistance * unitInfo.definition->buildDistance))
+        {
+            navigateTo(unitInfo, targetUnitId);
+            return false;
+        }
+
+        return deployRepairArm(unitInfo, targetUnitId);
     }
 
     bool UnitBehaviorService::handleBuild(UnitInfo unitInfo, const std::string& unitType)
@@ -1683,7 +1737,7 @@ namespace rwe
     {
         auto targetUnitRef = sim->tryGetUnitState(targetUnitId);
 
-        if (!targetUnitRef || targetUnitRef->get().isDead() || !targetUnitRef->get().isBeingBuilt(*unitInfo.definition))
+        if (!targetUnitRef || targetUnitRef->get().isDead() || !targetUnitRef->get().isBeingBuilt(sim->unitDefinitions.at(targetUnitRef->get().unitType)))
         {
             changeState(*unitInfo.state, UnitBehaviorStateIdle());
             return true;
@@ -1860,6 +1914,62 @@ namespace rwe
                 auto pitch = headingAndPitch.second;
 
                 changeState(*unitInfo.state, UnitBehaviorStateReclaiming{target, std::nullopt});
+                unitInfo.state->cobEnvironment->createThread("StartBuilding", {toCobAngle(heading).value, toCobAngle(pitch).value});
+                return false;
+            });
+    }
+
+    bool UnitBehaviorService::deployRepairArm(UnitInfo unitInfo, UnitId targetUnitId)
+    {
+        auto targetUnitRef = sim->tryGetUnitState(targetUnitId);
+        if (!targetUnitRef || targetUnitRef->get().isDead())
+        {
+            changeState(*unitInfo.state, UnitBehaviorStateIdle());
+            return true;
+        }
+        auto& targetUnit = targetUnitRef->get();
+        const auto& targetUnitDefinition = sim->unitDefinitions.at(targetUnit.unitType);
+
+        // Repairing reuses the building state so the nanolathe effect and
+        // the StartBuilding/StopBuilding script hooks behave the same way.
+        return match(
+            unitInfo.state->behaviourState,
+            [&](UnitBehaviorStateBuilding& buildingState) {
+                if (targetUnitId != buildingState.targetUnit)
+                {
+                    changeState(*unitInfo.state, UnitBehaviorStateIdle());
+                    return repairExistingUnit(unitInfo, targetUnitId);
+                }
+
+                if (!unitInfo.state->inBuildStance)
+                {
+                    // We are not in the correct stance to repair the unit yet, wait.
+                    return false;
+                }
+
+                buildingState.nanoParticleOrigin = getNanoPoint(unitInfo.id);
+
+                // Repair at the same rate the unit would be built: full health
+                // takes buildTime worth of worker time. Repairing costs nothing,
+                // as in TA.
+                auto buildTime = std::max(1u, targetUnitDefinition.buildTime);
+                auto healthPerTick = std::max(1u, (targetUnitDefinition.maxHitPoints * unitInfo.definition->workerTimePerTick) / buildTime);
+                targetUnit.hitPoints = std::min(targetUnitDefinition.maxHitPoints, targetUnit.hitPoints + healthPerTick);
+
+                if (targetUnit.hitPoints >= targetUnitDefinition.maxHitPoints)
+                {
+                    changeState(*unitInfo.state, UnitBehaviorStateIdle());
+                    return true;
+                }
+                return false;
+            },
+            [&](const auto&) {
+                auto nanoFromPosition = getNanoPoint(unitInfo.id);
+                auto headingAndPitch = computeLineOfSightHeadingAndPitch(unitInfo.state->rotation, nanoFromPosition, targetUnit.position);
+                auto heading = headingAndPitch.first;
+                auto pitch = headingAndPitch.second;
+
+                changeState(*unitInfo.state, UnitBehaviorStateBuilding{targetUnitId, std::nullopt});
                 unitInfo.state->cobEnvironment->createThread("StartBuilding", {toCobAngle(heading).value, toCobAngle(pitch).value});
                 return false;
             });

@@ -58,6 +58,11 @@ message ReclaimOrder
     }
 }
 
+message RepairOrder
+{
+    required int32 unit = 1;
+}
+
 message PlayerUnitCommand
 {
     message IssueOrder
@@ -77,6 +82,7 @@ message PlayerUnitCommand
             CompleteBuildOrder complete_build = 5;
             GuardOrder guard = 6;
             ReclaimOrder reclaim = 7;
+            RepairOrder repair = 8;
         }
     }
 

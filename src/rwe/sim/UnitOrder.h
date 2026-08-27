@@ -56,5 +56,12 @@ namespace rwe
         explicit ReclaimOrder(const FeatureId& target) : target(target) {}
     };
 
-    using UnitOrder = std::variant<MoveOrder, AttackOrder, BuildOrder, BuggerOffOrder, CompleteBuildOrder, GuardOrder, ReclaimOrder>;
+    /** Restore a damaged unit to full health, or finish it if it is still under construction. */
+    struct RepairOrder
+    {
+        UnitId target;
+        explicit RepairOrder(const UnitId& target) : target(target) {}
+    };
+
+    using UnitOrder = std::variant<MoveOrder, AttackOrder, BuildOrder, BuggerOffOrder, CompleteBuildOrder, GuardOrder, ReclaimOrder, RepairOrder>;
 }

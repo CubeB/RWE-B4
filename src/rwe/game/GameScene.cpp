@@ -105,6 +105,13 @@ namespace rwe
         return unit.isBeingBuilt(unitDefinition);
     }
 
+    bool unitIsDamaged(const GameSimulation& sim, UnitId unitId)
+    {
+        const auto& unit = sim.getUnitState(unitId);
+        const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
+        return unit.isAlive() && !unit.isBeingBuilt(unitDefinition) && unit.hitPoints < unitDefinition.maxHitPoints;
+    }
+
     bool unitIsSelectableBy(const GameSimulation& sim, UnitId unitId, PlayerId playerId)
     {
         const auto& unit = sim.getUnitState(unitId);
@@ -660,6 +667,14 @@ namespace rwe
                     }
                     return unitOption->get().position;
                 },
+                [&](const RepairOrder& o) {
+                    auto unitOption = tryGetUnit(o.target);
+                    if (!unitOption)
+                    {
+                        return pos;
+                    }
+                    return unitOption->get().position;
+                },
                 [&](const ReclaimOrder& o) {
                     return match(
                         o.target,
@@ -689,7 +704,8 @@ namespace rwe
                 [&](const BuggerOffOrder&) { return std::optional<CursorType>(); },
                 [&](const CompleteBuildOrder&) { return std::optional<CursorType>(CursorType::Repair); },
                 [&](const GuardOrder&) { return std::optional<CursorType>(CursorType::Guard); },
-                [&](const ReclaimOrder&) { return std::optional<CursorType>(CursorType::Reclaim); });
+                [&](const ReclaimOrder&) { return std::optional<CursorType>(CursorType::Reclaim); },
+                [&](const RepairOrder&) { return std::optional<CursorType>(CursorType::Repair); });
 
             // draw waypoint icons
             if (waypointIcon)
@@ -715,7 +731,8 @@ namespace rwe
                     [&](const BuggerOffOrder&) { return false; },
                     [&](const CompleteBuildOrder&) { return true; },
                     [&](const GuardOrder&) { return true; },
-                    [&](const ReclaimOrder&) { return true; });
+                    [&](const ReclaimOrder&) { return true; },
+                    [&](const RepairOrder&) { return true; });
 
                 if (drawLine)
                 {
@@ -1682,6 +1699,23 @@ namespace rwe
                         }
                     }
                 },
+                [&](const RepairCursorMode&) {
+                    for (const auto& selectedUnit : selectedUnits)
+                    {
+                        if (hoveredUnit && isFriendly(*hoveredUnit))
+                        {
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, RepairOrder(*hoveredUnit));
+                            }
+                            else
+                            {
+                                localPlayerIssueUnitOrder(selectedUnit, RepairOrder(*hoveredUnit));
+                                cursorMode.next(NormalCursorMode());
+                            }
+                        }
+                    }
+                },
                 [&](const ReclaimCursorMode&) {
                     for (const auto& selectedUnit : selectedUnits)
                     {
@@ -1827,6 +1861,9 @@ namespace rwe
                 [&](const ReclaimCursorMode&) {
                     cursorMode.next(NormalCursorMode());
                 },
+                [&](const RepairCursorMode&) {
+                    cursorMode.next(NormalCursorMode());
+                },
                 [&](const BuildCursorMode&) {
                     cursorMode.next(NormalCursorMode());
                 },
@@ -1969,6 +2006,24 @@ namespace rwe
                                                 else
                                                 {
                                                     localPlayerIssueUnitOrder(selectedUnit, CompleteBuildOrder(*hoveredUnit));
+                                                }
+                                            }
+                                        }
+                                        else if (unitIsDamaged(simulation, *hoveredUnit))
+                                        {
+                                            for (const auto& selectedUnit : selectedUnits)
+                                            {
+                                                if (!unitIsBuilder(simulation, selectedUnit))
+                                                {
+                                                    continue;
+                                                }
+                                                if (isShiftDown())
+                                                {
+                                                    localPlayerEnqueueUnitOrder(selectedUnit, RepairOrder(*hoveredUnit));
+                                                }
+                                                else
+                                                {
+                                                    localPlayerIssueUnitOrder(selectedUnit, RepairOrder(*hoveredUnit));
                                                 }
                                             }
                                         }
@@ -2273,6 +2328,9 @@ namespace rwe
                 [&](const ReclaimCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Reclaim);
                 },
+                [&](const RepairCursorMode&) {
+                    sceneContext.cursor->useCursor(CursorType::Repair);
+                },
                 [&](const BuildCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Normal);
                 },
@@ -2289,7 +2347,7 @@ namespace rwe
                             sceneContext.cursor->useCursor(CursorType::Attack);
                         }
                         else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id); })
-                            && hoveredUnit && unitIsBeingBuilt(simulation, *hoveredUnit))
+                            && hoveredUnit && isFriendly(*hoveredUnit) && (unitIsBeingBuilt(simulation, *hoveredUnit) || unitIsDamaged(simulation, *hoveredUnit)))
                         {
                             sceneContext.cursor->useCursor(CursorType::Repair);
                         }
@@ -3484,6 +3542,11 @@ namespace rwe
             p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<GuardCursorMode>(v)); }));
         }
 
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "REPAIR"))
+        {
+            p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<RepairCursorMode>(v)); }));
+        }
+
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "FIREORD"))
         {
             p->get().addSubscription(fireOrders.subscribe([&p = p->get()](const auto& v) {
@@ -3607,6 +3670,22 @@ namespace rwe
             else
             {
                 cursorMode.next(ReclaimCursorMode());
+            }
+        }
+        else if (matchesWithSidePrefix("REPAIR", message))
+        {
+            if (sounds.specialOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.specialOrders);
+            }
+
+            if (std::holds_alternative<RepairCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(RepairCursorMode());
             }
         }
         else if (matchesWithSidePrefix("FIREORD", message))

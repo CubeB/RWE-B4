@@ -59,6 +59,8 @@ namespace rwe
 
         bool handleReclaimOrder(UnitInfo unitInfo, const ReclaimOrder& reclaimOrder);
 
+        bool handleRepairOrder(UnitInfo unitInfo, const RepairOrder& repairOrder);
+
         bool handleBuild(UnitInfo unitInfo, const std::string& unitType);
 
         void clearBuild(UnitInfo unitInfo);
@@ -138,6 +140,10 @@ namespace rwe
         bool deployBuildArm(UnitInfo unitInfo, UnitId targetUnitId);
 
         bool deployReclaimArm(UnitInfo unitInfo, std::variant<UnitId, FeatureId> target);
+
+        bool repairExistingUnit(UnitInfo unitInfo, UnitId targetUnitId);
+
+        bool deployRepairArm(UnitInfo unitInfo, UnitId targetUnitId);
 
         bool climbToCruiseAltitude(UnitInfo unitInfo);
 
