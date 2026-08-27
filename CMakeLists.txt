@@ -637,6 +637,14 @@ target_include_directories(librwe PUBLIC ${ZLIB_INCLUDE_DIRS})
 
 target_copy_file(librwe ${PNG_DLL})
 
+if(MINGW)
+    # The GCC runtime is only on PATH inside the MSYS2 shell. Ship it next to
+    # the executables so a build (and the installer) runs from anywhere.
+    target_copy_dll(librwe libgcc_s_seh-1.dll)
+    target_copy_dll(librwe libstdc++-6.dll)
+    target_copy_dll(librwe libwinpthread-1.dll)
+endif()
+
 
 if(TARGET protobuf::libprotobuf)
     message(STATUS "Using protobuf::libprotobuf imported target")
