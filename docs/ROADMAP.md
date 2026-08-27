@@ -41,7 +41,7 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 
 **Orders & unit behaviour**
 - [x] Reclaim features: the merged branch only ran a timer. Now work = metal + energy at `workerTimePerTick` per tick, resources credited progressively, feature deleted and `featureReclamate` spawned on completion; progress lives on the feature so several builders can share it. Tested at sim level and through `tick()`. Closes the "corpses clog the battlefield" note from the 2022 blog post.
-- [ ] Reclaim units (own units and enemy units in range): orders are currently dropped as a no-op. Needs progress on `UnitState` (hash + dump), payout from `buildCostMetal/Energy`, and death without a corpse.
+- [x] Reclaim units (own or enemy, in range): work = `buildTime`, payout = build cost × fraction actually built, progress on `UnitState` (hashed + dumped), dies without wreck or explosion (`DeathType::Deleted`). Tick-driven test covers a builder reclaiming an enemy solar.
 - [ ] Reclaim polish: play the feature's `seqNameReclamate` animation and reclaim sound; show progress in the unit info panel; auto-reclaim (`autoreclaimable`) when a builder is idle with the area-reclaim command.
 - [ ] Repair, Capture, Patrol, Resurrect (in that order — repair reuses nanolathe/build code; patrol reuses waypoints).
 - [ ] Transports (load/unload, `TransportCapacity`, `TransportSize`) — currently zero references in the sim.
