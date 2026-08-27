@@ -68,6 +68,11 @@ message PatrolOrder
     required SimVector destination = 1;
 }
 
+message CaptureOrder
+{
+    required int32 unit = 1;
+}
+
 message PlayerUnitCommand
 {
     message IssueOrder
@@ -89,6 +94,7 @@ message PlayerUnitCommand
             ReclaimOrder reclaim = 7;
             RepairOrder repair = 8;
             PatrolOrder patrol = 9;
+            CaptureOrder capture = 10;
         }
     }
 

@@ -362,6 +362,47 @@ namespace rwe
         return true;
     }
 
+    bool GameSimulation::captureUnit(UnitId targetId, PlayerId captor, unsigned int workAmount)
+    {
+        auto unitRef = tryGetUnitState(targetId);
+        if (!unitRef || unitRef->get().isDead())
+        {
+            return true;
+        }
+        auto& unit = unitRef->get();
+        if (unit.isOwnedBy(captor))
+        {
+            return true;
+        }
+        if (workAmount == 0)
+        {
+            return false;
+        }
+
+        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        auto totalWork = std::max(1u, unitDefinition.buildTime);
+        unit.captureProgress = std::min(totalWork, unit.captureProgress + workAmount);
+        if (unit.captureProgress < totalWork)
+        {
+            return false;
+        }
+
+        auto previousOwner = unit.owner;
+        unit.owner = captor;
+        unit.captureProgress = 0;
+
+        // The unit changes hands with a clean slate: whatever it was doing
+        // for its old owner stops, and it must not keep shooting at its new
+        // friends.
+        unit.orders.clear();
+        unit.buildOrderUnitId = std::nullopt;
+        unit.behaviourState = UnitBehaviorStateIdle();
+        unit.clearWeaponTargets();
+
+        events.push_back(UnitCapturedEvent{targetId, previousOwner, captor});
+        return true;
+    }
+
     PlayerId GameSimulation::addPlayer(const GamePlayerInfo& info)
     {
         PlayerId id(players.size());

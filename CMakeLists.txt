@@ -786,6 +786,7 @@ set(TEST_FILES
     src/rwe/sim/reclaim.test.cpp
     src/rwe/sim/repair.test.cpp
     src/rwe/sim/patrol.test.cpp
+    src/rwe/sim/capture.test.cpp
     src/rwe/sim/UnitState_util.test.cpp
     src/rwe/sim/util.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp

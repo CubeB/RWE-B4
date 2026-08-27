@@ -93,6 +93,7 @@ namespace rwe
             u.kills,
             u.buildTimeCompleted,
             u.reclaimProgress,
+            u.captureProgress,
             u.activated,
             u.isSufficientlyPowered,
             u.energyProductionBuffer,

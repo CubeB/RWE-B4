@@ -676,6 +676,14 @@ namespace rwe
                     return unitOption->get().position;
                 },
                 [&](const PatrolOrder& o) { return o.destination; },
+                [&](const CaptureOrder& o) {
+                    auto unitOption = tryGetUnit(o.target);
+                    if (!unitOption)
+                    {
+                        return pos;
+                    }
+                    return unitOption->get().position;
+                },
                 [&](const ReclaimOrder& o) {
                     return match(
                         o.target,
@@ -707,7 +715,8 @@ namespace rwe
                 [&](const GuardOrder&) { return std::optional<CursorType>(CursorType::Guard); },
                 [&](const ReclaimOrder&) { return std::optional<CursorType>(CursorType::Reclaim); },
                 [&](const RepairOrder&) { return std::optional<CursorType>(CursorType::Repair); },
-                [&](const PatrolOrder&) { return std::optional<CursorType>(CursorType::Patrol); });
+                [&](const PatrolOrder&) { return std::optional<CursorType>(CursorType::Patrol); },
+                [&](const CaptureOrder&) { return std::optional<CursorType>(CursorType::Capture); });
 
             // draw waypoint icons
             if (waypointIcon)
@@ -735,7 +744,8 @@ namespace rwe
                     [&](const GuardOrder&) { return true; },
                     [&](const ReclaimOrder&) { return true; },
                     [&](const RepairOrder&) { return true; },
-                    [&](const PatrolOrder&) { return true; });
+                    [&](const PatrolOrder&) { return true; },
+                    [&](const CaptureOrder&) { return true; });
 
                 if (drawLine)
                 {
@@ -1702,6 +1712,23 @@ namespace rwe
                         }
                     }
                 },
+                [&](const CaptureCursorMode&) {
+                    for (const auto& selectedUnit : selectedUnits)
+                    {
+                        if (hoveredUnit && isEnemy(*hoveredUnit))
+                        {
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, CaptureOrder(*hoveredUnit));
+                            }
+                            else
+                            {
+                                localPlayerIssueUnitOrder(selectedUnit, CaptureOrder(*hoveredUnit));
+                                cursorMode.next(NormalCursorMode());
+                            }
+                        }
+                    }
+                },
                 [&](const PatrolCursorMode&) {
                     auto coord = getMouseTerrainCoordinate();
                     if (coord)
@@ -1892,6 +1919,9 @@ namespace rwe
                     cursorMode.next(NormalCursorMode());
                 },
                 [&](const PatrolCursorMode&) {
+                    cursorMode.next(NormalCursorMode());
+                },
+                [&](const CaptureCursorMode&) {
                     cursorMode.next(NormalCursorMode());
                 },
                 [&](const BuildCursorMode&) {
@@ -2363,6 +2393,9 @@ namespace rwe
                 },
                 [&](const PatrolCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Patrol);
+                },
+                [&](const CaptureCursorMode&) {
+                    sceneContext.cursor->useCursor(CursorType::Capture);
                 },
                 [&](const BuildCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Normal);
@@ -3404,6 +3437,13 @@ namespace rwe
                         playUnitNotificationSound(unit->get().owner, unit->get().unitType, UnitSoundType::Build);
                     }
                 },
+                [&](const UnitCapturedEvent& e) {
+                    // A unit we lost must not linger in our selection.
+                    if (e.previousOwner == localPlayerId)
+                    {
+                        deselectUnit(e.unitId);
+                    }
+                },
                 [&](const ProjectileSpawnedEvent& e) {
                     projectileRenderInfos.insert({e.projectileId, ProjectileRenderInfo{getGameTime()}});
                 },
@@ -3585,6 +3625,11 @@ namespace rwe
             p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<PatrolCursorMode>(v)); }));
         }
 
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "CAPTURE"))
+        {
+            p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<CaptureCursorMode>(v)); }));
+        }
+
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "FIREORD"))
         {
             p->get().addSubscription(fireOrders.subscribe([&p = p->get()](const auto& v) {
@@ -3740,6 +3785,22 @@ namespace rwe
             else
             {
                 cursorMode.next(PatrolCursorMode());
+            }
+        }
+        else if (matchesWithSidePrefix("CAPTURE", message))
+        {
+            if (sounds.specialOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.specialOrders);
+            }
+
+            if (std::holds_alternative<CaptureCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(CaptureCursorMode());
             }
         }
         else if (matchesWithSidePrefix("FIREORD", message))

@@ -329,6 +329,9 @@ namespace rwe
         /** Reclaim work applied to this unit so far, see GameSimulation::reclaimUnit. */
         unsigned int reclaimProgress{0};
 
+        /** Capture work applied to this unit so far, see GameSimulation::captureUnit. */
+        unsigned int captureProgress{0};
+
         bool activated{false};
         bool isSufficientlyPowered{false};
 

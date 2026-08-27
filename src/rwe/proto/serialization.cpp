@@ -84,6 +84,12 @@ namespace rwe
             serializeVector(o.destination, dest);
         }
 
+        void operator()(const CaptureOrder& o)
+        {
+            auto& out = *cmd->mutable_capture();
+            out.set_unit(o.target.value);
+        }
+
         void operator()(const ReclaimOrder& o)
         {
             auto& out = *cmd->mutable_reclaim();
@@ -380,6 +386,12 @@ namespace rwe
         {
             const auto& patrol = cmd.patrol();
             return PatrolOrder(deserializeVector(patrol.destination()));
+        }
+
+        if (cmd.has_capture())
+        {
+            const auto& capture = cmd.capture();
+            return CaptureOrder(UnitId(capture.unit()));
         }
 
         if (cmd.has_reclaim())

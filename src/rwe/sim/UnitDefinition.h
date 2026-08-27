@@ -74,6 +74,7 @@ namespace rwe
         bool canAttack;
         bool canMove;
         bool canGuard;
+        bool canCapture;
 
         /** If true, the unit is considered a commander for victory conditions. */
         bool commander;

@@ -207,6 +207,13 @@ namespace rwe
         DeathType deathType;
     };
 
+    struct UnitCapturedEvent
+    {
+        UnitId unitId;
+        PlayerId previousOwner;
+        PlayerId newOwner;
+    };
+
     using GameEvent = std::variant<
         FireWeaponEvent,
         UnitArrivedEvent,
@@ -218,7 +225,8 @@ namespace rwe
         UnitDiedEvent,
         UnitStartedBuildingEvent,
         ProjectileSpawnedEvent,
-        ProjectileDiedEvent>;
+        ProjectileDiedEvent,
+        UnitCapturedEvent>;
 
 
     struct UnitInfo
@@ -363,6 +371,15 @@ namespace rwe
          * then marked dead with no corpse) or no longer exists.
          */
         bool reclaimUnit(UnitId targetId, PlayerId reclaimer, unsigned int workAmount);
+
+        /**
+         * Applies workAmount of capture work to an enemy unit on behalf of a player.
+         * Total work is the unit's buildTime. On completion the unit changes
+         * owner, drops its orders and weapon targets, and a UnitCapturedEvent is
+         * emitted. Returns true when the unit is captured, already owned by the
+         * captor, or no longer exists.
+         */
+        bool captureUnit(UnitId targetId, PlayerId captor, unsigned int workAmount);
 
         PlayerId addPlayer(const GamePlayerInfo& info);
 

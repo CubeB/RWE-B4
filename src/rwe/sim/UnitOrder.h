@@ -73,5 +73,12 @@ namespace rwe
         explicit PatrolOrder(const SimVector& destination) : destination(destination) {}
     };
 
-    using UnitOrder = std::variant<MoveOrder, AttackOrder, BuildOrder, BuggerOffOrder, CompleteBuildOrder, GuardOrder, ReclaimOrder, RepairOrder, PatrolOrder>;
+    /** Take over an enemy unit. Only units whose definition has canCapture may do this. */
+    struct CaptureOrder
+    {
+        UnitId target;
+        explicit CaptureOrder(const UnitId& target) : target(target) {}
+    };
+
+    using UnitOrder = std::variant<MoveOrder, AttackOrder, BuildOrder, BuggerOffOrder, CompleteBuildOrder, GuardOrder, ReclaimOrder, RepairOrder, PatrolOrder, CaptureOrder>;
 }

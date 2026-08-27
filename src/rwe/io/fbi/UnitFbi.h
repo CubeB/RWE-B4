@@ -46,6 +46,7 @@ namespace rwe
         bool canAttack;
         bool canMove;
         bool canGuard;
+        bool canCapture;
 
         bool commander;
 

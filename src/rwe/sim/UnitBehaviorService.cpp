@@ -1002,6 +1002,9 @@ namespace rwe
             },
             [&](const PatrolOrder& o) {
                 return handlePatrolOrder(unitInfo, o);
+            },
+            [&](const CaptureOrder& o) {
+                return handleCaptureOrder(unitInfo, o);
             });
     }
 
@@ -1360,6 +1363,89 @@ namespace rwe
         }
 
         return false;
+    }
+
+    bool UnitBehaviorService::handleCaptureOrder(UnitInfo unitInfo, const CaptureOrder& captureOrder)
+    {
+        if (!unitInfo.definition->canCapture)
+        {
+            return true;
+        }
+
+        auto targetRef = sim->tryGetUnitState(captureOrder.target);
+        if (!targetRef || targetRef->get().isDead() || targetRef->get().isOwnedBy(unitInfo.state->owner))
+        {
+            return true;
+        }
+
+        return captureExistingUnit(unitInfo, captureOrder.target);
+    }
+
+    bool UnitBehaviorService::captureExistingUnit(UnitInfo unitInfo, UnitId targetUnitId)
+    {
+        auto targetUnitRef = sim->tryGetUnitState(targetUnitId);
+        if (!targetUnitRef || targetUnitRef->get().isDead() || targetUnitRef->get().isOwnedBy(unitInfo.state->owner))
+        {
+            changeState(*unitInfo.state, UnitBehaviorStateIdle());
+            return true;
+        }
+        auto& targetUnit = targetUnitRef->get();
+
+        // Same reach as building; see the FIXME in buildExistingUnit.
+        if (unitInfo.state->position.distanceSquared(targetUnit.position) > (unitInfo.definition->buildDistance * unitInfo.definition->buildDistance))
+        {
+            navigateTo(unitInfo, targetUnitId);
+            return false;
+        }
+
+        return deployCaptureArm(unitInfo, targetUnitId);
+    }
+
+    bool UnitBehaviorService::deployCaptureArm(UnitInfo unitInfo, UnitId targetUnitId)
+    {
+        auto targetUnitRef = sim->tryGetUnitState(targetUnitId);
+        if (!targetUnitRef || targetUnitRef->get().isDead() || targetUnitRef->get().isOwnedBy(unitInfo.state->owner))
+        {
+            changeState(*unitInfo.state, UnitBehaviorStateIdle());
+            return true;
+        }
+        auto& targetUnit = targetUnitRef->get();
+
+        // Capturing reuses the building state for the nanolathe effect and
+        // the StartBuilding/StopBuilding script hooks.
+        return match(
+            unitInfo.state->behaviourState,
+            [&](UnitBehaviorStateBuilding& buildingState) {
+                if (targetUnitId != buildingState.targetUnit)
+                {
+                    changeState(*unitInfo.state, UnitBehaviorStateIdle());
+                    return captureExistingUnit(unitInfo, targetUnitId);
+                }
+
+                if (!unitInfo.state->inBuildStance)
+                {
+                    return false;
+                }
+
+                buildingState.nanoParticleOrigin = getNanoPoint(unitInfo.id);
+
+                auto finished = sim->captureUnit(targetUnitId, unitInfo.state->owner, unitInfo.definition->workerTimePerTick);
+                if (finished)
+                {
+                    changeState(*unitInfo.state, UnitBehaviorStateIdle());
+                }
+                return finished;
+            },
+            [&](const auto&) {
+                auto nanoFromPosition = getNanoPoint(unitInfo.id);
+                auto headingAndPitch = computeLineOfSightHeadingAndPitch(unitInfo.state->rotation, nanoFromPosition, targetUnit.position);
+                auto heading = headingAndPitch.first;
+                auto pitch = headingAndPitch.second;
+
+                changeState(*unitInfo.state, UnitBehaviorStateBuilding{targetUnitId, std::nullopt});
+                unitInfo.state->cobEnvironment->createThread("StartBuilding", {toCobAngle(heading).value, toCobAngle(pitch).value});
+                return false;
+            });
     }
 
     bool UnitBehaviorService::repairExistingUnit(UnitInfo unitInfo, UnitId targetUnitId)

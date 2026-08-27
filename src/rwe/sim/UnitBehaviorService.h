@@ -63,6 +63,12 @@ namespace rwe
 
         bool handlePatrolOrder(UnitInfo unitInfo, const PatrolOrder& patrolOrder);
 
+        bool handleCaptureOrder(UnitInfo unitInfo, const CaptureOrder& captureOrder);
+
+        bool captureExistingUnit(UnitInfo unitInfo, UnitId targetUnitId);
+
+        bool deployCaptureArm(UnitInfo unitInfo, UnitId targetUnitId);
+
         /** Nearest living enemy unit within range of the unit's primary weapon, if any. */
         std::optional<UnitId> findEnemyInWeaponRange(UnitInfo unitInfo) const;
 
