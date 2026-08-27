@@ -297,6 +297,12 @@ namespace rwe
         std::optional<WinStatus> gameOver;
         GameTime gameOverTime{0};
 
+        /** Fog of war: hide what the local player cannot see. Off reveals the whole map. */
+        bool fogOfWarEnabled{true};
+        /** Black overlay, one texel per vision cell; alpha encodes unexplored / explored / visible. */
+        std::optional<Sprite> fogSprite;
+        GameTime fogSpriteTime{0};
+
         BehaviorSubject<CursorMode> cursorMode{NormalCursorMode()};
 
         std::deque<std::optional<GameSceneTimeAction>> actions;
@@ -493,6 +499,14 @@ namespace rwe
         void returnToMainMenu();
 
         void renderGameOverOverlay();
+
+        void updateFogSprite();
+
+        bool unitIsVisibleToLocalPlayer(const UnitState& unit) const;
+
+        bool unitIsDetectableByLocalPlayer(const UnitState& unit) const;
+
+        bool positionIsExploredByLocalPlayer(const SimVector& position) const;
 
         UnitState& getUnit(UnitId id);
 

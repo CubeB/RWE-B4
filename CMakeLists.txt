@@ -475,6 +475,8 @@ set(SOURCE_FILES
     src/rwe/sim/GameTime.h
     src/rwe/sim/MapFeature.cpp
     src/rwe/sim/MapFeature.h
+    src/rwe/sim/PlayerVisibility.cpp
+    src/rwe/sim/PlayerVisibility.h
     src/rwe/sim/MapTerrain.cpp
     src/rwe/sim/MapTerrain.h
     src/rwe/sim/Metal.h
@@ -798,6 +800,7 @@ set(TEST_FILES
     src/rwe/sim/selfdestruct.test.cpp
     src/rwe/pathfinding/pathing.test.cpp
     src/rwe/sim/economy.test.cpp
+    src/rwe/sim/visibility.test.cpp
     src/rwe/sim/UnitState_util.test.cpp
     src/rwe/sim/util.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp

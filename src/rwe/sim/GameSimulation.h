@@ -1,5 +1,6 @@
 #pragma once
 
+#include <rwe/sim/PlayerVisibility.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <memory>
 #include <random>
@@ -307,6 +308,9 @@ namespace rwe
 
         std::vector<GamePlayerInfo> players;
 
+        /** One entry per player, indexed by PlayerId. Derived state: rebuilt every tick, not hashed. */
+        std::vector<PlayerVisibility> playerVisibility;
+
         VectorMap<MapFeature, FeatureIdTag> features;
 
         VectorMap<UnitState, UnitIdTag> units;
@@ -402,6 +406,19 @@ namespace rwe
 
         /** Starts a unit's self-destruct countdown, or cancels it if one is already running. */
         void toggleSelfDestruct(UnitId unitId);
+
+        /** The vision grid cell containing a world position (may lie outside the grid). */
+        Point visionCellAt(const SimVector& position) const;
+
+        bool isExploredBy(PlayerId player, const SimVector& position) const;
+        bool isVisibleTo(PlayerId player, const SimVector& position) const;
+        bool isOnRadarOf(PlayerId player, const SimVector& position) const;
+
+        /** True for the viewer's own units, and for other units standing in the viewer's line of sight. */
+        bool canSeeUnit(PlayerId viewer, UnitId unitId) const;
+
+        /** True when the unit can be seen, or is a radar contact. */
+        bool canDetectUnit(PlayerId viewer, UnitId unitId) const;
 
         /**
          * Destroys a unit immediately with its SelfDestructAs explosion
@@ -581,6 +598,8 @@ namespace rwe
         void deleteDeadUnits();
 
         void updateSelfDestructs();
+
+        void updateVisibility();
 
         void deleteDeadProjectiles();
 

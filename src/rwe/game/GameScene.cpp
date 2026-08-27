@@ -580,6 +580,10 @@ namespace rwe
     {
         // draw minimap
         chromeUiRenderService.drawSpriteAbs(minimapRect, *minimap);
+        if (fogOfWarEnabled && fogSprite)
+        {
+            chromeUiRenderService.drawSpriteAbs(minimapRect, *fogSprite);
+        }
 
         auto cameraInverse = computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
         auto worldToMinimap = worldToMinimapMatrix(simulation.terrain, minimapRect);
@@ -587,6 +591,10 @@ namespace rwe
         // draw minimap dots
         for (const auto& [_, unit] : simulation.units)
         {
+            if (!unitIsDetectableByLocalPlayer(unit))
+            {
+                continue;
+            }
             auto minimapPos = worldToMinimap * simVectorToFloat(unit.position);
             minimapPos.x = std::floor(minimapPos.x);
             minimapPos.y = std::floor(minimapPos.y);
@@ -783,6 +791,8 @@ namespace rwe
 
     void GameScene::renderWorld()
     {
+        updateFogSprite();
+
         sceneContext.graphics->bindFrameBuffer(worldFrameBuffer.frameBuffer.get());
         sceneContext.graphics->setViewport(
             0,
@@ -803,6 +813,10 @@ namespace rwe
         SpriteBatch flatFeatureShadowBatch;
         for (const auto& f : simulation.features)
         {
+            if (!positionIsExploredByLocalPlayer(f.second.position))
+            {
+                continue;
+            }
             const auto& featureDefinition = simulation.getFeatureDefinition(f.second.featureName);
             if (!featureDefinition.isStanding())
             {
@@ -812,6 +826,16 @@ namespace rwe
         }
         worldRenderService.drawSpriteBatch(flatFeatureShadowBatch);
         worldRenderService.drawSpriteBatch(flatFeatureBatch);
+
+        // Fog of war over the terrain. The tiles are drawn flat at y = 0 with
+        // their height baked into the artwork, so a flat quad lines up exactly.
+        if (fogOfWarEnabled && fogSprite)
+        {
+            auto flatten = Matrix4f::rotationX(-Pif / 2.0f) * Matrix4f::scale(Vector3f(1.0f, -1.0f, 1.0f));
+            SpriteBatch fogBatch;
+            fogBatch.sprites.push_back(SpriteRenderInfo{&*fogSprite, viewProjectionMatrix * flatten * fogSprite->getTransform(), false});
+            worldRenderService.drawSpriteBatch(fogBatch);
+        }
 
         ColoredMeshBatch squareParticlesBatch;
         for (const auto& particle : particles)
@@ -863,6 +887,10 @@ namespace rwe
         UnitShadowMeshBatch unitShadowMeshBatch;
         for (const auto& [_, unit] : simulation.units)
         {
+            if (!unitIsVisibleToLocalPlayer(unit))
+            {
+                continue;
+            }
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
             const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
 
@@ -876,6 +904,10 @@ namespace rwe
         for (const auto& [_, feature] : simulation.features)
         {
             const auto& position = feature.position;
+            if (!positionIsExploredByLocalPlayer(position))
+            {
+                continue;
+            }
             auto groundHeight = simulation.terrain.getHeightAt(position.x, position.z);
             if (position.y >= seaLevel && groundHeight < seaLevel)
             {
@@ -891,12 +923,20 @@ namespace rwe
         UnitMeshBatch unitMeshBatch;
         for (const auto& [_, unit] : simulation.units)
         {
+            if (!unitIsVisibleToLocalPlayer(unit))
+            {
+                continue;
+            }
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
             const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
             drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
         }
         for (const auto& [_, feature] : simulation.features)
         {
+            if (!positionIsExploredByLocalPlayer(feature.position))
+            {
+                continue;
+            }
             drawMeshFeature(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
         }
         worldRenderService.drawUnitMeshBatch(unitMeshBatch, simScalarToFloat(seaLevel), simulation.gameTime.value);
@@ -915,6 +955,10 @@ namespace rwe
         SpriteBatch featureShadowBatch;
         for (const auto& f : simulation.features)
         {
+            if (!positionIsExploredByLocalPlayer(f.second.position))
+            {
+                continue;
+            }
             const auto& featureDefinition = simulation.getFeatureDefinition(f.second.featureName);
             if (featureDefinition.isStanding())
             {
@@ -1060,6 +1104,24 @@ namespace rwe
                     * viewProjectionMatrix
                     * simVectorToFloat(unit.position);
                 worldUiRenderService.drawHealthBar(uiPos.x, uiPos.y, static_cast<float>(unit.hitPoints) / static_cast<float>(unitDefinition.maxHitPoints));
+            }
+        }
+
+        // Radar contacts: enemies we cannot see but our radar can, drawn as blips.
+        if (fogOfWarEnabled)
+        {
+            for (const auto& [_, unit] : simulation.units)
+            {
+                if (unit.isDead() || unit.isOwnedBy(localPlayerId) || unitIsVisibleToLocalPlayer(unit) || !unitIsDetectableByLocalPlayer(unit))
+                {
+                    continue;
+                }
+                auto uiPos = worldUiRenderService.getInverseViewProjectionMatrix()
+                    * viewProjectionMatrix
+                    * simVectorToFloat(unit.position);
+                const auto& color = *minimapDots->sprites[getPlayer(unit.owner).color.value];
+                worldUiRenderService.drawSprite(uiPos.x - 2.0f, uiPos.y - 2.0f, color);
+                worldUiRenderService.drawBoxOutline(uiPos.x - 4.0f, uiPos.y - 4.0f, 8.0f, 8.0f, Color(255, 255, 255, 160));
             }
         }
 
@@ -1298,6 +1360,7 @@ namespace rwe
 
         ImGui::Begin("Game Debug", &showDebugWindow);
         ImGui::Checkbox("Health bars", &healthBarsVisible);
+        ImGui::Checkbox("Fog of war", &fogOfWarEnabled);
         if (ImGui::Checkbox("GUI", &guiVisible))
         {
             if (guiVisible)
@@ -3041,6 +3104,11 @@ namespace rwe
 
         for (const auto& entry : simulation.units)
         {
+            if (!unitIsVisibleToLocalPlayer(entry.second))
+            {
+                // What cannot be seen cannot be clicked.
+                continue;
+            }
             const auto& unitDefinition = simulation.unitDefinitions.at(entry.second.unitType);
             auto selectionMesh = gameMediaDatabase.getSelectionCollisionMesh(unitDefinition.objectName);
             auto distance = selectionIntersect(entry.second, *selectionMesh.value(), ray);
@@ -3328,6 +3396,71 @@ namespace rwe
             static_cast<float>(sceneContext.viewport->width()),
             static_cast<float>(sceneContext.viewport->height()));
         sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+    }
+
+    bool GameScene::unitIsVisibleToLocalPlayer(const UnitState& unit) const
+    {
+        return !fogOfWarEnabled || unit.isOwnedBy(localPlayerId) || simulation.isVisibleTo(localPlayerId, unit.position);
+    }
+
+    bool GameScene::unitIsDetectableByLocalPlayer(const UnitState& unit) const
+    {
+        return unitIsVisibleToLocalPlayer(unit) || simulation.isOnRadarOf(localPlayerId, unit.position);
+    }
+
+    bool GameScene::positionIsExploredByLocalPlayer(const SimVector& position) const
+    {
+        return !fogOfWarEnabled || simulation.isExploredBy(localPlayerId, position);
+    }
+
+    void GameScene::updateFogSprite()
+    {
+        if (!fogOfWarEnabled)
+        {
+            return;
+        }
+
+        // The grids only change on sim ticks, and a couple of ticks of lag is invisible.
+        if (fogSprite && (simulation.gameTime.value - fogSpriteTime.value) < 2)
+        {
+            return;
+        }
+        fogSpriteTime = simulation.gameTime;
+
+        const auto& vis = simulation.playerVisibility.at(localPlayerId.value);
+        auto width = vis.explored.getWidth();
+        auto height = vis.explored.getHeight();
+
+        std::vector<Color> pixels;
+        pixels.reserve(static_cast<size_t>(width) * static_cast<size_t>(height));
+        for (int y = 0; y < height; ++y)
+        {
+            for (int x = 0; x < width; ++x)
+            {
+                if (vis.visible.get(x, y))
+                {
+                    pixels.emplace_back(0, 0, 0, 0);
+                }
+                else if (vis.explored.get(x, y))
+                {
+                    pixels.emplace_back(0, 0, 0, 120);
+                }
+                else
+                {
+                    pixels.emplace_back(0, 0, 0, 255);
+                }
+            }
+        }
+
+        SharedTextureHandle texture(sceneContext.graphics->createTexture(width, height, pixels.data()));
+
+        // The grid starts at the map's top-left corner and covers whole vision cells,
+        // which may extend slightly past the map's edge.
+        auto cellWorldUnits = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) * static_cast<float>(PlayerVisibility::VisionCellSizeInTiles);
+        auto corner = simVectorToFloat(simulation.terrain.heightmapIndexToWorldCorner(0, 0));
+        auto bounds = Rectangle2f::fromTopLeft(corner.x, corner.z, width * cellWorldUnits, height * cellWorldUnits);
+        auto region = Rectangle2f::fromTopLeft(0.0f, 0.0f, 1.0f, 1.0f);
+        fogSprite = sceneContext.graphics->createSprite(bounds, region, texture);
     }
 
     void GameScene::renderGameOverOverlay()

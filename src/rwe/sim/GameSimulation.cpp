@@ -500,7 +500,91 @@ namespace rwe
     {
         PlayerId id(players.size());
         players.push_back(info);
+
+        const auto& heights = terrain.getHeightMap();
+        auto cells = PlayerVisibility::VisionCellSizeInTiles;
+        playerVisibility.emplace_back((heights.getWidth() + cells - 1) / cells, (heights.getHeight() + cells - 1) / cells);
+
         return id;
+    }
+
+    Point GameSimulation::visionCellAt(const SimVector& position) const
+    {
+        auto tile = terrain.worldToHeightmapCoordinate(position);
+        auto cells = PlayerVisibility::VisionCellSizeInTiles;
+        // Floor division so that positions just off the map's edge stay outside the grid.
+        auto x = tile.x >= 0 ? tile.x / cells : -1;
+        auto y = tile.y >= 0 ? tile.y / cells : -1;
+        return Point(x, y);
+    }
+
+    bool GameSimulation::isExploredBy(PlayerId player, const SimVector& position) const
+    {
+        return playerVisibility.at(player.value).isExplored(visionCellAt(position));
+    }
+
+    bool GameSimulation::isVisibleTo(PlayerId player, const SimVector& position) const
+    {
+        return playerVisibility.at(player.value).isVisible(visionCellAt(position));
+    }
+
+    bool GameSimulation::isOnRadarOf(PlayerId player, const SimVector& position) const
+    {
+        return playerVisibility.at(player.value).isOnRadar(visionCellAt(position));
+    }
+
+    bool GameSimulation::canSeeUnit(PlayerId viewer, UnitId unitId) const
+    {
+        const auto& unit = getUnitState(unitId);
+        return unit.isOwnedBy(viewer) || isVisibleTo(viewer, unit.position);
+    }
+
+    bool GameSimulation::canDetectUnit(PlayerId viewer, UnitId unitId) const
+    {
+        const auto& unit = getUnitState(unitId);
+        return unit.isOwnedBy(viewer) || isVisibleTo(viewer, unit.position) || isOnRadarOf(viewer, unit.position);
+    }
+
+    void GameSimulation::updateVisibility()
+    {
+        for (auto& v : playerVisibility)
+        {
+            v.clearCurrent();
+        }
+
+        // World units per vision cell; sight and radar ranges are in world units.
+        auto cellWorldUnits = static_cast<unsigned int>(simScalarToUInt(MapTerrain::HeightTileWidthInWorldUnits)) * PlayerVisibility::VisionCellSizeInTiles;
+        auto toCells = [&](unsigned int worldDistance) {
+            return static_cast<int>((worldDistance + cellWorldUnits - 1) / cellWorldUnits);
+        };
+
+        for (const auto& [unitId, unit] : units)
+        {
+            if (unit.isDead())
+            {
+                continue;
+            }
+            const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+            auto& vis = playerVisibility.at(unit.owner.value);
+            auto cell = visionCellAt(unit.position);
+
+            if (unitDefinition.sightDistance > 0)
+            {
+                vis.revealCircle(cell, toCells(unitDefinition.sightDistance));
+            }
+            else
+            {
+                // Even a blind unit knows where it is standing.
+                vis.revealCircle(cell, 0);
+            }
+
+            // Radar needs the unit switched on if it can be switched at all.
+            auto radarActive = !unitDefinition.onOffable || unit.activated;
+            if (unitDefinition.radarDistance > 0 && radarActive && !unit.isBeingBuilt(unitDefinition))
+            {
+                vis.radarCircle(cell, toCells(unitDefinition.radarDistance));
+            }
+        }
     }
 
     std::optional<UnitWeapon> tryCreateWeapon(const GameSimulation& sim, const std::string& weaponType)
@@ -2108,6 +2192,8 @@ namespace rwe
         deleteDeadProjectiles();
 
         spawnNewUnits();
+
+        updateVisibility();
     }
 
     std::optional<FeatureDefinitionId> GameSimulation::tryGetFeatureDefinitionId(const std::string& featureName) const
