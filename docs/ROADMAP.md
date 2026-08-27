@@ -60,6 +60,7 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 - [ ] Unit info panel completeness (HP, resource make/use, build progress, kills), order buttons wired to every order above.
 - [ ] Build menu paging, queue display, `Shift` queue count badge.
 - [ ] Pause/speed indicators on screen (logic merged; needs HUD).
+- [ ] Resource-stall feedback: when metal/energy hit zero a build proceeds in one-second bursts (full speed for a second, then stalled until income repays the debt), which looks like a stuck nanoframe. Show the TA stall flash on the resource bar and slow the nanolathe continuously instead of bursting (`GamePlayerInfo::addResourceDelta` / `updateResources`).
 - [ ] Focused-control highlight (#5), list-box selected-item brightness (#6).
 
 **Game flow**
