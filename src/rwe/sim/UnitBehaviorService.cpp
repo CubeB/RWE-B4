@@ -1252,10 +1252,9 @@ namespace rwe
 
     bool UnitBehaviorService::handleReclaimOrder(UnitInfo unitInfo, const ReclaimOrder& reclaimOrder)
     {
-        if (std::holds_alternative<UnitId>(reclaimOrder.target))
+        if (auto targetUnit = std::get_if<UnitId>(&reclaimOrder.target); targetUnit != nullptr && *targetUnit == unitInfo.id)
         {
-            // TODO: reclaiming units is not implemented yet.
-            // Drop the order rather than walking over and getting stuck.
+            // A unit cannot reclaim itself.
             return true;
         }
 
@@ -1827,10 +1826,13 @@ namespace rwe
 
                 return match(
                     target,
-                    [&](const UnitId&) {
-                        // TODO: reclaiming units is not implemented yet.
-                        changeState(*unitInfo.state, UnitBehaviorStateIdle());
-                        return true;
+                    [&](const UnitId& targetUnitId) {
+                        auto finished = sim->reclaimUnit(targetUnitId, unitInfo.state->owner, unitInfo.definition->workerTimePerTick);
+                        if (finished)
+                        {
+                            changeState(*unitInfo.state, UnitBehaviorStateIdle());
+                        }
+                        return finished;
                     },
                     [&](const FeatureId& targetFeatureId) {
                         auto finished = sim->reclaimFeature(targetFeatureId, unitInfo.state->owner, unitInfo.definition->workerTimePerTick);

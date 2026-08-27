@@ -73,23 +73,130 @@ namespace rwe
             return d;
         }
 
-        UnitId addBuilderUnit(GameSimulation& sim, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
+        UnitId addUnitOfType(GameSimulation& sim, const std::string& unitType, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
         {
-            sim.unitDefinitions["builder"] = makeBuilderDef(30u);
             auto env = std::make_unique<CobEnvironment>(script.get());
             std::vector<UnitMesh> pieces;
             const UnitId unitId(sim.units.emplace(pieces, std::move(env)));
             auto& unit = sim.getUnitState(unitId);
-            unit.unitType = "builder";
+            unit.unitType = unitType;
             unit.owner = owner;
             unit.position = pos;
             unit.previousPosition = pos;
             unit.hitPoints = 100;
-            // Normally set by the COB script's StartBuilding thread; the
-            // empty test script has none, so pretend the arm is deployed.
-            unit.inBuildStance = true;
+            unit.buildTimeCompleted = sim.unitDefinitions.at(unitType).buildTime;
             return unitId;
         }
+
+        UnitId addBuilderUnit(GameSimulation& sim, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
+        {
+            sim.unitDefinitions["builder"] = makeBuilderDef(30u);
+            auto unitId = addUnitOfType(sim, "builder", owner, pos, script);
+            // Normally set by the COB script's StartBuilding thread; the
+            // empty test script has none, so pretend the arm is deployed.
+            sim.getUnitState(unitId).inBuildStance = true;
+            return unitId;
+        }
+
+        UnitDefinition makeSolarDef()
+        {
+            UnitDefinition d{};
+            d.maxHitPoints = 100;
+            d.buildTime = 150u;
+            d.buildCostMetal = Metal(100.0f);
+            d.buildCostEnergy = Energy(50.0f);
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
+            return d;
+        }
+    }
+
+    TEST_CASE("GameSimulation::reclaimUnit", "[reclaim]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        sim.unitDefinitions["solar"] = makeSolarDef();
+        auto solarId = addUnitOfType(sim, "solar", player, SimVector(100_ss, 0_ss, 100_ss), script);
+        const auto& info = sim.getPlayer(player);
+
+        SECTION("a complete unit pays back its full build cost over buildTime worth of work")
+        {
+            for (int i = 0; i < 4; ++i)
+            {
+                REQUIRE_FALSE(sim.reclaimUnit(solarId, player, 30u));
+                REQUIRE(sim.getUnitState(solarId).isAlive());
+            }
+            REQUIRE(info.metalProductionBuffer.value == Catch::Approx(80.0f));
+
+            REQUIRE(sim.reclaimUnit(solarId, player, 30u));
+            REQUIRE(sim.getUnitState(solarId).isDead());
+            REQUIRE(info.metalProductionBuffer.value == Catch::Approx(100.0f));
+            REQUIRE(info.energyProductionBuffer.value == Catch::Approx(50.0f));
+
+            // Reclaimed units leave no wreck.
+            sim.tick();
+            REQUIRE_FALSE(sim.tryGetUnitState(solarId).has_value());
+            REQUIRE(sim.features.begin() == sim.features.end());
+        }
+
+        SECTION("a half-built unit only pays back the half that was invested")
+        {
+            sim.getUnitState(solarId).buildTimeCompleted = 75u;
+            REQUIRE(sim.reclaimUnit(solarId, player, 150u));
+            REQUIRE(info.metalProductionBuffer.value == Catch::Approx(50.0f));
+            REQUIRE(info.energyProductionBuffer.value == Catch::Approx(25.0f));
+        }
+
+        SECTION("reports completion for a unit that is already dead")
+        {
+            sim.getUnitState(solarId).markAsDead();
+            REQUIRE(sim.reclaimUnit(solarId, player, 30u));
+            REQUIRE(info.metalProductionBuffer.value == Catch::Approx(0.0f));
+        }
+    }
+
+    TEST_CASE("a builder with a reclaim order reclaims an enemy unit over successive ticks", "[reclaim]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto enemy = addPlayer(sim);
+
+        sim.unitDefinitions["solar"] = makeSolarDef();
+        auto solarPosition = SimVector(200_ss, 0_ss, 200_ss);
+        auto solarId = addUnitOfType(sim, "solar", enemy, solarPosition, script);
+        auto builderId = addBuilderUnit(sim, player, solarPosition + SimVector(40_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(builderId).orders.push_back(ReclaimOrder(solarId));
+
+        for (int i = 0; i < 20 && sim.tryGetUnitState(solarId); ++i)
+        {
+            sim.tick();
+        }
+
+        REQUIRE_FALSE(sim.tryGetUnitState(solarId).has_value());
+        const auto& builder = sim.getUnitState(builderId);
+        REQUIRE(builder.orders.empty());
+        REQUIRE(std::holds_alternative<UnitBehaviorStateIdle>(builder.behaviourState));
+
+        const auto& info = sim.getPlayer(player);
+        REQUIRE(info.metal.value + info.metalProductionBuffer.value == Catch::Approx(100.0f));
+        REQUIRE(sim.getPlayer(enemy).metalProductionBuffer.value == Catch::Approx(0.0f));
+    }
+
+    TEST_CASE("a unit ignores an order to reclaim itself", "[reclaim]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto builderId = addBuilderUnit(sim, player, SimVector(100_ss, 0_ss, 100_ss), script);
+        sim.getUnitState(builderId).orders.push_back(ReclaimOrder(builderId));
+
+        sim.tick();
+
+        const auto& builder = sim.getUnitState(builderId);
+        REQUIRE(builder.isAlive());
+        REQUIRE(builder.orders.empty());
+        REQUIRE(builder.reclaimProgress == 0u);
     }
 
     TEST_CASE("computeFeatureReclaimWork", "[reclaim]")

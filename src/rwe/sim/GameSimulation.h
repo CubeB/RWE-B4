@@ -355,6 +355,15 @@ namespace rwe
          */
         bool reclaimFeature(FeatureId featureId, PlayerId reclaimer, unsigned int workAmount);
 
+        /**
+         * Applies workAmount of reclaim work to a unit on behalf of a player.
+         * Total work is the unit's buildTime. The player recovers the unit's
+         * build cost scaled by how much of it had actually been built, paid out
+         * progressively. Returns true when the unit is fully reclaimed (it is
+         * then marked dead with no corpse) or no longer exists.
+         */
+        bool reclaimUnit(UnitId targetId, PlayerId reclaimer, unsigned int workAmount);
+
         PlayerId addPlayer(const GamePlayerInfo& info);
 
         std::optional<UnitId> trySpawnUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<SimAngle> rotation);

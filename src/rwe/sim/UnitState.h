@@ -326,6 +326,9 @@ namespace rwe
 
         unsigned int buildTimeCompleted{0};
 
+        /** Reclaim work applied to this unit so far, see GameSimulation::reclaimUnit. */
+        unsigned int reclaimProgress{0};
+
         bool activated{false};
         bool isSufficientlyPowered{false};
 

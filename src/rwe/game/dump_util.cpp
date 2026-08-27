@@ -65,6 +65,7 @@ namespace rwe
             {"inCollision", dumpJson(u.inCollision)},
             {"fireOrders", dumpJson(u.fireOrders)},
             {"buildTimeCompleted", dumpJson(u.buildTimeCompleted)},
+            {"reclaimProgress", dumpJson(u.reclaimProgress)},
             {"activated", dumpJson(u.activated)},
             {"isSufficientlyPowered", dumpJson(u.isSufficientlyPowered)},
             {"energyProductionBuffer", dumpJson(u.energyProductionBuffer)},

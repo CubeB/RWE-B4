@@ -319,6 +319,49 @@ namespace rwe
         return true;
     }
 
+    bool GameSimulation::reclaimUnit(UnitId targetId, PlayerId reclaimer, unsigned int workAmount)
+    {
+        auto unitRef = tryGetUnitState(targetId);
+        if (!unitRef || unitRef->get().isDead())
+        {
+            return true;
+        }
+        if (workAmount == 0)
+        {
+            return false;
+        }
+
+        auto& unit = unitRef->get();
+        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+
+        auto totalWork = std::max(1u, unitDefinition.buildTime);
+        auto previousProgress = unit.reclaimProgress;
+        auto newProgress = std::min(totalWork, previousProgress + workAmount);
+        unit.reclaimProgress = newProgress;
+
+        // Only the share of the cost that has actually been built can be recovered.
+        auto investedFraction = unitDefinition.buildTime == 0
+            ? 1.0f
+            : std::min(1.0f, static_cast<float>(unit.buildTimeCompleted) / static_cast<float>(unitDefinition.buildTime));
+
+        auto cumulative = [&](float amount, unsigned int progress) {
+            return amount * investedFraction * (static_cast<float>(progress) / static_cast<float>(totalWork));
+        };
+        Metal metalDelta(cumulative(unitDefinition.buildCostMetal.value, newProgress) - cumulative(unitDefinition.buildCostMetal.value, previousProgress));
+        Energy energyDelta(cumulative(unitDefinition.buildCostEnergy.value, newProgress) - cumulative(unitDefinition.buildCostEnergy.value, previousProgress));
+        getPlayer(reclaimer).addResourceDelta(energyDelta, metalDelta, energyDelta, metalDelta);
+
+        if (newProgress < totalWork)
+        {
+            return false;
+        }
+
+        // Reclaimed units vanish quietly: no wreck, no explosion.
+        unit.markAsDeadNoCorpse();
+        events.push_back(UnitDiedEvent{targetId, unit.unitType, unit.position, UnitDiedEvent::DeathType::Deleted});
+        return true;
+    }
+
     PlayerId GameSimulation::addPlayer(const GamePlayerInfo& info)
     {
         PlayerId id(players.size());
