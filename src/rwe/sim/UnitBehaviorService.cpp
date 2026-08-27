@@ -647,6 +647,18 @@ namespace rwe
             weapon->readyTime = gameTime + deltaSecondsToTicks(weaponDefinition.reloadTime);
         }
 
+        // Recoil: let the script rock the unit away from the shot. RockUnit takes
+        // the push direction in the unit's own frame, scaled the way TA-derived
+        // engines do (about 500 per unit of direction).
+        if (!isBomb)
+        {
+            // Scripts assume rotation 0 faces -z (see the XZAtan note in cob.cpp),
+            // whereas the sim's rotation 0 faces +z; hence the half turn.
+            auto localHeading = UnitState::toRotation(direction) - unit.rotation + HalfTurn;
+            auto recoil = UnitState::toDirection(localHeading) * -1_ss;
+            unit.cobEnvironment->createThread("RockUnit", {static_cast<int>(recoil.z.value * 500.0f), static_cast<int>(recoil.x.value * 500.0f)});
+        }
+
         ++fireInfo->burstsFired;
         fireInfo->readyTime = gameTime + deltaSecondsToTicks(weaponDefinition.burstInterval);
         if (fireInfo->burstsFired >= weaponDefinition.burst)

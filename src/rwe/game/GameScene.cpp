@@ -442,6 +442,8 @@ namespace rwe
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont, Color(255, 71, 0));
         }
 
+        renderHelpOverlay();
+
         renderGameOverOverlay();
 
         // render bottom bar
@@ -1476,6 +1478,10 @@ namespace rwe
         else if (keysym.key == SDLK_F10)
         {
             showDebugWindow = true;
+        }
+        else if (keysym.key == SDLK_F1)
+        {
+            helpVisible = !helpVisible;
         }
         else if (keysym.scancode == SDL_SCANCODE_GRAVE)
         {
@@ -3461,6 +3467,91 @@ namespace rwe
         auto bounds = Rectangle2f::fromTopLeft(corner.x, corner.z, width * cellWorldUnits, height * cellWorldUnits);
         auto region = Rectangle2f::fromTopLeft(0.0f, 0.0f, 1.0f, 1.0f);
         fogSprite = sceneContext.graphics->createSprite(bounds, region, texture);
+    }
+
+    void GameScene::renderHelpOverlay()
+    {
+        if (!helpVisible)
+        {
+            return;
+        }
+
+        // Two columns of "key   what it does".
+        static const std::vector<std::pair<std::string, std::string>> leftColumn{
+            {"F1", "Show or hide this help"},
+            {"Left click", "Select unit, or drag a box"},
+            {"Right click", "Move / attack / assist (right-click mode)"},
+            {"Shift + order", "Queue the order"},
+            {"Esc", "Cancel cursor mode / deselect"},
+            {"A", "Attack"},
+            {"M", "Move"},
+            {"D", "Guard"},
+            {"P", "Patrol"},
+            {"R", "Repair"},
+            {"E", "Reclaim"},
+            {"C", "Capture"},
+            {"S", "Stop"},
+            {"T", "Track selected unit"},
+            {"Ctrl+D", "Self-destruct (again to cancel)"},
+            {"Ctrl+1..9 / 1..9", "Assign / select group"},
+            {"+ / -", "Game speed"},
+            {"Pause", "Pause"},
+            {"Arrows", "Scroll the map"},
+            {"`", "Health bars"},
+            {"F10 / F11", "Debug menus"},
+        };
+        static const std::vector<std::pair<std::string, std::string>> rightColumn{
+            {"Ctrl+A", "Select all units"},
+            {"Ctrl+B", "Next idle builder"},
+            {"Ctrl+C", "Select commander"},
+            {"Ctrl+F", "Fight (attack-move)"},
+            {"Ctrl+G", "Armed ground units"},
+            {"Ctrl+H", "Armed hovercraft"},
+            {"Ctrl+J", "Metal makers"},
+            {"Ctrl+K", "Armed kbots"},
+            {"Ctrl+L", "Long range artillery"},
+            {"Ctrl+M", "Mines"},
+            {"Ctrl+N", "Armed naval units"},
+            {"Ctrl+O", "Fighters"},
+            {"Ctrl+P", "Armed aircraft"},
+            {"Ctrl+Q", "Bombers"},
+            {"Ctrl+R", "Radar / sonar / jammers"},
+            {"Ctrl+S", "Armed units on screen"},
+            {"Ctrl+T", "Transports"},
+            {"Ctrl+U", "Armed underwater units"},
+            {"Ctrl+V", "Armed vehicles"},
+            {"Ctrl+W", "Guard mode"},
+            {"Ctrl+X", "Defensive buildings"},
+            {"Ctrl+Y", "Torpedo bombers"},
+            {"Ctrl+Z", "All units of the selected types"},
+        };
+
+        const float lineHeight = 14.0f;
+        const float columnWidth = 300.0f;
+        const float keyWidth = 110.0f;
+        auto rows = std::max(leftColumn.size(), rightColumn.size());
+        const float boxWidth = (columnWidth * 2.0f) + 24.0f;
+        const float boxHeight = (rows + 3) * lineHeight;
+        auto centerX = worldViewport.left() + (worldViewport.width() / 2.0f);
+        auto centerY = worldViewport.top() + (worldViewport.height() / 2.0f);
+        auto boxX = centerX - (boxWidth / 2.0f);
+        auto boxY = centerY - (boxHeight / 2.0f);
+
+        chromeUiRenderService.fillColor(boxX, boxY, boxWidth, boxHeight, Color(0, 0, 0, 215));
+        chromeUiRenderService.drawBoxOutline(boxX, boxY, boxWidth, boxHeight, Color(180, 180, 180), 1.0f);
+        chromeUiRenderService.drawTextCenteredX(centerX, boxY + (lineHeight * 0.5f), "HOTKEYS", *guiFont);
+
+        auto drawColumn = [&](const std::vector<std::pair<std::string, std::string>>& column, float x) {
+            auto y = boxY + (lineHeight * 2.0f);
+            for (const auto& [key, action] : column)
+            {
+                chromeUiRenderService.drawText(x, y, key, *guiFont, Color(83, 223, 79));
+                chromeUiRenderService.drawText(x + keyWidth, y, action, *guiFont);
+                y += lineHeight;
+            }
+        };
+        drawColumn(leftColumn, boxX + 12.0f);
+        drawColumn(rightColumn, boxX + 12.0f + columnWidth);
     }
 
     void GameScene::renderGameOverOverlay()

@@ -52,20 +52,21 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 - [x] Self-destruct: `Ctrl‑D` starts a 5 s countdown (toggle again cancels), the sim detonates the unit with its `SelfDestructAs` weapon (new FBI field, falls back to `ExplodeAs`), no wreck; seconds remaining drawn above the unit. Blink/flash effect not yet done.
 - [x] COB getters: Health, VeteranLevel, MinId/MaxId/MyId, UnitTeam, UnitBuildPercentLeft, UnitAllied etc. were implemented in the merged `feats/next` work. Remaining FIXMEs (UnitTeam returning player id, UnitAllied = same owner) need a team/alliance model — tracked under multiplayer.
 - [x] Pathing: units slow when climbing (top speed → ½ at the slope limit, floor ¼) (#45); ground steeper than half the slope limit is rough terrain for routing (#33); no diagonal squeeze between touching obstacle corners (#30); an unreachable move target ends at the closest reachable point and the order completes instead of re-pathing forever (#28). Tests in `src/rwe/pathfinding/pathing.test.cpp`.
-- [ ] Aiming scripts run twice (#42), unit rock on fire (#40).
+- [x] Units rock when they fire (#40): `RockUnit(x, z)` is now called on every shot with the recoil direction in the unit's frame (Spring-style scaling).
+- [ ] Aiming scripts run twice (#42): after `AimPrimary` returns, the engine re-checks the heading against the script's last aim and re-aims if the target drifted beyond tolerance; needs a repro with logging before changing (the check protects ballistic accuracy).
 
 **In-game UI** (stated focus when upstream stalled)
 - [ ] F2 in-game menu: save/load placeholders, options, exit (#154).
-- [ ] Hotkey help overlay (#155) — all Ctrl‑keys now exist, they just aren't documented in‑game.
+- [x] Hotkey help overlay (#155): F1 toggles a two-column reference of every binding.
 - [ ] Unit info panel completeness (HP, resource make/use, build progress, kills), order buttons wired to every order above.
 - [ ] Build menu paging, queue display, `Shift` queue count badge.
-- [ ] Pause/speed indicators on screen (logic merged; needs HUD).
+- [x] Pause/speed indicators on screen — already present in the merged work ("Paused" and the +N speed readout).
 - [x] Resource stall: spending is now gated on what is actually on hand at the moment (stock + income so far this second − spent so far), so an empty stockpile throttles building continuously to the income rate instead of one-second bursts; stalled energy/metal bars flash red as in TA.
 - [ ] Focused-control highlight (#5), list-box selected-item brightness (#6).
 
 **Game flow**
 - [x] End-of-game flow: result panel (VICTORY/DEFEAT/DRAW, game time, units destroyed/lost) instead of exiting; the sim keeps running for spectating; Escape returns to the main menu. Single-player games are never "decided". Per-player kill/loss tallies added to `GamePlayerInfo`.
-- [ ] Line of sight / fog of war / radar & jammers — FBI fields are parsed, sim has no visibility model. This is the largest single gap between "demo" and "game".
+- [x] Line of sight / fog of war / radar: per-player explored/visible/radar grids in the sim (32 world units per cell, rebuilt each tick); unseen enemies hidden, radar contacts drawn as blips, unexplored features hidden, terrain and minimap fogged, unseen units not clickable; F10 toggle. Not yet: radar jammers, sonar, stealth/cloak, AI perception using it (Phase 2).
 - [ ] Music playback (`AudioService` has no music support) and sound completeness (unit sound types are defined, many unwired).
 
 ## Phase 2 — AI opponent (≈ 2 months, overlaps Phase 1)

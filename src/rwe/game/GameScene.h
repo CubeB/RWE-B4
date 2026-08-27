@@ -299,6 +299,9 @@ namespace rwe
 
         /** Fog of war: hide what the local player cannot see. Off reveals the whole map. */
         bool fogOfWarEnabled{true};
+
+        /** F1: the hotkey reference overlay. */
+        bool helpVisible{false};
         /** Black overlay, one texel per vision cell; alpha encodes unexplored / explored / visible. */
         std::optional<Sprite> fogSprite;
         GameTime fogSpriteTime{0};
@@ -499,6 +502,8 @@ namespace rwe
         void returnToMainMenu();
 
         void renderGameOverOverlay();
+
+        void renderHelpOverlay();
 
         void updateFogSprite();
 
