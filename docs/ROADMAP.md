@@ -51,7 +51,7 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 - [ ] Transports (load/unload, `TransportCapacity`, `TransportSize`) — currently zero references in the sim.
 - [x] Self-destruct: `Ctrl‑D` starts a 5 s countdown (toggle again cancels), the sim detonates the unit with its `SelfDestructAs` weapon (new FBI field, falls back to `ExplodeAs`), no wreck; seconds remaining drawn above the unit. Blink/flash effect not yet done.
 - [x] COB getters: Health, VeteranLevel, MinId/MaxId/MyId, UnitTeam, UnitBuildPercentLeft, UnitAllied etc. were implemented in the merged `feats/next` work. Remaining FIXMEs (UnitTeam returning player id, UnitAllied = same owner) need a team/alliance model — tracked under multiplayer.
-- [ ] Vehicles slow on slopes (#45); slope as rough terrain in pathfinder (#33); no diagonal squeeze between touching corners (#30); path to nearest valid location on invalid target (#28).
+- [x] Pathing: units slow when climbing (top speed → ½ at the slope limit, floor ¼) (#45); ground steeper than half the slope limit is rough terrain for routing (#33); no diagonal squeeze between touching obstacle corners (#30); an unreachable move target ends at the closest reachable point and the order completes instead of re-pathing forever (#28). Tests in `src/rwe/pathfinding/pathing.test.cpp`.
 - [ ] Aiming scripts run twice (#42), unit rock on fire (#40).
 
 **In-game UI** (stated focus when upstream stalled)
