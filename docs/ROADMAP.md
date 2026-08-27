@@ -66,7 +66,7 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 
 **Game flow**
 - [x] End-of-game flow: result panel (VICTORY/DEFEAT/DRAW, game time, units destroyed/lost) instead of exiting; the sim keeps running for spectating; Escape returns to the main menu. Single-player games are never "decided". Per-player kill/loss tallies added to `GamePlayerInfo`.
-- [x] Line of sight / fog of war / radar: per-player explored/visible/radar grids in the sim (32 world units per cell, rebuilt each tick); unseen enemies hidden, radar contacts drawn as blips, unexplored features hidden, terrain and minimap fogged, unseen units not clickable; F10 toggle. Not yet: radar jammers, sonar, stealth/cloak, AI perception using it (Phase 2).
+- [x] Line of sight / fog of war / radar: per-player explored/visible/radar grids in the sim (32 world units per cell, rebuilt each tick); sight rays are blocked by higher ground so hills cast shadows; unseen enemies hidden, radar contacts drawn as blips, unexplored features hidden, terrain and minimap fogged with a soft ragged edge (4× upsampled noise threshold, linear filtering), unseen units not clickable; F10 toggle. Not yet: radar jammers, sonar, stealth/cloak.
 - [ ] Music playback (`AudioService` has no music support) and sound completeness (unit sound types are defined, many unwired).
 
 ## Phase 2 — AI opponent (≈ 2 months, overlaps Phase 1)
