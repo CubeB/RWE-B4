@@ -22,6 +22,13 @@ namespace rwe
         return simulation.unitDefinitions.find(unitType) != simulation.unitDefinitions.end();
     }
 
+    bool featureCanBeReclaimed(const GameSimulation& sim, FeatureId featureId)
+    {
+        const auto& featureState = sim.getFeature(featureId);
+        const auto& def = sim.getFeatureDefinition(featureState.featureName);
+        return def.reclaimable;
+    }
+
     std::optional<std::reference_wrapper<const std::vector<GuiEntry>>> getBuilderGui(const BuilderGuisDatabase& db, const std::string& unitType, unsigned int page)
     {
         const auto& pages = db.tryGetBuilderGui(unitType);
@@ -652,6 +659,26 @@ namespace rwe
                         return pos;
                     }
                     return unitOption->get().position;
+                },
+                [&](const ReclaimOrder& o) {
+                    return match(
+                        o.target,
+                        [&](const UnitId& u) {
+                            auto unitOption = tryGetUnit(u);
+                            if (!unitOption)
+                            {
+                                return pos;
+                            }
+                            return unitOption->get().position;
+                        },
+                        [&](const FeatureId& f) {
+                            auto featureOption = simulation.tryGetFeature(f);
+                            if (!featureOption)
+                            {
+                                return pos;
+                            }
+                            return featureOption->get().position;
+                        });
                 });
 
             auto waypointIcon = match(
@@ -661,7 +688,8 @@ namespace rwe
                 [&](const AttackOrder&) { return std::optional<CursorType>(CursorType::Attack); },
                 [&](const BuggerOffOrder&) { return std::optional<CursorType>(); },
                 [&](const CompleteBuildOrder&) { return std::optional<CursorType>(CursorType::Repair); },
-                [&](const GuardOrder&) { return std::optional<CursorType>(CursorType::Guard); });
+                [&](const GuardOrder&) { return std::optional<CursorType>(CursorType::Guard); },
+                [&](const ReclaimOrder&) { return std::optional<CursorType>(CursorType::Reclaim); });
 
             // draw waypoint icons
             if (waypointIcon)
@@ -686,7 +714,8 @@ namespace rwe
                     [&](const AttackOrder&) { return false; },
                     [&](const BuggerOffOrder&) { return false; },
                     [&](const CompleteBuildOrder&) { return true; },
-                    [&](const GuardOrder&) { return true; });
+                    [&](const GuardOrder&) { return true; },
+                    [&](const ReclaimOrder&) { return true; });
 
                 if (drawLine)
                 {
@@ -850,10 +879,38 @@ namespace rwe
         {
             if (auto nanolatheTarget = unit.getActiveNanolatheTarget())
             {
-                auto targetUnitOption = tryGetUnit(nanolatheTarget->first);
-                if (targetUnitOption)
+                auto targetPositionOption = match(
+                    std::get<0>(*nanolatheTarget),
+                    [&](const UnitId& targetUnitId) -> std::optional<SimVector> {
+                        auto targetUnitOption = tryGetUnit(targetUnitId);
+                        if (!targetUnitOption)
+                        {
+                            return std::nullopt;
+                        }
+                        return targetUnitOption->get().position;
+                    },
+                    [&](const FeatureId& targetFeatureId) -> std::optional<SimVector> {
+                        auto targetFeature = simulation.tryGetFeature(targetFeatureId);
+                        if (!targetFeature)
+                        {
+                            return std::nullopt;
+                        }
+                        return targetFeature->get().position;
+                    });
+
+                if (targetPositionOption)
                 {
-                    drawNanoLine(simVectorToFloat(nanolatheTarget->second), simVectorToFloat(targetUnitOption->get().position), nanoLinesBatch);
+                    switch (std::get<2>(*nanolatheTarget))
+                    {
+                        case UnitState::NanolatheDirection::Forward:
+                            drawNanoLine(simVectorToFloat(std::get<1>(*nanolatheTarget)), simVectorToFloat(*targetPositionOption), nanoLinesBatch);
+                            break;
+                        case UnitState::NanolatheDirection::Reverse:
+                            drawReverseNanoLine(simVectorToFloat(std::get<1>(*nanolatheTarget)), simVectorToFloat(*targetPositionOption), nanoLinesBatch);
+                            break;
+                        default:
+                            throw std::logic_error("unhandled nanolathe direction");
+                    }
                 }
             }
         }
@@ -1031,6 +1088,9 @@ namespace rwe
             },
             [&](const UnitBehaviorStateBuilding&) {
                 return "building";
+            },
+            [&](const UnitBehaviorStateReclaiming&) {
+                return "reclaiming";
             },
             [&](const UnitBehaviorStateCreatingUnit&) {
                 return "creating unit";
@@ -1622,6 +1682,35 @@ namespace rwe
                         }
                     }
                 },
+                [&](const ReclaimCursorMode&) {
+                    for (const auto& selectedUnit : selectedUnits)
+                    {
+                        if (hoveredUnit)
+                        {
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, ReclaimOrder(*hoveredUnit));
+                            }
+                            else
+                            {
+                                localPlayerIssueUnitOrder(selectedUnit, ReclaimOrder(*hoveredUnit));
+                                cursorMode.next(NormalCursorMode());
+                            }
+                        }
+                        else if (hoveredFeature)
+                        {
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
+                            }
+                            else
+                            {
+                                localPlayerIssueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
+                                cursorMode.next(NormalCursorMode());
+                            }
+                        }
+                    }
+                },
                 [&](const BuildCursorMode& buildCursor) {
                     if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit)
                     {
@@ -1735,6 +1824,9 @@ namespace rwe
                 [&](const GuardCursorMode&) {
                     cursorMode.next(NormalCursorMode());
                 },
+                [&](const ReclaimCursorMode&) {
+                    cursorMode.next(NormalCursorMode());
+                },
                 [&](const BuildCursorMode&) {
                     cursorMode.next(NormalCursorMode());
                 },
@@ -1780,6 +1872,17 @@ namespace rwe
                                             localPlayerIssueUnitOrder(selectedUnit, CompleteBuildOrder(*hoveredUnit));
                                         }
                                     }
+                                }
+                            }
+                            else if (hoveredFeature && featureCanBeReclaimed(simulation, *hoveredFeature))
+                            {
+                                if (isShiftDown())
+                                {
+                                    localPlayerEnqueueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
+                                }
+                                else
+                                {
+                                    localPlayerIssueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
                                 }
                             }
                             else
@@ -1868,6 +1971,20 @@ namespace rwe
                                                     localPlayerIssueUnitOrder(selectedUnit, CompleteBuildOrder(*hoveredUnit));
                                                 }
                                             }
+                                        }
+                                    }
+                                }
+                                else if (leftClickMode() && hoveredFeature && featureCanBeReclaimed(simulation, *hoveredFeature))
+                                {
+                                    for (const auto& selectedUnit : selectedUnits)
+                                    {
+                                        if (isShiftDown())
+                                        {
+                                            localPlayerEnqueueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
+                                        }
+                                        else
+                                        {
+                                            localPlayerIssueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
                                         }
                                     }
                                 }
@@ -2153,6 +2270,9 @@ namespace rwe
                 [&](const GuardCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Guard);
                 },
+                [&](const ReclaimCursorMode&) {
+                    sceneContext.cursor->useCursor(CursorType::Reclaim);
+                },
                 [&](const BuildCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Normal);
                 },
@@ -2172,6 +2292,10 @@ namespace rwe
                             && hoveredUnit && unitIsBeingBuilt(simulation, *hoveredUnit))
                         {
                             sceneContext.cursor->useCursor(CursorType::Repair);
+                        }
+                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id); }) && hoveredFeature && featureCanBeReclaimed(simulation, *hoveredFeature))
+                        {
+                            sceneContext.cursor->useCursor(CursorType::Reclaim);
                         }
                         else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitCanMove(simulation, id); }))
                         {
@@ -2200,6 +2324,10 @@ namespace rwe
                         }
                         else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitCanGuard(simulation, id); })
                             && hoveredUnit && isFriendly(*hoveredUnit))
+                        {
+                            sceneContext.cursor->useCursor(CursorType::Green);
+                        }
+                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id); }) && hoveredFeature && featureCanBeReclaimed(simulation, *hoveredFeature))
                         {
                             sceneContext.cursor->useCursor(CursorType::Green);
                         }
@@ -3446,6 +3574,22 @@ namespace rwe
             {
                 cursorMode.next(NormalCursorMode());
                 localPlayerStopUnit(selectedUnit);
+            }
+        }
+        else if (matchesWithSidePrefix("RECLAIM", message))
+        {
+            if (sounds.specialOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.specialOrders);
+            }
+
+            if (std::holds_alternative<ReclaimCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(ReclaimCursorMode());
             }
         }
         else if (matchesWithSidePrefix("FIREORD", message))

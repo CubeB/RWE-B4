@@ -57,6 +57,8 @@ namespace rwe
 
         bool handleGuardOrder(UnitInfo unitInfo, const GuardOrder& guardOrder);
 
+        bool handleReclaimOrder(UnitInfo unitInfo, const ReclaimOrder& reclaimOrder);
+
         bool handleBuild(UnitInfo unitInfo, const std::string& unitType);
 
         void clearBuild(UnitInfo unitInfo);
@@ -125,6 +127,8 @@ namespace rwe
 
         bool buildUnit(UnitInfo unitInfo, const std::string& unitType, const SimVector& position);
 
+        bool reclaimTarget(UnitInfo unitInfo, std::variant<UnitId, FeatureId> target);
+
         UnitCreationStatus createNewUnit(UnitInfo unitInfo, const std::string& unitType, const SimVector& position);
 
         bool buildExistingUnit(UnitInfo unitInfo, UnitId targetUnitId);
@@ -132,6 +136,8 @@ namespace rwe
         void changeState(UnitState& unit, const UnitBehaviorState& newState);
 
         bool deployBuildArm(UnitInfo unitInfo, UnitId targetUnitId);
+
+        bool deployReclaimArm(UnitInfo unitInfo, std::variant<UnitId, FeatureId> target);
 
         bool climbToCruiseAltitude(UnitInfo unitInfo);
 

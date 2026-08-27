@@ -168,9 +168,14 @@ namespace rwe
         return GameHash(0);
     }
 
-    GameHash computeHashOf(const UnitBehaviorStateBuilding&)
+    GameHash computeHashOf(const UnitBehaviorStateBuilding& s)
     {
-        return GameHash(0);
+        return combineHashes(s.targetUnit, s.nanoParticleOrigin);
+    }
+
+    GameHash computeHashOf(const UnitBehaviorStateReclaiming& s)
+    {
+        return combineHashes(s.target, s.nanoParticleOrigin);
     }
 
     GameHash computeHashOf(const UnitBehaviorStateCreatingUnit& s)

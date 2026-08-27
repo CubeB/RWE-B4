@@ -21,6 +21,7 @@
 #include <rwe/sim/UnitMovementOrders.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitWeapon.h>
+#include <tuple>
 #include <variant>
 
 namespace rwe
@@ -38,7 +39,7 @@ namespace rwe
     {
     };
 
-    using NavigationGoal = std::variant<UnitId, SimVector, DiscreteRect, NavigationGoalLandingLocation>;
+    using NavigationGoal = std::variant<UnitId, FeatureId, SimVector, DiscreteRect, NavigationGoalLandingLocation>;
 
     using MovingStateGoal = std::variant<UnitId, SimVector, DiscreteRect>;
 
@@ -76,10 +77,18 @@ namespace rwe
         std::optional<SimVector> nanoParticleOrigin;
     };
 
+    struct UnitBehaviorStateReclaiming
+    {
+        std::variant<UnitId, FeatureId> target;
+        std::optional<SimVector> nanoParticleOrigin;
+        std::optional<GameTime> startTime;
+    };
+
     using UnitBehaviorState = std::variant<
         UnitBehaviorStateIdle,
         UnitBehaviorStateCreatingUnit,
-        UnitBehaviorStateBuilding>;
+        UnitBehaviorStateBuilding,
+        UnitBehaviorStateReclaiming>;
 
     struct NavigationStateIdle
     {
@@ -416,7 +425,13 @@ namespace rwe
 
         int getBuildQueueTotal(const std::string& unitType) const;
 
-        std::optional<std::pair<UnitId, SimVector>> getActiveNanolatheTarget() const;
+        enum class NanolatheDirection
+        {
+            Forward,
+            Reverse,
+        };
+
+        std::optional<std::tuple<std::variant<UnitId, FeatureId>, SimVector, NanolatheDirection>> getActiveNanolatheTarget() const;
 
         std::optional<std::reference_wrapper<const UnitMesh>> findPiece(const std::string& pieceName) const;
 
