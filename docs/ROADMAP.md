@@ -45,7 +45,9 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 - [ ] Reclaim polish: play the feature's `seqNameReclamate` animation and reclaim sound; show progress in the unit info panel; auto-reclaim (`autoreclaimable`) when a builder is idle with the area-reclaim command.
 - [x] Repair: `RepairOrder` heals at the build rate (free, as in TA) or finishes an unfinished unit; REPAIR panel button, repair cursor mode, and left-click-on-damaged-friendly for builders. Also fixed `buildExistingUnit` checking `isBeingBuilt` against the builder's definition instead of the target's.
 - [x] Patrol: `PatrolOrder` loops through waypoints (re-queued on arrival), engages enemies in primary-weapon range en route unless on hold fire; PATROL button + `cursorpatrol` sprite; a single click patrols between the point and the unit's position.
-- [ ] Capture, Resurrect (capture mirrors repair with per-tick capture progress and an owner swap; resurrect turns a corpse feature back into a unit). Builders on patrol should also repair/reclaim along the route as in TA.
+- [x] Capture: `CanCapture` now parsed from FBI; `CaptureOrder` works like repair but accumulates `captureProgress` on the target and swaps owner at `buildTime`, clearing its orders/targets; `UnitCapturedEvent` drops it from the old owner's selection. CAPTURE button + `cursorcapture`.
+- [ ] Resurrect (turn a corpse feature back into the unit it came from; needs a corpse→unit-type mapping from `featureDead`/`corpse` definitions).
+- [ ] Builders on patrol should repair/reclaim along the route as in TA; capture progress should decay when the captor stops.
 - [ ] Transports (load/unload, `TransportCapacity`, `TransportSize`) — currently zero references in the sim.
 - [ ] Self-destruct countdown UI + `Ctrl‑D` toggle (command exists, countdown/blink missing).
 - [ ] COB getters that still `return 0; // TODO` in `src/rwe/sim/cob.cpp` (~8), real allied/team check.
