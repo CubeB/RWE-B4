@@ -49,8 +49,8 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 - [ ] Resurrect (turn a corpse feature back into the unit it came from; needs a corpse→unit-type mapping from `featureDead`/`corpse` definitions).
 - [ ] Builders on patrol should repair/reclaim along the route as in TA; capture progress should decay when the captor stops.
 - [ ] Transports (load/unload, `TransportCapacity`, `TransportSize`) — currently zero references in the sim.
-- [ ] Self-destruct countdown UI + `Ctrl‑D` toggle (command exists, countdown/blink missing).
-- [ ] COB getters that still `return 0; // TODO` in `src/rwe/sim/cob.cpp` (~8), real allied/team check.
+- [x] Self-destruct: `Ctrl‑D` starts a 5 s countdown (toggle again cancels), the sim detonates the unit with its `SelfDestructAs` weapon (new FBI field, falls back to `ExplodeAs`), no wreck; seconds remaining drawn above the unit. Blink/flash effect not yet done.
+- [x] COB getters: Health, VeteranLevel, MinId/MaxId/MyId, UnitTeam, UnitBuildPercentLeft, UnitAllied etc. were implemented in the merged `feats/next` work. Remaining FIXMEs (UnitTeam returning player id, UnitAllied = same owner) need a team/alliance model — tracked under multiplayer.
 - [ ] Vehicles slow on slopes (#45); slope as rough terrain in pathfinder (#33); no diagonal squeeze between touching corners (#30); path to nearest valid location on invalid target (#28).
 - [ ] Aiming scripts run twice (#42), unit rock on fire (#40).
 
