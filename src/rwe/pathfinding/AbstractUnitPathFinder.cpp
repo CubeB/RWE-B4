@@ -1,7 +1,21 @@
 #include "AbstractUnitPathFinder.h"
+#include <rwe/sim/movement.h>
 
 namespace rwe
 {
+    namespace
+    {
+        unsigned int computeRoughSlope(const GameSimulation& simulation, UnitId self)
+        {
+            // Half the unit's slope limit: climbable, but slow going.
+            // Units that can go anywhere (max slope 255) never see rough terrain.
+            const auto& unit = simulation.getUnitState(self);
+            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+            auto maxSlope = simulation.getAdHocMovementClass(unitDefinition.movementCollisionInfo).maxSlope;
+            return maxSlope >= 255 ? 255 : maxSlope / 2;
+        }
+    }
+
     AbstractUnitPathFinder::AbstractUnitPathFinder(
         const GameSimulation* simulation,
         const MovementClassCollisionService* collisionService,
@@ -14,7 +28,8 @@ namespace rwe
           self(self),
           movementClass(movementClass),
           footprintX(footprintX),
-          footprintZ(footprintZ)
+          footprintZ(footprintZ),
+          roughSlope(computeRoughSlope(*simulation, self))
     {
     }
 
@@ -62,7 +77,26 @@ namespace rwe
     bool AbstractUnitPathFinder::isRoughTerrain(const Point& p) const
     {
         DiscreteRect rect(p.x, p.y, footprintX, footprintZ);
-        return simulation->isAdjacentToObstacle(rect);
+        if (simulation->isAdjacentToObstacle(rect))
+        {
+            return true;
+        }
+
+        if (roughSlope >= 255 || p.x < 0 || p.y < 0)
+        {
+            return false;
+        }
+
+        // Steep (but passable) ground is slow to cross, so prefer routes around it.
+        const auto& heights = simulation->terrain.getHeightMap();
+        auto x = static_cast<unsigned int>(p.x);
+        auto y = static_cast<unsigned int>(p.y);
+        if (x + footprintX >= heights.getWidth() || y + footprintZ >= heights.getHeight())
+        {
+            return false;
+        }
+        auto seaLevel = simScalarToUInt(simulation->terrain.getSeaLevel());
+        return isMaxSlopeGreaterThan(heights, seaLevel, x, y, footprintX, footprintZ, roughSlope, roughSlope);
     }
 
     Point AbstractUnitPathFinder::step(const Point& p, Direction d) const
@@ -83,6 +117,18 @@ namespace rwe
             if (!isWalkable(newPosition))
             {
                 continue;
+            }
+
+            // No squeezing diagonally between two obstacles whose corners
+            // touch: both of the orthogonal steps that make up the diagonal
+            // must be clear too.
+            if (isDiagonal(d))
+            {
+                auto delta = directionToPoint(d);
+                if (!isWalkable(p + Point(delta.x, 0)) || !isWalkable(p + Point(0, delta.y)))
+                {
+                    continue;
+                }
             }
 
             neighbours.push_back(newPosition);

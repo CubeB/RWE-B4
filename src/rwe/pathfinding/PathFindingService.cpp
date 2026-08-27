@@ -37,6 +37,12 @@ namespace rwe
                         return findPath(simulation, request.unitId, pos);
                     });
 
+                // If the destination itself cannot be reached, remember the closest
+                // point that can be, so arrival there counts as arrival.
+                movingState->reachableDestination = path.destinationUnreachable && !path.waypoints.empty()
+                    ? std::make_optional(path.waypoints.back())
+                    : std::nullopt;
+
                 movingState->path = PathFollowingInfo(std::move(path), simulation.gameTime);
                 movingState->pathRequested = false;
 
@@ -64,7 +70,7 @@ namespace rwe
         UnitPerimeterPathFinder pathFinder(&simulation, &simulation.movementClassCollisionService, unitId, movementClassId, start.width, start.height, goal);
 
         auto path = pathFinder.findPath(Point(start.x, start.y));
-        lastPathDebugInfo = AStarPathInfo<Point, PathCost>{path.type, path.path, std::move(path.closedVertices)};
+        lastPathDebugInfo = AStarPathInfo<Point, PathCost>{path.type, path.path, std::move(path.closedVertices), path.exhausted};
 
         assert(path.path.size() >= 1);
 
@@ -99,19 +105,30 @@ namespace rwe
         UnitPathFinder pathFinder(&simulation, &simulation.movementClassCollisionService, unitId, movementClassId, start.width, start.height, Point(goal.x, goal.y));
 
         auto path = pathFinder.findPath(Point(start.x, start.y));
-        lastPathDebugInfo = AStarPathInfo<Point, PathCost>{path.type, path.path, std::move(path.closedVertices)};
+        lastPathDebugInfo = AStarPathInfo<Point, PathCost>{path.type, path.path, std::move(path.closedVertices), path.exhausted};
 
+        bool unreachable = false;
         if (path.type == AStarPathType::Partial)
         {
-            path.path.emplace_back(goal.x, goal.y);
+            // A partial path either means the search gave up (budget) or that
+            // the goal genuinely cannot be reached: blocked, or in a region we
+            // cannot get to. In the first case aim for the goal anyway and let
+            // the next request carry on from wherever we get to. In the second
+            // case stop at the closest point we found, as TA does.
+            unreachable = path.exhausted || !pathFinder.isWalkable(Point(goal.x, goal.y));
+            if (!unreachable)
+            {
+                path.path.emplace_back(goal.x, goal.y);
+            }
         }
 
         assert(path.path.size() >= 1);
 
         if (path.path.size() == 1)
         {
-            // The path is trivial, we are already at the goal.
-            return UnitPath{std::vector<SimVector>{destination}};
+            // The path is trivial, we are already at the goal
+            // (or as close to it as we can get).
+            return UnitPath{std::vector<SimVector>{unreachable ? unit.position : destination}, unreachable};
         }
 
         auto simplifiedPath = runSimplifyPath(path.path);
@@ -121,9 +138,12 @@ namespace rwe
         {
             waypoints.push_back(getWorldCenter(simulation, DiscreteRect(it->x, it->y, start.width, start.height)));
         }
-        waypoints.back() = destination;
+        if (!unreachable)
+        {
+            waypoints.back() = destination;
+        }
 
-        return UnitPath{std::move(waypoints)};
+        return UnitPath{std::move(waypoints), unreachable};
     }
 
     SimVector PathFindingService::getWorldCenter(const GameSimulation& simulation, const DiscreteRect& rect)

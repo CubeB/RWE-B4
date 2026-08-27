@@ -107,8 +107,17 @@ namespace rwe
             }
         }
 
+        // A logger that discards everything, for headless use (tests, tools)
+        // where no log file has been set up.
+        SimpleLogger() = default;
+
         void write(LogLevel msgLevel, const std::string& msg)
         {
+            if (!file.is_open())
+            {
+                return;
+            }
+
             auto line = "[" + timestamp() + "] [" + levelString(msgLevel) + "] " + msg + "\n";
             std::lock_guard<std::mutex> lock(mutex);
             file << line;
@@ -161,7 +170,11 @@ namespace rwe
     inline SimpleLogger& getLogger()
     {
         auto& logger = globalLogger();
-        assert(logger && "Logger not initialized");
+        if (!logger)
+        {
+            // Nothing set up (tests, command-line tools): discard log output.
+            logger = std::make_shared<SimpleLogger>();
+        }
         return *logger;
     }
 }

@@ -218,7 +218,8 @@ namespace rwe
         return nlohmann::json{
             {"movementGoal", dumpJson(m.movementGoal)},
             {"pathDestination", dumpJson(m.pathDestination)},
-            {"pathRequested", m.pathRequested}};
+            {"pathRequested", m.pathRequested},
+            {"reachableDestination", dumpJson(m.reachableDestination)}};
     }
 
     nlohmann::json dumpJson(const NavigationStateMovingToLandingSpot& m)

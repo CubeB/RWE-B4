@@ -36,6 +36,12 @@ namespace rwe
         AStarPathType type;
         std::vector<T> path;
         std::unordered_map<T, AStarVertexInfo<T, Cost>> closedVertices;
+        /**
+         * True for a Partial result when the search ran out of vertices to
+         * expand, i.e. the goal is genuinely unreachable, as opposed to the
+         * search giving up because it hit its expansion budget.
+         */
+        bool exhausted{false};
     };
 
     template <typename T, typename Cost = float>
@@ -90,7 +96,8 @@ namespace rwe
             }
 
             LOG_DEBUG << "Failed to find goal, visited " << openListPopsPerformed << " vertices";
-            return AStarPathInfo<T, Cost>{AStarPathType::Partial, walkPath(*(closestVertex->second)), std::move(closedVertices)};
+            auto exhausted = openVertices.empty();
+            return AStarPathInfo<T, Cost>{AStarPathType::Partial, walkPath(*(closestVertex->second)), std::move(closedVertices), exhausted};
         }
 
     protected:

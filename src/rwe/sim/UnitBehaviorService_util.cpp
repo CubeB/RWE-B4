@@ -165,7 +165,39 @@ namespace rwe
         };
     }
 
-    SimScalar computeNewGroundUnitSpeed(const MapTerrain& terrain, const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoGround& physics)
+    SimScalar computeSlopeSpeedFactor(const MapTerrain& terrain, const UnitState& unit, unsigned int maxSlope)
+    {
+        // Units that can climb anything are not slowed by anything.
+        if (maxSlope == 0 || maxSlope >= 255)
+        {
+            return 1_ss;
+        }
+
+        // Rise over one heightmap tile in the direction we are facing, in the
+        // same units the movement class limit uses (height per tile).
+        auto forward = UnitState::toDirection(unit.rotation);
+        auto ahead = unit.position + (forward * MapTerrain::HeightTileWidthInWorldUnits);
+        auto extent = terrain.worldToHeightmapCoordinate(ahead);
+        const auto& heights = terrain.getHeightMap();
+        if (extent.x < 0 || extent.y < 0 || extent.x >= heights.getWidth() || extent.y >= heights.getHeight())
+        {
+            return 1_ss;
+        }
+
+        auto rise = terrain.getHeightAt(ahead.x, ahead.z) - terrain.getHeightAt(unit.position.x, unit.position.z);
+        if (rise <= 0_ss)
+        {
+            // Downhill and flat are full speed.
+            return 1_ss;
+        }
+
+        // At the slope limit the unit crawls at half speed; never below a quarter.
+        auto ratio = rise / SimScalar(static_cast<float>(maxSlope));
+        auto factor = 1_ss - (ratio / 2_ss);
+        return rweMax(factor, 1_ss / 4_ss);
+    }
+
+    SimScalar computeNewGroundUnitSpeed(const MapTerrain& terrain, const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoGround& physics, unsigned int maxSlope)
     {
         SimScalar newSpeed;
         if (physics.steeringInfo.targetSpeed > physics.currentSpeed)
@@ -198,6 +230,7 @@ namespace rwe
         {
             effectiveMaxSpeed /= 2_ss;
         }
+        effectiveMaxSpeed = effectiveMaxSpeed * computeSlopeSpeedFactor(terrain, unit, maxSlope);
         newSpeed = std::clamp(newSpeed, 0_ss, effectiveMaxSpeed);
 
         return newSpeed;
@@ -498,6 +531,15 @@ namespace rwe
         auto destination = match(
             goal,
             [&](const SimVector& pos) {
+                // If the pathfinder found the point unreachable, getting as close
+                // as we can is as good as arriving.
+                if (auto moving = std::get_if<NavigationStateMoving>(&unit.navigationState.state); moving != nullptr && moving->reachableDestination)
+                {
+                    if (auto movingGoal = std::get_if<SimVector>(&moving->movementGoal); movingGoal != nullptr && *movingGoal == pos)
+                    {
+                        return std::make_optional(*moving->reachableDestination);
+                    }
+                }
                 return std::make_optional(pos);
             },
             [&](const DiscreteRect& rect) {

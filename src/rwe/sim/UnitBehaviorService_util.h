@@ -34,7 +34,15 @@ namespace rwe
 
     SteeringInfo arrive(const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoGround& physics, const SimVector& destination);
 
-    SimScalar computeNewGroundUnitSpeed(const MapTerrain& terrain, const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoGround& physics);
+    /**
+     * Speed for the next tick. maxSlope is the unit's movement class slope
+     * limit; climbing slows the unit down in proportion to how close the
+     * ground ahead is to that limit.
+     */
+    SimScalar computeNewGroundUnitSpeed(const MapTerrain& terrain, const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoGround& physics, unsigned int maxSlope);
+
+    /** Multiplier in (0, 1] applied to a unit's top speed for the ground directly ahead of it. */
+    SimScalar computeSlopeSpeedFactor(const MapTerrain& terrain, const UnitState& unit, unsigned int maxSlope);
 
     SimVector decelerate(SimVector currentVelocity, SimScalar deceleration);
 

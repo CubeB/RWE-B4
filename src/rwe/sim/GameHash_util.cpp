@@ -227,7 +227,8 @@ namespace rwe
     {
         return combineHashes(
             m.pathDestination,
-            m.pathRequested);
+            m.pathRequested,
+            m.reachableDestination);
     }
 
     GameHash computeHashOf(const NavigationStateMovingToLandingSpot& m)

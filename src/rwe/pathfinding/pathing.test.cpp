@@ -1,0 +1,282 @@
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+#include <rwe/cob/CobEnvironment.h>
+#include <rwe/grid/Grid.h>
+#include <rwe/io/cob/Cob.h>
+#include <rwe/pathfinding/UnitPathFinder.h>
+#include <rwe/sim/FeatureDefinition.h>
+#include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/MapTerrain.h>
+#include <rwe/sim/UnitBehaviorService_util.h>
+#include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/UnitOrder.h>
+#include <rwe/sim/UnitState.h>
+#include <rwe/sim/movement.h>
+#include <sstream>
+#include <memory>
+
+namespace rwe
+{
+    namespace
+    {
+        MapTerrain makeTerrain(int width, int height, const std::function<unsigned char(int, int)>& heightAt)
+        {
+            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
+            for (int y = 0; y < height; ++y)
+            {
+                for (int x = 0; x < width; ++x)
+                {
+                    heights.set(x, y, heightAt(x, y));
+                }
+            }
+            return MapTerrain(std::move(heights), 0_ss);
+        }
+
+        MapTerrain makeFlatTerrain(int width = 16, int height = 16)
+        {
+            return makeTerrain(width, height, [](int, int) { return 0; });
+        }
+
+        PlayerId addPlayer(GameSimulation& sim)
+        {
+            GamePlayerInfo p{
+                std::optional<std::string>("player"),
+                GamePlayerType::Human,
+                PlayerColorIndex(0),
+                GamePlayerStatus::Alive,
+                std::string("ARM"),
+                Metal(1000.0f),
+                Energy(1000.0f),
+                Metal(1000.0f),
+                Energy(1000.0f),
+                Metal(1000.0f),
+                Energy(1000.0f),
+            };
+            return sim.addPlayer(p);
+        }
+
+        std::shared_ptr<CobScript> makeEmptyCobScript()
+        {
+            auto script = std::make_shared<CobScript>();
+            script->staticVariableCount = 0;
+            return script;
+        }
+
+        UnitDefinition makeTankDef(unsigned int maxSlope)
+        {
+            UnitDefinition d{};
+            d.isMobile = true;
+            d.canMove = true;
+            d.maxVelocity = 4_ss;
+            d.acceleration = 4_ss;
+            d.brakeRate = 4_ss;
+            d.turnRate = 4000_ss;
+            d.maxHitPoints = 100;
+            d.buildTime = 0u;
+            // {footprintX, footprintZ, maxSlope, maxWaterSlope, minWaterDepth, maxWaterDepth}
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{1u, 1u, maxSlope, maxSlope, 0u, 255u};
+            return d;
+        }
+
+        /** World-space centre of a 1x1 footprint at heightmap cell (x, y). */
+        SimVector cellCenter(const GameSimulation& sim, int x, int y)
+        {
+            auto corner = sim.terrain.heightmapIndexToWorldCorner(x, y);
+            return corner + SimVector(8_ss, 0_ss, 8_ss);
+        }
+
+        UnitId addTank(GameSimulation& sim, PlayerId owner, int cellX, int cellY, const std::shared_ptr<CobScript>& script, unsigned int maxSlope = 10u)
+        {
+            sim.unitDefinitions["tank"] = makeTankDef(maxSlope);
+            auto env = std::make_unique<CobEnvironment>(script.get());
+            std::vector<UnitMesh> pieces;
+            UnitState unit(pieces, std::move(env));
+            unit.unitType = "tank";
+            unit.owner = owner;
+            unit.position = cellCenter(sim, cellX, cellY);
+            unit.previousPosition = unit.position;
+            unit.hitPoints = 100;
+            // Register through the real spawn path so the unit occupies grid
+            // cells; movement and collision depend on that.
+            auto unitId = sim.tryAddUnit(std::move(unit));
+            REQUIRE(unitId.has_value());
+            return *unitId;
+        }
+
+        FeatureDefinitionId addWallDef(GameSimulation& sim)
+        {
+            FeatureDefinition d{};
+            d.name = "wall";
+            d.footprintX = 1;
+            d.footprintZ = 1;
+            d.height = 10_ss;
+            d.blocking = true;
+            d.indestructible = true;
+            return sim.featureDefinitions.insert(d);
+        }
+
+        void placeWall(GameSimulation& sim, FeatureDefinitionId wall, int x, int y)
+        {
+            REQUIRE(sim.addFeature(wall, x, y).has_value());
+        }
+
+        bool pathContainsStep(const std::vector<Point>& path, const Point& from, const Point& to)
+        {
+            for (size_t i = 1; i < path.size(); ++i)
+            {
+                if (path[i - 1] == from && path[i] == to)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    TEST_CASE("the pathfinder does not squeeze diagonally between touching obstacle corners", "[pathing]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto wall = addWallDef(sim);
+        auto tankId = addTank(sim, player, 2, 2, script);
+
+        // Obstacles east and south of the unit; the cell diagonally
+        // south-east is free but only reachable by going around.
+        placeWall(sim, wall, 3, 2);
+        placeWall(sim, wall, 2, 3);
+
+        UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, tankId, std::nullopt, 1u, 1u, Point(3, 3));
+        auto result = pathFinder.findPath(Point(2, 2));
+
+        REQUIRE(result.type == AStarPathType::Complete);
+        REQUIRE(result.path.size() > 2);
+        REQUIRE_FALSE(pathContainsStep(result.path, Point(2, 2), Point(3, 3)));
+    }
+
+    TEST_CASE("the pathfinder routes around steep but passable ground", "[pathing]")
+    {
+        auto script = makeEmptyCobScript();
+        // A corrugated band across the middle of the map: every cell in it has
+        // slope 6, passable for a unit with max slope 10 but counted as rough.
+        // Flat ground above and below offers a longer but smoother route.
+        GameSimulation sim(makeTerrain(16, 12, [](int x, int y) { return (x >= 4 && x <= 10 && y >= 4 && y <= 6) ? static_cast<unsigned char>((x % 2) * 6) : static_cast<unsigned char>(0); }), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto tankId = addTank(sim, player, 1, 5, script, 10u);
+
+        UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, tankId, std::nullopt, 1u, 1u, Point(12, 5));
+        auto result = pathFinder.findPath(Point(1, 5));
+
+        REQUIRE(result.type == AStarPathType::Complete);
+        std::ostringstream pathText;
+        for (const auto& p : result.path)
+        {
+            pathText << "(" << p.x << "," << p.y << ") ";
+        }
+        INFO("path: " << pathText.str());
+        for (const auto& p : result.path)
+        {
+            // Cells whose 2x2 height block contains a raised column (odd x in 5..9).
+            bool onSlope = p.x >= 4 && p.x <= 9 && p.y >= 3 && p.y <= 6;
+            REQUIRE_FALSE(onSlope);
+        }
+    }
+
+    TEST_CASE("a move order to an unreachable point completes at the closest reachable point", "[pathing]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto wall = addWallDef(sim);
+        auto tankId = addTank(sim, player, 2, 8, script);
+
+        // Wall off cell (8, 8) completely.
+        for (int y = 7; y <= 9; ++y)
+        {
+            for (int x = 7; x <= 9; ++x)
+            {
+                if (x != 8 || y != 8)
+                {
+                    placeWall(sim, wall, x, y);
+                }
+            }
+        }
+
+        auto target = cellCenter(sim, 8, 8);
+        sim.getUnitState(tankId).orders.push_back(MoveOrder(target));
+
+        for (int i = 0; i < 600 && !sim.getUnitState(tankId).orders.empty(); ++i)
+        {
+            sim.tick();
+        }
+
+        const auto& tank = sim.getUnitState(tankId);
+        {
+            auto moving = std::get_if<NavigationStateMoving>(&tank.navigationState.state);
+            auto ground = std::get_if<UnitPhysicsInfoGround>(&tank.physics);
+            auto direction = UnitState::toDirection(tank.rotation);
+            auto next = tank.position + direction * 4_ss;
+            auto nextRegion = sim.computeFootprintRegion(next, sim.unitDefinitions.at("tank").movementCollisionInfo);
+            auto walkable = isGridPointWalkable(sim.terrain, sim.getAdHocMovementClass(sim.unitDefinitions.at("tank").movementCollisionInfo), nextRegion.x, nextRegion.y);
+            INFO("dir=" << direction.x.value << "," << direction.z.value
+                        << " next=" << next.x.value << "," << next.z.value
+                        << " nextRegion=" << nextRegion.x << "," << nextRegion.y
+                        << " collision=" << sim.isCollisionAt(nextRegion, tankId)
+                        << " walkable=" << walkable
+                        << " waypoint=" << (moving && moving->path ? moving->path->path.waypoints.back().x.value : -999.0f) << "," << (moving && moving->path ? moving->path->path.waypoints.back().z.value : -999.0f)
+                        << " target=" << (ground ? ground->steeringInfo.targetSpeed.value : -1.0f));
+            INFO("pos=" << tank.position.x.value << "," << tank.position.z.value
+                        << " moving=" << (moving != nullptr)
+                        << " hasPath=" << (moving && moving->path ? 1 : 0)
+                        << " waypoints=" << (moving && moving->path ? moving->path->path.waypoints.size() : 0)
+                        << " reachable=" << (moving && moving->reachableDestination ? 1 : 0)
+                        << " pathRequested=" << (moving ? static_cast<int>(moving->pathRequested) : -1)
+                        << " desired=" << tank.navigationState.desiredDestination.has_value()
+                        << " speed=" << (ground ? ground->currentSpeed.value : -1.0f)
+                        << " inCollision=" << tank.inCollision
+                        << " pendingRequests=" << sim.pathRequests.size());
+            REQUIRE(tank.orders.empty());
+        }
+        // We stopped next to the wall, not inside it.
+        auto cell = sim.terrain.worldToHeightmapCoordinate(tank.position);
+        REQUIRE(cell.x < 7);
+        REQUIRE(cell.x > 2);
+    }
+
+    TEST_CASE("computeSlopeSpeedFactor", "[pathing]")
+    {
+        auto script = makeEmptyCobScript();
+        // Flat ground for x < 4, a plateau of height 8 from x = 4.
+        GameSimulation sim(makeTerrain(10, 10, [](int x, int) { return x >= 4 ? 8 : 0; }), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto tankId = addTank(sim, player, 3, 3, script, 16u);
+        auto& tank = sim.getUnitState(tankId);
+        // Stand exactly on the tile corner so heights are not interpolated.
+        tank.position = sim.terrain.heightmapIndexToWorldCorner(3, 3);
+
+        SECTION("climbing towards the slope limit slows the unit")
+        {
+            tank.rotation = UnitState::toRotation(SimVector(1_ss, 0_ss, 0_ss));
+            // rise 8 over one tile against a limit of 16 -> 1 - (0.5 / 2) = 0.75
+            REQUIRE(computeSlopeSpeedFactor(sim.terrain, tank, 16u).value == Catch::Approx(0.75f));
+        }
+
+        SECTION("a steeper climb is never slower than a quarter speed")
+        {
+            tank.rotation = UnitState::toRotation(SimVector(1_ss, 0_ss, 0_ss));
+            REQUIRE(computeSlopeSpeedFactor(sim.terrain, tank, 4u).value == Catch::Approx(0.25f));
+        }
+
+        SECTION("flat or downhill ground is full speed")
+        {
+            tank.rotation = UnitState::toRotation(SimVector(-1_ss, 0_ss, 0_ss));
+            REQUIRE(computeSlopeSpeedFactor(sim.terrain, tank, 16u).value == Catch::Approx(1.0f));
+        }
+
+        SECTION("units with no slope limit are never slowed")
+        {
+            tank.rotation = UnitState::toRotation(SimVector(1_ss, 0_ss, 0_ss));
+            REQUIRE(computeSlopeSpeedFactor(sim.terrain, tank, 255u).value == Catch::Approx(1.0f));
+        }
+    }
+}

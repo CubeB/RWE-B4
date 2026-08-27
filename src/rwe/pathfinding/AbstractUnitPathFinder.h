@@ -23,6 +23,8 @@ namespace rwe
         const std::optional<MovementClassId> movementClass;
         const unsigned int footprintX;
         const unsigned int footprintZ;
+        /** Slopes steeper than this count as rough terrain (double cost). */
+        const unsigned int roughSlope;
 
     public:
         AbstractUnitPathFinder(
@@ -33,12 +35,12 @@ namespace rwe
             unsigned int footprintX,
             unsigned int footprintZ);
 
+        bool isWalkable(const Point& p) const;
+
     protected:
         std::vector<VertexInfo> getSuccessors(const VertexInfo& vertex) override;
 
     private:
-        bool isWalkable(const Point& p) const;
-
         bool isWalkable(int x, int y) const;
 
         bool isRoughTerrain(const Point& p) const;

@@ -99,6 +99,12 @@ namespace rwe
         PathDestination pathDestination;
         std::optional<PathFollowingInfo> path;
         bool pathRequested;
+
+        /**
+         * Set when the goal cannot be reached: the closest reachable point,
+         * which then counts as the destination for arrival purposes.
+         */
+        std::optional<SimVector> reachableDestination;
     };
 
     struct NavigationStateMovingToLandingSpot
