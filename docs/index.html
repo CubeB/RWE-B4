@@ -71,8 +71,8 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <div class="meta">
     <span>branch <b>revival</b></span>
     <span>base <b>upstream master b2d8a31 · 25 Mar 2026</b></span>
-    <span>updated <b>28 Aug 2026</b></span>
-    <span>tests <b>171 cases · 1800+ assertions</b></span>
+    <span>updated <b>29 Aug 2026</b></span>
+    <span>tests <b>171 cases · 1823 assertions</b></span>
   </div>
 </header>
 <nav aria-label="Sections">
@@ -98,7 +98,10 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Self‑destruct countdown (Ctrl‑D, 5 s, cancellable) using the unit's <code>SelfDestructAs</code> weapon</li>
   <li>Transports: load and unload orders with TA's own cursors and panel buttons; carried units ride the transport's <code>QueryTransport</code> piece and are set down on clear ground</li>
   <li>Bombers fly through the target on their run, release when the timing is right, and turn back after a short run‑out or at the map edge instead of flying off the map</li>
-  <li>Ships and shipyards can be placed and built in water (a missing <code>MaxWaterDepth</code> now means any depth)</li>
+  <li>Ships and shipyards can be placed and built in water (a missing <code>MaxWaterDepth</code> now means any depth); torpedoes only hit units in the water and run under the surface</li>
+  <li>Aircraft move off and steer while climbing, bank into turns, and bombers drop a stick of three per pass</li>
+  <li>Sea transports (Hulk/Envoy, six units, crane reach) and Atlas hover‑down pickup; LOAD/BLAST/CLOAK buttons appear only where they apply</li>
+  <li>Units only auto‑target what their owner can see or has on radar; a new order interrupts building cleanly; shift‑click removes a planned building</li>
   <li>Units rock with recoil when they fire</li>
   <li>Pathing: slope‑aware speed and routing, no corner squeezing between obstacles, unreachable destinations end at the closest reachable point</li>
   <li>Builders no longer get stuck on unreachable build sites; nanoframes killed while unattended die cleanly</li>
@@ -156,8 +159,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <h3>Needs checking in‑game</h3>
 <ul>
   <li>Lighting direction (now a low sun from the left; tune against <code>lightingexample.png</code>)</li>
-  <li>Lab bay showing through a unit under construction</li>
-  <li>Wireframe weight, pulse speed and texture sweep timing</li>
+  <li>Construction phases, aircraft banking amount, Atlas hover height, transport ship crane reach (200 units is an estimate)</li>
 </ul>
 
 <h3>Phase 0</h3>
@@ -172,7 +174,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <ul>
   <li>Resurrect order (corpse → unit mapping)</li>
   <li>Builders on patrol repair and reclaim en route; capture progress decays when the captor stops</li>
-  <li>Transports: units ordering themselves aboard, air transports descending to pick up, <code>TransportPickup</code>/<code>TransportDrop</code> hooks, AI use</li>
+  <li>Transports: units ordering themselves aboard by clicking a transport, crane animation timed to the attach, AI use</li>
   <li>Aiming scripts running twice (#42)</li>
   <li>Reclaim polish: sounds, progress in the info panel, auto‑reclaim for idle builders</li>
   <li>Self‑destruct blink effect; unit debris severity from actual overkill; SHATTER as real polygon fragments; explosions after a script's first sleep</li>
