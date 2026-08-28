@@ -59,6 +59,7 @@ namespace rwe
         tdf.readOrDefault("CanMove", u.canMove);
         tdf.readOrDefault("CanGuard", u.canGuard);
         tdf.readOrDefault("CanCapture", u.canCapture);
+        tdf.readOrDefault("Cloakable", u.cloakable);
 
         tdf.readOrDefault("Commander", u.commander);
 

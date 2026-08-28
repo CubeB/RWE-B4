@@ -511,6 +511,17 @@ namespace rwe
 
         void localPlayerSelfDestructUnit(UnitId unitId);
 
+        /** Drops the queued build order whose footprint covers position (a shift-click on a planned building). */
+        void localPlayerCancelBuildOrder(UnitId unitId, const SimVector& position);
+
+        void cancelBuildOrderAt(UnitId unitId, const SimVector& position);
+
+        /** The position of the unit's queued build order whose footprint covers position, if any. */
+        std::optional<SimVector> plannedBuildOrderAt(UnitId unitId, const SimVector& position) const;
+
+        /** The ORDERS panel with the buttons a unit cannot use taken out. */
+        std::unique_ptr<UiPanel> createOrdersPanel(std::optional<UnitId> unitId);
+
         void localPlayerSetFireOrders(UnitId unitId, UnitFireOrders orders);
 
         void localPlayerSetOnOff(UnitId unitId, bool on);

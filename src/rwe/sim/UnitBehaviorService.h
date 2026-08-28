@@ -32,6 +32,12 @@ namespace rwe
 
         void update(UnitId unitId);
 
+        /**
+         * Abandons whatever the unit is in the middle of (building, reclaiming),
+         * running its StopBuilding script, so a new order starts from idle.
+         */
+        void interruptCurrentTask(UnitId unitId);
+
         // FIXME: shouldn't really be public
         SimVector getSweetSpot(UnitId id);
         std::optional<SimVector> tryGetSweetSpot(UnitId id);
@@ -68,6 +74,12 @@ namespace rwe
         bool handleLoadOrder(UnitInfo unitInfo, const LoadOrder& loadOrder);
 
         bool handleUnloadOrder(UnitInfo unitInfo, const UnloadOrder& unloadOrder);
+
+        /** Steers an air unit to a point that may be below cruise height; true once it hovers there. */
+        bool hoverTowards(UnitInfo unitInfo, const SimVector& point);
+
+        /** Whether this weapon can hit the unit at all (water weapons only reach units in the water). */
+        bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& target) const;
 
         bool captureExistingUnit(UnitInfo unitInfo, UnitId targetUnitId);
 

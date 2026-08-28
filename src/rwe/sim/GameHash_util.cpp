@@ -120,7 +120,7 @@ namespace rwe
 
     GameHash computeHashOf(const AirMovementStateTakingOff& p)
     {
-        return GameHash(0);
+        return combineHashes(p.currentVelocity, p.targetPosition.value_or(SimVector(0_ss, 0_ss, 0_ss)));
     }
 
     GameHash computeHashOf(const AirMovementStateLanding& p)
@@ -139,7 +139,8 @@ namespace rwe
             p.lastKnownTargetPos,
             p.runOutDirection,
             p.runOutDistance,
-            static_cast<uint32_t>(p.phase));
+            static_cast<uint32_t>(p.phase),
+            p.bombsDroppedThisPass);
     }
 
     GameHash computeHashOf(const SteeringInfo& s)

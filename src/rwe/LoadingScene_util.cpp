@@ -200,6 +200,8 @@ namespace rwe
 
         weaponDefinition.fireStarter = static_cast<unsigned int>(std::clamp(tdf.fireStarter, 0.0f, 100.0f));
 
+        weaponDefinition.waterWeapon = tdf.waterWeapon;
+
         weaponDefinition.randomDecay = GameTime(static_cast<unsigned int>(tdf.randomDecay * 30.0f));
 
         return weaponDefinition;
@@ -282,6 +284,7 @@ namespace rwe
         u.canMove = fbi.canMove;
         u.canGuard = fbi.canGuard;
         u.canCapture = fbi.canCapture;
+        u.cloakable = fbi.cloakable;
 
         u.commander = fbi.commander;
 
@@ -295,6 +298,12 @@ namespace rwe
         u.canFly = fbi.canFly;
         u.transportCapacity = fbi.transportCapacity;
         u.transportSize = fbi.transportSize;
+        if (u.transportSize > 0 && u.transportCapacity == 0)
+        {
+            // TA gives no capacity in the FBI: air transports carry one unit,
+            // the Hulk and Envoy six (the crane loads units onto the deck).
+            u.transportCapacity = fbi.floater ? 6u : 1u;
+        }
 
         u.cruiseAltitude = SimScalar(fbi.cruiseAlt);
 

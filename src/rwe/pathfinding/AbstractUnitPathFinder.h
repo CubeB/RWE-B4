@@ -25,6 +25,12 @@ namespace rwe
         const unsigned int footprintZ;
         /** Slopes steeper than this count as rough terrain (double cost). */
         const unsigned int roughSlope;
+        /**
+         * True for land units that can wade: water costs them double,
+         * so a dry route is preferred when one exists.
+         * Ships and other units that live in the water are never penalised.
+         */
+        const bool waterIsSlow;
 
     public:
         AbstractUnitPathFinder(
@@ -44,6 +50,8 @@ namespace rwe
         bool isWalkable(int x, int y) const;
 
         bool isRoughTerrain(const Point& p) const;
+
+        bool isUnderWater(const Point& p) const;
 
         Point step(const Point& p, Direction d) const;
 

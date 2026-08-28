@@ -202,6 +202,12 @@ namespace rwe
 
     void UiPanel::removeChildrenWithPrefix(const std::string& prefix)
     {
+        // Don't leave the focus pointing at a child we are about to destroy.
+        if (focusedChild && startsWith((*focusedChild)->getName(), prefix))
+        {
+            focusedChild = std::nullopt;
+        }
+
         children.erase(
             std::remove_if(
                 children.begin(),

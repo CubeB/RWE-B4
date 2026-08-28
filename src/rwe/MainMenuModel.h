@@ -64,6 +64,27 @@ namespace rwe
 
         BehaviorSubject<std::optional<SelectedMapInfo>> candidateSelectedMap;
 
+        /**
+         * The staged option buttons down the right of the skirmish screen.
+         * Each value is the stage shown on the button, in the order the
+         * stages are listed in SKIRMISH.GUI.
+         */
+        struct SkirmishOptions
+        {
+            /** Game ends | Continues */
+            BehaviorSubject<unsigned int> commanderDeath{0u};
+            /** Fixed | Random */
+            BehaviorSubject<unsigned int> startLocation{0u};
+            /** Unmapped | Mapped */
+            BehaviorSubject<unsigned int> mapping{0u};
+            /** Permanent | True | Circular */
+            BehaviorSubject<unsigned int> lineOfSight{1u};
+            /** Easy | Medium | Hard; decides the AI tuning profile. */
+            BehaviorSubject<unsigned int> difficulty{1u};
+        };
+
+        SkirmishOptions skirmishOptions;
+
         std::array<PlayerSettings, 10> players{{
             {PlayerSettings::Type::Human, PlayerSettings::Side::Arm, PlayerColorIndex(0), std::optional<int>(std::nullopt), Metal(1000), Energy(1000)},
             {PlayerSettings::Type::Computer, PlayerSettings::Side::Core, PlayerColorIndex(1), std::optional<int>(std::nullopt), Metal(1000), Energy(1000)},

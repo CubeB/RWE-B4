@@ -12,6 +12,7 @@
 #include <rwe/game/matrix_util.h>
 #include <rwe/resource_io.h>
 #include <rwe/sim/SimTicksPerSecond.h>
+#include <rwe/sim/UnitBehaviorService.h>
 #include <rwe/ui/UiStagedButton.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/match.h>
@@ -2054,12 +2055,32 @@ namespace rwe
                                 SimVector buildPos(x, y, z);
                                 if (isShiftDown())
                                 {
-                                    localPlayerEnqueueUnitOrder(*selectedUnit, BuildOrder(buildCursor.unitType, buildPos));
+                                    // Shift-clicking a building already in the plan takes it out again.
+                                    if (auto planned = plannedBuildOrderAt(*selectedUnit, buildPos))
+                                    {
+                                        localPlayerCancelBuildOrder(*selectedUnit, *planned);
+                                    }
+                                    else
+                                    {
+                                        localPlayerEnqueueUnitOrder(*selectedUnit, BuildOrder(buildCursor.unitType, buildPos));
+                                    }
                                 }
                                 else
                                 {
                                     localPlayerIssueUnitOrder(*selectedUnit, BuildOrder(buildCursor.unitType, buildPos));
                                     cursorMode.next(NormalCursorMode());
+                                }
+                            }
+                            else if (isShiftDown() && getMouseTerrainCoordinate())
+                            {
+                                // The spot is blocked by our own plan: shift-click removes that plan.
+                                if (auto planned = plannedBuildOrderAt(*selectedUnit, *getMouseTerrainCoordinate()))
+                                {
+                                    localPlayerCancelBuildOrder(*selectedUnit, *planned);
+                                }
+                                else if (sounds.notOkToBuild)
+                                {
+                                    playUiSound(*sounds.notOkToBuild);
                                 }
                             }
                             else
@@ -3443,6 +3464,10 @@ namespace rwe
         auto unit = tryGetUnit(unitId);
         if (unit)
         {
+            // Whatever it was doing (building, reclaiming) stops now, so the
+            // arm is stowed and the nano spray ends; a later order to the same
+            // target starts cleanly with StartBuilding.
+            UnitBehaviorService(&simulation).interruptCurrentTask(unitId);
             unit->get().clearOrders();
             unit->get().addOrder(order);
         }
@@ -3462,7 +3487,39 @@ namespace rwe
         auto unit = tryGetUnit(unitId);
         if (unit)
         {
+            UnitBehaviorService(&simulation).interruptCurrentTask(unitId);
             unit->get().clearOrders();
+        }
+    }
+
+    void GameScene::cancelBuildOrderAt(UnitId unitId, const SimVector& position)
+    {
+        auto unit = tryGetUnit(unitId);
+        if (!unit)
+        {
+            return;
+        }
+        auto cell = simulation.terrain.worldToHeightmapCoordinate(position);
+        auto& orders = unit->get().orders;
+        for (auto it = orders.begin(); it != orders.end(); ++it)
+        {
+            auto buildOrder = std::get_if<BuildOrder>(&*it);
+            if (!buildOrder)
+            {
+                continue;
+            }
+            const auto& definition = simulation.unitDefinitions.at(buildOrder->unitType);
+            auto rect = simulation.computeFootprintRegion(buildOrder->position, definition.movementCollisionInfo);
+            if (cell.x >= rect.x && cell.x < rect.x + static_cast<int>(rect.width) && cell.y >= rect.y && cell.y < rect.y + static_cast<int>(rect.height))
+            {
+                // Only the plan is dropped; a building already started stays.
+                if (it == orders.begin() && std::holds_alternative<UnitBehaviorStateBuilding>(unit->get().behaviourState))
+                {
+                    return;
+                }
+                orders.erase(it);
+                return;
+            }
         }
     }
 
@@ -3610,6 +3667,74 @@ namespace rwe
     bool GameScene::positionIsVisibleToLocalPlayer(const SimVector& position) const
     {
         return !fogOfWarEnabled || simulation.isVisibleTo(localPlayerId, position);
+    }
+
+    std::optional<SimVector> GameScene::plannedBuildOrderAt(UnitId unitId, const SimVector& position) const
+    {
+        auto unit = tryGetUnit(unitId);
+        if (!unit)
+        {
+            return std::nullopt;
+        }
+        auto cell = simulation.terrain.worldToHeightmapCoordinate(position);
+        for (const auto& order : unit->get().orders)
+        {
+            auto buildOrder = std::get_if<BuildOrder>(&order);
+            if (!buildOrder)
+            {
+                continue;
+            }
+            const auto& definition = simulation.unitDefinitions.at(buildOrder->unitType);
+            auto rect = simulation.computeFootprintRegion(buildOrder->position, definition.movementCollisionInfo);
+            if (cell.x >= rect.x && cell.x < rect.x + static_cast<int>(rect.width) && cell.y >= rect.y && cell.y < rect.y + static_cast<int>(rect.height))
+            {
+                return buildOrder->position;
+            }
+        }
+        return std::nullopt;
+    }
+
+    void GameScene::localPlayerCancelBuildOrder(UnitId unitId, const SimVector& position)
+    {
+        localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::CancelBuildOrder{position}));
+    }
+
+    std::unique_ptr<UiPanel> GameScene::createOrdersPanel(std::optional<UnitId> unitId)
+    {
+        const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
+        auto panel = uiFactory.panelFromGuiFile(sidePrefix + "GEN");
+
+        auto unit = unitId ? tryGetUnit(*unitId) : std::nullopt;
+        if (!unit)
+        {
+            return panel;
+        }
+        const auto& definition = simulation.unitDefinitions.at(unit->get().unitType);
+
+        // TA shows only the orders a unit can carry out. LOAD and BLAST share a
+        // slot in the GUI, so exactly one of them survives.
+        bool hasCommandFireWeapon = false;
+        for (const auto& weapon : unit->get().weapons)
+        {
+            if (weapon && simulation.weaponDefinitions.at(weapon->weaponType).commandFire)
+            {
+                hasCommandFireWeapon = true;
+            }
+        }
+        if (!definition.isTransport())
+        {
+            panel->removeChildrenWithPrefix(sidePrefix + "LOAD");
+            panel->removeChildrenWithPrefix(sidePrefix + "UNLOAD");
+        }
+        if (definition.isTransport() || !hasCommandFireWeapon)
+        {
+            panel->removeChildrenWithPrefix(sidePrefix + "BLAST");
+        }
+        if (!definition.cloakable)
+        {
+            panel->removeChildrenWithPrefix(sidePrefix + "CLOAK");
+        }
+        return panel;
     }
 
     void GameScene::spawnDebris(const PieceExplodedEvent& e)
@@ -4651,8 +4776,7 @@ namespace rwe
                 auto& guiInfo = unitGuiInfos.at(*selectedUnit);
                 guiInfo.section = UnitGuiInfo::Section::Orders;
 
-                const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
-                setNextPanel(uiFactory.panelFromGuiFile(sidePrefix + "GEN"));
+                setNextPanel(createOrdersPanel(*selectedUnit));
             }
         }
         else if (isValidUnitType(simulation, message))
@@ -4883,14 +5007,12 @@ namespace rwe
             }
             else
             {
-                const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
-                setNextPanel(uiFactory.panelFromGuiFile(sidePrefix + "GEN"));
+                setNextPanel(createOrdersPanel(*unitId));
             }
         }
         else
         {
-            const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
-            setNextPanel(uiFactory.panelFromGuiFile(sidePrefix + "GEN"));
+            setNextPanel(createOrdersPanel(std::nullopt));
         }
     }
 
@@ -5051,6 +5173,9 @@ namespace rwe
                 {
                     simulation.deactivateUnit(unitCommand.unit);
                 }
+            },
+            [&](const PlayerUnitCommand::CancelBuildOrder& c) {
+                cancelBuildOrderAt(unitCommand.unit, c.position);
             },
             [&](const PlayerUnitCommand::SelfDestruct&) {
                 // Starts the countdown, or cancels it if pressed again.

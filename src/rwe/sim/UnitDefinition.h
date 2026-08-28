@@ -75,6 +75,8 @@ namespace rwe
         bool canMove;
         bool canGuard;
         bool canCapture;
+        /** Can hide from enemy sight (TA Cloakable). Only this shows the CLOAK button. */
+        bool cloakable{false};
 
         /** If true, the unit is considered a commander for victory conditions. */
         bool commander;

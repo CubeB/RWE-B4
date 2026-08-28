@@ -427,6 +427,7 @@ namespace rwe
                 if (toUnitFromTarget.lengthSquared() >= runOutSquared)
                 {
                     runState.phase = AirMovementStateAttackRun::Phase::Approaching;
+                    runState.bombsDroppedThisPass = 0;
                 }
                 return false;
             }

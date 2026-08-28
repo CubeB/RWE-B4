@@ -14,6 +14,20 @@ namespace rwe
             auto maxSlope = simulation.getAdHocMovementClass(unitDefinition.movementCollisionInfo).maxSlope;
             return maxSlope >= 255 ? 255 : maxSlope / 2;
         }
+
+        bool computeWaterIsSlow(const GameSimulation& simulation, UnitId self)
+        {
+            // Floating units (ships) and units that need water under them
+            // are at home in the water; everything else wades slowly.
+            const auto& unit = simulation.getUnitState(self);
+            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+            if (unitDefinition.floater)
+            {
+                return false;
+            }
+            auto movementClass = simulation.getAdHocMovementClass(unitDefinition.movementCollisionInfo);
+            return movementClass.minWaterDepth == 0;
+        }
     }
 
     AbstractUnitPathFinder::AbstractUnitPathFinder(
@@ -29,7 +43,8 @@ namespace rwe
           movementClass(movementClass),
           footprintX(footprintX),
           footprintZ(footprintZ),
-          roughSlope(computeRoughSlope(*simulation, self))
+          roughSlope(computeRoughSlope(*simulation, self)),
+          waterIsSlow(computeWaterIsSlow(*simulation, self))
     {
     }
 
@@ -50,11 +65,18 @@ namespace rwe
             auto direction = pointToDirection(neighbour - info.vertex);
             auto distance = octileDistance(info.vertex, neighbour);
             assert(distance.diagonal == 0 || distance.straight == 0);
+            auto stepCost = distance;
             if (isRoughTerrain(neighbour))
             {
                 // double the cost on rough terrain
-                distance = distance + distance;
+                stepCost = stepCost + distance;
             }
+            if (waterIsSlow && isUnderWater(neighbour))
+            {
+                // wading is slow too: a step through water costs twice a step on land
+                stepCost = stepCost + distance;
+            }
+            distance = stepCost;
             unsigned int turns = prevDirection ? directionDistance(*prevDirection, direction) : 0;
             PathCost cost(distance, turns);
             vs.push_back(VertexInfo{info.costToReach + cost, neighbour, &info});
@@ -97,6 +119,25 @@ namespace rwe
         }
         auto seaLevel = simScalarToUInt(simulation->terrain.getSeaLevel());
         return isMaxSlopeGreaterThan(heights, seaLevel, x, y, footprintX, footprintZ, roughSlope, roughSlope);
+    }
+
+    bool AbstractUnitPathFinder::isUnderWater(const Point& p) const
+    {
+        if (p.x < 0 || p.y < 0)
+        {
+            return false;
+        }
+
+        const auto& heights = simulation->terrain.getHeightMap();
+        auto x = static_cast<unsigned int>(p.x);
+        auto y = static_cast<unsigned int>(p.y);
+        // isAreaUnderWater looks one cell past the footprint on each axis.
+        if (x + footprintX >= static_cast<unsigned int>(heights.getWidth()) || y + footprintZ >= static_cast<unsigned int>(heights.getHeight()))
+        {
+            return false;
+        }
+        auto seaLevel = simScalarToUInt(simulation->terrain.getSeaLevel());
+        return isAreaUnderWater(heights, seaLevel, x, y, footprintX, footprintZ);
     }
 
     Point AbstractUnitPathFinder::step(const Point& p, Direction d) const

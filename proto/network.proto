@@ -141,6 +141,11 @@ message PlayerUnitCommand
     {
     }
 
+    message CancelBuildOrder
+    {
+        required SimVector position = 1;
+    }
+
     required int32 unit = 1;
 
     oneof command {
@@ -150,6 +155,7 @@ message PlayerUnitCommand
         SetOnOff set_on_off = 5;
         ModifyBuildQueue modify_build_queue = 6;
         SelfDestruct self_destruct = 7;
+        CancelBuildOrder cancel_build_order = 8;
     }
 }
 

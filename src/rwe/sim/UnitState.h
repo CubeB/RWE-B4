@@ -198,6 +198,10 @@ namespace rwe
 
     struct AirMovementStateTakingOff
     {
+        /** Where the aircraft is heading while it climbs; it moves off as soon as it leaves the ground. */
+        std::optional<SimVector> targetPosition;
+
+        SimVector currentVelocity{0_ss, 0_ss, 0_ss};
     };
 
     struct AirMovementStateLanding
@@ -238,6 +242,9 @@ namespace rwe
         SimScalar runOutDistance{0_ss};
 
         Phase phase{Phase::Approaching};
+
+        /** Bombs let go on the current pass; a run drops a stick of three once the sight opens. */
+        unsigned int bombsDroppedThisPass{0};
 
         /** Current air velocity in game units/tick. */
         SimVector currentVelocity{0_ss, 0_ss, 0_ss};

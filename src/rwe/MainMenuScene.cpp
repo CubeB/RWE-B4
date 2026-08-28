@@ -8,8 +8,11 @@
 #include <rwe/io/ota/ota.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/resource_io.h>
+#include <rwe/ai/AiTuningProfile.h>
+#include <rwe/ui/UiStagedButton.h>
 #include <rwe/ui/UiSurface.h>
 #include <rwe/util/Index.h>
+#include <rwe/util/rwe_string.h>
 
 namespace rwe
 {
@@ -243,6 +246,10 @@ namespace rwe
             {
                 startGame();
             }
+            else if (message == "CommanderDeath" || message == "StartLocation" || message == "Mapping" || message == "LineOfSight" || message == "Difficulty")
+            {
+                cycleSkirmishOption(message);
+            }
             else if (auto num = matchesPlayer("PLAYER{0}", message))
             {
                 togglePlayer(*num);
@@ -340,6 +347,10 @@ namespace rwe
             throw std::runtime_error("Failed to parse GUI file");
         }
 
+        // Pick the default map before the panel subscribes to the selection,
+        // so the map name shows as soon as the screen opens.
+        selectDefaultMap();
+
         auto panel = uiFactory.panelFromGuiFile("SKIRMISH", "Skirmsetup4x", *parsedGui);
         if (auto mapLabel = panel->find<UiLabel>("MapName"))
         {
@@ -356,9 +367,82 @@ namespace rwe
             mapLabel->get().addSubscription(std::move(sub));
         }
 
+        attachSkirmishOptionComponents(*panel);
         attachPlayerSelectionComponents("SKIRMISH", *panel);
 
         goToMenu(std::move(panel));
+    }
+
+    void MainMenuScene::selectDefaultMap()
+    {
+        if (model.selectedMap.getValue())
+        {
+            return;
+        }
+
+        auto mapNames = getMapNames();
+        if (mapNames.empty())
+        {
+            return;
+        }
+
+        const std::string preferredMap = "Coast To Coast";
+        auto it = std::find_if(mapNames.begin(), mapNames.end(), [&preferredMap](const auto& name) { return toUpper(name) == toUpper(preferredMap); });
+        const auto& mapName = it != mapNames.end() ? *it : mapNames.front();
+
+        setCandidateSelectedMap(mapName);
+        commitSelectedMap();
+    }
+
+    void MainMenuScene::attachSkirmishOptionComponents(UiPanel& panel)
+    {
+        auto attach = [&panel](const std::string& name, BehaviorSubject<unsigned int>& option) {
+            auto button = panel.find<UiStagedButton>(name);
+            if (!button)
+            {
+                return;
+            }
+
+            auto sub = option.subscribe([b = &button->get()](unsigned int stage) {
+                b->setStage(stage);
+            });
+            button->get().addSubscription(std::move(sub));
+        };
+
+        attach("CommanderDeath", model.skirmishOptions.commanderDeath);
+        attach("StartLocation", model.skirmishOptions.startLocation);
+        attach("Mapping", model.skirmishOptions.mapping);
+        attach("LineOfSight", model.skirmishOptions.lineOfSight);
+        attach("Difficulty", model.skirmishOptions.difficulty);
+    }
+
+    void MainMenuScene::cycleSkirmishOption(const std::string& optionName)
+    {
+        // Each option cycles through the stages listed for it in SKIRMISH.GUI.
+        auto cycle = [](BehaviorSubject<unsigned int>& option, unsigned int stageCount) {
+            option.next((option.getValue() + 1) % stageCount);
+        };
+
+        if (optionName == "CommanderDeath")
+        {
+            cycle(model.skirmishOptions.commanderDeath, 2);
+        }
+        else if (optionName == "StartLocation")
+        {
+            cycle(model.skirmishOptions.startLocation, 2);
+        }
+        else if (optionName == "Mapping")
+        {
+            cycle(model.skirmishOptions.mapping, 2);
+        }
+        else if (optionName == "LineOfSight")
+        {
+            cycle(model.skirmishOptions.lineOfSight, 3);
+        }
+        else if (optionName == "Difficulty")
+        {
+            cycle(model.skirmishOptions.difficulty, 3);
+        }
     }
 
     void MainMenuScene::openMapSelectionDialog()
@@ -690,6 +774,20 @@ namespace rwe
         }
     }
 
+    AiDifficulty skirmishDifficultyToAiDifficulty(unsigned int stage)
+    {
+        // The skirmish screen offers Easy | Medium | Hard.
+        switch (stage)
+        {
+            case 0:
+                return AiDifficulty::Easy;
+            case 1:
+                return AiDifficulty::Standard;
+            default:
+                return AiDifficulty::Hard;
+        }
+    }
+
     void MainMenuScene::startGame()
     {
         if (!model.selectedMap.getValue())
@@ -698,6 +796,7 @@ namespace rwe
         }
 
         GameParameters params{model.selectedMap.getValue()->name, 0};
+        params.aiDifficulty = skirmishDifficultyToAiDifficulty(model.skirmishOptions.difficulty.getValue());
 
         for (Index i = 0; i < getSize(model.players); ++i)
         {

@@ -103,6 +103,8 @@ namespace rwe
 
         void cyclePlayerTeam(int playerIndex);
 
+        void cycleSkirmishOption(const std::string& optionName);
+
         void startGame();
 
     private:
@@ -113,6 +115,18 @@ namespace rwe
         Point toScaledCoordinates(int x, int y) const;
 
         std::vector<std::string> getMapNames();
+
+        /**
+         * Picks the default map ("Coast To Coast", or the first installed
+         * map) if no map has been chosen yet.
+         */
+        void selectDefaultMap();
+
+        /**
+         * Hooks the staged option buttons on the right of the skirmish
+         * screen up to the model so that clicking them cycles the stage.
+         */
+        void attachSkirmishOptionComponents(UiPanel& panel);
 
         void attachPlayerSelectionComponents(const std::string& guiName, UiPanel& panel);
 

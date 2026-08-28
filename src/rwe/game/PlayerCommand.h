@@ -49,7 +49,13 @@ namespace rwe
         {
         };
 
-        using Command = std::variant<IssueOrder, ModifyBuildQueue, Stop, SetFireOrders, SetOnOff, SelfDestruct>;
+        /** Remove the queued build order whose footprint covers position. */
+        struct CancelBuildOrder
+        {
+            SimVector position;
+        };
+
+        using Command = std::variant<IssueOrder, ModifyBuildQueue, Stop, SetFireOrders, SetOnOff, SelfDestruct, CancelBuildOrder>;
 
         UnitId unit;
         Command command;

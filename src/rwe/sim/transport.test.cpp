@@ -145,7 +145,13 @@ namespace rwe
                 {
                     sim.tick();
                 }
-                REQUIRE((sim.getUnitState(kbotId).position == sim.getUnitState(transportId).position));
+                // Rides on deck: same spot on the map, a little above the ship.
+                const auto& kbotPos = sim.getUnitState(kbotId).position;
+                const auto& shipPos = sim.getUnitState(transportId).position;
+                REQUIRE(kbotPos.x == shipPos.x);
+                REQUIRE(kbotPos.z == shipPos.z);
+                REQUIRE(kbotPos.y > shipPos.y);
+                REQUIRE(kbotPos.y < shipPos.y + 16_ss);
             }
 
             SECTION("an unload order sets it down near the destination, back on the ground")

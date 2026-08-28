@@ -612,6 +612,23 @@ namespace rwe
                 attachPoint = getUnitPiecePosition(*unit.carriedBy, unit.carriedPiece);
             }
 
+            const auto& transportDefinition = unitDefinitions.at(transport.unitType);
+            const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+            if (transportDefinition.canFly)
+            {
+                // Slung underneath: the top of the unit meets the transport's grip.
+                attachPoint.y -= unitModelDefinitions.at(unitDefinition.objectName).height;
+            }
+            else
+            {
+                // On deck: each unit gets its own slot along the ship's length.
+                const auto& carried = transport.carriedUnits;
+                auto slot = std::find(carried.begin(), carried.end(), unitId) - carried.begin();
+                auto offset = (SimScalar(static_cast<float>(slot)) - (SimScalar(static_cast<float>(carried.size()) - 1.0f) / 2_ss)) * 14_ss;
+                attachPoint += UnitState::toDirection(transport.rotation) * offset;
+                attachPoint.y += 4_ss;
+            }
+
             unit.previousPosition = unit.position;
             unit.position = attachPoint;
             unit.previousRotation = unit.rotation;
@@ -1822,9 +1839,10 @@ namespace rwe
 
         auto seaLevel = simulation.terrain.getSeaLevel();
 
-        // test collision with sea
-        // FIXME: waterweapons should be allowed in water
-        if (seaLevel > *terrainHeight && projectile.position.y <= seaLevel)
+        // test collision with sea; torpedoes and the like live in the water
+        auto weaponIt = simulation.weaponDefinitions.find(projectile.weaponType);
+        bool waterWeapon = weaponIt != simulation.weaponDefinitions.end() && weaponIt->second.waterWeapon;
+        if (!waterWeapon && seaLevel > *terrainHeight && projectile.position.y <= seaLevel)
         {
             return ProjectileCollisionInfoSea();
         }

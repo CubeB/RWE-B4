@@ -261,6 +261,27 @@ namespace rwe
         }
     }
 
+    Matrix4f unitRenderTransform(const UnitState& unit, const UnitDefinition& unitDefinition, const Vector3f& position, float rotation)
+    {
+        auto transform = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
+        if (unitDefinition.canFly && isFlying(unit.physics))
+        {
+            // Bank into turns: roll in proportion to how fast the heading changed this tick.
+            auto yawDelta = toRadians(unit.rotation).value - toRadians(unit.previousRotation).value;
+            while (yawDelta > Pif)
+            {
+                yawDelta -= 2.0f * Pif;
+            }
+            while (yawDelta < -Pif)
+            {
+                yawDelta += 2.0f * Pif;
+            }
+            auto roll = std::clamp(-yawDelta * 40.0f, -0.9f, 0.9f);
+            transform = transform * Matrix4f::rotationZ(roll);
+        }
+        return transform;
+    }
+
     Matrix4f getPieceTransformForRender(const std::string& pieceName, const UnitModelDefinition& modelDefinition, const std::vector<UnitMesh>& pieces, float frac)
     {
         assert(modelDefinition.pieces.size() == pieces.size());
@@ -528,7 +549,7 @@ namespace rwe
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
+        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation);
         if (unit.isBeingBuilt(unitDefinition))
         {
             drawBuildingUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, unit.getPreciseCompletePercent(unitDefinition), position.y, playerColorIndex, frac, unitTextureAtlas, unitTeamTextureAtlases, batch);
@@ -572,7 +593,7 @@ namespace rwe
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
+        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation);
 
         drawUnitShadowMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, frac, groundHeight, unitTextureAtlas, unitTeamTextureAtlases, batch);
     }
@@ -731,7 +752,7 @@ namespace rwe
 
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
+        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation);
 
         // Edges resting on the ground trace the footprint; TA leaves those out.
         auto groundLevel = position.y + 1.0f;
@@ -802,7 +823,7 @@ namespace rwe
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
+        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation);
 
         UnitMeshBatch batch;
         drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, unitTextureAtlas, unitTeamTextureAtlases, batch);

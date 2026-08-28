@@ -182,6 +182,86 @@ namespace rwe
         }
     }
 
+    namespace
+    {
+        /**
+         * Land at height 6 with sea level 5, and a strip of shallow water
+         * (height 4) at x in [6, 8] from row 4 down to the bottom edge.
+         * Rows 0-2 stay dry all the way across, so a unit on row 4 can
+         * cross the strip directly (wading) or hop up two rows and stay dry.
+         */
+        MapTerrain makeShallowStripTerrain()
+        {
+            Grid<unsigned char> heights(16, 12, static_cast<unsigned char>(6));
+            for (int y = 4; y < 12; ++y)
+            {
+                for (int x = 6; x <= 8; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(4));
+                }
+            }
+            return MapTerrain(std::move(heights), 5_ss);
+        }
+
+        std::string describePath(const std::vector<Point>& path)
+        {
+            std::ostringstream pathText;
+            for (const auto& p : path)
+            {
+                pathText << "(" << p.x << "," << p.y << ") ";
+            }
+            return pathText.str();
+        }
+
+        /** True when the cell's 2x2 height block touches the shallow strip. */
+        bool touchesStrip(const Point& p)
+        {
+            return p.x >= 5 && p.x <= 8 && p.y >= 3;
+        }
+    }
+
+    TEST_CASE("an amphibious unit detours over land around shallow water when the dry route is not much longer", "[pathing]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeShallowStripTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto tankId = addTank(sim, player, 3, 4, script, 10u);
+
+        // Straight across is 8 steps, 4 of them wading; the dry route over
+        // rows 2-3 is about 9.7 steps' worth. With wading at double cost
+        // the dry route wins.
+        UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, tankId, std::nullopt, 1u, 1u, Point(11, 4));
+        auto result = pathFinder.findPath(Point(3, 4));
+
+        REQUIRE(result.type == AStarPathType::Complete);
+        INFO("path: " << describePath(result.path));
+        for (const auto& p : result.path)
+        {
+            REQUIRE_FALSE(touchesStrip(p));
+        }
+    }
+
+    TEST_CASE("a floating unit is not penalised for water and goes straight through", "[pathing]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeShallowStripTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto boatId = addTank(sim, player, 3, 4, script, 10u);
+        sim.unitDefinitions["tank"].floater = true;
+
+        UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, boatId, std::nullopt, 1u, 1u, Point(11, 4));
+        auto result = pathFinder.findPath(Point(3, 4));
+
+        REQUIRE(result.type == AStarPathType::Complete);
+        INFO("path: " << describePath(result.path));
+        // Straight along row 4: nine cells, no detour.
+        REQUIRE(result.path.size() == 9);
+        for (const auto& p : result.path)
+        {
+            REQUIRE(p.y == 4);
+        }
+    }
+
     TEST_CASE("a move order to an unreachable point completes at the closest reachable point", "[pathing]")
     {
         auto script = makeEmptyCobScript();

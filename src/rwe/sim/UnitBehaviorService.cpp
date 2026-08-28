@@ -211,11 +211,15 @@ namespace rwe
                 [&](UnitPhysicsInfoAir& p) {
                     match(
                         p.movementState,
-                        [&](const AirMovementStateTakingOff&) {
+                        [&](const AirMovementStateTakingOff& m) {
                             auto targetHeight = getTargetAltitude(sim->terrain, unitInfo.state->position.x, unitInfo.state->position.z, *unitInfo.definition);
                             if (unitInfo.state->position.y == targetHeight)
                             {
-                                p.movementState = AirMovementStateFlying();
+                                // Keep the heading and speed built up during the climb.
+                                AirMovementStateFlying flying;
+                                flying.targetPosition = m.targetPosition;
+                                flying.currentVelocity = m.currentVelocity;
+                                p.movementState = flying;
                             }
                         },
                         [&](AirMovementStateLanding& m) {
@@ -393,6 +397,13 @@ namespace rwe
                         continue;
                     }
 
+                    // Only what the owner can see or has on radar is fair game,
+                    // and a torpedo cannot reach something standing on land.
+                    if (!sim->canDetectUnit(unit.owner, otherUnitId) || !weaponCanHitUnit(weaponDefinition, otherUnit))
+                    {
+                        continue;
+                    }
+
                     weapon->state = UnitWeaponStateAttacking(otherUnitId);
                     break;
                 }
@@ -449,13 +460,14 @@ namespace rwe
                     && sim->gameTime >= weapon->readyTime)
                 {
                     auto bomberVelocity = SimVector(0_ss, 0_ss, 0_ss);
+                    AirMovementStateAttackRun* runState = nullptr;
                     if (auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unit.physics))
                     {
                         match(
                             airPhysics->movementState,
-                            [&](const AirMovementStateAttackRun& m) { bomberVelocity = m.currentVelocity; },
+                            [&](AirMovementStateAttackRun& m) { bomberVelocity = m.currentVelocity; runState = &m; },
                             [&](const AirMovementStateFlying& m) { bomberVelocity = m.currentVelocity; },
-                            [&](const AirMovementStateTakingOff&) {},
+                            [&](const AirMovementStateTakingOff& m) { bomberVelocity = m.currentVelocity; },
                             [&](const AirMovementStateLanding&) {});
                     }
 
@@ -464,8 +476,19 @@ namespace rwe
                     // LoadingScene_util.cpp), which is roughly the splash
                     // radius — a reasonable bombsight gate.
                     auto releaseRadius = rweMax(weaponDefinition.damageRadius, 16_ss);
-                    if (bombsightInReleaseWindow(unit.position, bomberVelocity, *targetPosition, releaseRadius))
+
+                    // Once the sight opens, a run lets go of a stick of three
+                    // bombs as fast as the weapon reloads, then holds until
+                    // the next pass.
+                    const unsigned int bombsPerRun = 3;
+                    bool stickStarted = runState && runState->bombsDroppedThisPass > 0;
+                    bool stickFinished = runState && runState->bombsDroppedThisPass >= bombsPerRun;
+                    if (!stickFinished && (stickStarted || bombsightInReleaseWindow(unit.position, bomberVelocity, *targetPosition, releaseRadius)))
                     {
+                        if (runState)
+                        {
+                            ++runState->bombsDroppedThisPass;
+                        }
                         // Heading/pitch are unused for bombs (we'll ignore
                         // them in tryFireWeapon and use the inherited
                         // velocity instead). Fill with zero for determinism.
@@ -586,6 +609,12 @@ namespace rwe
 
         auto firingPoint = unit.getTransform() * getPieceLocalPosition(id, *fireInfo->firingPiece);
 
+        // Torpedoes run just under the surface from the moment they leave the tube.
+        if (weaponDefinition.waterWeapon)
+        {
+            firingPoint.y = rweMin(firingPoint.y, sim->terrain.getSeaLevel() + SimScalar(0.25f));
+        }
+
         bool isBomb = std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType);
 
         auto direction = match(
@@ -616,6 +645,13 @@ namespace rwe
         {
             // Bombs don't spray — release is deterministic from the bombsight.
             direction = changeDirectionByRandomAngle(direction, weaponDefinition.sprayAngle);
+        }
+
+        if (weaponDefinition.waterWeapon)
+        {
+            // Level running: a torpedo neither dives to the seabed nor leaps out of the water.
+            direction.y = 0_ss;
+            direction = direction.normalizedOr(UnitState::toDirection(unit.rotation));
         }
 
         std::optional<SimVector> inheritedVelocity;
@@ -693,8 +729,19 @@ namespace rwe
             [&](const UnitPhysicsInfoAir& p) {
                 match(
                     p.movementState,
-                    [&](const AirMovementStateTakingOff&) {
-                        // do nothing
+                    [&](const AirMovementStateTakingOff& m) {
+                        // Already turning towards where it is going while it climbs.
+                        if (!m.targetPosition)
+                        {
+                            return;
+                        }
+                        auto direction = *m.targetPosition - unitInfo.state->position;
+                        direction.y = 0_ss;
+                        if (direction.lengthSquared() == 0_ss)
+                        {
+                            return;
+                        }
+                        unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, UnitState::toRotation(direction), turnRateThisFrame);
                     },
                     [&](const AirMovementStateLanding&) {
                         // do nothing
@@ -749,8 +796,20 @@ namespace rwe
                     [&](AirMovementStateFlying& m) {
                         m.currentVelocity = computeNewAirUnitVelocity(*unitInfo.state, *unitInfo.definition, m);
                     },
-                    [&](const AirMovementStateTakingOff&) {
-                        // do nothing
+                    [&](AirMovementStateTakingOff& m) {
+                        // Gather speed towards the destination on the way up, at
+                        // most half pace until it reaches cruise height.
+                        AirMovementStateFlying asFlying;
+                        asFlying.targetPosition = m.targetPosition;
+                        asFlying.currentVelocity = m.currentVelocity;
+                        auto velocity = computeNewAirUnitVelocity(*unitInfo.state, *unitInfo.definition, asFlying);
+                        velocity.y = 0_ss;
+                        auto limit = unitInfo.definition->maxVelocity / 2_ss;
+                        if (velocity.lengthSquared() > limit * limit)
+                        {
+                            velocity = velocity.normalized() * limit;
+                        }
+                        m.currentVelocity = velocity;
                     },
                     [&](const AirMovementStateLanding&) {
                         // do nothing
@@ -829,7 +888,10 @@ namespace rwe
                         auto newPosition = unitInfo.state->position + m.currentVelocity;
                         tryApplyMovementToPosition(unitInfo, newPosition);
                     },
-                    [&](const AirMovementStateTakingOff&) {
+                    [&](const AirMovementStateTakingOff& m) {
+                        // Move off along the ground track while climbing.
+                        auto newPosition = unitInfo.state->position + m.currentVelocity;
+                        tryApplyMovementToPosition(unitInfo, newPosition);
                         climbToCruiseAltitude(unitInfo);
                     },
                     [&](const AirMovementStateLanding&) {
@@ -1032,6 +1094,42 @@ namespace rwe
             });
     }
 
+    void UnitBehaviorService::interruptCurrentTask(UnitId unitId)
+    {
+        auto unitRef = sim->tryGetUnitState(unitId);
+        if (!unitRef)
+        {
+            return;
+        }
+        changeState(unitRef->get(), UnitBehaviorStateIdle());
+    }
+
+    namespace
+    {
+        // How far above the ground a hovering air transport holds while it lifts or sets down.
+        constexpr float HoverClearance = 6.0f;
+
+        // How far a sea transport's crane reaches to a unit on the shore.
+        // TA's data does not say; the Hulk's boom animation covers about this.
+        const SimScalar CraneReach = 200_ss;
+    }
+
+    bool UnitBehaviorService::hoverTowards(UnitInfo unitInfo, const SimVector& point)
+    {
+        // Steers an air transport to a point that may be below cruise height;
+        // true once it is hovering there.
+        auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
+        if (airPhysics == nullptr)
+        {
+            return unitInfo.state->position.distanceSquared(point) <= 64_ss;
+        }
+        if (auto flying = std::get_if<AirMovementStateFlying>(&airPhysics->movementState))
+        {
+            flying->targetPosition = point;
+        }
+        return unitInfo.state->position.distanceSquared(point) <= 64_ss;
+    }
+
     bool UnitBehaviorService::handleLoadOrder(UnitInfo unitInfo, const LoadOrder& loadOrder)
     {
         if (!unitInfo.definition->isTransport())
@@ -1044,7 +1142,7 @@ namespace rwe
         {
             return true;
         }
-        const auto& target = targetRef->get();
+        auto& target = targetRef->get();
         const auto& targetDefinition = sim->unitDefinitions.at(target.unitType);
 
         // Only ground units ride; a transport that is full, or too small for
@@ -1057,14 +1155,38 @@ namespace rwe
             return true;
         }
 
-        // Close in over the unit (flat distance: an air transport hovers above it).
+        bool isShip = unitInfo.definition->floater;
         auto dx = unitInfo.state->position.x - target.position.x;
         auto dz = unitInfo.state->position.z - target.position.z;
-        auto pickupRange = 24_ss + SimScalar(static_cast<float>(std::max(footprintX, footprintZ))) * MapTerrain::HeightTileWidthInWorldUnits;
-        if ((dx * dx) + (dz * dz) > pickupRange * pickupRange)
+        auto flatDistanceSquared = (dx * dx) + (dz * dz);
+
+        // An air transport hovers over the unit; a ship's crane reaches the shore.
+        auto pickupRange = isShip ? CraneReach : 24_ss + SimScalar(static_cast<float>(std::max(footprintX, footprintZ))) * MapTerrain::HeightTileWidthInWorldUnits;
+        if (flatDistanceSquared > pickupRange * pickupRange)
         {
             navigateTo(unitInfo, loadOrder.target);
+
+            // A ship cannot come ashore, so the unit walks to the water's edge
+            // to meet it. Its own path ends at the closest reachable point.
+            if (isShip && target.orders.empty() && !target.carriedBy)
+            {
+                SimVector toTransport(-dx, 0_ss, -dz);
+                auto meetingPoint = target.position + (toTransport.normalizedOr(SimVector(0_ss, 0_ss, 0_ss)) * rweMax(0_ss, rweSqrt(flatDistanceSquared) - (pickupRange / 2_ss)));
+                target.addOrder(createMoveOrder(meetingPoint));
+            }
             return false;
+        }
+
+        auto targetHeight = simScalarToFloat(sim->unitModelDefinitions.at(targetDefinition.objectName).height);
+
+        // An air transport drops down until it hovers just above the unit before lifting it.
+        if (unitInfo.definition->canFly)
+        {
+            SimVector hoverPoint(target.position.x, target.position.y + SimScalar(targetHeight + HoverClearance), target.position.z);
+            if (!hoverTowards(unitInfo, hoverPoint))
+            {
+                return false;
+            }
         }
 
         // The script says which piece the unit hangs from and does its own animation.
@@ -1080,7 +1202,9 @@ namespace rwe
 
         if (sim->loadUnitIntoTransport(unitInfo.id, loadOrder.target, piece))
         {
-            unitInfo.state->cobEnvironment->createThread("BeginTransport", {static_cast<int>(simScalarToFloat(sim->unitModelDefinitions.at(targetDefinition.objectName).height))});
+            // Air transports (Atlas) use BeginTransport(height); ships (Hulk) TransportPickup(unit).
+            unitInfo.state->cobEnvironment->createThread("BeginTransport", {static_cast<int>(targetHeight)});
+            unitInfo.state->cobEnvironment->createThread("TransportPickup", {static_cast<int>(loadOrder.target.value)});
         }
         return true;
     }
@@ -1094,11 +1218,30 @@ namespace rwe
 
         auto dx = unitInfo.state->position.x - unloadOrder.destination.x;
         auto dz = unitInfo.state->position.z - unloadOrder.destination.z;
-        const auto dropRange = 32_ss;
+        auto dropRange = unitInfo.definition->floater ? CraneReach : 32_ss;
         if ((dx * dx) + (dz * dz) > dropRange * dropRange)
         {
             navigateTo(unitInfo, unloadOrder.destination);
             return false;
+        }
+
+        // An air transport settles low over the spot before letting go.
+        if (unitInfo.definition->canFly)
+        {
+            float tallest = 0.0f;
+            for (auto carriedId : unitInfo.state->carriedUnits)
+            {
+                if (auto carried = sim->tryGetUnitState(carriedId))
+                {
+                    tallest = std::max(tallest, simScalarToFloat(sim->unitModelDefinitions.at(sim->unitDefinitions.at(carried->get().unitType).objectName).height));
+                }
+            }
+            auto ground = sim->terrain.getHeightAt(unloadOrder.destination.x, unloadOrder.destination.z);
+            SimVector hoverPoint(unloadOrder.destination.x, ground + SimScalar(tallest + HoverClearance), unloadOrder.destination.z);
+            if (!hoverTowards(unitInfo, hoverPoint))
+            {
+                return false;
+            }
         }
 
         auto carried = unitInfo.state->carriedUnits;
@@ -1108,6 +1251,8 @@ namespace rwe
             if (sim->unloadUnitFromTransport(unitInfo.id, carriedId, unloadOrder.destination))
             {
                 droppedAny = true;
+                auto dropped = sim->getUnitState(carriedId).position;
+                unitInfo.state->cobEnvironment->createThread("TransportDrop", {static_cast<int>(carriedId.value), static_cast<int>(simScalarToFloat(dropped.x)), static_cast<int>(simScalarToFloat(dropped.y)), static_cast<int>(simScalarToFloat(dropped.z))});
             }
         }
         if (droppedAny)
@@ -1151,11 +1296,31 @@ namespace rwe
             });
     }
 
+    bool UnitBehaviorService::weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& target) const
+    {
+        if (!weaponDefinition.waterWeapon)
+        {
+            return true;
+        }
+        return target.position.y <= sim->terrain.getSeaLevel();
+    }
+
     bool UnitBehaviorService::attackTarget(UnitInfo unitInfo, const AttackTarget& target)
     {
         if (!unitInfo.state->weapons[0])
         {
             return true;
+        }
+
+        // A water weapon ordered at a unit on dry land has nothing to do.
+        if (auto targetUnitId = std::get_if<UnitId>(&target))
+        {
+            auto targetUnit = sim->tryGetUnitState(*targetUnitId);
+            const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType);
+            if (targetUnit && !weaponCanHitUnit(weaponDefinition, targetUnit->get()))
+            {
+                return true;
+            }
         }
 
         // Aircraft execute attack runs rather than the ground-unit
@@ -1226,8 +1391,14 @@ namespace rwe
 
         // If we're taking off or landing, wait until the transition completes
         // (the air-state machine will end up in Flying). Don't fire yet.
-        if (std::holds_alternative<AirMovementStateTakingOff>(airPhysics->movementState)
-            || std::holds_alternative<AirMovementStateLanding>(airPhysics->movementState))
+        if (std::holds_alternative<AirMovementStateTakingOff>(airPhysics->movementState))
+        {
+            // Start moving towards the target while still climbing out.
+            navigateTo(unitInfo, *targetPosition);
+            unitInfo.state->clearWeaponTargets();
+            return false;
+        }
+        if (std::holds_alternative<AirMovementStateLanding>(airPhysics->movementState))
         {
             unitInfo.state->clearWeaponTargets();
             return false;
@@ -2351,8 +2522,10 @@ namespace rwe
 
                 m.targetPosition = destinationAtAltitude;
             },
-            [&](const AirMovementStateTakingOff&) {
-                // do nothing
+            [&](AirMovementStateTakingOff& m) {
+                // Head that way as soon as the wheels leave the ground.
+                auto targetHeight = getTargetAltitude(sim->terrain, destination.x, destination.z, *unitInfo.definition);
+                m.targetPosition = SimVector(destination.x, targetHeight, destination.z);
             },
             [&](AirMovementStateLanding& m) {
                 m.shouldAbort = true;
