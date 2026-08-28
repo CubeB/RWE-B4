@@ -122,7 +122,7 @@ namespace rwe
           occupiedGrid(this->terrain.getHeightMap().getWidth() - 1, this->terrain.getHeightMap().getHeight() - 1, OccupiedCell()),
           metalGrid(this->terrain.getHeightMap().getWidth() - 1, this->terrain.getHeightMap().getHeight() - 1, surfaceMetal),
           surfaceMetal(surfaceMetal),
-          visionHeights(computeVisionHeights(this->terrain.getHeightMap())),
+          visionHeights(computeVisionHeights(this->terrain.getHeightMap(), static_cast<unsigned char>(std::min(simScalarToUInt(this->terrain.getSeaLevel()), 255u)))),
           geoGrid(this->terrain.getHeightMap().getWidth() - 1, this->terrain.getHeightMap().getHeight() - 1, false),
           minWindSpeed(minWindSpeed),
           maxWindSpeed(maxWindSpeed),
@@ -476,6 +476,171 @@ namespace rwe
                     radius = it->second.damageRadius;
                 }
                 tryIgniteFeaturesInRadius(feature.position, radius, featureDefinition.spreadChance);
+            }
+        }
+    }
+
+    bool GameSimulation::loadUnitIntoTransport(UnitId transportId, UnitId unitId, const std::string& piece)
+    {
+        auto transportRef = tryGetUnitState(transportId);
+        auto unitRef = tryGetUnitState(unitId);
+        if (!transportRef || !unitRef)
+        {
+            return false;
+        }
+        auto& transport = transportRef->get();
+        auto& unit = unitRef->get();
+        if (unit.carriedBy || !unit.isAlive() || !transport.isAlive() || transportId == unitId)
+        {
+            return false;
+        }
+
+        // Leave the ground.
+        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        auto footprintRect = computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
+        if (auto region = occupiedGrid.tryToRegion(footprintRect))
+        {
+            occupiedGrid.forEach(*region, [&](auto& cell) {
+                if (cell.mobileUnitId == unitId)
+                {
+                    cell.mobileUnitId = std::nullopt;
+                }
+            });
+        }
+        flyingUnitsSet.erase(unitId);
+
+        unit.carriedBy = transportId;
+        unit.carriedPiece = piece;
+        unit.orders.clear();
+        unit.clearWeaponTargets();
+        unit.behaviourState = UnitBehaviorStateIdle();
+        unit.navigationState = NavigationStateInfo{};
+        transport.carriedUnits.push_back(unitId);
+        return true;
+    }
+
+    bool GameSimulation::unloadUnitFromTransport(UnitId transportId, UnitId unitId, const SimVector& position)
+    {
+        auto transportRef = tryGetUnitState(transportId);
+        auto unitRef = tryGetUnitState(unitId);
+        if (!transportRef || !unitRef || unitRef->get().carriedBy != transportId)
+        {
+            return false;
+        }
+        auto& transport = transportRef->get();
+        auto& unit = unitRef->get();
+        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        auto mc = getAdHocMovementClass(unitDefinition.movementCollisionInfo);
+
+        // Nearest clear footprint to the drop point, searching outwards ring by ring.
+        auto centre = terrain.worldToHeightmapCoordinate(position);
+        auto halfX = static_cast<int>(mc.footprintX / 2);
+        auto halfZ = static_cast<int>(mc.footprintZ / 2);
+        std::optional<DiscreteRect> spot;
+        for (int ring = 0; ring <= 12 && !spot; ++ring)
+        {
+            for (int dy = -ring; dy <= ring && !spot; ++dy)
+            {
+                for (int dx = -ring; dx <= ring && !spot; ++dx)
+                {
+                    if (std::max(std::abs(dx), std::abs(dy)) != ring)
+                    {
+                        continue;
+                    }
+                    auto x = centre.x + dx - halfX;
+                    auto y = centre.y + dy - halfZ;
+                    if (x < 0 || y < 0 || x + static_cast<int>(mc.footprintX) > occupiedGrid.getWidth() || y + static_cast<int>(mc.footprintZ) > occupiedGrid.getHeight())
+                    {
+                        continue;
+                    }
+                    if (canBeBuiltAt(mc, std::nullopt, false, static_cast<unsigned int>(x), static_cast<unsigned int>(y)))
+                    {
+                        spot = DiscreteRect(x, y, mc.footprintX, mc.footprintZ);
+                    }
+                }
+            }
+        }
+        if (!spot)
+        {
+            return false;
+        }
+
+        auto corner = terrain.heightmapIndexToWorldCorner(spot->x, spot->y);
+        SimVector newPosition(
+            corner.x + (SimScalar(static_cast<float>(mc.footprintX)) * MapTerrain::HeightTileWidthInWorldUnits / 2_ss),
+            0_ss,
+            corner.z + (SimScalar(static_cast<float>(mc.footprintZ)) * MapTerrain::HeightTileHeightInWorldUnits / 2_ss));
+        newPosition.y = terrain.getHeightAt(newPosition.x, newPosition.z);
+        if (unitDefinition.floater || unitDefinition.canHover)
+        {
+            newPosition.y = rweMax(newPosition.y, terrain.getSeaLevel());
+        }
+
+        if (auto region = occupiedGrid.tryToRegion(*spot))
+        {
+            occupiedGrid.forEach(*region, [unitId](auto& cell) { cell.mobileUnitId = unitId; });
+        }
+
+        unit.position = newPosition;
+        unit.previousPosition = newPosition;
+        unit.rotation = transport.rotation;
+        unit.previousRotation = transport.rotation;
+        unit.carriedBy = std::nullopt;
+        unit.carriedPiece.clear();
+        transport.carriedUnits.erase(std::remove(transport.carriedUnits.begin(), transport.carriedUnits.end(), unitId), transport.carriedUnits.end());
+        return true;
+    }
+
+    void GameSimulation::updateCarriedUnits()
+    {
+        for (auto& [unitId, unit] : units)
+        {
+            if (!unit.carriedBy)
+            {
+                continue;
+            }
+            auto transportRef = tryGetUnitState(*unit.carriedBy);
+            if (!transportRef)
+            {
+                continue;
+            }
+            const auto& transport = transportRef->get();
+
+            auto attachPoint = transport.position;
+            if (!unit.carriedPiece.empty() && transport.findPiece(unit.carriedPiece))
+            {
+                attachPoint = getUnitPiecePosition(*unit.carriedBy, unit.carriedPiece);
+            }
+
+            unit.previousPosition = unit.position;
+            unit.position = attachPoint;
+            unit.previousRotation = unit.rotation;
+            unit.rotation = transport.rotation;
+        }
+    }
+
+    void GameSimulation::releaseTransportLinks(UnitId unitId)
+    {
+        auto& unit = getUnitState(unitId);
+        if (unit.carriedBy)
+        {
+            if (auto transportRef = tryGetUnitState(*unit.carriedBy))
+            {
+                auto& carried = transportRef->get().carriedUnits;
+                carried.erase(std::remove(carried.begin(), carried.end(), unitId), carried.end());
+            }
+            // carriedBy stays set so the dead unit is not cleared from ground it never occupied.
+        }
+
+        // Whatever it was carrying goes down with it.
+        auto carried = unit.carriedUnits;
+        unit.carriedUnits.clear();
+        for (auto carriedId : carried)
+        {
+            auto carriedRef = tryGetUnitState(carriedId);
+            if (carriedRef && carriedRef->get().isAlive())
+            {
+                killUnit(carriedId);
             }
         }
     }
@@ -1442,6 +1607,7 @@ namespace rwe
         auto& unit = getUnitState(unitId);
         unit.markAsDeadNoCorpse();
         getPlayer(unit.owner).unitsLost += 1;
+        releaseTransportLinks(unitId);
         // No explosion or wreck, but the scene still has to hear about it so
         // it drops the unit from the selection, hover state and GUI caches.
         events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::Deleted});
@@ -1717,6 +1883,7 @@ namespace rwe
 
         unit.markAsDead();
         getPlayer(unit.owner).unitsLost += 1;
+        releaseTransportLinks(unitId);
 
         // Credit the kill to the attacker, if any.
         // Match TA behavior: friendly-fire kills count.
@@ -2213,7 +2380,11 @@ namespace rwe
             auto footprintRect = computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
             auto footprintRegion = occupiedGrid.tryToRegion(footprintRect);
             assert(!!footprintRegion);
-            if (unitDefinition.isMobile)
+            if (unit.carriedBy)
+            {
+                // It died in a transport's grip: it holds no ground to give back.
+            }
+            else if (unitDefinition.isMobile)
             {
                 if (isFlying(unit.physics))
                 {
@@ -2342,6 +2513,8 @@ namespace rwe
 
             runUnitCobScripts(*this, unitId);
         }
+
+        updateCarriedUnits();
 
         updateSelfDestructs();
 

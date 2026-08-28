@@ -761,6 +761,10 @@ namespace rwe
                 return ((matrix * normal) - origin).dot(toCamera) > 0.0f;
             };
 
+            auto facesUp = [&](const Vector3f& normal) {
+                return ((matrix * normal) - origin).y > 0.5f;
+            };
+
             for (const auto& edge : *pieceInfo.edges)
             {
                 if (!facesCamera(edge.normalA) && !(edge.normalB && facesCamera(*edge.normalB)))
@@ -771,7 +775,14 @@ namespace rwe
                 auto b = matrix * edge.end;
                 if (a.y <= groundLevel && b.y <= groundLevel)
                 {
-                    continue;
+                    // A ground-level edge is skipped when it is just where a
+                    // wall meets the ground, but kept when it outlines a
+                    // floor polygon such as an aircraft plant's landing pad.
+                    bool outlinesFloor = facesUp(edge.normalA) || (edge.normalB && facesUp(*edge.normalB));
+                    if (!outlinesFloor)
+                    {
+                        continue;
+                    }
                 }
                 pushLine(batch.lines, a + bias, b + bias, color);
             }

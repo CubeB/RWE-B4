@@ -48,6 +48,12 @@ namespace rwe
         tdf.readOrDefault("MaxWaterSlope", u.maxWaterSlope, u.maxSlope);
         tdf.readOrDefault("MinWaterDepth", u.minWaterDepth);
         tdf.readOrDefault("MaxWaterDepth", u.maxWaterDepth);
+        if (u.maxWaterDepth < u.minWaterDepth)
+        {
+            // Ships and shipyards give only MinWaterDepth; TA treats the
+            // missing maximum as "any depth", not zero.
+            u.maxWaterDepth = 255u;
+        }
 
         tdf.readOrDefault("CanAttack", u.canAttack);
         tdf.readOrDefault("CanMove", u.canMove);
@@ -64,6 +70,8 @@ namespace rwe
         tdf.readOrDefault("CanHover", u.canHover);
 
         tdf.readOrDefault("CanFly", u.canFly);
+        tdf.readOrDefault("TransportCapacity", u.transportCapacity);
+        tdf.readOrDefault("TransportSize", u.transportSize);
 
         tdf.readOrDefault("CruiseAlt", u.cruiseAlt);
 

@@ -291,11 +291,12 @@ namespace rwe
 
         if (physics.phase == AirMovementStateAttackRun::Phase::Engaging)
         {
-            // Hold heading: aim a fixed lookahead distance ahead of the unit
-            // along the run-out vector. This keeps the aircraft committed to the
-            // line through the target rather than orbiting above it.
+            // Fly through the target: aim at a point beyond it along the
+            // run-out vector. Steering at the far point pulls an off-axis
+            // approach back onto the line over the target (so the bombsight
+            // can open) without orbiting above it.
             auto lookahead = unitDefinition.maxVelocity * 30_ss;
-            return unit.position + (physics.runOutDirection * lookahead);
+            return physics.lastKnownTargetPos + (physics.runOutDirection * lookahead);
         }
 
         // Approaching: aim directly at the target.
@@ -323,12 +324,13 @@ namespace rwe
         return newVelocity;
     }
 
-    SimScalar defaultAttackRunOutDistance(const UnitDefinition& unitDefinition, SimScalar weaponMaxRange)
+    SimScalar defaultAttackRunOutDistance(const UnitDefinition& unitDefinition, SimScalar /*weaponMaxRange*/)
     {
-        // Run out at least one weapon range past the target, with a floor based
-        // on the cruise altitude so units that hover high don't loop too tight.
-        auto altitudeFloor = unitDefinition.cruiseAltitude * 8_ss;
-        return rweMax(weaponMaxRange, altitudeFloor);
+        // Run out far enough past the target to turn around and line up again:
+        // about twice the cruise altitude, kept between 250 and 600 units. The
+        // weapon's range is deliberately not used; a bomb's 1280 range would
+        // send the aircraft clean off the map before it turned.
+        return rweMax(250_ss, rweMin(600_ss, unitDefinition.cruiseAltitude * 2_ss));
     }
 
     SimVector predictBombImpactPoint(const SimVector& bomberPosition, const SimVector& bomberVelocity, SimScalar groundY)
@@ -365,7 +367,22 @@ namespace rwe
     {
         auto impact = predictBombImpactPoint(bomberPosition, bomberVelocity, targetPosition.y);
         SimVector dxz(impact.x - targetPosition.x, 0_ss, impact.z - targetPosition.z);
-        return dxz.lengthSquared() <= (releaseRadius * releaseRadius);
+
+        SimVector heading(bomberVelocity.x, 0_ss, bomberVelocity.z);
+        if (heading.lengthSquared() == 0_ss)
+        {
+            return dxz.lengthSquared() <= (releaseRadius * releaseRadius);
+        }
+        heading = heading.normalized();
+
+        // Split the miss into along-track (timing, which the bombsight controls
+        // precisely) and across-track (line-up, which it cannot fix at release).
+        // Timing must be within the blast; a run that is slightly wide still
+        // drops rather than wasting the whole pass.
+        auto along = (dxz.x * heading.x) + (dxz.z * heading.z);
+        auto across = (dxz.x * heading.z) - (dxz.z * heading.x);
+        auto acrossTolerance = rweMax(releaseRadius * 2_ss, 48_ss);
+        return along * along <= releaseRadius * releaseRadius && across * across <= acrossTolerance * acrossTolerance;
     }
 
     bool stepAttackRunPhase(

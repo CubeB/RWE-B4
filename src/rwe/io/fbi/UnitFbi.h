@@ -58,6 +58,10 @@ namespace rwe
         bool canHover;
 
         bool canFly;
+        /** How many units it can carry; 0 unless it is a transport. */
+        unsigned int transportCapacity;
+        /** Largest footprint it can carry (TA: the unit's footprint must not exceed this). */
+        unsigned int transportSize;
 
         unsigned int cruiseAlt;
 

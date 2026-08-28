@@ -65,6 +65,10 @@ namespace rwe
 
         bool handleCaptureOrder(UnitInfo unitInfo, const CaptureOrder& captureOrder);
 
+        bool handleLoadOrder(UnitInfo unitInfo, const LoadOrder& loadOrder);
+
+        bool handleUnloadOrder(UnitInfo unitInfo, const UnloadOrder& unloadOrder);
+
         bool captureExistingUnit(UnitInfo unitInfo, UnitId targetUnitId);
 
         bool deployCaptureArm(UnitInfo unitInfo, UnitId targetUnitId);

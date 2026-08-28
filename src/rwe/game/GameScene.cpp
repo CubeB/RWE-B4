@@ -727,6 +727,15 @@ namespace rwe
                     }
                     return unitOption->get().position;
                 },
+                [&](const LoadOrder& o) {
+                    auto unitOption = tryGetUnit(o.target);
+                    if (!unitOption)
+                    {
+                        return pos;
+                    }
+                    return unitOption->get().position;
+                },
+                [&](const UnloadOrder& o) { return o.destination; },
                 [&](const ReclaimOrder& o) {
                     return match(
                         o.target,
@@ -759,7 +768,9 @@ namespace rwe
                 [&](const ReclaimOrder&) { return std::optional<CursorType>(CursorType::Reclaim); },
                 [&](const RepairOrder&) { return std::optional<CursorType>(CursorType::Repair); },
                 [&](const PatrolOrder&) { return std::optional<CursorType>(CursorType::Patrol); },
-                [&](const CaptureOrder&) { return std::optional<CursorType>(CursorType::Capture); });
+                [&](const CaptureOrder&) { return std::optional<CursorType>(CursorType::Capture); },
+                [&](const LoadOrder&) { return std::optional<CursorType>(CursorType::Load); },
+                [&](const UnloadOrder&) { return std::optional<CursorType>(CursorType::Unload); });
 
             // draw waypoint icons
             if (waypointIcon)
@@ -788,7 +799,9 @@ namespace rwe
                     [&](const ReclaimOrder&) { return true; },
                     [&](const RepairOrder&) { return true; },
                     [&](const PatrolOrder&) { return true; },
-                    [&](const CaptureOrder&) { return true; });
+                    [&](const CaptureOrder&) { return true; },
+                    [&](const LoadOrder&) { return true; },
+                    [&](const UnloadOrder&) { return true; });
 
                 if (drawLine)
                 {
@@ -1918,6 +1931,44 @@ namespace rwe
                         }
                     }
                 },
+                [&](const LoadCursorMode&) {
+                    for (const auto& selectedUnit : selectedUnits)
+                    {
+                        if (hoveredUnit && isFriendly(*hoveredUnit) && *hoveredUnit != selectedUnit)
+                        {
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, LoadOrder(*hoveredUnit));
+                            }
+                            else
+                            {
+                                localPlayerIssueUnitOrder(selectedUnit, LoadOrder(*hoveredUnit));
+                                cursorMode.next(NormalCursorMode());
+                            }
+                        }
+                    }
+                },
+                [&](const UnloadCursorMode&) {
+                    auto coord = getMouseTerrainCoordinate();
+                    if (coord)
+                    {
+                        for (const auto& selectedUnit : selectedUnits)
+                        {
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, UnloadOrder(*coord));
+                            }
+                            else
+                            {
+                                localPlayerIssueUnitOrder(selectedUnit, UnloadOrder(*coord));
+                            }
+                        }
+                        if (!isShiftDown())
+                        {
+                            cursorMode.next(NormalCursorMode());
+                        }
+                    }
+                },
                 [&](const PatrolCursorMode&) {
                     auto coord = getMouseTerrainCoordinate();
                     if (coord)
@@ -2111,6 +2162,12 @@ namespace rwe
                     cursorMode.next(NormalCursorMode());
                 },
                 [&](const CaptureCursorMode&) {
+                    cursorMode.next(NormalCursorMode());
+                },
+                [&](const LoadCursorMode&) {
+                    cursorMode.next(NormalCursorMode());
+                },
+                [&](const UnloadCursorMode&) {
                     cursorMode.next(NormalCursorMode());
                 },
                 [&](const BuildCursorMode&) {
@@ -2585,6 +2642,12 @@ namespace rwe
                 },
                 [&](const CaptureCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Capture);
+                },
+                [&](const LoadCursorMode&) {
+                    sceneContext.cursor->useCursor(CursorType::Load);
+                },
+                [&](const UnloadCursorMode&) {
+                    sceneContext.cursor->useCursor(CursorType::Unload);
                 },
                 [&](const BuildCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Normal);
@@ -3077,6 +3140,39 @@ namespace rwe
         spawnNanoParticles();
 
         updateDebris();
+
+        // Testing aid: RWE_DEBUG_SELF_DESTRUCT=<seconds> self-destructs a
+        // player's first unit (the commander) at that game time, so a crash on
+        // commander death can be reproduced under a debugger. The player is
+        // the local one unless RWE_DEBUG_SELF_DESTRUCT_PLAYER gives an index.
+        if (const char* debugSelfDestruct = std::getenv("RWE_DEBUG_SELF_DESTRUCT"))
+        {
+            auto seconds = static_cast<unsigned int>(std::atoi(debugSelfDestruct));
+            if (seconds > 0 && simulation.gameTime.value == seconds * static_cast<unsigned int>(SimTicksPerSecond))
+            {
+                auto player = localPlayerId;
+                if (const char* debugPlayer = std::getenv("RWE_DEBUG_SELF_DESTRUCT_PLAYER"))
+                {
+                    player = PlayerId(static_cast<unsigned int>(std::atoi(debugPlayer)));
+                }
+                for (const auto& [unitId, unit] : simulation.units)
+                {
+                    if (unit.isOwnedBy(player) && unit.isAlive())
+                    {
+                        LOG_INFO << "Debug: self-destructing unit " << unitId.value << " of player " << player.value;
+                        if (player == localPlayerId)
+                        {
+                            localPlayerSelfDestructUnit(unitId);
+                        }
+                        else
+                        {
+                            simulation.toggleSelfDestruct(unitId);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
 
         // A game needs an opponent before it can be decided; a lone player
         // is just exploring the map.
@@ -4236,6 +4332,16 @@ namespace rwe
             p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<CaptureCursorMode>(v)); }));
         }
 
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "LOAD"))
+        {
+            p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<LoadCursorMode>(v)); }));
+        }
+
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "UNLOAD"))
+        {
+            p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<UnloadCursorMode>(v)); }));
+        }
+
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "FIREORD"))
         {
             p->get().addSubscription(fireOrders.subscribe([&p = p->get()](const auto& v) {
@@ -4407,6 +4513,38 @@ namespace rwe
             else
             {
                 cursorMode.next(CaptureCursorMode());
+            }
+        }
+        else if (matchesWithSidePrefix("LOAD", message))
+        {
+            if (sounds.specialOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.specialOrders);
+            }
+
+            if (std::holds_alternative<LoadCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(LoadCursorMode());
+            }
+        }
+        else if (matchesWithSidePrefix("UNLOAD", message))
+        {
+            if (sounds.specialOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.specialOrders);
+            }
+
+            if (std::holds_alternative<UnloadCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(UnloadCursorMode());
             }
         }
         else if (matchesWithSidePrefix("FIREORD", message))

@@ -36,20 +36,20 @@ namespace rwe
 
     TEST_CASE("defaultAttackRunOutDistance", "[aircraft]")
     {
-        SECTION("returns at least the weapon range")
+        SECTION("is about twice the cruise altitude, never shorter than 250")
         {
             auto def = makeBomberDefinition();
             def.cruiseAltitude = 0_ss;
-            auto runOut = defaultAttackRunOutDistance(def, 500_ss);
-            REQUIRE(runOut == 500_ss);
+            REQUIRE(defaultAttackRunOutDistance(def, 500_ss) == 250_ss);
+            def.cruiseAltitude = 200_ss;
+            REQUIRE(defaultAttackRunOutDistance(def, 100_ss) == 400_ss);
         }
 
-        SECTION("respects altitude floor (8x cruiseAltitude) when weapon range is short")
+        SECTION("is capped at 600 regardless of weapon range")
         {
             auto def = makeBomberDefinition();
-            def.cruiseAltitude = 100_ss;  // 8x = 800
-            auto runOut = defaultAttackRunOutDistance(def, 100_ss);
-            REQUIRE(runOut == 800_ss);
+            def.cruiseAltitude = 1000_ss;
+            REQUIRE(defaultAttackRunOutDistance(def, 2000_ss) == 600_ss);
         }
     }
 
@@ -76,7 +76,7 @@ namespace rwe
             state.runOutDirection = SimVector(1_ss, 0_ss, 0_ss);
             auto pt = computeAttackRunTargetPoint(unit, def, state);
             // unit.position + runOutDirection * (maxVelocity * 30) = (0,50,0) + (1,0,0)*120 = (120,50,0)
-            REQUIRE(pt.x == 120_ss);
+            REQUIRE(pt.x == 220_ss); // lastKnownTargetPos (100) + runOutDirection * maxVelocity * 30 (120)
             REQUIRE(pt.z == 0_ss);
         }
 

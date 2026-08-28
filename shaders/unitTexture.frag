@@ -25,7 +25,7 @@ void main(void)
 
     float lightAngleFactor = clamp(dot(worldNormal, lightDirection), 0.0, 1.0);
     float lightIntensity = shade
-        ? 1.5 * clamp(dot(worldNormal, lightDirection), 0.0, 1.0) + 0.5
+        ? 0.4 + 0.7 * clamp(dot(worldNormal, lightDirection), 0.0, 1.0)
         : 1.0;
     outColor = vec4(vec3(baseColor) * lightIntensity * (height > seaLevel ? normalTint : waterTint), 1.0);
 }

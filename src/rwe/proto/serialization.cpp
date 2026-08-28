@@ -90,6 +90,19 @@ namespace rwe
             out.set_unit(o.target.value);
         }
 
+        void operator()(const LoadOrder& o)
+        {
+            auto& out = *cmd->mutable_load();
+            out.set_unit(o.target.value);
+        }
+
+        void operator()(const UnloadOrder& o)
+        {
+            auto& out = *cmd->mutable_unload();
+            auto& dest = *out.mutable_destination();
+            serializeVector(o.destination, dest);
+        }
+
         void operator()(const ReclaimOrder& o)
         {
             auto& out = *cmd->mutable_reclaim();
@@ -386,6 +399,16 @@ namespace rwe
         {
             const auto& patrol = cmd.patrol();
             return PatrolOrder(deserializeVector(patrol.destination()));
+        }
+
+        if (cmd.has_load())
+        {
+            return LoadOrder(UnitId(cmd.load().unit()));
+        }
+
+        if (cmd.has_unload())
+        {
+            return UnloadOrder(deserializeVector(cmd.unload().destination()));
         }
 
         if (cmd.has_capture())

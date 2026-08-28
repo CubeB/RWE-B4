@@ -258,7 +258,7 @@ namespace rwe
         graphics->useStencilBufferAsMask();
         graphics->enableColorBuffer();
 
-        fillScreen(0.0f, 0.0f, 0.0f, 0.5f);
+        fillScreen(0.0f, 0.0f, 0.0f, 0.7f);
 
         graphics->enableColorBuffer();
         graphics->disableStencilBuffer();

@@ -105,6 +105,18 @@ namespace rwe
         bool operator!=(const CaptureCursorMode& /*rhs*/) const { return false; }
     };
 
+    struct LoadCursorMode
+    {
+        bool operator==(const LoadCursorMode& /*rhs*/) const { return true; }
+        bool operator!=(const LoadCursorMode& /*rhs*/) const { return false; }
+    };
+
+    struct UnloadCursorMode
+    {
+        bool operator==(const UnloadCursorMode& /*rhs*/) const { return true; }
+        bool operator!=(const UnloadCursorMode& /*rhs*/) const { return false; }
+    };
+
     struct NormalCursorMode
     {
         struct SelectingState
@@ -162,7 +174,7 @@ namespace rwe
         }
     };
 
-    using CursorMode = std::variant<AttackCursorMode, MoveCursorMode, GuardCursorMode, ReclaimCursorMode, RepairCursorMode, PatrolCursorMode, CaptureCursorMode, BuildCursorMode, NormalCursorMode>;
+    using CursorMode = std::variant<AttackCursorMode, MoveCursorMode, GuardCursorMode, ReclaimCursorMode, RepairCursorMode, PatrolCursorMode, CaptureCursorMode, LoadCursorMode, UnloadCursorMode, BuildCursorMode, NormalCursorMode>;
 
     struct UnitGuiInfo
     {

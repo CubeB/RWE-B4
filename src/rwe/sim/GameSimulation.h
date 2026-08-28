@@ -537,6 +537,26 @@ namespace rwe
 
         void updateBurningFeatures();
 
+        /**
+         * Lifts a unit off the ground into a transport: it leaves the occupancy
+         * grid, drops its orders and follows the transport (hanging from piece
+         * if the transport's model has it) until unloaded. Returns false if
+         * either unit is missing, dead, or the unit is already carried.
+         */
+        bool loadUnitIntoTransport(UnitId transportId, UnitId unitId, const std::string& piece);
+
+        /**
+         * Sets a carried unit down on the nearest clear ground to position.
+         * Returns false (and keeps carrying) if there is no room nearby.
+         */
+        bool unloadUnitFromTransport(UnitId transportId, UnitId unitId, const SimVector& position);
+
+        /** Moves carried units along with their transports; run after unit behaviour each tick. */
+        void updateCarriedUnits();
+
+        /** On death: leaves the transport it was in, and kills whatever it was carrying. */
+        void releaseTransportLinks(UnitId unitId);
+
         std::optional<std::reference_wrapper<MapFeature>> tryGetFeature(FeatureId id);
 
         std::optional<std::reference_wrapper<const MapFeature>> tryGetFeature(FeatureId id) const;

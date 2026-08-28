@@ -52,5 +52,5 @@ namespace rwe
     };
 
     /** Ground height per vision cell: the highest heightmap sample the cell covers. */
-    Grid<unsigned char> computeVisionHeights(const Grid<unsigned char>& heightmap);
+    Grid<unsigned char> computeVisionHeights(const Grid<unsigned char>& heightmap, unsigned char seaLevel);
 }

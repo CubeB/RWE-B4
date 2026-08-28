@@ -80,5 +80,19 @@ namespace rwe
         explicit CaptureOrder(const UnitId& target) : target(target) {}
     };
 
-    using UnitOrder = std::variant<MoveOrder, AttackOrder, BuildOrder, BuggerOffOrder, CompleteBuildOrder, GuardOrder, ReclaimOrder, RepairOrder, PatrolOrder, CaptureOrder>;
+    /** A transport picks up a friendly unit. */
+    struct LoadOrder
+    {
+        UnitId target;
+        explicit LoadOrder(const UnitId& target) : target(target) {}
+    };
+
+    /** A transport sets down everything it carries at a point. */
+    struct UnloadOrder
+    {
+        SimVector destination;
+        explicit UnloadOrder(const SimVector& destination) : destination(destination) {}
+    };
+
+    using UnitOrder = std::variant<MoveOrder, AttackOrder, BuildOrder, BuggerOffOrder, CompleteBuildOrder, GuardOrder, ReclaimOrder, RepairOrder, PatrolOrder, CaptureOrder, LoadOrder, UnloadOrder>;
 }

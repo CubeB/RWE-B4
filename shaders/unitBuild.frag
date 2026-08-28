@@ -53,7 +53,7 @@ vec3 shadeNormal()
 {
     vec3 baseColor = vec3(texture(textureSampler, fragTexCoord));
     float lightIntensity = shade
-        ? 1.5 * clamp(dot(worldNormal, lightDirection), 0.0, 1.0) + 0.5
+        ? 0.4 + 0.7 * clamp(dot(worldNormal, lightDirection), 0.0, 1.0)
         : 1.0;
     return baseColor * lightIntensity * (height > seaLevel ? normalTint : waterTint);
 }

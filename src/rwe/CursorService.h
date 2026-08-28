@@ -21,6 +21,8 @@ namespace rwe
         Reclaim,
         Patrol,
         Capture,
+        Load,
+        Unload,
         Red,
         Green,
         NUM_CURSORS

@@ -126,7 +126,7 @@ namespace rwe
         });
     }
 
-    Grid<unsigned char> computeVisionHeights(const Grid<unsigned char>& heightmap)
+    Grid<unsigned char> computeVisionHeights(const Grid<unsigned char>& heightmap, unsigned char seaLevel)
     {
         auto cells = PlayerVisibility::VisionCellSizeInTiles;
         auto width = (heightmap.getWidth() + cells - 1) / cells;
@@ -149,7 +149,8 @@ namespace rwe
                         }
                     }
                 }
-                result.set(x, y, highest);
+                // The seabed does not count: sight travels over the water's surface.
+                result.set(x, y, std::max(highest, seaLevel));
             }
         }
         return result;

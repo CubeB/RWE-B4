@@ -341,6 +341,15 @@ namespace rwe
         /** When set, the game time at which this unit will self-destruct. */
         std::optional<GameTime> selfDestructTime;
 
+        /** The transport carrying this unit, if any. While set the unit does nothing and follows the transport. */
+        std::optional<UnitId> carriedBy;
+
+        /** The transport piece this unit hangs from (empty: the transport's own position). */
+        std::string carriedPiece;
+
+        /** Units this transport is carrying. */
+        std::vector<UnitId> carriedUnits;
+
         bool activated{false};
         bool isSufficientlyPowered{false};
 

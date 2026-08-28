@@ -72,7 +72,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
     <span>branch <b>revival</b></span>
     <span>base <b>upstream master b2d8a31 · 25 Mar 2026</b></span>
     <span>updated <b>28 Aug 2026</b></span>
-    <span>tests <b>167 cases · 1756 assertions</b></span>
+    <span>tests <b>171 cases · 1800+ assertions</b></span>
   </div>
 </header>
 <nav aria-label="Sections">
@@ -96,6 +96,9 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Reclaim features and units, with progress shared between builders and resources credited as work is done</li>
   <li>Repair, patrol (engages en route, single click patrols between two points) and capture orders, each with panel button and cursor</li>
   <li>Self‑destruct countdown (Ctrl‑D, 5 s, cancellable) using the unit's <code>SelfDestructAs</code> weapon</li>
+  <li>Transports: load and unload orders with TA's own cursors and panel buttons; carried units ride the transport's <code>QueryTransport</code> piece and are set down on clear ground</li>
+  <li>Bombers fly through the target on their run, release when the timing is right, and turn back after a short run‑out or at the map edge instead of flying off the map</li>
+  <li>Ships and shipyards can be placed and built in water (a missing <code>MaxWaterDepth</code> now means any depth)</li>
   <li>Units rock with recoil when they fire</li>
   <li>Pathing: slope‑aware speed and routing, no corner squeezing between obstacles, unreachable destinations end at the closest reachable point</li>
   <li>Builders no longer get stuck on unreachable build sites; nanoframes killed while unattended die cleanly</li>
@@ -123,7 +126,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Burning features: fire‑starting weapons ignite trees and foliage, fires spread and leave burnt remains, using each feature's own burn sequence</li>
   <li>Building deaths run the COB <code>Killed</code> script: pieces fly off with smoke and fire trails and impact explosions</li>
   <li>Reclaimed features play their golden dissolve sequence</li>
-  <li>Model lighting moved to match TA's low sun from the left</li>
+  <li>Model lighting moved to match TA's low sun from the left, with a flatter curve and darker shadows; sight ignores the seabed under water</li>
 </ul>
 
 <h3>Skirmish AI</h3>
@@ -169,7 +172,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <ul>
   <li>Resurrect order (corpse → unit mapping)</li>
   <li>Builders on patrol repair and reclaim en route; capture progress decays when the captor stops</li>
-  <li>Transports: load, unload, capacity and size</li>
+  <li>Transports: units ordering themselves aboard, air transports descending to pick up, <code>TransportPickup</code>/<code>TransportDrop</code> hooks, AI use</li>
   <li>Aiming scripts running twice (#42)</li>
   <li>Reclaim polish: sounds, progress in the info panel, auto‑reclaim for idle builders</li>
   <li>Self‑destruct blink effect; unit debris severity from actual overkill; SHATTER as real polygon fragments; explosions after a script's first sleep</li>

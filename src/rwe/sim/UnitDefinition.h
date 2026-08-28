@@ -88,6 +88,13 @@ namespace rwe
 
         bool canFly;
 
+        /** Units it can carry at once; 0 for anything that is not a transport. */
+        unsigned int transportCapacity{0};
+        /** Largest footprint (in tiles) it can carry; 0 means no limit. */
+        unsigned int transportSize{0};
+        bool isTransport() const { return transportCapacity > 0 || transportSize > 0; }
+        unsigned int effectiveTransportCapacity() const { return transportCapacity > 0 ? transportCapacity : 1u; }
+
         /** Distance above the ground that the unit flies at. */
         SimScalar cruiseAltitude;
 

@@ -293,6 +293,8 @@ namespace rwe
         u.canHover = fbi.canHover;
 
         u.canFly = fbi.canFly;
+        u.transportCapacity = fbi.transportCapacity;
+        u.transportSize = fbi.transportSize;
 
         u.cruiseAltitude = SimScalar(fbi.cruiseAlt);
 

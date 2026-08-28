@@ -70,6 +70,12 @@ namespace rwe
     {
         auto unitInfo = sim->getUnitInfo(unitId);
 
+        // A unit in a transport's grip just rides along (see updateCarriedUnits).
+        if (unitInfo.state->carriedBy)
+        {
+            return;
+        }
+
         // Clear steering targets.
         match(
             unitInfo.state->physics,
@@ -1017,7 +1023,99 @@ namespace rwe
             },
             [&](const CaptureOrder& o) {
                 return handleCaptureOrder(unitInfo, o);
+            },
+            [&](const LoadOrder& o) {
+                return handleLoadOrder(unitInfo, o);
+            },
+            [&](const UnloadOrder& o) {
+                return handleUnloadOrder(unitInfo, o);
             });
+    }
+
+    bool UnitBehaviorService::handleLoadOrder(UnitInfo unitInfo, const LoadOrder& loadOrder)
+    {
+        if (!unitInfo.definition->isTransport())
+        {
+            return true;
+        }
+
+        auto targetRef = sim->tryGetUnitState(loadOrder.target);
+        if (!targetRef || !targetRef->get().isAlive() || !targetRef->get().isOwnedBy(unitInfo.state->owner) || targetRef->get().carriedBy || loadOrder.target == unitInfo.id)
+        {
+            return true;
+        }
+        const auto& target = targetRef->get();
+        const auto& targetDefinition = sim->unitDefinitions.at(target.unitType);
+
+        // Only ground units ride; a transport that is full, or too small for
+        // the unit's footprint, gives up.
+        auto [footprintX, footprintZ] = sim->getFootprintXZ(targetDefinition.movementCollisionInfo);
+        if (!targetDefinition.isMobile || targetDefinition.canFly || targetDefinition.isTransport()
+            || unitInfo.state->carriedUnits.size() >= unitInfo.definition->effectiveTransportCapacity()
+            || (unitInfo.definition->transportSize > 0 && std::max(footprintX, footprintZ) > unitInfo.definition->transportSize))
+        {
+            return true;
+        }
+
+        // Close in over the unit (flat distance: an air transport hovers above it).
+        auto dx = unitInfo.state->position.x - target.position.x;
+        auto dz = unitInfo.state->position.z - target.position.z;
+        auto pickupRange = 24_ss + SimScalar(static_cast<float>(std::max(footprintX, footprintZ))) * MapTerrain::HeightTileWidthInWorldUnits;
+        if ((dx * dx) + (dz * dz) > pickupRange * pickupRange)
+        {
+            navigateTo(unitInfo, loadOrder.target);
+            return false;
+        }
+
+        // The script says which piece the unit hangs from and does its own animation.
+        std::string piece;
+        if (auto pieceId = runCobQuery(unitInfo.id, "QueryTransport"))
+        {
+            const auto& pieces = unitInfo.state->cobEnvironment->_script->pieces;
+            if (*pieceId >= 0 && static_cast<std::size_t>(*pieceId) < pieces.size())
+            {
+                piece = pieces[static_cast<std::size_t>(*pieceId)];
+            }
+        }
+
+        if (sim->loadUnitIntoTransport(unitInfo.id, loadOrder.target, piece))
+        {
+            unitInfo.state->cobEnvironment->createThread("BeginTransport", {static_cast<int>(simScalarToFloat(sim->unitModelDefinitions.at(targetDefinition.objectName).height))});
+        }
+        return true;
+    }
+
+    bool UnitBehaviorService::handleUnloadOrder(UnitInfo unitInfo, const UnloadOrder& unloadOrder)
+    {
+        if (unitInfo.state->carriedUnits.empty())
+        {
+            return true;
+        }
+
+        auto dx = unitInfo.state->position.x - unloadOrder.destination.x;
+        auto dz = unitInfo.state->position.z - unloadOrder.destination.z;
+        const auto dropRange = 32_ss;
+        if ((dx * dx) + (dz * dz) > dropRange * dropRange)
+        {
+            navigateTo(unitInfo, unloadOrder.destination);
+            return false;
+        }
+
+        auto carried = unitInfo.state->carriedUnits;
+        bool droppedAny = false;
+        for (auto carriedId : carried)
+        {
+            if (sim->unloadUnitFromTransport(unitInfo.id, carriedId, unloadOrder.destination))
+            {
+                droppedAny = true;
+            }
+        }
+        if (droppedAny)
+        {
+            unitInfo.state->cobEnvironment->createThread("EndTransport");
+        }
+        // Anything that found no room stays aboard; the order is done either way.
+        return true;
     }
 
     bool UnitBehaviorService::handleMoveOrder(UnitInfo unitInfo, const MoveOrder& moveOrder)
@@ -1181,6 +1279,23 @@ namespace rwe
         // before stepping. Approaching's phase change to Engaging happens in
         // stepAttackRunPhase.
         bool weaponsHot = stepAttackRunPhase(unitInfo.state->position, *targetPosition, weaponDefinition.maxRange, *attackRun);
+
+        // Never run out past the edge of the map: turn back early instead.
+        if (attackRun->phase == AirMovementStateAttackRun::Phase::Departing)
+        {
+            const auto& heights = sim->terrain.getHeightMap();
+            auto corner = sim->terrain.heightmapIndexToWorldCorner(0, 0);
+            auto margin = 64_ss;
+            auto minX = corner.x + margin;
+            auto minZ = corner.z + margin;
+            auto maxX = corner.x + (SimScalar(static_cast<float>(heights.getWidth())) * MapTerrain::HeightTileWidthInWorldUnits) - margin;
+            auto maxZ = corner.z + (SimScalar(static_cast<float>(heights.getHeight())) * MapTerrain::HeightTileHeightInWorldUnits) - margin;
+            const auto& p = unitInfo.state->position;
+            if (p.x < minX || p.x > maxX || p.z < minZ || p.z > maxZ)
+            {
+                attackRun->phase = AirMovementStateAttackRun::Phase::Approaching;
+            }
+        }
 
         if (previousPhase == AirMovementStateAttackRun::Phase::Approaching
             && attackRun->phase == AirMovementStateAttackRun::Phase::Engaging)

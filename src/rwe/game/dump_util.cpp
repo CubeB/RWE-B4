@@ -70,6 +70,7 @@ namespace rwe
             {"reclaimProgress", dumpJson(u.reclaimProgress)},
             {"captureProgress", dumpJson(u.captureProgress)},
             {"selfDestructTime", dumpJson(u.selfDestructTime)},
+            {"carriedBy", dumpJson(u.carriedBy)},
             {"activated", dumpJson(u.activated)},
             {"isSufficientlyPowered", dumpJson(u.isSufficientlyPowered)},
             {"energyProductionBuffer", dumpJson(u.energyProductionBuffer)},
