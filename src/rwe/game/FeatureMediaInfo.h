@@ -14,6 +14,8 @@ namespace rwe
         bool transparentAnimation;
         std::optional<std::shared_ptr<SpriteSeries>> shadowAnimation;
         bool transparentShadow;
+        /** Looping frames shown in place of the animation while the feature burns. */
+        std::optional<std::shared_ptr<SpriteSeries>> burnAnimation;
     };
 
     struct FeatureObjectInfo
@@ -30,6 +32,9 @@ namespace rwe
         std::string category;
 
         FeatureRenderInfo renderInfo;
+
+        /** The GAF the feature's sequences live in (without path or extension). */
+        std::string fileName;
 
         std::string seqNameReclamate;
 

@@ -74,6 +74,20 @@ namespace rwe
         const Sprite* sprite;
         Matrix4f mvpMatrix;
         bool translucent;
+        /** Drawn in the grey of remembered-but-unseen ground. */
+        bool fogged{false};
+    };
+
+    /** Fog of war map laid over the terrain: one texel per sight cell, alpha 0 = seen, mid = explored, 1 = unknown. */
+    struct FogOverlay
+    {
+        TextureIdentifier texture;
+        /** World x/z of the map's top-left corner. */
+        float originX;
+        float originZ;
+        /** World width/height the map covers. */
+        float width;
+        float height;
     };
 
     struct SpriteBatch
@@ -95,9 +109,9 @@ namespace rwe
             ShaderService* shaders,
             const Matrix4f* viewProjectionMatrix);
 
-        void drawMapTerrain(const MapTerrainGraphics& terrain, const Vector3f& cameraPosition, float viewportWidth, float viewportHeight);
+        void drawMapTerrain(const MapTerrainGraphics& terrain, const Vector3f& cameraPosition, float viewportWidth, float viewportHeight, const std::optional<FogOverlay>& fog = std::nullopt);
 
-        void drawMapTerrain(const MapTerrainGraphics& terrain, unsigned int x, unsigned int y, unsigned int width, unsigned int height);
+        void drawMapTerrain(const MapTerrainGraphics& terrain, unsigned int x, unsigned int y, unsigned int width, unsigned int height, const std::optional<FogOverlay>& fog = std::nullopt);
 
         void fillScreen(float r, float g, float b, float a);
 

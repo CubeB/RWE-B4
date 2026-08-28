@@ -183,6 +183,24 @@ namespace rwe
             [&](const CobEnvironment::PieceCommandStatus::DisableShading&) {
                 simulation.disableShading(unitId, objectName);
             },
+            [&](const CobEnvironment::PieceCommandStatus::Explode& e) {
+                const auto& unit = simulation.getUnitState(unitId);
+                simulation.events.push_back(PieceExplodedEvent{
+                    unitId,
+                    unit.unitType,
+                    unit.owner,
+                    objectName,
+                    simulation.getUnitPiecePosition(unitId, objectName),
+                    unit.rotation,
+                    e.flags});
+
+                // BITMAPONLY shows an explosion but leaves the piece in place.
+                const unsigned int bitmapOnly = 32u;
+                if ((e.flags & bitmapOnly) == 0u)
+                {
+                    simulation.hideObject(unitId, objectName);
+                }
+            },
             [&](const CobEnvironment::PieceCommandStatus::EmitSfx& s) {
                 switch (s.sfxType)
                 {

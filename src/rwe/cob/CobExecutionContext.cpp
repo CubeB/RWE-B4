@@ -255,8 +255,13 @@ namespace rwe
                         CobEnvironment::PieceCommandStatus::StopSpin{axis, deceleration}};
                 }
                 case OpCode::EXPLODE:
-                    explode();
-                    break;
+                {
+                    auto object = nextInstruction();
+                    auto flags = static_cast<unsigned int>(pop());
+                    return CobEnvironment::PieceCommandStatus{
+                        object,
+                        CobEnvironment::PieceCommandStatus::Explode{flags}};
+                }
                 case OpCode::EMIT_SFX:
                 {
                     auto object = nextInstruction();
@@ -535,13 +540,6 @@ namespace rwe
     {
         auto v = pop();
         push(~v);
-    }
-
-    void CobExecutionContext::explode()
-    {
-        /*auto object = */ nextInstruction();
-        /*auto explosionType = */ pop();
-        // TODO: this
     }
 
     void CobExecutionContext::enableCaching()

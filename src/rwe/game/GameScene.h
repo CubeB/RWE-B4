@@ -341,6 +341,24 @@ namespace rwe
 
         std::vector<Particle> particles;
 
+        /** A piece blown off a unit by its script, tumbling under gravity. Purely visual. */
+        struct Debris
+        {
+            std::string objectName;
+            std::string pieceName;
+            PlayerColorIndex color{0u};
+            Vector3f position;
+            Vector3f velocity;
+            Vector3f rotation;
+            Vector3f angularVelocity;
+            GameTime endTime;
+            GameTime nextTrail;
+            unsigned int flags{0};
+            /** A fragment of a shattered piece, drawn as a small dark square instead of a mesh. */
+            bool shard{false};
+        };
+        std::vector<Debris> debris;
+
         /** Scatter for purely visual effects; never feeds the simulation. */
         std::minstd_rand effectsRng{20260828u};
 
@@ -640,6 +658,13 @@ namespace rwe
 
         /** Emits this tick's nanolathe spray for every builder the local player can see. */
         void spawnNanoParticles();
+
+        /** Turns a COB piece explosion into flying debris, shards or an explosion sprite. */
+        void spawnDebris(const PieceExplodedEvent& e);
+
+        void updateDebris();
+
+        bool positionIsVisibleToLocalPlayer(const SimVector& position) const;
 
         /** One square of nano spray travelling from one point to another. */
         void spawnNanoParticle(const Vector3f& from, const Vector3f& to);

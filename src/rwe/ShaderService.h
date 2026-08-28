@@ -17,12 +17,16 @@ namespace rwe
         ShaderProgramHandle handle;
         UniformLocation mvpMatrix;
         UniformLocation tint;
+        UniformLocation desaturate;
     };
 
     struct MapTerrainShader
     {
         ShaderProgramHandle handle;
         UniformLocation mvpMatrix;
+        UniformLocation fogSampler;
+        UniformLocation fogEnabled;
+        UniformLocation fogTransform;
     };
 
     struct UnitTextureShader

@@ -231,7 +231,30 @@ namespace rwe
         PlayerId newOwner;
     };
 
+    /** A feature has just been fully reclaimed and removed. */
+    struct FeatureReclaimedEvent
+    {
+        FeatureDefinitionId featureType;
+        SimVector position;
+    };
+
+    /** A unit script exploded one of its pieces (the COB `explode` command). */
+    struct PieceExplodedEvent
+    {
+        UnitId unitId;
+        std::string unitType;
+        PlayerId owner;
+        std::string pieceName;
+        /** World position of the piece when it went. */
+        SimVector position;
+        SimAngle rotation;
+        /** TA's explode flags: SHATTER 1, EXPLODE_ON_HIT 2, FALL 4, SMOKE 8, FIRE 16, BITMAPONLY 32, BITMAP1..5 64..1024. */
+        unsigned int flags;
+    };
+
     using GameEvent = std::variant<
+        FeatureReclaimedEvent,
+        PieceExplodedEvent,
         FireWeaponEvent,
         UnitArrivedEvent,
         UnitActivatedEvent,
@@ -501,6 +524,18 @@ namespace rwe
         MapFeature& getFeature(FeatureId id);
 
         const MapFeature& getFeature(FeatureId id) const;
+
+        /**
+         * Sets a flammable feature alight. It burns for burnMin..burnMax
+         * seconds, tries to spread every sparkTime seconds, and is replaced by
+         * its burnt form (or removed) when it burns out.
+         */
+        void igniteFeature(FeatureId id);
+
+        /** Gives every flammable feature within radius a chancePercent chance to catch fire. */
+        void tryIgniteFeaturesInRadius(const SimVector& position, SimScalar radius, unsigned int chancePercent);
+
+        void updateBurningFeatures();
 
         std::optional<std::reference_wrapper<MapFeature>> tryGetFeature(FeatureId id);
 

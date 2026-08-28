@@ -51,5 +51,8 @@ namespace rwe
         bool groundBounce;
 
         Energy energyPerShot;
+
+        /** Percent chance that an impact sets flammable features in the blast alight. */
+        unsigned int fireStarter{0};
     };
 }

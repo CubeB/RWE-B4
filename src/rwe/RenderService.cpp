@@ -12,7 +12,7 @@ namespace rwe
     {
     }
 
-    void RenderService::drawMapTerrain(const MapTerrainGraphics& terrain, unsigned int x, unsigned int y, unsigned int width, unsigned int height)
+    void RenderService::drawMapTerrain(const MapTerrainGraphics& terrain, unsigned int x, unsigned int y, unsigned int width, unsigned int height, const std::optional<FogOverlay>& fog)
     {
         std::unordered_map<TextureArrayIdentifier, std::vector<std::pair<unsigned int, unsigned int>>> batches;
 
@@ -30,6 +30,16 @@ namespace rwe
         const auto& shader = shaders->mapTerrain;
         graphics->bindShader(shader.handle.get());
         graphics->setUniformMatrix(shader.mvpMatrix, *viewProjectionMatrix);
+
+        graphics->setUniformBool(shader.fogEnabled, fog.has_value());
+        if (fog)
+        {
+            graphics->setUniformInt(shader.fogSampler, 1);
+            graphics->setUniformVec4(shader.fogTransform, fog->originX, fog->originZ, 1.0f / fog->width, 1.0f / fog->height);
+            graphics->setActiveTextureSlot1();
+            graphics->bindTexture(fog->texture);
+            graphics->setActiveTextureSlot0();
+        }
 
         for (const auto& batch : batches)
         {
@@ -62,7 +72,7 @@ namespace rwe
         }
     }
 
-    void RenderService::drawMapTerrain(const MapTerrainGraphics& terrain, const Vector3f& cameraPosition, float viewportWidth, float viewportHeight)
+    void RenderService::drawMapTerrain(const MapTerrainGraphics& terrain, const Vector3f& cameraPosition, float viewportWidth, float viewportHeight, const std::optional<FogOverlay>& fog)
     {
         Vector3f cameraExtents(viewportWidth / 2.0f, 0.0f, viewportHeight / 2.0f);
         auto topLeft = terrain.worldToTileCoordinate(floatToSimVector(cameraPosition - cameraExtents));
@@ -72,7 +82,7 @@ namespace rwe
         auto x2 = static_cast<unsigned int>(std::clamp<int>(bottomRight.x, 0, terrain.getTiles().getWidth() - 1));
         auto y2 = static_cast<unsigned int>(std::clamp<int>(bottomRight.y, 0, terrain.getTiles().getHeight() - 1));
 
-        drawMapTerrain(terrain, x1, y1, (x2 + 1) - x1, (y2 + 1) - y1);
+        drawMapTerrain(terrain, x1, y1, (x2 + 1) - x1, (y2 + 1) - y1, fog);
     }
 
     void RenderService::fillScreen(float r, float g, float b, float a)
@@ -261,6 +271,7 @@ namespace rwe
             graphics->bindTexture(s.sprite->texture.get());
             graphics->setUniformMatrix(shader.mvpMatrix, s.mvpMatrix);
             graphics->setUniformVec4(shader.tint, 1.0f, 1.0f, 1.0f, alpha);
+            graphics->setUniformFloat(shader.desaturate, s.fogged ? 1.0f : 0.0f);
             graphics->drawTriangles(*s.sprite->mesh);
         }
     }

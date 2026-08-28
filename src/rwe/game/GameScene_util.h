@@ -76,18 +76,37 @@ namespace rwe
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitShadowMeshBatch& batch);
 
+    /** fogged draws the sprite in fog-of-war grey; currentTime drives the burning animation. */
     void drawFeature(
         const GameMediaDatabase& gameMediaDatabase,
         const MapFeature& feature,
         const FeatureDefinition& featureDefinition,
         const Matrix4f& viewProjectionMatrix,
+        GameTime currentTime,
+        bool fogged,
         SpriteBatch& batch);
     void drawFeatureShadow(
         const GameMediaDatabase& gameMediaDatabase,
         const MapFeature& feature,
         const FeatureDefinition& featureDefinition,
         const Matrix4f& viewProjectionMatrix,
+        bool fogged,
         SpriteBatch& batch);
+
+    /** One piece of a unit model at an arbitrary transform, for debris. */
+    void drawDebrisPiece(
+        const GameMediaDatabase& gameMediaDatabase,
+        const Matrix4f& viewProjectionMatrix,
+        const std::string& objectName,
+        const std::string& pieceName,
+        const Matrix4f& matrix,
+        PlayerColorIndex playerColorIndex,
+        TextureIdentifier unitTextureAtlas,
+        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        UnitMeshBatch& batch);
+
+    /** A small dark square: a fragment of a shattered piece. */
+    void drawDebrisShard(const Vector3f& position, ColoredMeshBatch& batch);
 
     /**
      * Outlines the polygons of a nanoframe that face the camera, in one colour.

@@ -510,7 +510,22 @@ namespace rwe
                 // ignore them if they don't exist.
                 spriteInfo.shadowAnimation = sceneContext.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqNameShad);
             }
+            if (!tdf.fileName.empty() && !tdf.seqNameBurn.empty())
+            {
+                spriteInfo.burnAnimation = sceneContext.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqNameBurn);
+            }
             f.renderInfo = std::move(spriteInfo);
+        }
+
+        f.fileName = tdf.fileName;
+
+        // The reclaim sequence plays as a one-off particle where the feature stood.
+        if (!tdf.fileName.empty() && !tdf.seqNameReclamate.empty())
+        {
+            if (auto anim = sceneContext.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqNameReclamate))
+            {
+                gameMediaDatabase.addSpriteSeries(tdf.fileName, tdf.seqNameReclamate, *anim);
+            }
         }
 
         f.seqNameReclamate = tdf.seqNameReclamate;
@@ -815,6 +830,15 @@ namespace rwe
         {
             auto anim = sceneContext.textureService->getGafEntry("anims/FX.GAF", "flamestream");
             dataMaps.gameMediaDatabase.addSpriteSeries("FX", "flamestream", anim);
+        }
+
+        // Explosion and fire sprites used by exploding unit pieces (COB `explode`).
+        for (const auto& name : {"Explosion", "Explode2", "Explode3", "Explode4", "Explode5", "Nuke1", "fire1"})
+        {
+            if (auto anim = sceneContext.textureService->tryGetGafEntry("anims/FX.GAF", name))
+            {
+                dataMaps.gameMediaDatabase.addSpriteSeries("FX", name, *anim);
+            }
         }
 
         // In-game titles: TA's own PAUSED / VICTORY / DEFEAT artwork.

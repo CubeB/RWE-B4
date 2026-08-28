@@ -14,6 +14,7 @@
 #include <rwe/util/match.h>
 #include <rwe/util/rwe_string.h>
 #include <type_traits>
+#include <random>
 #include <unordered_set>
 
 namespace rwe
@@ -341,8 +342,11 @@ namespace rwe
         auto position = feature.position;
         auto rotation = feature.rotation;
         auto reclamate = featureDefinition.featureReclamate;
+        auto featureType = feature.featureName;
 
         deleteFeature(featureId);
+
+        events.push_back(FeatureReclaimedEvent{featureType, position});
 
         if (reclamate)
         {
@@ -350,6 +354,130 @@ namespace rwe
         }
 
         return true;
+    }
+
+    void GameSimulation::igniteFeature(FeatureId id)
+    {
+        auto featureRef = tryGetFeature(id);
+        if (!featureRef)
+        {
+            return;
+        }
+        auto& feature = featureRef->get();
+        const auto& featureDefinition = getFeatureDefinition(feature.featureName);
+        if (!featureDefinition.flamable || feature.burningUntil)
+        {
+            return;
+        }
+
+        const auto ticksPerSecond = static_cast<unsigned int>(SimTicksPerSecond);
+        auto minTicks = featureDefinition.burnMin * ticksPerSecond;
+        auto maxTicks = std::max(featureDefinition.burnMax, featureDefinition.burnMin) * ticksPerSecond;
+        std::uniform_int_distribution<unsigned int> duration(minTicks, maxTicks);
+        feature.burningUntil = gameTime + GameTime(std::max(1u, duration(rng)));
+        feature.nextSpark = gameTime + GameTime(std::max(1u, featureDefinition.sparkTime) * ticksPerSecond);
+    }
+
+    void GameSimulation::tryIgniteFeaturesInRadius(const SimVector& position, SimScalar radius, unsigned int chancePercent)
+    {
+        if (chancePercent == 0 || radius <= 0_ss)
+        {
+            return;
+        }
+
+        auto minPoint = terrain.worldToHeightmapCoordinate(SimVector(position.x - radius, position.y, position.z - radius));
+        auto maxPoint = terrain.worldToHeightmapCoordinate(SimVector(position.x + radius, position.y, position.z + radius));
+        auto minCell = occupiedGrid.clampToCoords(minPoint);
+        auto maxCell = occupiedGrid.clampToCoords(maxPoint);
+        auto region = GridRegion::fromCoordinates(minCell, maxCell);
+
+        // Collect in grid order so the rolls below happen in the same order on every machine.
+        std::vector<FeatureId> candidates;
+        region.forEach([&](const auto& coords) {
+            auto featureId = occupiedGrid.get(coords).featureId;
+            if (!featureId || std::find(candidates.begin(), candidates.end(), *featureId) != candidates.end())
+            {
+                return;
+            }
+            candidates.push_back(*featureId);
+        });
+
+        auto radiusSquared = radius * radius;
+        std::uniform_int_distribution<unsigned int> roll(1, 100);
+        for (auto id : candidates)
+        {
+            auto featureRef = tryGetFeature(id);
+            if (!featureRef)
+            {
+                continue;
+            }
+            const auto& feature = featureRef->get();
+            const auto& featureDefinition = getFeatureDefinition(feature.featureName);
+            if (!featureDefinition.flamable || feature.burningUntil)
+            {
+                continue;
+            }
+            auto dx = feature.position.x - position.x;
+            auto dz = feature.position.z - position.z;
+            if ((dx * dx) + (dz * dz) > radiusSquared)
+            {
+                continue;
+            }
+            if (roll(rng) <= chancePercent)
+            {
+                igniteFeature(id);
+            }
+        }
+    }
+
+    void GameSimulation::updateBurningFeatures()
+    {
+        std::vector<FeatureId> burning;
+        for (const auto& [id, feature] : features)
+        {
+            if (feature.burningUntil)
+            {
+                burning.push_back(id);
+            }
+        }
+
+        const auto ticksPerSecond = static_cast<unsigned int>(SimTicksPerSecond);
+        for (auto id : burning)
+        {
+            auto featureRef = tryGetFeature(id);
+            if (!featureRef)
+            {
+                continue;
+            }
+            auto& feature = featureRef->get();
+            const auto& featureDefinition = getFeatureDefinition(feature.featureName);
+
+            if (gameTime >= *feature.burningUntil)
+            {
+                auto position = feature.position;
+                auto rotation = feature.rotation;
+                auto burnt = featureDefinition.featureBurnt;
+                deleteFeature(id);
+                if (burnt)
+                {
+                    addFeature(MapFeature{*burnt, position, rotation});
+                }
+                continue;
+            }
+
+            if (gameTime >= feature.nextSpark)
+            {
+                feature.nextSpark = gameTime + GameTime(std::max(1u, featureDefinition.sparkTime) * ticksPerSecond);
+
+                // The burn weapon's blast radius says how far the fire reaches.
+                auto radius = 32_ss;
+                if (auto it = weaponDefinitions.find(toUpper(featureDefinition.burnWeapon)); it != weaponDefinitions.end() && it->second.damageRadius > 0_ss)
+                {
+                    radius = it->second.damageRadius;
+                }
+                tryIgniteFeaturesInRadius(feature.position, radius, featureDefinition.spreadChance);
+            }
+        }
     }
 
     bool GameSimulation::reclaimUnit(UnitId targetId, PlayerId reclaimer, unsigned int workAmount)
@@ -1607,7 +1735,17 @@ namespace rwe
         auto deathType = unit.position.y < terrain.getSeaLevel() ? UnitDiedEvent::DeathType::WaterExploded : UnitDiedEvent::DeathType::NormalExploded;
         events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, deathType});
 
-        // TODO: spawn debris particles (from Killed script)
+        // Run the script's Killed(severity, corpsetype) now, while the unit
+        // still exists: the piece explosions it fires before its first sleep
+        // become debris. Anything it does after a sleep is lost, as the unit
+        // is removed at the end of the tick.
+        if (unit.cobEnvironment)
+        {
+            const int severity = 50;
+            unit.cobEnvironment->createThread("Killed", {severity, 0});
+            runUnitCobScripts(*this, unitId);
+        }
+
         if (!unitDefinition.explodeAs.empty())
         {
             auto impactType = unit.position.y < terrain.getSeaLevel() ? ImpactType::Water : ImpactType::Normal;
@@ -1755,6 +1893,11 @@ namespace rwe
     void GameSimulation::doProjectileImpact(const Projectile& projectile, ImpactType impactType)
     {
         applyDamageInRadius(projectile.position, projectile.damageRadius, projectile);
+
+        if (auto it = weaponDefinitions.find(projectile.weaponType); it != weaponDefinitions.end() && it->second.fireStarter > 0)
+        {
+            tryIgniteFeaturesInRadius(projectile.position, std::max(projectile.damageRadius, 16_ss), it->second.fireStarter);
+        }
     }
 
     void GameSimulation::updateProjectiles()
@@ -2203,6 +2346,8 @@ namespace rwe
         updateSelfDestructs();
 
         updateProjectiles();
+
+        updateBurningFeatures();
 
         processVictoryCondition();
 

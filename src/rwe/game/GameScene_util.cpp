@@ -607,6 +607,8 @@ namespace rwe
         const MapFeature& feature,
         const FeatureDefinition& featureDefinition,
         const Matrix4f& viewProjectionMatrix,
+        GameTime currentTime,
+        bool fogged,
         SpriteBatch& batch)
     {
         const auto& featureMediaInfo = gameMediaDatabase.getFeature(feature.featureName);
@@ -618,7 +620,16 @@ namespace rwe
         }
 
         auto position = simVectorToFloat(feature.position);
-        const auto& sprite = *spriteInfo->animation->sprites[0];
+
+        // A burning feature shows its burn sequence on a loop instead of its usual frame.
+        const SpriteSeries* series = spriteInfo->animation.get();
+        std::size_t frameIndex = 0;
+        if (feature.burningUntil && spriteInfo->burnAnimation && !(*spriteInfo->burnAnimation)->sprites.empty())
+        {
+            series = spriteInfo->burnAnimation->get();
+            frameIndex = (currentTime.value / 2) % series->sprites.size();
+        }
+        const auto& sprite = *series->sprites[frameIndex];
 
         Vector3f snappedPosition(std::round(position.x), truncateToInterval(position.y, 2.0f), std::round(position.z));
 
@@ -633,7 +644,7 @@ namespace rwe
 
         auto mvpMatrix = viewProjectionMatrix * modelMatrix;
 
-        batch.sprites.push_back(SpriteRenderInfo{&sprite, mvpMatrix, spriteInfo->transparentAnimation});
+        batch.sprites.push_back(SpriteRenderInfo{&sprite, mvpMatrix, spriteInfo->transparentAnimation, fogged});
     }
 
     void drawFeatureShadow(
@@ -641,6 +652,7 @@ namespace rwe
         const MapFeature& feature,
         const FeatureDefinition& featureDefinition,
         const Matrix4f& viewProjectionMatrix,
+        bool fogged,
         SpriteBatch& batch)
     {
         const auto& featureMediaInfo = gameMediaDatabase.getFeature(feature.featureName);
@@ -671,7 +683,37 @@ namespace rwe
 
         auto mvpMatrix = viewProjectionMatrix * modelMatrix;
 
-        batch.sprites.push_back(SpriteRenderInfo{&sprite, mvpMatrix, spriteInfo->transparentShadow});
+        batch.sprites.push_back(SpriteRenderInfo{&sprite, mvpMatrix, spriteInfo->transparentShadow, fogged});
+    }
+
+    void drawDebrisPiece(
+        const GameMediaDatabase& gameMediaDatabase,
+        const Matrix4f& viewProjectionMatrix,
+        const std::string& objectName,
+        const std::string& pieceName,
+        const Matrix4f& matrix,
+        PlayerColorIndex playerColorIndex,
+        TextureIdentifier unitTextureAtlas,
+        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        UnitMeshBatch& batch)
+    {
+        auto pieceMesh = gameMediaDatabase.getUnitPieceMesh(objectName, pieceName);
+        if (!pieceMesh)
+        {
+            return;
+        }
+        drawShaderMesh(viewProjectionMatrix, *pieceMesh->get().mesh, matrix, true, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
+    }
+
+    void drawDebrisShard(const Vector3f& position, ColoredMeshBatch& batch)
+    {
+        const Vector3f color(0.22f, 0.2f, 0.18f);
+        const auto topLeft = position + Vector3f(-1.5f, 0.0f, -1.5f);
+        const auto topRight = position + Vector3f(1.5f, 0.0f, -1.5f);
+        const auto bottomLeft = position + Vector3f(-1.5f, 0.0f, 1.5f);
+        const auto bottomRight = position + Vector3f(1.5f, 0.0f, 1.5f);
+        pushTriangle(batch.triangles, topLeft, bottomLeft, bottomRight, color);
+        pushTriangle(batch.triangles, topLeft, bottomRight, topRight, color);
     }
 
     void drawUnitWireframe(

@@ -68,7 +68,6 @@ namespace rwe
         void bitwiseNot();
 
         // control object pieces
-        void explode();
 
         void enableCaching();
 

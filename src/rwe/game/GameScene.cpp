@@ -820,7 +820,14 @@ namespace rwe
 
         sceneContext.graphics->disableDepthBuffer();
 
-        worldRenderService.drawMapTerrain(terrainGraphics, worldCameraState.getRoundedPosition(), worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
+        // Fog of war is applied by the terrain shader: remembered ground goes
+        // grey, unknown ground black, with TA's ragged 32-unit boundary.
+        std::optional<FogOverlay> fogOverlay;
+        if (fogOfWarEnabled && fogSprite)
+        {
+            fogOverlay = FogOverlay{fogSprite->texture.get(), fogSprite->bounds.left(), fogSprite->bounds.top(), fogSprite->bounds.width(), fogSprite->bounds.height()};
+        }
+        worldRenderService.drawMapTerrain(terrainGraphics, worldCameraState.getRoundedPosition(), worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()), fogOverlay);
 
         SpriteBatch flatFeatureBatch;
         SpriteBatch flatFeatureShadowBatch;
@@ -833,22 +840,13 @@ namespace rwe
             const auto& featureDefinition = simulation.getFeatureDefinition(f.second.featureName);
             if (!featureDefinition.isStanding())
             {
-                drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, flatFeatureBatch);
-                drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, flatFeatureShadowBatch);
+                auto fogged = !positionIsVisibleToLocalPlayer(f.second.position);
+                drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, simulation.gameTime, fogged, flatFeatureBatch);
+                drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, flatFeatureShadowBatch);
             }
         }
         worldRenderService.drawSpriteBatch(flatFeatureShadowBatch);
         worldRenderService.drawSpriteBatch(flatFeatureBatch);
-
-        // Fog of war over the terrain. The tiles are drawn flat at y = 0 with
-        // their height baked into the artwork, so a flat quad lines up exactly.
-        if (fogOfWarEnabled && fogSprite)
-        {
-            auto flatten = Matrix4f::rotationX(-Pif / 2.0f) * Matrix4f::scale(Vector3f(1.0f, -1.0f, 1.0f));
-            SpriteBatch fogBatch;
-            fogBatch.sprites.push_back(SpriteRenderInfo{&*fogSprite, viewProjectionMatrix * flatten * fogSprite->getTransform(), false});
-            worldRenderService.drawSpriteBatch(fogBatch);
-        }
 
         ColoredMeshBatch squareParticlesBatch;
         for (const auto& particle : particles)
@@ -960,6 +958,17 @@ namespace rwe
             }
             drawMeshFeature(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
         }
+        for (const auto& d : debris)
+        {
+            if (d.shard)
+            {
+                continue;
+            }
+            auto position = d.position + (d.velocity * interpolationFraction);
+            auto rotation = d.rotation + (d.angularVelocity * interpolationFraction);
+            auto matrix = Matrix4f::translation(position) * Matrix4f::rotationZXY(rotation);
+            drawDebrisPiece(gameMediaDatabase, viewProjectionMatrix, d.objectName, d.pieceName, matrix, d.color, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+        }
         worldRenderService.drawUnitMeshBatch(unitMeshBatch, simScalarToFloat(seaLevel), simulation.gameTime.value);
 
         // Construction wireframe: the visible polygon edges of each nanoframe,
@@ -1019,8 +1028,9 @@ namespace rwe
             const auto& featureDefinition = simulation.getFeatureDefinition(f.second.featureName);
             if (featureDefinition.isStanding())
             {
-                drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, featureBatch);
-                drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, featureShadowBatch);
+                auto fogged = !positionIsVisibleToLocalPlayer(f.second.position);
+                drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, simulation.gameTime, fogged, featureBatch);
+                drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, featureShadowBatch);
             }
         }
         worldRenderService.drawSpriteBatch(featureShadowBatch);
@@ -1033,6 +1043,13 @@ namespace rwe
         for (const auto& particle : particles)
         {
             drawNanoParticle(simulation.gameTime, interpolationFraction, particle, nanoParticlesBatch);
+        }
+        for (const auto& d : debris)
+        {
+            if (d.shard)
+            {
+                drawDebrisShard(d.position + (d.velocity * interpolationFraction), nanoParticlesBatch);
+            }
         }
         worldRenderService.drawBatch(nanoParticlesBatch, viewProjectionMatrix);
 
@@ -3058,6 +3075,8 @@ namespace rwe
 
         spawnNanoParticles();
 
+        updateDebris();
+
         // A game needs an opponent before it can be decided; a lone player
         // is just exploring the map.
         if (!gameOver && simulation.players.size() >= 2)
@@ -3484,6 +3503,127 @@ namespace rwe
         return !fogOfWarEnabled || simulation.isExploredBy(localPlayerId, position);
     }
 
+    bool GameScene::positionIsVisibleToLocalPlayer(const SimVector& position) const
+    {
+        return !fogOfWarEnabled || simulation.isVisibleTo(localPlayerId, position);
+    }
+
+    void GameScene::spawnDebris(const PieceExplodedEvent& e)
+    {
+        if (!positionIsVisibleToLocalPlayer(e.position))
+        {
+            return;
+        }
+
+        const auto& unitDefinition = simulation.unitDefinitions.at(e.unitType);
+        auto position = simVectorToFloat(e.position);
+
+        // TA's explode flags.
+        const unsigned int shatter = 1u;
+        const unsigned int bitmapOnly = 32u;
+
+        // BITMAP1..5 (bits 6-10) choose an explosion sprite to show at the piece.
+        static const char* const bitmapAnims[] = {"Explode2", "Explode3", "Explode4", "Explode5", "Explosion"};
+        for (unsigned int i = 0; i < 5; ++i)
+        {
+            if ((e.flags & (64u << i)) && gameMediaDatabase.getSpriteSeries("FX", bitmapAnims[i]))
+            {
+                spawnExplosion(position, AnimLocation{"FX", bitmapAnims[i]});
+                break;
+            }
+        }
+        if (e.flags & bitmapOnly)
+        {
+            return;
+        }
+
+        std::uniform_real_distribution<float> sideways(-2.5f, 2.5f);
+        std::uniform_real_distribution<float> upwards(3.0f, 7.0f);
+        std::uniform_real_distribution<float> spin(-0.3f, 0.3f);
+        std::uniform_int_distribution<unsigned int> lifetime(60u, 120u);
+
+        auto makeDebris = [&](bool shard) {
+            Debris d;
+            d.objectName = unitDefinition.objectName;
+            d.pieceName = e.pieceName;
+            d.color = getPlayer(e.owner).color;
+            d.position = position;
+            d.velocity = Vector3f(sideways(effectsRng), upwards(effectsRng), sideways(effectsRng));
+            d.rotation = Vector3f(0.0f, toRadians(e.rotation).value, 0.0f);
+            d.angularVelocity = Vector3f(spin(effectsRng), spin(effectsRng), spin(effectsRng));
+            d.endTime = simulation.gameTime + GameTime(lifetime(effectsRng));
+            d.nextTrail = simulation.gameTime;
+            d.flags = e.flags;
+            d.shard = shard;
+            debris.push_back(d);
+        };
+
+        if (e.flags & shatter)
+        {
+            // The piece breaks up: a handful of fragments instead of the mesh.
+            for (int i = 0; i < 6; ++i)
+            {
+                makeDebris(true);
+            }
+        }
+        else
+        {
+            makeDebris(false);
+        }
+    }
+
+    void GameScene::updateDebris()
+    {
+        const unsigned int explodeOnHit = 2u;
+        const unsigned int smoke = 8u;
+        const unsigned int fire = 16u;
+        const float gravity = 0.3f;
+
+        auto corner = simVectorToFloat(simulation.terrain.heightmapIndexToWorldCorner(0, 0));
+        auto tile = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
+        auto mapWidth = static_cast<float>(simulation.terrain.getHeightMap().getWidth()) * tile;
+        auto mapHeight = static_cast<float>(simulation.terrain.getHeightMap().getHeight()) * tile;
+
+        auto end = debris.end();
+        for (auto it = debris.begin(); it != end;)
+        {
+            auto& d = *it;
+            d.velocity.y -= gravity;
+            d.position += d.velocity;
+            d.rotation += d.angularVelocity;
+
+            bool onMap = d.position.x > corner.x + tile && d.position.x < corner.x + mapWidth - tile
+                && d.position.z > corner.z + tile && d.position.z < corner.z + mapHeight - tile;
+
+            if (onMap && (d.flags & (smoke | fire)) && simulation.gameTime >= d.nextTrail)
+            {
+                d.nextTrail = simulation.gameTime + GameTime(3);
+                if ((d.flags & fire) && gameMediaDatabase.getSpriteSeries("FX", "fire1"))
+                {
+                    spawnExplosion(d.position, AnimLocation{"FX", "fire1"});
+                }
+                else
+                {
+                    spawnSmoke(d.position, "FX", "smoke 1", ParticleFinishTimeEndOfFrames(), GameTime(2));
+                }
+            }
+
+            auto ground = onMap ? simScalarToFloat(simulation.terrain.getHeightAt(SimScalar(d.position.x), SimScalar(d.position.z))) : d.position.y;
+            bool landed = onMap && d.position.y <= ground;
+            if (!onMap || landed || simulation.gameTime >= d.endTime)
+            {
+                if (landed && (d.flags & explodeOnHit) && gameMediaDatabase.getSpriteSeries("FX", "Explode2"))
+                {
+                    spawnExplosion(Vector3f(d.position.x, ground, d.position.z), AnimLocation{"FX", "Explode2"});
+                }
+                *it = std::move(*--end);
+                continue;
+            }
+            ++it;
+        }
+        debris.erase(end, debris.end());
+    }
+
     void GameScene::updateFogSprite()
     {
         if (!fogOfWarEnabled)
@@ -3511,47 +3651,21 @@ namespace rwe
         auto cellsWide = vis.explored.getWidth();
         auto cellsHigh = vis.explored.getHeight();
 
-        // Render at four texels per vision cell (8 world units each, the
-        // step size of TA's own fog edge). Each texel blends the four nearest
-        // cells and is visible where the blend passes one half, which turns
-        // the cell grid into the rounded, stepped outline TA draws. The
-        // texture is sampled with nearest filtering so the steps stay crisp.
-        const int upscale = 4;
-        auto width = cellsWide * upscale;
-        auto height = cellsHigh * upscale;
-
-        auto sampleGrid = [&](const Grid<unsigned char>& grid, float cx, float cy) {
-            // Bilinear sample of a 0/1 grid at cell-space coordinates (cell centres at n + 0.5).
-            auto fx = cx - 0.5f;
-            auto fy = cy - 0.5f;
-            auto x0 = static_cast<int>(std::floor(fx));
-            auto y0 = static_cast<int>(std::floor(fy));
-            auto tx = fx - static_cast<float>(x0);
-            auto ty = fy - static_cast<float>(y0);
-            auto at = [&](int x, int y) {
-                x = std::clamp(x, 0, cellsWide - 1);
-                y = std::clamp(y, 0, cellsHigh - 1);
-                return grid.get(x, y) ? 1.0f : 0.0f;
-            };
-            auto top = (at(x0, y0) * (1.0f - tx)) + (at(x0 + 1, y0) * tx);
-            auto bottom = (at(x0, y0 + 1) * (1.0f - tx)) + (at(x0 + 1, y0 + 1) * tx);
-            return (top * (1.0f - ty)) + (bottom * ty);
-        };
-        const float threshold = 0.5f;
-
+        // One texel per sight cell, as in TA. The terrain shader roughens the
+        // boundary itself; the minimap draws this map directly.
+        auto width = cellsWide;
+        auto height = cellsHigh;
         std::vector<Color> pixels;
         pixels.reserve(static_cast<size_t>(width) * static_cast<size_t>(height));
         for (int y = 0; y < height; ++y)
         {
             for (int x = 0; x < width; ++x)
             {
-                auto cx = (static_cast<float>(x) + 0.5f) / static_cast<float>(upscale);
-                auto cy = (static_cast<float>(y) + 0.5f) / static_cast<float>(upscale);
-                if (sampleGrid(vis.visible, cx, cy) > threshold)
+                if (vis.visible.get(x, y))
                 {
                     pixels.emplace_back(0, 0, 0, 0);
                 }
-                else if (sampleGrid(vis.explored, cx, cy) > threshold)
+                else if (vis.explored.get(x, y))
                 {
                     pixels.emplace_back(0, 0, 0, 120);
                 }
@@ -3772,6 +3886,26 @@ namespace rwe
         {
             match(
                 event,
+                [&](const FeatureReclaimedEvent& e) {
+                    // The feature's reclaim sequence (TA's golden swirl) plays once where it stood.
+                    if (!positionIsVisibleToLocalPlayer(e.position))
+                    {
+                        return;
+                    }
+                    const auto& featureMediaInfo = gameMediaDatabase.getFeature(e.featureType);
+                    if (featureMediaInfo.fileName.empty() || featureMediaInfo.seqNameReclamate.empty())
+                    {
+                        return;
+                    }
+                    if (!gameMediaDatabase.getSpriteSeries(featureMediaInfo.fileName, featureMediaInfo.seqNameReclamate))
+                    {
+                        return;
+                    }
+                    spawnExplosion(simVectorToFloat(e.position), AnimLocation{featureMediaInfo.fileName, featureMediaInfo.seqNameReclamate});
+                },
+                [&](const PieceExplodedEvent& e) {
+                    spawnDebris(e);
+                },
                 [&](const FireWeaponEvent& e) {
                     const auto& weaponMediaInfo = gameMediaDatabase.getWeapon(e.weaponType);
 

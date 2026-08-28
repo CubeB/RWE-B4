@@ -198,6 +198,8 @@ namespace rwe
 
         weaponDefinition.groundBounce = tdf.groundBounce;
 
+        weaponDefinition.fireStarter = static_cast<unsigned int>(std::clamp(tdf.fireStarter, 0.0f, 100.0f));
+
         weaponDefinition.randomDecay = GameTime(static_cast<unsigned int>(tdf.randomDecay * 30.0f));
 
         return weaponDefinition;
