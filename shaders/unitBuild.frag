@@ -11,10 +11,14 @@ uniform float seaLevel;
 uniform bool shade;
 uniform float percentComplete;
 uniform float time;
+// Height of the whole model above unitY.
+uniform float unitHeight;
 
 const vec3 waterTint = vec3(0.5, 0.5, 1.0);
 const vec3 normalTint = vec3(1.0, 1.0, 1.0);
-const vec3 lightDirection = normalize(vec3(-1.0, 4.0, 1.0));
+// The sun sits low to the left and slightly in front, as in TA: faces that
+// look left are brightest, tops a little dimmer, right-facing sides dark.
+const vec3 lightDirection = normalize(vec3(-1.2, 1.0, 0.4));
 
 const float band1EndPercent = 0.05;
 const float band1Speed = 2000.0;
@@ -29,12 +33,21 @@ const float mainFillSpeed = 2000.0;
 const float mainFillLeadThickness = 10.0;
 
 const float textureFillStartPercent = 0.7;
-const float textureFillSpeed = 2000.0;
+// The texture sweeps up over the last part of the build, so its rate
+// depends on how tall the model is (see textureFillSpeedFor).
+const float textureFillEndPercent = 0.96;
 const float textureFillLeadThickness = 10.0;
 
 const float band3EndPercent = 0.95;
 const float band3Speed = 2000.0;
 const float band3Thickness = 10.0;
+
+float textureFillSpeedFor(float modelHeight)
+{
+    // Height per unit of percentComplete: the texture front reaches the
+    // top of the model at textureFillEndPercent instead of appearing at once.
+    return max(modelHeight, 1.0) / (textureFillEndPercent - textureFillStartPercent);
+}
 
 vec3 shadeNormal()
 {
@@ -70,9 +83,9 @@ void main(void)
             shadingMethod = 2;
 
     //texture overlay
-    else if ((percentComplete - textureFillStartPercent)*textureFillSpeed >= posY) {
+    else if ((percentComplete - textureFillStartPercent)*textureFillSpeedFor(unitHeight) >= posY) {
         //lead band
-        if (posY + textureFillLeadThickness >= (percentComplete - textureFillStartPercent)*textureFillSpeed)
+        if (posY + textureFillLeadThickness >= (percentComplete - textureFillStartPercent)*textureFillSpeedFor(unitHeight))
             shadingMethod = 2;
         //rest of fill
         else
@@ -99,7 +112,7 @@ void main(void)
 
     //0 = transparent, 1 = sine green, 2 = cosine green, 3 = ignore (texture pass fills this in)
 
-    float time2 = time / 15.0;
+    float time2 = time / 13.0;
 
     float lightIntensity = (0.5 * clamp(dot(worldNormal, lightDirection), 0.0, 1.0)) + 0.5;
 

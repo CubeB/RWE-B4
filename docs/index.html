@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RWE Revival Status</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=Source+Code+Pro:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F3F2EE; --panel:#FBFAF7; --line:#D5D2CA;
+  --ink:#1E2226; --ink-2:#4B5258; --muted:#767D84;
+  --accent:#2F5F9E; --accent-soft:#DDE7F4;
+  --done:#2E7D46; --done-soft:#DCEFE1;
+  --todo:#9A6A12; --todo-soft:#F6EBD1;
+  --disp:'Barlow Condensed','Arial Narrow',sans-serif;
+  --sans:'Source Sans 3',system-ui,'Segoe UI',sans-serif;
+  --mono:'Source Code Pro',ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#171A1D; --panel:#1F2327; --line:#333940;
+    --ink:#E4E6E2; --ink-2:#B9BEB9; --muted:#8C949B;
+    --accent:#7FA9E6; --accent-soft:#213448;
+    --done:#7CCB93; --done-soft:#1E3526;
+    --todo:#E2B25C; --todo-soft:#3A2E14;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#171A1D; --panel:#1F2327; --line:#333940;
+  --ink:#E4E6E2; --ink-2:#B9BEB9; --muted:#8C949B;
+  --accent:#7FA9E6; --accent-soft:#213448;
+  --done:#7CCB93; --done-soft:#1E3526;
+  --todo:#E2B25C; --todo-soft:#3A2E14;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.5}
+a{color:var(--accent)}
+code{font-family:var(--mono);font-size:.85em;background:var(--panel);border:1px solid var(--line);padding:0 .3em;border-radius:3px}
+.wrap{max-width:860px;margin:0 auto;padding:0 1.25rem 4rem}
+header{padding:2.5rem 0 1.5rem;border-bottom:2px solid var(--ink)}
+h1{font-family:var(--disp);font-size:clamp(2.4rem,6vw,3.6rem);font-weight:700;letter-spacing:.02em;text-transform:uppercase;margin:0;line-height:1}
+.meta{display:flex;flex-wrap:wrap;gap:.4rem 1.4rem;margin-top:.8rem;font-family:var(--mono);font-size:.82rem;color:var(--muted)}
+.meta b{color:var(--ink);font-weight:500}
+nav{display:flex;gap:1.2rem;padding:.9rem 0;border-bottom:1px solid var(--line);font-family:var(--disp);font-size:1.05rem;text-transform:uppercase;letter-spacing:.06em}
+nav a{color:var(--ink-2);text-decoration:none}
+nav a:hover,nav a:focus-visible{color:var(--accent);outline:none}
+h2{font-family:var(--disp);font-size:1.9rem;text-transform:uppercase;letter-spacing:.03em;margin:2.6rem 0 .3rem;line-height:1.1}
+h2 small{display:block;font-family:var(--sans);font-size:.95rem;font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink-2)}
+h3{font-family:var(--disp);font-size:1.25rem;text-transform:uppercase;letter-spacing:.05em;margin:1.6rem 0 .3rem;color:var(--ink-2)}
+ul{margin:.2rem 0 0;padding-left:1.2rem}
+li{margin:.25rem 0}
+li::marker{color:var(--muted)}
+.phase{display:grid;grid-template-columns:auto 1fr;gap:.7rem 1rem;align-items:baseline;padding:.7rem 0;border-bottom:1px solid var(--line)}
+.phase .n{font-family:var(--disp);font-size:1.4rem;font-weight:700;color:var(--accent)}
+.phase .t{font-weight:600}
+.phase .s{color:var(--ink-2);margin:0}
+.tag{display:inline-block;font-family:var(--disp);font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;padding:.1rem .45rem;border-radius:3px;vertical-align:middle;margin-left:.4rem}
+.tag.done{background:var(--done-soft);color:var(--done)}
+.tag.todo{background:var(--todo-soft);color:var(--todo)}
+.tag.part{background:var(--accent-soft);color:var(--accent)}
+.note{background:var(--panel);border-left:3px solid var(--accent);padding:.7rem 1rem;margin:1rem 0;color:var(--ink-2)}
+footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<header>
+  <h1>RWE Revival</h1>
+  <div class="meta">
+    <span>branch <b>revival</b></span>
+    <span>base <b>upstream master b2d8a31 · 25 Mar 2026</b></span>
+    <span>updated <b>28 Aug 2026</b></span>
+    <span>tests <b>167 cases · 1756 assertions</b></span>
+  </div>
+</header>
+<nav aria-label="Sections">
+  <a href="#added">Added</a>
+  <a href="#roadmap">Roadmap</a>
+  <a href="#todo">To do</a>
+</nav>
+
+<h2 id="added">Added since the last official update<small>Everything on <code>revival</code> that is not in MHeasell/rwe master as of 25 March 2026.</small></h2>
+
+<h3>Merged from forks</h3>
+<ul>
+  <li>Total Annihilation Ctrl‑key hotkey suite, game speed control and pause, COB query/set handlers, TA‑style aircraft attack runs and bomber bombsight, Phase‑1 skirmish AI, Nix dev shell <span class="tag part">tgunnoe</span></li>
+  <li>Tagged release job and Linux AppImage build <span class="tag part">KevinHake</span></li>
+  <li><code>EnergyPerShot</code> weapon support <span class="tag part">OskarPedersen</span></li>
+  <li>Reclaim orders scaffold from the upstream <code>reclaim</code> branch (2023), finished here</li>
+</ul>
+
+<h3>Orders and unit behaviour</h3>
+<ul>
+  <li>Reclaim features and units, with progress shared between builders and resources credited as work is done</li>
+  <li>Repair, patrol (engages en route, single click patrols between two points) and capture orders, each with panel button and cursor</li>
+  <li>Self‑destruct countdown (Ctrl‑D, 5 s, cancellable) using the unit's <code>SelfDestructAs</code> weapon</li>
+  <li>Units rock with recoil when they fire</li>
+  <li>Pathing: slope‑aware speed and routing, no corner squeezing between obstacles, unreachable destinations end at the closest reachable point</li>
+  <li>Builders no longer get stuck on unreachable build sites; nanoframes killed while unattended die cleanly</li>
+</ul>
+
+<h3>Economy and game flow</h3>
+<ul>
+  <li>Spending throttles continuously to income when a stockpile runs dry; stalled resource bars flash red</li>
+  <li>Game‑over panel (victory / defeat / draw, game time, units destroyed and lost) instead of quitting; spectate afterwards</li>
+  <li>PAUSED uses TA's own title artwork from <code>IGTITLES.GAF</code></li>
+  <li>F1 hotkey reference overlay; F10/F11 toggle the debug windows, Escape closes them and the keyboard is never trapped</li>
+</ul>
+
+<h3>Visibility</h3>
+<ul>
+  <li>Line of sight, fog of war and radar in the deterministic sim; unseen enemies hidden, radar contacts as blips, unexplored features hidden</li>
+  <li>Sight is blocked by higher ground, so hills cast shadows</li>
+  <li>Fog drawn the way TA draws it: remembered ground in grey, unknown ground black, a 32‑unit boundary eroded by a few pixels of fixed noise (measured from the original)</li>
+  <li>Minimap only reveals what the player can see or detect</li>
+</ul>
+
+<h3>Effects</h3>
+<ul>
+  <li>Construction: green pulse plus a wireframe of the camera‑facing edges that blends green → white → black; texture sweeps up over the frame as it completes; nano spray of small green squares from the builder's nozzle; shadow kept but cut out under the frame</li>
+  <li>Burning features: fire‑starting weapons ignite trees and foliage, fires spread and leave burnt remains, using each feature's own burn sequence</li>
+  <li>Building deaths run the COB <code>Killed</code> script: pieces fly off with smoke and fire trails and impact explosions</li>
+  <li>Reclaimed features play their golden dissolve sequence</li>
+  <li>Model lighting moved to match TA's low sun from the left</li>
+</ul>
+
+<h3>Skirmish AI</h3>
+<ul>
+  <li>Perception through fog of war, threat map, scouting, expansion build order (solars, extractors on real patches, lab, radar, towers, metal makers), factories, constructors that assist</li>
+  <li>Single‑army rally, defend and attack cycle; Easy / Standard / Hard / Brutal profiles via <code>--ai-difficulty</code></li>
+  <li>Debug panel and 30‑second status lines in <code>rwe.log</code>; verified live on Coast To Coast</li>
+</ul>
+
+<h3>Build and tooling</h3>
+<ul>
+  <li>Windows checkouts without symlinks build (real asio include path); MinGW runtime DLLs copied next to the executables</li>
+  <li>Headless‑safe logging for tests; 34 new test cases across orders, pathing, economy, visibility and burning</li>
+</ul>
+
+<h2 id="roadmap">Roadmap<small>Six phases, in order of dependence. The full plan lives in <code>docs/ROADMAP.md</code>.</small></h2>
+
+<div class="phase"><span class="n">P0</span><div><span class="t">Foundation</span><span class="tag part">mostly done</span><p class="s">Toolchain, integration branch, local builds, TA data smoke test. Left: push to GitHub for CI, first pre‑release tag, README/CLAUDE.md refresh.</p></div></div>
+<div class="phase"><span class="n">P1</span><div><span class="t">Playable single‑player skirmish</span><span class="tag part">in progress</span><p class="s">Every basic order works, effects and fog look like TA, UI complete enough to never need the debug menu.</p></div></div>
+<div class="phase"><span class="n">P2</span><div><span class="t">AI opponent</span><span class="tag part">core done</span><p class="s">Perception, economy, army and difficulty tiers are in; polish and multiplayer safety remain.</p></div></div>
+<div class="phase"><span class="n">P3</span><div><span class="t">Multiplayer and launcher</span><span class="tag todo">not started</span><p class="s">Launcher dependency refresh, public master server, desync UX, chat, replays, mod management.</p></div></div>
+<div class="phase"><span class="n">P4</span><div><span class="t">Compatibility and content</span><span class="tag todo">not started</span><p class="s">Map‑pack robustness, model and animation fixes, expansion packs and big mods.</p></div></div>
+<div class="phase"><span class="n">P5</span><div><span class="t">Performance, renderer, platform</span><span class="tag todo">not started</span><p class="s">Profiling large maps, batched rendering, SDL_gpu backend, protobuf upgrade, Linux and macOS builds.</p></div></div>
+
+<h2 id="todo">To do<small>Everything else, grouped by phase. Items with issue numbers refer to the upstream tracker.</small></h2>
+
+<h3>Needs checking in‑game</h3>
+<ul>
+  <li>Lighting direction (now a low sun from the left; tune against <code>lightingexample.png</code>)</li>
+  <li>Lab bay showing through a unit under construction</li>
+  <li>Wireframe weight, pulse speed and texture sweep timing</li>
+</ul>
+
+<h3>Phase 0</h3>
+<ul>
+  <li>Push <code>revival</code> to GitHub and confirm the CI matrix is green</li>
+  <li>Tag <code>v0.2.0‑pre1</code>; let the release job produce Windows and AppImage builds</li>
+  <li>Update README download section and CLAUDE.md (C++20, not C++17)</li>
+  <li>Decide on <code>experimental/sdl-gpu</code> and the protobuf upgrade branch</li>
+</ul>
+
+<h3>Phase 1</h3>
+<ul>
+  <li>Resurrect order (corpse → unit mapping)</li>
+  <li>Builders on patrol repair and reclaim en route; capture progress decays when the captor stops</li>
+  <li>Transports: load, unload, capacity and size</li>
+  <li>Aiming scripts running twice (#42)</li>
+  <li>Reclaim polish: sounds, progress in the info panel, auto‑reclaim for idle builders</li>
+  <li>Self‑destruct blink effect; unit debris severity from actual overkill; SHATTER as real polygon fragments; explosions after a script's first sleep</li>
+  <li>Radar jammers, sonar, stealth and cloak</li>
+  <li>F2 in‑game menu (#154); unit info panel completeness; build menu paging and queue badges; focused‑control highlight (#5, #6)</li>
+  <li>Music playback and the unwired unit sounds</li>
+  <li>Hash map features (burning state) in the desync check</li>
+</ul>
+
+<h3>Phase 2</h3>
+<ul>
+  <li>AI in multiplayer: commands generated locally are never sent, so a network game with an AI would desync</li>
+  <li>Several platoons with role templates; TDF‑loaded profiles and build orders; per‑slot difficulty in the lobby</li>
+  <li>Metal makers and storage in the planner; radar jammers and air; tuning from AI‑vs‑AI runs</li>
+  <li>Naval doctrine, air‑only strategies, multi‑AI teams</li>
+</ul>
+
+<h3>Phase 3</h3>
+<ul>
+  <li>Launcher: Electron and React upgrade, Redux Toolkit, dependency audit (#166, #167)</li>
+  <li>Public master server; non‑recommended port (#60)</li>
+  <li>Desync detection UX with state dumps; in‑game chat; replays from the command stream</li>
+  <li>Lobby mod management and reconnect handling</li>
+</ul>
+
+<h3>Phase 4</h3>
+<ul>
+  <li>Map‑pack robustness: #93, #38, #49, #52, #70</li>
+  <li>3DO texture distortion (#7), GAF off‑by‑one (#82), shadows on water (#25), invalid UTF‑8 (#14)</li>
+  <li>Run Core Contingency, Battle Tactics and the large community mods; document intentional differences</li>
+</ul>
+
+<h3>Phase 5</h3>
+<ul>
+  <li>Profile large maps (#62, #111); batch unit and feature rendering (#16)</li>
+  <li>TDF parser speed in MSVC Debug (#66)</li>
+  <li>SDL_gpu backend; protobuf upgrade or replacement</li>
+  <li>Official Linux and macOS builds, reproducible builds (#35)</li>
+  <li>Split <code>GameScene.cpp</code> into input, HUD and command dispatch</li>
+</ul>
+
+<div class="note">A personal project for now: no upstream coordination is planned until the game is playable end to end.</div>
+
+<footer>Robot War Engine is GPL‑3.0. Original engine by Michael Heasell; 2026 modernisation by Kevin Hake and Taylor Gunnoe; revival branch maintained locally.</footer>
+</div>
+</body>
+</html>

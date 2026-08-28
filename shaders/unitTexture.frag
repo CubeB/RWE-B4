@@ -11,7 +11,9 @@ uniform bool shade;
 
 const vec3 waterTint = vec3(0.5, 0.5, 1.0);
 const vec3 normalTint = vec3(1.0, 1.0, 1.0);
-const vec3 lightDirection = normalize(vec3(-1.0, 4.0, 1.0));
+// The sun sits low to the left and slightly in front, as in TA: faces that
+// look left are brightest, tops a little dimmer, right-facing sides dark.
+const vec3 lightDirection = normalize(vec3(-1.2, 1.0, 0.4));
 
 void main(void)
 {

@@ -56,6 +56,7 @@ namespace rwe
         UniformLocation shade;
         UniformLocation percentComplete;
         UniformLocation time;
+        UniformLocation unitHeight;
     };
 
     struct FlashEffectShader

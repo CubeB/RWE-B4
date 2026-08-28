@@ -185,18 +185,24 @@ namespace rwe
             },
             [&](const CobEnvironment::PieceCommandStatus::Explode& e) {
                 const auto& unit = simulation.getUnitState(unitId);
+
+                // Scripts routinely name pieces the model does not have. Those
+                // still get their explosion sprite, at the unit's own position.
+                auto pieceExists = unit.findPiece(objectName).has_value();
+                auto position = pieceExists ? simulation.getUnitPiecePosition(unitId, objectName) : unit.position;
+
                 simulation.events.push_back(PieceExplodedEvent{
                     unitId,
                     unit.unitType,
                     unit.owner,
-                    objectName,
-                    simulation.getUnitPiecePosition(unitId, objectName),
+                    pieceExists ? objectName : std::string(),
+                    position,
                     unit.rotation,
                     e.flags});
 
                 // BITMAPONLY shows an explosion but leaves the piece in place.
                 const unsigned int bitmapOnly = 32u;
-                if ((e.flags & bitmapOnly) == 0u)
+                if (pieceExists && (e.flags & bitmapOnly) == 0u)
                 {
                     simulation.hideObject(unitId, objectName);
                 }

@@ -1004,7 +1004,8 @@ namespace rwe
                 const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
                 drawUnitWireframe(gameMediaDatabase, unit, unitDefinition, modelDefinition, interpolationFraction, toCamera, wireframeColor, wireframeBatch);
             }
-            worldRenderService.drawBatch(wireframeBatch, viewProjectionMatrix);
+            // Lines cannot go below one pixel, so a lighter blend reads as a finer wire.
+            worldRenderService.drawBatch(wireframeBatch, viewProjectionMatrix, 0.65f);
         }
 
         ColoredMeshBatch lineProjectilesBatch;
@@ -3110,6 +3111,13 @@ namespace rwe
 
             for (const auto& [unitId, unit] : simulation.units)
             {
+                // Only what the minimap actually shows can be picked: your own
+                // units and enemies you can see or have on radar.
+                if (fogOfWarEnabled && !unit.isOwnedBy(localPlayerId) && !simulation.canDetectUnit(localPlayerId, unitId))
+                {
+                    continue;
+                }
+
                 // convert to minimap rect
                 auto minimapPos = worldToMinimap * simVectorToFloat(unit.position);
                 minimapPos.x = std::floor(minimapPos.x);
@@ -3532,7 +3540,9 @@ namespace rwe
                 break;
             }
         }
-        if (e.flags & bitmapOnly)
+        // Only buildings break into flying pieces; mobile units just get the
+        // explosion sprites. A piece the model does not have cannot fly either.
+        if ((e.flags & bitmapOnly) || unitDefinition.isMobile || e.pieceName.empty())
         {
             return;
         }
@@ -5001,9 +5011,9 @@ namespace rwe
                     auto tile = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
                     targetCentre = simVectorToFloat(targetUnit->get().position);
                     spread = Vector3f(
-                        static_cast<float>(footprint.width) * tile * 0.25f,
-                        simScalarToFloat(targetModel.height) * 0.35f,
-                        static_cast<float>(footprint.height) * tile * 0.25f);
+                        static_cast<float>(footprint.width) * tile * 0.15f,
+                        simScalarToFloat(targetModel.height) * 0.2f,
+                        static_cast<float>(footprint.height) * tile * 0.15f);
                 },
                 [&](const FeatureId& targetFeatureId) {
                     auto targetFeature = simulation.tryGetFeature(targetFeatureId);
@@ -5015,9 +5025,9 @@ namespace rwe
                     auto tile = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
                     targetCentre = simVectorToFloat(targetFeature->get().position);
                     spread = Vector3f(
-                        static_cast<float>(featureDefinition.footprintX) * tile * 0.25f,
-                        simScalarToFloat(featureDefinition.height) * 0.35f,
-                        static_cast<float>(featureDefinition.footprintZ) * tile * 0.25f);
+                        static_cast<float>(featureDefinition.footprintX) * tile * 0.15f,
+                        simScalarToFloat(featureDefinition.height) * 0.2f,
+                        static_cast<float>(featureDefinition.footprintZ) * tile * 0.15f);
                 });
             if (!targetCentre)
             {
@@ -5064,7 +5074,7 @@ namespace rwe
         };
         std::uniform_int_distribution<std::size_t> pickColor(0, std::size(nanoColors) - 1);
 
-        const float speed = 6.0f; // world units per tick
+        const float speed = 9.0f; // world units per tick
         auto delta = to - from;
         auto distance = delta.length();
         auto ticks = std::max(1, static_cast<int>(std::ceil(distance / speed)));

@@ -148,13 +148,13 @@ namespace rwe
         }
     }
 
-    void RenderService::drawBatch(const ColoredMeshBatch& batch, const Matrix4f& vpMatrix)
+    void RenderService::drawBatch(const ColoredMeshBatch& batch, const Matrix4f& vpMatrix, float alpha)
     {
         if (!batch.lines.empty() || !batch.triangles.empty())
         {
             const auto& shader = shaders->basicColor;
             graphics->bindShader(shader.handle.get());
-            graphics->setUniformFloat(shader.alpha, 1.0f);
+            graphics->setUniformFloat(shader.alpha, alpha);
             graphics->setUniformMatrix(shader.mvpMatrix, vpMatrix);
             if (!batch.lines.empty())
             {
@@ -173,6 +173,24 @@ namespace rwe
 
     void RenderService::drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel, float time)
     {
+        // Finished models first: a nanoframe's see-through parts still write
+        // depth, so drawing it after the lab it sits in leaves the lab's bay
+        // visible through it instead of the ground.
+        if (!batch.meshes.empty())
+        {
+            const auto& textureShader = shaders->unitTexture;
+            graphics->bindShader(textureShader.handle.get());
+            graphics->setUniformFloat(textureShader.seaLevel, seaLevel);
+            for (const auto& m : batch.meshes)
+            {
+                graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
+                graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
+                graphics->setUniformBool(textureShader.shade, m.shaded);
+                graphics->bindTexture(m.texture);
+                graphics->drawTriangles(*m.mesh);
+            }
+        }
+
         if (!batch.buildingMeshes.empty())
         {
             const auto& buildShader = shaders->unitBuild;
@@ -184,24 +202,10 @@ namespace rwe
                 graphics->setUniformMatrix(buildShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(buildShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformFloat(buildShader.unitY, m.unitY);
+                graphics->setUniformFloat(buildShader.unitHeight, m.unitHeight);
                 graphics->setUniformBool(buildShader.shade, m.shaded);
                 graphics->setUniformFloat(buildShader.percentComplete, m.percentComplete);
 
-                graphics->bindTexture(m.texture);
-                graphics->drawTriangles(*m.mesh);
-            }
-        }
-
-        if (!batch.meshes.empty())
-        {
-            const auto& textureShader = shaders->unitTexture;
-            graphics->bindShader(textureShader.handle.get());
-            graphics->setUniformFloat(textureShader.seaLevel, seaLevel);
-            for (const auto& m : batch.meshes)
-            {
-                graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
-                graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
-                graphics->setUniformBool(textureShader.shade, m.shaded);
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }

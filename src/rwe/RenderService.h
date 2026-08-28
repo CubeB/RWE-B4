@@ -44,6 +44,8 @@ namespace rwe
         TextureIdentifier texture;
         float percentComplete;
         float unitY;
+        /** Height of the whole model, so the build fill can sweep bottom to top. */
+        float unitHeight;
     };
 
     struct UnitTextureShadowMeshRenderInfo
@@ -117,7 +119,7 @@ namespace rwe
 
         void drawFlashes(GameTime currentTime, const std::vector<FlashEffect>& flashes);
 
-        void drawBatch(const ColoredMeshBatch& batch, const Matrix4f& vpMatrix);
+        void drawBatch(const ColoredMeshBatch& batch, const Matrix4f& vpMatrix, float alpha = 1.0f);
 
         void drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel, float time);
 

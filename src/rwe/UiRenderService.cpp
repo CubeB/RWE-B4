@@ -29,6 +29,9 @@ namespace rwe
         graphics->bindShader(shader.handle.get());
         graphics->setUniformMatrix(shader.mvpMatrix, getViewProjectionMatrix() * matrix);
         graphics->setUniformVec4(shader.tint, tint.r / 255.0f, tint.g / 255.0f, tint.b / 255.0f, tint.a / 255.0f);
+        // The shader is shared with the world's sprites, where fogged ones are
+        // greyed; the UI must always draw in full colour.
+        graphics->setUniformFloat(shader.desaturate, 0.0f);
         graphics->bindTexture(sprite.texture.get());
 
         graphics->drawTriangles(*sprite.mesh);
