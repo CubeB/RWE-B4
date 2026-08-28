@@ -32,7 +32,14 @@ namespace rwe
         GameTime finishTime;
     };
 
-    using ParticleRenderType = std::variant<ParticleRenderTypeSprite, ParticleRenderTypeWake>;
+    /** A small flat square of one colour: the nanolathe spray. */
+    struct ParticleRenderTypeNano
+    {
+        GameTime finishTime;
+        Vector3f color;
+    };
+
+    using ParticleRenderType = std::variant<ParticleRenderTypeSprite, ParticleRenderTypeWake, ParticleRenderTypeNano>;
 
     struct Particle
     {

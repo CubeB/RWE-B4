@@ -133,10 +133,6 @@ namespace rwe
         TextureHandle createTexture(unsigned int width, unsigned int height, const std::vector<Color>& image);
 
         TextureHandle createTexture(unsigned int width, unsigned int height, const Color* image);
-
-        /** Like createTexture, but sampled with linear filtering; for soft overlays such as fog of war. */
-        TextureHandle createSmoothTexture(unsigned int width, unsigned int height, const Color* image);
-
         TextureHandle createEmptyTexture(unsigned int width, unsigned int height);
 
         TextureHandle createColorTexture(Color c);

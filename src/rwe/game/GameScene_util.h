@@ -89,12 +89,21 @@ namespace rwe
         const Matrix4f& viewProjectionMatrix,
         SpriteBatch& batch);
 
-    void drawNanoLine(const Vector3f& start, const Vector3f& end, ColoredMeshBatch& batch);
-    void drawReverseNanoLine(const Vector3f& start, const Vector3f& end, ColoredMeshBatch& batch);
+    /** Outlines every polygon of the unit's model in one colour; drawn over nanoframes under construction. */
+    void drawUnitWireframe(
+        const GameMediaDatabase& gameMediaDatabase,
+        const UnitState& unit,
+        const UnitDefinition& unitDefinition,
+        const UnitModelDefinition& modelDefinition,
+        float frac,
+        const Vector3f& color,
+        ColoredMeshBatch& batch);
 
     void drawSpriteParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, SpriteBatch& batch);
 
     void drawWakeParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, ColoredMeshBatch& batch);
+
+    void drawNanoParticle(GameTime currentTime, const Particle& particle, ColoredMeshBatch& batch);
 
     void updateParticles(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, std::vector<Particle>& particles);
 

@@ -674,19 +674,64 @@ namespace rwe
         batch.sprites.push_back(SpriteRenderInfo{&sprite, mvpMatrix, spriteInfo->transparentShadow});
     }
 
-    void drawNanoLine(const Vector3f& start, const Vector3f& end, ColoredMeshBatch& batch)
+    void drawUnitWireframe(
+        const GameMediaDatabase& gameMediaDatabase,
+        const UnitState& unit,
+        const UnitDefinition& unitDefinition,
+        const UnitModelDefinition& modelDefinition,
+        float frac,
+        const Vector3f& color,
+        ColoredMeshBatch& batch)
     {
-        pushLine(batch.lines, start, end, Vector3f(0.0f, 1.0f, 0.0f));
+        assert(modelDefinition.pieces.size() == unit.pieces.size());
+
+        auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
+        auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
+        auto transform = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
+
+        for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
+        {
+            const auto& pieceDef = modelDefinition.pieces[i];
+            if (!unit.pieces[i].visible)
+            {
+                continue;
+            }
+
+            auto matrix = transform * getPieceTransformForRender(pieceDef.name, modelDefinition, unit.pieces, frac);
+            const auto& pieceInfo = gameMediaDatabase.getUnitPieceMesh(unitDefinition.objectName, pieceDef.name).value().get();
+            if (!pieceInfo.edges)
+            {
+                continue;
+            }
+            for (const auto& edge : *pieceInfo.edges)
+            {
+                pushLine(batch.lines, matrix * edge.start, matrix * edge.end, color);
+            }
+        }
     }
 
-    /**
-     * Like a regular nano line but reversed, for reclaiming.
-     */
-    void drawReverseNanoLine(const Vector3f& start, const Vector3f& end, ColoredMeshBatch& batch)
+    void drawNanoParticle(GameTime currentTime, const Particle& particle, ColoredMeshBatch& batch)
     {
-        // We'll just make it a yellow nano-line for now so we can tell the difference
-        // between this and the regular nano line.
-        pushLine(batch.lines, start, end, Vector3f(1.0f, 1.0f, 0.0f));
+        auto nanoRenderInfo = std::get_if<ParticleRenderTypeNano>(&particle.renderType);
+        if (nanoRenderInfo == nullptr)
+        {
+            return;
+        }
+
+        if (!particle.isStarted(currentTime) || currentTime >= nanoRenderInfo->finishTime)
+        {
+            return;
+        }
+
+        // A flat square: the camera looks straight down (with a cabinet skew
+        // for height), so this reads as a screen-aligned pixel block.
+        const auto topLeft = particle.position + Vector3f(-1.0f, 0.0f, -1.0f);
+        const auto topRight = particle.position + Vector3f(1.0f, 0.0f, -1.0f);
+        const auto bottomLeft = particle.position + Vector3f(-1.0f, 0.0f, 1.0f);
+        const auto bottomRight = particle.position + Vector3f(1.0f, 0.0f, 1.0f);
+
+        pushTriangle(batch.triangles, topLeft, bottomLeft, bottomRight, nanoRenderInfo->color);
+        pushTriangle(batch.triangles, topLeft, bottomRight, topRight, nanoRenderInfo->color);
     }
 
     void drawWakeParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, ColoredMeshBatch& batch)
@@ -765,6 +810,9 @@ namespace rwe
                 },
                 [&](const ParticleRenderTypeWake& w) {
                     return currentTime >= w.finishTime;
+                },
+                [&](const ParticleRenderTypeNano& n) {
+                    return currentTime >= n.finishTime;
                 });
 
             if (isFinished)

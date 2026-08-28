@@ -20,6 +20,7 @@
 #include <rwe/game/GameNetworkService.h>
 #include <rwe/game/GameSpeed.h>
 #include <rwe/game/InGameSoundsInfo.h>
+#include <random>
 #include <rwe/game/Particle.h>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/game/PlayerCommandService.h>
@@ -338,6 +339,9 @@ namespace rwe
 
         std::vector<Particle> particles;
 
+        /** Scatter for purely visual effects; never feeds the simulation. */
+        std::minstd_rand effectsRng{20260828u};
+
         int millisecondsBuffer{0};
 
         GameSpeed gameSpeed;
@@ -631,6 +635,12 @@ namespace rwe
         void spawnSmoke(const Vector3f& position, const std::string& gaf, const std::string& anim, ParticleFinishTime duration, GameTime frameDuration);
 
         void spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration);
+
+        /** Emits this tick's nanolathe spray for every builder the local player can see. */
+        void spawnNanoParticles();
+
+        /** One square of nano spray travelling from one point to another. */
+        void spawnNanoParticle(const Vector3f& from, const Vector3f& to);
 
         void recreateWorldRenderTextures();
 

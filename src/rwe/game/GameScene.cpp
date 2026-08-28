@@ -895,6 +895,11 @@ namespace rwe
                 continue;
             }
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+            if (unit.isBeingBuilt(unitDefinition))
+            {
+                // A nanoframe is not solid yet; it casts no shadow.
+                continue;
+            }
             const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
 
             auto groundHeight = simulation.terrain.getHeightAt(unit.position.x, unit.position.z);
@@ -973,47 +978,42 @@ namespace rwe
         worldRenderService.drawSpriteBatch(featureBatch);
 
         sceneContext.graphics->disableDepthTest();
-        ColoredMeshBatch nanoLinesBatch;
-        for (const auto& [_, unit] : simulation.units)
-        {
-            if (auto nanolatheTarget = unit.getActiveNanolatheTarget())
-            {
-                auto targetPositionOption = match(
-                    std::get<0>(*nanolatheTarget),
-                    [&](const UnitId& targetUnitId) -> std::optional<SimVector> {
-                        auto targetUnitOption = tryGetUnit(targetUnitId);
-                        if (!targetUnitOption)
-                        {
-                            return std::nullopt;
-                        }
-                        return targetUnitOption->get().position;
-                    },
-                    [&](const FeatureId& targetFeatureId) -> std::optional<SimVector> {
-                        auto targetFeature = simulation.tryGetFeature(targetFeatureId);
-                        if (!targetFeature)
-                        {
-                            return std::nullopt;
-                        }
-                        return targetFeature->get().position;
-                    });
 
-                if (targetPositionOption)
+        // Construction wireframe: every polygon edge of a nanoframe, flashing
+        // green / white / black a few times a second, drawn over the frame.
+        {
+            static const Vector3f wireframeColors[] = {
+                Vector3f(0.0f, 1.0f, 0.0f),
+                Vector3f(1.0f, 1.0f, 1.0f),
+                Vector3f(0.0f, 0.0f, 0.0f),
+            };
+            const auto& wireframeColor = wireframeColors[(simulation.gameTime.value / 2) % std::size(wireframeColors)];
+
+            ColoredMeshBatch wireframeBatch;
+            for (const auto& [_, unit] : simulation.units)
+            {
+                if (!unitIsVisibleToLocalPlayer(unit))
                 {
-                    switch (std::get<2>(*nanolatheTarget))
-                    {
-                        case UnitState::NanolatheDirection::Forward:
-                            drawNanoLine(simVectorToFloat(std::get<1>(*nanolatheTarget)), simVectorToFloat(*targetPositionOption), nanoLinesBatch);
-                            break;
-                        case UnitState::NanolatheDirection::Reverse:
-                            drawReverseNanoLine(simVectorToFloat(std::get<1>(*nanolatheTarget)), simVectorToFloat(*targetPositionOption), nanoLinesBatch);
-                            break;
-                        default:
-                            throw std::logic_error("unhandled nanolathe direction");
-                    }
+                    continue;
                 }
+                const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+                if (!unit.isBeingBuilt(unitDefinition))
+                {
+                    continue;
+                }
+                const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
+                drawUnitWireframe(gameMediaDatabase, unit, unitDefinition, modelDefinition, interpolationFraction, wireframeColor, wireframeBatch);
             }
+            worldRenderService.drawBatch(wireframeBatch, viewProjectionMatrix);
         }
-        worldRenderService.drawBatch(nanoLinesBatch, viewProjectionMatrix);
+
+        // Nano spray, drawn over everything so it reads on top of the target.
+        ColoredMeshBatch nanoParticlesBatch;
+        for (const auto& particle : particles)
+        {
+            drawNanoParticle(simulation.gameTime, particle, nanoParticlesBatch);
+        }
+        worldRenderService.drawBatch(nanoParticlesBatch, viewProjectionMatrix);
 
         sceneContext.graphics->bindFrameBufferColorBuffer(dodgeMask.get());
         sceneContext.graphics->clearColor();
@@ -3035,6 +3035,8 @@ namespace rwe
 
         updateParticles(gameMediaDatabase, simulation.gameTime, particles);
 
+        spawnNanoParticles();
+
         // A game needs an opponent before it can be decided; a lone player
         // is just exploring the map.
         if (!gameOver && simulation.players.size() >= 2)
@@ -3482,7 +3484,8 @@ namespace rwe
         // Render at four texels per vision cell. Each texel blends the four
         // nearest cells and compares the result against a fixed per-texel
         // noise threshold, which turns the cell grid into the ragged edge TA
-        // draws instead of a staircase of squares.
+        // draws instead of a staircase of squares. The texture is sampled
+        // with nearest filtering so the edge stays crisp, like TA's.
         const int upscale = 4;
         auto width = cellsWide * upscale;
         auto height = cellsHigh * upscale;
@@ -3536,7 +3539,7 @@ namespace rwe
             }
         }
 
-        SharedTextureHandle texture(sceneContext.graphics->createSmoothTexture(width, height, pixels.data()));
+        SharedTextureHandle texture(sceneContext.graphics->createTexture(width, height, pixels.data()));
 
         // The grid starts at the map's top-left corner and covers whole vision cells,
         // which may extend slightly past the map's edge.
@@ -4808,6 +4811,109 @@ namespace rwe
         particle.velocity = velocity;
         particle.renderType = ParticleRenderTypeWake{
             simulation.gameTime + duration};
+        particle.startTime = simulation.gameTime;
+
+        particles.push_back(particle);
+    }
+
+    void GameScene::spawnNanoParticles()
+    {
+        for (const auto& [_, unit] : simulation.units)
+        {
+            auto nanolatheTarget = unit.getActiveNanolatheTarget();
+            if (!nanolatheTarget || !unitIsVisibleToLocalPlayer(unit))
+            {
+                continue;
+            }
+
+            // Where the spray lands: a random point over the target's footprint,
+            // so the beam fans out from the nozzle to the width of the building.
+            std::optional<Vector3f> targetCentre;
+            Vector3f spread(0.0f, 0.0f, 0.0f);
+            match(
+                std::get<0>(*nanolatheTarget),
+                [&](const UnitId& targetUnitId) {
+                    auto targetUnit = tryGetUnit(targetUnitId);
+                    if (!targetUnit)
+                    {
+                        return;
+                    }
+                    const auto& targetDefinition = simulation.unitDefinitions.at(targetUnit->get().unitType);
+                    const auto& targetModel = simulation.unitModelDefinitions.at(targetDefinition.objectName);
+                    auto footprint = simulation.computeFootprintRegion(targetUnit->get().position, targetDefinition.movementCollisionInfo);
+                    auto tile = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
+                    targetCentre = simVectorToFloat(targetUnit->get().position);
+                    spread = Vector3f(
+                        static_cast<float>(footprint.width) * tile * 0.35f,
+                        simScalarToFloat(targetModel.height) * 0.5f,
+                        static_cast<float>(footprint.height) * tile * 0.35f);
+                },
+                [&](const FeatureId& targetFeatureId) {
+                    auto targetFeature = simulation.tryGetFeature(targetFeatureId);
+                    if (!targetFeature)
+                    {
+                        return;
+                    }
+                    const auto& featureDefinition = simulation.getFeatureDefinition(targetFeature->get().featureName);
+                    auto tile = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
+                    targetCentre = simVectorToFloat(targetFeature->get().position);
+                    spread = Vector3f(
+                        static_cast<float>(featureDefinition.footprintX) * tile * 0.35f,
+                        simScalarToFloat(featureDefinition.height) * 0.5f,
+                        static_cast<float>(featureDefinition.footprintZ) * tile * 0.35f);
+                });
+            if (!targetCentre)
+            {
+                continue;
+            }
+
+            auto nozzle = simVectorToFloat(std::get<1>(*nanolatheTarget));
+            std::uniform_real_distribution<float> unit01(-1.0f, 1.0f);
+            std::uniform_real_distribution<float> up01(0.0f, 1.0f);
+
+            const int particlesPerTick = 4;
+            for (int i = 0; i < particlesPerTick; ++i)
+            {
+                auto landing = *targetCentre + Vector3f(unit01(effectsRng) * spread.x, up01(effectsRng) * spread.y, unit01(effectsRng) * spread.z);
+                switch (std::get<2>(*nanolatheTarget))
+                {
+                    case UnitState::NanolatheDirection::Forward:
+                        spawnNanoParticle(nozzle, landing);
+                        break;
+                    case UnitState::NanolatheDirection::Reverse:
+                        spawnNanoParticle(landing, nozzle);
+                        break;
+                    default:
+                        throw std::logic_error("unhandled nanolathe direction");
+                }
+            }
+        }
+    }
+
+    void GameScene::spawnNanoParticle(const Vector3f& from, const Vector3f& to)
+    {
+        // The greens of TA's nano spray.
+        static const Vector3f nanoColors[] = {
+            Vector3f(0xab / 255.0f, 0xe7 / 255.0f, 0x7f / 255.0f),
+            Vector3f(0x2f / 255.0f, 0x77 / 255.0f, 0x1b / 255.0f),
+            Vector3f(0x7a / 255.0f, 0xcd / 255.0f, 0x52 / 255.0f),
+            Vector3f(0x36 / 255.0f, 0x85 / 255.0f, 0x26 / 255.0f),
+            Vector3f(0x83 / 255.0f, 0xd3 / 255.0f, 0x5b / 255.0f),
+            Vector3f(0x30 / 255.0f, 0x79 / 255.0f, 0x1d / 255.0f),
+        };
+        std::uniform_int_distribution<std::size_t> pickColor(0, std::size(nanoColors) - 1);
+
+        const float speed = 6.0f; // world units per tick
+        auto delta = to - from;
+        auto distance = delta.length();
+        auto ticks = std::max(1, static_cast<int>(std::ceil(distance / speed)));
+
+        Particle particle;
+        particle.position = from;
+        particle.velocity = delta / static_cast<float>(ticks);
+        particle.renderType = ParticleRenderTypeNano{
+            simulation.gameTime + GameTime(ticks),
+            nanoColors[pickColor(effectsRng)]};
         particle.startTime = simulation.gameTime;
 
         particles.push_back(particle);

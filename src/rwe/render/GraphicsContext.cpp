@@ -104,16 +104,6 @@ namespace rwe
         return handle;
     }
 
-    TextureHandle GraphicsContext::createSmoothTexture(unsigned int width, unsigned int height, const Color* image)
-    {
-        auto handle = createTexture(width, height, image);
-        // Still bound from createTexture. Linear filtering blends texels, which
-        // is what a soft overlay such as fog of war wants.
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        return handle;
-    }
-
     TextureHandle GraphicsContext::createEmptyTexture(unsigned int width, unsigned int height)
     {
         GLuint texture;

@@ -34,6 +34,9 @@ namespace rwe
         const _3do::Object& o,
         std::vector<std::pair<std::string, UnitPieceMeshInfo>>& v);
 
+    /** Every polygon outline edge of the object (model space), each edge listed once. */
+    std::vector<Line3f> polygonEdgesFrom3do(const _3do::Object& o);
+
     Mesh meshFrom3do(
         const std::unordered_map<std::string, Rectangle2f>& atlasMap,
         const std::unordered_map<std::string, Rectangle2f>& teamAtlasMap,

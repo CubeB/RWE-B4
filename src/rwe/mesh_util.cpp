@@ -1,5 +1,7 @@
 #include "mesh_util.h"
+#include <algorithm>
 #include <rwe/fixed_point.h>
+#include <set>
 
 namespace rwe
 {
@@ -54,13 +56,45 @@ namespace rwe
         auto secondVertex = o.vertices.size() > 1 ? vertexToVector(o.vertices[1]) : Vector3f(1.0f, 0.0f, 0.0f);
         auto mesh = meshFrom3do(atlasMap, teamAtlasMap, atlasColorMap, o);
         auto shaderMesh = convertMesh(graphics, mesh);
+        auto edges = std::make_shared<std::vector<Line3f>>(polygonEdgesFrom3do(o));
 
-        v.push_back(std::make_pair(o.name, UnitPieceMeshInfo{std::make_shared<ShaderMesh>(std::move(shaderMesh)), firstVertex, secondVertex}));
+        v.push_back(std::make_pair(o.name, UnitPieceMeshInfo{std::make_shared<ShaderMesh>(std::move(shaderMesh)), firstVertex, secondVertex, std::move(edges)}));
 
         for (const auto& c : o.children)
         {
             extractMeshes(graphics, atlasMap, teamAtlasMap, atlasColorMap, c, v);
         }
+    }
+
+    std::vector<Line3f> polygonEdgesFrom3do(const _3do::Object& o)
+    {
+        // Edges follow the polygons as authored, not the triangulation,
+        // so a quad outlines as four lines with no diagonal.
+        std::set<std::pair<unsigned int, unsigned int>> seen;
+        std::vector<Line3f> edges;
+        for (const auto& p : o.primitives)
+        {
+            auto count = p.vertices.size();
+            if (count < 3)
+            {
+                continue;
+            }
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                auto a = p.vertices[i];
+                auto b = p.vertices[(i + 1) % count];
+                if (a == b || a >= o.vertices.size() || b >= o.vertices.size())
+                {
+                    continue;
+                }
+                if (!seen.insert(std::minmax(a, b)).second)
+                {
+                    continue;
+                }
+                edges.emplace_back(vertexToVector(o.vertices[a]), vertexToVector(o.vertices[b]));
+            }
+        }
+        return edges;
     }
 
     Mesh meshFrom3do(
