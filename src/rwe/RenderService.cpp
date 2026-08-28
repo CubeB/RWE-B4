@@ -223,6 +223,24 @@ namespace rwe
             graphics->drawTriangles(*m.mesh);
         }
 
+        if (!batch.cutouts.empty())
+        {
+            // Erase the shadow wherever these models sit on screen, so it
+            // only shows where it falls outside them.
+            graphics->useStencilBufferForClears();
+            const auto& textureShader = shaders->unitTexture;
+            graphics->bindShader(textureShader.handle.get());
+            graphics->setUniformFloat(textureShader.seaLevel, 0.0f);
+            graphics->setUniformBool(textureShader.shade, false);
+            for (const auto& m : batch.cutouts)
+            {
+                graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
+                graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
+                graphics->bindTexture(m.texture);
+                graphics->drawTriangles(*m.mesh);
+            }
+        }
+
         graphics->useStencilBufferAsMask();
         graphics->enableColorBuffer();
 

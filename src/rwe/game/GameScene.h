@@ -306,6 +306,8 @@ namespace rwe
         /** Black overlay, one texel per vision cell; alpha encodes unexplored / explored / visible. */
         std::optional<Sprite> fogSprite;
         GameTime fogSpriteTime{0};
+        std::vector<unsigned char> fogVisibleSnapshot;
+        std::vector<unsigned char> fogExploredSnapshot;
 
         BehaviorSubject<CursorMode> cursorMode{NormalCursorMode()};
 

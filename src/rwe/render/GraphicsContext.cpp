@@ -653,6 +653,12 @@ namespace rwe
         glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
     }
 
+    void GraphicsContext::useStencilBufferForClears()
+    {
+        glStencilFunc(GL_ALWAYS, 0, 0xFF);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+    }
+
     void GraphicsContext::setViewport(int x, int y, int width, int height)
     {
         glViewport(x, y, width, height);

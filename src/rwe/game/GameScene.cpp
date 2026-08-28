@@ -575,7 +575,17 @@ namespace rwe
         {
             float centerX = static_cast<float>(sceneContext.viewport->width()) / 2.0f;
             float centerY = static_cast<float>(sceneContext.viewport->height()) / 2.0f;
-            chromeUiRenderService.drawTextCenteredX(centerX, centerY, "Paused", *guiFont);
+            // TA's own title from anims/IGTITLES.GAF, centred on the screen.
+            auto title = gameMediaDatabase.getSpriteSeries("IGTITLES", "igpaused");
+            if (title && !(*title)->sprites.empty())
+            {
+                const auto& sprite = *(*title)->sprites.front();
+                chromeUiRenderService.drawSpriteAbs(std::floor(centerX - (sprite.bounds.width() / 2.0f)), std::floor(centerY - (sprite.bounds.height() / 2.0f)), sprite);
+            }
+            else
+            {
+                chromeUiRenderService.drawTextCenteredX(centerX, centerY, "PAUSED", *guiFont);
+            }
         }
     }
 
@@ -895,11 +905,6 @@ namespace rwe
                 continue;
             }
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
-            if (unit.isBeingBuilt(unitDefinition))
-            {
-                // A nanoframe is not solid yet; it casts no shadow.
-                continue;
-            }
             const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
 
             auto groundHeight = simulation.terrain.getHeightAt(unit.position.x, unit.position.z);
@@ -908,6 +913,14 @@ namespace rwe
                 groundHeight = rweMax(groundHeight, seaLevel);
             }
             drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch);
+
+            if (unit.isBeingBuilt(unitDefinition))
+            {
+                // The frame is see-through while it is built, so the shadow
+                // would show through it. Keep only the part cast outside the
+                // model's own outline.
+                drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch.cutouts);
+            }
         }
         for (const auto& [_, feature] : simulation.features)
         {
@@ -949,6 +962,42 @@ namespace rwe
         }
         worldRenderService.drawUnitMeshBatch(unitMeshBatch, simScalarToFloat(seaLevel), simulation.gameTime.value);
 
+        // Construction wireframe: the visible polygon edges of each nanoframe,
+        // drawn with the depth test on so the model hides its own back, in a
+        // colour that cycles slowly green -> white -> black.
+        {
+            static const Vector3f wireframeColors[] = {
+                Vector3f(0.0f, 1.0f, 0.0f),
+                Vector3f(1.0f, 1.0f, 1.0f),
+                Vector3f(0.0f, 0.0f, 0.0f),
+            };
+            const float ticksPerColor = 20.0f; // a full cycle every two seconds
+            auto phase = std::fmod((static_cast<float>(simulation.gameTime.value) + interpolationFraction) / ticksPerColor, 3.0f);
+            auto colorIndex = static_cast<int>(phase);
+            auto wireframeColor = lerp(wireframeColors[colorIndex], wireframeColors[(colorIndex + 1) % 3], phase - static_cast<float>(colorIndex));
+
+            // The direction from the scene towards the camera, in world space.
+            auto inverseViewProjection = computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+            auto toCamera = ((inverseViewProjection * Vector3f(0.0f, 0.0f, -1.0f)) - (inverseViewProjection * Vector3f(0.0f, 0.0f, 0.0f))).normalized();
+
+            ColoredMeshBatch wireframeBatch;
+            for (const auto& [_, unit] : simulation.units)
+            {
+                if (!unitIsVisibleToLocalPlayer(unit))
+                {
+                    continue;
+                }
+                const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+                if (!unit.isBeingBuilt(unitDefinition))
+                {
+                    continue;
+                }
+                const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
+                drawUnitWireframe(gameMediaDatabase, unit, unitDefinition, modelDefinition, interpolationFraction, toCamera, wireframeColor, wireframeBatch);
+            }
+            worldRenderService.drawBatch(wireframeBatch, viewProjectionMatrix);
+        }
+
         ColoredMeshBatch lineProjectilesBatch;
         SpriteBatch spriteProjectilesBatch;
         UnitMeshBatch meshProjectilesBatch;
@@ -979,39 +1028,11 @@ namespace rwe
 
         sceneContext.graphics->disableDepthTest();
 
-        // Construction wireframe: every polygon edge of a nanoframe, flashing
-        // green / white / black a few times a second, drawn over the frame.
-        {
-            static const Vector3f wireframeColors[] = {
-                Vector3f(0.0f, 1.0f, 0.0f),
-                Vector3f(1.0f, 1.0f, 1.0f),
-                Vector3f(0.0f, 0.0f, 0.0f),
-            };
-            const auto& wireframeColor = wireframeColors[(simulation.gameTime.value / 2) % std::size(wireframeColors)];
-
-            ColoredMeshBatch wireframeBatch;
-            for (const auto& [_, unit] : simulation.units)
-            {
-                if (!unitIsVisibleToLocalPlayer(unit))
-                {
-                    continue;
-                }
-                const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
-                if (!unit.isBeingBuilt(unitDefinition))
-                {
-                    continue;
-                }
-                const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
-                drawUnitWireframe(gameMediaDatabase, unit, unitDefinition, modelDefinition, interpolationFraction, wireframeColor, wireframeBatch);
-            }
-            worldRenderService.drawBatch(wireframeBatch, viewProjectionMatrix);
-        }
-
         // Nano spray, drawn over everything so it reads on top of the target.
         ColoredMeshBatch nanoParticlesBatch;
         for (const auto& particle : particles)
         {
-            drawNanoParticle(simulation.gameTime, particle, nanoParticlesBatch);
+            drawNanoParticle(simulation.gameTime, interpolationFraction, particle, nanoParticlesBatch);
         }
         worldRenderService.drawBatch(nanoParticlesBatch, viewProjectionMatrix);
 
@@ -3478,14 +3499,23 @@ namespace rwe
         fogSpriteTime = simulation.gameTime;
 
         const auto& vis = simulation.playerVisibility.at(localPlayerId.value);
+
+        // Rebuilding the texture is the expensive part; skip it while nothing has changed.
+        if (fogSprite && vis.visible.getVector() == fogVisibleSnapshot && vis.explored.getVector() == fogExploredSnapshot)
+        {
+            return;
+        }
+        fogVisibleSnapshot = vis.visible.getVector();
+        fogExploredSnapshot = vis.explored.getVector();
+
         auto cellsWide = vis.explored.getWidth();
         auto cellsHigh = vis.explored.getHeight();
 
-        // Render at four texels per vision cell. Each texel blends the four
-        // nearest cells and compares the result against a fixed per-texel
-        // noise threshold, which turns the cell grid into the ragged edge TA
-        // draws instead of a staircase of squares. The texture is sampled
-        // with nearest filtering so the edge stays crisp, like TA's.
+        // Render at four texels per vision cell (8 world units each, the
+        // step size of TA's own fog edge). Each texel blends the four nearest
+        // cells and is visible where the blend passes one half, which turns
+        // the cell grid into the rounded, stepped outline TA draws. The
+        // texture is sampled with nearest filtering so the steps stay crisp.
         const int upscale = 4;
         auto width = cellsWide * upscale;
         auto height = cellsHigh * upscale;
@@ -3507,13 +3537,7 @@ namespace rwe
             auto bottom = (at(x0, y0 + 1) * (1.0f - tx)) + (at(x0 + 1, y0 + 1) * tx);
             return (top * (1.0f - ty)) + (bottom * ty);
         };
-        auto noiseAt = [](int x, int y) {
-            // Small integer hash -> [0.3, 0.7]; fixed per texel so the edge does not shimmer.
-            auto h = static_cast<unsigned int>(x) * 374761393u + static_cast<unsigned int>(y) * 668265263u;
-            h = (h ^ (h >> 13)) * 1274126177u;
-            h ^= h >> 16;
-            return 0.3f + (static_cast<float>(h & 0xFFFFu) / 65535.0f) * 0.4f;
-        };
+        const float threshold = 0.5f;
 
         std::vector<Color> pixels;
         pixels.reserve(static_cast<size_t>(width) * static_cast<size_t>(height));
@@ -3523,7 +3547,6 @@ namespace rwe
             {
                 auto cx = (static_cast<float>(x) + 0.5f) / static_cast<float>(upscale);
                 auto cy = (static_cast<float>(y) + 0.5f) / static_cast<float>(upscale);
-                auto threshold = noiseAt(x, y);
                 if (sampleGrid(vis.visible, cx, cy) > threshold)
                 {
                     pixels.emplace_back(0, 0, 0, 0);
@@ -4844,9 +4867,9 @@ namespace rwe
                     auto tile = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
                     targetCentre = simVectorToFloat(targetUnit->get().position);
                     spread = Vector3f(
-                        static_cast<float>(footprint.width) * tile * 0.35f,
-                        simScalarToFloat(targetModel.height) * 0.5f,
-                        static_cast<float>(footprint.height) * tile * 0.35f);
+                        static_cast<float>(footprint.width) * tile * 0.25f,
+                        simScalarToFloat(targetModel.height) * 0.35f,
+                        static_cast<float>(footprint.height) * tile * 0.25f);
                 },
                 [&](const FeatureId& targetFeatureId) {
                     auto targetFeature = simulation.tryGetFeature(targetFeatureId);
@@ -4858,9 +4881,9 @@ namespace rwe
                     auto tile = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
                     targetCentre = simVectorToFloat(targetFeature->get().position);
                     spread = Vector3f(
-                        static_cast<float>(featureDefinition.footprintX) * tile * 0.35f,
-                        simScalarToFloat(featureDefinition.height) * 0.5f,
-                        static_cast<float>(featureDefinition.footprintZ) * tile * 0.35f);
+                        static_cast<float>(featureDefinition.footprintX) * tile * 0.25f,
+                        simScalarToFloat(featureDefinition.height) * 0.35f,
+                        static_cast<float>(featureDefinition.footprintZ) * tile * 0.25f);
                 });
             if (!targetCentre)
             {
@@ -4871,7 +4894,7 @@ namespace rwe
             std::uniform_real_distribution<float> unit01(-1.0f, 1.0f);
             std::uniform_real_distribution<float> up01(0.0f, 1.0f);
 
-            const int particlesPerTick = 4;
+            const int particlesPerTick = 10;
             for (int i = 0; i < particlesPerTick; ++i)
             {
                 auto landing = *targetCentre + Vector3f(unit01(effectsRng) * spread.x, up01(effectsRng) * spread.y, unit01(effectsRng) * spread.z);
@@ -4892,13 +4915,17 @@ namespace rwe
 
     void GameScene::spawnNanoParticle(const Vector3f& from, const Vector3f& to)
     {
-        // The greens of TA's nano spray.
+        // The greens of TA's nano spray; the light ones are listed three
+        // times so they come up more often than the dark ones.
+        static const Vector3f light1(0xab / 255.0f, 0xe7 / 255.0f, 0x7f / 255.0f);
+        static const Vector3f light2(0x7a / 255.0f, 0xcd / 255.0f, 0x52 / 255.0f);
+        static const Vector3f light3(0x83 / 255.0f, 0xd3 / 255.0f, 0x5b / 255.0f);
         static const Vector3f nanoColors[] = {
-            Vector3f(0xab / 255.0f, 0xe7 / 255.0f, 0x7f / 255.0f),
+            light1, light1, light1,
+            light2, light2, light2,
+            light3, light3, light3,
             Vector3f(0x2f / 255.0f, 0x77 / 255.0f, 0x1b / 255.0f),
-            Vector3f(0x7a / 255.0f, 0xcd / 255.0f, 0x52 / 255.0f),
             Vector3f(0x36 / 255.0f, 0x85 / 255.0f, 0x26 / 255.0f),
-            Vector3f(0x83 / 255.0f, 0xd3 / 255.0f, 0x5b / 255.0f),
             Vector3f(0x30 / 255.0f, 0x79 / 255.0f, 0x1d / 255.0f),
         };
         std::uniform_int_distribution<std::size_t> pickColor(0, std::size(nanoColors) - 1);

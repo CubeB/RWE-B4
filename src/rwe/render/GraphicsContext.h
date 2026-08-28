@@ -164,6 +164,9 @@ namespace rwe
         void disableColorBuffer();
         void enableStencilBuffer();
         void useStencilBufferForWrites();
+
+        /** Subsequent draws reset the stencil to 0 where they land. */
+        void useStencilBufferForClears();
         void useStencilBufferAsMask();
         void clearStencilBuffer();
         void disableStencilBuffer();

@@ -1,7 +1,7 @@
 #include "mesh_util.h"
 #include <algorithm>
+#include <map>
 #include <rwe/fixed_point.h>
-#include <set>
 
 namespace rwe
 {
@@ -56,7 +56,7 @@ namespace rwe
         auto secondVertex = o.vertices.size() > 1 ? vertexToVector(o.vertices[1]) : Vector3f(1.0f, 0.0f, 0.0f);
         auto mesh = meshFrom3do(atlasMap, teamAtlasMap, atlasColorMap, o);
         auto shaderMesh = convertMesh(graphics, mesh);
-        auto edges = std::make_shared<std::vector<Line3f>>(polygonEdgesFrom3do(o));
+        auto edges = std::make_shared<std::vector<WireframeEdge>>(polygonEdgesFrom3do(o));
 
         v.push_back(std::make_pair(o.name, UnitPieceMeshInfo{std::make_shared<ShaderMesh>(std::move(shaderMesh)), firstVertex, secondVertex, std::move(edges)}));
 
@@ -66,12 +66,14 @@ namespace rwe
         }
     }
 
-    std::vector<Line3f> polygonEdgesFrom3do(const _3do::Object& o)
+    std::vector<WireframeEdge> polygonEdgesFrom3do(const _3do::Object& o)
     {
         // Edges follow the polygons as authored, not the triangulation,
         // so a quad outlines as four lines with no diagonal.
-        std::set<std::pair<unsigned int, unsigned int>> seen;
-        std::vector<Line3f> edges;
+        // Each edge remembers the outward normals of the polygons on either
+        // side so the renderer can keep only the edges the camera can see.
+        std::map<std::pair<unsigned int, unsigned int>, std::size_t> edgeIndices;
+        std::vector<WireframeEdge> edges;
         for (const auto& p : o.primitives)
         {
             auto count = p.vertices.size();
@@ -79,19 +81,50 @@ namespace rwe
             {
                 continue;
             }
+            bool valid = true;
+            for (auto index : p.vertices)
+            {
+                valid = valid && index < o.vertices.size();
+            }
+            if (!valid)
+            {
+                continue;
+            }
+
+            // Newell's method over the vertices in reverse order, matching the
+            // winding meshFrom3do uses, so the normal points outward like the lit faces.
+            Vector3f normal(0.0f, 0.0f, 0.0f);
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                auto current = vertexToVector(o.vertices[p.vertices[(count - i) % count]]);
+                auto next = vertexToVector(o.vertices[p.vertices[(count - i - 1) % count]]);
+                normal.x += (current.y - next.y) * (current.z + next.z);
+                normal.y += (current.z - next.z) * (current.x + next.x);
+                normal.z += (current.x - next.x) * (current.y + next.y);
+            }
+            normal = normal.normalizedOr(Vector3f(0.0f, 1.0f, 0.0f));
+
             for (std::size_t i = 0; i < count; ++i)
             {
                 auto a = p.vertices[i];
                 auto b = p.vertices[(i + 1) % count];
-                if (a == b || a >= o.vertices.size() || b >= o.vertices.size())
+                if (a == b)
                 {
                     continue;
                 }
-                if (!seen.insert(std::minmax(a, b)).second)
+                auto key = std::minmax(a, b);
+                auto it = edgeIndices.find(key);
+                if (it != edgeIndices.end())
                 {
+                    auto& edge = edges[it->second];
+                    if (!edge.normalB)
+                    {
+                        edge.normalB = normal;
+                    }
                     continue;
                 }
-                edges.emplace_back(vertexToVector(o.vertices[a]), vertexToVector(o.vertices[b]));
+                edgeIndices.emplace(key, edges.size());
+                edges.push_back(WireframeEdge{vertexToVector(o.vertices[a]), vertexToVector(o.vertices[b]), normal, std::nullopt});
             }
         }
         return edges;

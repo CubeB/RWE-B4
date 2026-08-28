@@ -89,21 +89,39 @@ namespace rwe
         const Matrix4f& viewProjectionMatrix,
         SpriteBatch& batch);
 
-    /** Outlines every polygon of the unit's model in one colour; drawn over nanoframes under construction. */
+    /**
+     * Outlines the polygons of a nanoframe that face the camera, in one colour.
+     * Edges resting on the ground are left out, and the lines are nudged towards
+     * the camera so the depth buffer hides those behind other parts of the model.
+     */
     void drawUnitWireframe(
         const GameMediaDatabase& gameMediaDatabase,
         const UnitState& unit,
         const UnitDefinition& unitDefinition,
         const UnitModelDefinition& modelDefinition,
         float frac,
+        const Vector3f& toCamera,
         const Vector3f& color,
         ColoredMeshBatch& batch);
+
+    /** The unit's model as the camera sees it, for stencil cut-outs. */
+    void drawUnitSilhouette(
+        const GameMediaDatabase& gameMediaDatabase,
+        const Matrix4f& viewProjectionMatrix,
+        const UnitState& unit,
+        const UnitDefinition& unitDefinition,
+        const UnitModelDefinition& modelDefinition,
+        float frac,
+        TextureIdentifier unitTextureAtlas,
+        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        std::vector<UnitTextureMeshRenderInfo>& out);
 
     void drawSpriteParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, SpriteBatch& batch);
 
     void drawWakeParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, ColoredMeshBatch& batch);
 
-    void drawNanoParticle(GameTime currentTime, const Particle& particle, ColoredMeshBatch& batch);
+    /** frac is the fraction of the current tick that has elapsed, for smooth motion between ticks. */
+    void drawNanoParticle(GameTime currentTime, float frac, const Particle& particle, ColoredMeshBatch& batch);
 
     void updateParticles(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, std::vector<Particle>& particles);
 

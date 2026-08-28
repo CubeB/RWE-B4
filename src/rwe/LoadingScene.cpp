@@ -817,6 +817,13 @@ namespace rwe
             dataMaps.gameMediaDatabase.addSpriteSeries("FX", "flamestream", anim);
         }
 
+        // In-game titles: TA's own PAUSED / VICTORY / DEFEAT artwork.
+        for (const auto& name : {"igpaused", "igvictory", "igdefeat"})
+        {
+            auto anim = sceneContext.textureService->getGafEntry("anims/IGTITLES.GAF", name);
+            dataMaps.gameMediaDatabase.addSpriteSeries("IGTITLES", name, anim);
+        }
+
         return dataMaps;
     }
 

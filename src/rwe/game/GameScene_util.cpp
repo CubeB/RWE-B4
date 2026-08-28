@@ -680,6 +680,7 @@ namespace rwe
         const UnitDefinition& unitDefinition,
         const UnitModelDefinition& modelDefinition,
         float frac,
+        const Vector3f& toCamera,
         const Vector3f& color,
         ColoredMeshBatch& batch)
     {
@@ -688,6 +689,14 @@ namespace rwe
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
         auto transform = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
+
+        // Edges resting on the ground trace the footprint; TA leaves those out.
+        auto groundLevel = position.y + 1.0f;
+
+        // Lift the lines slightly towards the camera so they pass the depth
+        // test against the surface they outline, while anything the model
+        // itself hides stays hidden.
+        auto bias = toCamera * 0.75f;
 
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
@@ -703,14 +712,50 @@ namespace rwe
             {
                 continue;
             }
+
+            auto origin = matrix * Vector3f(0.0f, 0.0f, 0.0f);
+            auto facesCamera = [&](const Vector3f& normal) {
+                return ((matrix * normal) - origin).dot(toCamera) > 0.0f;
+            };
+
             for (const auto& edge : *pieceInfo.edges)
             {
-                pushLine(batch.lines, matrix * edge.start, matrix * edge.end, color);
+                if (!facesCamera(edge.normalA) && !(edge.normalB && facesCamera(*edge.normalB)))
+                {
+                    continue;
+                }
+                auto a = matrix * edge.start;
+                auto b = matrix * edge.end;
+                if (a.y <= groundLevel && b.y <= groundLevel)
+                {
+                    continue;
+                }
+                pushLine(batch.lines, a + bias, b + bias, color);
             }
         }
     }
 
-    void drawNanoParticle(GameTime currentTime, const Particle& particle, ColoredMeshBatch& batch)
+    void drawUnitSilhouette(
+        const GameMediaDatabase& gameMediaDatabase,
+        const Matrix4f& viewProjectionMatrix,
+        const UnitState& unit,
+        const UnitDefinition& unitDefinition,
+        const UnitModelDefinition& modelDefinition,
+        float frac,
+        TextureIdentifier unitTextureAtlas,
+        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        std::vector<UnitTextureMeshRenderInfo>& out)
+    {
+        auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
+        auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
+        auto transform = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
+
+        UnitMeshBatch batch;
+        drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, unitTextureAtlas, unitTeamTextureAtlases, batch);
+        out.insert(out.end(), batch.meshes.begin(), batch.meshes.end());
+    }
+
+    void drawNanoParticle(GameTime currentTime, float frac, const Particle& particle, ColoredMeshBatch& batch)
     {
         auto nanoRenderInfo = std::get_if<ParticleRenderTypeNano>(&particle.renderType);
         if (nanoRenderInfo == nullptr)
@@ -723,12 +768,16 @@ namespace rwe
             return;
         }
 
+        // Particles step once per tick; draw them part-way along this tick's
+        // step so the stream flows at the frame rate rather than at 30 Hz.
+        auto position = particle.position + (particle.velocity * frac);
+
         // A flat square: the camera looks straight down (with a cabinet skew
         // for height), so this reads as a screen-aligned pixel block.
-        const auto topLeft = particle.position + Vector3f(-1.0f, 0.0f, -1.0f);
-        const auto topRight = particle.position + Vector3f(1.0f, 0.0f, -1.0f);
-        const auto bottomLeft = particle.position + Vector3f(-1.0f, 0.0f, 1.0f);
-        const auto bottomRight = particle.position + Vector3f(1.0f, 0.0f, 1.0f);
+        const auto topLeft = position + Vector3f(-1.0f, 0.0f, -1.0f);
+        const auto topRight = position + Vector3f(1.0f, 0.0f, -1.0f);
+        const auto bottomLeft = position + Vector3f(-1.0f, 0.0f, 1.0f);
+        const auto bottomRight = position + Vector3f(1.0f, 0.0f, 1.0f);
 
         pushTriangle(batch.triangles, topLeft, bottomLeft, bottomRight, nanoRenderInfo->color);
         pushTriangle(batch.triangles, topLeft, bottomRight, topRight, nanoRenderInfo->color);
