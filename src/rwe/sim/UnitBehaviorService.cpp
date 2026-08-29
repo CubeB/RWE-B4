@@ -1,7 +1,9 @@
 #include "UnitBehaviorService.h"
+#include <rwe/util/SimpleLogger.h>
 #include <rwe/cob/CobExecutionContext.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
+#include <rwe/cob/cob_util.h>
 #include <rwe/sim/cob.h>
 #include <rwe/sim/movement.h>
 #include <rwe/util/Index.h>
@@ -791,6 +793,21 @@ namespace rwe
                 p.currentSpeed = computeNewGroundUnitSpeed(sim->terrain, *unitInfo.state, *unitInfo.definition, p, sim->getAdHocMovementClass(unitInfo.definition->movementCollisionInfo).maxSlope);
             },
             [&](UnitPhysicsInfoAir& p) {
+                // Bank with the turn: ease the roll towards the rate the nose is swinging.
+                p.previousRoll = p.roll;
+                auto yaw = toRadians(unitInfo.state->rotation).value - toRadians(unitInfo.state->previousRotation).value;
+                while (yaw > Pif)
+                {
+                    yaw -= 2.0f * Pif;
+                }
+                while (yaw < -Pif)
+                {
+                    yaw += 2.0f * Pif;
+                }
+                auto targetRoll = std::clamp(-yaw * 25.0f, -0.75f, 0.75f);
+                auto roll = p.roll.value;
+                p.roll = SimScalar(roll + std::clamp(targetRoll - roll, -0.05f, 0.05f));
+
                 match(
                     p.movementState,
                     [&](AirMovementStateFlying& m) {
@@ -1094,6 +1111,25 @@ namespace rwe
             });
     }
 
+    bool UnitBehaviorService::withinBuildReach(UnitInfo unitInfo, const UnitState& target) const
+    {
+        const auto& targetDefinition = sim->unitDefinitions.at(target.unitType);
+        auto rect = sim->computeFootprintRegion(target.position, targetDefinition.movementCollisionInfo);
+        auto corner = sim->terrain.heightmapIndexToWorldCorner(rect.x, rect.y);
+        auto minX = corner.x;
+        auto minZ = corner.z;
+        auto maxX = corner.x + (SimScalar(static_cast<float>(rect.width)) * MapTerrain::HeightTileWidthInWorldUnits);
+        auto maxZ = corner.z + (SimScalar(static_cast<float>(rect.height)) * MapTerrain::HeightTileHeightInWorldUnits);
+
+        const auto& position = unitInfo.state->position;
+        auto nearestX = rweMax(minX, rweMin(maxX, position.x));
+        auto nearestZ = rweMax(minZ, rweMin(maxZ, position.z));
+        auto dx = position.x - nearestX;
+        auto dz = position.z - nearestZ;
+        auto reach = unitInfo.definition->buildDistance;
+        return (dx * dx) + (dz * dz) <= reach * reach;
+    }
+
     void UnitBehaviorService::interruptCurrentTask(UnitId unitId)
     {
         auto unitRef = sim->tryGetUnitState(unitId);
@@ -1138,8 +1174,15 @@ namespace rwe
         }
 
         auto targetRef = sim->tryGetUnitState(loadOrder.target);
+        if (targetRef && targetRef->get().carriedBy == unitInfo.id)
+        {
+            // Aboard (the script's attach-unit got there first): done.
+            unitInfo.state->transportScriptTarget = std::nullopt;
+            return true;
+        }
         if (!targetRef || !targetRef->get().isAlive() || !targetRef->get().isOwnedBy(unitInfo.state->owner) || targetRef->get().carriedBy || loadOrder.target == unitInfo.id)
         {
+            unitInfo.state->transportScriptTarget = std::nullopt;
             return true;
         }
         auto& target = targetRef->get();
@@ -1179,6 +1222,34 @@ namespace rwe
 
         auto targetHeight = simScalarToFloat(sim->unitModelDefinitions.at(targetDefinition.objectName).height);
 
+        if (isShip)
+        {
+            // The ship's own script does the loading: TransportPickup(unit)
+            // opens the doors, swings the crane out, fastens the unit with
+            // attach-unit (which takes it aboard) and stows it on deck.
+            if (unitInfo.state->transportScriptTarget != loadOrder.target)
+            {
+                unitInfo.state->transportScriptTarget = loadOrder.target;
+                unitInfo.state->transportScriptStartedAt = sim->gameTime;
+                auto thread = unitInfo.state->cobEnvironment->createThread("TransportPickup", {static_cast<int>(loadOrder.target.value)});
+                LOG_DEBUG << "Transport " << unitInfo.id.value << " TransportPickup(" << loadOrder.target.value << ") " << (thread ? "started" : "not in script");
+                return false;
+            }
+            if (target.carriedBy == unitInfo.id)
+            {
+                unitInfo.state->transportScriptTarget = std::nullopt;
+                return true;
+            }
+            // A script that never attaches: take the unit aboard ourselves after a while.
+            if (sim->gameTime >= unitInfo.state->transportScriptStartedAt + GameTime(10u * static_cast<unsigned int>(SimTicksPerSecond)))
+            {
+                sim->loadUnitIntoTransport(unitInfo.id, loadOrder.target, std::string());
+                unitInfo.state->transportScriptTarget = std::nullopt;
+                return true;
+            }
+            return false;
+        }
+
         // An air transport drops down until it hovers just above the unit before lifting it.
         if (unitInfo.definition->canFly)
         {
@@ -1202,17 +1273,18 @@ namespace rwe
 
         if (sim->loadUnitIntoTransport(unitInfo.id, loadOrder.target, piece))
         {
-            // Air transports (Atlas) use BeginTransport(height); ships (Hulk) TransportPickup(unit).
+            // Air transports (Atlas) animate their grip with BeginTransport(height).
             unitInfo.state->cobEnvironment->createThread("BeginTransport", {static_cast<int>(targetHeight)});
-            unitInfo.state->cobEnvironment->createThread("TransportPickup", {static_cast<int>(loadOrder.target.value)});
         }
         return true;
     }
 
     bool UnitBehaviorService::handleUnloadOrder(UnitInfo unitInfo, const UnloadOrder& unloadOrder)
     {
+        LOG_DEBUG << "Transport " << unitInfo.id.value << " unload order: carrying " << unitInfo.state->carriedUnits.size() << ", floater " << unitInfo.definition->floater;
         if (unitInfo.state->carriedUnits.empty())
         {
+            unitInfo.state->transportScriptTarget = std::nullopt;
             return true;
         }
 
@@ -1222,6 +1294,33 @@ namespace rwe
         if ((dx * dx) + (dz * dz) > dropRange * dropRange)
         {
             navigateTo(unitInfo, unloadOrder.destination);
+            return false;
+        }
+
+        if (unitInfo.definition->floater)
+        {
+            // One unit at a time: TransportDrop(unit, x, y, z) swings it ashore
+            // and lets go with drop-unit, which sets it down where it hangs.
+            const auto& carried = unitInfo.state->carriedUnits;
+            auto current = unitInfo.state->transportScriptTarget;
+            bool stillAboard = current && std::find(carried.begin(), carried.end(), *current) != carried.end();
+            if (!stillAboard)
+            {
+                auto next = carried.front();
+                unitInfo.state->transportScriptTarget = next;
+                unitInfo.state->transportScriptStartedAt = sim->gameTime;
+                // TransportDrop(unit, xz) takes the drop point as a packed x/z pair.
+                const auto& d = unloadOrder.destination;
+                auto packed = static_cast<int>(cobPackCoords(CobPosition::fromFloat(simScalarToFloat(d.x)), CobPosition::fromFloat(simScalarToFloat(d.z))));
+                auto thread = unitInfo.state->cobEnvironment->createThread("TransportDrop", {static_cast<int>(next.value), packed});
+                LOG_DEBUG << "Transport " << unitInfo.id.value << " TransportDrop(" << next.value << ") " << (thread ? "started" : "not in script");
+            }
+            else if (sim->gameTime >= unitInfo.state->transportScriptStartedAt + GameTime(10u * static_cast<unsigned int>(SimTicksPerSecond)))
+            {
+                // The script never let go: set it down ourselves.
+                sim->unloadUnitFromTransport(unitInfo.id, *current, unloadOrder.destination);
+                unitInfo.state->transportScriptTarget = std::nullopt;
+            }
             return false;
         }
 
@@ -1251,8 +1350,6 @@ namespace rwe
             if (sim->unloadUnitFromTransport(unitInfo.id, carriedId, unloadOrder.destination))
             {
                 droppedAny = true;
-                auto dropped = sim->getUnitState(carriedId).position;
-                unitInfo.state->cobEnvironment->createThread("TransportDrop", {static_cast<int>(carriedId.value), static_cast<int>(simScalarToFloat(dropped.x)), static_cast<int>(simScalarToFloat(dropped.y)), static_cast<int>(simScalarToFloat(dropped.z))});
             }
         }
         if (droppedAny)
@@ -2200,13 +2297,15 @@ namespace rwe
         }
         auto& targetUnit = targetUnitRef->get();
 
-        // FIXME: this distance measure is wrong
-        // Experiment has shown that the distance from which a new building
-        // can be started (when caged in) is greater than assist distance,
-        // and it appears both measures something more advanced than center <-> center distance.
-        if (unitInfo.state->position.distanceSquared(targetUnit.position) > (unitInfo.definition->buildDistance * unitInfo.definition->buildDistance))
+        // Reach is measured to the building's footprint, not its centre, so a
+        // builder stops as soon as it is within arm's length of any edge
+        // instead of walking round to the front.
+        if (!withinBuildReach(unitInfo, targetUnit))
         {
-            navigateTo(unitInfo, targetUnitId);
+            const auto& targetDefinition = sim->unitDefinitions.at(targetUnit.unitType);
+            auto rect = sim->computeFootprintRegion(targetUnit.position, targetDefinition.movementCollisionInfo);
+            auto reachTiles = std::max(0, static_cast<int>(simScalarToFloat(unitInfo.definition->buildDistance) / simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits)) - 1);
+            navigateTo(unitInfo, rect.expand(reachTiles));
             return false;
         }
 

@@ -98,6 +98,8 @@ namespace rwe
             u.captureProgress,
             u.selfDestructTime,
             u.carriedBy,
+            u.transportScriptTarget,
+            u.transportScriptStartedAt,
             u.activated,
             u.isSufficientlyPowered,
             u.energyProductionBuffer,
@@ -115,7 +117,7 @@ namespace rwe
 
     GameHash computeHashOf(const UnitPhysicsInfoAir& p)
     {
-        return combineHashes(p.movementState);
+        return combineHashes(p.movementState, p.roll);
     }
 
     GameHash computeHashOf(const AirMovementStateTakingOff& p)

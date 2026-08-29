@@ -261,23 +261,26 @@ namespace rwe
         }
     }
 
-    Matrix4f unitRenderTransform(const UnitState& unit, const UnitDefinition& unitDefinition, const Vector3f& position, float rotation)
+    Matrix4f unitRenderTransform(const UnitState& unit, const UnitDefinition& unitDefinition, const Vector3f& position, float rotation, float frac)
     {
         auto transform = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
-        if (unitDefinition.canFly && isFlying(unit.physics))
+        auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unit.physics);
+        if (unitDefinition.canFly && airPhysics != nullptr)
         {
-            // Bank into turns: roll in proportion to how fast the heading changed this tick.
-            auto yawDelta = toRadians(unit.rotation).value - toRadians(unit.previousRotation).value;
-            while (yawDelta > Pif)
-            {
-                yawDelta -= 2.0f * Pif;
-            }
-            while (yawDelta < -Pif)
-            {
-                yawDelta += 2.0f * Pif;
-            }
-            auto roll = std::clamp(-yawDelta * 40.0f, -0.9f, 0.9f);
-            transform = transform * Matrix4f::rotationZ(roll);
+            // The sim eases the bank angle in and out with the turn; pitch follows the climb or dive.
+            auto roll = airPhysics->previousRoll.value + ((airPhysics->roll.value - airPhysics->previousRoll.value) * frac);
+
+            SimVector velocity(0_ss, 0_ss, 0_ss);
+            match(
+                airPhysics->movementState,
+                [&](const AirMovementStateFlying& m) { velocity = m.currentVelocity; },
+                [&](const AirMovementStateAttackRun& m) { velocity = m.currentVelocity; },
+                [&](const AirMovementStateTakingOff& m) { velocity = m.currentVelocity; },
+                [&](const AirMovementStateLanding&) {});
+            auto horizontal = std::sqrt(simScalarToFloat(velocity.x) * simScalarToFloat(velocity.x) + simScalarToFloat(velocity.z) * simScalarToFloat(velocity.z));
+            auto pitch = horizontal > 0.01f ? std::clamp(std::atan2(simScalarToFloat(velocity.y), horizontal) * 0.6f, -0.35f, 0.35f) : 0.0f;
+
+            transform = transform * Matrix4f::rotationX(-pitch) * Matrix4f::rotationZ(roll);
         }
         return transform;
     }
@@ -549,7 +552,7 @@ namespace rwe
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation);
+        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
         if (unit.isBeingBuilt(unitDefinition))
         {
             drawBuildingUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, unit.getPreciseCompletePercent(unitDefinition), position.y, playerColorIndex, frac, unitTextureAtlas, unitTeamTextureAtlases, batch);
@@ -593,7 +596,7 @@ namespace rwe
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation);
+        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
 
         drawUnitShadowMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, frac, groundHeight, unitTextureAtlas, unitTeamTextureAtlases, batch);
     }
@@ -752,7 +755,7 @@ namespace rwe
 
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation);
+        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
 
         // Edges resting on the ground trace the footprint; TA leaves those out.
         auto groundLevel = position.y + 1.0f;
@@ -823,7 +826,7 @@ namespace rwe
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation);
+        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
 
         UnitMeshBatch batch;
         drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, unitTextureAtlas, unitTeamTextureAtlases, batch);

@@ -1,4 +1,6 @@
 #include "CobExecutionContext.h"
+#include <rwe/util/SimpleLogger.h>
+#include <limits>
 #include <random>
 #include <rwe/cob/CobConstants.h>
 #include <rwe/cob/CobOpCode.h>
@@ -42,6 +44,7 @@ namespace rwe
                 auto coords = arg1;
                 auto pair = cobUnpackCoords(coords);
                 auto result = cobHypot(pair.first, pair.second);
+                LOG_DEBUG << "COB XZ_HYPOT(" << pair.first.toFloat() << "," << pair.second.toFloat() << ") = " << result.toFloat();
                 return result.value;
             }
             case CobValueId::Atan:
@@ -53,6 +56,7 @@ namespace rwe
                 auto a = CobPosition(arg1);
                 auto b = CobPosition(arg2);
                 auto result = cobHypot(a, b);
+                LOG_DEBUG << "COB HYPOT(" << a.toFloat() << "," << b.toFloat() << ") = " << result.toFloat();
                 return result.value;
             }
             case CobValueId::GroundHeight:
@@ -297,11 +301,24 @@ namespace rwe
                     disableCaching();
                     break;
                 case OpCode::ATTACH_UNIT:
-                    attachUnit();
-                    break;
+                {
+                    // attach-unit unit, piece: compiled with a third, always-zero operand.
+                    pop();
+                    auto piece = pop();
+                    auto unit = static_cast<unsigned int>(pop());
+                    // Piece -1 stows the unit inside the transport, out of sight.
+                    auto pieceIndex = piece < 0 ? std::numeric_limits<unsigned int>::max() : static_cast<unsigned int>(piece);
+                    return CobEnvironment::PieceCommandStatus{
+                        pieceIndex,
+                        CobEnvironment::PieceCommandStatus::AttachUnit{unit}};
+                }
                 case OpCode::DROP_UNIT:
-                    detachUnit();
-                    break;
+                {
+                    auto unit = static_cast<unsigned int>(pop());
+                    return CobEnvironment::PieceCommandStatus{
+                        0u,
+                        CobEnvironment::PieceCommandStatus::DropUnit{unit}};
+                }
 
                 case OpCode::WAIT_FOR_MOVE:
                 {
@@ -554,19 +571,6 @@ namespace rwe
         // do nothing, RWE does not have the concept of caching
     }
 
-    void CobExecutionContext::attachUnit()
-    {
-        /*auto piece = */ pop();
-        /*auto unit = */ pop();
-        // TODO: this
-    }
-
-    void CobExecutionContext::detachUnit()
-    {
-        /*auto unit = */ pop();
-        // TODO: this
-    }
-
     void CobExecutionContext::returnFromScript()
     {
         thread->returnValue = pop();
@@ -580,10 +584,12 @@ namespace rwe
         auto paramCount = nextInstruction();
 
         // collect up the parameters
+        // Arguments were pushed first to last, so they pop off last to first:
+        // fill the callee's locals from the back so local 0 is the first argument.
         std::vector<int> params(paramCount);
         for (unsigned int i = 0; i < paramCount; ++i)
         {
-            params[i] = pop();
+            params[paramCount - 1 - i] = pop();
         }
 
         const auto& functionInfo = env->script()->functions.at(functionId);
@@ -595,10 +601,12 @@ namespace rwe
         auto functionId = nextInstruction();
         auto paramCount = nextInstruction();
 
+        // Arguments were pushed first to last, so they pop off last to first:
+        // fill the callee's locals from the back so local 0 is the first argument.
         std::vector<int> params(paramCount);
         for (unsigned int i = 0; i < paramCount; ++i)
         {
-            params[i] = pop();
+            params[paramCount - 1 - i] = pop();
         }
 
         env->createThread(functionId, params, thread->signalMask);

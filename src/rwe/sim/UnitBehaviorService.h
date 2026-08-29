@@ -78,6 +78,9 @@ namespace rwe
         /** Steers an air unit to a point that may be below cruise height; true once it hovers there. */
         bool hoverTowards(UnitInfo unitInfo, const SimVector& point);
 
+        /** Whether the builder's arm reaches the target's footprint from where it stands. */
+        bool withinBuildReach(UnitInfo unitInfo, const UnitState& target) const;
+
         /** Whether this weapon can hit the unit at all (water weapons only reach units in the water). */
         bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& target) const;
 

@@ -1,4 +1,5 @@
 #include "cob.h"
+#include <rwe/util/SimpleLogger.h>
 #include <optional>
 #include <rwe/cob/CobAxis.h>
 #include <rwe/cob/CobExecutionContext.h>
@@ -138,7 +139,10 @@ namespace rwe
 
     void handlePieceCommand(GameSimulation& simulation, const CobEnvironment& env, UnitId unitId, const CobEnvironment::PieceCommandStatus& result)
     {
-        const auto& objectName = getObjectName(env, result.piece);
+        // attach-unit may name piece -1 (stowed inside the transport); other
+        // commands always carry a real piece.
+        static const std::string noPiece;
+        const auto& objectName = result.piece < env._script->pieces.size() ? getObjectName(env, result.piece) : noPiece;
         match(
             result.command,
             [&](const CobEnvironment::PieceCommandStatus::Move& m) {
@@ -206,6 +210,15 @@ namespace rwe
                 {
                     simulation.hideObject(unitId, objectName);
                 }
+            },
+            [&](const CobEnvironment::PieceCommandStatus::AttachUnit& a) {
+                // The transport's script has the unit on its crane or pad now.
+                LOG_DEBUG << "COB attach-unit: transport " << unitId.value << " takes unit " << a.unit << " on piece " << objectName;
+                simulation.attachUnitToTransportPiece(unitId, UnitId(a.unit), objectName);
+            },
+            [&](const CobEnvironment::PieceCommandStatus::DropUnit& d) {
+                LOG_DEBUG << "COB drop-unit: transport " << unitId.value << " lets go of unit " << d.unit;
+                simulation.dropUnitFromTransport(unitId, UnitId(d.unit));
             },
             [&](const CobEnvironment::PieceCommandStatus::EmitSfx& s) {
                 switch (s.sfxType)

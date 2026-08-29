@@ -551,6 +551,15 @@ namespace rwe
          */
         bool unloadUnitFromTransport(UnitId transportId, UnitId unitId, const SimVector& position);
 
+        /**
+         * A transport script's attach-unit: takes the unit aboard if it is not
+         * yet carried, or moves it to another of the transport's pieces if it is.
+         */
+        void attachUnitToTransportPiece(UnitId transportId, UnitId unitId, const std::string& piece);
+
+        /** A transport script's drop-unit: sets the unit down where it hangs right now. */
+        void dropUnitFromTransport(UnitId transportId, UnitId unitId);
+
         /** Moves carried units along with their transports; run after unit behaviour each tick. */
         void updateCarriedUnits();
 

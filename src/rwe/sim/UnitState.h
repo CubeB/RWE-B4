@@ -258,6 +258,10 @@ namespace rwe
     struct UnitPhysicsInfoAir
     {
         AirMovementState movementState{AirMovementStateTakingOff()};
+
+        /** Bank angle in radians, eased towards the turn rate each tick so turns roll in and out smoothly. */
+        SimScalar roll{0_ss};
+        SimScalar previousRoll{0_ss};
     };
 
     using UnitPhysicsInfo = std::variant<UnitPhysicsInfoGround, UnitPhysicsInfoAir>;
@@ -356,6 +360,10 @@ namespace rwe
 
         /** Units this transport is carrying. */
         std::vector<UnitId> carriedUnits;
+
+        /** The unit a transport's TransportPickup / TransportDrop script is currently handling, and when it began. */
+        std::optional<UnitId> transportScriptTarget;
+        GameTime transportScriptStartedAt{0};
 
         bool activated{false};
         bool isSufficientlyPowered{false};

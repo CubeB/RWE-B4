@@ -591,6 +591,36 @@ namespace rwe
         return true;
     }
 
+    void GameSimulation::attachUnitToTransportPiece(UnitId transportId, UnitId unitId, const std::string& piece)
+    {
+        auto unitRef = tryGetUnitState(unitId);
+        if (!unitRef)
+        {
+            return;
+        }
+        auto& unit = unitRef->get();
+        if (unit.carriedBy == transportId)
+        {
+            unit.carriedPiece = piece;
+            return;
+        }
+        if (unit.carriedBy || !unit.isAlive() || !unit.isOwnedBy(getUnitState(transportId).owner))
+        {
+            return;
+        }
+        loadUnitIntoTransport(transportId, unitId, piece);
+    }
+
+    void GameSimulation::dropUnitFromTransport(UnitId transportId, UnitId unitId)
+    {
+        auto unitRef = tryGetUnitState(unitId);
+        if (!unitRef || unitRef->get().carriedBy != transportId)
+        {
+            return;
+        }
+        unloadUnitFromTransport(transportId, unitId, unitRef->get().position);
+    }
+
     void GameSimulation::updateCarriedUnits()
     {
         for (auto& [unitId, unit] : units)
@@ -614,12 +644,13 @@ namespace rwe
 
             const auto& transportDefinition = unitDefinitions.at(transport.unitType);
             const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+            bool onScriptPiece = !unit.carriedPiece.empty() && transport.findPiece(unit.carriedPiece).has_value();
             if (transportDefinition.canFly)
             {
                 // Slung underneath: the top of the unit meets the transport's grip.
                 attachPoint.y -= unitModelDefinitions.at(unitDefinition.objectName).height;
             }
-            else
+            else if (!onScriptPiece)
             {
                 // On deck: each unit gets its own slot along the ship's length.
                 const auto& carried = transport.carriedUnits;

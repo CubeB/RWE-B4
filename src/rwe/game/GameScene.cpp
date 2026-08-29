@@ -3651,6 +3651,14 @@ namespace rwe
 
     bool GameScene::unitIsVisibleToLocalPlayer(const UnitState& unit) const
     {
+        // Stowed inside a ship's hold (attached to no piece): out of sight until unloaded.
+        if (unit.carriedBy && unit.carriedPiece.empty())
+        {
+            if (auto transport = tryGetUnit(*unit.carriedBy); transport && simulation.unitDefinitions.at(transport->get().unitType).floater)
+            {
+                return false;
+            }
+        }
         return !fogOfWarEnabled || unit.isOwnedBy(localPlayerId) || simulation.isVisibleTo(localPlayerId, unit.position);
     }
 

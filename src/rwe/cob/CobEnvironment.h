@@ -117,7 +117,17 @@ namespace rwe
             {
                 unsigned int flags;
             };
-            using CommandType = std::variant<Move, Turn, Spin, StopSpin, Show, Hide, EnableShading, DisableShading, EmitSfx, Explode>;
+            /** attach-unit: a transport script fastens the unit to this piece. */
+            struct AttachUnit
+            {
+                unsigned int unit;
+            };
+            /** drop-unit: a transport script lets the unit go where it is (piece is unused). */
+            struct DropUnit
+            {
+                unsigned int unit;
+            };
+            using CommandType = std::variant<Move, Turn, Spin, StopSpin, Show, Hide, EnableShading, DisableShading, EmitSfx, Explode, AttachUnit, DropUnit>;
 
             unsigned int piece;
             CommandType command;

@@ -15,8 +15,10 @@ namespace rwe
 
     std::pair<CobPosition, CobPosition> cobUnpackCoords(uint32_t xz)
     {
-        auto x = CobPosition::fromInt(static_cast<int>(xz >> 16));
-        auto z = CobPosition::fromInt(static_cast<int>(xz & 0xffff));
+        // Both halves are signed 16-bit: scripts subtract packed positions to
+        // get an offset, and an offset to the west or north is negative.
+        auto x = CobPosition::fromInt(static_cast<int16_t>(static_cast<uint16_t>(xz >> 16)));
+        auto z = CobPosition::fromInt(static_cast<int16_t>(static_cast<uint16_t>(xz & 0xffff)));
         return std::make_pair(x, z);
     }
 

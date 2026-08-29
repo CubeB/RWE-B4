@@ -31,6 +31,9 @@ const float greenPhaseStart = 1.0 / 3.0;
 const float texturePhaseStart = 2.0 / 3.0;
 // Brighter green just above the advancing texture front.
 const float textureLeadThickness = 8.0;
+// Fraction of the build over which the texture front travels bottom to top
+// (it finishes before 100%, so the last stretch is fully textured).
+const float textureSweepLength = 0.25;
 
 vec3 shadeNormal()
 {
@@ -50,9 +53,9 @@ void main(void)
 
     if (percentComplete >= texturePhaseStart)
     {
-        // The texture front climbs from the bottom of the model to the top
-        // over the final third of the build.
-        float textureProgress = (percentComplete - texturePhaseStart) / (1.0 - texturePhaseStart);
+        // The texture front climbs from the bottom of the model to the top,
+        // reaching it a little before the build is done.
+        float textureProgress = clamp((percentComplete - texturePhaseStart) / textureSweepLength, 0.0, 1.0);
         float frontHeight = textureProgress * max(unitHeight, 1.0);
         if (posY <= frontHeight)
             shadingMethod = 3;
@@ -63,7 +66,13 @@ void main(void)
     }
     else if (percentComplete >= greenPhaseStart)
     {
-        shadingMethod = 1;
+        // The green fill climbs from the base to the top over the middle third.
+        float greenProgress = (percentComplete - greenPhaseStart) / (texturePhaseStart - greenPhaseStart);
+        float frontHeight = greenProgress * max(unitHeight, 1.0);
+        if (posY <= frontHeight)
+            shadingMethod = 1;
+        else if (posY <= frontHeight + textureLeadThickness)
+            shadingMethod = 2;
     }
 
     //Now we actually compute pixel color

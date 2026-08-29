@@ -73,9 +73,7 @@ namespace rwe
 
         void disableCaching();
 
-        void attachUnit();
 
-        void detachUnit();
 
         // script dispatch and return
         void returnFromScript();
