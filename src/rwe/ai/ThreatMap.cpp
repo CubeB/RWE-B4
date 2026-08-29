@@ -183,6 +183,11 @@ namespace rwe
 
     std::optional<SimVector> ThreatMap::bestScoutTarget(const SimVector& from) const
     {
+        return bestScoutTarget(from, [](int, int, const SimVector&) { return true; });
+    }
+
+    std::optional<SimVector> ThreatMap::bestScoutTarget(const SimVector& from, const std::function<bool(int, int, const SimVector&)>& accept) const
+    {
         std::optional<SimVector> best;
         float bestScore = -1.0f;
         for (int y = 0; y < getHeight(); ++y)
@@ -195,6 +200,10 @@ namespace rwe
                     continue;
                 }
                 auto center = cellCenter(x, y);
+                if (!accept(x, y, center))
+                {
+                    continue;
+                }
                 auto distance = std::max(1.0f, (center - from).length().value);
                 // Prefer ground that has gone unseen for a long time, but not at any distance.
                 auto score = std::min(stale, 3000.0f) / distance;

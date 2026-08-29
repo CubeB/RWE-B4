@@ -39,6 +39,7 @@ namespace rwe
                 p.targetMetalExtractorCount = 5;
                 p.targetConstructorCount = 1;
                 p.targetDefenceCount = 1;
+                p.targetVehiclePlantCount = 0;
                 p.attackArmySize = 14;
                 p.retreatArmySize = 5;
                 p.buildPlannerTickInterval = 60;

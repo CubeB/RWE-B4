@@ -314,10 +314,21 @@ namespace rwe
             renderOverlay();
         }
 
-        // oh yeah also regulate sound
-        std::scoped_lock<std::mutex> lock(playingUnitChannelsLock);
-        auto volume = computeSoundVolume(playingUnitChannels.size());
-        for (auto channel : playingUnitChannels)
+        // oh yeah also regulate sound.
+        // Never call into the mixer while holding playingUnitChannelsLock:
+        // the mixer's audio thread holds its track lock while it reports a
+        // finished track, and that report wants our lock in turn. Finished
+        // tracks are therefore announced here, on this thread, and the
+        // volume pass works from a copy of the set.
+        sceneContext.audioService->dispatchFinishedChannels();
+        std::vector<int> channels;
+        int volume;
+        {
+            std::scoped_lock<std::mutex> lock(playingUnitChannelsLock);
+            channels.assign(playingUnitChannels.begin(), playingUnitChannels.end());
+            volume = computeSoundVolume(playingUnitChannels.size());
+        }
+        for (auto channel : channels)
         {
             sceneContext.audioService->setVolume(channel, volume);
         }
@@ -2976,9 +2987,17 @@ namespace rwe
     {
         // FIXME: should play on a position-aware channel
         auto channel = sceneContext.audioService->playSound(sound);
-        std::scoped_lock<std::mutex> lock(playingUnitChannelsLock);
-        playingUnitChannels.insert(channel);
-        sceneContext.audioService->setVolume(channel, computeSoundVolume(playingUnitChannels.size()));
+        if (channel < 0)
+        {
+            return;
+        }
+        int volume;
+        {
+            std::scoped_lock<std::mutex> lock(playingUnitChannelsLock);
+            playingUnitChannels.insert(channel);
+            volume = computeSoundVolume(playingUnitChannels.size());
+        }
+        sceneContext.audioService->setVolume(channel, volume);
     }
 
     void GameScene::playWeaponStartSound(const Vector3f& position, const std::string& weaponType)
@@ -3161,6 +3180,49 @@ namespace rwe
         spawnNanoParticles();
 
         updateDebris();
+
+        // Testing aid: RWE_DEBUG_SPAWN=<unitType>*<count>@<player>:<seconds>
+        // drops finished units of that type, owned by that player, in a ring
+        // around the local player's first unit at that game time (for example
+        // CORAK*6@1:10 to have six AKs attack the commander at ten seconds).
+        if (const char* debugSpawn = std::getenv("RWE_DEBUG_SPAWN"))
+        {
+            std::string spec(debugSpawn);
+            auto star = spec.find('*');
+            auto at = spec.find('@');
+            auto colon = spec.find(':');
+            if (star != std::string::npos && at != std::string::npos && colon != std::string::npos)
+            {
+                auto unitType = spec.substr(0, star);
+                auto count = std::atoi(spec.substr(star + 1, at - star - 1).c_str());
+                auto player = std::atoi(spec.substr(at + 1, colon - at - 1).c_str());
+                auto rest = spec.substr(colon + 1);
+                auto nearSep = rest.find(':');
+                auto seconds = static_cast<unsigned int>(std::atoi(rest.substr(0, nearSep).c_str()));
+                // An optional trailing :<player> puts the ring around that player's first unit instead.
+                auto nearPlayer = nearSep == std::string::npos ? PlayerId(localPlayerId) : PlayerId(static_cast<unsigned int>(std::atoi(rest.substr(nearSep + 1).c_str())));
+                if (seconds > 0 && simulation.gameTime.value == seconds * static_cast<unsigned int>(SimTicksPerSecond) && isValidUnitType(simulation, unitType) && player >= 0 && player < getSize(simulation.players))
+                {
+                    std::optional<SimVector> centre;
+                    for (const auto& [unitId, unit] : simulation.units)
+                    {
+                        if (unit.isOwnedBy(nearPlayer) && unit.isAlive())
+                        {
+                            centre = unit.position;
+                            break;
+                        }
+                    }
+                    for (int i = 0; centre && i < count; ++i)
+                    {
+                        auto angle = (2.0f * Pif * static_cast<float>(i)) / static_cast<float>(std::max(1, count));
+                        SimVector position(centre->x + SimScalar(std::cos(angle) * 96.0f), centre->y, centre->z + SimScalar(std::sin(angle) * 96.0f));
+                        position.y = simulation.terrain.getHeightAt(position.x, position.z);
+                        LOG_INFO << "Debug: spawning " << unitType << " for player " << player << " at " << simScalarToFloat(position.x) << "," << simScalarToFloat(position.z);
+                        spawnCompletedUnit(unitType, PlayerId(static_cast<unsigned int>(player)), position);
+                    }
+                }
+            }
+        }
 
         // Testing aid: RWE_DEBUG_SELF_DESTRUCT=<seconds> self-destructs a
         // player's first unit (the commander) at that game time, so a crash on

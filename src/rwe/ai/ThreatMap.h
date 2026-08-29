@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <rwe/ai/AiBlackboard.h>
 #include <rwe/grid/Grid.h>
@@ -38,6 +39,11 @@ namespace rwe
 
         /** Cell centre that has gone longest without being seen, weighted against travel distance. */
         std::optional<SimVector> bestScoutTarget(const SimVector& from) const;
+
+        /** As above, considering only cells the predicate accepts (given the cell and its centre). */
+        std::optional<SimVector> bestScoutTarget(const SimVector& from, const std::function<bool(int, int, const SimVector&)>& accept) const;
+
+        float antiGroundAtCell(int x, int y) const { return antiGround.get(x, y); }
 
         /** The enemy cell worth attacking most: value minus threat. */
         std::optional<SimVector> bestAttackTarget(float threatAversion) const;

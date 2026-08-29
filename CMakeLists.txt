@@ -189,6 +189,12 @@ set(SOURCE_FILES
     src/rwe/ai/PerceptionManager.h
     src/rwe/ai/ScoutManager.cpp
     src/rwe/ai/ScoutManager.h
+    src/rwe/ai/AiSideUnits.cpp
+    src/rwe/ai/AiSideUnits.h
+    src/rwe/ai/ReachabilityMap.cpp
+    src/rwe/ai/ReachabilityMap.h
+    src/rwe/ai/TransportManager.cpp
+    src/rwe/ai/TransportManager.h
     src/rwe/ai/StrategicManager.cpp
     src/rwe/ai/StrategicManager.h
     src/rwe/ai/ThreatMap.cpp

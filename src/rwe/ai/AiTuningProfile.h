@@ -33,6 +33,15 @@ namespace rwe
         int targetDefenceCount{2};
         int targetRadarCount{1};
         int targetMetalMakerCount{2};
+        int targetAirPlantCount{1};
+        int targetVehiclePlantCount{1};
+        /** Dedicated scouts kept alive: planes from the air plant, fast vehicles from the vehicle plant. */
+        int targetScoutPlaneCount{1};
+        int targetScoutVehicleCount{1};
+        /** Air transports built once there is ground the base cannot walk to. */
+        int targetTransportCount{1};
+        /** Give up on a ferry that has not finished in this many seconds. */
+        int ferryTimeoutSeconds{120};
 
         // --- Site search ---
         SimScalar maxMexSearchRadius{512_ss};

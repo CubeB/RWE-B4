@@ -793,21 +793,6 @@ namespace rwe
                 p.currentSpeed = computeNewGroundUnitSpeed(sim->terrain, *unitInfo.state, *unitInfo.definition, p, sim->getAdHocMovementClass(unitInfo.definition->movementCollisionInfo).maxSlope);
             },
             [&](UnitPhysicsInfoAir& p) {
-                // Bank with the turn: ease the roll towards the rate the nose is swinging.
-                p.previousRoll = p.roll;
-                auto yaw = toRadians(unitInfo.state->rotation).value - toRadians(unitInfo.state->previousRotation).value;
-                while (yaw > Pif)
-                {
-                    yaw -= 2.0f * Pif;
-                }
-                while (yaw < -Pif)
-                {
-                    yaw += 2.0f * Pif;
-                }
-                auto targetRoll = std::clamp(-yaw * 25.0f, -0.75f, 0.75f);
-                auto roll = p.roll.value;
-                p.roll = SimScalar(roll + std::clamp(targetRoll - roll, -0.05f, 0.05f));
-
                 match(
                     p.movementState,
                     [&](AirMovementStateFlying& m) {

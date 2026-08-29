@@ -17,57 +17,10 @@ namespace rwe
             return it == counts.end() ? 0 : it->second;
         }
 
-        bool isDefined(const GameSimulation& sim, const std::string& unitType)
-        {
-            return !unitType.empty() && sim.unitDefinitions.find(unitType) != sim.unitDefinitions.end();
-        }
-
         PlayerCommand buildCommand(UnitId builder, const std::string& unitType, const SimVector& site)
         {
             return PlayerUnitCommand(builder, PlayerUnitCommand::IssueOrder(BuildOrder(unitType, site), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
         }
-    }
-
-    void BuildManager::resolveSide(const GameSimulation& sim, PlayerId aiOwner)
-    {
-        if (sideResolved)
-        {
-            return;
-        }
-        sideResolved = true;
-
-        auto side = sim.getPlayer(aiOwner).side;
-        std::string upper;
-        for (auto c : side)
-        {
-            upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
-        }
-
-        if (upper == "CORE")
-        {
-            sideUnits = AiSideUnits{"CORMEX", "CORSOLAR", "CORLAB", "CORCK", "CORAK", "CORSTORM", "CORLLT", "CORRAD", "CORMAKR"};
-        }
-        else
-        {
-            sideUnits = AiSideUnits{"ARMMEX", "ARMSOLAR", "ARMLAB", "ARMCK", "ARMPW", "ARMROCK", "ARMLLT", "ARMRAD", "ARMMAKR"};
-        }
-
-        // Anything the game data does not define is simply never built.
-        auto check = [&](std::string& name) {
-            if (!isDefined(sim, name))
-            {
-                name.clear();
-            }
-        };
-        check(sideUnits.metalExtractor);
-        check(sideUnits.solar);
-        check(sideUnits.lab);
-        check(sideUnits.constructor);
-        check(sideUnits.raider);
-        check(sideUnits.rocketKbot);
-        check(sideUnits.lightLaserTower);
-        check(sideUnits.radar);
-        check(sideUnits.metalMaker);
     }
 
     std::optional<SimVector> BuildManager::chooseBuildSite(
@@ -145,7 +98,8 @@ namespace rwe
         const std::string& unitType,
         const SimVector& anchor,
         SimScalar radius,
-        std::minstd_rand& rng) const
+        std::minstd_rand& rng,
+        const std::function<bool(const SimVector&)>& accept) const
     {
         const auto& metalGrid = sim.metalGrid;
         const auto anchorHm = sim.terrain.worldToHeightmapCoordinate(anchor);
@@ -202,6 +156,10 @@ namespace rwe
 
                     SimVector candidate = sim.terrain.heightmapIndexToWorldCenter(gx, gz);
                     candidate.y = sim.terrain.getHeightAt(candidate.x, candidate.z);
+                    if (accept && !accept(candidate))
+                    {
+                        continue;
+                    }
                     auto rect = sim.computeFootprintRegion(candidate, def.movementCollisionInfo);
                     if (rect.x < 0 || rect.y < 0)
                     {
@@ -238,10 +196,9 @@ namespace rwe
         return tiedCandidates[dist(rng)];
     }
 
-    std::vector<std::string> BuildManager::buildPriorities(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb) const
+    std::vector<std::string> BuildManager::buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase) const
     {
-        (void)sim;
-        const auto& s = sideUnits;
+        const auto& s = bb.sideUnits;
         // Count what exists or is already going up, so we don't double up.
         auto total = [&](const std::string& t) { return t.empty() ? 0 : countOf(bb.ownedTotalCounts, t); };
 
@@ -252,6 +209,16 @@ namespace rwe
                 wanted.push_back(t);
             }
         };
+
+        // A builder ferried to an island the base cannot walk to runs an
+        // outpost: it takes the metal there and powers its own extractors,
+        // but leaves the factories and towers to the main base.
+        if (!builderAtBase)
+        {
+            want(s.metalExtractor);
+            want(s.solar);
+            return wanted;
+        }
 
         // Energy first if the lights are out, otherwise metal first: every
         // later build is paced by metal income, and the starting stockpile
@@ -299,6 +266,14 @@ namespace rwe
         {
             want(s.lightLaserTower);
         }
+        // An air plant for scout planes, and for transports when there is
+        // ground to reach that no one can walk to. Metal is nearly always
+        // short on a poor map, so this is not gated on it: a blind AI is
+        // worth less than a slow one.
+        if (total(s.lab) >= 1 && total(s.airPlant) < profile.targetAirPlantCount && total(s.solar) >= profile.openingSolarCount && total(s.radar) >= profile.targetRadarCount)
+        {
+            want(s.airPlant);
+        }
         if (total(s.solar) < profile.targetSolarCount)
         {
             want(s.solar);
@@ -307,12 +282,19 @@ namespace rwe
         {
             want(s.metalExtractor);
         }
+        // A vehicle plant comes last: fast scouts and tanks once the economy is ticking over.
+        if (!metalShort && total(s.airPlant) >= profile.targetAirPlantCount && total(s.vehiclePlant) < profile.targetVehiclePlantCount)
+        {
+            want(s.vehiclePlant);
+        }
         return wanted;
     }
 
     void BuildManager::planFactories(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const
     {
-        const auto& s = sideUnits;
+        const auto& s = bb.sideUnits;
+        auto total = [&](const std::string& t) { return t.empty() ? 0 : countOf(bb.ownedTotalCounts, t); };
+
         for (auto factoryId : bb.factories)
         {
             const auto& factory = sim.getUnitState(factoryId);
@@ -321,26 +303,52 @@ namespace rwe
                 continue;
             }
 
-            auto constructors = s.constructor.empty() ? 0 : countOf(bb.ownedTotalCounts, s.constructor);
             std::string next;
-            if (!s.constructor.empty() && constructors < profile.targetConstructorCount)
+            if (!s.airPlant.empty() && factory.unitType == s.airPlant)
             {
-                next = s.constructor;
+                // Eyes first, then lift when it is needed. Otherwise the plant waits.
+                if (!s.scoutPlane.empty() && total(s.scoutPlane) < profile.targetScoutPlaneCount)
+                {
+                    next = s.scoutPlane;
+                }
+                else if (!s.airTransport.empty() && bb.wantsTransport && total(s.airTransport) < profile.targetTransportCount)
+                {
+                    next = s.airTransport;
+                }
             }
-            else if (!s.raider.empty() && !s.rocketKbot.empty())
+            else if (!s.vehiclePlant.empty() && factory.unitType == s.vehiclePlant)
             {
-                // Two raiders for every rocket kbot.
-                auto raiders = countOf(bb.ownedTotalCounts, s.raider);
-                auto rockets = countOf(bb.ownedTotalCounts, s.rocketKbot);
-                next = raiders <= rockets * 2 ? s.raider : s.rocketKbot;
+                if (!s.scoutVehicle.empty() && total(s.scoutVehicle) < profile.targetScoutVehicleCount)
+                {
+                    next = s.scoutVehicle;
+                }
+                else
+                {
+                    next = s.tank;
+                }
             }
-            else if (!s.raider.empty())
+            else
             {
-                next = s.raider;
-            }
-            else if (!s.rocketKbot.empty())
-            {
-                next = s.rocketKbot;
+                auto constructors = s.constructor.empty() ? 0 : countOf(bb.ownedTotalCounts, s.constructor);
+                if (!s.constructor.empty() && constructors < profile.targetConstructorCount)
+                {
+                    next = s.constructor;
+                }
+                else if (!s.raider.empty() && !s.rocketKbot.empty())
+                {
+                    // Two raiders for every rocket kbot.
+                    auto raiders = countOf(bb.ownedTotalCounts, s.raider);
+                    auto rockets = countOf(bb.ownedTotalCounts, s.rocketKbot);
+                    next = raiders <= rockets * 2 ? s.raider : s.rocketKbot;
+                }
+                else if (!s.raider.empty())
+                {
+                    next = s.raider;
+                }
+                else if (!s.rocketKbot.empty())
+                {
+                    next = s.rocketKbot;
+                }
             }
 
             if (!next.empty())
@@ -355,9 +363,11 @@ namespace rwe
         PlayerId aiOwner,
         const AiTuningProfile& profile,
         const AiBlackboard& bb,
+        const ReachabilityMap& reachability,
         std::minstd_rand& rng,
         std::vector<PlayerCommand>& outCommands)
     {
+        (void)aiOwner;
         ++ticksSinceLastPlanning;
         if (ticksSinceLastPlanning < profile.buildPlannerTickInterval)
         {
@@ -365,11 +375,11 @@ namespace rwe
         }
         ticksSinceLastPlanning = 0;
 
-        if (!bb.baseAnchor)
+        if (!bb.baseAnchor || !bb.sideUnitsResolved)
         {
             return;
         }
-        resolveSide(sim, aiOwner);
+        const auto& sideUnits = bb.sideUnits;
 
         planFactories(sim, profile, bb, outCommands);
 
@@ -382,28 +392,38 @@ namespace rwe
         auto builderId = bb.idleBuilders.front();
         const auto& builder = sim.getUnitState(builderId);
 
-        for (const auto& next : buildPriorities(sim, profile, bb))
+        // A builder that cannot walk home is running an outpost: it builds around itself.
+        bool builderAtBase = !bb.groundReachabilityValid || reachability.isReachable(sim, builder.position);
+        auto anchor = builderAtBase ? *bb.baseAnchor : builder.position;
+
+        for (const auto& next : buildPriorities(profile, bb, builderAtBase))
         {
             std::optional<SimVector> site;
             if (next == sideUnits.metalExtractor)
             {
                 // Nearby patches first; further afield if there are none.
-                site = chooseMexSite(sim, next, builder.position, profile.maxMexSearchRadius, rng);
-                if (!site)
+                // Only patches the builder can walk to: islands are for the transport.
+                std::function<bool(const SimVector&)> walkable;
+                if (bb.groundReachabilityValid)
                 {
-                    site = chooseMexSite(sim, next, *bb.baseAnchor, profile.expansionMexSearchRadius, rng);
+                    walkable = [&](const SimVector& p) { return reachability.isReachable(sim, p) == builderAtBase; };
+                }
+                site = chooseMexSite(sim, next, builder.position, profile.maxMexSearchRadius, rng, walkable);
+                if (!site && builderAtBase)
+                {
+                    site = chooseMexSite(sim, next, *bb.baseAnchor, profile.expansionMexSearchRadius, rng, walkable);
                 }
             }
             else if (next == sideUnits.lightLaserTower && bb.enemyBasePosition)
             {
                 // Defences go on the side of the base that faces the enemy.
                 auto towards = (*bb.enemyBasePosition - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
-                auto anchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
-                site = chooseBuildSite(sim, profile, next, anchor, rng);
+                auto towerAnchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
+                site = chooseBuildSite(sim, profile, next, towerAnchor, rng);
             }
             else
             {
-                site = chooseBuildSite(sim, profile, next, *bb.baseAnchor, rng);
+                site = chooseBuildSite(sim, profile, next, anchor, rng);
             }
 
             if (site)
@@ -416,7 +436,7 @@ namespace rwe
         }
 
         // Nothing to build (or nowhere to build it): lend a hand at the factory.
-        if (!bb.factories.empty())
+        if (!bb.factories.empty() && builderAtBase)
         {
             const auto& factory = sim.getUnitState(bb.factories.front());
             if (!factory.buildQueue.empty())

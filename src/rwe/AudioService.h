@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <rwe/observable/Subject.h>
 #include <rwe/sdl/SdlContext.h>
 #include <rwe/sdl/SdlMixerContext.h>
@@ -42,6 +43,10 @@ namespace rwe
         std::unordered_map<std::string, std::shared_ptr<Sound>> soundBank;
         Subject<int> channelFinished;
 
+        /** Tracks the mixer reported finished, noted on the audio thread and announced from the main thread. */
+        std::mutex finishedChannelsLock;
+        std::vector<int> finishedChannels;
+
         // Track pool: maps channel indices to MIX_Track pointers.
         // Tracks 0..reservedCount-1 are "reserved" (used by playSoundIfFree).
         std::vector<SdlMixerContext::TrackPtr> tracks;
@@ -72,6 +77,14 @@ namespace rwe
         void setVolume(int channel, int volume);
 
         Observable<int>& getChannelFinished();
+
+        /**
+         * Announces the channels that have finished since the last call.
+         * Call from the main thread: the mixer reports them from its audio
+         * thread while holding its own locks, so nothing that talks back to
+         * the mixer may run there.
+         */
+        void dispatchFinishedChannels();
 
     private:
         void haltChannel(int channel);

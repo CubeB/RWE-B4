@@ -2,12 +2,15 @@
 
 #include <map>
 #include <optional>
+#include <rwe/ai/AiSideUnits.h>
+#include <rwe/grid/Grid.h>
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/Metal.h>
 #include <rwe/sim/PlayerId.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitId.h>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -46,6 +49,10 @@ namespace rwe
         GamePhase phase{GamePhase::Opening};
         GameTime now{0};
 
+        // --- Side ---
+        bool sideUnitsResolved{false};
+        AiSideUnits sideUnits;
+
         // --- Economy ---
         Metal currentMetal{0};
         Energy currentEnergy{0};
@@ -69,6 +76,16 @@ namespace rwe
         std::vector<UnitId> factories;
         /** Complete, mobile, armed, non-builder units, in id order. */
         std::vector<UnitId> combatUnits;
+        /** Complete scout planes and scout vehicles, in id order. */
+        std::vector<UnitId> scoutUnits;
+        /** Complete mobile transports, in id order. */
+        std::vector<UnitId> transports;
+
+        // --- Ground ---
+        /** Whether the reachability grid has been built yet. */
+        bool groundReachabilityValid{false};
+        /** True when the map has ground the base cannot walk to (islands, far banks). */
+        bool hasUnreachableGround{false};
 
         // --- Enemy ---
         /** Keyed by the enemy unit's raw id so iteration is deterministic. */
@@ -79,7 +96,14 @@ namespace rwe
         std::vector<UnitId> enemiesNearBase;
 
         // --- Army ---
+        /** A combat unit pressed into scouting while there is no dedicated scout. */
         std::optional<UnitId> scoutUnitId;
+        /** Where each scout is heading, keyed by raw unit id, so two scouts do not chase the same ground. */
+        std::map<unsigned int, SimVector> scoutTargets;
+        /** Units booked onto a transport, keyed by raw unit id; the other managers leave them alone. */
+        std::set<unsigned int> ferryPassengers;
+        /** Set when there is somewhere worth going that ground units cannot walk to. */
+        bool wantsTransport{false};
         std::optional<SimVector> rallyPoint;
         std::optional<SimVector> attackTarget;
         int armySize{0};

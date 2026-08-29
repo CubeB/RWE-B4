@@ -33,12 +33,14 @@ namespace rwe
             tracks[trackIndex].get(),
             [](void* userdata, MIX_Track* track)
             {
+                // Runs on the audio thread with the track locked: only note it down.
                 auto* self = static_cast<AudioService*>(userdata);
                 for (unsigned int i = 0; i < self->tracks.size(); ++i)
                 {
                     if (self->tracks[i].get() == track)
                     {
-                        self->channelFinished.next(static_cast<int>(i));
+                        std::scoped_lock<std::mutex> lock(self->finishedChannelsLock);
+                        self->finishedChannels.push_back(static_cast<int>(i));
                         break;
                     }
                 }
@@ -160,6 +162,19 @@ namespace rwe
     Observable<int>& AudioService::getChannelFinished()
     {
         return channelFinished;
+    }
+
+    void AudioService::dispatchFinishedChannels()
+    {
+        std::vector<int> finished;
+        {
+            std::scoped_lock<std::mutex> lock(finishedChannelsLock);
+            finished.swap(finishedChannels);
+        }
+        for (auto channel : finished)
+        {
+            channelFinished.next(channel);
+        }
     }
 
     void AudioService::setVolume(int channel, int volume)

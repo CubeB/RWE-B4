@@ -258,10 +258,6 @@ namespace rwe
     struct UnitPhysicsInfoAir
     {
         AirMovementState movementState{AirMovementStateTakingOff()};
-
-        /** Bank angle in radians, eased towards the turn rate each tick so turns roll in and out smoothly. */
-        SimScalar roll{0_ss};
-        SimScalar previousRoll{0_ss};
     };
 
     using UnitPhysicsInfo = std::variant<UnitPhysicsInfoGround, UnitPhysicsInfoAir>;

@@ -261,30 +261,6 @@ namespace rwe
         auto currentSpeedSquared = physics.currentVelocity.lengthSquared();
         auto decelerationDistance = currentSpeedSquared / (2_ss * unitDefinition.acceleration);
 
-        // Out on the way somewhere, an aircraft flies along its nose and turns
-        // at its turn rate, so a change of course is an arc (and a bank), not
-        // a sideways slide. Only the last stretch to the destination steers
-        // directly, so it can settle exactly on the spot.
-        SimVector flat(rawDirection.x, 0_ss, rawDirection.z);
-        auto closeRange = rweMax(unitDefinition.maxVelocity * 4_ss, 32_ss);
-        if (flat.lengthSquared() > closeRange * closeRange)
-        {
-            auto speed = rweSqrt(currentSpeedSquared);
-            if (distanceSquared > (decelerationDistance * decelerationDistance))
-            {
-                speed = rweMin(unitDefinition.maxVelocity, speed + unitDefinition.acceleration);
-            }
-            else
-            {
-                speed = rweMax(0_ss, speed - unitDefinition.acceleration);
-            }
-            auto climbLimit = unitDefinition.maxVelocity / 2_ss;
-            auto climb = rweMax(-climbLimit, rweMin(climbLimit, rawDirection.y / 4_ss));
-            auto velocity = UnitState::toDirection(unit.rotation) * speed;
-            velocity.y = climb;
-            return velocity;
-        }
-
         if (distanceSquared > (decelerationDistance * decelerationDistance))
         {
             auto targetVelocity = direction * unitDefinition.maxVelocity;
@@ -329,12 +305,23 @@ namespace rwe
 
     SimVector computeNewAttackRunVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateAttackRun& physics)
     {
-        // On a run the aircraft flies flat out along its nose; the nose is
-        // turned towards the run's target point at the turn rate elsewhere,
-        // so the approach, run-out and turn-back are all banked arcs.
-        auto speed = physics.currentVelocity.length();
-        speed = rweMin(unitDefinition.maxVelocity, speed + unitDefinition.acceleration);
-        return UnitState::toDirection(unit.rotation) * speed;
+        auto targetPoint = computeAttackRunTargetPoint(unit, unitDefinition, physics);
+
+        auto rawDirection = targetPoint - unit.position;
+        auto direction = rawDirection.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
+
+        // Always accelerate toward max velocity along the desired direction.
+        // Unlike computeNewAirUnitVelocity, no deceleration near the target.
+        auto targetVelocity = direction * unitDefinition.maxVelocity;
+        auto velocityDelta = targetVelocity - physics.currentVelocity;
+        auto deltaDirection = velocityDelta.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
+
+        auto newVelocity = physics.currentVelocity + (deltaDirection * unitDefinition.acceleration);
+        if (newVelocity.lengthSquared() > (unitDefinition.maxVelocity * unitDefinition.maxVelocity))
+        {
+            newVelocity = newVelocity.normalized() * unitDefinition.maxVelocity;
+        }
+        return newVelocity;
     }
 
     SimScalar defaultAttackRunOutDistance(const UnitDefinition& unitDefinition, SimScalar /*weaponMaxRange*/)

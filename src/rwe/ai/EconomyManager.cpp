@@ -1,4 +1,5 @@
 #include "EconomyManager.h"
+#include <rwe/ai/AiSideUnits.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
@@ -25,8 +26,15 @@ namespace rwe
         bb.idleBuilders.clear();
         bb.factories.clear();
         bb.combatUnits.clear();
+        bb.scoutUnits.clear();
+        bb.transports.clear();
 
         const auto& player = sim.getPlayer(aiOwner);
+        if (!bb.sideUnitsResolved)
+        {
+            bb.sideUnits = resolveAiSideUnits(sim, player.side);
+            bb.sideUnitsResolved = true;
+        }
         bb.currentMetal = player.metal;
         bb.currentEnergy = player.energy;
         bb.metalStorage = player.maxMetal;
@@ -63,19 +71,30 @@ namespace rwe
                 bb.baseAnchor = bb.homePosition;
             }
 
+            // Units booked onto a transport are spoken for until they are set down again.
+            const bool isFerryPassenger = bb.ferryPassengers.count(unitId.value) > 0;
+
             if (def.builder && !def.isMobile && !def.commander)
             {
                 bb.factories.push_back(unitId);
             }
+            else if (def.isMobile && def.isTransport() && !def.builder)
+            {
+                bb.transports.push_back(unitId);
+            }
+            else if (def.isMobile && (isAiScoutType(bb.sideUnits, unit.unitType) || (def.canFly && !def.canAttack && !def.builder)))
+            {
+                bb.scoutUnits.push_back(unitId);
+            }
             else if (def.builder)
             {
-                if (unit.orders.empty())
+                if (unit.orders.empty() && !isFerryPassenger)
                 {
                     ++bb.idleBuilderCount;
                     bb.idleBuilders.push_back(unitId);
                 }
             }
-            else if (def.isMobile && def.canAttack && !def.canFly && (!def.weapon1.empty() || !def.weapon2.empty()))
+            else if (def.isMobile && def.canAttack && !def.canFly && (!def.weapon1.empty() || !def.weapon2.empty()) && !isFerryPassenger)
             {
                 bb.combatUnits.push_back(unitId);
             }

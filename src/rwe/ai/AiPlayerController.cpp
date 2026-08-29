@@ -33,6 +33,21 @@ namespace rwe
             threatMap.rebuild(sim, playerId, blackboard, profile.cheatModeOmniscient);
         }
 
+        // 3b. Where can our ground units walk to? Rebuilt now and then; the ground does not change.
+        ++ticksSinceReachabilityRebuild;
+        if (blackboard.baseAnchor && blackboard.sideUnitsResolved && (!reachability.isValid() || ticksSinceReachabilityRebuild >= 20 * SimTicksPerSecond))
+        {
+            ticksSinceReachabilityRebuild = 0;
+            std::string mover = blackboard.sideUnits.constructor.empty() ? (blackboard.commanderUnitId ? sim.getUnitState(*blackboard.commanderUnitId).unitType : std::string()) : blackboard.sideUnits.constructor;
+            auto moverDef = sim.unitDefinitions.find(mover);
+            if (moverDef != sim.unitDefinitions.end())
+            {
+                reachability.rebuild(sim, moverDef->second.movementCollisionInfo, *blackboard.baseAnchor);
+                blackboard.groundReachabilityValid = reachability.isValid();
+                blackboard.hasUnreachableGround = reachability.walkableTileCount() > reachability.reachableTileCount() + 64;
+            }
+        }
+
         // 4. Which phase of the game are we in?
         auto previousPhase = blackboard.phase;
         strategic.update(profile, blackboard);
@@ -82,10 +97,11 @@ namespace rwe
         }
 
         // 5. Economy and production.
-        build.update(sim, playerId, profile, blackboard, rng, outCommands);
+        build.update(sim, playerId, profile, blackboard, reachability, rng, outCommands);
 
-        // 6. Eyes and fists.
-        scout.update(sim, profile, threatMap, blackboard, outCommands);
+        // 6. Eyes, lift and fists.
+        scout.update(sim, profile, threatMap, reachability, blackboard, outCommands);
+        transport.update(sim, playerId, profile, reachability, build, blackboard, rng, outCommands);
         army.update(sim, playerId, profile, threatMap, blackboard, outCommands);
     }
 }

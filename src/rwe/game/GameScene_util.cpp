@@ -263,26 +263,11 @@ namespace rwe
 
     Matrix4f unitRenderTransform(const UnitState& unit, const UnitDefinition& unitDefinition, const Vector3f& position, float rotation, float frac)
     {
-        auto transform = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
-        auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unit.physics);
-        if (unitDefinition.canFly && airPhysics != nullptr)
-        {
-            // The sim eases the bank angle in and out with the turn; pitch follows the climb or dive.
-            auto roll = airPhysics->previousRoll.value + ((airPhysics->roll.value - airPhysics->previousRoll.value) * frac);
-
-            SimVector velocity(0_ss, 0_ss, 0_ss);
-            match(
-                airPhysics->movementState,
-                [&](const AirMovementStateFlying& m) { velocity = m.currentVelocity; },
-                [&](const AirMovementStateAttackRun& m) { velocity = m.currentVelocity; },
-                [&](const AirMovementStateTakingOff& m) { velocity = m.currentVelocity; },
-                [&](const AirMovementStateLanding&) {});
-            auto horizontal = std::sqrt(simScalarToFloat(velocity.x) * simScalarToFloat(velocity.x) + simScalarToFloat(velocity.z) * simScalarToFloat(velocity.z));
-            auto pitch = horizontal > 0.01f ? std::clamp(std::atan2(simScalarToFloat(velocity.y), horizontal) * 0.6f, -0.35f, 0.35f) : 0.0f;
-
-            transform = transform * Matrix4f::rotationX(-pitch) * Matrix4f::rotationZ(roll);
-        }
-        return transform;
+        // Aircraft are drawn level: yaw only, no bank or pitch.
+        (void)unit;
+        (void)unitDefinition;
+        (void)frac;
+        return Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
     }
 
     Matrix4f getPieceTransformForRender(const std::string& pieceName, const UnitModelDefinition& modelDefinition, const std::vector<UnitMesh>& pieces, float frac)

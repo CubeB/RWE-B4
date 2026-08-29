@@ -179,12 +179,7 @@ namespace rwe
         UnitState unit({}, std::unique_ptr<CobEnvironment>{});
         auto def = makeBomberDefinition();
 
-        // Flight is along the nose: the heading is turned elsewhere, so here
-        // the aircraft already faces +x.
-        unit.rotation = UnitState::toRotation(SimVector(1_ss, 0_ss, 0_ss));
-        unit.previousRotation = unit.rotation;
-
-        SECTION("accelerates from rest along its heading")
+        SECTION("accelerates from rest toward target")
         {
             unit.position = SimVector(0_ss, 50_ss, 0_ss);
             auto state = makeAttackRunState(SimVector(100_ss, 50_ss, 0_ss));
@@ -193,7 +188,7 @@ namespace rwe
             auto v = computeNewAttackRunVelocity(unit, def, state);
             REQUIRE(v.x > 0_ss);
             REQUIRE(v.x <= def.acceleration);
-            REQUIRE(v.z * v.z < SimScalar(0.0001f)); // heading is +x up to fixed-point rounding
+            REQUIRE(v.z == 0_ss);
         }
 
         SECTION("does not slow down when very close to target (Engaging lookahead applies)")
@@ -207,7 +202,7 @@ namespace rwe
             auto v = computeNewAttackRunVelocity(unit, def, state);
             // velocity magnitude should remain at maxVelocity (4)
             REQUIRE(v.x == 4_ss);
-            REQUIRE(v.z * v.z < SimScalar(0.0001f)); // heading is +x up to fixed-point rounding
+            REQUIRE(v.z == 0_ss);
         }
     }
 

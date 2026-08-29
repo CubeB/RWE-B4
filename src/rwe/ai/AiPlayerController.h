@@ -8,9 +8,11 @@
 #include <rwe/ai/BuildManager.h>
 #include <rwe/ai/EconomyManager.h>
 #include <rwe/ai/PerceptionManager.h>
+#include <rwe/ai/ReachabilityMap.h>
 #include <rwe/ai/ScoutManager.h>
 #include <rwe/ai/StrategicManager.h>
 #include <rwe/ai/ThreatMap.h>
+#include <rwe/ai/TransportManager.h>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/sim/PlayerId.h>
 #include <vector>
@@ -37,6 +39,8 @@ namespace rwe
         const AiTuningProfile& getProfile() const { return profile; }
         const AiBlackboard& getBlackboard() const { return blackboard; }
         const ThreatMap& getThreatMap() const { return threatMap; }
+        const ReachabilityMap& getReachabilityMap() const { return reachability; }
+        const TransportManager& getTransportManager() const { return transport; }
         const std::minstd_rand& getRng() const { return rng; }
 
     private:
@@ -46,12 +50,15 @@ namespace rwe
         AiBlackboard blackboard;
         ThreatMap threatMap;
         int ticksSinceThreatRebuild{0};
+        ReachabilityMap reachability;
+        int ticksSinceReachabilityRebuild{0};
 
         PerceptionManager perception;
         EconomyManager economy;
         StrategicManager strategic;
         BuildManager build;
         ScoutManager scout;
+        TransportManager transport;
         ArmyManager army;
     };
 }

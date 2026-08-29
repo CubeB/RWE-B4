@@ -99,7 +99,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Transports: load and unload orders with TA's own cursors and panel buttons; carried units ride the transport's <code>QueryTransport</code> piece and are set down on clear ground</li>
   <li>Bombers fly through the target on their run, release when the timing is right, and turn back after a short run‑out or at the map edge instead of flying off the map</li>
   <li>Ships and shipyards can be placed and built in water (a missing <code>MaxWaterDepth</code> now means any depth); torpedoes only hit units in the water and run under the surface</li>
-  <li>Aircraft fly along their nose and turn at their real turn rate (banked arcs, eased roll and pitch), move off while climbing, and bombers drop a stick of three per pass</li>
+  <li>Aircraft move off and steer while climbing out, and bombers drop a stick of three per pass (the heading-only flight model tried in between was reverted: the force-steered model flies better)</li>
   <li>Sea transports load through their own scripts — doors open, the crane swings out and hooks the unit, stows it in the hold — and the Atlas hovers down to lift; LOAD/BLAST/CLOAK buttons appear only where they apply</li>
   <li>COB VM fixes: script call arguments were passed in reverse, packed positions unpacked unsigned, <code>attach-unit</code>/<code>drop-unit</code> implemented</li>
   <li>Units only auto‑target what their owner can see or has on radar; a new order interrupts building cleanly; shift‑click removes a planned building</li>
@@ -135,7 +135,9 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 
 <h3>Skirmish AI</h3>
 <ul>
-  <li>Perception through fog of war, threat map, scouting, expansion build order (solars, extractors on real patches, lab, radar, towers, metal makers), factories, constructors that assist</li>
+  <li>Scouting: a Peeper or Fink from the air plant flies three‑leg routes to the ground seen least recently, keeping clear of known guns; a scout vehicle from the vehicle plant and, until they exist, a raider standing in; hurt scouts head home</li>
+  <li>Transports: the base floods the heightmap to learn what its kbots can walk to; when there is metal across the water an Atlas or Valkyrie is built and ferries a constructor over to run an outpost, and in the attack phase it carries the army to a landing near an enemy it cannot walk to</li>
+  <li>Perception through fog of war, threat map, expansion build order (solars, extractors on real patches, lab, radar, towers, metal makers), factories, constructors that assist</li>
   <li>Single‑army rally, defend and attack cycle; Easy / Standard / Hard / Brutal profiles via <code>--ai-difficulty</code></li>
   <li>Debug panel and 30‑second status lines in <code>rwe.log</code>; verified live on Coast To Coast</li>
 </ul>
@@ -143,7 +145,8 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <h3>Build and tooling</h3>
 <ul>
   <li>Windows checkouts without symlinks build (real asio include path); MinGW runtime DLLs copied next to the executables</li>
-  <li>Headless‑safe logging for tests; 34 new test cases across orders, pathing, economy, visibility and burning</li>
+  <li>Fixed the freeze under heavy fire: a deadlock between the render loop setting sound volumes and SDL_mixer's audio thread reporting finished tracks (track‑finished events are now queued for the main thread). <code>RWE_DEBUG_SPAWN=ARMPW*12@0:8:1</code> reproduces it</li>
+  <li>Headless‑safe logging for tests; 40 new test cases across orders, pathing, economy, visibility, burning, transports, bombing and AI</li>
 </ul>
 
 <h2 id="roadmap">Roadmap<small>Six phases, in order of dependence. The full plan lives in <code>docs/ROADMAP.md</code>.</small></h2>
@@ -160,7 +163,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <h3>Needs checking in‑game</h3>
 <ul>
   <li>Lighting direction (now a low sun from the left; tune against <code>lightingexample.png</code>)</li>
-  <li>Construction phases, aircraft banking amount, Atlas hover height, transport ship crane reach (200 units is an estimate)</li>
+  <li>Atlas hover height, transport ship crane reach (200 units is an estimate), AI scout routes and ferry trips on island maps</li>
 </ul>
 
 <h3>Phase 0</h3>
@@ -175,7 +178,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <ul>
   <li>Resurrect order (corpse → unit mapping)</li>
   <li>Builders on patrol repair and reclaim en route; capture progress decays when the captor stops</li>
-  <li>Transports: units ordering themselves aboard by clicking a transport, AI use</li>
+  <li>Transports: units ordering themselves aboard by clicking a transport; sea transports for the AI</li>
   <li>Aiming scripts running twice (#42)</li>
   <li>Reclaim polish: sounds, progress in the info panel, auto‑reclaim for idle builders</li>
   <li>Self‑destruct blink effect; unit debris severity from actual overkill; SHATTER as real polygon fragments; explosions after a script's first sleep</li>
@@ -189,7 +192,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <ul>
   <li>AI in multiplayer: commands generated locally are never sent, so a network game with an AI would desync</li>
   <li>Several platoons with role templates; TDF‑loaded profiles and build orders; per‑slot difficulty in the lobby</li>
-  <li>Metal makers and storage in the planner; radar jammers and air; tuning from AI‑vs‑AI runs</li>
+  <li>Storage in the planner; radar jammers, fighters and bombers; tuning from AI‑vs‑AI runs</li>
   <li>Naval doctrine, air‑only strategies, multi‑AI teams</li>
 </ul>
 

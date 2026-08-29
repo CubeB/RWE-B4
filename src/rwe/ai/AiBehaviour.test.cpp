@@ -89,6 +89,57 @@ namespace rwe
             sim.unitDefinitions["ARMRAD"] = makeDef(false, false, false, "", 100u);
             sim.unitDefinitions["CORCOM"] = makeDef(true, true, true, "", 300u);
             sim.unitDefinitions["CORSOLAR"] = makeDef(false, false, false, "", 50u);
+
+            // Eyes and lift: a scout plane, an air transport and the plants that make them.
+            auto peeper = makeDef(false, false, true, "", 400u);
+            peeper.canFly = true;
+            peeper.maxVelocity = 6_ss;
+            sim.unitDefinitions["ARMPEEP"] = peeper;
+            auto atlas = makeDef(false, false, true, "", 100u);
+            atlas.canFly = true;
+            atlas.transportCapacity = 1;
+            atlas.transportSize = 3;
+            sim.unitDefinitions["ARMATLAS"] = atlas;
+            sim.unitDefinitions["ARMAP"] = makeDef(false, true, false, "", 100u);
+            sim.unitDefinitions["ARMVP"] = makeDef(false, true, false, "", 100u);
+            sim.unitDefinitions["ARMFAV"] = makeDef(false, false, true, "LASER", 300u);
+            sim.unitDefinitions["ARMFLASH"] = makeDef(false, false, true, "LASER", 200u);
+        }
+
+        /** Two banks of land either side of a channel too deep for a kbot, running north to south. */
+        MapTerrain makeChannelTerrain()
+        {
+            Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(60));
+            for (int y = 0; y < 64; ++y)
+            {
+                for (int x = 28; x < 36; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(0));
+                }
+            }
+            return MapTerrain(std::move(heights), 30_ss);
+        }
+
+        template <typename Order>
+        std::vector<Order> ordersFor(const std::vector<PlayerCommand>& commands, UnitId unit)
+        {
+            std::vector<Order> found;
+            for (const auto& c : commands)
+            {
+                auto unitCommand = std::get_if<PlayerUnitCommand>(&c);
+                if (!unitCommand || unitCommand->unit != unit)
+                {
+                    continue;
+                }
+                if (auto issue = std::get_if<PlayerUnitCommand::IssueOrder>(&unitCommand->command))
+                {
+                    if (auto order = std::get_if<Order>(&issue->order))
+                    {
+                        found.push_back(*order);
+                    }
+                }
+            }
+            return found;
         }
 
         UnitId addUnit(GameSimulation& sim, const std::string& type, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
@@ -103,6 +154,12 @@ namespace rwe
             unit.previousPosition = pos;
             unit.hitPoints = 100;
             unit.buildTimeCompleted = sim.unitDefinitions.at(type).buildTime;
+            if (sim.unitDefinitions.at(type).canFly)
+            {
+                UnitPhysicsInfoAir air;
+                air.movementState = AirMovementStateFlying();
+                unit.physics = air;
+            }
             return unitId;
         }
 
@@ -319,6 +376,140 @@ namespace rwe
             REQUIRE(cheat.getBlackboard().phase == GamePhase::Attack);
             REQUIRE(cheat.getBlackboard().attackTarget.has_value());
             REQUIRE(countOrders<MoveOrder>(commands) >= 3);
+        }
+    }
+
+    TEST_CASE("scouts explore the ground the AI has not seen", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(100_ss, 0_ss, 100_ss), script);
+
+        AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u);
+        std::vector<PlayerCommand> commands;
+
+        SECTION("a scout plane is sent along a string of legs and the army keeps its raiders")
+        {
+            auto peeperId = addUnit(sim, "ARMPEEP", ai, SimVector(120_ss, 80_ss, 120_ss), script);
+            auto raiderId = addUnit(sim, "ARMPW", ai, SimVector(140_ss, 0_ss, 100_ss), script);
+            runTicks(sim, controller, 61, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.scoutUnits == std::vector<UnitId>{peeperId});
+            REQUIRE_FALSE(bb.scoutUnitId.has_value());
+            REQUIRE(bb.combatUnits == std::vector<UnitId>{raiderId});
+
+            auto legs = ordersFor<MoveOrder>(commands, peeperId);
+            REQUIRE(legs.size() == 3);
+            // Each leg heads for different ground.
+            REQUIRE(legs[0].destination.distanceSquared(legs[1].destination) > (300_ss * 300_ss));
+            REQUIRE(legs[1].destination.distanceSquared(legs[2].destination) > (300_ss * 300_ss));
+            REQUIRE(bb.scoutTargets.count(peeperId.value) == 1);
+        }
+
+        SECTION("without a dedicated scout a combat unit stands in, one leg at a time")
+        {
+            auto raiderId = addUnit(sim, "ARMPW", ai, SimVector(140_ss, 0_ss, 100_ss), script);
+            // Until it is made the scout, the army sends it to the rally point; only the scouting pass counts here.
+            runTicks(sim, controller, 59, commands);
+            commands.clear();
+            runTicks(sim, controller, 2, commands);
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.scoutUnitId == raiderId);
+            REQUIRE(ordersFor<MoveOrder>(commands, raiderId).size() == 1);
+        }
+
+        SECTION("the air plant builds a scout plane before anything else")
+        {
+            auto plantId = addUnit(sim, "ARMAP", ai, SimVector(200_ss, 0_ss, 200_ss), script);
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMPEEP") == 1);
+            REQUIRE(countQueueCommands(commands, "ARMATLAS") == 0);
+            (void)plantId;
+        }
+    }
+
+    TEST_CASE("the AI ferries a builder across water it cannot walk", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeChannelTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        // Kbots cannot wade the channel.
+        for (auto* type : {"ARMCOM", "ARMCK", "ARMPW"})
+        {
+            sim.unitDefinitions.at(type).movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 20u};
+        }
+        // World space is centred on the map: the channel at tiles 28-36 runs
+        // down world x -64..64, and the base sits on the west bank.
+        // A rich patch on the east bank, at tile (50, 32): world (296, 8).
+        for (int y = 32; y < 34; ++y)
+        {
+            for (int x = 50; x < 52; ++x)
+            {
+                sim.metalGrid.set(x, y, static_cast<unsigned char>(200));
+            }
+        }
+
+        auto commanderPosition = SimVector(-300_ss, 60_ss, 0_ss);
+        addUnit(sim, "ARMCOM", ai, commanderPosition, script);
+        auto builderId = addUnit(sim, "ARMCK", ai, SimVector(-250_ss, 60_ss, 0_ss), script);
+        const SimVector farBankPatch(296_ss, 60_ss, 8_ss);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        AiPlayerController controller(ai, profile, 42u);
+        std::vector<PlayerCommand> commands;
+
+        SECTION("the base knows the far bank is out of reach")
+        {
+            runTicks(sim, controller, 2, commands);
+            const auto& reach = controller.getReachabilityMap();
+            REQUIRE(reach.isValid());
+            REQUIRE(reach.isReachable(sim, commanderPosition));
+            REQUIRE_FALSE(reach.isReachable(sim, farBankPatch));
+            REQUIRE(reach.isWalkable(sim, farBankPatch));
+            REQUIRE_FALSE(reach.isWalkable(sim, SimVector(0_ss, 0_ss, 0_ss)));
+            REQUIRE(controller.getBlackboard().hasUnreachableGround);
+        }
+
+        SECTION("an idle transport is sent to carry the builder to the patch")
+        {
+            auto atlasId = addUnit(sim, "ARMATLAS", ai, SimVector(-280_ss, 120_ss, 20_ss), script);
+            runTicks(sim, controller, 16, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.wantsTransport);
+            auto loads = ordersFor<LoadOrder>(commands, atlasId);
+            REQUIRE(loads.size() == 1);
+            REQUIRE(loads.front().target == builderId);
+            auto unloads = ordersFor<UnloadOrder>(commands, atlasId);
+            REQUIRE(unloads.size() == 1);
+            // Set down on the east bank, on the patch.
+            REQUIRE(unloads.front().destination.x > 64_ss);
+            REQUIRE(unloads.front().destination.distanceSquared(farBankPatch) < (32_ss * 32_ss));
+            REQUIRE(bb.ferryPassengers.count(builderId.value) == 1);
+            REQUIRE(controller.getTransportManager().getFerries().count(atlasId.value) == 1);
+
+            // Booked passengers are left alone by the builder planner.
+            commands.clear();
+            runTicks(sim, controller, 30, commands);
+            REQUIRE(ordersFor<BuildOrder>(commands, builderId).empty());
+        }
+
+        SECTION("the air plant queues a transport once a scout plane exists and there is ground to reach")
+        {
+            addUnit(sim, "ARMAP", ai, SimVector(-200_ss, 60_ss, -100_ss), script);
+            addUnit(sim, "ARMPEEP", ai, SimVector(-200_ss, 120_ss, -40_ss), script);
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(controller.getBlackboard().wantsTransport);
+            REQUIRE(controller.getBlackboard().factories.size() == 1);
+            REQUIRE(countQueueCommands(commands, "ARMPEEP") == 0);
+            REQUIRE(countQueueCommands(commands, "ARMATLAS") == 1);
         }
     }
 
