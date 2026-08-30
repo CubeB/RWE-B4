@@ -616,8 +616,10 @@ namespace rwe
         // draw minimap dots
         for (const auto& [_, unit] : simulation.units)
         {
-            if (!unitIsDetectableByLocalPlayer(unit))
+            if (!unitIsDetectableByLocalPlayer(unit) || unit.carriedBy)
             {
+                // Units riding in a transport are inside it: only the
+                // transport shows on the minimap.
                 continue;
             }
             auto minimapPos = worldToMinimap * simVectorToFloat(unit.position);
@@ -1152,9 +1154,9 @@ namespace rwe
         {
             for (const auto& [_, unit] : simulation.units)
             {
-                if (!unit.isOwnedBy(localPlayerId))
+                if (!unit.isOwnedBy(localPlayerId) || unit.carriedBy)
                 {
-                    // only draw healthbars on units we own
+                    // only draw healthbars on units we own, and not on cargo
                     continue;
                 }
 
@@ -1179,7 +1181,7 @@ namespace rwe
         {
             for (const auto& [_, unit] : simulation.units)
             {
-                if (unit.isDead() || unit.isOwnedBy(localPlayerId) || unitIsVisibleToLocalPlayer(unit) || !unitIsDetectableByLocalPlayer(unit))
+                if (unit.isDead() || unit.isOwnedBy(localPlayerId) || unit.carriedBy || unitIsVisibleToLocalPlayer(unit) || !unitIsDetectableByLocalPlayer(unit))
                 {
                     continue;
                 }
@@ -3374,6 +3376,11 @@ namespace rwe
                 // What cannot be seen cannot be clicked.
                 continue;
             }
+            if (entry.second.carriedBy)
+            {
+                // Cargo has no hitbox: clicks go to the transport carrying it.
+                continue;
+            }
             const auto& unitDefinition = simulation.unitDefinitions.at(entry.second.unitType);
             auto selectionMesh = gameMediaDatabase.getSelectionCollisionMesh(unitDefinition.objectName);
             auto distance = selectionIntersect(entry.second, *selectionMesh.value(), ray);
@@ -3540,6 +3547,13 @@ namespace rwe
         auto unit = tryGetUnit(unitId);
         if (unit)
         {
+            // An idle unit has nothing to queue behind, so this order starts
+            // straight away — which means an aircraft part-way through setting
+            // down has to break off and get back in the air for it.
+            if (unit->get().orders.empty())
+            {
+                UnitBehaviorService(&simulation).interruptCurrentTask(unitId);
+            }
             unit->get().addOrder(order);
         }
     }

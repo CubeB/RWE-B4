@@ -312,6 +312,14 @@ namespace rwe
         void deleteThread(const CobThread* thread);
 
         /**
+         * True while a thread running the named function still exists, whether
+         * it is ready, blocked or sleeping. Lets the simulation wait for an
+         * animation to play out — a transport's crane finishing its swing, say
+         * — instead of guessing at a duration.
+         */
+        bool isThreadRunning(const std::string& functionName) const;
+
+        /**
          * Sends a signal to all threads.
          * If the signal is non-zero after being ANDed
          * with the thread's signal mask, the thread is killed.

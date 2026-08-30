@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <random>
 #include <rwe/ai/AiBlackboard.h>
 #include <rwe/ai/AiTuningProfile.h>
@@ -14,12 +15,47 @@
 #include <rwe/ai/ThreatMap.h>
 #include <rwe/ai/TransportManager.h>
 #include <rwe/game/PlayerCommand.h>
+#include <rwe/sim/GameTime.h>
 #include <rwe/sim/PlayerId.h>
+#include <string>
 #include <vector>
 
 namespace rwe
 {
     struct GameSimulation;
+
+    /**
+     * Wall-clock timing of the AI's passes, for hunting frame stalls.
+     *
+     * Off unless the RWE_AI_PROFILE environment variable is set. It is a
+     * pure observer: nothing it measures is ever read back into the
+     * simulation, so switching it on cannot change what the AI does.
+     */
+    class AiProfiler
+    {
+    public:
+        /** Whether RWE_AI_PROFILE was set when the process started. */
+        static bool enabled();
+
+        struct PassStats
+        {
+            double totalMs{0.0};
+            double worstMs{0.0};
+            unsigned int calls{0};
+            unsigned int spikes{0};
+        };
+
+        /** Times one pass, logging straight away if it blew the spike budget. */
+        void record(const char* pass, double milliseconds, PlayerId player, GameTime now);
+
+        /** Logs the accumulated totals since the last report, then clears them. */
+        void report(PlayerId player, GameTime now);
+
+    private:
+        // std::map so the report comes out in a stable order.
+        std::map<std::string, PassStats> passes;
+        double windowMs{0.0};
+    };
 
     /**
      * One computer player. Runs inside the deterministic simulation and only
@@ -60,5 +96,7 @@ namespace rwe
         ScoutManager scout;
         TransportManager transport;
         ArmyManager army;
+
+        AiProfiler profiler;
     };
 }

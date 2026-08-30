@@ -1,4 +1,7 @@
 #include "AiPlayerController.h"
+#include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -7,6 +10,52 @@
 
 namespace rwe
 {
+    namespace
+    {
+        // A pass slower than this is worth a line of its own in the log.
+        const double AiProfileSpikeThresholdMs = 2.0;
+
+        // How often the accumulated totals are dumped.
+        const unsigned int AiProfileReportIntervalTicks = 30u * static_cast<unsigned int>(SimTicksPerSecond);
+    }
+
+    bool AiProfiler::enabled()
+    {
+        // Read once: the answer cannot change, and getenv is not cheap.
+        static const bool on = std::getenv("RWE_AI_PROFILE") != nullptr;
+        return on;
+    }
+
+    void AiProfiler::record(const char* pass, double milliseconds, PlayerId player, GameTime now)
+    {
+        auto& stats = passes[pass];
+        stats.totalMs += milliseconds;
+        stats.worstMs = std::max(stats.worstMs, milliseconds);
+        ++stats.calls;
+        windowMs += milliseconds;
+        if (milliseconds >= AiProfileSpikeThresholdMs)
+        {
+            ++stats.spikes;
+            LOG_INFO << "AI profile: player " << player.value << " pass " << pass << " took " << milliseconds << " ms at tick " << now.value;
+        }
+    }
+
+    void AiProfiler::report(PlayerId player, GameTime now)
+    {
+        if (passes.empty())
+        {
+            return;
+        }
+        std::string line;
+        for (const auto& [name, stats] : passes)
+        {
+            line += " " + name + "=" + std::to_string(stats.totalMs) + "ms/" + std::to_string(stats.calls) + " (worst " + std::to_string(stats.worstMs) + "ms, " + std::to_string(stats.spikes) + " spikes)";
+        }
+        LOG_INFO << "AI profile summary: player " << player.value << " at tick " << now.value << ", total " << windowMs << " ms:" << line;
+        passes.clear();
+        windowMs = 0.0;
+    }
+
     AiPlayerController::AiPlayerController(
         PlayerId playerId,
         AiTuningProfile profile,
@@ -19,18 +68,34 @@ namespace rwe
 
     void AiPlayerController::tick(const GameSimulation& sim, std::vector<PlayerCommand>& outCommands)
     {
+        // Times a pass when RWE_AI_PROFILE is set, and simply runs it otherwise.
+        // Nothing measured here feeds back into the sim, so this is invisible
+        // to determinism.
+        const bool profiling = AiProfiler::enabled();
+        auto timed = [&](const char* name, auto&& pass) {
+            if (!profiling)
+            {
+                pass();
+                return;
+            }
+            auto start = std::chrono::steady_clock::now();
+            pass();
+            auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            profiler.record(name, elapsed, playerId, sim.gameTime);
+        };
+
         // 1. What do we own, and how is the economy doing?
-        economy.refresh(sim, playerId, profile, blackboard);
+        timed("economy", [&] { economy.refresh(sim, playerId, profile, blackboard); });
 
         // 2. What do we know about the enemy?
-        perception.refresh(sim, playerId, profile, blackboard);
+        timed("perception", [&] { perception.refresh(sim, playerId, profile, blackboard); });
 
         // 3. Influence map, once a second.
         ++ticksSinceThreatRebuild;
         if (threatMap.isEmpty() || ticksSinceThreatRebuild >= profile.threatMapTickInterval)
         {
             ticksSinceThreatRebuild = 0;
-            threatMap.rebuild(sim, playerId, blackboard, profile.cheatModeOmniscient);
+            timed("threatMap", [&] { threatMap.rebuild(sim, playerId, blackboard, profile.cheatModeOmniscient); });
         }
 
         // 3b. Where can our ground units walk to? Rebuilt now and then; the ground does not change.
@@ -42,9 +107,11 @@ namespace rwe
             auto moverDef = sim.unitDefinitions.find(mover);
             if (moverDef != sim.unitDefinitions.end())
             {
-                reachability.rebuild(sim, moverDef->second.movementCollisionInfo, *blackboard.baseAnchor);
-                blackboard.groundReachabilityValid = reachability.isValid();
-                blackboard.hasUnreachableGround = reachability.walkableTileCount() > reachability.reachableTileCount() + 64;
+                timed("reachability", [&] {
+                    reachability.rebuild(sim, moverDef->second.movementCollisionInfo, *blackboard.baseAnchor);
+                    blackboard.groundReachabilityValid = reachability.isValid();
+                    blackboard.hasUnreachableGround = reachability.walkableTileCount() > reachability.reachableTileCount() + 64;
+                });
             }
         }
 
@@ -97,11 +164,16 @@ namespace rwe
         }
 
         // 5. Economy and production.
-        build.update(sim, playerId, profile, blackboard, reachability, rng, outCommands);
+        timed("build", [&] { build.update(sim, playerId, profile, blackboard, reachability, rng, outCommands); });
 
         // 6. Eyes, lift and fists.
-        scout.update(sim, profile, threatMap, reachability, blackboard, outCommands);
-        transport.update(sim, playerId, profile, reachability, build, blackboard, rng, outCommands);
-        army.update(sim, playerId, profile, threatMap, blackboard, outCommands);
+        timed("scout", [&] { scout.update(sim, profile, threatMap, reachability, blackboard, outCommands); });
+        timed("transport", [&] { transport.update(sim, playerId, profile, reachability, build, blackboard, rng, outCommands); });
+        timed("army", [&] { army.update(sim, playerId, profile, threatMap, blackboard, outCommands); });
+
+        if (profiling && sim.gameTime.value % AiProfileReportIntervalTicks == 0)
+        {
+            profiler.report(playerId, sim.gameTime);
+        }
     }
 }

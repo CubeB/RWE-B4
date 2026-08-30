@@ -60,6 +60,8 @@ namespace rwe
 
     GameHash computeHashOf(const DiscreteRect& r);
 
+    GameHash computeHashOf(const MapFeature& f);
+
     GameHash computeHashOf(const GameSimulation& simulation);
 
     template <typename... Ts>

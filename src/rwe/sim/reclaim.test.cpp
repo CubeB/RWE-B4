@@ -201,14 +201,19 @@ namespace rwe
 
     TEST_CASE("computeFeatureReclaimWork", "[reclaim]")
     {
-        SECTION("is the sum of the feature's metal and energy")
+        SECTION("is the sum of the feature's metal and energy when it has no hit points")
         {
-            REQUIRE(computeFeatureReclaimWork(makeFeatureDef("rock", 100u, 50u, true)) == 150u);
+            REQUIRE(computeFeatureReclaimWork(makeFeatureDef("rock", 100u, 50u, true), 0u) == 150u);
+        }
+
+        SECTION("adds a quarter of the feature's remaining hit points")
+        {
+            REQUIRE(computeFeatureReclaimWork(makeFeatureDef("rock", 100u, 50u, true), 2000u) == 650u);
         }
 
         SECTION("is never zero, so worthless features can still be cleared")
         {
-            REQUIRE(computeFeatureReclaimWork(makeFeatureDef("twig", 0u, 0u, true)) == 1u);
+            REQUIRE(computeFeatureReclaimWork(makeFeatureDef("twig", 0u, 0u, true), 0u) == 1u);
         }
     }
 

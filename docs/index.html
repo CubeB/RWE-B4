@@ -71,8 +71,8 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <div class="meta">
     <span>branch <b>revival</b></span>
     <span>base <b>upstream master b2d8a31 · 25 Mar 2026</b></span>
-    <span>updated <b>29 Aug 2026</b></span>
-    <span>tests <b>171 cases · 1824 assertions</b></span>
+    <span>updated <b>30 Aug 2026</b></span>
+    <span>tests <b>182 cases · 1924 assertions</b></span>
   </div>
 </header>
 <nav aria-label="Sections">
@@ -99,8 +99,13 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Transports: load and unload orders with TA's own cursors and panel buttons; carried units ride the transport's <code>QueryTransport</code> piece and are set down on clear ground</li>
   <li>Bombers fly through the target on their run, release when the timing is right, and turn back after a short run‑out or at the map edge instead of flying off the map</li>
   <li>Ships and shipyards can be placed and built in water (a missing <code>MaxWaterDepth</code> now means any depth); torpedoes only hit units in the water and run under the surface</li>
-  <li>Aircraft move off and steer while climbing out, and bombers drop a stick of three per pass (the heading-only flight model tried in between was reverted: the force-steered model flies better)</li>
+  <li>Aircraft move off and steer while climbing out, and bombers drop a stick of three per pass</li>
+  <li>An attack run holds speed and banks at the aircraft's own turn rate, so the turn back for another pass is an arc of radius <code>speed / turnRate</code> rather than a stop and a pivot; the run-out is sized from that radius, and a run is only committed to when the aircraft is close and lined up — one caught inside its own turn circle extends away first instead of orbiting and missing</li>
+  <li>Aircraft set down on dry land only, and an order given while one is landing aborts the descent and sends it back up</li>
+  <li>Construction aircraft have to be flying to use the fabricator, and circle slowly over whatever they are lathing</li>
   <li>Sea transports load through their own scripts — doors open, the crane swings out and hooks the unit, stows it in the hold — and the Atlas hovers down to lift; LOAD/BLAST/CLOAK buttons appear only where they apply</li>
+  <li>The crane takes one unit at a time and is not free until it has stowed it; one unload order sets down one unit; cargo has no hitbox, stays off the minimap, forgets its old orders and dies with the transport</li>
+  <li>Wreckage and scenery have hit points from the feature's <code>damage</code>: blasts break them apart into their <code>featuredead</code> form, and reclaim time follows what is left of them</li>
   <li>COB VM fixes: script call arguments were passed in reverse, packed positions unpacked unsigned, <code>attach-unit</code>/<code>drop-unit</code> implemented</li>
   <li>Units only auto‑target what their owner can see or has on radar; a new order interrupts building cleanly; shift‑click removes a planned building</li>
   <li>Units rock with recoil when they fire</li>
@@ -140,13 +145,14 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Perception through fog of war, threat map, expansion build order (solars, extractors on real patches, lab, radar, towers, metal makers), factories, constructors that assist</li>
   <li>Single‑army rally, defend and attack cycle; Easy / Standard / Hard / Brutal profiles via <code>--ai-difficulty</code></li>
   <li>Debug panel and 30‑second status lines in <code>rwe.log</code>; verified live on Coast To Coast</li>
+  <li>Frame stalls fixed: the ferry planner was re-scanning the whole map three times a second whenever it found nothing, dragging the sim from 30 to 7.8 ticks/s on a land map. Terrain reachability is now labelled once, metal searches walk an index of the patches, and <code>RWE_AI_PROFILE=1</code> times every AI pass</li>
 </ul>
 
 <h3>Build and tooling</h3>
 <ul>
   <li>Windows checkouts without symlinks build (real asio include path); MinGW runtime DLLs copied next to the executables</li>
   <li>Fixed the freeze under heavy fire: a deadlock between the render loop setting sound volumes and SDL_mixer's audio thread reporting finished tracks (track‑finished events are now queued for the main thread). <code>RWE_DEBUG_SPAWN=ARMPW*12@0:8:1</code> reproduces it</li>
-  <li>Headless‑safe logging for tests; 40 new test cases across orders, pathing, economy, visibility, burning, transports, bombing and AI</li>
+  <li>Headless‑safe logging for tests; 49 new test cases across orders, pathing, economy, visibility, burning, wreckage, transports, bombing and AI</li>
 </ul>
 
 <h2 id="roadmap">Roadmap<small>Six phases, in order of dependence. The full plan lives in <code>docs/ROADMAP.md</code>.</small></h2>
@@ -192,6 +198,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <ul>
   <li>AI in multiplayer: commands generated locally are never sent, so a network game with an AI would desync</li>
   <li>Several platoons with role templates; TDF‑loaded profiles and build orders; per‑slot difficulty in the lobby</li>
+  <li>Recuperating after losing part of the base: rebuilding what was destroyed, reclaiming its own wreckage, fortifying the side attacks came from</li>
   <li>Storage in the planner; radar jammers, fighters and bombers; tuning from AI‑vs‑AI runs</li>
   <li>Naval doctrine, air‑only strategies, multi‑AI teams</li>
 </ul>

@@ -78,6 +78,17 @@ namespace rwe
         /** Steers an air unit to a point that may be below cruise height; true once it hovers there. */
         bool hoverTowards(UnitInfo unitInfo, const SimVector& point);
 
+        /**
+         * Gets a construction aircraft ready to work on something at the given
+         * position: it takes off if it is sitting on the ground (the fabricator
+         * only reaches from the air), breaks off a landing, and once airborne
+         * holds a slow circuit over the job. Returns false while it is still
+         * getting airborne, so the caller waits.
+         *
+         * Ground builders are always ready and it returns true for them.
+         */
+        bool prepareBuilderForWork(UnitInfo unitInfo, const SimVector& workPosition);
+
         /** Whether the builder's arm reaches the target's footprint from where it stands. */
         bool withinBuildReach(UnitInfo unitInfo, const UnitState& target) const;
 

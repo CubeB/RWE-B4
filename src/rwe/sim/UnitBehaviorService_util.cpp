@@ -1,5 +1,6 @@
 #include "UnitBehaviorService_util.h"
 #include <algorithm>
+#include <rwe/sim/SimTicksPerSecond.h>
 
 #include <stdexcept>
 
@@ -29,8 +30,60 @@ namespace rwe
 
     std::optional<SimVector> findLandingLocation(const GameSimulation& sim, ConstUnitInfo unitInfo)
     {
-        // TODO: make this smarter
-        return unitInfo.state->position;
+        // Aircraft set down on dry land only: nothing in TA lands on the sea,
+        // and an aircraft that touched down over water used to sink into it.
+        // Look at the spot underneath first, then work outwards a ring of
+        // heightmap tiles at a time until there is somewhere clear to put it.
+        auto canLandAt = [&](const SimVector& candidate) {
+            auto ground = sim.terrain.getHeightAt(candidate.x, candidate.z);
+            if (ground < sim.terrain.getSeaLevel())
+            {
+                return false;
+            }
+            // isCollisionAt also rejects a footprint that runs off the map.
+            auto footprintRect = sim.computeFootprintRegion(candidate, unitInfo.definition->movementCollisionInfo);
+            return !sim.isCollisionAt(footprintRect, unitInfo.id);
+        };
+
+        const auto& position = unitInfo.state->position;
+        if (canLandAt(position))
+        {
+            return position;
+        }
+
+        // Nothing underneath, so a search is needed. A successful one is
+        // remembered by the caller, but a failure would be repeated every
+        // tick for as long as the aircraft loiters over water, so only look
+        // once a second. Sim time drives the throttle, so every peer agrees.
+        if (sim.gameTime.value % static_cast<unsigned int>(SimTicksPerSecond) != 0)
+        {
+            return std::nullopt;
+        }
+
+        auto origin = sim.terrain.worldToHeightmapCoordinate(position);
+        const int maxRings = 48;
+        for (int ring = 1; ring <= maxRings; ++ring)
+        {
+            for (int dz = -ring; dz <= ring; ++dz)
+            {
+                for (int dx = -ring; dx <= ring; ++dx)
+                {
+                    if (std::max(std::abs(dx), std::abs(dz)) != ring)
+                    {
+                        continue;
+                    }
+                    auto candidate = sim.terrain.heightmapIndexToWorldCenter(origin.x + dx, origin.y + dz);
+                    candidate.y = sim.terrain.getHeightAt(candidate.x, candidate.z);
+                    if (canLandAt(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+        }
+
+        // Nowhere within reach: stay airborne rather than ditching.
+        return std::nullopt;
     }
 
     std::pair<SimAngle, SimAngle> computeHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, SimScalar zOffset, ProjectilePhysicsType projectileType)
@@ -280,6 +333,35 @@ namespace rwe
         }
     }
 
+    SimScalar attackRunTurnRadius(const UnitDefinition& unitDefinition)
+    {
+        // The circle an aircraft flies at full speed: speed over turn rate.
+        if (unitDefinition.turnRate <= 0_ss)
+        {
+            return 0_ss;
+        }
+        return getTurnRadius(unitDefinition.maxVelocity, unitDefinition.turnRate);
+    }
+
+    AttackRunGeometry computeAttackRunGeometry(const UnitDefinition& unitDefinition, SimScalar weaponMaxRange)
+    {
+        AttackRunGeometry geometry;
+        geometry.turnRadius = attackRunTurnRadius(unitDefinition);
+
+        // Commit to the run about three seconds out — far enough that a bomb
+        // released on the way in still has time to fall, near enough that the
+        // aircraft is not holding a straight line across half the map. Never
+        // further than the weapon can reach.
+        auto threeSeconds = unitDefinition.maxVelocity * 90_ss;
+        geometry.commitDistance = rweMin(weaponMaxRange, rweMax(threeSeconds, geometry.turnRadius * 2_ss));
+
+        // About 20 degrees of heading error is close enough to call it lined up.
+        geometry.commitAngle = SimAngle(3600);
+
+        geometry.runOutDistance = defaultAttackRunOutDistance(unitDefinition, weaponMaxRange);
+        return geometry;
+    }
+
     SimVector computeAttackRunTargetPoint(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateAttackRun& physics)
     {
         if (physics.phase == AirMovementStateAttackRun::Phase::Departing)
@@ -307,30 +389,43 @@ namespace rwe
     {
         auto targetPoint = computeAttackRunTargetPoint(unit, unitDefinition, physics);
 
-        auto rawDirection = targetPoint - unit.position;
-        auto direction = rawDirection.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
+        // Speed: always winding up towards the aircraft's best. A run never
+        // brakes — flying slower does not help it hit anything.
+        auto speed = physics.currentVelocity.length();
+        speed = rweMin(unitDefinition.maxVelocity, speed + unitDefinition.acceleration);
 
-        // Always accelerate toward max velocity along the desired direction.
-        // Unlike computeNewAirUnitVelocity, no deceleration near the target.
-        auto targetVelocity = direction * unitDefinition.maxVelocity;
-        auto velocityDelta = targetVelocity - physics.currentVelocity;
-        auto deltaDirection = velocityDelta.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
+        // Heading: an aircraft cannot slide sideways, it banks. Swing the
+        // current heading towards the aim point by at most one tick's worth
+        // of turn, so coming back for another pass is a arc of radius
+        // speed / turnRate flown at full speed, rather than a stop and a
+        // pivot on the spot.
+        SimVector flatVelocity(physics.currentVelocity.x, 0_ss, physics.currentVelocity.z);
+        auto currentHeading = flatVelocity.lengthSquared() > 0_ss
+            ? UnitState::toRotation(flatVelocity)
+            : unit.rotation;
 
-        auto newVelocity = physics.currentVelocity + (deltaDirection * unitDefinition.acceleration);
-        if (newVelocity.lengthSquared() > (unitDefinition.maxVelocity * unitDefinition.maxVelocity))
-        {
-            newVelocity = newVelocity.normalized() * unitDefinition.maxVelocity;
-        }
-        return newVelocity;
+        SimVector toTarget(targetPoint.x - unit.position.x, 0_ss, targetPoint.z - unit.position.z);
+        auto desiredHeading = toTarget.lengthSquared() > 0_ss
+            ? UnitState::toRotation(toTarget)
+            : currentHeading;
+
+        auto newHeading = turnTowards(currentHeading, desiredHeading, SimAngle(unitDefinition.turnRate.value));
+
+        // Altitude is handled separately (the aircraft converges on its cruise
+        // height as the ground rises and falls), so the run itself is level.
+        return UnitState::toDirection(newHeading) * speed;
     }
 
     SimScalar defaultAttackRunOutDistance(const UnitDefinition& unitDefinition, SimScalar /*weaponMaxRange*/)
     {
-        // Run out far enough past the target to turn around and line up again:
-        // about twice the cruise altitude, kept between 250 and 600 units. The
-        // weapon's range is deliberately not used; a bomb's 1280 range would
-        // send the aircraft clean off the map before it turned.
-        return rweMax(250_ss, rweMin(600_ss, unitDefinition.cruiseAltitude * 2_ss));
+        // Run out far enough past the target that the turn back can be flown
+        // as one continuous arc and still end up pointing at the target: a
+        // half circle is two radii across, so two and a half gives room to
+        // straighten up. The weapon's range is deliberately not used; a bomb's
+        // 1280 range would send the aircraft clean off the map before it turned.
+        auto fromTurn = attackRunTurnRadius(unitDefinition) * 2.5_ssf;
+        auto fromAltitude = unitDefinition.cruiseAltitude * 2_ss;
+        return rweMax(250_ss, rweMin(900_ss, rweMax(fromTurn, fromAltitude)));
     }
 
     SimVector predictBombImpactPoint(const SimVector& bomberPosition, const SimVector& bomberVelocity, SimScalar groundY)
@@ -387,20 +482,49 @@ namespace rwe
 
     bool stepAttackRunPhase(
         const SimVector& unitPosition,
+        const SimVector& unitHeading,
         const SimVector& targetPosition,
-        SimScalar weaponMaxRange,
+        const AttackRunGeometry& geometry,
         AirMovementStateAttackRun& runState)
     {
         SimVector xzUnit(unitPosition.x, 0_ss, unitPosition.z);
         SimVector xzTarget(targetPosition.x, 0_ss, targetPosition.z);
         auto xzDistanceSquared = xzUnit.distanceSquared(xzTarget);
-        auto maxRangeSquared = weaponMaxRange * weaponMaxRange;
+        auto commitDistanceSquared = geometry.commitDistance * geometry.commitDistance;
+
+        SimVector toTarget(targetPosition.x - unitPosition.x, 0_ss, targetPosition.z - unitPosition.z);
+        SimVector flatHeading(unitHeading.x, 0_ss, unitHeading.z);
+        bool linedUp = true;
+        if (toTarget.lengthSquared() > 0_ss && flatHeading.lengthSquared() > 0_ss)
+        {
+            linedUp = angleBetweenIsLessOrEqual(
+                UnitState::toRotation(flatHeading),
+                UnitState::toRotation(toTarget),
+                geometry.commitAngle);
+        }
 
         switch (runState.phase)
         {
             case AirMovementStateAttackRun::Phase::Approaching:
             {
-                if (xzDistanceSquared <= maxRangeSquared)
+                // Too close to turn onto the target: an aircraft inside its own
+                // turn circle can only spiral around it, which looks like a
+                // bomber circling forever without ever dropping. Extend away
+                // first, then come back with room to line up.
+                auto insideTurnCircle = geometry.turnRadius > 0_ss
+                    && xzDistanceSquared < (geometry.turnRadius * 2_ss) * (geometry.turnRadius * 2_ss);
+                if (insideTurnCircle && !linedUp)
+                {
+                    runState.phase = AirMovementStateAttackRun::Phase::Departing;
+                    if (flatHeading.lengthSquared() > 0_ss)
+                    {
+                        runState.runOutDirection = flatHeading.normalized();
+                    }
+                    return false;
+                }
+
+                // Commit to the run once it is close enough and pointing the right way.
+                if (xzDistanceSquared <= commitDistanceSquared && linedUp)
                 {
                     runState.phase = AirMovementStateAttackRun::Phase::Engaging;
                     return true;
@@ -423,7 +547,8 @@ namespace rwe
             case AirMovementStateAttackRun::Phase::Departing:
             {
                 SimVector toUnitFromTarget(unitPosition.x - targetPosition.x, 0_ss, unitPosition.z - targetPosition.z);
-                auto runOutSquared = runState.runOutDistance * runState.runOutDistance;
+                auto runOut = rweMax(runState.runOutDistance, geometry.runOutDistance);
+                auto runOutSquared = runOut * runOut;
                 if (toUnitFromTarget.lengthSquared() >= runOutSquared)
                 {
                     runState.phase = AirMovementStateAttackRun::Phase::Approaching;

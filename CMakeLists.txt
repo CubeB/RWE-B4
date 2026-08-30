@@ -814,6 +814,7 @@ set(TEST_FILES
     src/rwe/sim/patrol.test.cpp
     src/rwe/sim/capture.test.cpp
     src/rwe/sim/burning.test.cpp
+    src/rwe/sim/wreckage.test.cpp
     src/rwe/sim/transport.test.cpp
     src/rwe/sim/bomber.test.cpp
     src/rwe/sim/selfdestruct.test.cpp

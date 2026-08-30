@@ -11,6 +11,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <map>
+#include <set>
+#include <vector>
 #include <memory>
 
 namespace rwe
@@ -213,5 +215,89 @@ namespace rwe
         REQUIRE(flatDistance(first.bomberPosition, targetPosition) < 900_ss);
         // ...and comes down close to the target.
         REQUIRE(flatDistance(first.lastPosition, targetPosition) < 64_ss);
+    }
+
+    TEST_CASE("a bomber keeps hitting on pass after pass", "[bomber]")
+    {
+        // The failure this guards against: after the first run the aircraft
+        // settles into a circle, going round and round without ever lining up
+        // again, and every later pass misses.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        auto them = addPlayer(sim, "them");
+        sim.unitDefinitions["bomber"] = makeBomberDef();
+        auto targetDef = makeTargetDef();
+        // Tough enough to survive the whole engagement so the run keeps going.
+        targetDef.maxHitPoints = 1000000;
+        sim.unitDefinitions["target"] = targetDef;
+        registerModel(sim, "model");
+        defineBomb(sim);
+
+        auto targetPosition = SimVector(600_ss, 0_ss, 0_ss);
+        auto targetId = spawnUnit(sim, "target", them, targetPosition, script);
+        sim.getUnitState(targetId).hitPoints = 1000000;
+
+        auto bomberId = spawnUnit(sim, "bomber", us, SimVector(-900_ss, 200_ss, 0_ss), script);
+        {
+            auto& bomber = sim.getUnitState(bomberId);
+            bomber.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            UnitWeapon weapon;
+            weapon.weaponType = "bomb";
+            bomber.weapons[0] = weapon;
+            bomber.orders.push_back(createAttackOrder(targetId));
+        }
+        sim.flyingUnitsSet.insert(bomberId);
+
+        std::map<ProjectileId, SimVector> lastSeen;
+        std::vector<int> hitTicks;
+        std::set<ProjectileId> counted;
+        auto slowestSpeed = SimScalar(1000.0f);
+
+        for (int tick = 0; tick < 3600; ++tick)
+        {
+            sim.tick();
+
+            // Watch for a bomb that has just come down near the target.
+            for (const auto& [id, projectile] : sim.projectiles)
+            {
+                lastSeen[id] = projectile.position;
+            }
+            for (auto it = lastSeen.begin(); it != lastSeen.end();)
+            {
+                if (sim.projectiles.tryGet(it->first))
+                {
+                    ++it;
+                    continue;
+                }
+                if (counted.insert(it->first).second && flatDistance(it->second, targetPosition) < 64_ss)
+                {
+                    hitTicks.push_back(tick);
+                }
+                it = lastSeen.erase(it);
+            }
+
+            // While manoeuvring it should never come close to stopping.
+            const auto& bomber = sim.getUnitState(bomberId);
+            if (auto air = std::get_if<UnitPhysicsInfoAir>(&bomber.physics))
+            {
+                if (auto run = std::get_if<AirMovementStateAttackRun>(&air->movementState))
+                {
+                    if (tick > 60)
+                    {
+                        slowestSpeed = rweMin(slowestSpeed, run->currentVelocity.length());
+                    }
+                }
+            }
+        }
+
+        INFO("hits at ticks: " << hitTicks.size());
+        // Several separate passes connect over the two minutes...
+        REQUIRE(hitTicks.size() >= 3);
+        // ...and they keep coming: the last one is in the closing stretch,
+        // not all bunched into the opening run.
+        REQUIRE(hitTicks.back() > 1800);
+        // The aircraft flew the whole engagement, never stalling to turn.
+        REQUIRE(slowestSpeed > 4_ss);
     }
 }

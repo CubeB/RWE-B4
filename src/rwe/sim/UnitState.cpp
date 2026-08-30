@@ -541,7 +541,9 @@ namespace rwe
 
     bool UnitState::isSelectableBy(const UnitDefinition& unitDefinition, rwe::PlayerId player) const
     {
-        return !isDead() && isOwnedBy(player) && !isBeingBuilt(unitDefinition);
+        // A unit riding in a transport is cargo, not a unit on the field: it
+        // has no hitbox to click and takes no orders until it is set down.
+        return !isDead() && isOwnedBy(player) && !isBeingBuilt(unitDefinition) && !carriedBy;
     }
 
     void UnitState::activate()

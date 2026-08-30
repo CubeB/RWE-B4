@@ -759,21 +759,15 @@ namespace rwe
                         unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, targetAngle, turnRateThisFrame);
                     },
                     [&](const AirMovementStateAttackRun& m) {
-                        SimVector heading;
-                        if (m.phase == AirMovementStateAttackRun::Phase::Departing)
+                        // The nose follows the flight path: the run's velocity
+                        // is already turn-rate limited, so pointing the model
+                        // along it keeps what you see and where the bombs go
+                        // in agreement.
+                        SimVector heading(m.currentVelocity.x, 0_ss, m.currentVelocity.z);
+                        if (heading.lengthSquared() == 0_ss)
                         {
-                            // Steer along the run-out vector once we're past the target.
-                            heading = m.runOutDirection;
-                        }
-                        else
-                        {
-                            // Approaching / Engaging: aim at last known target position.
                             heading = m.lastKnownTargetPos - unitInfo.state->position;
                             heading.y = 0_ss;
-                            if (heading.lengthSquared() == 0_ss)
-                            {
-                                heading = m.runOutDirection;
-                            }
                         }
                         if (heading.lengthSquared() == 0_ss)
                         {
@@ -1122,7 +1116,18 @@ namespace rwe
         {
             return;
         }
-        changeState(unitRef->get(), UnitBehaviorStateIdle());
+        auto& unit = unitRef->get();
+        changeState(unit, UnitBehaviorStateIdle());
+
+        // An aircraft part-way through setting down breaks off and climbs
+        // away: whatever it has just been told to do outranks landing.
+        if (auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unit.physics))
+        {
+            if (auto landing = std::get_if<AirMovementStateLanding>(&airPhysics->movementState))
+            {
+                landing->shouldAbort = true;
+            }
+        }
     }
 
     namespace
@@ -1151,6 +1156,60 @@ namespace rwe
         return unitInfo.state->position.distanceSquared(point) <= 64_ss;
     }
 
+    bool UnitBehaviorService::prepareBuilderForWork(UnitInfo unitInfo, const SimVector& workPosition)
+    {
+        if (!unitInfo.definition->canFly)
+        {
+            return true;
+        }
+
+        // Sitting on its pad a construction aircraft cannot reach anything:
+        // it has to be flying to use its fabricator. Get it up first.
+        if (auto groundPhysics = std::get_if<UnitPhysicsInfoGround>(&unitInfo.state->physics))
+        {
+            groundPhysics->steeringInfo.shouldTakeOff = true;
+            return false;
+        }
+
+        auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
+        if (airPhysics == nullptr)
+        {
+            return true;
+        }
+
+        if (auto landing = std::get_if<AirMovementStateLanding>(&airPhysics->movementState))
+        {
+            landing->shouldAbort = true;
+            return false;
+        }
+        if (std::holds_alternative<AirMovementStateTakingOff>(airPhysics->movementState))
+        {
+            // Still climbing out.
+            return false;
+        }
+
+        if (auto flying = std::get_if<AirMovementStateFlying>(&airPhysics->movementState))
+        {
+            // Fly a slow circuit over the job rather than hanging motionless
+            // above it, the way TA's construction aircraft do. Steering at a
+            // point a little way round the circle keeps it moving: by the time
+            // it gets there the point has moved on again.
+            auto radius = rweMax(32_ss, unitInfo.definition->buildDistance * 0.6_ssf);
+            SimVector fromCentre(unitInfo.state->position.x - workPosition.x, 0_ss, unitInfo.state->position.z - workPosition.z);
+            auto bearing = fromCentre.lengthSquared() > 0_ss
+                ? UnitState::toRotation(fromCentre)
+                : unitInfo.state->rotation;
+            // An eighth of a turn ahead: far enough to keep flying, near
+            // enough that the circuit stays over the target.
+            auto lead = bearing + EighthTurn;
+            auto orbitPoint = workPosition + (UnitState::toDirection(lead) * radius);
+            orbitPoint.y = getTargetAltitude(sim->terrain, orbitPoint.x, orbitPoint.z, *unitInfo.definition);
+            flying->targetPosition = orbitPoint;
+        }
+
+        return true;
+    }
+
     bool UnitBehaviorService::handleLoadOrder(UnitInfo unitInfo, const LoadOrder& loadOrder)
     {
         if (!unitInfo.definition->isTransport())
@@ -1161,7 +1220,12 @@ namespace rwe
         auto targetRef = sim->tryGetUnitState(loadOrder.target);
         if (targetRef && targetRef->get().carriedBy == unitInfo.id)
         {
-            // Aboard (the script's attach-unit got there first): done.
+            // Aboard (the script's attach-unit got there first). A crane that
+            // is still stowing it is not ready for the next one, though.
+            if (unitInfo.state->cobEnvironment->isThreadRunning("TransportPickup"))
+            {
+                return false;
+            }
             unitInfo.state->transportScriptTarget = std::nullopt;
             return true;
         }
@@ -1214,6 +1278,12 @@ namespace rwe
             // attach-unit (which takes it aboard) and stows it on deck.
             if (unitInfo.state->transportScriptTarget != loadOrder.target)
             {
+                // The crane handles one unit at a time: wait for the last
+                // pickup to finish stowing before reaching for the next.
+                if (unitInfo.state->cobEnvironment->isThreadRunning("TransportPickup"))
+                {
+                    return false;
+                }
                 unitInfo.state->transportScriptTarget = loadOrder.target;
                 unitInfo.state->transportScriptStartedAt = sim->gameTime;
                 auto thread = unitInfo.state->cobEnvironment->createThread("TransportPickup", {static_cast<int>(loadOrder.target.value)});
@@ -1222,6 +1292,13 @@ namespace rwe
             }
             if (target.carriedBy == unitInfo.id)
             {
+                // Hooked on, but the boom is still swinging it into the hold
+                // and the doors have yet to close. Not finished until the
+                // script is.
+                if (unitInfo.state->cobEnvironment->isThreadRunning("TransportPickup"))
+                {
+                    return false;
+                }
                 unitInfo.state->transportScriptTarget = std::nullopt;
                 return true;
             }
@@ -1284,13 +1361,31 @@ namespace rwe
 
         if (unitInfo.definition->floater)
         {
-            // One unit at a time: TransportDrop(unit, x, y, z) swings it ashore
-            // and lets go with drop-unit, which sets it down where it hangs.
+            // TransportDrop(unit, xz) swings one unit ashore and lets go with
+            // drop-unit, which sets it down where it hangs. One order sets
+            // down one unit, and the crane is not free until it has stowed.
             const auto& carried = unitInfo.state->carriedUnits;
             auto current = unitInfo.state->transportScriptTarget;
             bool stillAboard = current && std::find(carried.begin(), carried.end(), *current) != carried.end();
-            if (!stillAboard)
+
+            if (current && !stillAboard)
             {
+                // It is ashore. Wait for the boom to come back in, then the order is done.
+                if (unitInfo.state->cobEnvironment->isThreadRunning("TransportDrop"))
+                {
+                    return false;
+                }
+                unitInfo.state->transportScriptTarget = std::nullopt;
+                unitInfo.state->cobEnvironment->createThread("EndTransport");
+                return true;
+            }
+
+            if (!current)
+            {
+                if (unitInfo.state->cobEnvironment->isThreadRunning("TransportDrop"))
+                {
+                    return false;
+                }
                 auto next = carried.front();
                 unitInfo.state->transportScriptTarget = next;
                 unitInfo.state->transportScriptStartedAt = sim->gameTime;
@@ -1299,12 +1394,15 @@ namespace rwe
                 auto packed = static_cast<int>(cobPackCoords(CobPosition::fromFloat(simScalarToFloat(d.x)), CobPosition::fromFloat(simScalarToFloat(d.z))));
                 auto thread = unitInfo.state->cobEnvironment->createThread("TransportDrop", {static_cast<int>(next.value), packed});
                 LOG_DEBUG << "Transport " << unitInfo.id.value << " TransportDrop(" << next.value << ") " << (thread ? "started" : "not in script");
+                return false;
             }
-            else if (sim->gameTime >= unitInfo.state->transportScriptStartedAt + GameTime(10u * static_cast<unsigned int>(SimTicksPerSecond)))
+
+            if (sim->gameTime >= unitInfo.state->transportScriptStartedAt + GameTime(10u * static_cast<unsigned int>(SimTicksPerSecond)))
             {
                 // The script never let go: set it down ourselves.
                 sim->unloadUnitFromTransport(unitInfo.id, *current, unloadOrder.destination);
                 unitInfo.state->transportScriptTarget = std::nullopt;
+                return true;
             }
             return false;
         }
@@ -1328,20 +1426,14 @@ namespace rwe
             }
         }
 
-        auto carried = unitInfo.state->carriedUnits;
-        bool droppedAny = false;
-        for (auto carriedId : carried)
-        {
-            if (sim->unloadUnitFromTransport(unitInfo.id, carriedId, unloadOrder.destination))
-            {
-                droppedAny = true;
-            }
-        }
-        if (droppedAny)
+        // One unload order sets down one unit; the rest stay aboard until
+        // they are ordered out in turn.
+        auto carriedId = unitInfo.state->carriedUnits.front();
+        if (sim->unloadUnitFromTransport(unitInfo.id, carriedId, unloadOrder.destination))
         {
             unitInfo.state->cobEnvironment->createThread("EndTransport");
         }
-        // Anything that found no room stays aboard; the order is done either way.
+        // If it found no room it stays aboard; the order is done either way.
         return true;
     }
 
@@ -1480,8 +1572,11 @@ namespace rwe
             unitInfo.state->clearWeaponTargets();
             return false;
         }
-        if (std::holds_alternative<AirMovementStateLanding>(airPhysics->movementState))
+        if (auto landing = std::get_if<AirMovementStateLanding>(&airPhysics->movementState))
         {
+            // Break off the landing and climb away: a new target outranks
+            // setting down. The state machine puts us back into Flying.
+            landing->shouldAbort = true;
             unitInfo.state->clearWeaponTargets();
             return false;
         }
@@ -1497,12 +1592,14 @@ namespace rwe
         {
             if (attackRun->target != target)
             {
-                airPhysics->movementState = AirMovementStateFlying();
+                AirMovementStateFlying flying;
+                flying.currentVelocity = attackRun->currentVelocity;
+                airPhysics->movementState = flying;
             }
         }
 
         // If we're currently in plain Flying, kick off an attack run.
-        if (std::holds_alternative<AirMovementStateFlying>(airPhysics->movementState))
+        if (auto flying = std::get_if<AirMovementStateFlying>(&airPhysics->movementState))
         {
             AirMovementStateAttackRun runState(target);
             // Cache target position at cruise altitude so steering doesn't dive.
@@ -1511,6 +1608,9 @@ namespace rwe
             runState.runOutDirection = UnitState::toDirection(unitInfo.state->rotation);
             runState.runOutDistance = defaultAttackRunOutDistance(*unitInfo.definition, weaponDefinition.maxRange);
             runState.phase = AirMovementStateAttackRun::Phase::Approaching;
+            // Carry the speed it already had: an aircraft that turns to attack
+            // does not come to a halt first.
+            runState.currentVelocity = flying->currentVelocity;
             airPhysics->movementState = runState;
         }
 
@@ -1531,7 +1631,14 @@ namespace rwe
         // If we just transitioned into Engaging, capture the run-out direction
         // before stepping. Approaching's phase change to Engaging happens in
         // stepAttackRunPhase.
-        bool weaponsHot = stepAttackRunPhase(unitInfo.state->position, *targetPosition, weaponDefinition.maxRange, *attackRun);
+        auto geometry = computeAttackRunGeometry(*unitInfo.definition, weaponDefinition.maxRange);
+        SimVector heading = attackRun->currentVelocity;
+        heading.y = 0_ss;
+        if (heading.lengthSquared() == 0_ss)
+        {
+            heading = UnitState::toDirection(unitInfo.state->rotation);
+        }
+        bool weaponsHot = stepAttackRunPhase(unitInfo.state->position, heading, *targetPosition, geometry, *attackRun);
 
         // Never run out past the edge of the map: turn back early instead.
         if (attackRun->phase == AirMovementStateAttackRun::Phase::Departing)
@@ -1738,7 +1845,8 @@ namespace rwe
             // Copy first: the caller pops the front after we return true.
             auto destination = patrolOrder.destination;
             unitInfo.state->orders.push_back(PatrolOrder(destination));
-            sim->events.push_back(UnitArrivedEvent{unitInfo.id});
+            // No arrival report: a patrol never finishes, and TA does not
+            // have the unit announce itself on every lap of its circuit.
             return true;
         }
 
@@ -2321,6 +2429,11 @@ namespace rwe
         auto& targetUnit = targetUnitRef->get();
         const auto& targetUnitDefinition = sim->unitDefinitions.at(targetUnit.unitType);
 
+        if (!prepareBuilderForWork(unitInfo, targetUnit.position))
+        {
+            return false;
+        }
+
         return match(
             unitInfo.state->behaviourState,
             [&](UnitBehaviorStateBuilding& buildingState) {
@@ -2399,6 +2512,15 @@ namespace rwe
         {
             changeState(*unitInfo.state, UnitBehaviorStateIdle());
             return true;
+        }
+
+        auto workPosition = match(
+            target,
+            [&](const UnitId& targetUnitId) { return sim->getUnitState(targetUnitId).position; },
+            [&](const FeatureId& targetFeatureId) { return sim->getFeature(targetFeatureId).position; });
+        if (!prepareBuilderForWork(unitInfo, workPosition))
+        {
+            return false;
         }
 
         return match(

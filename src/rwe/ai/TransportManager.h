@@ -56,6 +56,8 @@ namespace rwe
         /** A metal patch across the water worth sending a builder to, refreshed now and then. */
         std::optional<SimVector> expansionSite;
         GameTime expansionSiteCheckedAt{0};
+        /** Whether we have looked at all yet; coming up empty still counts as a look. */
+        bool expansionSiteSearched{false};
 
         void tendFerries(const GameSimulation& sim, const AiTuningProfile& profile, AiBlackboard& bb, std::vector<PlayerCommand>& outCommands);
 

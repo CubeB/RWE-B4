@@ -81,19 +81,42 @@ namespace rwe
             antiGround = Grid<float>(width, height, 0.0f);
             economic = Grid<float>(width, height, 0.0f);
             staleness = Grid<float>(width, height, 100000.0f);
+            economicCellIndices.clear();
+            antiGroundCellIndices.clear();
         }
         origin = sim.terrain.heightmapIndexToWorldCorner(0, 0);
         cellSize = MapTerrain::HeightTileWidthInWorldUnits.value * static_cast<float>(PlayerVisibility::VisionCellSizeInTiles);
 
         // Threat and value are recomputed from scratch; staleness ages.
-        for (int y = 0; y < height; ++y)
+        // Straight over the backing vectors: this is every cell on the map,
+        // and Grid::get/set pays for an index calculation and a bounds check
+        // each time.
+        auto& antiGroundCells = antiGround.getVector();
+        auto& economicCells = economic.getVector();
+        auto& stalenessCells = staleness.getVector();
+        const auto& visibleCells = vis.visible.getVector();
+        // Threat and value only ever land on cells near a known enemy, and
+        // the last pass wrote down which those were, so wiping just those is
+        // far cheaper than blanking the whole map twice.
+        for (auto index : antiGroundCellIndices)
         {
-            for (int x = 0; x < width; ++x)
+            antiGroundCells[index] = 0.0f;
+        }
+        for (auto index : economicCellIndices)
+        {
+            economicCells[index] = 0.0f;
+        }
+        antiGroundCellIndices.clear();
+        economicCellIndices.clear();
+        if (omniscient)
+        {
+            std::fill(stalenessCells.begin(), stalenessCells.end(), 0.0f);
+        }
+        else
+        {
+            for (std::size_t i = 0; i < stalenessCells.size(); ++i)
             {
-                antiGround.set(x, y, 0.0f);
-                economic.set(x, y, 0.0f);
-                auto seen = omniscient || vis.visible.get(x, y) != 0;
-                staleness.set(x, y, seen ? 0.0f : staleness.get(x, y) + 1.0f);
+                stalenessCells[i] = visibleCells[i] != 0 ? 0.0f : stalenessCells[i] + 1.0f;
             }
         }
 
@@ -109,7 +132,12 @@ namespace rwe
 
             if (enemy.isBuilding && cell.x >= 0 && cell.y >= 0 && cell.x < width && cell.y < height)
             {
-                economic.set(cell.x, cell.y, economic.get(cell.x, cell.y) + def.buildCostMetal.value);
+                auto index = static_cast<std::size_t>((cell.y * width) + cell.x);
+                if (economicCells[index] == 0.0f)
+                {
+                    economicCellIndices.push_back(index);
+                }
+                economicCells[index] += def.buildCostMetal.value;
             }
 
             auto dps = estimateDps(sim, def);
@@ -134,10 +162,20 @@ namespace rwe
                     {
                         continue;
                     }
-                    antiGround.set(x, y, antiGround.get(x, y) + dps);
+                    auto index = static_cast<std::size_t>((y * width) + x);
+                    if (antiGroundCells[index] == 0.0f)
+                    {
+                        antiGroundCellIndices.push_back(index);
+                    }
+                    antiGroundCells[index] += dps;
                 }
             }
         }
+
+        // Known enemies come in unit id order, so put the cells they landed
+        // in back into map scan order: that is the order the old full sweep
+        // saw them in, and it decides ties in bestAttackTarget.
+        std::sort(economicCellIndices.begin(), economicCellIndices.end());
     }
 
     float ThreatMap::antiGroundAt(const SimVector& position) const
@@ -186,56 +224,29 @@ namespace rwe
         return bestScoutTarget(from, [](int, int, const SimVector&) { return true; });
     }
 
-    std::optional<SimVector> ThreatMap::bestScoutTarget(const SimVector& from, const std::function<bool(int, int, const SimVector&)>& accept) const
-    {
-        std::optional<SimVector> best;
-        float bestScore = -1.0f;
-        for (int y = 0; y < getHeight(); ++y)
-        {
-            for (int x = 0; x < getWidth(); ++x)
-            {
-                auto stale = staleness.get(x, y);
-                if (stale <= 0.0f)
-                {
-                    continue;
-                }
-                auto center = cellCenter(x, y);
-                if (!accept(x, y, center))
-                {
-                    continue;
-                }
-                auto distance = std::max(1.0f, (center - from).length().value);
-                // Prefer ground that has gone unseen for a long time, but not at any distance.
-                auto score = std::min(stale, 3000.0f) / distance;
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    best = center;
-                }
-            }
-        }
-        return best;
-    }
-
     std::optional<SimVector> ThreatMap::bestAttackTarget(float threatAversion) const
     {
+        // Only cells holding an enemy building can be a target, and the
+        // rebuild pass already noted which those are, so there is no need to
+        // sweep the whole map again. The list is in the same scan order the
+        // sweep used, so the pick is unchanged.
         std::optional<SimVector> best;
         float bestScore = 0.0f;
-        for (int y = 0; y < getHeight(); ++y)
+        auto width = getWidth();
+        const auto& economicCells = economic.getVector();
+        const auto& antiGroundCells = antiGround.getVector();
+        for (auto index : economicCellIndices)
         {
-            for (int x = 0; x < getWidth(); ++x)
+            auto value = economicCells[index];
+            if (value <= 0.0f)
             {
-                auto value = economic.get(x, y);
-                if (value <= 0.0f)
-                {
-                    continue;
-                }
-                auto score = value - (antiGround.get(x, y) * threatAversion);
-                if (!best || score > bestScore)
-                {
-                    bestScore = score;
-                    best = cellCenter(x, y);
-                }
+                continue;
+            }
+            auto score = value - (antiGroundCells[index] * threatAversion);
+            if (!best || score > bestScore)
+            {
+                bestScore = score;
+                best = cellCenter(index % width, index / width);
             }
         }
         return best;

@@ -6,6 +6,7 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
+#include <tuple>
 
 namespace rwe
 {
@@ -20,6 +21,26 @@ namespace rwe
         PlayerCommand buildCommand(UnitId builder, const std::string& unitType, const SimVector& site)
         {
             return PlayerUnitCommand(builder, PlayerUnitCommand::IssueOrder(BuildOrder(unitType, site), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
+        }
+    }
+
+    void BuildManager::indexMetalPatches(const GameSimulation& sim) const
+    {
+        if (metalPatchesIndexed)
+        {
+            return;
+        }
+        metalPatchesIndexed = true;
+        const auto& metalGrid = sim.metalGrid;
+        for (int y = 0; y < metalGrid.getHeight(); ++y)
+        {
+            for (int x = 0; x < metalGrid.getWidth(); ++x)
+            {
+                if (metalGrid.get(x, y) > sim.surfaceMetal)
+                {
+                    metalPatches.emplace_back(x, y);
+                }
+            }
         }
     }
 
@@ -66,13 +87,15 @@ namespace rwe
                     {
                         continue;
                     }
-                    if (!sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+                    // Don't plant a building on a metal patch; mexes want
+                    // those. Checked before canBeBuiltAt, which walks the
+                    // whole footprint and is much the more expensive test.
+                    if (rect.x < sim.metalGrid.getWidth() && rect.y < sim.metalGrid.getHeight()
+                        && sim.metalGrid.get(rect.x, rect.y) > sim.surfaceMetal)
                     {
                         continue;
                     }
-                    // Don't plant a building on a metal patch; mexes want those.
-                    if (rect.x < sim.metalGrid.getWidth() && rect.y < sim.metalGrid.getHeight()
-                        && sim.metalGrid.get(rect.x, rect.y) > sim.surfaceMetal)
+                    if (!sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
                     {
                         continue;
                     }
@@ -130,45 +153,53 @@ namespace rwe
             return total;
         };
 
+        // Only cells that actually hold metal can win, and the map's patches
+        // never move, so walk the known patches ring by ring instead of every
+        // cell out to the radius. Sorting by (ring, dz, dx) visits them in
+        // exactly the order the old whole-map ring scan did, which keeps the
+        // tie-breaking - and therefore the RNG draw below - unchanged.
+        indexMetalPatches(sim);
+        struct RingCell
+        {
+            int ring;
+            int dz;
+            int dx;
+        };
+        std::vector<RingCell> ringCells;
+        ringCells.reserve(metalPatches.size());
+        for (const auto& patch : metalPatches)
+        {
+            auto dx = patch.x - anchorHm.x;
+            auto dz = patch.y - anchorHm.y;
+            auto ring = std::max(std::abs(dx), std::abs(dz));
+            if (ring > radiusInTiles)
+            {
+                continue;
+            }
+            ringCells.push_back(RingCell{ring, dz, dx});
+        }
+        std::sort(ringCells.begin(), ringCells.end(), [](const RingCell& a, const RingCell& b) {
+            return std::tie(a.ring, a.dz, a.dx) < std::tie(b.ring, b.dz, b.dx);
+        });
+
         // Take the richest buildable patch on the nearest ring that has one.
         std::vector<SimVector> tiedCandidates;
         unsigned int bestMetal = 0;
-        for (int ring = 0; ring <= radiusInTiles; ++ring)
+        for (std::size_t i = 0; i < ringCells.size(); ++i)
         {
-            for (int dz = -ring; dz <= ring; ++dz)
-            {
-                for (int dx = -ring; dx <= ring; ++dx)
-                {
-                    if (std::max(std::abs(dx), std::abs(dz)) != ring)
-                    {
-                        continue;
-                    }
-                    const int gx = anchorHm.x + dx;
-                    const int gz = anchorHm.y + dz;
-                    if (gx < 0 || gz < 0 || gx >= metalGrid.getWidth() || gz >= metalGrid.getHeight())
-                    {
-                        continue;
-                    }
-                    if (metalGrid.get(gx, gz) <= sim.surfaceMetal)
-                    {
-                        continue;
-                    }
+            const int gx = anchorHm.x + ringCells[i].dx;
+            const int gz = anchorHm.y + ringCells[i].dz;
 
-                    SimVector candidate = sim.terrain.heightmapIndexToWorldCenter(gx, gz);
-                    candidate.y = sim.terrain.getHeightAt(candidate.x, candidate.z);
-                    if (accept && !accept(candidate))
-                    {
-                        continue;
-                    }
-                    auto rect = sim.computeFootprintRegion(candidate, def.movementCollisionInfo);
-                    if (rect.x < 0 || rect.y < 0)
-                    {
-                        continue;
-                    }
-                    if (!sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
-                    {
-                        continue;
-                    }
+            SimVector candidate = sim.terrain.heightmapIndexToWorldCenter(gx, gz);
+            candidate.y = sim.terrain.getHeightAt(candidate.x, candidate.z);
+            bool usable = !accept || accept(candidate);
+            if (usable)
+            {
+                auto rect = sim.computeFootprintRegion(candidate, def.movementCollisionInfo);
+                usable = rect.x >= 0 && rect.y >= 0
+                    && sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y));
+                if (usable)
+                {
                     auto metal = patchMetalUnder(rect);
                     if (metal > bestMetal)
                     {
@@ -182,7 +213,10 @@ namespace rwe
                     }
                 }
             }
-            if (!tiedCandidates.empty())
+
+            // Stop at the end of the first ring that turned something up.
+            bool ringEnds = (i + 1 == ringCells.size()) || ringCells[i + 1].ring != ringCells[i].ring;
+            if (ringEnds && !tiedCandidates.empty())
             {
                 break;
             }

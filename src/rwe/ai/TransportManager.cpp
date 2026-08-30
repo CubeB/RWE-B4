@@ -130,12 +130,24 @@ namespace rwe
         if (!bb.groundReachabilityValid || !bb.baseAnchor || bb.sideUnits.metalExtractor.empty())
         {
             expansionSite.reset();
+            expansionSiteSearched = false;
             return;
         }
-        if (expansionSite && sim.gameTime < expansionSiteCheckedAt + GameTime(ExpansionSiteRefreshTicks))
+        // On a map where everything can be walked to there is nothing for a
+        // ferry to reach, so there is no point looking at all.
+        if (!bb.hasUnreachableGround)
+        {
+            expansionSite.reset();
+            return;
+        }
+        // Look at most once every refresh interval whether or not the last
+        // look found anything: an empty result used to fall through this
+        // guard and search the map again on the very next pass.
+        if (expansionSiteSearched && sim.gameTime < expansionSiteCheckedAt + GameTime(ExpansionSiteRefreshTicks))
         {
             return;
         }
+        expansionSiteSearched = true;
         expansionSiteCheckedAt = sim.gameTime;
 
         // The nearest rich patch on ground the base cannot walk to, anywhere on the map.
@@ -250,8 +262,10 @@ namespace rwe
                     outCommands.push_back(unloadCommand(transportId, *expansionSite, IssueKind::Queued));
                     bookPassengers(bb, ferry);
                     ferries[transportId.value] = std::move(ferry);
-                    // The patch is spoken for; look for another next time.
+                    // The patch is spoken for; look for another next time
+                    // rather than waiting out the refresh interval.
                     expansionSite.reset();
+                    expansionSiteSearched = false;
                     continue;
                 }
             }

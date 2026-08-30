@@ -49,9 +49,37 @@ namespace rwe
     SimVector computeNewAirUnitVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateFlying& physics);
 
     /**
-     * Velocity update for aircraft executing an attack run. Unlike
-     * computeNewAirUnitVelocity, this does NOT decelerate near the target —
-     * the aircraft is meant to fly through the target, not stop on it.
+     * The tightest circle the aircraft can fly at full speed, from its own
+     * FBI stats: speed divided by turn rate. Everything about an attack run
+     * — how far it runs out, when it commits to the run — is measured in
+     * these, so a nimble fighter loops tightly and a heavy bomber sweeps wide.
+     */
+    SimScalar attackRunTurnRadius(const UnitDefinition& unitDefinition);
+
+    /** The shape of one aircraft's attack pattern, derived from its stats and its weapon. */
+    struct AttackRunGeometry
+    {
+        /** Tightest circle the aircraft can fly at speed. */
+        SimScalar turnRadius;
+
+        /**
+         * How close, and how well lined up, before it stops manoeuvring and
+         * holds a straight line through the target so the sight can settle.
+         */
+        SimScalar commitDistance;
+        SimAngle commitAngle;
+
+        /** How far past the target it flies before turning back for another pass. */
+        SimScalar runOutDistance;
+    };
+
+    AttackRunGeometry computeAttackRunGeometry(const UnitDefinition& unitDefinition, SimScalar weaponMaxRange);
+
+    /**
+     * Velocity update for aircraft executing an attack run. The aircraft
+     * never brakes — it holds speed and banks, turning its heading at no more
+     * than its own turn rate, so reversing course is an arc rather than a
+     * stop and a pivot on the spot.
      */
     SimVector computeNewAttackRunVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateAttackRun& physics);
 
@@ -92,9 +120,14 @@ namespace rwe
 
     /**
      * Pure state-machine step for an aircraft attack run. Given the unit's
-     * current XZ position, the resolved target XZ position, the weapon's max
-     * range, and the current run state, this advances the run phase and
-     * returns whether weapons should be hot this tick.
+     * current XZ position and heading, the resolved target XZ position, the
+     * geometry of its attack pattern and the current run state, this advances
+     * the run phase and returns whether weapons should be hot this tick.
+     *
+     * The aircraft only commits to a run (Engaging) once it is both close
+     * enough and lined up; if it finds itself inside its own turn circle it
+     * extends away first rather than spiralling around the target, which is
+     * what makes a bomber circle forever without ever dropping.
      *
      * The function does not mutate UnitState; the caller is responsible for
      * applying weapon target updates and writing the new run state back.
@@ -103,8 +136,9 @@ namespace rwe
      */
     bool stepAttackRunPhase(
         const SimVector& unitPosition,
+        const SimVector& unitHeading,
         const SimVector& targetPosition,
-        SimScalar weaponMaxRange,
+        const AttackRunGeometry& geometry,
         AirMovementStateAttackRun& runState);
 
     SimVector findClosestPointToFootprintXZ(const MapTerrain& terrain, const DiscreteRect& rect, const SimVector& p);

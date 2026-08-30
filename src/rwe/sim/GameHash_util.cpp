@@ -252,12 +252,25 @@ namespace rwe
         return combineHashes(r.x, r.y, r.width, r.height);
     }
 
+    GameHash computeHashOf(const MapFeature& f)
+    {
+        return combineHashes(
+            f.featureName,
+            f.position,
+            f.rotation,
+            f.reclaimProgress,
+            f.hitPoints,
+            f.burningUntil,
+            f.nextSpark);
+    }
+
     GameHash computeHashOf(const GameSimulation& simulation)
     {
         return combineHashes(
             simulation.gameTime,
             simulation.players,
             simulation.units,
-            simulation.projectiles);
+            simulation.projectiles,
+            simulation.features);
     }
 }

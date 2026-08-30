@@ -1,12 +1,13 @@
 #pragma once
 
-#include <functional>
+#include <algorithm>
 #include <optional>
 #include <rwe/ai/AiBlackboard.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/grid/Point.h>
 #include <rwe/sim/PlayerId.h>
 #include <rwe/sim/SimVector.h>
+#include <vector>
 
 namespace rwe
 {
@@ -40,8 +41,50 @@ namespace rwe
         /** Cell centre that has gone longest without being seen, weighted against travel distance. */
         std::optional<SimVector> bestScoutTarget(const SimVector& from) const;
 
-        /** As above, considering only cells the predicate accepts (given the cell and its centre). */
-        std::optional<SimVector> bestScoutTarget(const SimVector& from, const std::function<bool(int, int, const SimVector&)>& accept) const;
+        /**
+         * As above, considering only cells the predicate accepts (given the
+         * cell and its centre).
+         *
+         * A template rather than a std::function because this runs over every
+         * cell on the map. The predicate is only asked about cells that would
+         * beat the best score so far - the cells it rejects could not have
+         * been picked anyway - so it can afford to be expensive.
+         */
+        template <typename Accept>
+        std::optional<SimVector> bestScoutTarget(const SimVector& from, Accept&& accept) const
+        {
+            std::optional<SimVector> best;
+            float bestScore = -1.0f;
+            auto width = getWidth();
+            auto height = getHeight();
+            const auto& stalenessCells = staleness.getVector();
+            for (int y = 0; y < height; ++y)
+            {
+                for (int x = 0; x < width; ++x)
+                {
+                    auto stale = stalenessCells[(y * width) + x];
+                    if (stale <= 0.0f)
+                    {
+                        continue;
+                    }
+                    auto center = cellCenter(x, y);
+                    auto distance = std::max(1.0f, (center - from).length().value);
+                    // Prefer ground that has gone unseen for a long time, but not at any distance.
+                    auto score = std::min(stale, 3000.0f) / distance;
+                    if (score <= bestScore)
+                    {
+                        continue;
+                    }
+                    if (!accept(x, y, center))
+                    {
+                        continue;
+                    }
+                    bestScore = score;
+                    best = center;
+                }
+            }
+            return best;
+        }
 
         float antiGroundAtCell(int x, int y) const { return antiGround.get(x, y); }
 
@@ -59,6 +102,10 @@ namespace rwe
         Grid<float> antiGround;
         Grid<float> economic;
         Grid<float> staleness;
+        /** Cells the last rebuild put economic value in, in map scan order. */
+        std::vector<std::size_t> economicCellIndices;
+        /** Cells the last rebuild put threat in, so only those need clearing. May repeat. */
+        std::vector<std::size_t> antiGroundCellIndices;
         SimVector origin{0_ss, 0_ss, 0_ss};
         float cellSize{32.0f};
     };

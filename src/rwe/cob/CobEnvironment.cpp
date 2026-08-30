@@ -86,6 +86,11 @@ namespace rwe
         }
     }
 
+    bool CobEnvironment::isThreadRunning(const std::string& functionName) const
+    {
+        return std::any_of(threads.begin(), threads.end(), [&functionName](const auto& t) { return t->name == functionName; });
+    }
+
     void CobEnvironment::sendSignal(unsigned int signal)
     {
         for (auto it = threads.begin(); it != threads.end();)

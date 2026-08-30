@@ -52,12 +52,15 @@ namespace rwe
     };
 
     /**
-     * Total worker-time needed to fully reclaim a feature.
-     * Mirrors build costs: a builder contributes workerTimePerTick per tick,
-     * so a commander (worker time 180/s) clears a 400-metal rock in ~2 seconds.
+     * Total worker-time needed to fully reclaim a feature, given how much of it
+     * is still standing. Scales with both the feature's value and its remaining
+     * hit points, so a boulder takes far longer than a bush and a wreck that has
+     * been shelled is quicker to clear than a pristine one. See the definition
+     * for the weighting and the TA data behind it.
+     * Mirrors build costs: a builder contributes workerTimePerTick per tick.
      * Never zero, so valueless features can still be cleared.
      */
-    unsigned int computeFeatureReclaimWork(const FeatureDefinition& definition);
+    unsigned int computeFeatureReclaimWork(const FeatureDefinition& definition, unsigned int currentHitPoints);
 
     struct GamePlayerInfo
     {
@@ -402,6 +405,22 @@ namespace rwe
 
         /** Removes a feature and frees the grid cells it occupied. No-op if the id is stale. */
         void deleteFeature(FeatureId id);
+
+        /**
+         * Removes a feature and, if a replacement definition is supplied, places a
+         * feature of that type at the same position and rotation. Used wherever a
+         * feature turns into a lesser one: burning out into its featureBurnt form,
+         * or being shot to pieces into its featureDead form.
+         * No-op if the id is stale; the replacement is dropped if it does not fit.
+         */
+        void replaceFeature(FeatureId id, const std::optional<FeatureDefinitionId>& replacement);
+
+        /**
+         * Knocks hit points off a feature. When they run out the feature is
+         * replaced by its featureDead form, or removed if it has none.
+         * Indestructible features and zero damage are ignored.
+         */
+        void applyDamageToFeature(FeatureId featureId, unsigned int damagePoints);
 
         /**
          * Applies workAmount of reclaim work to a feature on behalf of a player,

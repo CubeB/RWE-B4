@@ -21,6 +21,16 @@ namespace rwe
          */
         unsigned int reclaimProgress{0};
 
+        /**
+         * Current hit points. Initialised from the definition's `damage` value
+         * (TA stores a feature's health under that key) when the feature is
+         * placed. Many TA terrain features -- trees and shrubs in particular --
+         * declare no `damage` at all; the feature TDF reader defaults those to 1,
+         * so they are swept away by the first shot that reaches them, which is
+         * what TA does too. Indestructible features never lose hit points.
+         */
+        unsigned int hitPoints{0};
+
         /** Set while the feature is on fire: the tick it burns out and is replaced by its burnt form. */
         std::optional<GameTime> burningUntil;
 

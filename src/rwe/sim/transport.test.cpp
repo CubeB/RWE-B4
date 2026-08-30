@@ -192,5 +192,70 @@ namespace rwe
             REQUIRE(sim.getUnitState(kbotId).orders.empty());
             REQUIRE_FALSE(sim.getUnitState(transportId).carriedBy.has_value());
         }
+
+        SECTION("a unit put aboard forgets where it was going")
+        {
+            // Walking somewhere of its own accord when the transport picks it up.
+            sim.getUnitState(kbotId).orders.push_back(createMoveOrder(SimVector(400_ss, 0_ss, 400_ss)));
+            sim.getUnitState(transportId).orders.push_back(LoadOrder(kbotId));
+            REQUIRE(tickUntil(sim, 600, [&] { return sim.getUnitState(kbotId).carriedBy.has_value(); }));
+            REQUIRE(sim.getUnitState(kbotId).orders.empty());
+
+            // Set it down somewhere else: it stays put instead of resuming the old march.
+            auto destination = SimVector(-200_ss, 0_ss, -200_ss);
+            sim.getUnitState(transportId).orders.push_back(UnloadOrder(destination));
+            REQUIRE(tickUntil(sim, 900, [&] { return !sim.getUnitState(kbotId).carriedBy.has_value(); }));
+            REQUIRE(sim.getUnitState(kbotId).orders.empty());
+            auto restingPlace = sim.getUnitState(kbotId).position;
+            for (int i = 0; i < 60; ++i)
+            {
+                sim.tick();
+            }
+            REQUIRE(sim.getUnitState(kbotId).position.distanceSquared(restingPlace) == 0_ss);
+        }
+
+        SECTION("cargo cannot be selected or given orders of its own")
+        {
+            sim.getUnitState(transportId).orders.push_back(LoadOrder(kbotId));
+            REQUIRE(tickUntil(sim, 600, [&] { return sim.getUnitState(kbotId).carriedBy.has_value(); }));
+            const auto& kbot = sim.getUnitState(kbotId);
+            REQUIRE_FALSE(kbot.isSelectableBy(sim.unitDefinitions.at("kbot"), player));
+            // Back on the ground it is a unit again.
+            sim.unloadUnitFromTransport(transportId, kbotId, SimVector(100_ss, 0_ss, 100_ss));
+            REQUIRE(sim.getUnitState(kbotId).isSelectableBy(sim.unitDefinitions.at("kbot"), player));
+        }
+    }
+
+    TEST_CASE("one unload order sets down one unit", "[transport]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim, "hauler");
+        auto transportDef = makeTransportDef();
+        transportDef.transportCapacity = 4;
+        sim.unitDefinitions["transport"] = transportDef;
+        sim.unitDefinitions["kbot"] = makeMobileDef(2u);
+        registerModel(sim, "model");
+
+        auto transportId = spawnUnit(sim, "transport", player, SimVector(-200_ss, 0_ss, 0_ss), script);
+        auto firstId = spawnUnit(sim, "kbot", player, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto secondId = spawnUnit(sim, "kbot", player, SimVector(0_ss, 0_ss, 64_ss), script);
+
+        sim.getUnitState(transportId).orders.push_back(LoadOrder(firstId));
+        sim.getUnitState(transportId).orders.push_back(LoadOrder(secondId));
+        REQUIRE(tickUntil(sim, 1200, [&] { return sim.getUnitState(transportId).carriedUnits.size() == 2; }));
+
+        auto destination = SimVector(200_ss, 0_ss, 200_ss);
+        sim.getUnitState(transportId).orders.push_back(UnloadOrder(destination));
+        REQUIRE(tickUntil(sim, 900, [&] { return sim.getUnitState(transportId).carriedUnits.size() == 1; }));
+
+        // The order is finished and the second unit is still aboard.
+        REQUIRE(tickUntil(sim, 120, [&] { return sim.getUnitState(transportId).orders.empty(); }));
+        REQUIRE(sim.getUnitState(transportId).carriedUnits == std::vector<UnitId>{secondId});
+        REQUIRE(sim.getUnitState(secondId).carriedBy.has_value());
+
+        // A second order sets down the other one.
+        sim.getUnitState(transportId).orders.push_back(UnloadOrder(destination));
+        REQUIRE(tickUntil(sim, 900, [&] { return sim.getUnitState(transportId).carriedUnits.empty(); }));
     }
 }
