@@ -78,6 +78,10 @@ namespace rwe
             return;
         }
 
+        // The slow work facing only holds while the work pattern asserts it
+        // afresh each tick; any other business flies and turns normally.
+        unitInfo.state->slowFacePoint = std::nullopt;
+
         // Clear steering targets.
         match(
             unitInfo.state->physics,
@@ -787,6 +791,19 @@ namespace rwe
                         // do nothing
                     },
                     [&](const AirMovementStateFlying& m) {
+                        // On station over its work, a construction aircraft
+                        // swings to face the job at a fixed, deliberately slow
+                        // rate instead of chasing its flight path.
+                        if (unitInfo.state->slowFacePoint)
+                        {
+                            auto direction = *unitInfo.state->slowFacePoint - unitInfo.state->position;
+                            direction.y = 0_ss;
+                            if (direction.lengthSquared() > 0_ss)
+                            {
+                                unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, UnitState::toRotation(direction), SimAngle(80));
+                            }
+                            return;
+                        }
                         if (!m.targetPosition)
                         {
                             // keep rotation as-is if not trying to go anywhere
@@ -1206,7 +1223,49 @@ namespace rwe
         return arrived;
     }
 
-    bool UnitBehaviorService::prepareBuilderForWork(UnitInfo unitInfo, const SimVector& workPosition)
+    namespace
+    {
+        // The work pattern's numbers: a spell over the centre, then four
+        // seconds at each of eight ring stations, the body turned towards the
+        // centre so slowly that a 45 degree station change takes most of the
+        // dwell to catch up (about 13 degrees a second).
+        constexpr unsigned int WorkOrbitCentreDwellTicks = 2u * static_cast<unsigned int>(SimTicksPerSecond);
+        constexpr unsigned int WorkOrbitPointDwellTicks = 4u * static_cast<unsigned int>(SimTicksPerSecond);
+        constexpr int WorkOrbitPointCount = 8;
+
+        /** The offset of ring station k: due north first, then clockwise. */
+        SimVector workOrbitPointOffset(int pointIndex, SimScalar radius)
+        {
+            auto angle = SimAngle(static_cast<uint16_t>(pointIndex * (65536 / WorkOrbitPointCount)));
+            return SimVector(sin(angle) * radius, 0_ss, -cos(angle) * radius);
+        }
+    }
+
+    SimScalar UnitBehaviorService::workOrbitRadius(const UnitState& target) const
+    {
+        const auto& targetDefinition = sim->unitDefinitions.at(target.unitType);
+        auto [footprintX, footprintZ] = sim->getFootprintXZ(targetDefinition.movementCollisionInfo);
+        auto halfX = SimScalar(static_cast<float>(footprintX)) * MapTerrain::HeightTileWidthInWorldUnits / 2_ss;
+        auto halfZ = SimScalar(static_cast<float>(footprintZ)) * MapTerrain::HeightTileHeightInWorldUnits / 2_ss;
+        auto halfDiagonal = rweSqrt((halfX * halfX) + (halfZ * halfZ));
+        if (targetDefinition.isMobile)
+        {
+            // Assisting or repairing a unit: stand off a little further, and
+            // never tighter than a floor — most units are small.
+            return rweMax(56_ss, halfDiagonal * 1.5_ssf);
+        }
+        // A building: the ring passes through the corners of its footprint.
+        return rweMax(40_ss, halfDiagonal);
+    }
+
+    SimScalar UnitBehaviorService::workOrbitRadius(const FeatureDefinition& featureDefinition) const
+    {
+        auto halfX = SimScalar(static_cast<float>(featureDefinition.footprintX)) * MapTerrain::HeightTileWidthInWorldUnits / 2_ss;
+        auto halfZ = SimScalar(static_cast<float>(featureDefinition.footprintZ)) * MapTerrain::HeightTileHeightInWorldUnits / 2_ss;
+        return rweMax(40_ss, rweSqrt((halfX * halfX) + (halfZ * halfZ)));
+    }
+
+    bool UnitBehaviorService::prepareBuilderForWork(UnitInfo unitInfo, const SimVector& workPosition, SimScalar orbitRadius)
     {
         if (!unitInfo.definition->canFly)
         {
@@ -1238,26 +1297,78 @@ namespace rwe
             return false;
         }
 
-        if (auto flying = std::get_if<AirMovementStateFlying>(&airPhysics->movementState))
+        auto flying = std::get_if<AirMovementStateFlying>(&airPhysics->movementState);
+        if (flying == nullptr)
         {
-            // Fly a slow circuit over the job rather than hanging motionless
-            // above it, the way TA's construction aircraft do. Steering at a
-            // point a little way round the circle keeps it moving: by the time
-            // it gets there the point has moved on again. A sixteenth of a
-            // turn keeps that point close, so the aircraft is always braking
-            // towards it and the circuit stays slow and tight.
-            auto radius = rweMax(24_ss, unitInfo.definition->buildDistance * 0.45_ssf);
-            SimVector fromCentre(unitInfo.state->position.x - workPosition.x, 0_ss, unitInfo.state->position.z - workPosition.z);
-            auto bearing = fromCentre.lengthSquared() > 0_ss
-                ? UnitState::toRotation(fromCentre)
-                : unitInfo.state->rotation;
-            auto lead = bearing + SimAngle(4096);
-            auto orbitPoint = workPosition + (UnitState::toDirection(lead) * radius);
-            orbitPoint.y = getTargetAltitude(sim->terrain, orbitPoint.x, orbitPoint.z, *unitInfo.definition);
-            flying->targetPosition = orbitPoint;
+            return true;
         }
 
-        return true;
+        // The work pattern: hold over the centre of the job for a couple of
+        // seconds, then dwell at each of eight stations on a ring around it,
+        // clockwise from a random start, four seconds a station.
+        auto& orbitOpt = unitInfo.state->airWorkOrbit;
+        if (!orbitOpt || orbitOpt->workPosition.distanceSquared(workPosition) > (48_ss * 48_ss))
+        {
+            // A new job (or the old one moved a long way): start from the centre.
+            orbitOpt = UnitState::AirWorkOrbitState{workPosition, -1, false, sim->gameTime};
+        }
+        auto& orbit = *orbitOpt;
+        // Follow a target that drifts (a unit under repair edging about).
+        orbit.workPosition = workPosition;
+
+        auto station = orbit.pointIndex < 0
+            ? workPosition
+            : workPosition + workOrbitPointOffset(orbit.pointIndex, orbitRadius);
+        station.y = getTargetAltitude(sim->terrain, station.x, station.z, *unitInfo.definition);
+
+        if (!orbit.onStation)
+        {
+            SimVector toStation(station.x - unitInfo.state->position.x, 0_ss, station.z - unitInfo.state->position.z);
+            auto tolerance = rweMax(16_ss, unitInfo.definition->maxVelocity * 4_ss);
+            if (toStation.lengthSquared() <= tolerance * tolerance)
+            {
+                orbit.onStation = true;
+                orbit.stationReachedAt = sim->gameTime;
+            }
+            else
+            {
+                flying->targetPosition = station;
+            }
+        }
+
+        if (orbit.onStation)
+        {
+            // Hold: with no target the aircraft brakes and hovers where it is.
+            flying->targetPosition = std::nullopt;
+
+            auto dwell = orbit.pointIndex < 0 ? WorkOrbitCentreDwellTicks : WorkOrbitPointDwellTicks;
+            if (sim->gameTime >= orbit.stationReachedAt + GameTime(dwell))
+            {
+                if (orbit.pointIndex < 0)
+                {
+                    // Off the centre: pick a ring station at random, then go
+                    // clockwise from there.
+                    std::uniform_int_distribution<int> pick(0, WorkOrbitPointCount - 1);
+                    orbit.pointIndex = pick(sim->rng);
+                }
+                else
+                {
+                    orbit.pointIndex = (orbit.pointIndex + 1) % WorkOrbitPointCount;
+                }
+                orbit.onStation = false;
+            }
+        }
+
+        // Out on the ring the body swings to face the job — so slowly that a
+        // move to the next station takes most of the dwell to catch up.
+        if (orbit.pointIndex >= 0)
+        {
+            unitInfo.state->slowFacePoint = workPosition;
+        }
+
+        // Work begins once it has taken up its first position over the
+        // centre, and carries on through the short hops between stations.
+        return orbit.onStation || orbit.pointIndex >= 0;
     }
 
     bool UnitBehaviorService::handleLoadOrder(UnitInfo unitInfo, const LoadOrder& loadOrder)
@@ -2518,7 +2629,7 @@ namespace rwe
         auto& targetUnit = targetUnitRef->get();
         const auto& targetUnitDefinition = sim->unitDefinitions.at(targetUnit.unitType);
 
-        if (!prepareBuilderForWork(unitInfo, targetUnit.position))
+        if (!prepareBuilderForWork(unitInfo, targetUnit.position, workOrbitRadius(targetUnit)))
         {
             return false;
         }
@@ -2612,11 +2723,17 @@ namespace rwe
             return true;
         }
 
-        auto workPosition = match(
+        auto [workPosition, orbitRadius] = match(
             target,
-            [&](const UnitId& targetUnitId) { return sim->getUnitState(targetUnitId).position; },
-            [&](const FeatureId& targetFeatureId) { return sim->getFeature(targetFeatureId).position; });
-        if (!prepareBuilderForWork(unitInfo, workPosition))
+            [&](const UnitId& targetUnitId) {
+                const auto& targetUnit = sim->getUnitState(targetUnitId);
+                return std::make_pair(targetUnit.position, workOrbitRadius(targetUnit));
+            },
+            [&](const FeatureId& targetFeatureId) {
+                const auto& targetFeature = sim->getFeature(targetFeatureId);
+                return std::make_pair(targetFeature.position, workOrbitRadius(sim->getFeatureDefinition(targetFeature.featureName)));
+            });
+        if (!prepareBuilderForWork(unitInfo, workPosition, orbitRadius))
         {
             return false;
         }
@@ -2696,6 +2813,11 @@ namespace rwe
         }
         auto& targetUnit = targetUnitRef->get();
         const auto& targetUnitDefinition = sim->unitDefinitions.at(targetUnit.unitType);
+
+        if (!prepareBuilderForWork(unitInfo, targetUnit.position, workOrbitRadius(targetUnit)))
+        {
+            return false;
+        }
 
         // Repairing reuses the building state so the nanolathe effect and
         // the StartBuilding/StopBuilding script hooks behave the same way.

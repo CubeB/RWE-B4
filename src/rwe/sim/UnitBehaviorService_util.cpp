@@ -291,13 +291,16 @@ namespace rwe
 
     SimVector decelerate(SimVector currentVelocity, SimScalar deceleration)
     {
-        auto currentDirection = currentVelocity.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
-        if (currentDirection == SimVector(0_ss, 0_ss, 0_ss))
+        // Slower than one tick's braking: stop dead. Subtracting the full
+        // step would overshoot past zero and flip the velocity, and because
+        // the flipped magnitudes differ the "stationary" aircraft would
+        // drift steadily off its spot, a fraction of a unit every tick.
+        if (currentVelocity.lengthSquared() <= deceleration * deceleration)
         {
             return SimVector(0_ss, 0_ss, 0_ss);
         }
-        auto newVelocity = currentVelocity - (currentDirection * deceleration);
-        return newVelocity;
+        auto currentDirection = currentVelocity.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
+        return currentVelocity - (currentDirection * deceleration);
     }
 
     SimVector computeNewAirUnitVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateFlying& physics)

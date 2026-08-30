@@ -8,6 +8,8 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
+#include <cstdlib>
+#include <iostream>
 #include <memory>
 
 namespace rwe
@@ -103,6 +105,57 @@ namespace rwe
             return id;
         }
 
+        /** A proper immobile structure with a yardmap, buildable by the test builder. */
+        UnitDefinition makeStructureDef(bool factory)
+        {
+            UnitDefinition d{};
+            d.objectName = "model";
+            d.isMobile = false;
+            d.canMove = false;
+            d.builder = factory;
+            d.maxHitPoints = 100;
+            d.buildTime = 300u;
+            d.buildCostMetal = Metal(1.0f);
+            d.buildCostEnergy = Energy(1.0f);
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{4u, 4u, 255u, 255u, 0u, 0u};
+            d.yardMap = Grid<YardMapCell>(4, 4, YardMapCell::Ground);
+            return d;
+        }
+
+        UnitDefinition makeBuilderDef()
+        {
+            UnitDefinition d{};
+            d.objectName = "model";
+            d.isMobile = true;
+            d.canMove = true;
+            d.builder = true;
+            d.buildDistance = 200_ss;
+            d.workerTimePerTick = 3;
+            d.maxVelocity = 3_ss;
+            d.acceleration = 1_ss;
+            d.brakeRate = 1_ss;
+            d.turnRate = 1000_ss;
+            d.maxHitPoints = 100;
+            d.buildTime = 0u;
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
+            return d;
+        }
+
+        UnitId spawnGroundUnit(GameSimulation& sim, const std::string& unitType, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
+        {
+            auto env = std::make_unique<CobEnvironment>(script.get());
+            UnitMesh base;
+            base.name = "base";
+            std::vector<UnitMesh> pieces{base};
+            UnitState unit(pieces, std::move(env));
+            unit.unitType = unitType;
+            unit.owner = owner;
+            unit.position = pos;
+            unit.previousPosition = pos;
+            unit.hitPoints = 100;
+            return sim.tryAddUnit(std::move(unit)).value();
+        }
+
         int countArrivals(const GameSimulation& sim, UnitId unitId)
         {
             int n = 0;
@@ -189,6 +242,133 @@ namespace rwe
             landed = std::holds_alternative<UnitPhysicsInfoGround>(sim.getUnitState(planeId).physics);
         }
         REQUIRE(landed);
+    }
+
+    TEST_CASE("buildings go up with a slight random twist", "[aircraft][construction]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        sim.unitDefinitions["builder"] = makeBuilderDef();
+        sim.unitDefinitions["STRUCTURE"] = makeStructureDef(false);
+        sim.unitDefinitions["FACTORY"] = makeStructureDef(true);
+        sim.unitScriptDefinitions["STRUCTURE"] = *script;
+        sim.unitScriptDefinitions["FACTORY"] = *script;
+        registerModel(sim);
+
+        auto builderId = spawnGroundUnit(sim, "builder", player, SimVector(-60_ss, 0_ss, 0_ss), script);
+
+        SECTION("an ordinary building is twisted up to five degrees either way")
+        {
+            sim.getUnitState(builderId).orders.push_back(BuildOrder("STRUCTURE", SimVector(40_ss, 0_ss, 0_ss)));
+            std::optional<UnitId> structureId;
+            for (int i = 0; i < 300 && !structureId; ++i)
+            {
+                sim.tick();
+                for (const auto& [id, unit] : sim.units)
+                {
+                    if (unit.unitType == "STRUCTURE")
+                    {
+                        structureId = id;
+                    }
+                }
+            }
+            REQUIRE(structureId.has_value());
+            const auto fiveDegrees = SimAngle(911);
+            REQUIRE(angleBetween(SimAngle(0), sim.getUnitState(*structureId).rotation).value <= fiveDegrees.value);
+        }
+
+        SECTION("a factory stays square so its pad lines up")
+        {
+            sim.getUnitState(builderId).orders.push_back(BuildOrder("FACTORY", SimVector(40_ss, 0_ss, 0_ss)));
+            std::optional<UnitId> factoryId;
+            for (int i = 0; i < 300 && !factoryId; ++i)
+            {
+                sim.tick();
+                for (const auto& [id, unit] : sim.units)
+                {
+                    if (unit.unitType == "FACTORY")
+                    {
+                        factoryId = id;
+                    }
+                }
+            }
+            REQUIRE(factoryId.has_value());
+            REQUIRE(sim.getUnitState(*factoryId).rotation == SimAngle(0));
+        }
+    }
+
+    TEST_CASE("a construction aircraft works the ring pattern", "[aircraft][construction]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto airBuilder = makeBuilderDef();
+        airBuilder.canFly = true;
+        airBuilder.cruiseAltitude = 60_ss;
+        airBuilder.maxVelocity = 5_ss;
+        sim.unitDefinitions["AIRBUILDER"] = airBuilder;
+        sim.unitDefinitions["plane"] = airBuilder;
+        sim.unitDefinitions["STRUCTURE"] = makeStructureDef(false);
+        sim.unitScriptDefinitions["STRUCTURE"] = *script;
+        registerModel(sim);
+
+        auto structurePosition = SimVector(0_ss, 0_ss, 0_ss);
+        auto planeId = spawnPlane(sim, player, SimVector(-150_ss, 60_ss, 0_ss), script);
+        sim.getUnitState(planeId).orders.push_back(BuildOrder("STRUCTURE", structurePosition));
+
+        // The build stance never comes (the test script has no StartBuilding),
+        // so the aircraft flies the pattern indefinitely: ideal for watching it.
+        bool sawCentreStage = false;
+        std::vector<int> stationsVisited;
+        bool ringDistanceOk = true;
+        float minRing = 1000.0f;
+        float maxRing = 0.0f;
+        for (int i = 0; i < 1500; ++i)
+        {
+            sim.tick();
+            const auto& plane = sim.getUnitState(planeId);
+            if (std::getenv("RWE_TRACE_ORBIT") && i % 15 == 0)
+            {
+                std::string o = plane.airWorkOrbit ? (std::to_string(plane.airWorkOrbit->pointIndex) + (plane.airWorkOrbit->onStation ? "+" : "-")) : "none";
+                std::cout << "t=" << i << " pos=" << simScalarToFloat(plane.position.x) << "," << simScalarToFloat(plane.position.y) << "," << simScalarToFloat(plane.position.z) << " orbit=" << o << std::endl;
+            }
+            if (!plane.airWorkOrbit)
+            {
+                continue;
+            }
+            const auto& orbit = *plane.airWorkOrbit;
+            if (orbit.pointIndex < 0 && orbit.onStation)
+            {
+                sawCentreStage = true;
+            }
+            if (orbit.pointIndex >= 0 && orbit.onStation)
+            {
+                if (stationsVisited.empty() || stationsVisited.back() != orbit.pointIndex)
+                {
+                    stationsVisited.push_back(orbit.pointIndex);
+                }
+                SimVector flat(plane.position.x - orbit.workPosition.x, 0_ss, plane.position.z - orbit.workPosition.z);
+                auto distance = flat.length();
+                // The 4x4 structure's ring radius is clamped to the 40-unit floor.
+                minRing = std::min(minRing, simScalarToFloat(distance));
+                maxRing = std::max(maxRing, simScalarToFloat(distance));
+                if (distance < 15_ss || distance > 80_ss)
+                {
+                    ringDistanceOk = false;
+                }
+            }
+        }
+
+        REQUIRE(sawCentreStage);
+        REQUIRE(stationsVisited.size() >= 2);
+        // After the random first station, movement is one step clockwise at a time.
+        for (std::size_t i = 1; i < stationsVisited.size(); ++i)
+        {
+            REQUIRE(stationsVisited[i] == (stationsVisited[i - 1] + 1) % 8);
+        }
+        CAPTURE(minRing, maxRing);
+        REQUIRE(ringDistanceOk);
     }
 
     TEST_CASE("aircraft look for dry land to set down on", "[aircraft]")

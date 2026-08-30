@@ -72,7 +72,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
     <span>branch <b>revival</b></span>
     <span>base <b>upstream master b2d8a31 · 25 Mar 2026</b></span>
     <span>updated <b>30 Aug 2026</b></span>
-    <span>tests <b>186 cases · 1941 assertions</b></span>
+    <span>tests <b>188 cases · 1959 assertions</b></span>
   </div>
 </header>
 <nav aria-label="Sections">
@@ -102,7 +102,8 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Aircraft move off and steer while climbing out, and bombers drop a stick of three per pass</li>
   <li>An attack run holds speed and banks at the aircraft's own turn rate, so the turn back for another pass is an arc of radius <code>speed / turnRate</code> rather than a stop and a pivot; the run-out is sized from that radius, and a run is only committed to when the aircraft is close and lined up — one caught inside its own turn circle extends away first instead of orbiting and missing</li>
   <li>Aircraft set down on dry land only, and an order given while one is landing aborts the descent and sends it back up</li>
-  <li>Construction aircraft have to be flying to use the fabricator, and circle slowly over whatever they are lathing; the nano spray follows the nozzle and is depth-tested, so the aircraft occludes the stream behind it</li>
+  <li>Construction aircraft have to be flying to use the fabricator and work a pattern: a spell over the centre, then eight stations on a ring through the building's corners, clockwise from a random start, the body swung slowly to face the job; the nano spray follows the nozzle and is depth-tested</li>
+  <li>Buildings go up with a random twist of up to five degrees either way; factories stay square for their pads</li>
   <li>A builder that raised its arm and then did nothing was losing its build stance to a stow that finished after the redeploy; starting a job now waits for the stow, and moving from one job to the next keeps the arm out</li>
   <li>Aircraft count as arrived within a few ticks of travel rather than 8 units — they cannot stop dead, and the tighter figure left orders that never finished and new aircraft hovering over the pad. Landing keeps the tight figure, refuses water, and retries elsewhere if the spot is taken</li>
   <li>Units report arrival at the end of the journey, not at every shift-queued waypoint</li>
@@ -155,7 +156,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <ul>
   <li>Windows checkouts without symlinks build (real asio include path); MinGW runtime DLLs copied next to the executables</li>
   <li>Fixed the freeze under heavy fire: a deadlock between the render loop setting sound volumes and SDL_mixer's audio thread reporting finished tracks (track‑finished events are now queued for the main thread). <code>RWE_DEBUG_SPAWN=ARMPW*12@0:8:1</code> reproduces it</li>
-  <li>Headless‑safe logging for tests; 53 new test cases across orders, pathing, economy, visibility, burning, wreckage, transports, aircraft, bombing and AI</li>
+  <li>Headless‑safe logging for tests; 55 new test cases across orders, pathing, economy, visibility, burning, wreckage, transports, aircraft, bombing and AI</li>
 </ul>
 
 <h2 id="roadmap">Roadmap<small>Six phases, in order of dependence. The full plan lives in <code>docs/ROADMAP.md</code>.</small></h2>

@@ -361,6 +361,32 @@ namespace rwe
         std::optional<UnitId> transportScriptTarget;
         GameTime transportScriptStartedAt{0};
 
+        /**
+         * Where a construction aircraft stands in its work pattern: a spell
+         * over the centre of the job, then dwelling at each of eight points
+         * on a ring around it, clockwise.
+         */
+        struct AirWorkOrbitState
+        {
+            /** The centre of the job the pattern is flown around. */
+            SimVector workPosition;
+
+            /** -1 = over the centre; 0-7 = the ring points, clockwise from due north. */
+            int pointIndex{-1};
+
+            /** True once it has settled at the current station; the dwell runs from stationReachedAt. */
+            bool onStation{false};
+            GameTime stationReachedAt{0};
+        };
+        std::optional<AirWorkOrbitState> airWorkOrbit;
+
+        /**
+         * Set each tick while a construction aircraft holds station: it turns
+         * towards this point at a slow fixed rate instead of chasing its
+         * flight path. Cleared at the start of every behaviour update.
+         */
+        std::optional<SimVector> slowFacePoint;
+
         bool activated{false};
         bool isSufficientlyPowered{false};
 

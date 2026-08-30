@@ -100,6 +100,8 @@ namespace rwe
             u.carriedBy,
             u.transportScriptTarget,
             u.transportScriptStartedAt,
+            u.airWorkOrbit,
+            u.slowFacePoint,
             u.activated,
             u.isSufficientlyPowered,
             u.energyProductionBuffer,
@@ -250,6 +252,15 @@ namespace rwe
     GameHash computeHashOf(const DiscreteRect& r)
     {
         return combineHashes(r.x, r.y, r.width, r.height);
+    }
+
+    GameHash computeHashOf(const UnitState::AirWorkOrbitState& s)
+    {
+        return combineHashes(
+            s.workPosition,
+            static_cast<int32_t>(s.pointIndex),
+            s.onStation,
+            s.stationReachedAt);
     }
 
     GameHash computeHashOf(const MapFeature& f)

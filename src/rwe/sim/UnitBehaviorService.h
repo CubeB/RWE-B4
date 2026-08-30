@@ -82,12 +82,26 @@ namespace rwe
          * Gets a construction aircraft ready to work on something at the given
          * position: it takes off if it is sitting on the ground (the fabricator
          * only reaches from the air), breaks off a landing, and once airborne
-         * holds a slow circuit over the job. Returns false while it is still
-         * getting airborne, so the caller waits.
+         * flies the work pattern — a spell over the centre, then dwelling at
+         * each of eight points on a ring of the given radius around the job,
+         * clockwise, its body slowly turned to face the centre. Returns false
+         * while it is still getting into position for the first time, so the
+         * caller waits.
          *
          * Ground builders are always ready and it returns true for them.
          */
-        bool prepareBuilderForWork(UnitInfo unitInfo, const SimVector& workPosition);
+        bool prepareBuilderForWork(UnitInfo unitInfo, const SimVector& workPosition, SimScalar orbitRadius);
+
+        /**
+         * The ring a construction aircraft flies while working on the target:
+         * through the corners of a building's footprint, and a little wider
+         * (with a floor) around a mobile unit, so the aircraft can stand off
+         * from something small or moving.
+         */
+        SimScalar workOrbitRadius(const UnitState& target) const;
+
+        /** As above, for a feature being reclaimed. */
+        SimScalar workOrbitRadius(const FeatureDefinition& featureDefinition) const;
 
         /** Whether the builder's arm reaches the target's footprint from where it stands. */
         bool withinBuildReach(UnitInfo unitInfo, const UnitState& target) const;
