@@ -226,6 +226,39 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a ship sends the unit it is collecting towards itself", "[transport]")
+    {
+        // A ship cannot come ashore, so the unit walks down to meet it. The
+        // bug this guards against had the unit setting off in the opposite
+        // direction, then further away again each time it arrived.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim, "hauler");
+        auto shipDef = makeTransportDef();
+        shipDef.floater = true;
+        sim.unitDefinitions["ship"] = shipDef;
+        sim.unitDefinitions["kbot"] = makeMobileDef(2u);
+        registerModel(sim, "model");
+
+        auto shipId = spawnUnit(sim, "ship", player, SimVector(-400_ss, 0_ss, 0_ss), script);
+        auto kbotId = spawnUnit(sim, "kbot", player, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto kbotStart = sim.getUnitState(kbotId).position;
+
+        sim.getUnitState(shipId).orders.push_back(LoadOrder(kbotId));
+        REQUIRE(tickUntil(sim, 60, [&] { return !sim.getUnitState(kbotId).orders.empty(); }));
+
+        auto move = std::get_if<MoveOrder>(&sim.getUnitState(kbotId).orders.front());
+        REQUIRE(move != nullptr);
+
+        auto shipPosition = sim.getUnitState(shipId).position;
+        auto distanceFromStart = shipPosition.distanceSquared(kbotStart);
+        auto distanceFromDestination = shipPosition.distanceSquared(move->destination);
+        // The meeting point is nearer the ship than the unit was.
+        REQUIRE(distanceFromDestination < distanceFromStart);
+        // And it is on the ship's side of the unit, not the far side.
+        REQUIRE(move->destination.x < kbotStart.x);
+    }
+
     TEST_CASE("one unload order sets down one unit", "[transport]")
     {
         auto script = makeEmptyCobScript();

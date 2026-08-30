@@ -174,6 +174,26 @@ namespace rwe
                 changeState(*unitInfo.state, UnitBehaviorStateIdle());
             }
 
+            // A spray that is already running follows its nozzle. Without this
+            // the emission point is only refreshed on the ticks where work is
+            // actually done, so an aircraft circling its job leaves the stream
+            // hanging in the air where it started.
+            match(
+                unitInfo.state->behaviourState,
+                [&](UnitBehaviorStateBuilding& s) {
+                    if (s.nanoParticleOrigin)
+                    {
+                        s.nanoParticleOrigin = getNanoPoint(unitInfo.id);
+                    }
+                },
+                [&](UnitBehaviorStateReclaiming& s) {
+                    if (s.nanoParticleOrigin)
+                    {
+                        s.nanoParticleOrigin = getNanoPoint(unitInfo.id);
+                    }
+                },
+                [&](const auto&) {});
+
             for (Index i = 0; i < getSize(unitInfo.state->weapons); ++i)
             {
                 updateWeapon(unitId, i);
@@ -237,7 +257,16 @@ namespace rwe
                                 {
                                     if (!tryTransitionFromAirToGround(unitInfo))
                                     {
+                                        // Something took the spot while we were
+                                        // coming down. Climb away and look for
+                                        // another one: forgetting the landing
+                                        // spot makes the next idle tick search
+                                        // afresh, and this one is now occupied
+                                        // so it will not be picked again.
                                         m.landingFailed = true;
+                                        unitInfo.state->activate();
+                                        unitInfo.state->navigationState.state = NavigationStateIdle();
+                                        p.movementState = AirMovementStateFlying();
                                     }
                                 }
                             }
@@ -245,6 +274,15 @@ namespace rwe
                         [&](const AirMovementStateFlying& m) {
                             if (m.shouldLand)
                             {
+                                // Never touch down on water, whatever the
+                                // navigation thinks: better to keep flying and
+                                // look for somewhere else than to sink.
+                                auto ground = sim->terrain.getHeightAt(unitInfo.state->position.x, unitInfo.state->position.z);
+                                if (ground < sim->terrain.getSeaLevel())
+                                {
+                                    unitInfo.state->navigationState.state = NavigationStateIdle();
+                                    return;
+                                }
                                 p.movementState = AirMovementStateLanding();
                                 unitInfo.state->deactivate();
                             }
@@ -1144,16 +1182,28 @@ namespace rwe
     {
         // Steers an air transport to a point that may be below cruise height;
         // true once it is hovering there.
+        //
+        // The tolerance is generous on purpose. An aircraft carries its speed
+        // into the hover and drifts past the spot before settling, so demanding
+        // that it be within a few units of the point had the Atlas circling and
+        // overshooting for ten seconds before it would let go of its cargo.
+        auto dx = unitInfo.state->position.x - point.x;
+        auto dz = unitInfo.state->position.z - point.z;
+        auto flatTolerance = rweMax(24_ss, unitInfo.definition->maxVelocity * 4_ss);
+        auto heightTolerance = 24_ss;
+        auto arrived = ((dx * dx) + (dz * dz)) <= (flatTolerance * flatTolerance)
+            && rweAbs(unitInfo.state->position.y - point.y) <= heightTolerance;
+
         auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
         if (airPhysics == nullptr)
         {
-            return unitInfo.state->position.distanceSquared(point) <= 64_ss;
+            return arrived;
         }
         if (auto flying = std::get_if<AirMovementStateFlying>(&airPhysics->movementState))
         {
             flying->targetPosition = point;
         }
-        return unitInfo.state->position.distanceSquared(point) <= 64_ss;
+        return arrived;
     }
 
     bool UnitBehaviorService::prepareBuilderForWork(UnitInfo unitInfo, const SimVector& workPosition)
@@ -1193,15 +1243,15 @@ namespace rwe
             // Fly a slow circuit over the job rather than hanging motionless
             // above it, the way TA's construction aircraft do. Steering at a
             // point a little way round the circle keeps it moving: by the time
-            // it gets there the point has moved on again.
-            auto radius = rweMax(32_ss, unitInfo.definition->buildDistance * 0.6_ssf);
+            // it gets there the point has moved on again. A sixteenth of a
+            // turn keeps that point close, so the aircraft is always braking
+            // towards it and the circuit stays slow and tight.
+            auto radius = rweMax(24_ss, unitInfo.definition->buildDistance * 0.45_ssf);
             SimVector fromCentre(unitInfo.state->position.x - workPosition.x, 0_ss, unitInfo.state->position.z - workPosition.z);
             auto bearing = fromCentre.lengthSquared() > 0_ss
                 ? UnitState::toRotation(fromCentre)
                 : unitInfo.state->rotation;
-            // An eighth of a turn ahead: far enough to keep flying, near
-            // enough that the circuit stays over the target.
-            auto lead = bearing + EighthTurn;
+            auto lead = bearing + SimAngle(4096);
             auto orbitPoint = workPosition + (UnitState::toDirection(lead) * radius);
             orbitPoint.y = getTargetAltitude(sim->terrain, orbitPoint.x, orbitPoint.z, *unitInfo.definition);
             flying->targetPosition = orbitPoint;
@@ -1258,12 +1308,20 @@ namespace rwe
         {
             navigateTo(unitInfo, loadOrder.target);
 
-            // A ship cannot come ashore, so the unit walks to the water's edge
-            // to meet it. Its own path ends at the closest reachable point.
+            // A ship cannot come ashore, so the unit walks down to the water's
+            // edge to meet it. Its own path stops at the last point it can
+            // actually reach, which is the shore.
+            //
+            // The meeting point is measured out from the ship towards the
+            // unit, not the other way about: working from the unit's end sent
+            // it marching away from the transport, and then further away again
+            // each time it arrived.
             if (isShip && target.orders.empty() && !target.carriedBy)
             {
-                SimVector toTransport(-dx, 0_ss, -dz);
-                auto meetingPoint = target.position + (toTransport.normalizedOr(SimVector(0_ss, 0_ss, 0_ss)) * rweMax(0_ss, rweSqrt(flatDistanceSquared) - (pickupRange / 2_ss)));
+                SimVector towardsTarget(-dx, 0_ss, -dz);
+                auto direction = towardsTarget.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
+                auto meetingPoint = unitInfo.state->position + (direction * (pickupRange * 0.75_ssf));
+                meetingPoint.y = sim->terrain.getHeightAt(meetingPoint.x, meetingPoint.z);
                 target.addOrder(createMoveOrder(meetingPoint));
             }
             return false;
@@ -1352,7 +1410,11 @@ namespace rwe
 
         auto dx = unitInfo.state->position.x - unloadOrder.destination.x;
         auto dz = unitInfo.state->position.z - unloadOrder.destination.z;
-        auto dropRange = unitInfo.definition->floater ? CraneReach : 32_ss;
+        // An aircraft needs room to stop, so it starts its descent from
+        // further out than a ship's crane needs.
+        auto dropRange = unitInfo.definition->floater
+            ? CraneReach
+            : rweMax(32_ss, unitInfo.definition->maxVelocity * 8_ss);
         if ((dx * dx) + (dz * dz) > dropRange * dropRange)
         {
             navigateTo(unitInfo, unloadOrder.destination);
@@ -1446,7 +1508,14 @@ namespace rwe
 
         if (navigateTo(unitInfo, moveOrder.destination))
         {
-            sim->events.push_back(UnitArrivedEvent{unitInfo.id});
+            // Only report in on arriving at the last waypoint. A unit given a
+            // string of shift-queued moves is still on its way until the queue
+            // runs out, and announcing every leg of the journey is noise.
+            // (This order is still at the front; the caller pops it.)
+            if (unitInfo.state->orders.size() == 1)
+            {
+                sim->events.push_back(UnitArrivedEvent{unitInfo.id});
+            }
             return true;
         }
 
@@ -1925,6 +1994,15 @@ namespace rwe
                 return finished;
             },
             [&](const auto&) {
+                // An arm still being stowed by a StopBuilding thread sets
+                // INBUILDSTANCE back to zero, and if it gets there after
+                // StartBuilding has set it the builder ends up with its arm
+                // raised and nothing else happening. Let the stow finish.
+                if (unitInfo.state->cobEnvironment->isThreadRunning("StopBuilding"))
+                {
+                    return false;
+                }
+
                 auto nanoFromPosition = getNanoPoint(unitInfo.id);
                 auto headingAndPitch = computeLineOfSightHeadingAndPitch(unitInfo.state->rotation, nanoFromPosition, targetUnit.position);
                 auto heading = headingAndPitch.first;
@@ -2395,6 +2473,11 @@ namespace rwe
         // instead of walking round to the front.
         if (!withinBuildReach(unitInfo, targetUnit))
         {
+            // Out of arm's length: the spray stops until it is back in range.
+            if (auto buildingState = std::get_if<UnitBehaviorStateBuilding>(&unitInfo.state->behaviourState))
+            {
+                buildingState->nanoParticleOrigin = std::nullopt;
+            }
             const auto& targetDefinition = sim->unitDefinitions.at(targetUnit.unitType);
             auto rect = sim->computeFootprintRegion(targetUnit.position, targetDefinition.movementCollisionInfo);
             auto reachTiles = std::max(0, static_cast<int>(simScalarToFloat(unitInfo.definition->buildDistance) / simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits)) - 1);
@@ -2408,11 +2491,17 @@ namespace rwe
 
     void UnitBehaviorService::changeState(UnitState& unit, const UnitBehaviorState& newState)
     {
-        if (std::holds_alternative<UnitBehaviorStateBuilding>(unit.behaviourState))
-        {
-            unit.cobEnvironment->createThread("StopBuilding");
-        }
-        else if (std::holds_alternative<UnitBehaviorStateReclaiming>(unit.behaviourState))
+        bool wasWorking = std::holds_alternative<UnitBehaviorStateBuilding>(unit.behaviourState)
+            || std::holds_alternative<UnitBehaviorStateReclaiming>(unit.behaviourState);
+        bool willBeWorking = std::holds_alternative<UnitBehaviorStateBuilding>(newState)
+            || std::holds_alternative<UnitBehaviorStateReclaiming>(newState);
+
+        // Stow the arm when the work stops. Moving straight from one job to
+        // the next — a builder following a factory from one unit to the next,
+        // say — keeps it out: stowing and redeploying in the same breath wins
+        // nothing and risks the stow clearing the build stance the redeploy
+        // just set, which leaves the builder with its arm up doing nothing.
+        if (wasWorking && !willBeWorking)
         {
             unit.cobEnvironment->createThread("StopBuilding");
         }
@@ -2480,6 +2569,15 @@ namespace rwe
                 return false;
             },
             [&](const auto&) {
+                // An arm still being stowed by a StopBuilding thread sets
+                // INBUILDSTANCE back to zero, and if it gets there after
+                // StartBuilding has set it the builder ends up with its arm
+                // raised and nothing else happening. Let the stow finish.
+                if (unitInfo.state->cobEnvironment->isThreadRunning("StopBuilding"))
+                {
+                    return false;
+                }
+
                 auto nanoFromPosition = getNanoPoint(unitInfo.id);
                 auto headingAndPitch = computeLineOfSightHeadingAndPitch(unitInfo.state->rotation, nanoFromPosition, targetUnit.position);
                 auto heading = headingAndPitch.first;
@@ -2560,6 +2658,13 @@ namespace rwe
                     });
             },
             [&](const auto&) {
+                // As in deployBuildArm: wait for any stow to finish, or the
+                // arm goes up and the unit then sits there doing nothing.
+                if (unitInfo.state->cobEnvironment->isThreadRunning("StopBuilding"))
+                {
+                    return false;
+                }
+
                 auto nanoFromPosition = getNanoPoint(unitInfo.id);
                 auto targetPosition = match(
                     target,
@@ -2626,6 +2731,15 @@ namespace rwe
                 return false;
             },
             [&](const auto&) {
+                // An arm still being stowed by a StopBuilding thread sets
+                // INBUILDSTANCE back to zero, and if it gets there after
+                // StartBuilding has set it the builder ends up with its arm
+                // raised and nothing else happening. Let the stow finish.
+                if (unitInfo.state->cobEnvironment->isThreadRunning("StopBuilding"))
+                {
+                    return false;
+                }
+
                 auto nanoFromPosition = getNanoPoint(unitInfo.id);
                 auto headingAndPitch = computeLineOfSightHeadingAndPitch(unitInfo.state->rotation, nanoFromPosition, targetUnit.position);
                 auto heading = headingAndPitch.first;

@@ -721,7 +721,22 @@ namespace rwe
         SimVector xzDestination(destination->x, 0_ss, destination->z);
         auto distanceSquared = xzPosition.distanceSquared(xzDestination);
 
-        if (distanceSquared < (8_ss * 8_ss))
+        // A ground unit stops on the spot, so eight units is close enough to
+        // call it arrived. An aircraft is still carrying its speed and cannot
+        // stop dead, so hold it to a few ticks of travel instead; asking for
+        // eight units leaves it circling the spot, overshooting each time,
+        // and orders that never finish.
+        //
+        // Landing is the exception: an aircraft touches down where it is, not
+        // where it was aiming, so it has to actually be over the spot. Getting
+        // this wrong puts it in the sea a few units short of the beach.
+        auto tolerance = 8_ss;
+        if (unitDefinition.canFly && !std::holds_alternative<NavigationGoalLandingLocation>(goal))
+        {
+            tolerance = rweMax(tolerance, unitDefinition.maxVelocity * 4_ss);
+        }
+
+        if (distanceSquared < (tolerance * tolerance))
         {
             return true;
         }

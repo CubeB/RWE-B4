@@ -1064,9 +1064,10 @@ namespace rwe
         worldRenderService.drawSpriteBatch(featureShadowBatch);
         worldRenderService.drawSpriteBatch(featureBatch);
 
-        sceneContext.graphics->disableDepthTest();
-
-        // Nano spray, drawn over everything so it reads on top of the target.
+        // Nano spray keeps depth testing (with writes still off) so the unit
+        // doing the lathing occludes the part of the stream behind it. Drawn
+        // without it, a construction aircraft hovering over its work has the
+        // spray painted across the top of the fuselage.
         ColoredMeshBatch nanoParticlesBatch;
         for (const auto& particle : particles)
         {
@@ -1080,6 +1081,8 @@ namespace rwe
             }
         }
         worldRenderService.drawBatch(nanoParticlesBatch, viewProjectionMatrix);
+
+        sceneContext.graphics->disableDepthTest();
 
         sceneContext.graphics->bindFrameBufferColorBuffer(dodgeMask.get());
         sceneContext.graphics->clearColor();
