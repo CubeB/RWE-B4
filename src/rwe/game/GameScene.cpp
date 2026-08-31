@@ -5553,11 +5553,13 @@ namespace rwe
                 continue;
             }
 
-            // Where the spray lands: the middle of the target, at the top of
-            // it. Aiming at one point rather than fanning across the footprint
-            // makes the beam converge the way TA's does, and taking the top of
-            // the model keeps the stream clear of the geometry, so it is never
-            // swallowed by the very structure it is building.
+            // Where the spray lands: the middle of the target, on top of it.
+            // Aiming at one point rather than fanning across the footprint
+            // makes the beam converge the way TA's does, and landing on the
+            // roof rather than inside the model keeps the stream out of the
+            // geometry, so the structure cannot swallow the end of it — which
+            // matters now that the spray is depth tested against the world so
+            // a construction aircraft can cover it.
             std::optional<Vector3f> targetCentre;
             Vector3f spread(0.0f, 0.0f, 0.0f);
             match(
@@ -5571,7 +5573,7 @@ namespace rwe
                     const auto& targetDefinition = simulation.unitDefinitions.at(targetUnit->get().unitType);
                     const auto& targetModel = simulation.unitModelDefinitions.at(targetDefinition.objectName);
                     auto height = simScalarToFloat(targetModel.height);
-                    targetCentre = simVectorToFloat(targetUnit->get().position) + Vector3f(0.0f, height * 0.5f, 0.0f);
+                    targetCentre = simVectorToFloat(targetUnit->get().position) + Vector3f(0.0f, height, 0.0f);
                     // Just enough scatter that the beam is not a single line.
                     spread = Vector3f(4.0f, height * 0.15f, 4.0f);
                 },
@@ -5583,7 +5585,7 @@ namespace rwe
                     }
                     const auto& featureDefinition = simulation.getFeatureDefinition(targetFeature->get().featureName);
                     auto height = simScalarToFloat(featureDefinition.height);
-                    targetCentre = simVectorToFloat(targetFeature->get().position) + Vector3f(0.0f, height * 0.5f, 0.0f);
+                    targetCentre = simVectorToFloat(targetFeature->get().position) + Vector3f(0.0f, height, 0.0f);
                     spread = Vector3f(4.0f, height * 0.15f, 4.0f);
                 });
             if (!targetCentre)
@@ -5643,9 +5645,11 @@ namespace rwe
             simulation.gameTime + GameTime(ticks),
             nanoColors[pickColor(effectsRng)],
             1.0f,
-            // Enough to clear the structure being built without punching
-            // through an aircraft hovering over it.
-            24.0f};
+            // No nudge towards the camera: the spray leaves a nozzle
+            // underneath a construction aircraft, so the aircraft has to be
+            // able to cover it. It clears the structure by landing on top of
+            // it instead — see where the target point is chosen above.
+            0.0f};
         particle.startTime = simulation.gameTime;
 
         particles.push_back(particle);

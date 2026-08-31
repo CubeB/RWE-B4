@@ -1,4 +1,5 @@
 #include "UnitBehaviorService.h"
+#include <algorithm>
 #include <rwe/util/SimpleLogger.h>
 #include <rwe/cob/CobExecutionContext.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -741,16 +742,33 @@ namespace rwe
             weapon->readyTime = gameTime + deltaSecondsToTicks(weaponDefinition.reloadTime);
         }
 
-        // Recoil: let the script rock the unit away from the shot. RockUnit takes
-        // the push direction in the unit's own frame, scaled the way TA-derived
-        // engines do (about 500 per unit of direction).
+        // Recoil: let the script rock the unit away from the shot. TA's own
+        // rockunit.h takes an angle about each of the x and z axes, heels the
+        // hull over that far and lets it settle back.
         if (!isBomb)
         {
+            // How hard it kicks follows the calibre. TA's scripts pass a fixed
+            // angle, but a Peewee's machine gun and a Bulldog's cannon should
+            // not heave a hull by the same amount. Damage stands in for
+            // calibre: 7 for that machine gun, 50 for a light cannon, 147 for
+            // the Bulldog, 196 for a Goliath, and the cap keeps a Big Bertha
+            // from throwing its own hull over.
+            auto damageIt = weaponDefinition.damage.find("DEFAULT");
+            auto damage = damageIt == weaponDefinition.damage.end() ? 0u : damageIt->second;
+            // Angles are a 16-bit turn, so 182 units is a degree: this runs
+            // from about half a degree up to five.
+            auto rockAngle = std::clamp(120.0f + (static_cast<float>(damage) * 3.0f), 120.0f, 900.0f);
+
             // Scripts assume rotation 0 faces -z (see the XZAtan note in cob.cpp),
             // whereas the sim's rotation 0 faces +z; hence the half turn.
             auto localHeading = UnitState::toRotation(direction) - unit.rotation + HalfTurn;
-            auto recoil = UnitState::toDirection(localHeading) * -1_ss;
-            unit.cobEnvironment->createThread("RockUnit", {static_cast<int>(recoil.z.value * 500.0f), static_cast<int>(recoil.x.value * 500.0f)});
+            auto shot = UnitState::toDirection(localHeading);
+            // The hull rocks away from the shot, never with it: a gun fired
+            // forward lifts the nose and squats the tail. Both axes come out
+            // negated — turning about x by a positive angle dips the front,
+            // and a z-axis turn is flipped again on its way into the sim
+            // (see cob.cpp), so the signs that read as "away" are these.
+            unit.cobEnvironment->createThread("RockUnit", {static_cast<int>(-shot.z.value * rockAngle), static_cast<int>(-shot.x.value * rockAngle)});
         }
 
         ++fireInfo->burstsFired;
