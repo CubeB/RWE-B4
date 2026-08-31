@@ -2630,18 +2630,23 @@ namespace rwe
                     continue;
                 }
 
-                // Buildings go up with a slight random twist, up to ten
-                // degrees either way, so a base looks placed by hand rather
-                // than stamped out on a grid. Factories are left square:
-                // their exit pads and roll-off assume the stock facing.
+                // A building goes up somewhere inside the arc its own FBI
+                // names, so a base looks placed by hand rather than stamped
+                // out on a grid. The arc is per-unit and ranges over a factor
+                // of thirty-two, from a vehicle plant that barely moves to a
+                // light laser tower that can end up facing any quarter, and
+                // the yards and aircraft plants name none at all, which is
+                // what keeps their roll-off square. The original spreads the
+                // draw uniformly over the whole arc and offsets it by half,
+                // and it leaves the facing alone for an arc narrower than
+                // two, which is why the fortification walls that ask for
+                // zero come out in a dead straight line.
                 std::optional<SimAngle> spawnRotation;
                 const auto& newUnitDefinition = unitDefinitions.at(s->unitType);
-                if (!newUnitDefinition.isMobile && !newUnitDefinition.builder)
+                if (!newUnitDefinition.isMobile && newUnitDefinition.buildAngle.value >= 2)
                 {
-                    // Ten degrees is 1/36 of a turn.
-                    const int tenDegrees = 65536 / 36;
-                    std::uniform_int_distribution<int> twist(-tenDegrees, tenDegrees);
-                    spawnRotation = SimAngle(static_cast<uint16_t>(twist(rng)));
+                    std::uniform_int_distribution<int> twist(0, newUnitDefinition.buildAngle.value - 1);
+                    spawnRotation = SimAngle(static_cast<uint16_t>(twist(rng))) - SimAngle(newUnitDefinition.buildAngle.value / 2);
                 }
 
                 auto newUnitId = trySpawnUnit(s->unitType, s->owner, s->position, spawnRotation);

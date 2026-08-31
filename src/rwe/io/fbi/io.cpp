@@ -98,6 +98,7 @@ namespace rwe
 
         tdf.readOrDefault("WorkerTime", u.workerTime);
         tdf.readOrDefault("Builddistance", u.buildDistance);
+        tdf.readOrDefault("BuildAngle", u.buildAngle, 0u);
 
         tdf.readOrDefault("onoffable", u.onOffable);
         tdf.readOrDefault("ActivateWhenBuilt", u.activateWhenBuilt);
