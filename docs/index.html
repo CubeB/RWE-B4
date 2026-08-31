@@ -72,7 +72,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
     <span>branch <b>revival</b></span>
     <span>base <b>upstream master b2d8a31 · 25 Mar 2026</b></span>
     <span>updated <b>31 Aug 2026</b></span>
-    <span>tests <b>197 cases · 2060 assertions</b></span>
+    <span>tests <b>200 cases · 2348 assertions</b></span>
   </div>
 </header>
 <nav aria-label="Sections">
@@ -98,6 +98,8 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Self‑destruct countdown (Ctrl‑D, 5 s, cancellable) using the unit's <code>SelfDestructAs</code> weapon</li>
   <li>Transports: load and unload orders with TA's own cursors and panel buttons; carried units ride the transport's <code>QueryTransport</code> piece and are set down on clear ground</li>
   <li>Bombers fly through the target on their run, release when the timing is right, and turn back after a short run‑out or at the map edge instead of flying off the map</li>
+  <li>Bombers stop missing. A run used to take its heading from whatever velocity the aircraft happened to have when it committed, then steer at a point beyond the target along <em>that</em> line; since committing tolerates twenty degrees of error, the aim point sat up to ninety units to one side — wider than the bombsight’s across-track gate. Every pass after the first crossed the target 78–130 units wide and never opened the sight. The original recomputes the line through the target every tick, so it cannot drift; with the real <code>ARMTHUND.FBI</code> numbers this went from three bombs dropped in two minutes to forty-two, and from two hits to twenty-eight or more, from every bearing</li>
+  <li>Gunships work a standoff ring instead of flying bomber runs. <code>HoverAttack=1</code> is set on exactly two units in the whole game — the Brawler and the Rapier — and the flag had never been read, so a Brawler spiralled in to half a unit of its target. The original gives them their own mission: close to weapon range, then hold a ring of two thirds of that range (246 units for a Brawler, 300 for a Rapier) and step exactly 45° around it, alternating side on every arrival. Because the bearing is measured afresh each pass it settles into a two-point shuttle rather than an orbit — the swing these two are recognised by — and the gun holds the target across the whole of it</li>
   <li>Ships and shipyards can be placed and built in water (a missing <code>MaxWaterDepth</code> now means any depth); torpedoes only hit units in the water and run under the surface</li>
   <li>Aircraft move off and steer while climbing out, and bombers drop a stick of three per pass</li>
   <li>An attack run holds speed and banks at the aircraft's own turn rate, so the turn back for another pass is an arc of radius <code>speed / turnRate</code> rather than a stop and a pivot; the run-out is sized from that radius, and a run is only committed to when the aircraft is close and lined up — one caught inside its own turn circle extends away first instead of orbiting and missing</li>
@@ -113,9 +115,10 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Sea transports load through their own scripts — doors open, the crane swings out and hooks the unit, stows it in the hold — and the Atlas hovers down to lift; LOAD/BLAST/CLOAK buttons appear only where they apply</li>
   <li>The crane takes one unit at a time and is not free until it has stowed it; one unload order sets down one unit; cargo has no hitbox, stays off the minimap, forgets its old orders and dies with the transport</li>
   <li>Wreckage and scenery have hit points from the feature's <code>damage</code>: blasts break them apart into their <code>featuredead</code> form, and reclaim time follows what is left of them</li>
+  <li>The TDF reader takes the files the original actually ships. Running it over all 800 <code>.tdf</code>/<code>.fbi</code>/<code>.ota</code>/<code>.gui</code> files in the game data found three it refused; one was ours, a top-level block closed with <code>};</code>, which <code>UNITVIEW.TDF</code> and <code>Translate.tdf</code> both do. Parse failures also say where they happened now: the line and column were recorded and then kept private with no way to read them, and the wanted character was printed as a number, so a broken mod file reported “Expected 91” and nothing else</li>
   <li>COB VM fixes: script call arguments were passed in reverse, packed positions unpacked unsigned, <code>attach-unit</code>/<code>drop-unit</code> implemented</li>
   <li>Units only auto‑target what their owner can see or has on radar; a new order interrupts building cleanly; shift‑click removes a planned building</li>
-  <li>Units rock with recoil when they fire</li>
+  <li>Units rock with recoil when they fire, and now away from the shot rather than into it. The shot direction is turned into the unit’s own frame before it reaches the <code>RockUnit</code> script, and a half turn was being added on top of that — a correction that belongs to <code>XZAtan</code>’s own return value, not to script arguments generally. Every one of the six geometry checks in the new test comes out exactly inverted on the old code</li>
   <li>Pathing: slope‑aware speed and routing, no corner squeezing between obstacles, unreachable destinations end at the closest reachable point</li>
   <li>Builders no longer get stuck on unreachable build sites; nanoframes killed while unattended die cleanly</li>
 </ul>
