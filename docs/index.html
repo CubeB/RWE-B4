@@ -72,7 +72,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
     <span>branch <b>revival</b></span>
     <span>base <b>upstream master b2d8a31 · 25 Mar 2026</b></span>
     <span>updated <b>31 Aug 2026</b></span>
-    <span>tests <b>197 cases · 2058 assertions</b></span>
+    <span>tests <b>197 cases · 2060 assertions</b></span>
   </div>
 </header>
 <nav aria-label="Sections">
@@ -105,6 +105,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Buildings go up with a random twist of up to ten degrees either way; factories stay square for their pads</li>
   <li>Construction aircraft have to be flying to use the fabricator, and work the original's pattern: their goal sits one <code>BuildDistance</code> from the job and steps a seventh of a turn round it every five seconds — seven stations, nose held on the job — so the movement is a dash, a wait, another dash. They lathe throughout</li>
   <li>Aircraft bank because they are accelerating sideways, not because an animation says so: <code>tan(roll) = BankScale × lateral acceleration / gravity</code> through a one-pole lag, straight out of the original, with no rate limit or maximum angle</li>
+  <li>Aircraft fly the original's arrival profile rather than bang&ndash;bang throttle: drag, then steer for <code>sqrt(2 &times; Acceleration &times; distance)</code> toward the target, moving at most one tick's acceleration, with the range floored at eight units so the last few are a straight run-down. The law it replaces was full throttle or full brakes with nothing in between, and the two modes chattered against each other whenever an aircraft sat near its destination &mdash; which is what made construction aircraft shake on station, since bank is computed from change in velocity. Bank sign changes over a work orbit fell from 71 to 17</li>
   <li>Aircraft thrusters emit TA's <code>SFXTYPE_VTOL</code> exhaust. Disassembling <code>TotalA.exe</code> settled what it actually draws: the <code>flamestream</code> sequence from <code>FX.GAF</code>, one frame per tick, drifting a sixth of the thruster vector each tick for six ticks — so each puff swells from a two-pixel speck into a ragged yellow flame as it falls, and the plume is a graded line with the largest furthest from the nozzle. Two things were in the way: the SFX type was an unhandled TODO, and the script starts its flame loop from <code>MoveRate1</code>, which the engine never called</li>
   <li>A builder that raised its arm and then did nothing was losing its build stance to a stow that finished after the redeploy; starting a job now waits for the stow, and moving from one job to the next keeps the arm out</li>
   <li>Aircraft count as arrived within a few ticks of travel rather than 8 units — they cannot stop dead, and the tighter figure left orders that never finished and new aircraft hovering over the pad. Landing keeps the tight figure, refuses water, and retries elsewhere if the spot is taken</li>
@@ -132,13 +133,15 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Line of sight, fog of war and radar in the deterministic sim; unseen enemies hidden, radar contacts as blips, unexplored features hidden</li>
   <li>Sight is blocked by higher ground, so hills cast shadows</li>
   <li>Fog of war rebuilt from the original: the grid is indexed in TA's projected space, sight walks the authored ray fan from <code>los.tdf</code> with a running-horizon shadow cast and an 8-cell cap, the height grid holds a reveal/occlude pair, and the ragged edge is TA's own <code>fog.gaf</code> artwork picked by marching squares rather than procedural noise. Radar has no grid at all — it is a range query that finds units and reveals no ground</li>
-  <li>Fog drawn the way TA draws it: remembered ground in grey, unknown ground black, a 32‑unit boundary eroded by a few pixels of fixed noise (measured from the original)</li>
+  <li>Fog drawn the way TA draws it: remembered ground in grey, unknown ground black, and the boundary its own hand-drawn <code>fog.gaf</code> frames, with the variant fixed in world space so the edge does not shimmer when the map scrolls</li>
+  <li>Fog meets the map border flush. Cells off the edge used to read as clear, so the ragged frame there had no neighbouring tile to cover it and a strip of map showed through along the top and left &mdash; the two sides the camera can actually reach</li>
   <li>Minimap only reveals what the player can see or detect</li>
 </ul>
 
 <h3>Effects</h3>
 <ul>
-  <li>Construction: green pulse plus a wireframe of the camera‑facing edges that blends green → white → black; texture sweeps up over the frame as it completes; nano spray of small green squares from the builder's nozzle; shadow kept but cut out under the frame</li>
+  <li>Construction display taken from the exe: the original keeps a height per pixel and remaps the model against a moving threshold, so a bare line sweeps down twice, a solid silhouette grows up from the base, the texture follows it, and one last line sweeps back down over the finished model. Both greens are triangle waves over palette entries 160&ndash;175 at different rates, offset per unit &mdash; and the wireframe is the second of them, not the green &rarr; white &rarr; black cycle guessed at before. Shadow kept but cut out under the frame</li>
+  <li>Nano spray to match: four world units a tick, each particle stepping a place along palette entries 161&ndash;167 every tick and wrapping, so the stream shimmers along its length instead of each particle being dyed one colour for life; it fans across the middle three elevenths of the target. Reclaiming a feature runs two emitters, which is why a reclaim stream reads twice as thick</li>
   <li>Burning features: fire‑starting weapons ignite trees and foliage, fires spread and leave burnt remains, using each feature's own burn sequence</li>
   <li>Weapons do not damage wreckage or scenery; features keep hit points only to set how long they take to reclaim</li>
   <li>Building deaths run the COB <code>Killed</code> script: pieces fly off with smoke and fire trails and impact explosions</li>
