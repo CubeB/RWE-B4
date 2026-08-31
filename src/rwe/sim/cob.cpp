@@ -363,17 +363,16 @@ namespace rwe
                 return static_cast<int>(unit.armored);
             },
             [&](const CobEnvironment::QueryStatus::VeteranLevel&) {
-                // TA's VeteranLevel returns an integer veterancy tier rather
-                // than a raw kill count.  We use a simple linear thresholding
-                // scheme: every 4 kills bumps the unit one tier, capped at
-                // tier 3 (the conventional cap used by TA-derived RTS engines
-                // such as Spring's experience tiering).  All arithmetic is
-                // integer-only so behavior is deterministic and platform-
-                // independent.  Tune VeteranKillsPerTier / VeteranMaxTier
-                // here if a per-unit veterancy table is later added.
+                // The original never answers this one: its GET dispatcher
+                // (TotalA.exe 0x480770) only knows values 1 to 20 and returns
+                // zero for anything else, VETERAN_LEVEL included. We answer
+                // with the tier the engine itself uses for damage, five kills
+                // apiece and capped at five (0x489BF3), on the grounds that a
+                // script asking the question is better served by the number
+                // the simulation actually acts on than by a constant zero.
                 const auto& unit = sim.getUnitState(unitId);
-                constexpr unsigned int VeteranKillsPerTier = 4;
-                constexpr unsigned int VeteranMaxTier = 3;
+                constexpr unsigned int VeteranKillsPerTier = 5;
+                constexpr unsigned int VeteranMaxTier = 5;
                 unsigned int tier = unit.kills / VeteranKillsPerTier;
                 if (tier > VeteranMaxTier)
                 {

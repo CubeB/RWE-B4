@@ -75,6 +75,8 @@ namespace rwe
 
         unsigned int maxDamage;
 
+        float damageModifier;
+
         bool bmCode;
 
         bool floater;

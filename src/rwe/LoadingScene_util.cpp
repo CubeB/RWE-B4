@@ -190,6 +190,7 @@ namespace rwe
         }
 
         weaponDefinition.damageRadius = SimScalar(static_cast<float>(tdf.areaOfEffect) / 2.0f);
+        weaponDefinition.edgeEffectiveness = SimScalar(tdf.edgeEffectiveness);
 
         if (tdf.weaponTimer != 0.0f)
         {
@@ -290,6 +291,7 @@ namespace rwe
         u.commander = fbi.commander;
 
         u.maxHitPoints = fbi.maxDamage;
+        u.damageModifier = simScalarToFixed(SimScalar(fbi.damageModifier));
 
         u.isMobile = fbi.bmCode;
 

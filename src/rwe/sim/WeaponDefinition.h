@@ -41,6 +41,13 @@ namespace rwe
 
         SimScalar damageRadius;
 
+        /**
+         * Fraction of the full damage still dealt at the very edge of the blast
+         * (TA EdgeEffectiveness). Absent from the weapon TDF means zero, so an
+         * ordinary weapon falls off to nothing at its blast radius.
+         */
+        SimScalar edgeEffectiveness;
+
         /** Number of ticks projectiles fired from this weapon live for */
         std::optional<GameTime> weaponTimer;
 

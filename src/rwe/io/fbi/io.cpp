@@ -75,6 +75,7 @@ namespace rwe
         tdf.readOrDefault("Commander", u.commander);
 
         tdf.readOrDefault("MaxDamage", u.maxDamage);
+        tdf.readOrDefault("DamageModifier", u.damageModifier, 1.0f);
 
         tdf.readOrDefault("BMCode", u.bmCode);
 
