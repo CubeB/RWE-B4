@@ -253,7 +253,53 @@ namespace rwe
         explicit AirMovementStateAttackRun(const AttackTarget& t) : target(t) {}
     };
 
-    using AirMovementState = std::variant<AirMovementStateTakingOff, AirMovementStateFlying, AirMovementStateLanding, AirMovementStateAttackRun>;
+    /**
+     * State for Total Annihilation's gunships. The Brawler and the Rapier are
+     * the only two units in the original data with HoverAttack set, and the
+     * original gives them their own mission rather than an attack run.
+     *
+     * A gunship does not fly runs. It closes until it is one weapon range out,
+     * then works its way around the target on a ring of two thirds of that
+     * range, moving exactly 45 degrees per pass and alternating side, so it
+     * shuttles between two stations rather than circling. Its gun takes the
+     * target on arrival and holds it for the rest of the engagement.
+     */
+    struct AirMovementStateHoverAttack
+    {
+        enum class Phase
+        {
+            /** Closing on a point half way in, thrown off to one side so a flight does not stack up. */
+            Closing,
+            /** On the ring, swinging from one station to the next. This is where it stays. */
+            Swinging,
+        };
+
+        /** Target unit or ground location. Mirrors AttackOrder::target. */
+        AttackTarget target;
+
+        /**
+         * Where it is flying right now. Worked out once when it arrives and
+         * then left alone: the station is a fixed point on the map, not one
+         * that slides along with the target.
+         */
+        SimVector station{0_ss, 0_ss, 0_ss};
+
+        /** Which way round the ring the next swing goes; the first one is negative. */
+        bool swingPositive{false};
+
+        /** Arrivals in a row with the target out of reach. Two of them send it to a fresh bearing. */
+        unsigned int outOfRangeArrivals{0};
+
+        Phase phase{Phase::Closing};
+
+        /** Current air velocity in game units/tick. */
+        SimVector currentVelocity{0_ss, 0_ss, 0_ss};
+
+        AirMovementStateHoverAttack() : target(SimVector(0_ss, 0_ss, 0_ss)) {}
+        explicit AirMovementStateHoverAttack(const AttackTarget& t) : target(t) {}
+    };
+
+    using AirMovementState = std::variant<AirMovementStateTakingOff, AirMovementStateFlying, AirMovementStateLanding, AirMovementStateAttackRun, AirMovementStateHoverAttack>;
 
     struct UnitPhysicsInfoAir
     {

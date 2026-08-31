@@ -31,6 +31,7 @@ namespace rwe
     nlohmann::json dumpJson(const AirMovementStateLanding& p);
     nlohmann::json dumpJson(const AirMovementStateFlying& p);
     nlohmann::json dumpJson(const AirMovementStateAttackRun& p);
+    nlohmann::json dumpJson(const AirMovementStateHoverAttack& p);
 
     nlohmann::json dumpJson(const SteeringInfo& s);
 

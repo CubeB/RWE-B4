@@ -164,6 +164,24 @@ namespace rwe
         return std::make_pair(result1, result2);
     }
 
+    std::pair<int, int> computeRockUnitAngles(SimAngle unitRotation, const SimVector& shotDirection, SimScalar rockAngle)
+    {
+        // Where the round went, as the hull sees it. This is the same local
+        // heading the aiming scripts are handed: zero is straight out of the
+        // nose, and there is no half turn in it, because a piece sitting at
+        // rotation zero already points along the hull's own +z.
+        auto shot = UnitState::toDirection(UnitState::toRotation(shotDirection) - unitRotation);
+
+        // A hull heels away from its own shot, which is to say the flank the
+        // round left by rises: firing forwards lifts the nose and squats the
+        // tail. Lifting local +z wants a negative x-axis turn and lifting
+        // local +x a positive z-axis turn, and cob.cpp negates a z-axis turn
+        // on its way into the sim, so both arguments leave here negative.
+        return {
+            static_cast<int>((-shot.z * rockAngle).value),
+            static_cast<int>((-shot.x * rockAngle).value)};
+    }
+
     SteeringInfo seek(const UnitState& unit, const UnitDefinition& unitDefinition, const SimVector& destination)
     {
         SimVector xzPosition(unit.position.x, 0_ss, unit.position.z);
@@ -392,11 +410,29 @@ namespace rwe
 
         if (physics.phase == AirMovementStateAttackRun::Phase::Engaging)
         {
-            // Fly through the target: aim at a point beyond it along the
-            // run-out vector. Steering at the far point pulls an off-axis
-            // approach back onto the line over the target (so the bombsight
-            // can open) without orbiting above it.
+            // Fly through the target: aim at a point on the far side of it,
+            // on the line the aircraft is on right now, worked out afresh
+            // every tick. That is the original's geometry, and the point of
+            // it is that the aim point sits on the line from here through the
+            // target no matter how the run started, so whatever heading error
+            // was left over from turning in gets flown off on the way rather
+            // than carried across the target as a lateral miss.
+            //
+            // Steering at the run-out heading captured when the run committed
+            // does not do this. That heading is allowed a good twenty degrees
+            // of error, and the aim point then sits about ninety units to one
+            // side of the target, which is wider than the bombsight's
+            // across-track gate: the aircraft crosses the target without ever
+            // opening the sight, runs out, comes back and misses again.
+            SimVector fromTarget(
+                unit.position.x - physics.lastKnownTargetPos.x,
+                0_ss,
+                unit.position.z - physics.lastKnownTargetPos.z);
             auto lookahead = unitDefinition.maxVelocity * 30_ss;
+            if (fromTarget.lengthSquared() > 0_ss)
+            {
+                return physics.lastKnownTargetPos - (fromTarget.normalized() * lookahead);
+            }
             return physics.lastKnownTargetPos + (physics.runOutDirection * lookahead);
         }
 
@@ -445,6 +481,41 @@ namespace rwe
         auto fromTurn = attackRunTurnRadius(unitDefinition) * 2.5_ssf;
         auto fromAltitude = unitDefinition.cruiseAltitude * 2_ss;
         return rweMax(250_ss, rweMin(900_ss, rweMax(fromTurn, fromAltitude)));
+    }
+
+    SimScalar hoverAttackRingRadius(SimScalar weaponMaxRange)
+    {
+        // Two thirds of the weapon's reach. A Brawler's gun goes 370, so it
+        // works its target from 246; a Rapier's rockets go 450, so 300.
+        return (2_ss * weaponMaxRange) / 3_ss;
+    }
+
+    SimVector hoverAttackStation(const SimVector& targetPosition, SimAngle bearing, SimScalar radius)
+    {
+        auto offset = UnitState::toDirection(bearing) * radius;
+        return SimVector(targetPosition.x + offset.x, targetPosition.y, targetPosition.z + offset.z);
+    }
+
+    SimAngle hoverAttackBearing(const SimVector& unitPosition, const SimVector& targetPosition)
+    {
+        SimVector fromTarget(unitPosition.x - targetPosition.x, 0_ss, unitPosition.z - targetPosition.z);
+        if (fromTarget.lengthSquared() == 0_ss)
+        {
+            return SimAngle(0);
+        }
+        return UnitState::toRotation(fromTarget);
+    }
+
+    SimVector computeNewHoverAttackVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateHoverAttack& physics)
+    {
+        // A gunship is flying between two stations a couple of hundred units
+        // apart, so it spends the whole engagement slowing down and speeding
+        // up again. That is the arrival profile's job, and it is the same one
+        // the rest of the air movement uses: see computeNewAirUnitVelocity.
+        AirMovementStateFlying asFlying;
+        asFlying.targetPosition = physics.station;
+        asFlying.currentVelocity = physics.currentVelocity;
+        return computeNewAirUnitVelocity(unit, unitDefinition, asFlying);
     }
 
     SimVector predictBombImpactPoint(const SimVector& bomberPosition, const SimVector& bomberVelocity, SimScalar groundY)

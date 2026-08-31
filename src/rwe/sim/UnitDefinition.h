@@ -107,6 +107,28 @@ namespace rwe
          */
         SimScalar bankScale{1_ss};
 
+        /**
+         * Set on the gunships. The Brawler and the Rapier are the only two
+         * units in the original data that carry it, and it makes them hold a
+         * standoff ring and work their way around a target rather than
+         * running in past it the way a bomber does.
+         */
+        bool hoverAttack{false};
+
+        /**
+         * How far past the target a bomber carries its run before turning
+         * back for another, and part of how early it lets the bombs go.
+         * Only the four bombers set it: Thunder 120, Phoenix 180, Shadow 220,
+         * Hurricane 290. Zero for everything else.
+         */
+        SimScalar attackRunLength{0_ss};
+
+        /**
+         * How far the unit will stray from where it was told to be in order
+         * to fight. 640 for most things, 1280 for aircraft and ships.
+         */
+        SimScalar maneuverLeashLength{0_ss};
+
         std::string weapon1;
         std::string weapon2;
         std::string weapon3;

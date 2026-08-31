@@ -171,6 +171,17 @@ namespace rwe
          */
         bool attackTargetAir(UnitInfo unitInfo, const AttackTarget& target);
 
+        /**
+         * Gunship attack handler, for the two units in the original data with
+         * HoverAttack set. Closes to weapon range, then holds a ring at two
+         * thirds of that range and shuttles 45 degrees back and forth around
+         * it with the gun on the target.
+         */
+        bool hoverAttackTarget(UnitInfo unitInfo, const AttackTarget& target, const SimVector& targetPosition, SimScalar weaponMaxRange);
+
+        /** Where the gunship goes next, and the bookkeeping that decides it. */
+        SimVector nextHoverAttackStation(UnitInfo unitInfo, AirMovementStateHoverAttack& hover, const SimVector& targetPosition, SimScalar radius, SimScalar weaponMaxRange);
+
         bool buildUnit(UnitInfo unitInfo, const std::string& unitType, const SimVector& position);
 
         bool reclaimTarget(UnitInfo unitInfo, std::variant<UnitId, FeatureId> target);

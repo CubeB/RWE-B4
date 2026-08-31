@@ -30,6 +30,13 @@ namespace rwe
 
     std::optional<std::pair<SimAngle, SimAngle>> computeFiringAngles(SimScalar speed, SimScalar gravity, SimScalar targetX, SimScalar targetY);
 
+    /**
+     * The pair of angles to hand a unit's RockUnit script -- one about the x
+     * axis, one about the z, in COB's 16-bit turn units -- so that the hull
+     * heels away from a shot leaving in the given world direction.
+     */
+    std::pair<int, int> computeRockUnitAngles(SimAngle unitRotation, const SimVector& shotDirection, SimScalar rockAngle);
+
     SteeringInfo seek(const UnitState& unit, const UnitDefinition& unitDefinition, const SimVector& destination);
 
     SteeringInfo arrive(const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoGround& physics, const SimVector& destination);
@@ -74,6 +81,18 @@ namespace rwe
     };
 
     AttackRunGeometry computeAttackRunGeometry(const UnitDefinition& unitDefinition, SimScalar weaponMaxRange);
+
+    /** The ring a gunship works its target from: two thirds of its weapon's reach. */
+    SimScalar hoverAttackRingRadius(SimScalar weaponMaxRange);
+
+    /** A point on that ring, at the given bearing out from the target. */
+    SimVector hoverAttackStation(const SimVector& targetPosition, SimAngle bearing, SimScalar radius);
+
+    /** Which way round the ring the gunship currently sits, as seen from the target. */
+    SimAngle hoverAttackBearing(const SimVector& unitPosition, const SimVector& targetPosition);
+
+    /** Velocity update for a gunship on station, flying from one point of the ring to the next. */
+    SimVector computeNewHoverAttackVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateHoverAttack& physics);
 
     /**
      * Velocity update for aircraft executing an attack run. The aircraft

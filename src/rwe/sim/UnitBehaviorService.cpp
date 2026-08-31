@@ -14,6 +14,13 @@ namespace rwe
 {
     namespace
     {
+        /**
+         * How near a gunship has to get to its station before it counts as
+         * arrived and picks the next one. The original uses sixteen units,
+         * which is close enough that it really does fly to each point.
+         */
+        const SimScalar HoverAttackArrivalTolerance = 16_ss;
+
         SimVector airVelocity(const AirMovementState& state)
         {
             return match(
@@ -21,6 +28,7 @@ namespace rwe
                 [](const AirMovementStateFlying& m) { return m.currentVelocity; },
                 [](const AirMovementStateTakingOff& m) { return m.currentVelocity; },
                 [](const AirMovementStateAttackRun& m) { return m.currentVelocity; },
+                [](const AirMovementStateHoverAttack& m) { return m.currentVelocity; },
                 [](const AirMovementStateLanding&) { return SimVector(0_ss, 0_ss, 0_ss); });
         }
 
@@ -157,6 +165,9 @@ namespace rwe
                     [&](const AirMovementStateAttackRun&) {
                         // Attack run drives its own steering inside handleAttackOrder.
                         // No clearing here, otherwise we'd erase the target each tick.
+                    },
+                    [&](const AirMovementStateHoverAttack&) {
+                        // As above: the gunship handler owns its own station.
                     });
             });
 
@@ -220,6 +231,12 @@ namespace rwe
                         // but the AttackRun handler is no longer driving us.
                         // Drop back to Flying so the idle/landing path can
                         // run; without this the aircraft freezes mid-air.
+                        airPhysics->movementState = AirMovementStateFlying();
+                        unitInfo.state->clearWeaponTargets();
+                    },
+                    [&](const AirMovementStateHoverAttack&) {
+                        // Same again: a gunship left on station with no orders
+                        // would otherwise shuttle back and forth for ever.
                         airPhysics->movementState = AirMovementStateFlying();
                         unitInfo.state->clearWeaponTargets();
                     });
@@ -351,6 +368,9 @@ namespace rwe
                         [&](const AirMovementStateAttackRun&) {
                             // Attack run does not transition out via this dispatcher.
                             // Termination back to Flying is handled in handleAttackOrder.
+                        },
+                        [&](const AirMovementStateHoverAttack&) {
+                            // Likewise the gunship: hoverAttackTarget owns the transitions.
                         });
                 });
         }
@@ -569,6 +589,7 @@ namespace rwe
                             [&](AirMovementStateAttackRun& m) { bomberVelocity = m.currentVelocity; runState = &m; },
                             [&](const AirMovementStateFlying& m) { bomberVelocity = m.currentVelocity; },
                             [&](const AirMovementStateTakingOff& m) { bomberVelocity = m.currentVelocity; },
+                            [&](const AirMovementStateHoverAttack& m) { bomberVelocity = m.currentVelocity; },
                             [&](const AirMovementStateLanding&) {});
                     }
 
@@ -770,6 +791,7 @@ namespace rwe
                     [&](const AirMovementStateAttackRun& m) { bomberVelocity = m.currentVelocity; },
                     [&](const AirMovementStateFlying& m) { bomberVelocity = m.currentVelocity; },
                     [&](const AirMovementStateTakingOff&) {},
+                    [&](const AirMovementStateHoverAttack& m) { bomberVelocity = m.currentVelocity; },
                     [&](const AirMovementStateLanding&) {});
             }
             inheritedVelocity = bomberVelocity;
@@ -806,17 +828,10 @@ namespace rwe
             // Angles are a 16-bit turn, so 182 units is a degree: this runs
             // from about half a degree up to five.
             auto rockAngle = std::clamp(120.0f + (static_cast<float>(damage) * 3.0f), 120.0f, 900.0f);
-
-            // Scripts assume rotation 0 faces -z (see the XZAtan note in cob.cpp),
-            // whereas the sim's rotation 0 faces +z; hence the half turn.
-            auto localHeading = UnitState::toRotation(direction) - unit.rotation + HalfTurn;
-            auto shot = UnitState::toDirection(localHeading);
-            // The hull rocks away from the shot, never with it: a gun fired
-            // forward lifts the nose and squats the tail. Both axes come out
-            // negated — turning about x by a positive angle dips the front,
-            // and a z-axis turn is flipped again on its way into the sim
-            // (see cob.cpp), so the signs that read as "away" are these.
-            unit.cobEnvironment->createThread("RockUnit", {static_cast<int>(-shot.z.value * rockAngle), static_cast<int>(-shot.x.value * rockAngle)});
+            // Which way it heels is worked out in the unit's own frame, so a
+            // tank broadside on to its target rolls rather than pitches.
+            auto rockAngles = computeRockUnitAngles(unit.rotation, direction, SimScalar(rockAngle));
+            unit.cobEnvironment->createThread("RockUnit", {rockAngles.first, rockAngles.second});
         }
 
         ++fireInfo->burstsFired;
@@ -907,6 +922,20 @@ namespace rwe
                         }
                         auto targetAngle = UnitState::toRotation(heading);
                         unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, targetAngle, turnRateThisFrame);
+                    },
+                    [&](const AirMovementStateHoverAttack& m) {
+                        // The nose follows the flight path here too. A gunship
+                        // therefore crosses its ring side-on to the target,
+                        // which is what the swing looks like from the ground.
+                        // It keeps shooting anyway: the original holds the aim
+                        // from the moment it arrives and fires whenever the
+                        // target is in range, without waiting to be pointed at it.
+                        SimVector heading(m.currentVelocity.x, 0_ss, m.currentVelocity.z);
+                        if (heading.lengthSquared() == 0_ss)
+                        {
+                            return;
+                        }
+                        unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, UnitState::toRotation(heading), turnRateThisFrame);
                     });
             });
     }
@@ -947,6 +976,9 @@ namespace rwe
                     },
                     [&](AirMovementStateAttackRun& m) {
                         m.currentVelocity = computeNewAttackRunVelocity(*unitInfo.state, *unitInfo.definition, m);
+                    },
+                    [&](AirMovementStateHoverAttack& m) {
+                        m.currentVelocity = computeNewHoverAttackVelocity(*unitInfo.state, *unitInfo.definition, m);
                     });
 
                 p.roll = computeNewBankAngle(*unitInfo.state, *unitInfo.definition, p, airVelocity(p.movementState) - velocityBefore);
@@ -1036,6 +1068,17 @@ namespace rwe
                         // delta to the unit's maxVelocity so rising terrain
                         // doesn't teleport the aircraft up — TA aircraft
                         // climb/dive smoothly to follow terrain.
+                        auto newPosition = unitInfo.state->position + m.currentVelocity;
+                        auto targetAltitude = getTargetAltitude(sim->terrain, newPosition.x, newPosition.z, *unitInfo.definition);
+                        auto maxAltDelta = unitInfo.definition->maxVelocity;
+                        auto altDelta = targetAltitude - newPosition.y;
+                        altDelta = rweMax(-maxAltDelta, rweMin(altDelta, maxAltDelta));
+                        newPosition.y = newPosition.y + altDelta;
+                        tryApplyMovementToPosition(unitInfo, newPosition);
+                    },
+                    [&](const AirMovementStateHoverAttack& m) {
+                        // Same as the attack run: fly the velocity, then ease
+                        // towards cruise height rather than snapping to it.
                         auto newPosition = unitInfo.state->position + m.currentVelocity;
                         auto targetAltitude = getTargetAltitude(sim->terrain, newPosition.x, newPosition.z, *unitInfo.definition);
                         auto maxAltDelta = unitInfo.definition->maxVelocity;
@@ -1804,6 +1847,25 @@ namespace rwe
 
         const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType);
 
+        // Gunships get their own behaviour, but only against a unit they can
+        // actually work around. The original gates it the same way: a Brawler
+        // sent at bare ground, or carrying a dropped weapon, flies the ordinary
+        // pattern instead.
+        if (unitInfo.definition->hoverAttack
+            && std::holds_alternative<UnitId>(target)
+            && !std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType))
+        {
+            return hoverAttackTarget(unitInfo, target, *targetPosition, weaponDefinition.maxRange);
+        }
+
+        if (std::holds_alternative<AirMovementStateHoverAttack>(airPhysics->movementState))
+        {
+            // Was working a ring, but this target does not qualify for one.
+            AirMovementStateFlying flying;
+            flying.currentVelocity = std::get<AirMovementStateHoverAttack>(airPhysics->movementState).currentVelocity;
+            airPhysics->movementState = flying;
+        }
+
         // If we're already in an AttackRun but the player retargeted, drop
         // the run so the next branch re-initialises Approaching cleanly
         // against the new target. Without this the aircraft pings between
@@ -1910,6 +1972,139 @@ namespace rwe
         }
 
         return false;
+    }
+
+    bool UnitBehaviorService::hoverAttackTarget(UnitInfo unitInfo, const AttackTarget& target, const SimVector& targetPosition, SimScalar weaponMaxRange)
+    {
+        auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
+        auto radius = hoverAttackRingRadius(weaponMaxRange);
+
+        // Retargeting starts a fresh approach rather than swinging around a
+        // ring centred on somewhere the aircraft is no longer fighting.
+        if (auto existing = std::get_if<AirMovementStateHoverAttack>(&airPhysics->movementState))
+        {
+            if (existing->target != target)
+            {
+                AirMovementStateFlying flying;
+                flying.currentVelocity = existing->currentVelocity;
+                airPhysics->movementState = flying;
+            }
+        }
+
+        if (auto flying = std::get_if<AirMovementStateFlying>(&airPhysics->movementState))
+        {
+            AirMovementStateHoverAttack hover(target);
+            hover.currentVelocity = flying->currentVelocity;
+            hover.phase = AirMovementStateHoverAttack::Phase::Closing;
+
+            // Close on a point half way in, thrown up to 45 degrees off the
+            // straight line. A flight ordered onto the same target therefore
+            // fans out on the way in instead of arriving in single file.
+            SimVector toTarget(targetPosition.x - unitInfo.state->position.x, 0_ss, targetPosition.z - unitInfo.state->position.z);
+            auto half = toTarget.length() / 2_ss;
+            auto heading = toTarget.lengthSquared() > 0_ss ? UnitState::toRotation(toTarget) : unitInfo.state->rotation;
+            std::uniform_int_distribution<unsigned int> spread(0, QuarterTurn.value);
+            auto scatter = SimAngle(spread(sim->rng)) - SimAngle(QuarterTurn.value / 2);
+            auto direction = UnitState::toDirection(heading + scatter);
+            auto altitude = getTargetAltitude(sim->terrain, unitInfo.state->position.x, unitInfo.state->position.z, *unitInfo.definition);
+            hover.station = SimVector(
+                unitInfo.state->position.x + (direction.x * half),
+                altitude,
+                unitInfo.state->position.z + (direction.z * half));
+            airPhysics->movementState = hover;
+        }
+
+        auto hover = std::get_if<AirMovementStateHoverAttack>(&airPhysics->movementState);
+        if (hover == nullptr)
+        {
+            return false;
+        }
+        hover->target = target;
+
+        SimVector toStation(hover->station.x - unitInfo.state->position.x, 0_ss, hover->station.z - unitInfo.state->position.z);
+        SimVector toTarget(targetPosition.x - unitInfo.state->position.x, 0_ss, targetPosition.z - unitInfo.state->position.z);
+
+        if (hover->phase == AirMovementStateHoverAttack::Phase::Closing)
+        {
+            // The approach ends as soon as the target is within reach, whether
+            // or not the half-way point was ever made: the point of it was to
+            // get into range, and it is in range now.
+            auto closeEnough = toTarget.lengthSquared() <= weaponMaxRange * weaponMaxRange;
+            if (closeEnough || toStation.lengthSquared() <= HoverAttackArrivalTolerance * HoverAttackArrivalTolerance)
+            {
+                hover->phase = AirMovementStateHoverAttack::Phase::Swinging;
+                hover->swingPositive = false;
+                hover->outOfRangeArrivals = 0;
+                hover->station = nextHoverAttackStation(unitInfo, *hover, targetPosition, radius, weaponMaxRange);
+            }
+        }
+        else if (toStation.lengthSquared() <= HoverAttackArrivalTolerance * HoverAttackArrivalTolerance)
+        {
+            // On station. Pick the next one, 45 degrees round, the other way
+            // from last time.
+            hover->station = nextHoverAttackStation(unitInfo, *hover, targetPosition, radius, weaponMaxRange);
+        }
+
+        // The gun takes the target once and holds it: the gunship keeps
+        // shooting all the way across the swing, not only while pointed at it.
+        if (hover->phase == AirMovementStateHoverAttack::Phase::Swinging)
+        {
+            for (unsigned int i = 0; i < 2; ++i)
+            {
+                match(
+                    target,
+                    [&](const UnitId& u) { unitInfo.state->setWeaponTarget(i, u); },
+                    [&](const SimVector& v) { unitInfo.state->setWeaponTarget(i, v); });
+            }
+        }
+        else
+        {
+            unitInfo.state->clearWeaponTargets();
+        }
+
+        return false;
+    }
+
+    SimVector UnitBehaviorService::nextHoverAttackStation(UnitInfo unitInfo, AirMovementStateHoverAttack& hover, const SimVector& targetPosition, SimScalar radius, SimScalar weaponMaxRange)
+    {
+        const auto& unitPosition = unitInfo.state->position;
+
+        SimVector fromTarget(unitPosition.x - targetPosition.x, 0_ss, unitPosition.z - targetPosition.z);
+        if (fromTarget.lengthSquared() <= weaponMaxRange * weaponMaxRange)
+        {
+            hover.outOfRangeArrivals = 0;
+        }
+        else
+        {
+            ++hover.outOfRangeArrivals;
+        }
+
+        auto stationAltitude = [&](const SimVector& p) {
+            return getTargetAltitude(sim->terrain, p.x, p.z, *unitInfo.definition);
+        };
+
+        if (hover.outOfRangeArrivals >= 2)
+        {
+            // Two arrivals running without a shot: something is in the way, or
+            // the target has moved off. Stop working round from here and take
+            // a fresh bearing at full range instead.
+            hover.outOfRangeArrivals = 0;
+            std::uniform_int_distribution<unsigned int> anywhere(0, 0xffffu);
+            auto station = hoverAttackStation(targetPosition, SimAngle(anywhere(sim->rng)), weaponMaxRange);
+            station.y = stationAltitude(station);
+            return station;
+        }
+
+        // A quarter of a quarter turn is 45 degrees, and the side alternates,
+        // so it shuttles between two points on the ring rather than orbiting.
+        auto bearing = hoverAttackBearing(unitPosition, targetPosition);
+        auto step = SimAngle(QuarterTurn.value / 2u);
+        bearing = hover.swingPositive ? bearing + step : bearing - step;
+        hover.swingPositive = !hover.swingPositive;
+
+        auto station = hoverAttackStation(targetPosition, bearing, radius);
+        station.y = stationAltitude(station);
+        return station;
     }
 
     bool UnitBehaviorService::handleBuildOrder(UnitInfo unitInfo, const BuildOrder& buildOrder)
@@ -3009,6 +3204,9 @@ namespace rwe
             },
             [&](const AirMovementStateAttackRun&) {
                 // Aircraft is mid-attack-run; the run handler decides where to fly.
+            },
+            [&](const AirMovementStateHoverAttack&) {
+                // Likewise on station: the gunship handler decides where to fly.
             });
 
         return false;

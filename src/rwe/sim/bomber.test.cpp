@@ -57,7 +57,7 @@ namespace rwe
             sim.unitModelDefinitions[objectName] = createUnitModelDefinition(10_ss, std::move(pieces));
         }
 
-        /** The ARM Thunder's numbers: 9 units a tick at 200 up. */
+        /** The ARM Thunder, straight out of ARMTHUND.FBI. */
         UnitDefinition makeBomberDef()
         {
             UnitDefinition d{};
@@ -68,9 +68,11 @@ namespace rwe
             d.canFly = true;
             d.cruiseAltitude = 200_ss;
             d.maxVelocity = 9_ss;
-            d.acceleration = 1_ss;
-            d.brakeRate = 1_ss;
-            d.turnRate = 200_ss;
+            d.acceleration = 0.08_ssf;
+            d.brakeRate = 0.4_ssf;
+            d.turnRate = 356_ss;
+            d.attackRunLength = 120_ss;
+            d.maneuverLeashLength = 1280_ss;
             d.maxHitPoints = 100;
             d.buildTime = 0u;
             d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
@@ -300,4 +302,114 @@ namespace rwe
         // The aircraft flew the whole engagement, never stalling to turn.
         REQUIRE(slowestSpeed > 4_ss);
     }
+
+    TEST_CASE("a bomber that comes in off the target line still lands its bombs", "[bomber]")
+    {
+        // Approaching straight down the target line is the easy case, and the
+        // test above already covers it. This is the one the player actually
+        // sees: an aircraft that has to turn onto its target, come round after
+        // a run-out, or attack something behind it. If the run commits to
+        // whatever heading the aircraft happened to have rather than to the
+        // line through the target, it flies a track parallel to the one it
+        // wanted, the bombsight never opens, and it crosses over, loops and
+        // tries again for as long as you let it.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(256, 256), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        auto them = addPlayer(sim, "them");
+        sim.unitDefinitions["bomber"] = makeBomberDef();
+        auto targetDef = makeTargetDef();
+        // Tough enough to sit there for the whole engagement.
+        targetDef.maxHitPoints = 1000000;
+        sim.unitDefinitions["target"] = targetDef;
+        registerModel(sim, "model");
+        defineBomb(sim);
+
+        auto targetPosition = SimVector(0_ss, 0_ss, 0_ss);
+
+        // Bearings around the target, all at the same range, so no section is
+        // luckier than another on distance.
+        auto start = SimVector(-1000_ss, 200_ss, 0_ss);
+        SECTION("from the north-west") { start = SimVector(-700_ss, 200_ss, -700_ss); }
+        SECTION("from the north") { start = SimVector(0_ss, 200_ss, -1000_ss); }
+        SECTION("from the north-east") { start = SimVector(700_ss, 200_ss, -700_ss); }
+        SECTION("from the east") { start = SimVector(1000_ss, 200_ss, 0_ss); }
+        SECTION("from the south") { start = SimVector(0_ss, 200_ss, 1000_ss); }
+
+        auto targetId = spawnUnit(sim, "target", them, targetPosition, script);
+        sim.getUnitState(targetId).hitPoints = 1000000;
+
+        auto bomberId = spawnUnit(sim, "bomber", us, start, script);
+        {
+            auto& bomber = sim.getUnitState(bomberId);
+            bomber.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            UnitWeapon weapon;
+            weapon.weaponType = "bomb";
+            bomber.weapons[0] = weapon;
+            bomber.orders.push_back(createAttackOrder(targetId));
+        }
+        sim.flyingUnitsSet.insert(bomberId);
+
+        std::map<ProjectileId, SimVector> lastSeen;
+        std::set<ProjectileId> counted;
+        int hits = 0;
+        int dropped = 0;
+        auto closest = SimScalar(100000.0f);
+
+        // Two minutes: long enough for several passes at any bearing.
+        for (int tick = 0; tick < 3600; ++tick)
+        {
+            sim.tick();
+
+            if (std::getenv("RWE_TRACE_BOMBER") && tick % 30 == 0)
+            {
+                const auto& b = sim.getUnitState(bomberId);
+                if (auto air = std::get_if<UnitPhysicsInfoAir>(&b.physics))
+                {
+                    const char* st = "other";
+                    int ph = -1;
+                    SimVector vel(0_ss, 0_ss, 0_ss);
+                    if (auto run = std::get_if<AirMovementStateAttackRun>(&air->movementState)) { st = "run"; ph = static_cast<int>(run->phase); vel = run->currentVelocity; }
+                    else if (auto f = std::get_if<AirMovementStateFlying>(&air->movementState)) { st = "flying"; vel = f->currentVelocity; }
+                    std::cout << "t=" << tick << " " << st << " ph=" << ph
+                              << " pos=" << simScalarToFloat(b.position.x) << "," << simScalarToFloat(b.position.z)
+                              << " d=" << simScalarToFloat(flatDistance(b.position, targetPosition))
+                              << " spd=" << simScalarToFloat(vel.length()) << std::endl;
+                }
+            }
+
+            for (const auto& [id, projectile] : sim.projectiles)
+            {
+                lastSeen[id] = projectile.position;
+            }
+            for (auto it = lastSeen.begin(); it != lastSeen.end();)
+            {
+                if (sim.projectiles.tryGet(it->first))
+                {
+                    ++it;
+                    continue;
+                }
+                if (counted.insert(it->first).second)
+                {
+                    ++dropped;
+                    auto miss = flatDistance(it->second, targetPosition);
+                    closest = rweMin(closest, miss);
+                    if (miss < 64_ss)
+                    {
+                        ++hits;
+                    }
+                }
+                it = lastSeen.erase(it);
+            }
+        }
+
+        CAPTURE(dropped);
+        CAPTURE(hits);
+        CAPTURE(simScalarToFloat(closest));
+        // It has to actually let go of bombs...
+        REQUIRE(dropped > 0);
+        // ...and put several of them on the target rather than parading past it.
+        REQUIRE(hits >= 3);
+    }
+
 }

@@ -11,6 +11,8 @@ namespace rwe
 
     CobSpeed toCobSpeed(SimScalar speed);
 
+    void handlePieceCommand(GameSimulation& sim, const CobEnvironment& env, UnitId unitId, const CobEnvironment::PieceCommandStatus& result);
+
     int handleQuery(GameSimulation& sim, const CobEnvironment& env, UnitId unitId, const CobEnvironment::QueryStatus& result);
 
     void handleSetQuery(GameSimulation& sim, const CobEnvironment& env, UnitId unitId, const CobEnvironment::SetQueryStatus& result);

@@ -824,6 +824,7 @@ set(TEST_FILES
     src/rwe/sim/wreckage.test.cpp
     src/rwe/sim/transport.test.cpp
     src/rwe/sim/bomber.test.cpp
+    src/rwe/sim/gunship.test.cpp
     src/rwe/sim/aircraft.test.cpp
     src/rwe/sim/selfdestruct.test.cpp
     src/rwe/pathfinding/pathing.test.cpp
@@ -831,6 +832,7 @@ set(TEST_FILES
     src/rwe/sim/visibility.test.cpp
     src/rwe/sim/UnitState_util.test.cpp
     src/rwe/sim/util.test.cpp
+    src/rwe/sim/recoil.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp
     src/rwe/util/Result.test.cpp
     src/rwe/util/SimpleLogger.test.cpp

@@ -147,6 +147,15 @@ namespace rwe
             p.bombsDroppedThisPass);
     }
 
+    GameHash computeHashOf(const AirMovementStateHoverAttack& p)
+    {
+        return combineHashes(
+            p.station,
+            static_cast<uint32_t>(p.swingPositive),
+            p.outOfRangeArrivals,
+            static_cast<uint32_t>(p.phase));
+    }
+
     GameHash computeHashOf(const SteeringInfo& s)
     {
         return combineHashes(s.targetAngle, s.targetSpeed);

@@ -68,6 +68,23 @@ namespace rwe
         unsigned int cruiseAlt;
 
         /**
+         * The gunships. Exactly two units in the original data set it, the
+         * Brawler and the Rapier, and it makes them work a target from a
+         * standoff ring instead of running in past it.
+         */
+        bool hoverAttack;
+
+        /**
+         * How far past the target a bomber carries its run before turning
+         * back. Only the four bombers set it: Thunder 120, Phoenix 180,
+         * Shadow 220, Hurricane 290.
+         */
+        unsigned int attackRunLength;
+
+        /** How far the unit will stray to fight. 640 or 1280 in the original data. */
+        unsigned int maneuverLeashLength;
+
+        /**
          * How hard an aircraft leans into a turn, as a multiple of a true
          * coordinated bank. One in the original unless the FBI says
          * otherwise, and the construction aircraft ship 1.5.

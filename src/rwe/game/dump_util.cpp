@@ -127,6 +127,22 @@ namespace rwe
         };
     }
 
+    nlohmann::json dumpJson(const AirMovementStateHoverAttack& p)
+    {
+        const char* phaseName = "Closing";
+        switch (p.phase)
+        {
+            case AirMovementStateHoverAttack::Phase::Closing:  phaseName = "Closing";  break;
+            case AirMovementStateHoverAttack::Phase::Swinging: phaseName = "Swinging"; break;
+        }
+        return nlohmann::json{
+            {"phase", phaseName},
+            {"station", dumpJson(p.station)},
+            {"swingPositive", p.swingPositive},
+            {"outOfRangeArrivals", p.outOfRangeArrivals},
+        };
+    }
+
     nlohmann::json dumpJson(const SteeringInfo& s)
     {
         return nlohmann::json{
