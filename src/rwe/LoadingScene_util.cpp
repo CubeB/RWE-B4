@@ -326,6 +326,7 @@ namespace rwe
         u.workerTimePerTick = fbi.workerTime / 30;
 
         u.buildDistance = SimScalar(fbi.buildDistance);
+        u.buildAngle = SimAngle(static_cast<uint16_t>(fbi.buildAngle));
 
         u.onOffable = fbi.onOffable;
         u.activateWhenBuilt = fbi.activateWhenBuilt;

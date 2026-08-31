@@ -4,6 +4,7 @@
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/Metal.h>
 #include <rwe/sim/MovementClassId.h>
+#include <rwe/sim/SimAngle.h>
 #include <rwe/sim/SimScalar.h>
 #include <string>
 #include <variant>
@@ -144,6 +145,16 @@ namespace rwe
         unsigned int workerTimePerTick;
 
         SimScalar buildDistance;
+
+        /**
+         * How wide an arc this building settles in when it goes up, centred
+         * on the stock facing. The original reads it straight out of the FBI
+         * and it varies by a factor of thirty-two: a vehicle plant barely
+         * moves at 1024, a light laser tower swings the full 32768. Zero for
+         * the shipyards, the aircraft plants and everything mobile, which go
+         * up square.
+         */
+        SimAngle buildAngle{0};
 
         bool onOffable;
         bool activateWhenBuilt;

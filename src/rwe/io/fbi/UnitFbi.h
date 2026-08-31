@@ -107,6 +107,14 @@ namespace rwe
 
         unsigned int buildDistance;
 
+        /**
+         * How wide an arc a finished building is allowed to settle in, as a
+         * fraction of a 16-bit turn. Eighty of the original's units name
+         * one, from 1024 on a vehicle plant to 32768 on a light laser tower;
+         * anything that stays silent goes up dead square.
+         */
+        unsigned int buildAngle{0};
+
         bool onOffable;
         bool activateWhenBuilt;
 

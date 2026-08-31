@@ -811,6 +811,7 @@ set(TEST_FILES
     src/rwe/render/FogTiles.test.cpp
     src/rwe/rc_gen_optional.h
     src/rwe/sim/GameHash_util.test.cpp
+    src/rwe/sim/buildangle.test.cpp
     src/rwe/sim/bombsight.test.cpp
     src/rwe/sim/cob.test.cpp
     src/rwe/sim/SimAngle.test.cpp

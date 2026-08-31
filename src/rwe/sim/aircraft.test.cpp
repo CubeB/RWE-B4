@@ -251,21 +251,24 @@ namespace rwe
         REQUIRE(landed);
     }
 
-    TEST_CASE("buildings go up with a slight random twist", "[aircraft][construction]")
+    TEST_CASE("a building goes up inside the arc its FBI names", "[aircraft][construction]")
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
         auto player = addPlayer(sim);
         sim.unitDefinitions["builder"] = makeBuilderDef();
         sim.unitDefinitions["STRUCTURE"] = makeStructureDef(false);
-        sim.unitDefinitions["FACTORY"] = makeStructureDef(true);
+        // A metal extractor's arc, and the twenty-two and a half degrees
+        // either way that it comes to.
+        sim.unitDefinitions["STRUCTURE"].buildAngle = SimAngle(8192);
+        sim.unitDefinitions["SQUARE"] = makeStructureDef(false);
         sim.unitScriptDefinitions["STRUCTURE"] = *script;
-        sim.unitScriptDefinitions["FACTORY"] = *script;
+        sim.unitScriptDefinitions["SQUARE"] = *script;
         registerModel(sim);
 
         auto builderId = spawnGroundUnit(sim, "builder", player, SimVector(-60_ss, 0_ss, 0_ss), script);
 
-        SECTION("an ordinary building is twisted up to ten degrees either way")
+        SECTION("a building that names an arc lands somewhere inside it")
         {
             sim.getUnitState(builderId).orders.push_back(BuildOrder("STRUCTURE", SimVector(40_ss, 0_ss, 0_ss)));
             std::optional<UnitId> structureId;
@@ -281,30 +284,28 @@ namespace rwe
                 }
             }
             REQUIRE(structureId.has_value());
-            // Ten degrees is 1/36 of a 16-bit turn, about 1820.
-            const auto tenDegrees = SimAngle(1821);
             auto twist = angleBetween(SimAngle(0), sim.getUnitState(*structureId).rotation);
-            REQUIRE(twist.value <= tenDegrees.value);
+            REQUIRE(twist.value <= 4096);
             REQUIRE(twist.value > 0);
         }
 
-        SECTION("a factory stays square so its pad lines up")
+        SECTION("a building that names none stays square")
         {
-            sim.getUnitState(builderId).orders.push_back(BuildOrder("FACTORY", SimVector(40_ss, 0_ss, 0_ss)));
-            std::optional<UnitId> factoryId;
-            for (int i = 0; i < 300 && !factoryId; ++i)
+            sim.getUnitState(builderId).orders.push_back(BuildOrder("SQUARE", SimVector(40_ss, 0_ss, 0_ss)));
+            std::optional<UnitId> squareId;
+            for (int i = 0; i < 300 && !squareId; ++i)
             {
                 sim.tick();
                 for (const auto& [id, unit] : sim.units)
                 {
-                    if (unit.unitType == "FACTORY")
+                    if (unit.unitType == "SQUARE")
                     {
-                        factoryId = id;
+                        squareId = id;
                     }
                 }
             }
-            REQUIRE(factoryId.has_value());
-            REQUIRE(sim.getUnitState(*factoryId).rotation == SimAngle(0));
+            REQUIRE(squareId.has_value());
+            REQUIRE(sim.getUnitState(*squareId).rotation == SimAngle(0));
         }
     }
 

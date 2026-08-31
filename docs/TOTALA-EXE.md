@@ -336,7 +336,11 @@ definition layout:
 | `pitchscale` | `def+0x1A6` | not implemented in RWE |
 | `turnrate` | `def+0x1BA` | |
 | `sightdistance` | `def+0x202` | |
+| `mincloakdistance` | `def+0x208` | |
+| `buildangle` | `def+0x210` | `WORD`, default 0 — see §9 |
+| `builddistance` | `def+0x212` | |
 | `sortbias` | `def+0x21A` | parsed, never read — dead |
+| `bmcode` | `def+0x22F` | `BYTE`; 1 = mobile, 0 = building |
 
 Unit instance fields:
 
@@ -389,6 +393,12 @@ original:
   leaves the frame's ragged edge with no neighbouring tile to cover it, and a
   strip of map shows through at the border.
 - **No `BrakeRate` nose re-aim and no pitch** — see §1.
+- **A mobile unit's `buildangle` is ignored.** The original overwrites a mobile
+  unit's spawn heading with the raw value (§9), which for everything but the ten
+  capital ships is zero and so agrees with RWE's half-turn default anyway. RWE
+  takes a factory-built unit's facing from the pad's `QueryBuildInfo` instead,
+  which is what actually points it out of the yard, so a ship coming off a
+  slipway keeps the pad's heading rather than being spun a quarter turn.
 - **A gunship's nose follows its flight path**, so it crosses its ring side-on.
   The original does the same, and holds its aim regardless of where the nose
   points; RWE relies on the same thing, so a gunship fires across the swing.
@@ -412,3 +422,75 @@ original:
   when the order was given — missions document §8.
 - The exact tick at which the original commits a **bomb release** inside its
   weapon code is still not pinned down; RWE uses its own bombsight.
+
+---
+
+## 9. Which way a finished building faces
+
+Every unit is spawned through `0x485A40`, and the last thing it does before
+handing back is set the heading:
+
+```
+485bd6  mov ax, WORD PTR [edx+0x210]    ; buildangle, zero-extended (eax was cleared at 485bbf)
+485bde  call 0x4b6c30                   ; rand
+485be9  mov dx, WORD PTR [ecx+0x210]    ; buildangle again
+485bf0  mov ecx,0x8000
+485bf5  shr dx,1 ; 485bf8 sub ecx,edx   ; 0x8000 - buildangle/2
+485c00  add eax,ecx
+485c06  mov WORD PTR [esi+0x66],ax      ; heading
+```
+
+so the heading is `0x8000 − buildangle/2 + rand(buildangle)`, taken modulo
+65536 by the `WORD` store. Roll and pitch are zeroed alongside it, at `485c02`
+and `485b92`.
+
+`0x4B6C30` really is `rand(n)`, and it matters that it is: it is Park–Miller
+(`a = 16807`, `m = 2^31 − 1`) evaluated by Schrage's trick, with the state at
+`ds:0x51FC88`, seeded at `0x4B6CA0` by XORing with `0x66E29572` and forcing the
+low bit. `485bde` returns `state % n` — uniform over `[0, n)`, exclusive of the
+top. **For `n < 2` it returns 0 without advancing the state**, which is how the
+fortification walls (the only two units that write `buildangle=0` out loud) come
+out in a dead straight line. That early exit leaves `edx` untouched rather than
+zeroed, so `485be9`'s `mov dx` merges into a stale pointer; the garbage lands
+entirely in the high half and the `WORD` store discards it, leaving exactly
+`0x8000`. Sloppy, but not a bug.
+
+`buildangle` is parsed at `0x42C54E` into `WORD def+0x210`, defaulted to 0 by
+the `esi` zeroed at `0x42C0F0` and shared by that whole run of key reads. It is
+copied field-for-field at `0x42B6F1`, between `+0x20E` and `+0x212`, which
+confirms the offset independently of the parser's store-after-the-next-push
+pipeline.
+
+**The other four readers are all the same override.** Each of the spawn
+routines — `0x485E50`, `0x485E90`, the one containing `0x4860E6`, and the one
+containing `0x4862FA` — calls `0x485A40`, and then:
+
+```
+485f0f  cmp BYTE PTR [edi+0x22f],0x1    ; bmcode == 1, i.e. mobile
+485f16  jne  ...
+485f18  push 0x2f ; call 0x4b4f10       ; 47 bytes
+485f29  call 0x43dc00                   ; construct it over the unit
+485f38  mov DWORD PTR [esi],eax         ; hang it off unit+0
+485f3a  mov ax, WORD PTR [edx+0x210]
+485f41  mov WORD PTR [esi+0x66],ax      ; heading = buildangle, verbatim
+```
+
+So a **mobile** unit throws the random heading away and takes `buildangle`
+literally. It is not a nanoframe path and not a factory path: it is the mobile
+branch of the ordinary spawn, and `bmcode` is what selects it (`0x485A81` uses
+the same byte the other way, flagging bit 29 of `unit+0x110` when it is zero).
+
+In the rev31 data 80 of 189 units name a `buildangle`. Seventy are buildings;
+the ten mobile ones are exactly the capital ships — Millenium, Colossus,
+Conqueror, Crusader, Hulk, Warlord, Hive, Executioner, Enforcer, Envoy — every
+one at 16384. The building values span a factor of thirty-two: 1024 on the
+vehicle plants and air repair pads, 2048, 4096 on the kbot labs and fusion
+plants, 8192 on most of the towers and extractors, 16384, and 32768 on the two
+light laser towers and the CORE solar collector. **The shipyards and aircraft
+plants name none at all** — that, not any special case for factories, is what
+keeps their roll-off square.
+
+RWE's heading is offset half a turn from TA's: `createUnit` already gives a
+mobile unit with no facing of its own `HalfTurn`, which is TA heading 0, and its
+buildings sit at rotation 0, which is TA's `0x8000` centre. So the arc lands in
+RWE as `rand(buildangle) − buildangle/2` about rotation zero, with no shift.

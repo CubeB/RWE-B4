@@ -115,7 +115,14 @@ RWE's enum order.
 
 **Effort / risk.** Half a day for a usable version. Low risk.
 
-### 3. `buildangle` — which way a finished building faces
+### 3. `buildangle` — which way a finished building faces — **done**
+
+Ported; the findings are written up as `TOTALA-EXE.md` §9. Two things below
+turned out to be wrong and are corrected in place: the ten capital ships mean
+that not every unit setting `buildangle` is a building, and `0x485E77` is the
+**mobile** branch of the ordinary spawn, gated on `bmcode`, not a nanoframe or a
+factory path. There is also a sixth reader, `0x4862FA`, and a `def`-to-`def`
+copy at `0x42B6F1`.
 
 **Behaviour.** RWE invents a flat ±10° random twist for every non-factory
 building (`src/rwe/sim/GameSimulation.cpp:2633–2644`, test at
@@ -142,9 +149,9 @@ Executioner, Enforcer, Envoy — every one at `16384`, so a ship leaves its yard
 on a ±45° spread. (Factories read as mobile too, since TA gives them
 `canmove=1` with no `MaxVelocity`.) Land and air units set it nowhere.
 
-**Evidence.** 80/195 units set `buildangle`, all of them buildings.
-`grep -i buildangle` returns nothing in `src/rwe` outside the invented-twist
-test.
+**Evidence.** 80/189 of the rev31 units set `buildangle`; seventy are buildings
+and ten are the capital ships. `grep -i buildangle` returns nothing in `src/rwe`
+outside the invented-twist test.
 
 **Where to start.** String at `0x503C00`, parsed at `0x42C54E` into `WORD
 def+0x210`. Readers: `0x485BD6`, `0x485BE9`, `0x485E77`, `0x485F3A`, `0x4860E6`.
