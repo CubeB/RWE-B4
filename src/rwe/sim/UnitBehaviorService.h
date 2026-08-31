@@ -90,18 +90,7 @@ namespace rwe
          *
          * Ground builders are always ready and it returns true for them.
          */
-        bool prepareBuilderForWork(UnitInfo unitInfo, const SimVector& workPosition, SimScalar orbitRadius);
-
-        /**
-         * The ring a construction aircraft flies while working on the target:
-         * through the corners of a building's footprint, and a little wider
-         * (with a floor) around a mobile unit, so the aircraft can stand off
-         * from something small or moving.
-         */
-        SimScalar workOrbitRadius(const UnitState& target) const;
-
-        /** As above, for a feature being reclaimed. */
-        SimScalar workOrbitRadius(const FeatureDefinition& featureDefinition) const;
+        bool prepareBuilderForWork(UnitInfo unitInfo, const SimVector& workPosition);
 
         /** Whether the builder's arm reaches the target's footprint from where it stands. */
         bool withinBuildReach(UnitInfo unitInfo, const UnitState& target) const;

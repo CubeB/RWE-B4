@@ -100,6 +100,13 @@ namespace rwe
         /** Distance above the ground that the unit flies at. */
         SimScalar cruiseAltitude;
 
+        /**
+         * How hard the aircraft leans into a turn, as a multiple of a true
+         * coordinated bank. One unless the FBI overrides it; the construction
+         * aircraft use 1.5.
+         */
+        SimScalar bankScale{1_ss};
+
         std::string weapon1;
         std::string weapon2;
         std::string weapon3;

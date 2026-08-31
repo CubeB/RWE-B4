@@ -66,6 +66,13 @@ namespace rwe
 
         unsigned int cruiseAlt;
 
+        /**
+         * How hard an aircraft leans into a turn, as a multiple of a true
+         * coordinated bank. One in the original unless the FBI says
+         * otherwise, and the construction aircraft ship 1.5.
+         */
+        float bankScale;
+
         std::string weapon1;
         std::string weapon2;
         std::string weapon3;

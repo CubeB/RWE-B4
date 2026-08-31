@@ -260,12 +260,14 @@ namespace rwe
         AirMovementState movementState{AirMovementStateTakingOff()};
 
         /**
-         * Bank angle in radians, eased towards whatever the current task asks
-         * for and back to level when nothing does. Only the construction
-         * aircraft's work pattern asks for any: ordinary flight is level.
+         * Bank angle in radians, and the lagged acceleration it is computed
+         * from. An aircraft leans because it is accelerating sideways, so the
+         * bank is a consequence of the flying rather than something asked for:
+         * see updateUnitSpeed for the formula, which is the original's.
          */
         SimScalar roll{0_ss};
         SimScalar previousRoll{0_ss};
+        SimVector bankAccum{0_ss, 0_ss, 0_ss};
     };
 
     using UnitPhysicsInfo = std::variant<UnitPhysicsInfoGround, UnitPhysicsInfoAir>;
@@ -379,15 +381,11 @@ namespace rwe
             /** The centre of the job the pattern is flown around. */
             SimVector workPosition;
 
-            /** -1 = over the centre; 0-7 = the ring points, clockwise from due north. */
-            int pointIndex{-1};
+            /** Bearing of the current station as seen from the job, measured the way the original does. */
+            SimAngle bearing{0};
 
-            /** True once it has settled at the current station; the dwell runs from stationReachedAt. */
-            bool onStation{false};
-            GameTime stationReachedAt{0};
-
-            /** How far the current hop between stations was when it set off, for pacing the bank. */
-            SimScalar transitDistance{0_ss};
+            /** False until the first station has been chosen. */
+            bool started{false};
         };
         std::optional<AirWorkOrbitState> airWorkOrbit;
 
@@ -398,12 +396,6 @@ namespace rwe
          */
         std::optional<SimVector> slowFacePoint;
 
-        /**
-         * Bank the current task wants this tick, in radians. Cleared at the
-         * start of every behaviour update; an aircraft with nothing asking
-         * for a bank rolls back to level.
-         */
-        std::optional<SimScalar> desiredRoll;
 
         bool activated{false};
         bool isSufficientlyPowered{false};

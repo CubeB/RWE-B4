@@ -75,6 +75,9 @@ namespace rwe
         tdf.readOrDefault("TransportSize", u.transportSize);
 
         tdf.readOrDefault("CruiseAlt", u.cruiseAlt);
+        // The original defaults this to one, so an aircraft whose FBI is
+        // silent still banks like an aircraft.
+        tdf.readOrDefault("BankScale", u.bankScale, 1.0f);
 
         tdf.readOrDefault("Weapon1", u.weapon1);
         tdf.readOrDefault("Weapon2", u.weapon2);

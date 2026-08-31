@@ -306,6 +306,7 @@ namespace rwe
         }
 
         u.cruiseAltitude = SimScalar(fbi.cruiseAlt);
+        u.bankScale = SimScalar(fbi.bankScale);
 
         u.weapon1 = fbi.weapon1;
         u.weapon2 = fbi.weapon2;

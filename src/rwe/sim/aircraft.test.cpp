@@ -156,6 +156,13 @@ namespace rwe
             return sim.tryAddUnit(std::move(unit)).value();
         }
 
+        /** The bank an aircraft is holding, or zero once it has landed. */
+        SimScalar rollOf(const GameSimulation& sim, UnitId unitId)
+        {
+            auto air = std::get_if<UnitPhysicsInfoAir>(&sim.getUnitState(unitId).physics);
+            return air == nullptr ? 0_ss : air->roll;
+        }
+
         int countArrivals(const GameSimulation& sim, UnitId unitId)
         {
             int n = 0;
@@ -310,6 +317,11 @@ namespace rwe
         airBuilder.canFly = true;
         airBuilder.cruiseAltitude = 60_ss;
         airBuilder.maxVelocity = 5_ss;
+        // A real construction aircraft accelerates gently: the ARM one at
+        // 0.06 world units per tick squared.
+        airBuilder.acceleration = 0.06_ssf;
+        airBuilder.bankScale = 1.5_ssf;
+        airBuilder.buildDistance = 40_ss;
         sim.unitDefinitions["AIRBUILDER"] = airBuilder;
         sim.unitDefinitions["plane"] = airBuilder;
         sim.unitDefinitions["STRUCTURE"] = makeStructureDef(false);
@@ -322,85 +334,137 @@ namespace rwe
 
         // The build stance never comes (the test script has no StartBuilding),
         // so the aircraft flies the pattern indefinitely: ideal for watching it.
-        bool sawCentreStage = false;
-        std::vector<int> stationsVisited;
+        std::vector<SimAngle> bearingsSeen;
         bool ringDistanceOk = true;
+        auto steepestRoll = 0_ss;
         float minRing = 1000.0f;
         float maxRing = 0.0f;
-        auto steepestTransitRoll = 0_ss;
-        auto steepestStationRoll = 0_ss;
-        bool rolledLeft = false;
-        bool rolledRight = false;
         for (int i = 0; i < 1500; ++i)
         {
             sim.tick();
             const auto& plane = sim.getUnitState(planeId);
-            if (std::getenv("RWE_TRACE_ORBIT") && i % 15 == 0)
-            {
-                std::string o = plane.airWorkOrbit ? (std::to_string(plane.airWorkOrbit->pointIndex) + (plane.airWorkOrbit->onStation ? "+" : "-")) : "none";
-                std::cout << "t=" << i << " pos=" << simScalarToFloat(plane.position.x) << "," << simScalarToFloat(plane.position.y) << "," << simScalarToFloat(plane.position.z) << " orbit=" << o << std::endl;
-            }
-            if (!plane.airWorkOrbit)
+            if (!plane.airWorkOrbit || !plane.airWorkOrbit->started)
             {
                 continue;
             }
             const auto& orbit = *plane.airWorkOrbit;
-            auto roll = std::get<UnitPhysicsInfoAir>(plane.physics).roll;
-            if (orbit.pointIndex >= 0)
+            if (bearingsSeen.empty() || bearingsSeen.back() != orbit.bearing)
             {
-                if (orbit.onStation)
-                {
-                    // Give the bank a moment to level out after arriving.
-                    if (sim.gameTime >= orbit.stationReachedAt + GameTime(30))
-                    {
-                        steepestStationRoll = rweMax(steepestStationRoll, rweAbs(roll));
-                    }
-                }
-                else
-                {
-                    steepestTransitRoll = rweMax(steepestTransitRoll, rweAbs(roll));
-                    rolledLeft = rolledLeft || roll < SimScalar(-0.04f);
-                    rolledRight = rolledRight || roll > SimScalar(0.04f);
-                }
+                bearingsSeen.push_back(orbit.bearing);
             }
-            if (orbit.pointIndex < 0 && orbit.onStation)
+
+            if (auto air = std::get_if<UnitPhysicsInfoAir>(&plane.physics))
             {
-                sawCentreStage = true;
+                steepestRoll = rweMax(steepestRoll, rweAbs(air->roll));
             }
-            if (orbit.pointIndex >= 0 && orbit.onStation)
+
+            // Once it has had time to reach the ring, it should be on it.
+            if (i > 300)
             {
-                if (stationsVisited.empty() || stationsVisited.back() != orbit.pointIndex)
-                {
-                    stationsVisited.push_back(orbit.pointIndex);
-                }
                 SimVector flat(plane.position.x - orbit.workPosition.x, 0_ss, plane.position.z - orbit.workPosition.z);
                 auto distance = flat.length();
-                // The 4x4 structure's ring radius is clamped to the 40-unit floor.
                 minRing = std::min(minRing, simScalarToFloat(distance));
                 maxRing = std::max(maxRing, simScalarToFloat(distance));
-                if (distance < 15_ss || distance > 80_ss)
+                if (distance > 90_ss)
                 {
                     ringDistanceOk = false;
                 }
             }
         }
 
-        REQUIRE(sawCentreStage);
-        REQUIRE(stationsVisited.size() >= 2);
-        // It banks on the way between stations and sits level once parked.
-        REQUIRE(steepestTransitRoll > SimScalar(0.07f));
-        REQUIRE(steepestStationRoll < SimScalar(0.06f));
-        // The bank goes both ways over a hop: over into the move, back the
-        // other way as it settles onto the next station.
-        REQUIRE((rolledLeft && rolledRight));
-        // After the random first station, movement is one step clockwise at a time.
-        for (std::size_t i = 1; i < stationsVisited.size(); ++i)
+        // Seven stations, so a lap comes back round to where it started.
+        REQUIRE(bearingsSeen.size() >= 3);
+        const SimAngle step(static_cast<uint16_t>(65536 / 7));
+        for (std::size_t i = 1; i < bearingsSeen.size(); ++i)
         {
-            REQUIRE(stationsVisited[i] == (stationsVisited[i - 1] + 1) % 8);
+            REQUIRE(bearingsSeen[i] == bearingsSeen[i - 1] - step);
         }
+
         CAPTURE(minRing, maxRing);
         REQUIRE(ringDistanceOk);
+
+        // It banks as it dashes between stations, because it is accelerating
+        // sideways — and nothing like as far as a fighter would.
+        REQUIRE(steepestRoll > SimScalar(0.05f));
+        REQUIRE(steepestRoll < SimScalar(0.8f));
     }
+
+    TEST_CASE("an aircraft's bank comes from the acceleration it is making", "[aircraft]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        // Real aircraft accelerate gently; the test default of one unit per
+        // tick squared would saturate the bank on every course correction.
+        auto gentle = makePlaneDef();
+        gentle.acceleration = 0.06_ssf;
+        sim.unitDefinitions["plane"] = gentle;
+        registerModel(sim);
+
+        auto planeId = spawnPlane(sim, player, SimVector(-400_ss, 100_ss, 0_ss), script);
+
+        SECTION("flying straight and level, it does not lean")
+        {
+            sim.getUnitState(planeId).orders.push_back(createMoveOrder(SimVector(400_ss, 0_ss, 0_ss)));
+            // Let it get up to speed, then watch a stretch of steady cruise.
+            for (int i = 0; i < 90; ++i)
+            {
+                sim.tick();
+            }
+            auto steepest = 0_ss;
+            for (int i = 0; i < 60; ++i)
+            {
+                sim.tick();
+                steepest = rweMax(steepest, rweAbs(rollOf(sim, planeId)));
+            }
+            REQUIRE(steepest < SimScalar(0.05f));
+        }
+
+        SECTION("the bank washes out on its own once the turn is over")
+        {
+            // Send it round a corner, then let it settle on a long straight.
+            sim.getUnitState(planeId).orders.push_back(createMoveOrder(SimVector(0_ss, 0_ss, 300_ss)));
+            auto steepestInTurn = 0_ss;
+            for (int i = 0; i < 200; ++i)
+            {
+                sim.tick();
+                steepestInTurn = rweMax(steepestInTurn, rweAbs(rollOf(sim, planeId)));
+            }
+            REQUIRE(steepestInTurn > SimScalar(0.05f));
+
+            sim.getUnitState(planeId).orders.clear();
+            sim.getUnitState(planeId).orders.push_back(createMoveOrder(SimVector(0_ss, 0_ss, 300_ss)));
+            for (int i = 0; i < 300; ++i)
+            {
+                sim.tick();
+            }
+            // No rate limit and no clamp: the lag alone brings it back level.
+            REQUIRE(rweAbs(rollOf(sim, planeId)) < SimScalar(0.05f));
+        }
+
+        SECTION("a unit that leans harder banks further for the same flying")
+        {
+            auto keen = makePlaneDef();
+            keen.bankScale = 3_ss;
+            sim.unitDefinitions["keen"] = keen;
+            auto keenId = spawnPlane(sim, player, SimVector(-400_ss, 100_ss, 200_ss), script);
+            sim.getUnitState(keenId).unitType = "keen";
+
+            sim.getUnitState(planeId).orders.push_back(createMoveOrder(SimVector(0_ss, 0_ss, -300_ss)));
+            sim.getUnitState(keenId).orders.push_back(createMoveOrder(SimVector(0_ss, 0_ss, -100_ss)));
+
+            auto steepestPlain = 0_ss;
+            auto steepestKeen = 0_ss;
+            for (int i = 0; i < 200; ++i)
+            {
+                sim.tick();
+                steepestPlain = rweMax(steepestPlain, rweAbs(rollOf(sim, planeId)));
+                steepestKeen = rweMax(steepestKeen, rweAbs(rollOf(sim, keenId)));
+            }
+            REQUIRE(steepestKeen > steepestPlain);
+        }
+    }
+
 
     TEST_CASE("aircraft look for dry land to set down on", "[aircraft]")
     {
