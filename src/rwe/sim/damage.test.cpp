@@ -158,6 +158,62 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a blast too small to spread pays out in full", "[damage]")
+    {
+        // The original stops bothering with falloff below an AreaOfEffect of
+        // sixteen (0x49A049) and pays a flat 1.0 (0x49A05B). Our radius is
+        // half the AreaOfEffect, so the line is at eight. Forty-three of the
+        // hundred and thirty-six shipped weapons sit under it, including the
+        // twenty-eight at AreaOfEffect eight, so getting this wrong would take
+        // most of the bite out of ordinary small-arms fire.
+        auto script = makeDamageScript();
+        GameSimulation sim(makeDamageTerrain(64, 64), 0u, 0, 0);
+        auto us = addDamagePlayer(sim, "us");
+        auto them = addDamagePlayer(sim, "them");
+        sim.unitDefinitions["target"] = makeTargetDef(100000);
+        registerDamageModel(sim, "model");
+
+        auto targetPosition = SimVector(0_ss, 0_ss, 0_ss);
+        auto probeId = spawnDamageUnit(sim, "target", them, targetPosition, script);
+        auto probeBox = sim.createBoundingBox(sim.getUnitState(probeId));
+        auto boxEdge = probeBox.center.x + probeBox.extents.x;
+        sim.quietlyKillUnit(probeId);
+        sim.deleteDeadUnits();
+
+        struct Case
+        {
+            SimScalar radius;
+            SimScalar distance;
+            unsigned int expected;
+        };
+
+        const Case cases[] = {
+            // AreaOfEffect 8, the commonest value in the game: full damage
+            // even three quarters of the way out, where the curve would have
+            // paid a sixteenth.
+            {4_ss, 0_ss, 100},
+            {4_ss, 3_ss, 100},
+            // AreaOfEffect 16 is still inside the rule.
+            {8_ss, 6_ss, 100},
+            // One unit wider and the curve takes over again.
+            {9_ss, 6_ss, 11},
+        };
+
+        for (const auto& c : cases)
+        {
+            auto targetId = spawnDamageUnit(sim, "target", them, targetPosition, script);
+            auto blastPosition = SimVector(boxEdge + c.distance, 0_ss, 0_ss);
+            REQUIRE(rweSqrt(sim.createBoundingBox(sim.getUnitState(targetId)).distanceSquared(blastPosition)) == c.distance);
+            auto projectile = makeBlast(us, blastPosition, 100, c.radius, 0_ss);
+            sim.applyDamageInRadius(blastPosition, projectile.damageRadius, projectile);
+            CAPTURE(simScalarToFloat(c.radius));
+            CAPTURE(simScalarToFloat(c.distance));
+            REQUIRE(damageTaken(sim, targetId) == c.expected);
+            sim.quietlyKillUnit(targetId);
+            sim.deleteDeadUnits();
+        }
+    }
+
     TEST_CASE("armour halves what an armoured unit takes until the hit is big enough to ignore it", "[damage]")
     {
         // TotalA.exe 0x489BC3: (damage * DamageModifier) >> 16, but only while

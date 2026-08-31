@@ -2265,6 +2265,21 @@ namespace rwe
     namespace
     {
         /**
+         * A blast too small to be worth spreading. The original checks
+         * AreaOfEffect against sixteen (0x49A049) and, under that, skips the
+         * falloff entirely for a flat 1.0 (0x49A05B). Our radius is already
+         * half the AreaOfEffect, so the same test is eight.
+         *
+         * This is not a rounding detail. Forty-three of the hundred and
+         * thirty-six shipped weapons are inside it, including the twenty-eight
+         * at AreaOfEffect eight -- the machine guns and light lasers that do
+         * most of the shooting in a game -- and under the quadratic curve a
+         * hit landing six units off centre would otherwise come out at a
+         * sixteenth strength.
+         */
+        const SimScalar SmallestSpreadingBlastRadius = 8_ss;
+
+        /**
          * The original's blast falloff (TotalA.exe 0x49A3B6). The curve is
          * quadratic rather than linear, and it lands on EdgeEffectiveness at
          * the rim instead of on zero, so a weapon that names an edge value
@@ -2273,6 +2288,11 @@ namespace rwe
          */
         SimScalar blastDamageScale(SimScalar distance, SimScalar radius, SimScalar edgeEffectiveness)
         {
+            if (radius <= SmallestSpreadingBlastRadius)
+            {
+                return 1_ss;
+            }
+
             auto t = std::clamp(1_ss - (distance / radius), 0_ss, 1_ss);
             return (t * t * (1_ss - edgeEffectiveness)) + edgeEffectiveness;
         }
