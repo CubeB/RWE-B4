@@ -105,6 +105,32 @@ namespace rwe
             REQUIRE(texelAt(r, (4 * 32) - 1, (4 * 32) - 1) == 0);
         }
 
+        SECTION("meets the map border flush, with no ragged edge left exposed")
+        {
+            // A frame's raggedness is covered by the tile drawing the other
+            // side of the boundary. At the map's edge there is no such tile, so
+            // every entry along it has to come out 0 or 15, the two codes that
+            // are drawn without artwork at all. This tile set paints nothing
+            // for any other code, so a solid result proves it.
+            auto holeyTiles = makeSquareFogTileSet();
+            for (int v = 0; v < FogTileSet::VariantCount; ++v)
+            {
+                for (int i = 0; i < 14; ++i)
+                {
+                    holeyTiles.unexplored[v][i].mask.assign(holeyTiles.unexplored[v][i].mask.size(), 0);
+                    holeyTiles.unseen[v][i].mask.assign(holeyTiles.unseen[v][i].mask.size(), 0);
+                }
+            }
+
+            Grid<unsigned char> visible(4, 4, static_cast<unsigned char>(0));
+            Grid<unsigned char> explored(4, 4, static_cast<unsigned char>(0));
+
+            FogRasterizer r;
+            r.update(holeyTiles, visible, explored, explored.getRegion());
+
+            REQUIRE(countOtherThan(r, GridRegion(0, 0, 4 * 32, 4 * 32), FogRasterizer::UnexploredValue) == 0);
+        }
+
         SECTION("reports nothing to redraw when the fog has not moved")
         {
             Grid<unsigned char> visible(4, 4, static_cast<unsigned char>(1));

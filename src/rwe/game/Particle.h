@@ -40,11 +40,20 @@ namespace rwe
         GameTime finishTime;
     };
 
-    /** A small flat square of one colour: the nanolathe spray. */
+    /**
+     * A small flat square of one colour: the nanolathe spray.
+     *
+     * The original animates each particle's colour, stepping it one place
+     * along palette entries 161..167 every tick and wrapping back to 161.
+     * Rather than rewrite the particle every tick we keep where it started
+     * and work out where it has got to from its age.
+     */
     struct ParticleRenderTypeNano
     {
         GameTime finishTime;
-        Vector3f color;
+
+        /** Offset into the seven-colour cycle at spawn, 0..6. */
+        unsigned char colorPhase{0};
 
         /** Half the side of the square, in world units. */
         float halfSize{1.0f};

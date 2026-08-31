@@ -48,9 +48,13 @@ namespace rwe
         s.unitBuild.modelMatrix = graphics.getUniformLocation(s.unitBuild.handle.get(), "modelMatrix");
         s.unitBuild.seaLevel = graphics.getUniformLocation(s.unitBuild.handle.get(), "seaLevel");
         s.unitBuild.shade = graphics.getUniformLocation(s.unitBuild.handle.get(), "shade");
-        s.unitBuild.percentComplete = graphics.getUniformLocation(s.unitBuild.handle.get(), "percentComplete");
-        s.unitBuild.time = graphics.getUniformLocation(s.unitBuild.handle.get(), "time");
         s.unitBuild.unitHeight = graphics.getUniformLocation(s.unitBuild.handle.get(), "unitHeight");
+        s.unitBuild.buildRatio = graphics.getUniformLocation(s.unitBuild.handle.get(), "buildRatio");
+        s.unitBuild.aboveMode = graphics.getUniformLocation(s.unitBuild.handle.get(), "aboveMode");
+        s.unitBuild.bandMode = graphics.getUniformLocation(s.unitBuild.handle.get(), "bandMode");
+        s.unitBuild.belowMode = graphics.getUniformLocation(s.unitBuild.handle.get(), "belowMode");
+        s.unitBuild.buildColorA = graphics.getUniformLocation(s.unitBuild.handle.get(), "buildColorA");
+        s.unitBuild.buildColorB = graphics.getUniformLocation(s.unitBuild.handle.get(), "buildColorB");
 
         s.flashEffect.handle = loadShader(graphics, "shaders/flashEffect.vert", "shaders/flashEffect.frag", texturedVertexAttribs);
         s.flashEffect.mvpMatrix = graphics.getUniformLocation(s.flashEffect.handle.get(), "mvpMatrix");

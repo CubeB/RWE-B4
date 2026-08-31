@@ -722,7 +722,7 @@ namespace rwe
         bool positionIsVisibleToLocalPlayer(const SimVector& position) const;
 
         /** One square of nano spray travelling from one point to another. */
-        void spawnNanoParticle(const Vector3f& from, const Vector3f& to);
+        void spawnNanoParticle(const Vector3f& from, const Vector3f& to, unsigned char colorPhase);
 
         void recreateWorldRenderTextures();
 

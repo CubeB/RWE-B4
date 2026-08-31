@@ -54,9 +54,13 @@ namespace rwe
         UniformLocation unitY;
         UniformLocation seaLevel;
         UniformLocation shade;
-        UniformLocation percentComplete;
-        UniformLocation time;
         UniformLocation unitHeight;
+        UniformLocation buildRatio;
+        UniformLocation aboveMode;
+        UniformLocation bandMode;
+        UniformLocation belowMode;
+        UniformLocation buildColorA;
+        UniformLocation buildColorB;
     };
 
     struct FlashEffectShader

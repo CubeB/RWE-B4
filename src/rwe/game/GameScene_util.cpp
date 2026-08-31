@@ -1,5 +1,6 @@
 #include "GameScene_util.h"
 
+#include <array>
 #include <algorithm>
 #include <rwe/util/Index.h>
 
@@ -466,7 +467,7 @@ namespace rwe
         const ShaderMesh& mesh,
         const Matrix4f& matrix,
         bool shaded,
-        float percentComplete,
+        const BuildPhase& buildPhase,
         float unitY,
         float unitHeight,
         PlayerColorIndex playerColorIndex,
@@ -477,11 +478,11 @@ namespace rwe
         auto mvpMatrix = viewProjectionMatrix * matrix;
         if (mesh.vertices)
         {
-            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shaded, unitTextureAtlas, percentComplete, unitY, unitHeight});
+            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shaded, unitTextureAtlas, unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB});
         }
         if (mesh.teamVertices)
         {
-            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shaded, unitTeamTextureAtlases.at(playerColorIndex.value).get(), percentComplete, unitY, unitHeight});
+            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shaded, unitTeamTextureAtlases.at(playerColorIndex.value).get(), unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB});
         }
     }
 
@@ -492,7 +493,7 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         const std::vector<UnitMesh>& meshes,
         const Matrix4f& modelMatrix,
-        float percentComplete,
+        const BuildPhase& buildPhase,
         float unitY,
         PlayerColorIndex playerColorIndex,
         float frac,
@@ -512,7 +513,7 @@ namespace rwe
             auto matrix = modelMatrix * getPieceTransformForRender(pieceDef.name, modelDefinition, meshes, frac);
 
             const auto& resolvedMesh = *gameMediaDatabase.getUnitPieceMesh(objectName, pieceDef.name).value().get().mesh;
-            drawBuildingShaderMesh(viewProjectionMatrix, resolvedMesh, matrix, mesh.shaded, percentComplete, unitY, simScalarToFloat(modelDefinition.height), playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.buildingMeshes);
+            drawBuildingShaderMesh(viewProjectionMatrix, resolvedMesh, matrix, mesh.shaded, buildPhase, unitY, simScalarToFloat(modelDefinition.height), playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.buildingMeshes);
         }
     }
 
@@ -543,6 +544,8 @@ namespace rwe
         const UnitDefinition& unitDefinition,
         const UnitModelDefinition& modelDefinition,
         PlayerColorIndex playerColorIndex,
+        unsigned int unitIndex,
+        unsigned int gameTime,
         float frac,
         TextureIdentifier unitTextureAtlas,
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
@@ -553,7 +556,8 @@ namespace rwe
         auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
         if (unit.isBeingBuilt(unitDefinition))
         {
-            drawBuildingUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, unit.getPreciseCompletePercent(unitDefinition), position.y, playerColorIndex, frac, unitTextureAtlas, unitTeamTextureAtlases, batch);
+            auto buildPhase = computeBuildPhase(unit.getPreciseCompletePercent(unitDefinition), unitIndex, gameTime);
+            drawBuildingUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, buildPhase, position.y, playerColorIndex, frac, unitTextureAtlas, unitTeamTextureAtlases, batch);
         }
         else
         {
@@ -831,6 +835,125 @@ namespace rwe
         out.insert(out.end(), batch.meshes.begin(), batch.meshes.end());
     }
 
+    /**
+     * Palette entries 161..167, the greens the original sprays. Each particle
+     * walks this list one step per tick and wraps round, so the stream
+     * shimmers from pale to dark along its length rather than being dyed one
+     * colour per particle.
+     */
+    static const std::array<Vector3f, 7> NanoSprayColors{
+        Vector3f(171 / 255.0f, 231 / 255.0f, 127 / 255.0f),
+        Vector3f(131 / 255.0f, 211 / 255.0f, 91 / 255.0f),
+        Vector3f(103 / 255.0f, 191 / 255.0f, 63 / 255.0f),
+        Vector3f(75 / 255.0f, 171 / 255.0f, 43 / 255.0f),
+        Vector3f(67 / 255.0f, 151 / 255.0f, 43 / 255.0f),
+        Vector3f(55 / 255.0f, 135 / 255.0f, 39 / 255.0f),
+        Vector3f(47 / 255.0f, 119 / 255.0f, 27 / 255.0f),
+    };
+
+    /**
+     * Palette entries 160..175: the sixteen greens, palest to near black, that
+     * the original's construction display cycles through.
+     */
+    static const std::array<Vector3f, 16> BuildCycleColors{
+        Vector3f(215 / 255.0f, 255 / 255.0f, 167 / 255.0f),
+        Vector3f(171 / 255.0f, 231 / 255.0f, 127 / 255.0f),
+        Vector3f(131 / 255.0f, 211 / 255.0f, 91 / 255.0f),
+        Vector3f(103 / 255.0f, 191 / 255.0f, 63 / 255.0f),
+        Vector3f(75 / 255.0f, 171 / 255.0f, 43 / 255.0f),
+        Vector3f(67 / 255.0f, 151 / 255.0f, 43 / 255.0f),
+        Vector3f(55 / 255.0f, 135 / 255.0f, 39 / 255.0f),
+        Vector3f(47 / 255.0f, 119 / 255.0f, 27 / 255.0f),
+        Vector3f(43 / 255.0f, 103 / 255.0f, 19 / 255.0f),
+        Vector3f(35 / 255.0f, 91 / 255.0f, 15 / 255.0f),
+        Vector3f(31 / 255.0f, 79 / 255.0f, 11 / 255.0f),
+        Vector3f(27 / 255.0f, 67 / 255.0f, 7 / 255.0f),
+        Vector3f(23 / 255.0f, 51 / 255.0f, 0 / 255.0f),
+        Vector3f(15 / 255.0f, 39 / 255.0f, 0 / 255.0f),
+        Vector3f(11 / 255.0f, 27 / 255.0f, 0 / 255.0f),
+        Vector3f(7 / 255.0f, 15 / 255.0f, 0 / 255.0f),
+    };
+
+    Vector3f buildCycleColor(unsigned int unitIndex, unsigned int gameTime, unsigned int xorKey, unsigned int rate)
+    {
+        // A counter that advances rate/30 places a tick, offset per unit so
+        // that two things being built side by side are not in step, then
+        // folded back on itself every sixteen places to give a triangle wave
+        // down the greens and back up again.
+        auto n = (unitIndex ^ xorKey) + ((rate * gameTime) / 30);
+        auto low = n & 0x0Fu;
+        return BuildCycleColors[(n & 0x10u) ? (15u - low) : low];
+    }
+
+    Vector3f buildCycleColorA(unsigned int unitIndex, unsigned int gameTime)
+    {
+        return buildCycleColor(unitIndex, gameTime, 5, 33);
+    }
+
+    Vector3f buildCycleColorB(unsigned int unitIndex, unsigned int gameTime)
+    {
+        return buildCycleColor(unitIndex, gameTime, 9, 57);
+    }
+
+    BuildPhase computeBuildPhase(float percentComplete, unsigned int unitIndex, unsigned int gameTime)
+    {
+        // The original tracks the fraction still to build, scaled to a byte,
+        // and switches the display at five thresholds on it.
+        auto v = std::clamp(static_cast<int>((1.0f - percentComplete) * 255.0f), 0, 255);
+
+        BuildPhase phase;
+        phase.colorA = buildCycleColorA(unitIndex, gameTime);
+        phase.colorB = buildCycleColorB(unitIndex, gameTime);
+
+        int ratio;
+        if (v >= 236)
+        {
+            // Nothing but a single line sweeping down the model.
+            ratio = 255 * (v - 235) / 20;
+            phase.aboveMode = BuildFillMode::Erase;
+            phase.bandMode = BuildFillMode::ColorA;
+            phase.belowMode = BuildFillMode::Erase;
+        }
+        else if (v >= 201)
+        {
+            // A second, slower sweep down.
+            ratio = 255 * (v - 200) / 35;
+            phase.aboveMode = BuildFillMode::Erase;
+            phase.bandMode = BuildFillMode::ColorA;
+            phase.belowMode = BuildFillMode::Erase;
+        }
+        else if (v >= 116)
+        {
+            // The solid green silhouette grows up from the base.
+            ratio = (3 * (115 - v)) - 1;
+            phase.aboveMode = BuildFillMode::Erase;
+            phase.bandMode = BuildFillMode::ColorB;
+            phase.belowMode = BuildFillMode::ColorA;
+        }
+        else if (v >= 31)
+        {
+            // The texture follows it up, green still above the line.
+            ratio = (3 * (30 - v)) - 1;
+            phase.aboveMode = BuildFillMode::ColorA;
+            phase.bandMode = BuildFillMode::ColorB;
+            phase.belowMode = BuildFillMode::Texture;
+        }
+        else
+        {
+            // One last line sweeps back down over the finished texture.
+            ratio = 255 * v / 30;
+            phase.aboveMode = BuildFillMode::Texture;
+            phase.bandMode = BuildFillMode::ColorA;
+            phase.belowMode = BuildFillMode::Texture;
+        }
+
+        // Only the low byte of the threshold reaches the original's remapper,
+        // which is why the two middle phases can compute a negative number and
+        // still sweep upwards.
+        phase.ratio = static_cast<float>(ratio & 0xFF);
+        return phase;
+    }
+
     void drawNanoParticle(GameTime currentTime, float frac, const Particle& particle, ColoredMeshBatch& batch)
     {
         auto nanoRenderInfo = std::get_if<ParticleRenderTypeNano>(&particle.renderType);
@@ -843,6 +966,10 @@ namespace rwe
         {
             return;
         }
+
+        // One step along the cycle per tick since the particle was spawned.
+        auto age = currentTime.value - particle.startTime.value;
+        const auto& color = NanoSprayColors[(nanoRenderInfo->colorPhase + age) % NanoSprayColors.size()];
 
         // Particles step once per tick; draw them part-way along this tick's
         // step so the stream flows at the frame rate rather than at 30 Hz.
@@ -864,8 +991,8 @@ namespace rwe
         const auto bottomLeft = position + Vector3f(-s, 0.0f, s);
         const auto bottomRight = position + Vector3f(s, 0.0f, s);
 
-        pushTriangle(batch.triangles, topLeft, bottomLeft, bottomRight, nanoRenderInfo->color);
-        pushTriangle(batch.triangles, topLeft, bottomRight, topRight, nanoRenderInfo->color);
+        pushTriangle(batch.triangles, topLeft, bottomLeft, bottomRight, color);
+        pushTriangle(batch.triangles, topLeft, bottomRight, topRight, color);
     }
 
     void drawWakeParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, ColoredMeshBatch& batch)

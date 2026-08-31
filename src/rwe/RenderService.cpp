@@ -171,7 +171,7 @@ namespace rwe
         }
     }
 
-    void RenderService::drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel, float time)
+    void RenderService::drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel)
     {
         // Finished models first: a nanoframe's see-through parts still write
         // depth, so drawing it after the lab it sits in leaves the lab's bay
@@ -196,7 +196,6 @@ namespace rwe
             const auto& buildShader = shaders->unitBuild;
             graphics->bindShader(buildShader.handle.get());
             graphics->setUniformFloat(buildShader.seaLevel, seaLevel);
-            graphics->setUniformFloat(buildShader.time, time);
             for (const auto& m : batch.buildingMeshes)
             {
                 graphics->setUniformMatrix(buildShader.mvpMatrix, m.mvpMatrix);
@@ -204,7 +203,12 @@ namespace rwe
                 graphics->setUniformFloat(buildShader.unitY, m.unitY);
                 graphics->setUniformFloat(buildShader.unitHeight, m.unitHeight);
                 graphics->setUniformBool(buildShader.shade, m.shaded);
-                graphics->setUniformFloat(buildShader.percentComplete, m.percentComplete);
+                graphics->setUniformFloat(buildShader.buildRatio, m.buildRatio);
+                graphics->setUniformInt(buildShader.aboveMode, static_cast<int>(m.aboveMode));
+                graphics->setUniformInt(buildShader.bandMode, static_cast<int>(m.bandMode));
+                graphics->setUniformInt(buildShader.belowMode, static_cast<int>(m.belowMode));
+                graphics->setUniformVec3(buildShader.buildColorA, m.buildColorA.x, m.buildColorA.y, m.buildColorA.z);
+                graphics->setUniformVec3(buildShader.buildColorB, m.buildColorB.x, m.buildColorB.y, m.buildColorB.z);
 
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);

@@ -40,6 +40,8 @@ namespace rwe
         const UnitDefinition& unitDefinition,
         const UnitModelDefinition& modelDefinition,
         PlayerColorIndex playerColorIndex,
+        unsigned int unitIndex,
+        unsigned int gameTime,
         float frac,
         TextureIdentifier unitTextureAtlas,
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
@@ -107,6 +109,31 @@ namespace rwe
 
     /** A small dark square: a fragment of a shattered piece. */
     void drawDebrisShard(const Vector3f& position, ColoredMeshBatch& batch);
+
+    /**
+     * How the original draws a nanoframe at one point in its construction:
+     * a height threshold and what to do above it, on it and below it.
+     */
+    struct BuildPhase
+    {
+        float ratio{0.0f};
+        BuildFillMode aboveMode{BuildFillMode::Erase};
+        BuildFillMode bandMode{BuildFillMode::Erase};
+        BuildFillMode belowMode{BuildFillMode::Erase};
+        Vector3f colorA;
+        Vector3f colorB;
+    };
+
+    BuildPhase computeBuildPhase(float percentComplete, unsigned int unitIndex, unsigned int gameTime);
+
+    /**
+     * The two colours the original animates its construction display with,
+     * both triangle waves over palette entries 160..175 but running at
+     * different rates: A takes about 0.97s to come round, B about 0.56s.
+     * unitIndex offsets the phase so neighbouring nanoframes are not in step.
+     */
+    Vector3f buildCycleColorA(unsigned int unitIndex, unsigned int gameTime);
+    Vector3f buildCycleColorB(unsigned int unitIndex, unsigned int gameTime);
 
     /**
      * Outlines the polygons of a nanoframe that face the camera, in one colour.

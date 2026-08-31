@@ -976,7 +976,7 @@ namespace rwe
         sceneContext.graphics->enableDepthBuffer();
 
         UnitMeshBatch unitMeshBatch;
-        for (const auto& [_, unit] : simulation.units)
+        for (const auto& [unitId, unit] : simulation.units)
         {
             if (!unitIsVisibleToLocalPlayer(unit))
             {
@@ -984,7 +984,7 @@ namespace rwe
             }
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
             const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
-            drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+            drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, simulation.gameTime.value, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
         }
         for (const auto& [_, feature] : simulation.features)
         {
@@ -1005,28 +1005,20 @@ namespace rwe
             auto matrix = Matrix4f::translation(position) * Matrix4f::rotationZXY(rotation);
             drawDebrisPiece(gameMediaDatabase, viewProjectionMatrix, d.objectName, d.pieceName, matrix, d.color, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
         }
-        worldRenderService.drawUnitMeshBatch(unitMeshBatch, simScalarToFloat(seaLevel), simulation.gameTime.value);
+        worldRenderService.drawUnitMeshBatch(unitMeshBatch, simScalarToFloat(seaLevel));
 
         // Construction wireframe: the visible polygon edges of each nanoframe,
-        // drawn with the depth test on so the model hides its own back, in a
-        // colour that cycles slowly green -> white -> black.
+        // drawn with the depth test on so the model hides its own back. The
+        // original outlines every primitive of every piece in its second build
+        // colour, a triangle wave down palette entries 160..175 and back that
+        // comes round about every half second, offset per unit.
         {
-            static const Vector3f wireframeColors[] = {
-                Vector3f(0.0f, 1.0f, 0.0f),
-                Vector3f(1.0f, 1.0f, 1.0f),
-                Vector3f(0.0f, 0.0f, 0.0f),
-            };
-            const float ticksPerColor = 20.0f; // a full cycle every two seconds
-            auto phase = std::fmod((static_cast<float>(simulation.gameTime.value) + interpolationFraction) / ticksPerColor, 3.0f);
-            auto colorIndex = static_cast<int>(phase);
-            auto wireframeColor = lerp(wireframeColors[colorIndex], wireframeColors[(colorIndex + 1) % 3], phase - static_cast<float>(colorIndex));
-
             // The direction from the scene towards the camera, in world space.
             auto inverseViewProjection = computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
             auto toCamera = ((inverseViewProjection * Vector3f(0.0f, 0.0f, -1.0f)) - (inverseViewProjection * Vector3f(0.0f, 0.0f, 0.0f))).normalized();
 
             ColoredMeshBatch wireframeBatch;
-            for (const auto& [_, unit] : simulation.units)
+            for (const auto& [unitId, unit] : simulation.units)
             {
                 if (!unitIsVisibleToLocalPlayer(unit))
                 {
@@ -1038,6 +1030,7 @@ namespace rwe
                     continue;
                 }
                 const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
+                auto wireframeColor = buildCycleColorB(unitId.value, simulation.gameTime.value);
                 drawUnitWireframe(gameMediaDatabase, unit, unitDefinition, modelDefinition, interpolationFraction, toCamera, wireframeColor, wireframeBatch);
             }
             // Lines cannot go below one pixel, so a lighter blend reads as a finer wire.
@@ -1049,7 +1042,7 @@ namespace rwe
         UnitMeshBatch meshProjectilesBatch;
         drawProjectiles(simulation, gameMediaDatabase, viewProjectionMatrix, simulation.projectiles, simulation.gameTime, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, lineProjectilesBatch, spriteProjectilesBatch, meshProjectilesBatch);
         worldRenderService.drawBatch(lineProjectilesBatch, viewProjectionMatrix);
-        worldRenderService.drawUnitMeshBatch(meshProjectilesBatch, simScalarToFloat(seaLevel), simulation.gameTime.value);
+        worldRenderService.drawUnitMeshBatch(meshProjectilesBatch, simScalarToFloat(seaLevel));
         worldRenderService.drawSpriteBatch(spriteProjectilesBatch);
 
         sceneContext.graphics->disableDepthWrites();
@@ -5615,15 +5608,23 @@ namespace rwe
                 continue;
             }
 
-            // Where the spray lands: the middle of the target, on top of it.
-            // Aiming at one point rather than fanning across the footprint
-            // makes the beam converge the way TA's does, and landing on the
-            // roof rather than inside the model keeps the stream out of the
-            // geometry, so the structure cannot swallow the end of it — which
-            // matters now that the spray is depth tested against the world so
-            // a construction aircraft can cover it.
+            // Where the spray lands. The original samples a uniform point in
+            // the target's bounding box, shrunk first to the middle three
+            // elevenths of each axis, so the stream fans across the middle of
+            // what is being worked on rather than converging on a point.
+            //
+            // The one place we depart from it is the height: the original
+            // samples inside the model too, which it can afford because its
+            // spray is composited over the world in a late layer. Ours is
+            // depth tested so that a construction aircraft can cover its own
+            // beam, so it lands on the roof instead and the structure cannot
+            // swallow the end of the stream.
             std::optional<Vector3f> targetCentre;
+            // The width and depth of the target we scatter the landing point over.
+            // Nothing in y: the height is already in targetCentre, because we
+            // land on the roof rather than inside the model.
             Vector3f spread(0.0f, 0.0f, 0.0f);
+            bool reclaimingFeature = false;
             match(
                 std::get<0>(*nanolatheTarget),
                 [&](const UnitId& targetUnitId) {
@@ -5636,8 +5637,9 @@ namespace rwe
                     const auto& targetModel = simulation.unitModelDefinitions.at(targetDefinition.objectName);
                     auto height = simScalarToFloat(targetModel.height);
                     targetCentre = simVectorToFloat(targetUnit->get().position) + Vector3f(0.0f, height, 0.0f);
-                    // Just enough scatter that the beam is not a single line.
-                    spread = Vector3f(4.0f, height * 0.15f, 4.0f);
+                    auto [footprintX, footprintZ] = simulation.getFootprintXZ(targetDefinition.movementCollisionInfo);
+                    auto tile = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
+                    spread = Vector3f(static_cast<float>(footprintX) * tile, 0.0f, static_cast<float>(footprintZ) * tile);
                 },
                 [&](const FeatureId& targetFeatureId) {
                     auto targetFeature = simulation.tryGetFeature(targetFeatureId);
@@ -5648,7 +5650,10 @@ namespace rwe
                     const auto& featureDefinition = simulation.getFeatureDefinition(targetFeature->get().featureName);
                     auto height = simScalarToFloat(featureDefinition.height);
                     targetCentre = simVectorToFloat(targetFeature->get().position) + Vector3f(0.0f, height, 0.0f);
-                    spread = Vector3f(4.0f, height * 0.15f, 4.0f);
+                    auto tile = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
+                    spread = Vector3f(static_cast<float>(featureDefinition.footprintX) * tile, 0.0f, static_cast<float>(featureDefinition.footprintZ) * tile);
+                    // The original runs two emitters when reclaiming a feature.
+                    reclaimingFeature = true;
                 });
             if (!targetCentre)
             {
@@ -5656,56 +5661,69 @@ namespace rwe
             }
 
             auto nozzle = simVectorToFloat(std::get<1>(*nanolatheTarget));
-            std::uniform_real_distribution<float> unit01(-1.0f, 1.0f);
-            std::uniform_real_distribution<float> up01(0.0f, 1.0f);
+            std::uniform_real_distribution<float> centralThird(-3.0f / 11.0f, 3.0f / 11.0f);
 
-            const int particlesPerTick = 10;
-            for (int i = 0; i < particlesPerTick; ++i)
+            // The original emits a burst of five every tick, and each emitter
+            // fires again on the following tick, so ten particles a tick are in
+            // flight. Reclaiming a feature runs two emitters, which is what
+            // makes a reclaim stream look twice as thick as a build stream.
+            const int burstSize = 5;
+            const int burstsPerTick = 2;
+            auto emitters = reclaimingFeature ? 2 : 1;
+            for (int emitter = 0; emitter < emitters; ++emitter)
             {
-                auto landing = *targetCentre + Vector3f(unit01(effectsRng) * spread.x, up01(effectsRng) * spread.y, unit01(effectsRng) * spread.z);
-                switch (std::get<2>(*nanolatheTarget))
+                for (int burst = 0; burst < burstsPerTick; ++burst)
                 {
-                    case UnitState::NanolatheDirection::Forward:
-                        spawnNanoParticle(nozzle, landing);
-                        break;
-                    case UnitState::NanolatheDirection::Reverse:
-                        spawnNanoParticle(landing, nozzle);
-                        break;
-                    default:
-                        throw std::logic_error("unhandled nanolathe direction");
+                    for (int i = 0; i < burstSize; ++i)
+                    {
+                        // The nozzle end has no scatter at all; the far end is
+                        // a uniform point in the middle three elevenths of the
+                        // target's bounding box, which is the window the
+                        // original shrinks the box to before sampling it.
+                        auto landing = *targetCentre + Vector3f(centralThird(effectsRng) * spread.x, 0.0f, centralThird(effectsRng) * spread.z);
+
+                        // Each particle starts one place further along the
+                        // seven-colour cycle than the last.
+                        auto colorPhase = static_cast<unsigned char>(i % 7);
+
+                        switch (std::get<2>(*nanolatheTarget))
+                        {
+                            case UnitState::NanolatheDirection::Forward:
+                                spawnNanoParticle(nozzle, landing, colorPhase);
+                                break;
+                            case UnitState::NanolatheDirection::Reverse:
+                                spawnNanoParticle(landing, nozzle, colorPhase);
+                                break;
+                            default:
+                                throw std::logic_error("unhandled nanolathe direction");
+                        }
+                    }
                 }
             }
         }
     }
 
-    void GameScene::spawnNanoParticle(const Vector3f& from, const Vector3f& to)
+    void GameScene::spawnNanoParticle(const Vector3f& from, const Vector3f& to, unsigned char colorPhase)
     {
-        // The greens of TA's nano spray; the light ones are listed three
-        // times so they come up more often than the dark ones.
-        static const Vector3f light1(0xab / 255.0f, 0xe7 / 255.0f, 0x7f / 255.0f);
-        static const Vector3f light2(0x7a / 255.0f, 0xcd / 255.0f, 0x52 / 255.0f);
-        static const Vector3f light3(0x83 / 255.0f, 0xd3 / 255.0f, 0x5b / 255.0f);
-        static const Vector3f nanoColors[] = {
-            light1, light1, light1,
-            light2, light2, light2,
-            light3, light3, light3,
-            Vector3f(0x2f / 255.0f, 0x77 / 255.0f, 0x1b / 255.0f),
-            Vector3f(0x36 / 255.0f, 0x85 / 255.0f, 0x26 / 255.0f),
-            Vector3f(0x30 / 255.0f, 0x79 / 255.0f, 0x1d / 255.0f),
-        };
-        std::uniform_int_distribution<std::size_t> pickColor(0, std::size(nanoColors) - 1);
-
-        const float speed = 9.0f; // world units per tick
+        // Four world units a tick, as in the original: it divides the distance
+        // by four to get the step count, then walks the particle along one step
+        // per tick. A target closer than one step gets no particle at all.
+        const float speed = 4.0f;
         auto delta = to - from;
-        auto distance = delta.length();
-        auto ticks = std::max(1, static_cast<int>(std::ceil(distance / speed)));
+        auto ticks = static_cast<int>(delta.length() / speed);
+        if (ticks < 1)
+        {
+            return;
+        }
 
         Particle particle;
         particle.position = from;
         particle.velocity = delta / static_cast<float>(ticks);
         particle.renderType = ParticleRenderTypeNano{
             simulation.gameTime + GameTime(ticks),
-            nanoColors[pickColor(effectsRng)],
+            colorPhase,
+            // The original fills a two pixel square, which at one world unit
+            // per pixel is a half-size of one.
             1.0f,
             // No nudge towards the camera: the spray leaves a nozzle
             // underneath a construction aircraft, so the aircraft has to be

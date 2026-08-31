@@ -35,6 +35,23 @@ namespace rwe
         TextureIdentifier texture;
     };
 
+    /**
+     * One phase of the original's construction display. The model is split by
+     * a threshold on height: above the line, in a four-unit band on it, and
+     * below it, each drawn one of four ways.
+     */
+    enum class BuildFillMode
+    {
+        /** Not drawn at all. */
+        Erase = 0,
+        /** The slower of the two animated build colours. */
+        ColorA = 1,
+        /** The faster one. */
+        ColorB = 2,
+        /** The finished texture. */
+        Texture = 3,
+    };
+
     struct UnitBuildingMeshRenderInfo
     {
         const GlMesh* mesh;
@@ -42,10 +59,16 @@ namespace rwe
         Matrix4f mvpMatrix;
         bool shaded;
         TextureIdentifier texture;
-        float percentComplete;
         float unitY;
         /** Height of the whole model, so the build fill can sweep bottom to top. */
         float unitHeight;
+        /** Height of the line, in the original's units above the model's base. */
+        float buildRatio;
+        BuildFillMode aboveMode;
+        BuildFillMode bandMode;
+        BuildFillMode belowMode;
+        Vector3f buildColorA;
+        Vector3f buildColorB;
     };
 
     struct UnitTextureShadowMeshRenderInfo
@@ -124,7 +147,7 @@ namespace rwe
 
         void drawBatch(const ColoredMeshBatch& batch, const Matrix4f& vpMatrix, float alpha = 1.0f);
 
-        void drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel, float time);
+        void drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel);
 
         void drawUnitShadowMeshBatch(const UnitShadowMeshBatch& batch);
 

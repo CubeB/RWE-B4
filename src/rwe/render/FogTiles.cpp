@@ -200,7 +200,6 @@ namespace rwe
         return tiles;
     }
 
-
     namespace
     {
         /**
@@ -208,14 +207,21 @@ namespace rwe
          *
          * Entry (ex, ey) is the corner between cells (ex-1, ey-1), (ex, ey-1),
          * (ex-1, ey) and (ex, ey), which the tile's four quadrants show in that
-         * order. Cells off the edge of the map count as clear, so the map's
-         * border does not grow a fog fringe of its own.
+         * order.
+         *
+         * A cell off the edge of the map reads as the nearest cell on it. The
+         * frames are ragged on every side, and a frame's raggedness is meant to
+         * be covered by the neighbouring tile that draws the other side of the
+         * boundary; at the map's edge there is no such neighbour, so anything
+         * but a flush edge leaves the border torn open. Extending the border
+         * cells outwards makes the outermost entries read 0 or 15, which draw
+         * nothing or a solid tile, and either way meet the edge square on.
          */
         template <typename IsDark>
         int cornerCode(int cellsWide, int cellsHigh, int ex, int ey, IsDark isDark)
         {
             auto dark = [&](int cx, int cy) {
-                return cx >= 0 && cy >= 0 && cx < cellsWide && cy < cellsHigh && isDark(cx, cy);
+                return isDark(std::clamp(cx, 0, cellsWide - 1), std::clamp(cy, 0, cellsHigh - 1));
             };
 
             int code = 0;
