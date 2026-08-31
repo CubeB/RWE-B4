@@ -1641,6 +1641,7 @@ namespace rwe
         projectile.damage = weaponDefinition.damage;
 
         projectile.damageRadius = weaponDefinition.damageRadius;
+        projectile.edgeEffectiveness = weaponDefinition.edgeEffectiveness;
 
         if (weaponDefinition.weaponTimer)
         {
@@ -2107,12 +2108,55 @@ namespace rwe
         applyDamage(unitId, damagePoints, std::nullopt);
     }
 
+    namespace
+    {
+        /**
+         * TA buckets a unit's kill count in fives and stops at the fifth tier
+         * (TotalA.exe 0x489BF3 and 0x499DAE do the same division and clamp).
+         * Nothing in the original ever exposes the tier directly; it only ever
+         * scales damage.
+         */
+        int64_t veterancyTier(unsigned int kills)
+        {
+            return std::min<int64_t>(5, kills / 5);
+        }
+    }
+
     void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker)
     {
         auto& unit = getUnitState(unitId);
+        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+
+        int64_t damage = damagePoints;
+
+        // The whole of the original's damage arithmetic happens here, in the
+        // order TotalA.exe does it. First the attacker's veterancy bonus
+        // (0x499DAE, +6% per tier), which is applied in the weapon path and so
+        // only when we know who fired.
+        if (attacker)
+        {
+            if (auto attackerUnit = tryGetUnitState(*attacker); attackerUnit)
+            {
+                damage = (damage * (100 + 6 * veterancyTier(attackerUnit->get().kills))) / 100;
+            }
+        }
+
+        // Then armour (0x489BC3). A unit only counts as armoured while its
+        // script says so, and a big enough hit ignores armour outright: that
+        // threshold is why the D-gun goes through a closed solar collector.
+        if (unit.armored && damage < ArmourBypassDamage)
+        {
+            damage = (damage * unitDefinition.damageModifier) >> 16;
+        }
+
+        // Then the victim's own veterancy (0x489BF3, -4% per tier), which
+        // applies to every kind of damage, weapon or not.
+        damage = (damage * (100 - 4 * veterancyTier(unit.kills))) / 100;
+
+        damagePoints = static_cast<unsigned int>(std::max<int64_t>(0, damage));
+
         if (unit.hitPoints <= damagePoints)
         {
-            const auto& unitDefinition = unitDefinitions.at(unit.unitType);
             if (unit.isBeingBuilt(unitDefinition))
             {
                 // Units that are still under construction
@@ -2131,6 +2175,22 @@ namespace rwe
         else
         {
             unit.hitPoints -= damagePoints;
+        }
+    }
+
+    namespace
+    {
+        /**
+         * The original's blast falloff (TotalA.exe 0x49A3B6). The curve is
+         * quadratic rather than linear, and it lands on EdgeEffectiveness at
+         * the rim instead of on zero, so a weapon that names an edge value
+         * keeps most of its bite right out to the edge of the blast while an
+         * ordinary one drops away far faster than a straight line would.
+         */
+        SimScalar blastDamageScale(SimScalar distance, SimScalar radius, SimScalar edgeEffectiveness)
+        {
+            auto t = std::clamp(1_ss - (distance / radius), 0_ss, 1_ss);
+            return (t * t * (1_ss - edgeEffectiveness)) + edgeEffectiveness;
         }
     }
 
@@ -2209,7 +2269,7 @@ namespace rwe
           }
 
           // apply appropriate damage
-          auto damageScale = std::clamp(1_ss - (rweSqrt(unitDistanceSquared) / radius), 0_ss, 1_ss);
+          auto damageScale = blastDamageScale(rweSqrt(unitDistanceSquared), radius, projectile.edgeEffectiveness);
           auto rawDamage = projectile.getDamage(unit.unitType);
           auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * damageScale);
           applyDamage(*u, scaledDamage, projectile.attacker); });
@@ -2233,7 +2293,7 @@ namespace rwe
             }
 
             // apply appropriate damage
-            auto damageScale = std::clamp(1_ss - (rweSqrt(unitDistanceSquared) / radius), 0_ss, 1_ss);
+            auto damageScale = blastDamageScale(rweSqrt(unitDistanceSquared), radius, projectile.edgeEffectiveness);
             auto rawDamage = projectile.getDamage(unit.unitType);
             auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * damageScale);
             applyDamage(flyingUnitId, scaledDamage, projectile.attacker);

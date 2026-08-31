@@ -83,6 +83,15 @@ namespace rwe
 
         unsigned int maxHitPoints;
 
+        /**
+         * TA DamageModifier, in 16.16 fixed point exactly as the original
+         * stores it, and only consulted while the unit's script has declared
+         * it armoured. The original parses the key to fixed point at load
+         * time and multiplies in integers, so keeping the same representation
+         * keeps the rounding identical.
+         */
+        int damageModifier{0x10000};
+
         bool isMobile;
 
         bool floater;

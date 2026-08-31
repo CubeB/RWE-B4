@@ -322,7 +322,107 @@ real depth buffer, so kept.
 
 ---
 
-## 6. Field offsets
+## 6. The damage pipeline
+
+Every point of damage in the game passes through the same four stages. Nothing
+between the weapon's `[DAMAGE]` table and the victim's hit points is a straight
+multiply.
+
+### Direct hit or blast, `0x499FA0`
+
+A weapon with `areaofeffect <= 16` (`0x49A049`) hits one unit only and does so at
+full strength — `0x49A05B` pushes a literal `1.0f` scale. Anything wider goes to
+the area routine at `0x49A120`. Ordinary contact damage takes the same one-target
+path through `0x499C70`, again at `1.0f`.
+
+### Blast falloff, `0x49A120`
+
+The blast radius is `areaofeffect / 2` (`0x49A149`–`0x49A152`), not
+`areaofeffect`. Candidates come from a scan of map squares within that radius,
+and for each one the distance is measured from the impact point to the unit's
+**axis-aligned bounding box** — zero if the point is inside it
+(`0x49A2AA`–`0x49A35A`, three per-axis clamps). Positions are 16.16 fixed point,
+so the integer world distance is the high half, which is what `0x49A397` reads.
+
+Beyond that:
+
+```
+49a39e  cmp eax,ecx                     ; distance >= radius -> no damage at all
+49a3aa  mov edx,[ecx+0xd8]              ; edgeeffectiveness
+49a3a8  test eax,eax ; 49a3e6 -> 1.0f   ; distance 0 -> full damage
+49a3b6..49a3e0                          ; (d/R - 1)^2 * (1 - E) + E
+```
+
+The curve is **quadratic**, and `edgeeffectiveness` is the multiplier reached
+*at* the rim rather than a slope. The weapon-TDF parse at `0x42E5A9` supplies a
+default of `0.0` into float `wdef+0xD8`, so an ordinary weapon falls to nothing —
+but it falls off far faster than a straight line on the way there, reaching a
+quarter of its damage at the half-way point rather than a half. Seventeen
+weapons override it, and they are the big-area ones: flak and Sentinel at 0.90,
+the nuke and the Krogoth's tremor at 0.25, Commander self-destruct at 0.75.
+
+### Attacker's veterancy, then the global speed flags, `0x499CD0`
+
+The `[DAMAGE]` block is a sorted name→value table looked up by the victim's
+armour class (`0x499D0C`–`0x499D6F`), multiplied by the blast scale and
+truncated (`0x499D73`–`0x499D7B`). Then, if the shot has a known firer:
+
+```
+499db5  mov cx,[ebx+0xb8]               ; the ATTACKER's kill count
+499dc7  cmp edx,5                       ; tier = min(5, kills/5)
+499dd9  lea ecx,[0x64+ecx*2]            ; 100 + 6*tier
+499de0..499dea                          ; * damage / 100
+```
+
+so a veteran gains up to **+30% damage dealt** at 25 kills.
+
+### Armour and the victim's veterancy, `0x489BB0`
+
+The single choke point every damage source funnels into. It takes
+`(attacker, victim, damage, type, direction)`; `type == 10` is a repair and skips
+straight past both adjustments to add hit points instead (`0x489BBD`,
+`0x489D5F`). Otherwise:
+
+```
+489bc3  mov al,[esi+0x10e] ; test al,2  ; victim ARMORED?
+489bd1  cmp edi,0x7530                  ; damage >= 30000 -> armour ignored
+489be4  mov eax,[eax+0x1aa]             ; DamageModifier, 16.16
+489bea  imul edi ; 489bec call 0x4e43d0 ; damage * modifier >> 16
+489bfa  mov cx,[esi+0xb8]               ; the VICTIM's kill count
+489c0c  cmp edx,5                       ; tier = min(5, kills/5)
+489c20  sub ecx,edx ; 489c25 shl ecx,2  ; (25 - tier) * damage * 4
+489c28..489c2d                          ; / 100  ==  100 - 4*tier percent
+```
+
+so a veteran also takes up to **−20% damage** at 25 kills, and the two effects
+partly cancel when veterans fight each other.
+
+`DamageModifier` is parsed at `0x42C1D5` into 16.16 at `def+0x1AA` with a default
+of `0x10000`; nine units ship one, between 0.15 and 0.5. The ARMORED bit is
+`unit+0x10E` bit 1 and is set only by the script: COB `SET ARMORED` is value id
+20, whose handler `0x480BE3` calls the flag setter with mask `0x2`. So armour is
+a state a unit enters, which is why a closed solar collector is tough and an open
+one is not. The `0x7530` cut-out is why the D-gun ignores it.
+
+`unit+0xB8` really is a kill count: it is zeroed at unit creation (`0x485C76`)
+and incremented on the killer at `0x4869CA`, reached through the victim's
+last-damager pointer at `unit+0xF0` which `0x489DBA` records. Note the original
+**declines to credit a kill when the killer and the victim share a player**
+(`0x4869BA`–`0x4869C8`); RWE currently credits friendly fire.
+
+Besides damage, more than five kills also earns a unit target leading
+(`0x48A324`), which RWE does not implement.
+
+### `GET VETERAN_LEVEL` does not work in the original
+
+The COB `GET` opcode (`0x4B160F`) hands the value id straight to the dispatcher
+at `0x480770`, which handles ids 1 to 20 and returns zero for everything else.
+Value 32 is not in that range, so a script asking for `VETERAN_LEVEL` in this
+build always reads back 0 — as do all the ids from 21 up.
+
+---
+
+## 7. Field offsets
 
 FBI key names are compared at `0x42C129`–`0x42C1C5`, which gives the unit
 definition layout:
@@ -370,7 +470,7 @@ Palette ranges that turned up:
 
 ---
 
-## 7. Where RWE deliberately differs
+## 8. Where RWE deliberately differs
 
 Recorded so these do not get "fixed" back later by someone comparing against the
 original:
@@ -395,7 +495,7 @@ original:
 
 ---
 
-## 8. Still unknown or unported
+## 9. Still unknown or unported
 
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not

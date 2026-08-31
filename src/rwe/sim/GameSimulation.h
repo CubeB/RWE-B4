@@ -39,6 +39,9 @@ namespace rwe
 
     constexpr int MaxUtilizableWindSpeed = 5000;
 
+    /** A hit of at least this much goes through armour untouched (TotalA.exe 0x489BD1). */
+    constexpr int ArmourBypassDamage = 30000;
+
     enum class GamePlayerStatus
     {
         Alive,

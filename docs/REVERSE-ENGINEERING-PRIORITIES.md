@@ -190,60 +190,32 @@ the aircraft profile). Use the documented method: transcribe the decoded routine
 into a standalone program, feed it real weapon values, and compare tick by tick
 against RWE before touching the engine.
 
-### 5. Blast damage: edge falloff, armour, and the veterancy that TA actually has
+### 5. Blast damage: edge falloff, armour, and the veterancy that TA actually has — DONE
 
-Three findings in one routine, all cheap once you are in it.
+Implemented; the whole pipeline is written up in `TOTALA-EXE.md` §6. What was
+decoded corrected this entry in four places, recorded here so the corrections
+are not lost:
 
-**5a. `edgeeffectiveness`.** RWE hardcodes linear-to-zero falloff
-(`GameSimulation.cpp:2212` and `:2236`: `1 - d/r`). TA's default really *is*
-zero at the edge — the parse at `0x42E59B` pushes a `0.0` default into float
-`wdef+0xD8` — so the default case is already right. But 17 weapons override it
-(0.25, 0.5, 0.75, 0.8, 0.9), and they are the big-area ones: those weapons
-currently do far too little damage away from the impact point. The data files'
-own comment confirms the semantics: *"the percentage (1.0 = 100%) of the damage
-that is inflicted at the edge of the area of effect"*.
+- The falloff is **quadratic**, `(1 − d/R)² · (1 − E) + E` at `0x49A3B6`, not
+  linear. Even for the default `E = 0` — which this entry called "already
+  right" — RWE was doing double the damage at the half-way point.
+- `R` is `areaofeffect / 2` (`0x49A149`), and a weapon with `areaofeffect <= 16`
+  skips the blast loop entirely and hits one target at full strength
+  (`0x49A049`). RWE already halved the radius, so that part was right.
+- Veterancy has a **second, opposite** step this entry missed: the attacker's
+  kill count *raises* damage dealt by 6% a tier at `0x499DAE`, before armour,
+  where the victim's discount of 4% a tier comes after it. Reading only the
+  defender's side would have made every veteran strictly weaker.
+- `GET VETERAN_LEVEL` returns **nothing** in the original: the COB `GET`
+  dispatcher at `0x480770` covers ids 1–20 and answers zero for anything else,
+  so value 32 never had an implementation to recover. RWE keeps a getter, but
+  answering with the engine's own tier (five kills apiece, capped at five)
+  rather than the invented four-per-tier-capped-at-three scheme.
 
-**5b. Armour is parsed and ignored.** `unit.armored` exists in RWE as a
-COB-settable flag (`cob.cpp` `SetQueryStatus::Armored`) and has no effect on
-damage; `damagemodifier` is not parsed at all. In the original, the damage
-routine at `0x489BB0` does:
-
-```
-489bc3  mov al, BYTE PTR [esi+0x10e]    ; unit flags
-489bcd  test al,0x2                     ; ARMORED?
-489bd1  cmp edi,0x7530                  ; damage >= 30000 -> ignore armour
-489be4  mov eax, DWORD PTR [eax+0x1aa]  ; DamageModifier (16.16 fixed point)
-489bea  imul edi ; 489bec call 0x4e43d0 ; damage * modifier >> 16
-```
-
-Nine units ship `DamageModifier`: 0.15, 0.28, 0.33333 (×2) and 0.5 (×5) — the
-Annihilator, Doomsday Machine, both anti-nukes, both solar collectors, the metal
-maker and the Toaster. The `>= 30000` cut-out is why the D-gun ignores armour.
-
-**5c. TA has real, hidden veterancy, and RWE invented a different one.**
-Immediately after the armour step:
-
-```
-489bfa  mov cx, WORD PTR [esi+0xb8]     ; the unit's kill count
-489c01..489c0a                          ; kills / 5
-489c0c  cmp edx,5 ; 489c11 mov edx,5    ; clamp to 5
-489c20  sub ecx,edx                     ; 25 - tier
-489c22  imul ecx,edi ; 489c25 shl ecx,2 ; * damage * 4
-489c28..489c2d                          ; / 100
-```
-
-i.e. **damage taken × (1 − 0.04 × min(5, kills/5))** — up to a 20% reduction at
-25 kills. `unit+0xB8` is zeroed at unit creation (`0x485C76`) and read by the
-unit info panel (`0x46B2C8`, `0x46B306`, `0x46B338`) and the renderer
-(`0x467CCF`, `0x467CF1`). RWE's `src/rwe/sim/cob.cpp:365–383` openly invents a
-different scheme ("`VeteranKillsPerTier = 4`… the conventional cap used by
-TA-derived RTS engines such as Spring's experience tiering") and applies it to
-nothing but the COB getter. While you are in there, settle what `GET
-VETERAN_LEVEL` actually returns — the raw count at `+0xB8` or the clamped tier.
-
-**Effort / risk.** 5a ~2 h, 5b ~3 h, 5c ~half a day. Low-to-medium risk; each
-is a handful of instructions, short enough to transcribe and check against a
-hand-worked example.
+Two things found next to it and deliberately left alone: the original **declines
+to credit a kill when killer and victim share a player** (`0x4869BA`–`0x4869C8`)
+where RWE credits friendly fire, and a unit with more than five kills earns
+**target leading** at `0x48A324`.
 
 ### 6. Standing orders and mission type from the FBI
 
@@ -338,7 +310,7 @@ is the difference between a skirmish that can end and one that cannot.
 weapon exists in the shipped data and RWE has a render type for it with
 `// TODO: implement mindgun if anyone actually uses it`
 (`src/rwe/game/GameScene_util.cpp:1205–1206`). Note the `>= 30000` armour bypass
-found in §5b is exactly the D-gun's signature. ~1–2 days.
+found in §5 is exactly the D-gun's signature. ~1–2 days.
 
 ### 13. Paralyzer / EMP
 
@@ -376,7 +348,7 @@ that side besides `hitDensity`. ~half a day, low risk.
 
 Already on the roadmap. 559 features set it, it is parsed and copied
 (`LoadingScene.cpp:585`) and never read. A shot should stop on a rock in the way.
-The findings doc's §8 flags the pass-through-chance reading as unconfirmed;
+The findings doc's §9 flags the pass-through-chance reading as unconfirmed;
 confirming it in the binary is the actual task here, and the pivot is the
 projectile-vs-feature collision rather than the feature TDF.
 
@@ -408,7 +380,7 @@ projectile-vs-feature collision rather than the feature TDF.
     `norestrict` (6), `digger`, `teleporter`, `immunetoparalyzer`,
     `cantbetransported` (1). Each is an hour or two. `canstop` and `shootme` are
     the two with enough coverage to matter.
-23. **TA's Permanent and Circular LOS modes.** Already in `TOTALA-EXE.md` §8.
+23. **TA's Permanent and Circular LOS modes.** Already in `TOTALA-EXE.md` §9.
     Circular is fully understood (a `vismasks.gaf` stamp, radius
     `clamp(SightDistance/32, 5, 14)`); Permanent has not been looked at. Only
     reachable once there is a skirmish option to select them, so low urgency.
@@ -444,7 +416,7 @@ projectile-vs-feature collision rather than the feature TDF.
 
 26. **`sortbias`** — parsed by the original into `def+0x21A` and read nowhere.
     Already recorded in the findings doc; leave dead.
-27. **The five deliberate departures in `TOTALA-EXE.md` §7** — the nanolathe
+27. **The five deliberate departures in `TOTALA-EXE.md` §8** — the nanolathe
     spray landing on the roof, depth-tested exhaust occlusion, the
     camera-windowed fog raster, off-map fog cells reading as the nearest on-map
     cell, and the absent `BrakeRate` nose re-aim. These are decisions, not gaps.
@@ -471,7 +443,7 @@ Those three keys have just landed in `src/rwe/io/fbi/io.cpp` and
 `src/rwe/sim/UnitDefinition.h`, so the parse side is done; the read sites above
 are what says how the original *uses* them.
 
-Also adjacent: the `>= 30000` damage cut-out found in §5b sits in the same
+Also adjacent: the `>= 30000` damage cut-out found in §5 sits in the same
 routine any weapon-damage change goes through, and `turret` (§7) shares code
 with issue #42's double-aim problem.
 

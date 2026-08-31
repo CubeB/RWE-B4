@@ -40,6 +40,8 @@ namespace rwe
 
         SimScalar damageRadius;
 
+        SimScalar edgeEffectiveness;
+
         bool groundBounce;
 
         bool isDead{false};

@@ -129,7 +129,7 @@ namespace rwe
 
         SECTION("VeteranLevel reflects kills via the threshold function")
         {
-            // Threshold scheme is: tier = min(kills / 4, 3)
+            // Threshold scheme is the original's own: tier = min(kills / 5, 5)
             // Walk through every kills count from 0 up through the cap and a
             // little past it, asserting the tier each time.
             struct Case
@@ -140,16 +140,17 @@ namespace rwe
             const Case cases[] = {
                 {0, 0},
                 {1, 0},
-                {3, 0},
-                {4, 1},
+                {4, 0},
                 {5, 1},
-                {7, 1},
-                {8, 2},
-                {11, 2},
-                {12, 3},
+                {9, 1},
+                {10, 2},
+                {14, 2},
                 {15, 3},
-                {16, 3}, // capped at MaxTier (3)
-                {100, 3}, // still capped
+                {20, 4},
+                {24, 4},
+                {25, 5},
+                {26, 5}, // capped at MaxTier (5)
+                {100, 5}, // still capped
             };
             for (const auto& c : cases)
             {
@@ -162,7 +163,7 @@ namespace rwe
         {
             // Make sure we don't overflow / wrap around when kills is enormous.
             unit.kills = std::numeric_limits<unsigned int>::max();
-            REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::VeteranLevel{}}) == 3);
+            REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::VeteranLevel{}}) == 5);
         }
 
         SECTION("UnitState.kills participates in the deterministic hash")
@@ -190,22 +191,22 @@ namespace rwe
             REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::VeteranLevel{}}) == 0);
         }
 
-        SECTION("Tier increases at every multiple of 4 kills")
+        SECTION("Tier increases at every multiple of 5 kills")
         {
-            unit.kills = 3;
-            REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::VeteranLevel{}}) == 0);
             unit.kills = 4;
+            REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::VeteranLevel{}}) == 0);
+            unit.kills = 5;
             REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::VeteranLevel{}}) == 1);
-            unit.kills = 8;
+            unit.kills = 10;
             REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::VeteranLevel{}}) == 2);
-            unit.kills = 12;
-            REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::VeteranLevel{}}) == 3);
+            unit.kills = 25;
+            REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::VeteranLevel{}}) == 5);
         }
 
         SECTION("Tier saturates at the maximum on huge kill counts (no overflow)")
         {
             unit.kills = std::numeric_limits<unsigned int>::max();
-            REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::VeteranLevel{}}) == 3);
+            REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::VeteranLevel{}}) == 5);
         }
 
         SECTION("Bumping kills changes the deterministic UnitState hash")
