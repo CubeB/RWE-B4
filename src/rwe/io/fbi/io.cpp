@@ -33,6 +33,16 @@ namespace rwe
         // signals" rather than as a meaningful zero.
         tdf.readOrDefault("TEDClass", u.tedClass);
         tdf.readOrDefault("Category", u.category);
+
+        // Target preferences. The original also accepts an unprefixed
+        // BadTargetCategory in three quarters of the shipped units, but that
+        // key exists nowhere in TotalA.exe — only the three slot-prefixed
+        // forms are read — so neither do we.
+        tdf.readOrDefault("wpri_badTargetCategory", u.wpriBadTargetCategory);
+        tdf.readOrDefault("wsec_badTargetCategory", u.wsecBadTargetCategory);
+        tdf.readOrDefault("wspe_badTargetCategory", u.wspeBadTargetCategory);
+        tdf.readOrDefault("NoChaseCategory", u.noChaseCategory);
+        tdf.readOrDefault("ShootMe", u.shootMe);
         tdf.readOrDefault("SightDistance", u.sightDistance, 0u);
         tdf.readOrDefault("RadarDistance", u.radarDistance, 0u);
         tdf.readOrDefault("SonarDistance", u.sonarDistance, 0u);

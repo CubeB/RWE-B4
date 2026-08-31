@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <rwe/grid/Grid.h>
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/Metal.h>
@@ -24,6 +25,15 @@ namespace rwe
         WaterPassable,
         Passable
     };
+
+    /**
+     * Whether a unit's Category list names the given category. The original
+     * interns every category name to a bit and asks a bitmask; the answer is
+     * the same either way and the lists are half a dozen words long, so we
+     * compare the words. An empty name never matches, which is how a unit
+     * with no bad target category is spelled.
+     */
+    bool categoryListContains(const std::string& categoryList, const std::string& category);
 
     struct UnitDefinition
     {
@@ -183,6 +193,24 @@ namespace rwe
         // Verbatim TA category list. Space-separated tokens such as
         // "LEVEL1 KBOT WEAPON CONSTRUCT". Empty if absent.
         std::string category;
+
+        /**
+         * The category each weapon slot would rather not shoot at, indexed
+         * the way the weapons are: primary, secondary, tertiary. A candidate
+         * whose own category list names it is still a legal target, it is
+         * just kept until nothing better is left.
+         */
+        std::array<std::string, 3> badTargetCategory;
+
+        /** The category the unit will not leave its post to go after. */
+        std::string noChaseCategory;
+
+        /**
+         * Whether the unit is worth shooting at unbidden. False on the
+         * passive buildings, which is why an idle tank ignores an enemy
+         * solar collector it is standing next to.
+         */
+        bool shootMe{false};
 
         // Sight / radar / sonar radii in TA "elmos". 0 = no LOS / no radar /
         // no sonar. Consumed by the visibility pass in GameSimulation:

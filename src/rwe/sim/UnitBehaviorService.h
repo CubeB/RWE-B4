@@ -98,6 +98,13 @@ namespace rwe
         /** Whether this weapon can hit the unit at all (water weapons only reach units in the water). */
         bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& target) const;
 
+        /**
+         * What the unit's given weapon picks to shoot at of its own accord,
+         * out of everything it can reach and its owner can see. Nothing if
+         * there is no legal target.
+         */
+        std::optional<UnitId> chooseTarget(UnitId id, unsigned int weaponIndex);
+
         bool captureExistingUnit(UnitInfo unitInfo, UnitId targetUnitId);
 
         bool deployCaptureArm(UnitInfo unitInfo, UnitId targetUnitId);

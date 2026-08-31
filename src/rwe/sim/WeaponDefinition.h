@@ -57,5 +57,8 @@ namespace rwe
 
         /** TA waterweapon: torpedoes and depth charges, which travel in the water and can only hit what is in it. */
         bool waterWeapon{false};
+
+        /** TA toairweapon: the flak guns, which will engage nothing that is not in the air. */
+        bool toAirWeapon{false};
     };
 }

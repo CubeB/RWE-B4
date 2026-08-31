@@ -516,6 +516,14 @@ namespace rwe
         void clearWeaponTarget(unsigned int weaponIndex);
         void clearWeaponTargets();
 
+        /**
+         * Changes the firing mode, dropping whatever the unit had picked out
+         * for itself if the new mode is not fire at will. The original does
+         * the same the moment the order arrives, so a unit put on return fire
+         * stops shooting until something hits it.
+         */
+        void setFireOrders(UnitFireOrders orders);
+
         Matrix4x<SimScalar> getTransform() const;
         Matrix4x<SimScalar> getInverseTransform() const;
 

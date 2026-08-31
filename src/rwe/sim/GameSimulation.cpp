@@ -988,6 +988,81 @@ namespace rwe
         return contacts.find(unitId) != contacts.end();
     }
 
+    bool GameSimulation::weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& target) const
+    {
+        // The original asks this of every candidate before it looks at range
+        // at all, and answers it in the same routine that measures the range.
+        if (weaponDefinition.toAirWeapon)
+        {
+            return isFlying(target.physics);
+        }
+
+        if (weaponDefinition.waterWeapon)
+        {
+            return target.position.y <= terrain.getSeaLevel();
+        }
+
+        return true;
+    }
+
+    void GameSimulation::returnFire(UnitId victimId, UnitId attackerId)
+    {
+        if (victimId == attackerId)
+        {
+            return;
+        }
+
+        auto attackerRef = tryGetUnitState(attackerId);
+        if (!attackerRef)
+        {
+            return;
+        }
+        const auto& attacker = attackerRef->get();
+        if (attacker.isDead())
+        {
+            return;
+        }
+
+        auto& victim = getUnitState(victimId);
+        if (victim.isDead() || victim.fireOrders == UnitFireOrders::HoldFire || victim.isOwnedBy(attacker.owner))
+        {
+            return;
+        }
+
+        const auto& victimDefinition = unitDefinitions.at(victim.unitType);
+        if (victim.isBeingBuilt(victimDefinition))
+        {
+            return;
+        }
+
+        for (unsigned int i = 0; i < victim.weapons.size(); ++i)
+        {
+            const auto& weapon = victim.weapons[i];
+            if (!weapon || !std::holds_alternative<UnitWeaponStateIdle>(weapon->state))
+            {
+                continue;
+            }
+
+            const auto& weaponDefinition = weaponDefinitions.at(weapon->weaponType);
+            if (weaponDefinition.commandFire)
+            {
+                continue;
+            }
+
+            if (victim.position.distanceSquared(attacker.position) > weaponDefinition.maxRange * weaponDefinition.maxRange)
+            {
+                continue;
+            }
+
+            if (!weaponCanHitUnit(weaponDefinition, attacker))
+            {
+                continue;
+            }
+
+            victim.setWeaponTarget(i, attackerId);
+        }
+    }
+
     void GameSimulation::updateVisibility()
     {
         for (auto& v : playerVisibility)
@@ -2109,6 +2184,15 @@ namespace rwe
 
     void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker)
     {
+        if (attacker)
+        {
+            // The original shoots back from inside the damage message
+            // handler, before the hit points come off, which is the only
+            // thing that makes return fire a firing mode rather than a
+            // second name for hold fire.
+            returnFire(unitId, *attacker);
+        }
+
         auto& unit = getUnitState(unitId);
         if (unit.hitPoints <= damagePoints)
         {

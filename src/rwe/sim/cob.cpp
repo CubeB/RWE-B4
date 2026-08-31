@@ -477,13 +477,13 @@ namespace rwe
                 switch (q.value)
                 {
                     case 0:
-                        unit.fireOrders = UnitFireOrders::HoldFire;
+                        unit.setFireOrders(UnitFireOrders::HoldFire);
                         break;
                     case 1:
-                        unit.fireOrders = UnitFireOrders::ReturnFire;
+                        unit.setFireOrders(UnitFireOrders::ReturnFire);
                         break;
                     case 2:
-                        unit.fireOrders = UnitFireOrders::FireAtWill;
+                        unit.setFireOrders(UnitFireOrders::FireAtWill);
                         break;
                     default:
                         // ignore out-of-range

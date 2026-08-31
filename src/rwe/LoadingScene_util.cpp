@@ -201,6 +201,7 @@ namespace rwe
         weaponDefinition.fireStarter = static_cast<unsigned int>(std::clamp(tdf.fireStarter, 0.0f, 100.0f));
 
         weaponDefinition.waterWeapon = tdf.waterWeapon;
+        weaponDefinition.toAirWeapon = tdf.toAirWeapon;
 
         weaponDefinition.randomDecay = GameTime(static_cast<unsigned int>(tdf.randomDecay * 30.0f));
 
@@ -355,6 +356,9 @@ namespace rwe
         // without re-parsing FBIs.
         u.tedClass = fbi.tedClass;
         u.category = fbi.category;
+        u.badTargetCategory = {fbi.wpriBadTargetCategory, fbi.wsecBadTargetCategory, fbi.wspeBadTargetCategory};
+        u.noChaseCategory = fbi.noChaseCategory;
+        u.shootMe = fbi.shootMe;
         u.sightDistance = fbi.sightDistance;
         u.radarDistance = fbi.radarDistance;
         u.sonarDistance = fbi.sonarDistance;

@@ -529,6 +529,16 @@ namespace rwe
         }
     }
 
+    void UnitState::setFireOrders(UnitFireOrders orders)
+    {
+        fireOrders = orders;
+
+        if (orders != UnitFireOrders::FireAtWill)
+        {
+            clearWeaponTargets();
+        }
+    }
+
     Matrix4x<SimScalar> UnitState::getTransform() const
     {
         return Matrix4x<SimScalar>::translation(position) * Matrix4x<SimScalar>::rotationY(sin(rotation), cos(rotation));
