@@ -359,8 +359,8 @@ namespace rwe
                 else
                 {
                     steepestTransitRoll = rweMax(steepestTransitRoll, rweAbs(roll));
-                    rolledLeft = rolledLeft || roll < SimScalar(-0.1f);
-                    rolledRight = rolledRight || roll > SimScalar(0.1f);
+                    rolledLeft = rolledLeft || roll < SimScalar(-0.04f);
+                    rolledRight = rolledRight || roll > SimScalar(0.04f);
                 }
             }
             if (orbit.pointIndex < 0 && orbit.onStation)
@@ -388,8 +388,8 @@ namespace rwe
         REQUIRE(sawCentreStage);
         REQUIRE(stationsVisited.size() >= 2);
         // It banks on the way between stations and sits level once parked.
-        REQUIRE(steepestTransitRoll > SimScalar(0.2f));
-        REQUIRE(steepestStationRoll < SimScalar(0.15f));
+        REQUIRE(steepestTransitRoll > SimScalar(0.07f));
+        REQUIRE(steepestStationRoll < SimScalar(0.06f));
         // The bank goes both ways over a hop: over into the move, back the
         // other way as it settles onto the next station.
         REQUIRE((rolledLeft && rolledRight));

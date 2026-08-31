@@ -20,6 +20,13 @@
 
 namespace rwe
 {
+    /** True for particles drawn among the world's geometry rather than over the finished frame. */
+    bool particleDrawsInWorld(const Particle& particle)
+    {
+        auto sprite = std::get_if<ParticleRenderTypeSprite>(&particle.renderType);
+        return sprite != nullptr && sprite->inWorld;
+    }
+
     bool isValidUnitType(const GameSimulation& simulation, const std::string& unitType)
     {
         return simulation.unitDefinitions.find(unitType) != simulation.unitDefinitions.end();
@@ -1064,6 +1071,23 @@ namespace rwe
         worldRenderService.drawSpriteBatch(featureShadowBatch);
         worldRenderService.drawSpriteBatch(featureBatch);
 
+        // Particles that belong in the world rather than over it: drawn here,
+        // while the depth test is still on, so what is in front of them hides
+        // them. An aircraft's exhaust comes out from under the hull, and the
+        // hull should cover it.
+        {
+            SpriteBatch worldSpriteParticlesBatch;
+            for (const auto& particle : particles)
+            {
+                if (!particleDrawsInWorld(particle))
+                {
+                    continue;
+                }
+                drawSpriteParticle(gameMediaDatabase, simulation.gameTime, viewProjectionMatrix, particle, worldSpriteParticlesBatch);
+            }
+            worldRenderService.drawSpriteBatch(worldSpriteParticlesBatch);
+        }
+
         // Nano spray keeps depth testing (with writes still off) so the unit
         // doing the lathing occludes the part of the stream behind it. Drawn
         // without it, a construction aircraft hovering over its work has the
@@ -1110,6 +1134,10 @@ namespace rwe
         SpriteBatch spriteParticlesBatch;
         for (const auto& particle : particles)
         {
+            if (particleDrawsInWorld(particle))
+            {
+                continue;
+            }
             drawSpriteParticle(gameMediaDatabase, simulation.gameTime, viewProjectionMatrix, particle, spriteParticlesBatch);
         }
         worldRenderService.drawSpriteBatch(spriteParticlesBatch);
@@ -5683,6 +5711,9 @@ namespace rwe
                 // it falls, the way the original's does.
                 GameTime(1),
                 false,
+                // Drawn among the world's geometry: the exhaust leaves from
+                // under the hull, so the hull must cover it.
+                true,
             };
             particles.push_back(particle);
         }

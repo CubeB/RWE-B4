@@ -854,9 +854,9 @@ namespace rwe
                 // back to level when nothing wants anything.
                 p.previousRoll = p.roll;
                 auto wanted = unitInfo.state->desiredRoll.value_or(0_ss);
-                // Brisk enough that the bank develops and unwinds inside one
-                // short hop between stations.
-                const SimScalar rollStep(0.09f);
+                // Quick enough that the bank still develops and unwinds inside
+                // one short hop between stations, gentle enough not to snap.
+                const SimScalar rollStep(0.045f);
                 auto rollDelta = wanted - p.roll;
                 p.roll = p.roll + rweMax(-rollStep, rweMin(rollStep, rollDelta));
 
@@ -1376,7 +1376,10 @@ namespace rwe
                 // One full cycle over the hop: over one way, level at the
                 // halfway point, over the other way, level on arrival.
                 auto phase = SimAngle(static_cast<uint16_t>(simScalarToFloat(progress) * 65535.0f));
-                const SimScalar maxRoll(0.45f);
+                // About ten degrees: enough to read as the aircraft leaning
+                // into the move and steadying itself again, without the
+                // wallowing that a steeper bank gives over so short a hop.
+                const SimScalar maxRoll(0.18f);
                 unitInfo.state->desiredRoll = sin(phase) * maxRoll;
             }
         }

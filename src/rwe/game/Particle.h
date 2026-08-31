@@ -25,6 +25,14 @@ namespace rwe
         ParticleFinishTime finishTime;
         GameTime frameDuration{4};
         bool translucent{false};
+
+        /**
+         * Draw this one inside the world, tested against the depth buffer,
+         * rather than over the finished frame. Explosions and smoke want to
+         * be seen whatever is in front of them; an aircraft's exhaust wants
+         * the aircraft to hide it, since it comes out underneath.
+         */
+        bool inWorld{false};
     };
 
     struct ParticleRenderTypeWake
