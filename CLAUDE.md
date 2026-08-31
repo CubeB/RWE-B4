@@ -77,3 +77,21 @@ Electron app with React/Redux for the multiplayer lobby. Communicates with the e
 ## CI
 
 GitHub Actions runs Linux (gcc-12, clang-15) and Windows (MSVC 2022, MinGW64) builds in both Debug and Release configurations.
+
+## Matching Total Annihilation
+
+Much of the current work is making RWE behave like the original rather than
+merely look similar. Where a behaviour is meant to match TA, it has usually been
+read out of `TotalA.exe` instead of guessed at.
+
+- `docs/TOTALA-EXE.md` — the findings: addresses, constants and algorithms for
+  the flight model, fog of war and line of sight, the nanolathe and construction
+  display, effects and render order, plus the FBI field offsets. It also records
+  where RWE **deliberately** differs, so those do not get "corrected" back.
+- `tools/exe/` — the probe scripts that produced them, and the method.
+
+Read the findings before reimplementing anything TA-facing. Several plausible
+readings of that binary are wrong in ways that only surface when you replay the
+arithmetic against real unit data — transcribing a decoded routine into a small
+standalone program and comparing it tick by tick against RWE has caught more
+than one confident mistake.

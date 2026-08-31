@@ -16,6 +16,8 @@ _Last updated: 2026-08-31. Status of the codebase is as of the `revival` integra
 3. **Small, mergeable PRs against a green CI.** The March‑2026 CI matrix (gcc‑14, clang‑18, MSVC 2026, MinGW64, Debug+Release) is the gate.
 4. **Personal project, for now.** No upstream coordination or outreach is planned. The forks by Kevin Hake, Taylor Gunnoe and Oskar Pedersen are reference material — check them before starting a feature so their work isn't redone.
 
+**Matching the original.** A lot of Phase 1 has come from disassembling `TotalA.exe` rather than guessing at behaviour. The findings — addresses, constants, algorithms, and the places RWE deliberately differs — are consolidated in [`docs/TOTALA-EXE.md`](TOTALA-EXE.md), with the probe scripts that produced them in [`tools/exe/`](../tools/exe/). Read that before reimplementing anything that is meant to look or feel like TA; several plausible-sounding readings of this binary are wrong in ways that only show up when you replay the arithmetic.
+
 ---
 
 ## Phase 0 — Foundation (now → 2 weeks)
