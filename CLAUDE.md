@@ -93,6 +93,9 @@ read out of `TotalA.exe` instead of guessed at.
   the gunship standoff ring, and what `hoverattack` and `maneuverleashlength`
   actually gate.
 - `tools/exe/` — the probe scripts that produced them, and the method.
+- `docs/REVERSE-ENGINEERING-PRIORITIES.md` — what is worth reading out of the
+  binary next, ranked, with the evidence that each is a real gap and a string
+  or offset to pivot on.
 
 Read the findings before reimplementing anything TA-facing. Several plausible
 readings of that binary are wrong in ways that only surface when you replay the
