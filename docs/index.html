@@ -72,7 +72,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
     <span>branch <b>revival</b></span>
     <span>base <b>upstream master b2d8a31 · 25 Mar 2026</b></span>
     <span>updated <b>31 Aug 2026</b></span>
-    <span>tests <b>188 cases · 1962 assertions</b></span>
+    <span>tests <b>187 cases · 1970 assertions</b></span>
   </div>
 </header>
 <nav aria-label="Sections">
@@ -105,7 +105,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Construction aircraft have to be flying to use the fabricator and work a pattern: a spell over the centre, then eight stations on a ring through the building's corners, clockwise from a random start, the body swung slowly to face the job; the nano spray follows the nozzle and is depth-tested</li>
   <li>Buildings go up with a random twist of up to ten degrees either way; factories stay square for their pads</li>
   <li>Construction aircraft bank between stations of their work pattern, and the nanolathe spray converges on the middle of the target and is nudged forward in the depth buffer so the structure cannot swallow it</li>
-  <li>Aircraft thrusters emit TA's <code>SFXTYPE_VTOL</code> exhaust — small warm sparks dropped in world space, so an Atlas trails them as it flies. Two things were in the way: the SFX type was an unhandled TODO, and the script starts its flame loop from <code>MoveRate1</code>, which the engine never called</li>
+  <li>Aircraft thrusters emit TA's <code>SFXTYPE_VTOL</code> exhaust. Disassembling <code>TotalA.exe</code> settled what it actually draws: the <code>flamestream</code> sequence from <code>FX.GAF</code>, one frame per tick, drifting a sixth of the thruster vector each tick for six ticks — so each puff swells from a two-pixel speck into a ragged yellow flame as it falls, and the plume is a graded line with the largest furthest from the nozzle. Two things were in the way: the SFX type was an unhandled TODO, and the script starts its flame loop from <code>MoveRate1</code>, which the engine never called</li>
   <li>A builder that raised its arm and then did nothing was losing its build stance to a stow that finished after the redeploy; starting a job now waits for the stow, and moving from one job to the next keeps the arm out</li>
   <li>Aircraft count as arrived within a few ticks of travel rather than 8 units — they cannot stop dead, and the tighter figure left orders that never finished and new aircraft hovering over the pad. Landing keeps the tight figure, refuses water, and retries elsewhere if the spot is taken</li>
   <li>Units report arrival at the end of the journey, not at every shift-queued waypoint</li>
@@ -139,6 +139,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <ul>
   <li>Construction: green pulse plus a wireframe of the camera‑facing edges that blends green → white → black; texture sweeps up over the frame as it completes; nano spray of small green squares from the builder's nozzle; shadow kept but cut out under the frame</li>
   <li>Burning features: fire‑starting weapons ignite trees and foliage, fires spread and leave burnt remains, using each feature's own burn sequence</li>
+  <li>Weapons do not damage wreckage or scenery; features keep hit points only to set how long they take to reclaim</li>
   <li>Building deaths run the COB <code>Killed</code> script: pieces fly off with smoke and fire trails and impact explosions</li>
   <li>Reclaimed features play their golden dissolve sequence</li>
   <li>Model lighting matches TA's low sun from the left. The falloff is wrapped rather than clamped, so a building's away-from-sun faces shade off gradually instead of dropping to the ambient floor — which is what made solar collectors read as black beside an unshaded vehicle</li>

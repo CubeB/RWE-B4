@@ -33,7 +33,6 @@ namespace rwe
     };
 
     /** A small flat square of one colour: the nanolathe spray. */
-    /** A small flat coloured square: nanolathe spray, and an aircraft's exhaust. */
     struct ParticleRenderTypeNano
     {
         GameTime finishTime;

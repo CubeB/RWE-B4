@@ -5642,45 +5642,48 @@ namespace rwe
         // Take the lower end and blow downwards instead.
         auto a = pieceTransform * pieceMesh.firstVertexPosition;
         auto b = pieceTransform * pieceMesh.secondVertexPosition;
-        auto spawnPosition = a.y <= b.y ? a : b;
+        const auto& lowerEnd = a.y <= b.y ? a : b;
+        const auto& upperEnd = a.y <= b.y ? b : a;
 
-        // TA's palette, from the warm end of its flame ramp: the pale yellows
-        // come up often and the deeper ambers rarely, the same weighting the
-        // nano spray uses for its greens.
-        static const Vector3f vtolColors[] = {
-            Vector3f(0xf7 / 255.0f, 0xe3 / 255.0f, 0x67 / 255.0f),
-            Vector3f(0xf7 / 255.0f, 0xe3 / 255.0f, 0x67 / 255.0f),
-            Vector3f(0xf3 / 255.0f, 0xd3 / 255.0f, 0x4f / 255.0f),
-            Vector3f(0xf3 / 255.0f, 0xd3 / 255.0f, 0x4f / 255.0f),
-            Vector3f(0xef / 255.0f, 0xbb / 255.0f, 0x33 / 255.0f),
-            Vector3f(0xef / 255.0f, 0xbb / 255.0f, 0x33 / 255.0f),
-            Vector3f(0xef / 255.0f, 0xa7 / 255.0f, 0x1b / 255.0f),
-            Vector3f(0xeb / 255.0f, 0x8f / 255.0f, 0x13 / 255.0f),
-        };
-        std::uniform_int_distribution<std::size_t> pickColor(0, std::size(vtolColors) - 1);
-        std::uniform_real_distribution<float> scatter(-1.5f, 1.5f);
+        // TA draws this effect with a sprite, not with coloured dots: the
+        // engine's handler for emit-sfx type 0 hands the piece's two vertices
+        // to a particle that plays the `flamestream` sequence out of
+        // anims/FX.GAF, which starts as a two pixel yellow speck and swells,
+        // frame by frame, into a ragged yellow flame about nine pixels
+        // across. The engine divides the piece vector by six for the drift
+        // per tick and gives the particle six ticks to live, so one puff
+        // crosses the length of the thruster while it grows.
+        auto velocity = (lowerEnd - upperEnd) / 6.0f;
 
-        // The script fires this about ten times a second per thruster, so a
-        // couple of sparks a time keeps each stream from reading as a
-        // dotted line.
-        const int particlesPerEmit = 2;
+        // TA drops one of these every tick and lets a whole run of them die
+        // together, so the plume is a graded line with the biggest, oldest
+        // flame furthest from the nozzle. The script only calls us every
+        // other tick, so lay several at once and backdate the trailing ones:
+        // each starts a frame further into the animation and a step further
+        // down, which is exactly where the engine's own would have got to.
+        const int particlesPerEmit = 4;
+        const unsigned int lifeInTicks = 7;
+        std::uniform_real_distribution<float> scatter(-0.75f, 0.75f);
         for (int i = 0; i < particlesPerEmit; ++i)
         {
+            auto age = std::min(static_cast<unsigned int>(i), simulation.gameTime.value);
+
             Particle particle;
-            particle.position = Vector3f(
-                spawnPosition.x + scatter(effectsRng),
-                spawnPosition.y,
-                spawnPosition.z + scatter(effectsRng));
-            // The sparks keep no share of the aircraft's speed: they hang
-            // where they were dropped and sink gently, so the aircraft draws
-            // a trail out behind itself as it flies on.
-            particle.velocity = Vector3f(0.0f, -0.5f, 0.0f);
-            particle.renderType = ParticleRenderTypeNano{
-                simulation.gameTime + GameTime(15),
-                vtolColors[pickColor(effectsRng)],
-                1.0f,
-                0.0f};
-            particle.startTime = simulation.gameTime;
+            particle.position = lowerEnd + (velocity * static_cast<float>(i)) + Vector3f(scatter(effectsRng), 0.0f, scatter(effectsRng));
+            // The puffs keep no share of the aircraft's speed: they hang
+            // where they were dropped, so the aircraft draws a trail out
+            // behind itself as it flies on.
+            particle.velocity = velocity;
+            particle.startTime = simulation.gameTime - GameTime(age);
+            particle.renderType = ParticleRenderTypeSprite{
+                "FX",
+                "flamestream",
+                ParticleFinishTimeFixedTime{simulation.gameTime + GameTime(lifeInTicks - age)},
+                // One animation frame per tick, so the flame grows as fast as
+                // it falls, the way the original's does.
+                GameTime(1),
+                false,
+            };
             particles.push_back(particle);
         }
     }
