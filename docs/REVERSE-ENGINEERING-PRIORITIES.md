@@ -68,10 +68,12 @@ ignore.
 **Where to start.** The keys are literals at `0x503E88` (`wpri_`), `0x503E70`
 (`wsec_`), `0x503E58` (`wspe_`), `0x503E48` (`noChaseCategory`), parsed at
 `0x42C00E`–`0x42C0AB` into `def+0x231 / +0x235 / +0x239 / +0x23D`. Each is a
-**pointer to a bit array**, not a single dword: category names are interned to
-integer ids by `0x488C50` (a binary search over a sorted name→id table at
-`0x51E6B4`, allocating a fresh id on miss), and a unit's own category id is a
-`WORD` at `+0xA6`. The filter itself is `0x407084`–`0x4070C6`:
+**pointer to a bit array**, not a single dword: category names are interned by
+`0x488C50` (a binary search over a sorted table at `0x51E6B4`, allocating on a
+miss). **Corrected since this was written** — see `TOTALA-EXE.md` §9, which
+answers this entry: what `0x488C50` allocates is a 512-bit *set of unit type
+indices*, and `WORD unit+0xA6` is the unit's **type index**, not a category id.
+The filter itself is `0x407084`–`0x4070C6`:
 
 ```
 40707d  mov ax, WORD PTR [edi+0xa6]     ; candidate's category id
@@ -84,9 +86,10 @@ integer ids by `0x488C50` (a binary search over a sorted name→id table at
 4070dd  call 0x43b1f0                   ; issue the attack
 ```
 
-Other readers of `+0x23D`: `0x4063D8`, `0x40B93F`, `0x40FD7E` — read those to
-recover the ordering rule (nearest? most valuable? first?) that decides *which*
-of the surviving candidates is chosen.
+Other readers of `+0x23D`: `0x4063D8`, `0x40B93F`, `0x40FD7E`. The ordering
+rule they lead to is in `0x40B7B0`: each candidate is scored `rand(dx² + dz²)`
+and the lowest wins, with the bad-target ones kept as a fallback rather than
+rejected. Written up in `TOTALA-EXE.md` §9 and implemented.
 
 **Effort / risk.** 2–3 days. Medium risk: the interned id numbering only has to
 be internally consistent (RWE would rebuild masks from names on both sides), so
@@ -111,7 +114,9 @@ shoots.
 where it records it on the victim, then the path to `0x43B1F0` (issue attack).
 The FBI side is `standingfireorder` → bits 2–3 of `def+0x241` (parsed at
 `0x42C437`), values 0/1/2 = Hold Fire / Return Fire / Fire At Will, matching
-RWE's enum order.
+RWE's enum order. Answered and implemented: the trail runs `0x489CE0` →
+`0x406F80`, and the *current* firing mode is bits 20–21 of `unit+0x110`, not
+the FBI default. `TOTALA-EXE.md` §9.
 
 **Effort / risk.** Half a day for a usable version. Low risk.
 

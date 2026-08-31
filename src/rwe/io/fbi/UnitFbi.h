@@ -25,6 +25,27 @@ namespace rwe
         // classifier normalises at use time.
         std::string category;
 
+        /**
+         * The category each weapon slot would rather not shoot at. The
+         * original writes a single category name here and asks whether the
+         * candidate's own Category list mentions it; a match does not veto
+         * the target, it drops it to the back of the queue.
+         */
+        std::string wpriBadTargetCategory;
+        std::string wsecBadTargetCategory;
+        std::string wspeBadTargetCategory;
+
+        /** The category the unit will not leave its post to go after. */
+        std::string noChaseCategory;
+
+        /**
+         * Whether the unit is worth shooting without being told to. Every
+         * mobile unit and every defence sets it; the fifty-four that do not
+         * are the passive buildings, which is why nothing in TA spontaneously
+         * opens fire on a solar collector.
+         */
+        bool shootMe{false};
+
         // Sight and radar radii (in TA "elmos"). The fog-of-war system in
         // Phase 2+ will use these to compute per-player visibility grids.
         // Both default to 0; LOS code must treat 0 as "no signal".

@@ -524,6 +524,7 @@ set(SOURCE_FILES
     src/rwe/sim/UnitBehaviorService.h
     src/rwe/sim/UnitBehaviorService_util.cpp
     src/rwe/sim/UnitBehaviorService_util.h
+    src/rwe/sim/UnitDefinition.cpp
     src/rwe/sim/UnitDefinition.h
     src/rwe/sim/UnitFireOrders.h
     src/rwe/sim/UnitId.h
@@ -834,6 +835,7 @@ set(TEST_FILES
     src/rwe/sim/UnitState_util.test.cpp
     src/rwe/sim/util.test.cpp
     src/rwe/sim/recoil.test.cpp
+    src/rwe/sim/targeting.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp
     src/rwe/util/Result.test.cpp
     src/rwe/util/SimpleLogger.test.cpp

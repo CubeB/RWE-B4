@@ -3786,7 +3786,7 @@ namespace rwe
         auto unit = tryGetUnit(unitId);
         if (unit)
         {
-            unit->get().fireOrders = orders;
+            unit->get().setFireOrders(orders);
 
             if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit && *selectedUnit == unitId)
             {

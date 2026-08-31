@@ -517,6 +517,21 @@ namespace rwe
         bool canDetectUnit(PlayerId viewer, UnitId unitId) const;
 
         /**
+         * Whether the weapon is allowed to engage that unit at all, before
+         * range comes into it: a torpedo cannot reach something standing on
+         * dry land, and a flak gun will not point itself at the ground.
+         */
+        bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& target) const;
+
+        /**
+         * Everything a unit does about having just been shot: it points any
+         * weapon that has nothing better to do at whoever hit it. Units on
+         * hold fire do nothing, and a unit with no weapons has nothing to
+         * do either.
+         */
+        void returnFire(UnitId victimId, UnitId attackerId);
+
+        /**
          * Destroys a unit immediately with its SelfDestructAs explosion
          * (falling back to ExplodeAs). Leaves no wreck.
          */

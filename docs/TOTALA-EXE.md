@@ -494,3 +494,137 @@ RWE's heading is offset half a turn from TA's: `createUnit` already gives a
 mobile unit with no facing of its own `HalfTurn`, which is TA heading 0, and its
 buildings sit at rotation 0, which is TA's `0x8000` centre. So the arc lands in
 RWE as `rand(buildangle) − buildangle/2` about rotation zero, with no shift.
+## 10. Target selection, and what the firing modes really do
+
+### Categories are sets of unit types, not ids on a unit
+
+There is no "category id". `0x488C50(name)` is a memoised map from a category
+*name* to a freshly allocated **64-byte block — a 512-bit set of unit type
+indices**, held in the sorted table at `ds:0x51E6B4 .. 0x51E6B8`. When a unit
+definition's `Category` list is parsed, `0x488E70` walks the list with
+`" %s %n"` and, for each name, sets **that definition's own index** in the named
+category's set, plus the same bit in the set called `ALL` (`0x507C14`).
+
+The definition's index lives in `WORD def+0x21E`, written at `0x42B2BB` as the
+loop counter that walks the definition table backwards in strides of `0x249`
+(585 bytes, the record size). The same number is copied onto every instance as
+`WORD unit+0xA6` by `0x485E90`, which derives the definition pointer from it.
+So `unit+0xA6` is the **unit type index**, not a category id — the priorities
+document's entry 1 has that wrong — and the filter `mask[id>>5] & (1<<(id&31))`
+is asking "is this unit's *type* in that category's set". Note the block is 512
+bits: the original cannot carry more than 512 unit types.
+
+`wpri_/wsec_/wspe_badTargetCategory` and `noChaseCategory` each hold a pointer
+to one such set at `def+0x231 / +0x235 / +0x239 / +0x23D`, defaulting to the set
+called `none` (`0x42C00E`–`0x42C0AB`). The per-slot indexing is confirmed by
+`0x40B9FD`, which reads `[def + 4*slot + 0x231]`. Every value in the shipped
+data is a single name: `VTOL`, `NOTAIR` or `NOTSUB`.
+
+### The scan, `0x4089A0`
+
+Called per player per tick, but it only advances its cursor `unitCount/30 + 1`
+units, so **every unit is looked at about once a second**, not every tick. A
+unit is considered only if it is fully built (`float unit+0x104 == 0`), has
+`unit+0x110` bit 31 set, and its **firing mode is Fire At Will** —
+`(unit+0x110 & 0x300000) == 0x200000`, see below. Then, per weapon slot:
+
+- the slot's flag byte `unit+0x1F+28*slot` must have bit 1 (armed) and bit 4
+  ("weapon free": no mission owns it, set and cleared by `0x489800` and
+  `0x4898B0`);
+- `dropped` weapons never auto-acquire, so bombs are only ever aimed by the
+  bomber's own mission;
+- `commandfire` weapons do not either, unless the player is of type 2;
+- `interceptor` weapons get a position from `0x49D120` instead of a unit;
+- an existing target is kept unless it has become allied, has left range, or is
+  in that slot's bad-target set — a `paralyzer` also drops an already paralysed
+  target (`weapondef+0x111` bit 7 against `unit+0x10E` bit 4);
+- otherwise `0x40B7B0(unit, slot, 1)` picks a new one.
+
+### The choice itself, `0x40B7B0`
+
+Candidates come from `0x40AD80(playerIdx, &centre, radius, 0, &out)`, the
+enemies of that player within `radius` — the **weapon's range** when the third
+argument is 1 (the auto-acquire above), the unit's **`SightDistance`** when it
+is 0 (`0x43B700`, the search that decides whether to go and find a fight).
+
+Then, up to **fifty** times, it draws a candidate **at random from the pool and
+removes it**, and rejects it if:
+
+- it is dead (`unit+0x110` bit 28 clear or bit 14 set);
+- it does not set `ShootMe` (`def+0x241` bit 15) — **unless** the attacking
+  player's type byte `player+0x73` is 2, or the global bit `0x37F30 & 4` is set.
+  The fifty-four units in the shipped data without `ShootMe` are exactly the
+  passive buildings, which is why nothing ever wanders over to an enemy solar
+  collector and opens fire on it, and why a computer player's units do;
+- `0x49ABB0(unit, candidate, slot)` says no. That routine owns range *and*
+  eligibility: a `waterweapon` needs its target at or below sea level (floaters
+  exempt, hovercraft excluded by their model height), a non-water weapon needs
+  both parties out of the water, a **`toairweapon` needs the target airborne**
+  (`unit+0x110 & 3 == 2`), a `ballistic` weapon needs an arc that reaches, and
+  finally `dx² + dz² ≤ range²` in whole world units. Kamikaze units skip it
+  entirely;
+- `noChaseCategory` names its type — **only when the third argument is 0**, so
+  it governs going to look for a fight, not shooting what is already in range;
+- a `paralyzer` weapon is offered an already paralysed unit.
+
+Each survivor is scored as **`rand(dx² + dz²)`** (`0x40B9D8`, on distances in
+whole world units) and the **lowest score wins**. So the nearest target usually
+wins but not always, which is what spreads a group's fire instead of putting
+every gun on the same unlucky Peewee. Two winners are tracked, one among
+candidates that are *not* in the slot's bad-target set and one among those that
+are, and the bad one is returned **only if there is no other** (`0x40BA4D`). A
+bad target category is therefore a preference, not a veto: a Samson with no
+aircraft about still shoots at tanks.
+
+### Firing modes, and Return Fire
+
+The firing mode is **bits 20–21 of `unit+0x110`**, written by the
+`Standing_FireOrder` mission handler at `0x403100` from `mission+0x36 & 3`:
+0 Hold Fire, 1 Return Fire, 2 Fire At Will. Setting 0 or 1 **clears all three
+weapons' targets there and then** (`0x403135`–`0x403150`).
+
+Return Fire is implemented entirely in the damage path. `0x489BB0` computes the
+damage — armour and veterancy, §5 of the priorities note — and emits an event;
+`0x489CE0` applies it, and on the way records the attacker on the victim
+(`unit+0xF0`, its player at `+0xF4`, the cause at `+0xF5`) and calls
+**`0x406F80(attacker, victim, damage)`**, its only caller. That routine is the
+whole of Return Fire:
+
+- the cause byte must not be `0xB` (a heal is cause `0xA` and returns earlier,
+  cause 1 is a weapon hit, cause 2 a paralyser);
+- the victim's player type must be 1 or 2, the attacker must not be allied
+  (`player[attackerIdx + 0x108] == 0`), and the victim's definition must have
+  `def+0x241` bit 16 — set at `0x42CF19` when any of `Weapon1/2/3` is present —
+  or be kamikaze;
+- if no mission is holding the unit (`mission+0x42 & 0x20000`) and the attacker
+  passes `noChaseCategory` *and* `wpri_badTargetCategory` and is inside weapon
+  0's range, `0x43B1F0` issues an attack;
+- then, for each armed and free weapon slot, if the attacker is inside that
+  slot's range it becomes the target — replacing an existing target only when
+  that target is gone, out of range, or in the slot's bad-target set.
+
+All of it is gated on `unit+0x110 & 0x300000` being **non-zero** (`0x4070F2`),
+i.e. Return Fire *or* Fire At Will. That single test is the difference between
+the two modes: both shoot back, only Fire At Will goes looking.
+
+### What RWE does with this
+
+Implemented: the two-bucket bad-target preference, the `rand(d²)` scoring,
+`ShootMe` with the computer-player exemption, `toAirWeapon`, `NoChaseCategory`
+on the search that breaks a patrol off, the firing-mode target clear, and
+Return Fire from `GameSimulation::applyDamage`.
+
+Deliberately not ported:
+
+- **The once-a-second cadence.** RWE acquires on the tick a weapon falls idle.
+  The original's cursor exists to spread the cost over a frame budget; RWE's
+  check already costs nothing by comparison, and the delay would only make
+  units slow on the draw.
+- **The fifty-candidate cap and the sampling without replacement.** Below fifty
+  candidates the two are identical; above it the original is simply sampling,
+  where RWE scores them all.
+- **The retaliation attack order.** RWE points the weapons and issues no order,
+  because the original only issues one when the attacker is already inside
+  weapon range, where the two come to the same thing.
+- **`unitsOnly`, `turret`, `lineOfSight`, `minbarrelangle`.** Decoded far enough
+  to say they are no part of this decision: `0x49ABB0` never looks at them.

@@ -1,5 +1,6 @@
 #include "UnitBehaviorService.h"
 #include <algorithm>
+#include <limits>
 #include <rwe/util/SimpleLogger.h>
 #include <rwe/cob/CobExecutionContext.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -498,35 +499,9 @@ namespace rwe
             // attempt to acquire a target
             if (!weaponDefinition.commandFire && unit.fireOrders == UnitFireOrders::FireAtWill)
             {
-                for (const auto& entry : sim->units)
+                if (auto target = chooseTarget(id, weaponIndex))
                 {
-                    auto otherUnitId = entry.first;
-                    const auto& otherUnit = entry.second;
-
-                    if (otherUnit.isDead())
-                    {
-                        continue;
-                    }
-
-                    if (otherUnit.isOwnedBy(unit.owner))
-                    {
-                        continue;
-                    }
-
-                    if (unit.position.distanceSquared(otherUnit.position) > weaponDefinition.maxRange * weaponDefinition.maxRange)
-                    {
-                        continue;
-                    }
-
-                    // Only what the owner can see or has on radar is fair game,
-                    // and a torpedo cannot reach something standing on land.
-                    if (!sim->canDetectUnit(unit.owner, otherUnitId) || !weaponCanHitUnit(weaponDefinition, otherUnit))
-                    {
-                        continue;
-                    }
-
-                    weapon->state = UnitWeaponStateAttacking(otherUnitId);
-                    break;
+                    weapon->state = UnitWeaponStateAttacking(*target);
                 }
             }
         }
@@ -538,12 +513,12 @@ namespace rwe
                 return;
             }
 
-            // If we are not fire-at-will, the target is a unit,
+            // If we are on hold fire, the target is a unit,
             // and we don't have an explicit order to attack that unit,
             // drop the target.
-            // This can happen if we acquired the target ourselves while in fire-at-will,
-            // but then the player switched us to another firing mode.
-            if (unit.fireOrders != UnitFireOrders::FireAtWill)
+            // A unit on return fire keeps what it picked up: whatever it is
+            // holding, it was handed by the thing that shot it.
+            if (unit.fireOrders == UnitFireOrders::HoldFire)
             {
                 if (auto targetUnit = std::get_if<UnitId>(&aimingState->target); targetUnit != nullptr)
                 {
@@ -1736,11 +1711,93 @@ namespace rwe
 
     bool UnitBehaviorService::weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& target) const
     {
-        if (!weaponDefinition.waterWeapon)
+        return sim->weaponCanHitUnit(weaponDefinition, target);
+    }
+
+    std::optional<UnitId> UnitBehaviorService::chooseTarget(UnitId id, unsigned int weaponIndex)
+    {
+        const auto& unit = sim->getUnitState(id);
+        const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
+        const auto& weaponDefinition = sim->weaponDefinitions.at(unit.weapons[weaponIndex]->weaponType);
+        const auto& badCategory = unitDefinition.badTargetCategory.at(weaponIndex);
+
+        // The original scores each candidate with a random number drawn
+        // between zero and the square of the distance to it, and takes the
+        // lowest score. Near things therefore win most of the time without
+        // winning every time, which is what stops a dozen units in a group
+        // all firing at the same unfortunate Peewee. A weapon's bad target
+        // category does not rule a candidate out, it only puts it behind
+        // everything else, so a Samson with no aircraft to shoot at will
+        // still shoot at tanks.
+        std::optional<UnitId> best;
+        std::optional<UnitId> bestBad;
+        auto bestScore = std::numeric_limits<int>::max();
+        auto bestBadScore = std::numeric_limits<int>::max();
+
+        // The original exempts the computer players from the ShootMe rule,
+        // so an AI's units do go after the buildings a human player's units
+        // would walk past.
+        auto ignoresShootMe = sim->getPlayer(unit.owner).type == GamePlayerType::Computer;
+
+        for (const auto& entry : sim->units)
         {
-            return true;
+            auto otherUnitId = entry.first;
+            const auto& otherUnit = entry.second;
+
+            if (otherUnit.isDead() || otherUnit.isOwnedBy(unit.owner))
+            {
+                continue;
+            }
+
+            const auto& otherUnitDefinition = sim->unitDefinitions.at(otherUnit.unitType);
+
+            // Buildings that do not ask to be shot at are left alone unless
+            // somebody orders otherwise, which is why nothing in the original
+            // wanders over to a metal extractor and opens up on it.
+            if (!otherUnitDefinition.shootMe && !ignoresShootMe)
+            {
+                continue;
+            }
+
+            auto distanceSquared = unit.position.distanceSquared(otherUnit.position);
+            if (distanceSquared > weaponDefinition.maxRange * weaponDefinition.maxRange)
+            {
+                continue;
+            }
+
+            // Only what the owner can see or has on radar is fair game,
+            // and a torpedo cannot reach something standing on land.
+            if (!sim->canDetectUnit(unit.owner, otherUnitId) || !weaponCanHitUnit(weaponDefinition, otherUnit))
+            {
+                continue;
+            }
+
+            // The draw is over whole world units squared, and the original's
+            // random number generator returns zero for anything under two.
+            auto range = static_cast<int>(simScalarToUInt(distanceSquared));
+            auto score = 0;
+            if (range > 1)
+            {
+                std::uniform_int_distribution dist(0, range - 1);
+                score = dist(sim->rng);
+            }
+
+            if (categoryListContains(otherUnitDefinition.category, badCategory))
+            {
+                if (score < bestBadScore)
+                {
+                    bestBadScore = score;
+                    bestBad = otherUnitId;
+                }
+            }
+            else if (score < bestScore)
+            {
+                bestScore = score;
+                best = otherUnitId;
+            }
         }
-        return target.position.y <= sim->terrain.getSeaLevel();
+
+        return best ? best : bestBad;
     }
 
     bool UnitBehaviorService::attackTarget(UnitInfo unitInfo, const AttackTarget& target)
@@ -2219,6 +2276,16 @@ namespace rwe
         for (const auto& [otherId, other] : sim->units)
         {
             if (otherId == unitInfo.id || other.isDead() || other.isOwnedBy(unitInfo.state->owner))
+            {
+                continue;
+            }
+
+            // NoChaseCategory is about leaving your post, not about what you
+            // may shoot: forty-four of the shipped units name VTOL there, and
+            // they carry on with what they were doing rather than stopping
+            // for an aircraft. Fire at will still shoots at it in passing.
+            const auto& otherDefinition = sim->unitDefinitions.at(other.unitType);
+            if (categoryListContains(otherDefinition.category, unitInfo.definition->noChaseCategory))
             {
                 continue;
             }
