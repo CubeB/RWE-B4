@@ -178,7 +178,9 @@ FMD_ROCKET, SBMISSILE, ARMTRUCK/CORTRUCK_ROCKET and ARM/CORMSHIP_ROCKET.
 **Where to start.** The weapon-TDF parser runs `0x42E484`–`0x42EFC3`.
 `weaponvelocity` → `wdef+0x68` (`0x42E4BA`), `startvelocity` → `+0x6C`
 (`0x42E4D5`), `weaponacceleration` → `+0x70` (`0x42E4F3`), `flighttime` → `WORD
-+0xFA` (`0x42E6CF`). The booleans are a bitfield at `wdef+0x111`: `selfprop`
++0xFA` (`0x42E6CF`). *(Done 2026-08-31; `flighttime` is at `+0xFC`, not `+0xFA`
+— `+0xFA` is `smokedelay`. See `TOTALA-EXE.md` §6 and the corrected weapon
+offsets in §B below.)* The booleans are a bitfield at `wdef+0x111`: `selfprop`
 `0x42E927`, `twophase` `0x42E9C1`, `vlaunch` `0x42EB20`, `guidance` `0x42E7A6`,
 `tracks` `0x42E7CB`, `cruise` `0x42E9E9`, `propeller` `0x42E949`. From there,
 `grep` the listing for reads of `+0x68`/`+0x6C`/`+0x70` inside the projectile
@@ -376,7 +378,7 @@ that side besides `hitDensity`. ~half a day, low risk.
 
 Already on the roadmap. 559 features set it, it is parsed and copied
 (`LoadingScene.cpp:585`) and never read. A shot should stop on a rock in the way.
-The findings doc's §8 flags the pass-through-chance reading as unconfirmed;
+The findings doc's §9 flags the pass-through-chance reading as unconfirmed;
 confirming it in the binary is the actual task here, and the pivot is the
 projectile-vs-feature collision rather than the feature TDF.
 
@@ -408,7 +410,7 @@ projectile-vs-feature collision rather than the feature TDF.
     `norestrict` (6), `digger`, `teleporter`, `immunetoparalyzer`,
     `cantbetransported` (1). Each is an hour or two. `canstop` and `shootme` are
     the two with enough coverage to matter.
-23. **TA's Permanent and Circular LOS modes.** Already in `TOTALA-EXE.md` §8.
+23. **TA's Permanent and Circular LOS modes.** Already in `TOTALA-EXE.md` §9.
     Circular is fully understood (a `vismasks.gaf` stamp, radius
     `clamp(SightDistance/32, 5, 14)`); Permanent has not been looked at. Only
     reachable once there is a skirmish option to select them, so low urgency.
@@ -444,7 +446,7 @@ projectile-vs-feature collision rather than the feature TDF.
 
 26. **`sortbias`** — parsed by the original into `def+0x21A` and read nowhere.
     Already recorded in the findings doc; leave dead.
-27. **The five deliberate departures in `TOTALA-EXE.md` §7** — the nanolathe
+27. **The five deliberate departures in `TOTALA-EXE.md` §8** — the nanolathe
     spray landing on the roof, depth-tested exhaust occlusion, the
     camera-windowed fog raster, off-map fog cells reading as the nearest on-map
     cell, and the absent `BrakeRate` nose re-aim. These are decisions, not gaps.
@@ -531,6 +533,15 @@ bit 1 = ARMORED. Weapon definition: flags bitfield at `wdef+0x111`,
 `areaofeffect` `+0xD6` (word), `edgeeffectiveness` `+0xD8` (float, default 0.0),
 `weapontimer` `+0xE6`, `flighttime` `+0xFA`, `minbarrelangle` `+0xFE`,
 `tolerance` `+0x104`, `pitchtolerance` `+0x106`, `shakemagnitude` `+0x108`.
+
+**Correction (2026-08-31, from the §4 work).** The last five of those are each
+one key early: the pipeline rule was applied a slot short from `smokedelay`
+onwards. `flighttime` is `+0xFC` and `+0xFA` is `smokedelay`; `minbarrelangle` is
+a **float** at `+0xC8` and `+0xFE` is `holdtime`; `+0x104` is `accuracy`,
+`+0x106` is `tolerance`, `+0x108` is `pitchtolerance`; `shakemagnitude` is a
+dword at `+0xCC` and `shakeduration` at `+0xD0`. Everything before them in the
+line is right. The full corrected weapon layout, with the flag bit numbers, is
+in `TOTALA-EXE.md` §7.
 
 Useful new routine addresses:
 

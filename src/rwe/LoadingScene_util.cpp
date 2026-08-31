@@ -161,7 +161,30 @@ namespace rwe
 
         weaponDefinition.energyPerShot = Energy(tdf.energyPerShot);
 
-        if (tdf.tracks)
+        if (tdf.selfProp)
+        {
+            // TA's projectile update tests `selfprop` before anything else, so a
+            // missile that also carries `lineofsight=1` -- which most of them do --
+            // is flown by the motor, not in a straight line (0x49B9C2). The three
+            // speeds are per second in the TDF and the original converts them to
+            // per tick and per tick squared as it parses; `turnrate` likewise, and
+            // it truncates rather than rounds (0x42E4C6, 0x42E60E, 0x4E43A0).
+            ProjectilePhysicsTypeSelfPropelled p;
+            p.startVelocity = SimScalar(static_cast<float>(tdf.startVelocity) / 30.0f);
+            p.acceleration = SimScalar(static_cast<float>(tdf.weaponAcceleration) / 900.0f);
+            p.maxVelocity = SimScalar(static_cast<float>(tdf.weaponVelocity) / 30.0f);
+            p.turnRate = SimAngle(static_cast<uint16_t>(tdf.turnRate / 30u));
+            p.guidance = tdf.guidance;
+            p.tracks = tdf.tracks;
+            p.twoPhase = tdf.twoPhase;
+            p.vLaunch = tdf.vLaunch;
+            p.flightTime = GameTime(static_cast<unsigned int>(tdf.flightTime * 30.0f));
+            p.burnBlow = tdf.burnBlow;
+            p.cruise = tdf.cruise;
+            p.autoRange = !tdf.noAutoRange && tdf.weaponVelocity != 0;
+            weaponDefinition.physicsType = p;
+        }
+        else if (tdf.tracks)
         {
             weaponDefinition.physicsType = ProjectilePhysicsTypeTracking{SimScalar(tdf.turnRate)};
         }

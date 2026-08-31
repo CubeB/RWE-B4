@@ -174,7 +174,12 @@ namespace rwe
             projectile.position,
             projectile.origin,
             projectile.velocity,
-            projectile.damageRadius);
+            projectile.damageRadius,
+            projectile.heading,
+            projectile.pitch,
+            projectile.speed,
+            projectile.secondPhase,
+            projectile.motorOut);
 
         for (const auto& [_, damage] : projectile.damage)
         {
