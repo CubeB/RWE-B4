@@ -1479,20 +1479,8 @@ namespace rwe
         ImGui::Checkbox("Occupied grid", &occupiedGridVisible);
         ImGui::Checkbox("Pathfinding visualisation", &pathfindingVisualisationVisible);
         ImGui::Checkbox("Movement class grid", &movementClassGridVisible);
-        ImGui::InputInt("Side", &unitSpawnPlayer);
-        if (ImGui::InputText("Spawn Unit", unitSpawnText, IM_ARRAYSIZE(unitSpawnText), ImGuiInputTextFlags_EnterReturnsTrue))
-        {
-            std::string text(unitSpawnText);
-            text = toUpper(text);
-            if (!text.empty() && isValidUnitType(simulation, text) && unitSpawnPlayer >= 0 && unitSpawnPlayer < getSize(simulation.players))
-            {
-                if (auto terrainPos = getMouseTerrainCoordinate())
-                {
-                    spawnCompletedUnit(text, PlayerId(unitSpawnPlayer), *terrainPos);
-                }
-            }
-            ImGui::SetKeyboardFocusHere(-1);
-        }
+        ImGui::Separator();
+        renderUnitPlacer();
         ImGui::Separator();
         {
             std::scoped_lock<std::mutex> lock(playingUnitChannelsLock);
@@ -1858,6 +1846,26 @@ namespace rwe
     void GameScene::onMouseDown(MouseButtonEvent event)
     {
         currentPanel->mouseDown(event);
+
+        // Debug placing mode: clicks drop units on the map instead of
+        // selecting and ordering, so a test scenario can be set up quickly.
+        if (unitSpawnOnClick && !unitSpawnType.empty() && isValidUnitType(simulation, unitSpawnType))
+        {
+            if (event.button == MouseButtonEvent::MouseButton::Left)
+            {
+                if (auto terrainPos = getMouseTerrainCoordinate())
+                {
+                    placeDebugUnit(*terrainPos);
+                }
+                return;
+            }
+            if (event.button == MouseButtonEvent::MouseButton::Right)
+            {
+                // Right-click leaves placing mode, like cancelling any other cursor mode.
+                unitSpawnOnClick = false;
+                return;
+            }
+        }
 
         if (event.button == MouseButtonEvent::MouseButton::Left)
         {
@@ -2865,6 +2873,138 @@ namespace rwe
     std::optional<UnitId> GameScene::spawnUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<const std::reference_wrapper<SimAngle>> rotation)
     {
         return simulation.trySpawnUnit(unitType, owner, position, rotation);
+    }
+
+    void GameScene::placeDebugUnit(const SimVector& position)
+    {
+        if (unitSpawnType.empty() || !isValidUnitType(simulation, unitSpawnType))
+        {
+            return;
+        }
+        if (unitSpawnPlayer < 0 || unitSpawnPlayer >= getSize(simulation.players))
+        {
+            return;
+        }
+
+        auto owner = PlayerId(unitSpawnPlayer);
+        if (unitSpawnComplete)
+        {
+            spawnCompletedUnit(unitSpawnType, owner, position);
+        }
+        else
+        {
+            // Left as a nanoframe, so a builder can be told to finish it.
+            spawnUnit(unitSpawnType, owner, position, std::nullopt);
+        }
+    }
+
+    void GameScene::renderUnitPlacer()
+    {
+        if (!ImGui::CollapsingHeader("Place units"))
+        {
+            return;
+        }
+        ImGui::Indent();
+
+        if (allUnitTypes.empty())
+        {
+            for (const auto& [unitType, _] : simulation.unitDefinitions)
+            {
+                allUnitTypes.push_back(unitType);
+            }
+            std::sort(allUnitTypes.begin(), allUnitTypes.end());
+        }
+
+        // Owner: every player in the game, named with its side so it is
+        // obvious which team a unit will fight for.
+        std::string ownerLabel = "none";
+        if (unitSpawnPlayer >= 0 && unitSpawnPlayer < getSize(simulation.players))
+        {
+            const auto& player = simulation.players[unitSpawnPlayer];
+            ownerLabel = std::to_string(unitSpawnPlayer) + ": " + player.side
+                + (player.type == GamePlayerType::Human ? " (human)" : " (computer)")
+                + (PlayerId(unitSpawnPlayer) == localPlayerId ? " [you]" : "");
+        }
+        if (ImGui::BeginCombo("Owner", ownerLabel.c_str()))
+        {
+            for (Index i = 0; i < getSize(simulation.players); ++i)
+            {
+                const auto& player = simulation.players[i];
+                auto label = std::to_string(i) + ": " + player.side
+                    + (player.type == GamePlayerType::Human ? " (human)" : " (computer)")
+                    + (PlayerId(i) == localPlayerId ? " [you]" : "");
+                if (ImGui::Selectable(label.c_str(), unitSpawnPlayer == static_cast<int>(i)))
+                {
+                    unitSpawnPlayer = static_cast<int>(i);
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        ImGui::InputText("Filter", unitSpawnFilter, IM_ARRAYSIZE(unitSpawnFilter));
+        auto filter = toUpper(std::string(unitSpawnFilter));
+
+        ImGui::BeginChild("unit type list", ImVec2(0.0f, 160.0f), true);
+        for (const auto& unitType : allUnitTypes)
+        {
+            if (!filter.empty() && unitType.find(filter) == std::string::npos)
+            {
+                continue;
+            }
+            if (ImGui::Selectable(unitType.c_str(), unitType == unitSpawnType))
+            {
+                unitSpawnType = unitType;
+            }
+        }
+        ImGui::EndChild();
+
+        ImGui::LabelText("Selected", "%s", unitSpawnType.empty() ? "none" : unitSpawnType.c_str());
+        ImGui::Checkbox("Place on click (right-click to stop)", &unitSpawnOnClick);
+        ImGui::Checkbox("Place finished (off: place a nanoframe)", &unitSpawnComplete);
+
+        if (ImGui::Button("Place one at the cursor"))
+        {
+            if (auto terrainPos = getMouseTerrainCoordinate())
+            {
+                placeDebugUnit(*terrainPos);
+            }
+        }
+
+        // The old typed entry, kept for when the name is already known.
+        if (ImGui::InputText("Type a name and press enter", unitSpawnText, IM_ARRAYSIZE(unitSpawnText), ImGuiInputTextFlags_EnterReturnsTrue))
+        {
+            auto text = toUpper(std::string(unitSpawnText));
+            if (!text.empty() && isValidUnitType(simulation, text))
+            {
+                unitSpawnType = text;
+                if (auto terrainPos = getMouseTerrainCoordinate())
+                {
+                    placeDebugUnit(*terrainPos);
+                }
+            }
+            ImGui::SetKeyboardFocusHere(-1);
+        }
+
+        if (ImGui::Button("Kill every unit of the chosen owner"))
+        {
+            if (unitSpawnPlayer >= 0 && unitSpawnPlayer < getSize(simulation.players))
+            {
+                std::vector<UnitId> doomed;
+                for (const auto& [unitId, unit] : simulation.units)
+                {
+                    if (unit.isOwnedBy(PlayerId(unitSpawnPlayer)) && unit.isAlive())
+                    {
+                        doomed.push_back(unitId);
+                    }
+                }
+                for (auto unitId : doomed)
+                {
+                    simulation.killUnit(unitId);
+                }
+            }
+        }
+
+        ImGui::Unindent();
     }
 
     std::optional<std::reference_wrapper<UnitState>> GameScene::spawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position)
@@ -5343,8 +5483,11 @@ namespace rwe
                 continue;
             }
 
-            // Where the spray lands: a random point over the target's footprint,
-            // so the beam fans out from the nozzle to the width of the building.
+            // Where the spray lands: the middle of the target, at the top of
+            // it. Aiming at one point rather than fanning across the footprint
+            // makes the beam converge the way TA's does, and taking the top of
+            // the model keeps the stream clear of the geometry, so it is never
+            // swallowed by the very structure it is building.
             std::optional<Vector3f> targetCentre;
             Vector3f spread(0.0f, 0.0f, 0.0f);
             match(
@@ -5357,13 +5500,10 @@ namespace rwe
                     }
                     const auto& targetDefinition = simulation.unitDefinitions.at(targetUnit->get().unitType);
                     const auto& targetModel = simulation.unitModelDefinitions.at(targetDefinition.objectName);
-                    auto footprint = simulation.computeFootprintRegion(targetUnit->get().position, targetDefinition.movementCollisionInfo);
-                    auto tile = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
-                    targetCentre = simVectorToFloat(targetUnit->get().position);
-                    spread = Vector3f(
-                        static_cast<float>(footprint.width) * tile * 0.15f,
-                        simScalarToFloat(targetModel.height) * 0.2f,
-                        static_cast<float>(footprint.height) * tile * 0.15f);
+                    auto height = simScalarToFloat(targetModel.height);
+                    targetCentre = simVectorToFloat(targetUnit->get().position) + Vector3f(0.0f, height * 0.5f, 0.0f);
+                    // Just enough scatter that the beam is not a single line.
+                    spread = Vector3f(4.0f, height * 0.15f, 4.0f);
                 },
                 [&](const FeatureId& targetFeatureId) {
                     auto targetFeature = simulation.tryGetFeature(targetFeatureId);
@@ -5372,12 +5512,9 @@ namespace rwe
                         return;
                     }
                     const auto& featureDefinition = simulation.getFeatureDefinition(targetFeature->get().featureName);
-                    auto tile = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
-                    targetCentre = simVectorToFloat(targetFeature->get().position);
-                    spread = Vector3f(
-                        static_cast<float>(featureDefinition.footprintX) * tile * 0.15f,
-                        simScalarToFloat(featureDefinition.height) * 0.2f,
-                        static_cast<float>(featureDefinition.footprintZ) * tile * 0.15f);
+                    auto height = simScalarToFloat(featureDefinition.height);
+                    targetCentre = simVectorToFloat(targetFeature->get().position) + Vector3f(0.0f, height * 0.5f, 0.0f);
+                    spread = Vector3f(4.0f, height * 0.15f, 4.0f);
                 });
             if (!targetCentre)
             {

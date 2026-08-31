@@ -348,6 +348,14 @@ namespace rwe
         char unitSpawnText[20]{""};
         int unitSpawnPlayer{0};
 
+        /** Debug unit placer: the type picked from the list, and whether clicks place it. */
+        std::string unitSpawnType;
+        char unitSpawnFilter[32]{""};
+        bool unitSpawnOnClick{false};
+        bool unitSpawnComplete{true};
+        /** Every unit type in the loaded data, sorted, built once on first use. */
+        std::vector<std::string> allUnitTypes;
+
         std::mutex playingUnitChannelsLock;
         std::unordered_set<int> playingUnitChannels;
 
@@ -601,6 +609,12 @@ namespace rwe
         void renderOverlay();
 
         void renderMinimap();
+
+        /** The debug window's unit placer: pick a type and an owner, then drop units on the map. */
+        void renderUnitPlacer();
+
+        /** Places one unit of the placer's current type and owner, finished and ready to act. */
+        void placeDebugUnit(const SimVector& position);
 
         void renderWorld();
 

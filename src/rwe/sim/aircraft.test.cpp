@@ -258,7 +258,7 @@ namespace rwe
 
         auto builderId = spawnGroundUnit(sim, "builder", player, SimVector(-60_ss, 0_ss, 0_ss), script);
 
-        SECTION("an ordinary building is twisted up to five degrees either way")
+        SECTION("an ordinary building is twisted up to ten degrees either way")
         {
             sim.getUnitState(builderId).orders.push_back(BuildOrder("STRUCTURE", SimVector(40_ss, 0_ss, 0_ss)));
             std::optional<UnitId> structureId;
@@ -274,8 +274,11 @@ namespace rwe
                 }
             }
             REQUIRE(structureId.has_value());
-            const auto fiveDegrees = SimAngle(911);
-            REQUIRE(angleBetween(SimAngle(0), sim.getUnitState(*structureId).rotation).value <= fiveDegrees.value);
+            // Ten degrees is 1/36 of a 16-bit turn, about 1820.
+            const auto tenDegrees = SimAngle(1821);
+            auto twist = angleBetween(SimAngle(0), sim.getUnitState(*structureId).rotation);
+            REQUIRE(twist.value <= tenDegrees.value);
+            REQUIRE(twist.value > 0);
         }
 
         SECTION("a factory stays square so its pad lines up")
@@ -324,6 +327,10 @@ namespace rwe
         bool ringDistanceOk = true;
         float minRing = 1000.0f;
         float maxRing = 0.0f;
+        auto steepestTransitRoll = 0_ss;
+        auto steepestStationRoll = 0_ss;
+        bool rolledLeft = false;
+        bool rolledRight = false;
         for (int i = 0; i < 1500; ++i)
         {
             sim.tick();
@@ -338,6 +345,24 @@ namespace rwe
                 continue;
             }
             const auto& orbit = *plane.airWorkOrbit;
+            auto roll = std::get<UnitPhysicsInfoAir>(plane.physics).roll;
+            if (orbit.pointIndex >= 0)
+            {
+                if (orbit.onStation)
+                {
+                    // Give the bank a moment to level out after arriving.
+                    if (sim.gameTime >= orbit.stationReachedAt + GameTime(30))
+                    {
+                        steepestStationRoll = rweMax(steepestStationRoll, rweAbs(roll));
+                    }
+                }
+                else
+                {
+                    steepestTransitRoll = rweMax(steepestTransitRoll, rweAbs(roll));
+                    rolledLeft = rolledLeft || roll < SimScalar(-0.1f);
+                    rolledRight = rolledRight || roll > SimScalar(0.1f);
+                }
+            }
             if (orbit.pointIndex < 0 && orbit.onStation)
             {
                 sawCentreStage = true;
@@ -362,6 +387,12 @@ namespace rwe
 
         REQUIRE(sawCentreStage);
         REQUIRE(stationsVisited.size() >= 2);
+        // It banks on the way between stations and sits level once parked.
+        REQUIRE(steepestTransitRoll > SimScalar(0.2f));
+        REQUIRE(steepestStationRoll < SimScalar(0.15f));
+        // The bank goes both ways over a hop: over into the move, back the
+        // other way as it settles onto the next station.
+        REQUIRE((rolledLeft && rolledRight));
         // After the random first station, movement is one step clockwise at a time.
         for (std::size_t i = 1; i < stationsVisited.size(); ++i)
         {

@@ -78,9 +78,11 @@ namespace rwe
             return;
         }
 
-        // The slow work facing only holds while the work pattern asserts it
-        // afresh each tick; any other business flies and turns normally.
+        // The slow work facing and the work bank only hold while the work
+        // pattern asserts them afresh each tick; any other business flies
+        // level and turns normally.
         unitInfo.state->slowFacePoint = std::nullopt;
+        unitInfo.state->desiredRoll = std::nullopt;
 
         // Clear steering targets.
         match(
@@ -842,6 +844,16 @@ namespace rwe
                 p.currentSpeed = computeNewGroundUnitSpeed(sim->terrain, *unitInfo.state, *unitInfo.definition, p, sim->getAdHocMovementClass(unitInfo.definition->movementCollisionInfo).maxSlope);
             },
             [&](UnitPhysicsInfoAir& p) {
+                // Ease the bank towards whatever the current task wants, and
+                // back to level when nothing wants anything.
+                p.previousRoll = p.roll;
+                auto wanted = unitInfo.state->desiredRoll.value_or(0_ss);
+                // Brisk enough that the bank develops and unwinds inside one
+                // short hop between stations.
+                const SimScalar rollStep(0.09f);
+                auto rollDelta = wanted - p.roll;
+                p.roll = p.roll + rweMax(-rollStep, rweMin(rollStep, rollDelta));
+
                 match(
                     p.movementState,
                     [&](AirMovementStateFlying& m) {
@@ -1233,6 +1245,9 @@ namespace rwe
         constexpr unsigned int WorkOrbitPointDwellTicks = 4u * static_cast<unsigned int>(SimTicksPerSecond);
         constexpr int WorkOrbitPointCount = 8;
 
+        /** The ring is flown a quarter wider than the job itself, so the aircraft stands clear of it. */
+        const SimScalar WorkOrbitRadiusScale(1.25f);
+
         /** The offset of ring station k: due north first, then clockwise. */
         SimVector workOrbitPointOffset(int pointIndex, SimScalar radius)
         {
@@ -1252,17 +1267,17 @@ namespace rwe
         {
             // Assisting or repairing a unit: stand off a little further, and
             // never tighter than a floor — most units are small.
-            return rweMax(56_ss, halfDiagonal * 1.5_ssf);
+            return rweMax(56_ss, halfDiagonal * 1.5_ssf) * WorkOrbitRadiusScale;
         }
         // A building: the ring passes through the corners of its footprint.
-        return rweMax(40_ss, halfDiagonal);
+        return rweMax(40_ss, halfDiagonal) * WorkOrbitRadiusScale;
     }
 
     SimScalar UnitBehaviorService::workOrbitRadius(const FeatureDefinition& featureDefinition) const
     {
         auto halfX = SimScalar(static_cast<float>(featureDefinition.footprintX)) * MapTerrain::HeightTileWidthInWorldUnits / 2_ss;
         auto halfZ = SimScalar(static_cast<float>(featureDefinition.footprintZ)) * MapTerrain::HeightTileHeightInWorldUnits / 2_ss;
-        return rweMax(40_ss, rweSqrt((halfX * halfX) + (halfZ * halfZ)));
+        return rweMax(40_ss, rweSqrt((halfX * halfX) + (halfZ * halfZ))) * WorkOrbitRadiusScale;
     }
 
     bool UnitBehaviorService::prepareBuilderForWork(UnitInfo unitInfo, const SimVector& workPosition, SimScalar orbitRadius)
@@ -1324,8 +1339,11 @@ namespace rwe
         if (!orbit.onStation)
         {
             SimVector toStation(station.x - unitInfo.state->position.x, 0_ss, station.z - unitInfo.state->position.z);
-            auto tolerance = rweMax(16_ss, unitInfo.definition->maxVelocity * 4_ss);
-            if (toStation.lengthSquared() <= tolerance * tolerance)
+            auto remaining = toStation.length();
+            // Tight, because the aircraft brakes to a stop on its station
+            // rather than flying through it.
+            auto tolerance = rweMax(10_ss, unitInfo.definition->maxVelocity * 2_ss);
+            if (remaining <= tolerance)
             {
                 orbit.onStation = true;
                 orbit.stationReachedAt = sim->gameTime;
@@ -1333,6 +1351,27 @@ namespace rwe
             else
             {
                 flying->targetPosition = station;
+
+                // Bank into the hop and back out of it: heeling over as it
+                // pulls away from one station and rolling the other way as it
+                // comes up on the next, so it looks like it is steadying
+                // itself onto the spot rather than sliding there flat.
+                if (orbit.transitDistance <= 0_ss)
+                {
+                    orbit.transitDistance = remaining;
+                }
+                // The hop ends as soon as it is within the arrival tolerance,
+                // so the bank has to run its course over the stretch actually
+                // flown; measured over the full gap it would still be heeled
+                // over one way when it got there.
+                auto flown = rweMax(1_ss, orbit.transitDistance - tolerance);
+                auto travelled = rweMax(0_ss, orbit.transitDistance - remaining);
+                auto progress = rweMin(1_ss, travelled / flown);
+                // One full cycle over the hop: over one way, level at the
+                // halfway point, over the other way, level on arrival.
+                auto phase = SimAngle(static_cast<uint16_t>(simScalarToFloat(progress) * 65535.0f));
+                const SimScalar maxRoll(0.45f);
+                unitInfo.state->desiredRoll = sin(phase) * maxRoll;
             }
         }
 
@@ -1356,6 +1395,7 @@ namespace rwe
                     orbit.pointIndex = (orbit.pointIndex + 1) % WorkOrbitPointCount;
                 }
                 orbit.onStation = false;
+                orbit.transitDistance = 0_ss;
             }
         }
 

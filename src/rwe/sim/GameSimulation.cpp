@@ -2640,7 +2640,7 @@ namespace rwe
                     continue;
                 }
 
-                // Buildings go up with a slight random twist, up to five
+                // Buildings go up with a slight random twist, up to ten
                 // degrees either way, so a base looks placed by hand rather
                 // than stamped out on a grid. Factories are left square:
                 // their exit pads and roll-off assume the stock facing.
@@ -2648,9 +2648,9 @@ namespace rwe
                 const auto& newUnitDefinition = unitDefinitions.at(s->unitType);
                 if (!newUnitDefinition.isMobile && !newUnitDefinition.builder)
                 {
-                    // Five degrees is 1/72 of a turn.
-                    const int fiveDegrees = 65536 / 72;
-                    std::uniform_int_distribution<int> twist(-fiveDegrees, fiveDegrees);
+                    // Ten degrees is 1/36 of a turn.
+                    const int tenDegrees = 65536 / 36;
+                    std::uniform_int_distribution<int> twist(-tenDegrees, tenDegrees);
                     spawnRotation = SimAngle(static_cast<uint16_t>(twist(rng)));
                 }
 

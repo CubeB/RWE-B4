@@ -263,11 +263,24 @@ namespace rwe
 
     Matrix4f unitRenderTransform(const UnitState& unit, const UnitDefinition& unitDefinition, const Vector3f& position, float rotation, float frac)
     {
-        // Aircraft are drawn level: yaw only, no bank or pitch.
-        (void)unit;
-        (void)unitDefinition;
-        (void)frac;
-        return Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
+        auto transform = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
+
+        // Aircraft fly level except where a task asks for a bank — the
+        // construction aircraft heeling over between the stations of its
+        // work pattern.
+        if (unitDefinition.canFly)
+        {
+            if (auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unit.physics))
+            {
+                auto roll = airPhysics->previousRoll.value + ((airPhysics->roll.value - airPhysics->previousRoll.value) * frac);
+                if (roll != 0.0f)
+                {
+                    transform = transform * Matrix4f::rotationZ(roll);
+                }
+            }
+        }
+
+        return transform;
     }
 
     Matrix4f getPieceTransformForRender(const std::string& pieceName, const UnitModelDefinition& modelDefinition, const std::vector<UnitMesh>& pieces, float frac)
@@ -834,6 +847,15 @@ namespace rwe
         // Particles step once per tick; draw them part-way along this tick's
         // step so the stream flows at the frame rate rather than at 30 Hz.
         auto position = particle.position + (particle.velocity * frac);
+
+        // Nudge the spray towards the camera so the structure it is being
+        // poured into never swallows the last stretch of it. The world camera
+        // maps depth to world Y and screen height to (0.5 * y - z), so raising
+        // y by d and z by d/2 moves the quad forward in the depth buffer
+        // without shifting it on screen by a single pixel. The nudge is small
+        // enough that an aircraft overhead still hides the stream behind it.
+        const float depthNudge = 24.0f;
+        position = position + Vector3f(0.0f, depthNudge, depthNudge / 2.0f);
 
         // A flat square: the camera looks straight down (with a cabinet skew
         // for height), so this reads as a screen-aligned pixel block.
