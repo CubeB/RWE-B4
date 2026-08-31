@@ -725,6 +725,9 @@ namespace rwe
             [&](const ProjectilePhysicsTypeTracking&) {
                 return (fireInfo->targetPosition - firingPoint).normalizedOr(UnitState::toDirection(unit.rotation));
             },
+            [&](const ProjectilePhysicsTypeSelfPropelled&) {
+                return (fireInfo->targetPosition - firingPoint).normalizedOr(UnitState::toDirection(unit.rotation));
+            },
             [&](const ProjectilePhysicsTypeBallistic&) {
                 return toDirection(fireInfo->heading + unit.rotation, -fireInfo->pitch);
             },
@@ -774,7 +777,7 @@ namespace rwe
 
         auto targetUnit = std::get_if<UnitId>(&attackInfo->target);
         auto targetUnitOption = targetUnit == nullptr ? std::optional<UnitId>() : std::make_optional(*targetUnit);
-        sim->spawnProjectile(unit.owner, *weapon, firingPoint, direction, (fireInfo->targetPosition - firingPoint).length(), targetUnitOption, id, inheritedVelocity);
+        sim->spawnProjectile(unit.owner, *weapon, firingPoint, direction, (fireInfo->targetPosition - firingPoint).length(), targetUnitOption, id, inheritedVelocity, fireInfo->targetPosition);
 
         sim->events.push_back(FireWeaponEvent{weapon->weaponType, fireInfo->burstsFired, firingPoint});
 

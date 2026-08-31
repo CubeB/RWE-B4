@@ -52,6 +52,31 @@ namespace rwe
         /** The unit that this projectile is tracking, if any. */
         std::optional<UnitId> targetUnit;
 
+        /**
+         * Where the shot was aimed. A self-propelled missile that does not
+         * track falls back on this once it has turned over, and a cruise
+         * missile measures its run-in against it.
+         */
+        std::optional<SimVector> targetPosition;
+
+        /**
+         * Attitude and speed of a self-propelled missile. TA turns these and
+         * works the velocity out from them, so a missile flies where it points
+         * rather than where it was going.
+         */
+        SimAngle heading{0};
+        SimAngle pitch{0};
+        SimScalar speed{0};
+
+        /** The tick the motor stops on. Unlike dieOnFrame this does not kill the projectile. */
+        std::optional<GameTime> motorOutFrame;
+
+        /** A two-phase missile has finished its blind launch and is steering. */
+        bool secondPhase{false};
+
+        /** The motor has stopped and the rest of the flight is a ballistic coast. */
+        bool motorOut{false};
+
         SimVector getBackPosition(SimScalar duration) const;
 
         SimVector getPreviousBackPosition(SimScalar duration) const;

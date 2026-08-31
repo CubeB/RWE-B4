@@ -96,6 +96,13 @@ namespace rwe
             [&](const ProjectilePhysicsTypeTracking&) {
                 return computeLineOfSightHeadingAndPitch(rotation, from, to);
             },
+            [&](const ProjectilePhysicsTypeSelfPropelled&) {
+                // A missile is launched pointing straight at the target, and the
+                // launcher aims along the same line. A vertical launch throws that
+                // away and leaves the tube upwards, but the original still runs the
+                // aim script first, so the mount still has to swing round.
+                return computeLineOfSightHeadingAndPitch(rotation, from, to);
+            },
             [&](const ProjectilePhysicsTypeBallistic&) {
                 return computeBallisticHeadingAndPitch(rotation, from, to, speed, gravity, zOffset);
             },

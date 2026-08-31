@@ -169,7 +169,12 @@ namespace rwe
             {"position", dumpJson(projectile.position)},
             {"origin", dumpJson(projectile.origin)},
             {"velocity", dumpJson(projectile.velocity)},
-            {"damageRadius", dumpJson(projectile.damageRadius)}};
+            {"damageRadius", dumpJson(projectile.damageRadius)},
+            {"heading", dumpJson(projectile.heading)},
+            {"pitch", dumpJson(projectile.pitch)},
+            {"speed", dumpJson(projectile.speed)},
+            {"secondPhase", projectile.secondPhase},
+            {"motorOut", projectile.motorOut}};
 
         for (const auto& [t, damage] : projectile.damage)
         {

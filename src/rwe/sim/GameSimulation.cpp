@@ -1684,13 +1684,40 @@ namespace rwe
         pathRequests.push_back(PathRequest{unitId});
     }
 
-    Projectile GameSimulation::createProjectileFromWeapon(
-        PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity)
+    /**
+     * The direction a missile with this attitude is pointing. TA builds its
+     * velocity this way round every tick -- pitch first, then heading -- so a
+     * missile always flies exactly where its nose points (0x49BA74).
+     */
+    SimVector toMissileDirection(SimAngle heading, SimAngle pitch)
     {
-        return createProjectileFromWeapon(owner, weapon.weaponType, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity);
+        auto horizontal = cos(pitch);
+        return SimVector(sin(heading) * horizontal, sin(pitch), cos(heading) * horizontal);
     }
 
-    Projectile GameSimulation::createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity)
+    /**
+     * TA hangs a cruise missile on two constants of its own rather than on
+     * anything the weapon says: it holds 700 world units up and only gives up
+     * the cruise for the target once it is within 1024 of where it was aimed
+     * (0x49B3E0).
+     */
+    static const SimScalar CruiseAltitude = 700_ss;
+    static const SimScalar CruiseHandoverDistance = 1024_ss;
+
+    /**
+     * How far off the nose the target may get before a `burnblow` missile gives
+     * up and detonates where it is: 27000 of a 65536 turn, a little under 150
+     * degrees (0x49B5AA).
+     */
+    static const SimAngle BurnBlowAbortAngle = SimAngle(27000);
+
+    Projectile GameSimulation::createProjectileFromWeapon(
+        PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition)
+    {
+        return createProjectileFromWeapon(owner, weapon.weaponType, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity, targetPosition);
+    }
+
+    Projectile GameSimulation::createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition)
     {
         const auto& weaponDefinition = weaponDefinitions.at(weaponType);
 
@@ -1734,13 +1761,63 @@ namespace rwe
         projectile.groundBounce = weaponDefinition.groundBounce;
 
         projectile.targetUnit = targetUnit;
+        projectile.targetPosition = targetPosition;
+
+        if (auto selfProp = std::get_if<ProjectilePhysicsTypeSelfPropelled>(&weaponDefinition.physicsType))
+        {
+            // A missile leaves at `startvelocity`; failing that it leaves at the
+            // top speed if it has no motor to build up with, and otherwise from a
+            // standstill (0x49C980). A vertical launch points straight up and is
+            // not moving at all, so the whole climb comes out of the motor
+            // (0x49CC20).
+            if (selfProp->startVelocity != 0_ss)
+            {
+                projectile.speed = selfProp->startVelocity;
+            }
+            else if (selfProp->acceleration == 0_ss)
+            {
+                projectile.speed = selfProp->maxVelocity;
+            }
+            else
+            {
+                projectile.speed = 0_ss;
+            }
+
+            if (selfProp->vLaunch)
+            {
+                projectile.heading = SimAngle(0);
+                projectile.pitch = QuarterTurn;
+                projectile.velocity = SimVector(0_ss, 0_ss, 0_ss);
+            }
+            else
+            {
+                auto flat = SimVector(direction.x, 0_ss, direction.z);
+                projectile.heading = UnitState::toRotation(flat);
+                projectile.pitch = atan2(direction.y, flat.length());
+                projectile.velocity = toMissileDirection(projectile.heading, projectile.pitch) * projectile.speed;
+            }
+
+            // The burn is `range / weaponvelocity` ticks -- how long the missile
+            // would take to fly its whole range at the speed cap -- unless the
+            // weapon says `noautorange`, in which case it is `weapontimer`, and
+            // that is what times a vertical launch's climb (0x49C920). Running
+            // out is not death: without `burnblow` the missile coasts on, which
+            // is why one fired at the far edge of its range arrives unguided.
+            auto burn = weaponDefinition.weaponTimer.value_or(GameTime(0));
+            if (selfProp->autoRange)
+            {
+                burn = GameTime(simScalarToUInt(weaponDefinition.maxRange / selfProp->maxVelocity));
+            }
+            projectile.motorOutFrame = gameTime + burn;
+            projectile.dieOnFrame = std::nullopt;
+        }
 
         return projectile;
     }
 
-    void GameSimulation::spawnProjectile(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity)
+    void GameSimulation::spawnProjectile(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition)
     {
-        projectiles.emplace(createProjectileFromWeapon(owner, weapon, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity));
+        projectiles.emplace(createProjectileFromWeapon(owner, weapon, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity, targetPosition));
     }
 
     WinStatus GameSimulation::computeWinStatus() const
@@ -2414,6 +2491,99 @@ namespace rwe
         }
     }
 
+    std::optional<SimVector> GameSimulation::getSelfPropelledAimPoint(const Projectile& projectile, const ProjectilePhysicsTypeSelfPropelled& p)
+    {
+        // A cruise missile ignores whatever it was fired at until it is nearly
+        // there and flies at its cruise altitude over the aim point instead,
+        // which is what makes it come in flat and then drop (0x49B455).
+        if (p.cruise && projectile.targetPosition)
+        {
+            if (projectile.position.distanceSquared(*projectile.targetPosition) > CruiseHandoverDistance * CruiseHandoverDistance)
+            {
+                return SimVector(projectile.targetPosition->x, CruiseAltitude, projectile.targetPosition->z);
+            }
+        }
+
+        if (projectile.targetUnit)
+        {
+            if (auto targetUnit = tryGetUnitState(*projectile.targetUnit); targetUnit)
+            {
+                return targetUnit->get().position;
+            }
+        }
+
+        return projectile.targetPosition;
+    }
+
+    bool GameSimulation::updateSelfPropelledProjectile(Projectile& projectile, const ProjectilePhysicsTypeSelfPropelled& p)
+    {
+        if (projectile.motorOutFrame && *projectile.motorOutFrame <= gameTime)
+        {
+            if (p.burnBlow)
+            {
+                // Torpedoes and depth charges go off at the end of their run
+                // rather than sinking to the seabed (0x49BAC3).
+                return false;
+            }
+
+            // TA takes one tick of gravity on the changeover without rebuilding
+            // the velocity from the attitude, so a vertical launch is still
+            // climbing on the tick it turns over.
+            projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
+
+            if (p.twoPhase && !projectile.secondPhase)
+            {
+                projectile.secondPhase = true;
+                projectile.motorOutFrame = gameTime + p.flightTime;
+                if (!p.tracks)
+                {
+                    // A missile that only has guidance, not tracking, finishes at
+                    // the place it was aimed at and stops caring who was standing
+                    // there (0x49BB34).
+                    projectile.targetUnit = std::nullopt;
+                }
+            }
+            else
+            {
+                projectile.motorOut = true;
+            }
+            return true;
+        }
+
+        if (projectile.speed < p.maxVelocity)
+        {
+            projectile.speed = rweMin(projectile.speed + p.acceleration, p.maxVelocity);
+        }
+
+        // The launch phase of a two-phase missile is flown blind whatever
+        // `guidance` says; the second phase steers whether it says so or not.
+        if (p.twoPhase ? projectile.secondPhase : p.guidance)
+        {
+            if (auto aimPoint = getSelfPropelledAimPoint(projectile, p); aimPoint)
+            {
+                auto toTarget = *aimPoint - projectile.position;
+                auto flat = SimVector(toTarget.x, 0_ss, toTarget.z);
+                auto wantHeading = UnitState::toRotation(flat);
+                auto wantPitch = atan2(toTarget.y, flat.length());
+
+                // A `burnblow` weapon that has let the target get round behind
+                // it gives up and detonates rather than turning after it.
+                auto lostTheTarget = angleBetween(projectile.heading, wantHeading).value > BurnBlowAbortAngle.value
+                    || angleBetween(projectile.pitch, wantPitch).value > BurnBlowAbortAngle.value;
+                if (p.burnBlow && lostTheTarget)
+                {
+                    return false;
+                }
+
+                projectile.heading = turnTowards(projectile.heading, wantHeading, p.turnRate);
+                projectile.pitch = turnTowards(projectile.pitch, wantPitch, p.turnRate);
+            }
+        }
+
+        projectile.velocity = toMissileDirection(projectile.heading, projectile.pitch) * projectile.speed;
+        return true;
+    }
+
     void GameSimulation::updateProjectiles()
     {
         for (auto& projectileEntry : projectiles)
@@ -2431,6 +2601,7 @@ namespace rwe
                 continue;
             }
 
+            bool detonated = false;
             match(
                 weaponDefinition.physicsType,
                 [&](const ProjectilePhysicsTypeBallistic&) {
@@ -2458,7 +2629,18 @@ namespace rwe
                     }
                     auto vectorToTarget = (targetUnit->get().position - projectile.position);
                     projectile.velocity = rotateTowards(projectile.velocity, vectorToTarget, t.turnRate);
+                },
+                [&](const ProjectilePhysicsTypeSelfPropelled& p) {
+                    detonated = !updateSelfPropelledProjectile(projectile, p);
                 });
+
+            if (detonated)
+            {
+                doProjectileImpact(projectile, ImpactType::Normal);
+                projectile.isDead = true;
+                events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, ProjectileDiedEvent::DeathType::NormalImpact});
+                continue;
+            }
 
             projectile.previousPosition = projectile.position;
             projectile.position += projectile.velocity;
