@@ -88,6 +88,10 @@ read out of `TotalA.exe` instead of guessed at.
   the flight model, fog of war and line of sight, the nanolathe and construction
   display, effects and render order, plus the FBI field offsets. It also records
   where RWE **deliberately** differs, so those do not get "corrected" back.
+- `docs/TOTALA-EXE-MISSIONS.md` — how aircraft decide *where to go* when
+  attacking: the mission name table and its handlers, the bomber attack run,
+  the gunship standoff ring, and what `hoverattack` and `maneuverleashlength`
+  actually gate.
 - `tools/exe/` — the probe scripts that produced them, and the method.
 
 Read the findings before reimplementing anything TA-facing. Several plausible

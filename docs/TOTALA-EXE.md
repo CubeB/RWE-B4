@@ -9,6 +9,12 @@ This is a findings document. It records addresses, constants and algorithms —
 the facts you need to reimplement a behaviour — not disassembly listings. Short
 instruction excerpts appear only where the exact operand order is the finding.
 
+Aircraft *attack* behaviour — which point an aircraft is sent to, rather than
+how it flies there — lives in a companion document,
+[TOTALA-EXE-MISSIONS.md](TOTALA-EXE-MISSIONS.md): the mission table, the bomber
+attack run, the gunship pendulum, and what `hoverattack` and
+`maneuverleashlength` really do.
+
 ## The binary
 
 | | |
@@ -383,6 +389,9 @@ original:
   leaves the frame's ragged edge with no neighbouring tile to cover it, and a
   strip of map shows through at the border.
 - **No `BrakeRate` nose re-aim and no pitch** — see §1.
+- **A gunship's nose follows its flight path**, so it crosses its ring side-on.
+  The original does the same, and holds its aim regardless of where the nose
+  points; RWE relies on the same thing, so a gunship fires across the swing.
 
 ---
 
@@ -396,3 +405,10 @@ original:
 - `hitDensity` is parsed (100 for solid things, 5–10 for foliage, 0 for smudges)
   and is very likely the pass-through chance for projectiles hitting features,
   but this has not been confirmed in the binary.
+- The **strafing pass** (`AirToGround`, `0x412710`) is decoded but not ported:
+  RWE's fighters still fly the generic attack run. See the missions document §5.
+- **`maneuverleashlength`** is now parsed but not enforced. In the original it
+  aborts an attack when the aircraft strays that far from where it was standing
+  when the order was given — missions document §8.
+- The exact tick at which the original commits a **bomb release** inside its
+  weapon code is still not pinned down; RWE uses its own bombsight.
