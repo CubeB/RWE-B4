@@ -303,6 +303,12 @@ namespace rwe
         return currentVelocity - (currentDirection * deceleration);
     }
 
+    /**
+     * Range at which an aircraft's arrival profile stops steepening, in world
+     * units. Eight in the original.
+     */
+    static constexpr SimScalar AirArrivalTaperDistance = 8_ss;
+
     SimVector computeNewAirUnitVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateFlying& physics)
     {
         if (!physics.targetPosition)
@@ -310,30 +316,40 @@ namespace rwe
             return decelerate(physics.currentVelocity, unitDefinition.acceleration);
         }
 
-        auto rawDirection = *physics.targetPosition - unit.position;
-        auto distanceSquared = rawDirection.lengthSquared();
-        auto direction = rawDirection.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
+        // Drag, applied before steering exactly as the original does. This is
+        // the only thing holding an aircraft to MaxVelocity: it settles where
+        // the acceleration it adds each tick balances the speed drag takes
+        // away, which is MaxVelocity exactly, so nothing below needs a clamp.
+        auto drag = unitDefinition.maxVelocity > 0_ss
+            ? 1_ss - (unitDefinition.acceleration / unitDefinition.maxVelocity)
+            : 1_ss;
+        auto currentVelocity = physics.currentVelocity * drag;
 
-        auto currentSpeedSquared = physics.currentVelocity.lengthSquared();
-        auto decelerationDistance = currentSpeedSquared / (2_ss * unitDefinition.acceleration);
+        // The original's arrival profile: steer for sqrt(2 * Acceleration *
+        // distance) towards the target, so the aircraft is always travelling
+        // exactly as fast as it can still shed before it gets there. Holding
+        // the range at a floor of AirArrivalTaperDistance turns the last few
+        // units into a straight run-down to a stop, instead of a curve that
+        // would demand ever harder braking the closer it came.
+        auto toTarget = *physics.targetPosition - unit.position;
+        auto profileRange = rweMax(toTarget.length(), AirArrivalTaperDistance);
+        auto targetVelocity = toTarget * rweSqrt((2_ss * unitDefinition.acceleration) / profileRange);
 
-        if (distanceSquared > (decelerationDistance * decelerationDistance))
+        // Move at most one tick's acceleration towards the profile. Once the
+        // aircraft is on the profile this step goes slack of its own accord,
+        // which is what stops it rocking. The version this replaces was
+        // bang-bang: it spent every tick of every trip at either full throttle
+        // or full braking, and chattered between the two whenever it sat near
+        // its destination. An aircraft's bank is computed from its change in
+        // velocity, so that chatter showed up as a visible rock -- worst on a
+        // construction aircraft, which holds station seven times an orbit.
+        auto velocityDelta = targetVelocity - currentVelocity;
+        if (velocityDelta.lengthSquared() > (unitDefinition.acceleration * unitDefinition.acceleration))
         {
-            auto targetVelocity = direction * unitDefinition.maxVelocity;
-            auto velocityDelta = targetVelocity - physics.currentVelocity;
-            auto deltaDirection = velocityDelta.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
+            velocityDelta = velocityDelta.normalized() * unitDefinition.acceleration;
+        }
 
-            auto newVelocity = physics.currentVelocity + (deltaDirection * unitDefinition.acceleration);
-            if (newVelocity.lengthSquared() > (unitDefinition.maxVelocity * unitDefinition.maxVelocity))
-            {
-                newVelocity = newVelocity.normalized() * unitDefinition.maxVelocity;
-            }
-            return newVelocity;
-        }
-        else
-        {
-            return decelerate(physics.currentVelocity, unitDefinition.acceleration);
-        }
+        return currentVelocity + velocityDelta;
     }
 
     SimScalar attackRunTurnRadius(const UnitDefinition& unitDefinition)

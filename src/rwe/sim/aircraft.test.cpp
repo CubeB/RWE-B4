@@ -337,6 +337,8 @@ namespace rwe
         std::vector<SimAngle> bearingsSeen;
         bool ringDistanceOk = true;
         auto steepestRoll = 0_ss;
+        int rollReversals = 0;
+        int lastRollSign = 0;
         float minRing = 1000.0f;
         float maxRing = 0.0f;
         for (int i = 0; i < 1500; ++i)
@@ -356,6 +358,22 @@ namespace rwe
             if (auto air = std::get_if<UnitPhysicsInfoAir>(&plane.physics))
             {
                 steepestRoll = rweMax(steepestRoll, rweAbs(air->roll));
+
+                // How often the bank swaps sides. A hop leans over on the
+                // way out and back the other way as it settles, so about one
+                // reversal a station is right. A great many means the
+                // aircraft is chattering between full throttle and full
+                // braking instead of flying an arrival profile, which is
+                // what made construction aircraft visibly shake on station.
+                if (rweAbs(air->roll) > SimScalar(0.05f))
+                {
+                    auto sign = air->roll > 0_ss ? 1 : -1;
+                    if (lastRollSign != 0 && sign != lastRollSign)
+                    {
+                        ++rollReversals;
+                    }
+                    lastRollSign = sign;
+                }
             }
 
             // Once it has had time to reach the ring, it should be on it.
@@ -387,6 +405,15 @@ namespace rwe
         // sideways — and nothing like as far as a fighter would.
         REQUIRE(steepestRoll > SimScalar(0.05f));
         REQUIRE(steepestRoll < SimScalar(0.8f));
+
+        // And it holds each lean instead of shaking through it. Ten-odd
+        // stations pass in this many ticks, each worth about one reversal.
+        // The bang-bang velocity law this replaced spent every tick at
+        // either full throttle or full braking and chattered between the two
+        // whenever it sat near a station, which ran to some twenty reversals
+        // apiece.
+        CAPTURE(rollReversals);
+        REQUIRE(rollReversals < 40);
     }
 
     TEST_CASE("an aircraft's bank comes from the acceleration it is making", "[aircraft]")
