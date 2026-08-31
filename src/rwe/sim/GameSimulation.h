@@ -411,18 +411,10 @@ namespace rwe
         /**
          * Removes a feature and, if a replacement definition is supplied, places a
          * feature of that type at the same position and rotation. Used wherever a
-         * feature turns into a lesser one: burning out into its featureBurnt form,
-         * or being shot to pieces into its featureDead form.
+         * feature turns into a lesser one: burning out into its featureBurnt form.
          * No-op if the id is stale; the replacement is dropped if it does not fit.
          */
         void replaceFeature(FeatureId id, const std::optional<FeatureDefinitionId>& replacement);
-
-        /**
-         * Knocks hit points off a feature. When they run out the feature is
-         * replaced by its featureDead form, or removed if it has none.
-         * Indestructible features and zero damage are ignored.
-         */
-        void applyDamageToFeature(FeatureId featureId, unsigned int damagePoints);
 
         /**
          * Applies workAmount of reclaim work to a feature on behalf of a player,

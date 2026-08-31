@@ -208,9 +208,10 @@ namespace rwe
             return std::nullopt;
         }
 
-        // Features are placed at full health. TA keeps a feature's hit points in
-        // its `damage` key; features that omit it (most vegetation) come out of
-        // the TDF reader with 1, so any hit at all destroys them.
+        // TA keeps a feature's hit points in its `damage` key; features that omit
+        // it (most vegetation) come out of the TDF reader with 1. Nothing spends
+        // these points -- weapons do not damage features -- they only tell
+        // computeFeatureReclaimWork how much bulk there is to haul away.
         newFeature.hitPoints = featureDefinition.damage;
 
         auto featureId = FeatureId(features.emplace(std::move(newFeature)));
@@ -296,11 +297,11 @@ namespace rwe
         // for wreckage -- a fusion plant's corpse is mostly a hauling job, 4104 +
         // 620 = 4724 -- while bulk alone still costs real time on scenery.
         //
-        // Using *current* rather than maximum hit points means softening a rock up
-        // with a few shots genuinely speeds up salvaging it, and a corpse that has
-        // been shelled since it fell is quicker to clear than a fresh one. The
-        // payout is unaffected: reclaimFeature always hands over the full
-        // metal/energy, spread across whatever work total applies.
+        // The hit points read here are the feature's current ones, but nothing
+        // damages a feature: weapons leave wreckage and scenery alone, so in
+        // practice this is always the full `damage` value the definition declared.
+        // The payout does not depend on it either way: reclaimFeature always hands
+        // over the full metal/energy, spread across whatever work total applies.
         return std::max(1u, definition.metal + definition.energy + (currentHitPoints / 4u));
     }
 
@@ -347,10 +348,10 @@ namespace rwe
         }
 
         auto totalWork = computeFeatureReclaimWork(featureDefinition, feature.hitPoints);
-        // Total work shrinks if the feature is shot while it is being reclaimed.
-        // Clamping the progress already made keeps the credit below from going
-        // negative; the worst case is that the last sliver of value is not paid
-        // out, never that a player is paid twice for the same feature.
+        // Clamping the progress already made to the current total keeps the credit
+        // below from going negative should the total ever shrink mid-reclaim; the
+        // worst case is that the last sliver of value is not paid out, never that
+        // a player is paid twice for the same feature.
         auto previousProgress = std::min(totalWork, feature.reclaimProgress);
         auto newProgress = std::min(totalWork, previousProgress + workAmount);
         feature.reclaimProgress = newProgress;
@@ -404,39 +405,6 @@ namespace rwe
         {
             addFeature(MapFeature{*replacement, position, rotation});
         }
-    }
-
-    void GameSimulation::applyDamageToFeature(FeatureId featureId, unsigned int damagePoints)
-    {
-        if (damagePoints == 0)
-        {
-            // A shot that lands too far away to do anything must not flatten
-            // the zero-hit-point scenery it happens to reach.
-            return;
-        }
-
-        auto featureRef = tryGetFeature(featureId);
-        if (!featureRef)
-        {
-            return;
-        }
-
-        auto& feature = featureRef->get();
-        const auto& featureDefinition = getFeatureDefinition(feature.featureName);
-
-        if (featureDefinition.indestructible)
-        {
-            return;
-        }
-
-        if (feature.hitPoints > damagePoints)
-        {
-            feature.hitPoints -= damagePoints;
-            return;
-        }
-
-        // Out of hit points: fall back to the wreck of a wreck, or vanish.
-        replaceFeature(featureId, featureDefinition.featureDead);
     }
 
     void GameSimulation::igniteFeature(FeatureId id)
@@ -2106,18 +2074,9 @@ namespace rwe
 
         std::unordered_set<UnitId> seenUnits;
 
-        // Features hit by the blast, gathered during the sweep and damaged
-        // afterwards: destroying one edits the occupancy grid (and may place a
-        // featureDead in the same cells) which we must not do mid-traversal.
-        //
-        // Weapon damage is listed per unit armour category and features belong to
-        // none of them, so they take the weapon's DEFAULT damage -- the same number
-        // a unit with no category-specific entry would take. A weapon that declares
-        // no DEFAULT has no number that applies to scenery, so it leaves it alone
-        // (rather than throwing, which is what Projectile::getDamage would do).
-        std::vector<FeatureId> seenFeatures;
-        auto defaultDamageIt = projectile.damage.find("DEFAULT");
-        auto rawFeatureDamage = defaultDamageIt == projectile.damage.end() ? 0u : defaultDamageIt->second;
+        // Blasts hurt units only. Wreckage and scenery are not damaged by weapons:
+        // a wreck stays put until somebody reclaims it, and terrain features are
+        // only ever removed by reclaim or by fire (see updateBurningFeatures).
 
         auto region = GridRegion::fromCoordinates(minCell, maxCell);
 
@@ -2134,13 +2093,8 @@ namespace rwe
               return;
           }
 
-          // check if a unit (or feature) is there
+          // check if a unit is there
           auto occupiedType = occupiedGrid.get(coords);
-
-          if (auto f = occupiedType.featureId; rawFeatureDamage > 0 && f && std::find(seenFeatures.begin(), seenFeatures.end(), *f) == seenFeatures.end())
-          {
-              seenFeatures.push_back(*f);
-          }
 
           auto u = occupiedType.mobileUnitId;
           if (!u && occupiedType.buildingInfo && !occupiedType.buildingInfo->passable)
@@ -2180,49 +2134,6 @@ namespace rwe
           auto rawDamage = projectile.getDamage(unit.unitType);
           auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * damageScale);
           applyDamage(*u, scaledDamage, projectile.attacker); });
-
-        // Apply damage to features caught in the blast, with the same linear
-        // falloff over damageRadius that units get.
-        //
-        // Note on hitDensity: it does *not* scale incoming damage. Checked against
-        // the extracted TA data: hitdensity=0 appears on 179 features and every one
-        // of them is blocking=0 (smudges, steam vents), while every corpse and
-        // every rock is hitdensity=100 and foliage sits at 5-10. It tracks how
-        // solid a thing is for collision purposes, not how much damage it absorbs;
-        // treating it as a damage multiplier would make blocking=0 scenery
-        // invulnerable rather than transparent. Left out deliberately.
-        for (auto featureId : seenFeatures)
-        {
-            auto featureRef = tryGetFeature(featureId);
-            if (!featureRef)
-            {
-                continue;
-            }
-            const auto& feature = featureRef->get();
-            const auto& featureDefinition = getFeatureDefinition(feature.featureName);
-            if (featureDefinition.indestructible)
-            {
-                continue;
-            }
-
-            // Measure to the feature's footprint rather than its centre, so a
-            // blast landing on the edge of a big rock hurts it properly.
-            Rectangle2x<SimScalar> featureRectangle(
-                Vector2x<SimScalar>(feature.position.x, feature.position.z),
-                Vector2x<SimScalar>(
-                    (intToSimScalar(featureDefinition.footprintX) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss,
-                    (intToSimScalar(featureDefinition.footprintZ) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
-            auto featureDistanceSquared = featureRectangle.distanceSquared(Vector2x<SimScalar>(position.x, position.z));
-            if (featureDistanceSquared > radiusSquared)
-            {
-                continue;
-            }
-
-            auto damageScale = radius <= 0_ss
-                ? 1_ss
-                : std::clamp(1_ss - (rweSqrt(featureDistanceSquared) / radius), 0_ss, 1_ss);
-            applyDamageToFeature(featureId, simScalarToUInt(SimScalar(rawFeatureDamage) * damageScale));
-        }
 
         // Apply damage to flying units
         for (const auto& flyingUnitId : flyingUnitsSet)

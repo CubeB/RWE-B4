@@ -659,7 +659,12 @@ namespace rwe
 
         void onSelectedUnitsChanged();
 
-        const UnitGuiInfo& getGuiInfo(const UnitId& unitId) const;
+        /**
+         * The unit's panel state, created on demand. Never fails: a unit can
+         * be selected before the spawn event that would normally set this up
+         * has been processed.
+         */
+        UnitGuiInfo& getGuiInfo(const UnitId& unitId);
 
         void setNextPanel(std::unique_ptr<UiPanel>&& panel);
 

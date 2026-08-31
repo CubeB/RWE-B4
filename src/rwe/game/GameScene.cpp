@@ -2886,6 +2886,22 @@ namespace rwe
             return;
         }
 
+        // The list offers every unit type the data defines, and some of those
+        // name a model or a script that did not load. Spawning one of those
+        // would take the game down, so refuse it here: this is a tool for
+        // poking at units, not a way to crash out of a game.
+        const auto& unitDefinition = simulation.unitDefinitions.at(unitSpawnType);
+        if (simulation.unitModelDefinitions.find(unitDefinition.objectName) == simulation.unitModelDefinitions.end())
+        {
+            LOG_WARN << "Cannot place " << unitSpawnType << ": its model " << unitDefinition.objectName << " is not loaded";
+            return;
+        }
+        if (simulation.unitScriptDefinitions.find(unitSpawnType) == simulation.unitScriptDefinitions.end())
+        {
+            LOG_WARN << "Cannot place " << unitSpawnType << ": its script is not loaded";
+            return;
+        }
+
         auto owner = PlayerId(unitSpawnPlayer);
         if (unitSpawnComplete)
         {
@@ -4941,8 +4957,13 @@ namespace rwe
                 }
 
                 const auto& unit = getUnit(*selectedUnit);
-                auto& guiInfo = unitGuiInfos.at(*selectedUnit);
+                auto& guiInfo = getGuiInfo(*selectedUnit);
                 auto pages = getBuildPageCount(builderGuisDatabase, unit.unitType);
+                if (pages == 0)
+                {
+                    // No build pages for this unit at all; nothing to leaf through.
+                    return;
+                }
                 guiInfo.currentBuildPage = (guiInfo.currentBuildPage + 1) % pages;
 
                 auto buildPanelDefinition = getBuilderGui(builderGuisDatabase, unit.unitType, guiInfo.currentBuildPage);
@@ -4962,9 +4983,12 @@ namespace rwe
                 }
 
                 const auto& unit = getUnit(*selectedUnit);
-                auto& guiInfo = unitGuiInfos.at(*selectedUnit);
+                auto& guiInfo = getGuiInfo(*selectedUnit);
                 auto pages = getBuildPageCount(builderGuisDatabase, unit.unitType);
-                assert(pages != 0);
+                if (pages == 0)
+                {
+                    return;
+                }
                 guiInfo.currentBuildPage = guiInfo.currentBuildPage == 0 ? pages - 1 : guiInfo.currentBuildPage - 1;
 
                 auto buildPanelDefinition = getBuilderGui(builderGuisDatabase, unit.unitType, guiInfo.currentBuildPage);
@@ -4984,7 +5008,7 @@ namespace rwe
                 }
 
                 const auto& unit = getUnit(*selectedUnit);
-                auto& guiInfo = unitGuiInfos.at(*selectedUnit);
+                auto& guiInfo = getGuiInfo(*selectedUnit);
                 guiInfo.section = UnitGuiInfo::Section::Build;
 
                 auto buildPanelDefinition = getBuilderGui(builderGuisDatabase, unit.unitType, guiInfo.currentBuildPage);
@@ -5003,7 +5027,7 @@ namespace rwe
                     sceneContext.audioService->playSound(*sounds.ordersButton);
                 }
 
-                auto& guiInfo = unitGuiInfos.at(*selectedUnit);
+                auto& guiInfo = getGuiInfo(*selectedUnit);
                 guiInfo.section = UnitGuiInfo::Section::Orders;
 
                 setNextPanel(createOrdersPanel(*selectedUnit));
@@ -5246,14 +5270,29 @@ namespace rwe
         }
     }
 
-    const UnitGuiInfo& GameScene::getGuiInfo(const UnitId& unitId) const
+    UnitGuiInfo& GameScene::getGuiInfo(const UnitId& unitId)
     {
         auto it = unitGuiInfos.find(unitId);
-        if (it == unitGuiInfos.end())
+        if (it != unitGuiInfos.end())
         {
-            throw std::logic_error("Gui info not found for unit " + std::to_string(unitId.value));
+            return it->second;
         }
-        return it->second;
+
+        // No panel state yet. This used to throw, which took the game down
+        // whenever a unit was selected before its spawn event had been
+        // processed — placing one from the debug window and clicking it
+        // straight away, for instance. Set it up on the spot instead: a
+        // builder opens on its build page, anything else on its orders.
+        auto section = UnitGuiInfo::Section::Orders;
+        if (auto unit = tryGetUnit(unitId))
+        {
+            const auto& unitDefinition = simulation.unitDefinitions.at(unit->get().unitType);
+            if (unitDefinition.builder)
+            {
+                section = UnitGuiInfo::Section::Build;
+            }
+        }
+        return unitGuiInfos.insert_or_assign(unitId, UnitGuiInfo{section, 0}).first->second;
     }
 
     void GameScene::setNextPanel(std::unique_ptr<UiPanel>&& panel)
