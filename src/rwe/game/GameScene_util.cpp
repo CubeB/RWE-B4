@@ -848,21 +848,21 @@ namespace rwe
         // step so the stream flows at the frame rate rather than at 30 Hz.
         auto position = particle.position + (particle.velocity * frac);
 
-        // Nudge the spray towards the camera so the structure it is being
-        // poured into never swallows the last stretch of it. The world camera
-        // maps depth to world Y and screen height to (0.5 * y - z), so raising
-        // y by d and z by d/2 moves the quad forward in the depth buffer
-        // without shifting it on screen by a single pixel. The nudge is small
-        // enough that an aircraft overhead still hides the stream behind it.
-        const float depthNudge = 24.0f;
-        position = position + Vector3f(0.0f, depthNudge, depthNudge / 2.0f);
+        // Nudge towards the camera, where asked, so a structure cannot swallow
+        // the spray being poured into it. The world camera maps depth to world
+        // Y and screen height to (0.5 * y - z), so raising y by d and z by d/2
+        // moves the quad forward in the depth buffer without shifting it on
+        // screen by a single pixel.
+        auto nudge = nanoRenderInfo->depthNudge;
+        position = position + Vector3f(0.0f, nudge, nudge / 2.0f);
 
         // A flat square: the camera looks straight down (with a cabinet skew
         // for height), so this reads as a screen-aligned pixel block.
-        const auto topLeft = position + Vector3f(-1.0f, 0.0f, -1.0f);
-        const auto topRight = position + Vector3f(1.0f, 0.0f, -1.0f);
-        const auto bottomLeft = position + Vector3f(-1.0f, 0.0f, 1.0f);
-        const auto bottomRight = position + Vector3f(1.0f, 0.0f, 1.0f);
+        auto s = nanoRenderInfo->halfSize;
+        const auto topLeft = position + Vector3f(-s, 0.0f, -s);
+        const auto topRight = position + Vector3f(s, 0.0f, -s);
+        const auto bottomLeft = position + Vector3f(-s, 0.0f, s);
+        const auto bottomRight = position + Vector3f(s, 0.0f, s);
 
         pushTriangle(batch.triangles, topLeft, bottomLeft, bottomRight, nanoRenderInfo->color);
         pushTriangle(batch.triangles, topLeft, bottomRight, topRight, nanoRenderInfo->color);

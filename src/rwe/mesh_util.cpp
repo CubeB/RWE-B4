@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <map>
 #include <rwe/fixed_point.h>
+#include <rwe/util/rwe_string.h>
 
 namespace rwe
 {
@@ -17,13 +18,21 @@ namespace rwe
         const std::unordered_map<std::string, Rectangle2f>& teamAtlasMap,
         const std::string& name)
     {
-        auto it = atlasMap.find(name);
+        // Everything else in the data path — archive lookup, GAF entry lookup
+        // — matches names case-insensitively, and TA's own data is
+        // inconsistent about case. Match that here too: a mismatch used to
+        // fall through to the empty region below, collapsing the whole face
+        // onto one atlas texel and painting it a flat arbitrary colour with
+        // no complaint.
+        auto key = toUpper(name);
+
+        auto it = atlasMap.find(key);
         if (it != atlasMap.end())
         {
             return TextureRegionInfo{false, it->second};
         }
 
-        auto it2 = teamAtlasMap.find(name);
+        auto it2 = teamAtlasMap.find(key);
         if (it2 != teamAtlasMap.end())
         {
             return TextureRegionInfo{true, it2->second};

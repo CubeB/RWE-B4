@@ -4432,6 +4432,9 @@ namespace rwe
                         case EmitParticleFromPieceEvent::SfxType::Wake1:
                             emitWake1FromPiece(e.unitId, e.pieceName);
                             break;
+                        case EmitParticleFromPieceEvent::SfxType::Vtol:
+                            emitVtolFromPiece(e.unitId, e.pieceName);
+                            break;
                         default:
                             throw std::logic_error("unknown particle type");
                     }
@@ -5571,10 +5574,76 @@ namespace rwe
         particle.velocity = delta / static_cast<float>(ticks);
         particle.renderType = ParticleRenderTypeNano{
             simulation.gameTime + GameTime(ticks),
-            nanoColors[pickColor(effectsRng)]};
+            nanoColors[pickColor(effectsRng)],
+            1.0f,
+            // Enough to clear the structure being built without punching
+            // through an aircraft hovering over it.
+            24.0f};
         particle.startTime = simulation.gameTime;
 
         particles.push_back(particle);
+    }
+
+    void GameScene::emitVtolFromPiece(UnitId unitId, const std::string& pieceName)
+    {
+        const auto& unit = getUnit(unitId);
+        if (!positionIsVisibleToLocalPlayer(unit.position))
+        {
+            return;
+        }
+        const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+        auto pieceTransform = toFloatMatrix(simulation.getUnitPieceTransform(unitId, pieceName));
+        const auto& pieceMesh = gameMediaDatabase.getUnitPieceMesh(unitDefinition.objectName, pieceName).value().get();
+
+        // A thruster piece is a bare two-vertex segment running from hull
+        // level down to a few units below it, and the exhaust comes out of
+        // the bottom. TA's own models wind these inconsistently — on the
+        // Atlas, two jets run bottom to top and the third runs top to bottom
+        // — so taking the difference would have one rotor spraying upwards.
+        // Take the lower end and blow downwards instead.
+        auto a = pieceTransform * pieceMesh.firstVertexPosition;
+        auto b = pieceTransform * pieceMesh.secondVertexPosition;
+        auto spawnPosition = a.y <= b.y ? a : b;
+
+        // TA's palette, from the warm end of its flame ramp: the pale yellows
+        // come up often and the deeper ambers rarely, the same weighting the
+        // nano spray uses for its greens.
+        static const Vector3f vtolColors[] = {
+            Vector3f(0xf7 / 255.0f, 0xe3 / 255.0f, 0x67 / 255.0f),
+            Vector3f(0xf7 / 255.0f, 0xe3 / 255.0f, 0x67 / 255.0f),
+            Vector3f(0xf3 / 255.0f, 0xd3 / 255.0f, 0x4f / 255.0f),
+            Vector3f(0xf3 / 255.0f, 0xd3 / 255.0f, 0x4f / 255.0f),
+            Vector3f(0xef / 255.0f, 0xbb / 255.0f, 0x33 / 255.0f),
+            Vector3f(0xef / 255.0f, 0xbb / 255.0f, 0x33 / 255.0f),
+            Vector3f(0xef / 255.0f, 0xa7 / 255.0f, 0x1b / 255.0f),
+            Vector3f(0xeb / 255.0f, 0x8f / 255.0f, 0x13 / 255.0f),
+        };
+        std::uniform_int_distribution<std::size_t> pickColor(0, std::size(vtolColors) - 1);
+        std::uniform_real_distribution<float> scatter(-1.5f, 1.5f);
+
+        // The script fires this about ten times a second per thruster, so a
+        // couple of sparks a time keeps each stream from reading as a
+        // dotted line.
+        const int particlesPerEmit = 2;
+        for (int i = 0; i < particlesPerEmit; ++i)
+        {
+            Particle particle;
+            particle.position = Vector3f(
+                spawnPosition.x + scatter(effectsRng),
+                spawnPosition.y,
+                spawnPosition.z + scatter(effectsRng));
+            // The sparks keep no share of the aircraft's speed: they hang
+            // where they were dropped and sink gently, so the aircraft draws
+            // a trail out behind itself as it flies on.
+            particle.velocity = Vector3f(0.0f, -0.5f, 0.0f);
+            particle.renderType = ParticleRenderTypeNano{
+                simulation.gameTime + GameTime(15),
+                vtolColors[pickColor(effectsRng)],
+                1.0f,
+                0.0f};
+            particle.startTime = simulation.gameTime;
+            particles.push_back(particle);
+        }
     }
 
     void GameScene::recreateWorldRenderTextures()

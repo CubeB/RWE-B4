@@ -18,10 +18,12 @@ const vec3 waterTint = vec3(0.5, 0.5, 1.0);
 const vec3 normalTint = vec3(1.0, 1.0, 1.0);
 // The sun sits low to the left and slightly in front, as in TA: faces that
 // look left are brightest, tops a little dimmer, right-facing sides dark.
-// Must match unitTexture.frag.
+// The falloff is wrapped rather than clamped so away-facing surfaces shade
+// off gradually instead of dropping to the ambient floor; see the fuller
+// explanation in unitTexture.frag, which this must match.
 const vec3 lightDirection = normalize(vec3(-1.3, 1.0, 0.3));
-const float ambientLight = 0.58;
-const float directionalLight = 0.6;
+const float ambientLight = 0.72;
+const float directionalLight = 0.36;
 
 // Construction happens in three equal phases:
 //   [0, 1/3)   nothing but the wireframe (drawn separately)
@@ -39,7 +41,7 @@ vec3 shadeNormal()
 {
     vec3 baseColor = vec3(texture(textureSampler, fragTexCoord));
     float lightIntensity = shade
-        ? ambientLight + directionalLight * clamp(dot(worldNormal, lightDirection), 0.0, 1.0)
+        ? ambientLight + directionalLight * (0.5 + 0.5 * dot(normalize(worldNormal), lightDirection))
         : 1.0;
     return baseColor * lightIntensity * (height > seaLevel ? normalTint : waterTint);
 }

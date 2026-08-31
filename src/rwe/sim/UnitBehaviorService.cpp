@@ -221,6 +221,12 @@ namespace rwe
             if (currentlyIsMoving && !previouslyWasMoving)
             {
                 unitInfo.state->cobEnvironment->createThread("StartMoving");
+
+                // Some scripts hang their movement effects off the move-rate
+                // callbacks rather than StartMoving — the Atlas has no
+                // StartMoving at all, and starts its thruster flames from
+                // MoveRate1. A script without the function ignores this.
+                unitInfo.state->cobEnvironment->createThread("MoveRate1");
             }
             else if (!currentlyIsMoving && previouslyWasMoving)
             {

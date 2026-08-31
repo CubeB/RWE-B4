@@ -1,5 +1,6 @@
 #include "atlas_util.h"
 #include <algorithm>
+#include <rwe/util/rwe_string.h>
 #include <rwe/util/SpanStream.h>
 #include <rwe/BoxTreeSplit.h>
 #include <rwe/io/gaf/GafArchive.h>
@@ -135,7 +136,9 @@ namespace rwe
             auto bottom = static_cast<float>(e.y + firstFrame.data.getHeight()) / static_cast<float>(packInfo.height);
             auto bounds = Rectangle2f::fromTLBR(top, left, bottom, right);
 
-            atlasMap.insert({entryName, bounds});
+            // Keyed upper-case: the 3DO texture names that look these up are
+            // inconsistently cased, and a miss silently paints the face flat.
+            atlasMap.insert({toUpper(entryName), bounds});
         }
 
         std::vector<SharedTextureHandle> atlases;
@@ -253,7 +256,7 @@ namespace rwe
                     auto bottom = static_cast<float>(e.y + f.frameInfo->data.getHeight()) / static_cast<float>(packInfo.height);
                     auto bounds = Rectangle2f::fromTLBR(top, left, bottom, right);
 
-                    atlasMap.insert({f.frameInfo->name, bounds});
+                    atlasMap.insert({toUpper(f.frameInfo->name), bounds});
 
                     atlas.replace(e.x, e.y, f.frameInfo->data);
                 },

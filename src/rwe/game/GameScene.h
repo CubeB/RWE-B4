@@ -477,6 +477,9 @@ namespace rwe
 
         void emitWake1FromPiece(UnitId unitId, const std::string& pieceName);
 
+        /** An aircraft's exhaust: small warm sparks dropped under a thruster piece, left behind as a trail. */
+        void emitVtolFromPiece(UnitId unitId, const std::string& pieceName);
+
         void modifyBuildQueue(UnitId unitId, const std::string& unitType, int count);
 
         void onChannelFinished(int channel);

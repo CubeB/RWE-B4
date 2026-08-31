@@ -33,10 +33,21 @@ namespace rwe
     };
 
     /** A small flat square of one colour: the nanolathe spray. */
+    /** A small flat coloured square: nanolathe spray, and an aircraft's exhaust. */
     struct ParticleRenderTypeNano
     {
         GameTime finishTime;
         Vector3f color;
+
+        /** Half the side of the square, in world units. */
+        float halfSize{1.0f};
+
+        /**
+         * How far to push the square towards the camera in the depth buffer,
+         * in world units, without moving it on screen. Nanolathe spray uses
+         * this so the structure it is being poured into cannot swallow it.
+         */
+        float depthNudge{0.0f};
     };
 
     using ParticleRenderType = std::variant<ParticleRenderTypeSprite, ParticleRenderTypeWake, ParticleRenderTypeNano>;

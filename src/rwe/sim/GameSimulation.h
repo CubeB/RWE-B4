@@ -199,6 +199,8 @@ namespace rwe
             LightSmoke,
             BlackSmoke,
             Wake1,
+            /** An aircraft thruster: the exhaust an Atlas trails from under its arms. */
+            Vtol,
         };
 
         SfxType sfxType;
