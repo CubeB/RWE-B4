@@ -219,5 +219,70 @@ namespace rwe
 
             auto result = parser.parse(cUtf8Begin(input), cUtf8End(input));
         }
+
+        SECTION("copes with a semicolon after a closing brace")
+        {
+            // The original's own gamedata is written this way: UNITVIEW.TDF
+            // and Translate.tdf both finish "};". TA reads them, so we do too.
+            std::string input = R"TDF(
+[RESOURCES]
+    {
+    website=www.cavedog.com/;
+    logo=bitmaps\small_cavedog_logo.pcx;
+    };
+)TDF";
+
+            auto expected = makeTdfBlock({{"RESOURCES", makeTdfBlock({{"website", "www.cavedog.com/"}, {"logo", "bitmaps\\small_cavedog_logo.pcx"}})}});
+
+            auto result = parser.parse(cUtf8Begin(input), cUtf8End(input));
+
+            REQUIRE(result == expected);
+        }
+
+        SECTION("a stray semicolon does not swallow the blocks after it")
+        {
+            std::string input = R"TDF(
+[Foo]
+    {
+    Bar=1;
+    };
+[Baz]
+    {
+    Qux=2;
+    }
+)TDF";
+
+            auto expected = makeTdfBlock({{"Foo", makeTdfBlock({{"Bar", "1"}})}, {"Baz", makeTdfBlock({{"Qux", "2"}})}});
+
+            auto result = parser.parse(cUtf8Begin(input), cUtf8End(input));
+
+            REQUIRE(result == expected);
+        }
+
+        SECTION("says where it gave up and what it wanted")
+        {
+            // A parse failure that only says "Expected 91" leaves whoever is
+            // porting a mod with nowhere to look.
+            std::string input = R"TDF([Foo]
+    {
+    Bar=1;
+    }
+oops
+)TDF";
+
+            try
+            {
+                parser.parse(cUtf8Begin(input), cUtf8End(input));
+                FAIL("expected the parse to fail");
+            }
+            catch (const TdfParserException& e)
+            {
+                REQUIRE(e.getLine() == 5);
+                REQUIRE(e.getColumn() == 1);
+                std::string message(e.what());
+                REQUIRE(message.find("line 5, column 1") != std::string::npos);
+                REQUIRE(message.find("'['") != std::string::npos);
+            }
+        }
     }
 }

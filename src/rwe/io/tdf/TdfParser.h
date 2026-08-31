@@ -86,14 +86,25 @@ namespace rwe
 
     class TdfParserException : public std::runtime_error
     {
-    private:
-        std::size_t line;
-        std::size_t column;
-
     public:
         explicit TdfParserException(std::size_t line, std::size_t column, const char* message);
         explicit TdfParserException(std::size_t line, std::size_t column, const std::string& message);
+
+        /**
+         * Where in the file the parse gave up. Also written into what(), so
+         * that the generic handlers that catch a load failure and print the
+         * message still say where to look.
+         */
+        std::size_t getLine() const { return line; }
+        std::size_t getColumn() const { return column; }
+
+    private:
+        std::size_t line;
+        std::size_t column;
     };
+
+    /** Names a code point the way an error message wants it: 91 is not helpful, '[' is. */
+    std::string describeTdfCodePoint(TdfCodePoint cp);
 
     template <typename T>
     class TdfAdapter
@@ -134,6 +145,18 @@ namespace rwe
 
             while (!isEndOfFile())
             {
+                // A semicolon sitting between blocks terminates nothing, but
+                // the original's own files do it: UNITVIEW.TDF and
+                // Translate.tdf both close their last block with "};". Skip
+                // it rather than refusing the file. blockBody has always been
+                // this forgiving about a stray semicolon inside a block; the
+                // top level simply never was.
+                if (accept(';'))
+                {
+                    consumeWhitespaceAndComments();
+                    continue;
+                }
+
                 block();
                 consumeWhitespaceAndComments();
             }
@@ -334,7 +357,7 @@ namespace rwe
         {
             if (!accept(cp))
             {
-                throw TdfParserException(_it.getLine(), _it.getColumn(), "Expected " + std::to_string(cp));
+                throw TdfParserException(_it.getLine(), _it.getColumn(), "Expected " + describeTdfCodePoint(cp));
             }
         }
 
