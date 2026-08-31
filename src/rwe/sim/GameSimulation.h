@@ -336,7 +336,14 @@ namespace rwe
         unsigned char surfaceMetal;
 
         /** Ground height per vision cell, for line-of-sight checks. */
-        Grid<unsigned char> visionHeights;
+        VisionHeightGrid visionHeights;
+
+        /**
+         * The authored line-of-sight ray fans, read from gamedata/los.tdf.
+         * Defaults to generated fans so a simulation built without game data
+         * still has sight.
+         */
+        LosTables losTables;
 
         Grid<bool> geoGrid;
 
@@ -446,27 +453,67 @@ namespace rwe
         /** Length of the self-destruct countdown, as in TA. */
         static constexpr unsigned int SelfDestructCountdownTicks = 5 * SimTicksPerSecond;
 
-        /** Line of sight: how high above the ground a unit looks from, and what height it needs to see at a cell. In heightmap units. */
-        static constexpr int EyeHeightAboveGround = 20;
-        static constexpr int SightTargetHeightAboveGround = 6;
-
         /** Starts a unit's self-destruct countdown, or cancels it if one is already running. */
         void toggleSelfDestruct(UnitId unitId);
 
         /** Income multiplier for a player: 1 for everyone except cheating computer players. */
         float resourceBonusFor(PlayerId playerId) const;
 
-        /** The vision grid cell containing a world position (may lie outside the grid). */
+        /**
+         * The vision grid cell containing a world position. The returned cell
+         * may lie outside the grid; callers must bounds check, which
+         * PlayerVisibility::contains does.
+         *
+         * The grid is indexed in *projected* space, not in plan view, exactly
+         * as Total Annihilation indexes it. RWE draws the world with
+         * cabinetProjection(0, 0.5) applied after the view rotation, so a
+         * world point (x, y, z) lands on screen at (x, z - y/2), and the
+         * vision grid is aligned to that screen space. Writing
+         *
+         *   H = the terrain heightmap sample under the position (0 off the map),
+         *   L = terrain.leftInWorldUnits(),
+         *   T = terrain.topInWorldUnits(),
+         *   C = MapTerrain::HeightTileWidthInWorldUnits
+         *         * PlayerVisibility::VisionCellSizeInTiles   (= 32 world units),
+         *
+         * the cell is
+         *
+         *   cellX = floor((position.x - L) / C)
+         *   cellY = floor((position.z - T - (H / 2)) / C)
+         *
+         * The "- H / 2" is the cabinet skew: high ground moves its vision cell
+         * towards the top of the map by half its height in world units, so
+         * that a cell's fog sits where that ground is actually drawn. The
+         * terrain height under the position is used, not the position's own
+         * y, so the cell is a function of (x, z) alone and a flying unit
+         * shares a cell with the ground beneath it.
+         *
+         * Everything that samples the vision grids - the fog renderer
+         * included - must apply this identical transform.
+         */
         Point visionCellAt(const SimVector& position) const;
+
+        /** The heightmap sample under a world position; 0 off the map. */
+        int terrainSampleHeightAt(const SimVector& position) const;
 
         bool isExploredBy(PlayerId player, const SimVector& position) const;
         bool isVisibleTo(PlayerId player, const SimVector& position) const;
+
+        /**
+         * True when a world position lies inside the reach of one of the
+         * player's active radar or sonar units.
+         *
+         * There is no radar grid: radar reveals no ground at all, it only
+         * makes units detectable, so this is the position-level form of the
+         * same range test canDetectUnit applies. Distance is measured in the
+         * map plane.
+         */
         bool isOnRadarOf(PlayerId player, const SimVector& position) const;
 
         /** True for the viewer's own units, and for other units standing in the viewer's line of sight. */
         bool canSeeUnit(PlayerId viewer, UnitId unitId) const;
 
-        /** True when the unit can be seen, or is a radar contact. */
+        /** True when the unit can be seen, or is a radar or sonar contact. */
         bool canDetectUnit(PlayerId viewer, UnitId unitId) const;
 
         /**

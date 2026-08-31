@@ -2,29 +2,71 @@
 
 #include <rwe/grid/Grid.h>
 #include <rwe/grid/Point.h>
+#include <rwe/sim/LosTables.h>
 #include <rwe/sim/SimVector.h>
+#include <rwe/sim/UnitId.h>
+#include <unordered_set>
+#include <vector>
 
 namespace rwe
 {
     /**
-     * What one player can see of the map.
+     * Ground height per vision cell, in the two flavours the line of sight
+     * march needs. The asymmetry is deliberate and errs towards revealing:
+     * a cell is easier to see than it is to hide behind.
+     */
+    struct VisionHeightGrid
+    {
+        /** Max-biased height: decides whether a cell can be seen. */
+        Grid<unsigned char> reveal;
+
+        /** Min-biased height: decides whether a cell blocks sight past it. */
+        Grid<unsigned char> occlude;
+    };
+
+    /**
+     * What one player can see of the map, plus the player's radar and sonar
+     * coverage.
      *
-     * Kept at a coarser resolution than the heightmap (VisionCellSizeInTiles
-     * heightmap tiles per cell) so that stamping every unit's sight circle
-     * each tick stays cheap even on large maps.
+     * The grids are kept at a coarser resolution than the heightmap
+     * (VisionCellSizeInTiles heightmap tiles per cell, i.e. 32 world units)
+     * and are indexed in projected space - see GameSimulation::visionCellAt
+     * for the transform, which anything reading these grids must apply.
      */
     struct PlayerVisibility
     {
         static constexpr int VisionCellSizeInTiles = 2;
 
+        /** A radar or sonar dish: one of the player's units, and its reach. */
+        struct RadarDetector
+        {
+            SimVector position;
+
+            /** Squared reach, in world units, measured in the map plane. */
+            SimScalar rangeSquared;
+        };
+
         /** Cells that have been seen at some point. Never cleared. */
         Grid<unsigned char> explored;
 
-        /** Cells currently within line of sight of a unit. Rebuilt every tick. */
+        /**
+         * Reference count per cell: how many of the player's units currently
+         * see it. Non-zero means visible. Rebuilt every tick.
+         */
         Grid<unsigned char> visible;
 
-        /** Cells currently covered by radar. Rebuilt every tick. */
-        Grid<unsigned char> radar;
+        /**
+         * The player's active radar and sonar dishes. Rebuilt every tick.
+         * Radar reveals no ground at all - it only makes units detectable.
+         */
+        std::vector<RadarDetector> radarDetectors;
+
+        /**
+         * Units currently inside one of those dishes' reach. Rebuilt every
+         * tick. Only ever queried by id, never iterated, so its ordering does
+         * not reach the simulation.
+         */
+        std::unordered_set<UnitId> radarContacts;
 
         PlayerVisibility() = default;
         PlayerVisibility(int width, int height);
@@ -32,25 +74,66 @@ namespace rwe
         bool contains(const Point& cell) const;
         bool isExplored(const Point& cell) const;
         bool isVisible(const Point& cell) const;
-        bool isOnRadar(const Point& cell) const;
+
+        /** How many of the player's units see the cell; 0 outside the grid. */
+        int visibleCount(const Point& cell) const;
 
         void clearCurrent();
 
-        /** Marks every cell within radius (in cells) of the centre as visible and explored. */
-        void revealCircle(const Point& center, int radius);
-
         /**
-         * Like revealCircle, but a cell is only revealed if the straight line
-         * from an eye eyeHeight above the centre cell's ground to a point
-         * targetHeight above the cell's ground clears the ground in between.
-         * Hills and ridges therefore cast shadows.
+         * Reveals what a unit standing on the centre cell, with its eye
+         * eyeHeight above the map's zero, can see out to radius cells.
+         *
+         * The centre cell is always revealed. Beyond that, sight follows the
+         * authored rays of tables.tableForRadius(radius), each replicated by
+         * the four ninety degree rotations; cells that lie on no ray are
+         * never revealed. Along each ray a running horizon is carried, so a
+         * ridge shadows everything behind it rather than each cell being
+         * tested against a fresh line.
+         *
+         * Every cell revealed by this call counts once towards the visible
+         * reference count, however many rays reach it.
          */
-        void revealCircleWithLineOfSight(const Point& center, int radius, const Grid<unsigned char>& groundHeights, int eyeHeight, int targetHeight);
+        void revealWithLineOfSight(
+            const Point& center,
+            int radius,
+            const VisionHeightGrid& heights,
+            int eyeHeight,
+            const LosTables& tables);
 
-        /** Marks every cell within radius (in cells) of the centre as radar-covered. */
-        void radarCircle(const Point& center, int radius);
+    private:
+        /**
+         * Which pass of revealWithLineOfSight last touched each cell, so that
+         * a unit whose rays cross the same cell twice only counts once.
+         */
+        Grid<unsigned int> seenStamp;
+        unsigned int currentStamp{0};
+
+        void beginReveal();
+        void revealCell(int x, int y);
     };
 
-    /** Ground height per vision cell: the highest heightmap sample the cell covers. */
-    Grid<unsigned char> computeVisionHeights(const Grid<unsigned char>& heightmap, unsigned char seaLevel);
+    /**
+     * The vision cell containing a point given in heightmap space (that is,
+     * in heightmap tiles rather than world units), with terrainHeight the
+     * height of the ground there.
+     *
+     * This is the shared implementation of the projected-space transform
+     * documented on GameSimulation::visionCellAt; read that comment first.
+     * The returned cell may lie outside the grid.
+     */
+    Point heightmapToVisionCell(SimScalar tileX, SimScalar tileZ, int terrainHeight);
+
+    /**
+     * Builds the two-height vision grid from the heightmap.
+     *
+     * Cells are placed in projected space, so a sample's row is skewed up the
+     * map by half its height (heightmapToVisionCell). Within a cell,
+     * reveal = max(seaLevel, (2*max + min) / 3) and
+     * occlude = max(seaLevel, (max + 2*min) / 3) over the samples that land
+     * in it. Cells that the skew leaves without any sample - the ground
+     * hidden behind a cliff face - fall back to the plan-view block at the
+     * same index.
+     */
+    VisionHeightGrid computeVisionHeights(const Grid<unsigned char>& heightmap, unsigned char seaLevel);
 }

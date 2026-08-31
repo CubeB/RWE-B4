@@ -30,6 +30,7 @@
 #include <rwe/grid/DiscreteRect.h>
 #include <rwe/io/featuretdf/FeatureTdf.h>
 #include <rwe/observable/BehaviorSubject.h>
+#include <rwe/render/FogTiles.h>
 #include <rwe/scene/Scene.h>
 #include <rwe/scene/util.h>
 #include <rwe/sim/FeatureId.h>
@@ -315,11 +316,20 @@ namespace rwe
 
         /** F1: the hotkey reference overlay. */
         bool helpVisible{false};
-        /** Black overlay, one texel per vision cell; alpha encodes unexplored / explored / visible. */
+        /** The minimap's fog: one texel per vision cell, alpha encodes unexplored / explored / visible. */
         std::optional<Sprite> fogSprite;
         GameTime fogSpriteTime{0};
         std::vector<unsigned char> fogVisibleSnapshot;
         std::vector<unsigned char> fogExploredSnapshot;
+        /** TA's fog artwork, read from anims/fog.gaf the first time the fog is drawn. */
+        std::optional<FogTileSet> fogTiles;
+        /** The world's fog, drawn from those tiles at one texel per world unit. */
+        FogRasterizer fogRasterizer;
+        SharedTextureHandle fogOverlayTexture;
+        unsigned int fogOverlayWidth{0};
+        unsigned int fogOverlayHeight{0};
+        /** World rectangle the fog overlay texture covers, for the terrain shader. */
+        Rectangle2f fogOverlayBounds{Rectangle2f::fromTopLeft(0.0f, 0.0f, 1.0f, 1.0f)};
 
         BehaviorSubject<CursorMode> cursorMode{NormalCursorMode()};
 

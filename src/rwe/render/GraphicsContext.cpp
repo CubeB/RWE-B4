@@ -156,6 +156,68 @@ namespace rwe
         return handle;
     }
 
+    TextureHandle GraphicsContext::createSingleChannelTexture(unsigned int width, unsigned int height, const unsigned char* image)
+    {
+        GLuint texture;
+        glGenTextures(1, &texture);
+        TextureIdentifier id(texture);
+        TextureHandle handle(id);
+
+        glBindTexture(GL_TEXTURE_2D, texture);
+
+        // Rows are a single byte per texel, so they are not word aligned.
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+        glTexImage2D(
+            GL_TEXTURE_2D,
+            0,
+            GL_R8,
+            width,
+            height,
+            0,
+            GL_RED,
+            GL_UNSIGNED_BYTE,
+            image);
+
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+        // No filtering and no mipmaps: the values name states, and averaging
+        // them would invent states that are not in the image.
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        requireNoOpenGlError();
+
+        return handle;
+    }
+
+    void GraphicsContext::updateSingleChannelTexture(TextureIdentifier texture, unsigned int imageWidth, unsigned int x, unsigned int y, unsigned int width, unsigned int height, const unsigned char* image)
+    {
+        glBindTexture(GL_TEXTURE_2D, texture.value);
+
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, imageWidth);
+
+        glTexSubImage2D(
+            GL_TEXTURE_2D,
+            0,
+            x,
+            y,
+            width,
+            height,
+            GL_RED,
+            GL_UNSIGNED_BYTE,
+            image + (static_cast<std::size_t>(y) * imageWidth) + x);
+
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+        requireNoOpenGlError();
+    }
+
     TextureArrayHandle GraphicsContext::createTextureArray(unsigned int width, unsigned int height, unsigned int mipMapLevels, std::vector<Color>& images)
     {
         assert(images.size() % (width * height) == 0);

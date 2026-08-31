@@ -1,5 +1,6 @@
 #include "GameSimulation.h"
 #include <algorithm>
+#include <cmath>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/SimScalar.h>
@@ -123,6 +124,7 @@ namespace rwe
           metalGrid(this->terrain.getHeightMap().getWidth() - 1, this->terrain.getHeightMap().getHeight() - 1, surfaceMetal),
           surfaceMetal(surfaceMetal),
           visionHeights(computeVisionHeights(this->terrain.getHeightMap(), static_cast<unsigned char>(std::min(simScalarToUInt(this->terrain.getSeaLevel()), 255u)))),
+          losTables(generateLosTables(DefaultLosTableCount - 1)),
           geoGrid(this->terrain.getHeightMap().getWidth() - 1, this->terrain.getHeightMap().getHeight() - 1, false),
           minWindSpeed(minWindSpeed),
           maxWindSpeed(maxWindSpeed),
@@ -913,14 +915,32 @@ namespace rwe
         return id;
     }
 
+    namespace
+    {
+        int heightMapSampleAt(const Grid<unsigned char>& heights, const SimVector& tile)
+        {
+            auto x = static_cast<int>(std::floor(tile.x.value));
+            auto y = static_cast<int>(std::floor(tile.z.value));
+            if (x < 0 || y < 0 || x >= heights.getWidth() || y >= heights.getHeight())
+            {
+                return 0;
+            }
+
+            return static_cast<int>(heights.get(x, y));
+        }
+    }
+
+    int GameSimulation::terrainSampleHeightAt(const SimVector& position) const
+    {
+        return heightMapSampleAt(terrain.getHeightMap(), terrain.worldToHeightmapSpace(position));
+    }
+
     Point GameSimulation::visionCellAt(const SimVector& position) const
     {
-        auto tile = terrain.worldToHeightmapCoordinate(position);
-        auto cells = PlayerVisibility::VisionCellSizeInTiles;
-        // Floor division so that positions just off the map's edge stay outside the grid.
-        auto x = tile.x >= 0 ? tile.x / cells : -1;
-        auto y = tile.y >= 0 ? tile.y / cells : -1;
-        return Point(x, y);
+        // The projected-space transform. See the doc comment in the header:
+        // the fog renderer must apply exactly this.
+        auto tile = terrain.worldToHeightmapSpace(position);
+        return heightmapToVisionCell(tile.x, tile.z, heightMapSampleAt(terrain.getHeightMap(), tile));
     }
 
     bool GameSimulation::isExploredBy(PlayerId player, const SimVector& position) const
@@ -935,7 +955,19 @@ namespace rwe
 
     bool GameSimulation::isOnRadarOf(PlayerId player, const SimVector& position) const
     {
-        return playerVisibility.at(player.value).isOnRadar(visionCellAt(position));
+        // No radar grid: this is a straight range test against the player's
+        // active dishes, measured in the map plane.
+        for (const auto& detector : playerVisibility.at(player.value).radarDetectors)
+        {
+            auto dx = position.x - detector.position.x;
+            auto dz = position.z - detector.position.z;
+            if (((dx * dx) + (dz * dz)) <= detector.rangeSquared)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     bool GameSimulation::canSeeUnit(PlayerId viewer, UnitId unitId) const
@@ -947,7 +979,13 @@ namespace rwe
     bool GameSimulation::canDetectUnit(PlayerId viewer, UnitId unitId) const
     {
         const auto& unit = getUnitState(unitId);
-        return unit.isOwnedBy(viewer) || isVisibleTo(viewer, unit.position) || isOnRadarOf(viewer, unit.position);
+        if (unit.isOwnedBy(viewer) || isVisibleTo(viewer, unit.position))
+        {
+            return true;
+        }
+
+        const auto& contacts = playerVisibility.at(viewer.value).radarContacts;
+        return contacts.find(unitId) != contacts.end();
     }
 
     void GameSimulation::updateVisibility()
@@ -958,10 +996,8 @@ namespace rwe
         }
 
         // World units per vision cell; sight and radar ranges are in world units.
-        auto cellWorldUnits = static_cast<unsigned int>(simScalarToUInt(MapTerrain::HeightTileWidthInWorldUnits)) * PlayerVisibility::VisionCellSizeInTiles;
-        auto toCells = [&](unsigned int worldDistance) {
-            return static_cast<int>((worldDistance + cellWorldUnits - 1) / cellWorldUnits);
-        };
+        auto cellWorldUnits = static_cast<int>(simScalarToUInt(MapTerrain::HeightTileWidthInWorldUnits)) * PlayerVisibility::VisionCellSizeInTiles;
+        auto seaLevel = static_cast<int>(std::min(simScalarToUInt(terrain.getSeaLevel()), 255u));
 
         for (const auto& [unitId, unit] : units)
         {
@@ -971,25 +1007,68 @@ namespace rwe
             }
             const auto& unitDefinition = unitDefinitions.at(unit.unitType);
             auto& vis = playerVisibility.at(unit.owner.value);
-            auto cell = visionCellAt(unit.position);
 
-            if (unitDefinition.sightDistance > 0)
+            // The eye sits at the top of the unit's model, never below the
+            // water's surface, and the whole thing lives in the heightmap's
+            // 0..255 range.
+            auto modelHeight = 0;
+            if (auto model = unitModelDefinitions.find(unitDefinition.objectName); model != unitModelDefinitions.end())
             {
-                // Eyes sit a little above the unit; ground is seen if the line
-                // to a point just above it is not blocked by higher ground.
-                vis.revealCircleWithLineOfSight(cell, toCells(unitDefinition.sightDistance), visionHeights, EyeHeightAboveGround, SightTargetHeightAboveGround);
+                modelHeight = static_cast<int>(std::floor(model->second.height.value));
             }
-            else
+            auto groundLevel = std::max(static_cast<int>(std::floor(unit.position.y.value)), seaLevel + 1);
+            auto eyeHeight = std::clamp(groundLevel + modelHeight, 0, 255);
+
+            // Sight is capped: TA indexes its ray tables with
+            // min(SightDistance / 32, numtables - 1), so terrain-mode sight
+            // never reaches beyond 8 cells however large SightDistance is.
+            auto radius = std::min(
+                static_cast<int>(unitDefinition.sightDistance) / cellWorldUnits,
+                losTables.maxRadius());
+
+            vis.revealWithLineOfSight(visionCellAt(unit.position), radius, visionHeights, eyeHeight, losTables);
+
+            // Radar and sonar need the unit switched on if it can be switched
+            // at all. Altitude extends radar; sonar is flat.
+            auto detectorActive = (!unitDefinition.onOffable || unit.activated) && !unit.isBeingBuilt(unitDefinition);
+            if (detectorActive)
             {
-                // Even a blind unit knows where it is standing.
-                vis.revealCircle(cell, 0);
+                auto altitude = rweMax(unit.position.y, 0_ss);
+                if (unitDefinition.radarDistance > 0)
+                {
+                    auto range = intToSimScalar(static_cast<int>(unitDefinition.radarDistance)) + (2_ss * altitude);
+                    vis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range});
+                }
+                if (unitDefinition.sonarDistance > 0)
+                {
+                    auto range = intToSimScalar(static_cast<int>(unitDefinition.sonarDistance));
+                    vis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range});
+                }
+            }
+        }
+
+        // Radar is a unit-versus-unit range query, not a grid: terrain never
+        // blocks it and it reveals no ground, it only flags contacts.
+        for (std::size_t i = 0; i < playerVisibility.size(); ++i)
+        {
+            auto& vis = playerVisibility[i];
+            if (vis.radarDetectors.empty())
+            {
+                continue;
             }
 
-            // Radar needs the unit switched on if it can be switched at all.
-            auto radarActive = !unitDefinition.onOffable || unit.activated;
-            if (unitDefinition.radarDistance > 0 && radarActive && !unit.isBeingBuilt(unitDefinition))
+            PlayerId player(static_cast<unsigned int>(i));
+            for (const auto& [unitId, unit] : units)
             {
-                vis.radarCircle(cell, toCells(unitDefinition.radarDistance));
+                if (unit.isDead() || unit.isOwnedBy(player))
+                {
+                    continue;
+                }
+
+                if (isOnRadarOf(player, unit.position))
+                {
+                    vis.radarContacts.insert(unitId);
+                }
             }
         }
     }

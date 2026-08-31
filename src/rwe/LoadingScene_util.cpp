@@ -354,6 +354,7 @@ namespace rwe
         u.category = fbi.category;
         u.sightDistance = fbi.sightDistance;
         u.radarDistance = fbi.radarDistance;
+        u.sonarDistance = fbi.sonarDistance;
 
         u.yardMapContainsGeo = false;
 

@@ -368,6 +368,8 @@ set(SOURCE_FILES
     src/rwe/io/hpi/hpi_util.h
     src/rwe/io/io_util.cpp
     src/rwe/io/io_util.h
+    src/rwe/io/lostdf/io.cpp
+    src/rwe/io/lostdf/io.h
     src/rwe/io/moveinfotdf/MovementClassTdf.h
     src/rwe/io/moveinfotdf/io.cpp
     src/rwe/io/moveinfotdf/io.h
@@ -436,6 +438,8 @@ set(SOURCE_FILES
     src/rwe/pathfinding/pathfinding_utils.h
     src/rwe/proto/serialization.cpp
     src/rwe/proto/serialization.h
+    src/rwe/render/FogTiles.cpp
+    src/rwe/render/FogTiles.h
     src/rwe/render/FrameBufferHandle.h
     src/rwe/render/GlIdentifier.h
     src/rwe/render/GlMesh.cpp
@@ -488,6 +492,8 @@ set(SOURCE_FILES
     src/rwe/sim/GameSimulation.h
     src/rwe/sim/GameTime.cpp
     src/rwe/sim/GameTime.h
+    src/rwe/sim/LosTables.cpp
+    src/rwe/sim/LosTables.h
     src/rwe/sim/MapFeature.cpp
     src/rwe/sim/MapFeature.h
     src/rwe/sim/PlayerVisibility.cpp
@@ -802,6 +808,7 @@ set(TEST_FILES
     src/rwe/math/rwe_math.test.cpp
     src/rwe/network_util.test.cpp
     src/rwe/pathfinding/pathfinding_utils.test.cpp
+    src/rwe/render/FogTiles.test.cpp
     src/rwe/rc_gen_optional.h
     src/rwe/sim/GameHash_util.test.cpp
     src/rwe/sim/bombsight.test.cpp

@@ -17,6 +17,7 @@
 #include <rwe/io/tnt/TntArchive.h>
 #include <rwe/render/TextureArrayRegion.h>
 #include <rwe/sim/Energy.h>
+#include <rwe/sim/LosTables.h>
 #include <rwe/sim/Metal.h>
 #include <rwe/sim/MovementClassDatabase.h>
 #include <rwe/sim/SimVector.h>
@@ -152,6 +153,7 @@ namespace rwe
             std::unordered_map<std::string, WeaponDefinition> weaponDefinitions;
             SimpleVectorMap<FeatureDefinition, FeatureDefinitionIdTag> featureDefinitions;
             std::unordered_map<std::string, FeatureDefinitionId> featureNameIndex;
+            LosTables losTables;
         };
 
         DataMaps loadDefinitions(MeshService& meshService, const std::unordered_set<std::string>& requiredFeatures);

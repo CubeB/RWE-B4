@@ -137,6 +137,19 @@ namespace rwe
 
         TextureHandle createColorTexture(Color c);
 
+        /**
+         * One byte per texel, read back in the red channel. Nearest filtered
+         * and without mipmaps, for images whose values are labels rather than
+         * colours and must survive sampling unblended.
+         */
+        TextureHandle createSingleChannelTexture(unsigned int width, unsigned int height, const unsigned char* image);
+
+        /**
+         * Replaces a rectangle of a single-channel texture. The image pointer
+         * is the whole image, of which the rectangle at (x, y) is uploaded.
+         */
+        void updateSingleChannelTexture(TextureIdentifier texture, unsigned int imageWidth, unsigned int x, unsigned int y, unsigned int width, unsigned int height, const unsigned char* image);
+
         TextureArrayHandle createTextureArray(unsigned int width, unsigned int height, unsigned int mipMapLevels, std::vector<Color>& images);
 
         void enableDepthBuffer();

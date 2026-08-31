@@ -35,6 +35,7 @@ namespace rwe
         tdf.readOrDefault("Category", u.category);
         tdf.readOrDefault("SightDistance", u.sightDistance, 0u);
         tdf.readOrDefault("RadarDistance", u.radarDistance, 0u);
+        tdf.readOrDefault("SonarDistance", u.sonarDistance, 0u);
 
         tdf.readOrDefault("TurnRate", u.turnRate);
         tdf.readOrDefault("MaxVelocity", u.maxVelocity);

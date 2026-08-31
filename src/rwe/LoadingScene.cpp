@@ -12,6 +12,7 @@
 #include <rwe/geometry/CollisionMesh.h>
 #include <rwe/io/fbi/io.h>
 #include <rwe/io/featuretdf/io.h>
+#include <rwe/io/lostdf/io.h>
 #include <rwe/io/moveinfotdf/MovementClassTdf.h>
 #include <rwe/io/moveinfotdf/io.h>
 #include <rwe/io/ota/ota.h>
@@ -21,6 +22,7 @@
 #include <rwe/sim/FeatureDefinitionId.h>
 #include <rwe/ui/UiLabel.h>
 #include <rwe/util/Index.h>
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -180,6 +182,7 @@ namespace rwe
         simulation.unitScriptDefinitions = loadCobScripts(*sceneContext.vfs);
         simulation.featureDefinitions = std::move(dataMaps.featureDefinitions);
         simulation.featureNameIndex = std::move(dataMaps.featureNameIndex);
+        simulation.losTables = std::move(dataMaps.losTables);
 
         for (const auto& [pos, featureName] : mapInfo.features)
         {
@@ -662,6 +665,36 @@ namespace rwe
             {
                 auto movementClassDefinition = parseMovementClassDefinition(c.second);
                 dataMaps.movementClassDatabase.registerMovementClass(movementClassDefinition);
+            }
+        }
+
+        // read the line of sight ray tables
+        {
+            auto path = sceneContext.pathMapping->gamedata + "/LOS.TDF";
+            std::optional<LosTables> tables;
+            if (auto bytes = sceneContext.vfs->readFile(path); bytes)
+            {
+                try
+                {
+                    std::string losString(bytes->data(), bytes->size());
+                    tables = parseLosTdf(parseTdfFromString(losString));
+                }
+                catch (const std::exception& e)
+                {
+                    LOG_WARN << "Failed to parse " << path << ": " << e.what();
+                }
+            }
+
+            if (tables)
+            {
+                dataMaps.losTables = std::move(*tables);
+            }
+            else
+            {
+                // Not fatal: without the authored fans, generate ray fans of
+                // the same shape so a game can still be played.
+                LOG_WARN << "Could not read " << path << ", generating line of sight tables instead";
+                dataMaps.losTables = generateLosTables(DefaultLosTableCount - 1);
             }
         }
 

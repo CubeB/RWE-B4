@@ -162,10 +162,12 @@ namespace rwe
         // "LEVEL1 KBOT WEAPON CONSTRUCT". Empty if absent.
         std::string category;
 
-        // Sight / radar radii in TA "elmos". 0 = no LOS / no radar.
-        // Consumed by the future fog-of-war subsystem; today RWE has no
-        // LOS implementation so these values are stored but not used.
+        // Sight / radar / sonar radii in TA "elmos". 0 = no LOS / no radar /
+        // no sonar. Consumed by the visibility pass in GameSimulation:
+        // sight is capped at 8 vision cells, radar range is extended by twice
+        // the detecting unit's altitude, and sonar range is flat.
         unsigned int sightDistance{0};
         unsigned int radarDistance{0};
+        unsigned int sonarDistance{0};
     };
 }

@@ -80,7 +80,10 @@ namespace rwe
         bool fogged{false};
     };
 
-    /** Fog of war map laid over the terrain: one texel per sight cell, alpha 0 = seen, mid = explored, 1 = unknown. */
+    /**
+     * Fog of war map laid over the terrain: a single-channel image of TA's fog
+     * tiles at one texel per world unit, 0 = seen, mid = explored, 1 = unknown.
+     */
     struct FogOverlay
     {
         TextureIdentifier texture;

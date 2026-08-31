@@ -30,6 +30,7 @@ namespace rwe
         // Both default to 0; LOS code must treat 0 as "no signal".
         unsigned int sightDistance{0};
         unsigned int radarDistance{0};
+        unsigned int sonarDistance{0};
 
         unsigned int turnRate;
         float maxVelocity;

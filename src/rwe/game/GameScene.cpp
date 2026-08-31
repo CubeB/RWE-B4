@@ -855,11 +855,13 @@ namespace rwe
         sceneContext.graphics->disableDepthBuffer();
 
         // Fog of war is applied by the terrain shader: remembered ground goes
-        // grey, unknown ground black, with TA's ragged 32-unit boundary.
+        // grey, unknown ground black, along the ragged boundary that TA's own
+        // fog tiles have been rasterised into fogOverlayTexture. That texture
+        // covers a window around the camera, not the whole map.
         std::optional<FogOverlay> fogOverlay;
-        if (fogOfWarEnabled && fogSprite)
+        if (fogOfWarEnabled && fogOverlayTexture.isValid())
         {
-            fogOverlay = FogOverlay{fogSprite->texture.get(), fogSprite->bounds.left(), fogSprite->bounds.top(), fogSprite->bounds.width(), fogSprite->bounds.height()};
+            fogOverlay = FogOverlay{fogOverlayTexture.get(), fogOverlayBounds.left(), fogOverlayBounds.top(), fogOverlayBounds.width(), fogOverlayBounds.height()};
         }
         worldRenderService.drawMapTerrain(terrainGraphics, worldCameraState.getRoundedPosition(), worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()), fogOverlay);
 
@@ -4133,16 +4135,87 @@ namespace rwe
             return;
         }
 
-        // The grids only change on sim ticks, and a couple of ticks of lag is invisible.
-        if (fogSprite && (simulation.gameTime.value - fogSpriteTime.value) < 2)
+        if (!fogTiles)
+        {
+            // TA's own fog artwork. Without it we fall back to square-edged
+            // shapes: uglier, but the fog still reads correctly.
+            fogTiles = loadFogTileSet(*sceneContext.vfs, "anims/fog.gaf").value_or(makeSquareFogTileSet());
+        }
+
+        const auto& vis = simulation.playerVisibility.at(localPlayerId.value);
+
+        auto cellsWide = vis.explored.getWidth();
+        auto cellsHigh = vis.explored.getHeight();
+        // The vision grid starts at the map's top-left corner and covers whole
+        // cells, which may extend slightly past the map's edge.
+        auto cellWorldUnits = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) * static_cast<float>(PlayerVisibility::VisionCellSizeInTiles);
+        auto corner = simVectorToFloat(simulation.terrain.heightmapIndexToWorldCorner(0, 0));
+
+        // The cells the camera can see. The fog grid is indexed in projected
+        // space, and the terrain sheet is drawn flat, so the sheet's own x and
+        // z are already that space and no skew is needed here. A whole terrain
+        // tile of slack covers the tiles that hang over the camera's edge.
+        auto camera = worldCameraState.getRoundedPosition();
+        auto halfWidth = worldCameraState.scaleDimension(static_cast<float>(worldViewport.width())) / 2.0f;
+        auto halfHeight = worldCameraState.scaleDimension(static_cast<float>(worldViewport.height())) / 2.0f;
+        auto toCellX = [&](float worldX) {
+            return std::clamp(static_cast<int>(std::floor((worldX - corner.x) / cellWorldUnits)), 0, cellsWide - 1);
+        };
+        auto toCellY = [&](float worldZ) {
+            return std::clamp(static_cast<int>(std::floor((worldZ - corner.z) / cellWorldUnits)), 0, cellsHigh - 1);
+        };
+        auto viewX0 = toCellX(camera.x - halfWidth - cellWorldUnits);
+        auto viewY0 = toCellY(camera.z - halfHeight - cellWorldUnits);
+        auto viewX1 = toCellX(camera.x + halfWidth + cellWorldUnits);
+        auto viewY1 = toCellY(camera.z + halfHeight + cellWorldUnits);
+        GridRegion cellsInView(viewX0, viewY0, (viewX1 - viewX0) + 1, (viewY1 - viewY0) + 1);
+
+        // The grids only change on sim ticks, and a couple of ticks of lag in
+        // the fog itself is invisible. The window is another matter: once the
+        // camera leaves it the edge of its texture would show, so a scroll off
+        // the end is never put off.
+        if (fogSprite && (simulation.gameTime.value - fogSpriteTime.value) < 2 && fogRasterizer.covers(cellsInView))
         {
             return;
         }
         fogSpriteTime = simulation.gameTime;
 
-        const auto& vis = simulation.playerVisibility.at(localPlayerId.value);
+        // Rebuilding is the expensive part. The rasteriser keeps a window a
+        // little larger than the view, tracks the corner codes it last drew,
+        // and reports only the patch of texture that moved.
+        auto update = fogRasterizer.update(*fogTiles, vis.visible, vis.explored, cellsInView);
+        if (update)
+        {
+            auto overlayWidth = static_cast<unsigned int>(fogRasterizer.getWidth());
+            auto overlayHeight = static_cast<unsigned int>(fogRasterizer.getHeight());
+            if (update->windowChanged || !fogOverlayTexture.isValid() || fogOverlayWidth != overlayWidth || fogOverlayHeight != overlayHeight)
+            {
+                fogOverlayTexture = SharedTextureHandle(sceneContext.graphics->createSingleChannelTexture(overlayWidth, overlayHeight, fogRasterizer.getData()));
+                fogOverlayWidth = overlayWidth;
+                fogOverlayHeight = overlayHeight;
+                fogOverlayBounds = Rectangle2f::fromTopLeft(
+                    corner.x + static_cast<float>(fogRasterizer.getOffsetX()),
+                    corner.z + static_cast<float>(fogRasterizer.getOffsetY()),
+                    static_cast<float>(overlayWidth),
+                    static_cast<float>(overlayHeight));
+            }
+            else
+            {
+                sceneContext.graphics->updateSingleChannelTexture(
+                    fogOverlayTexture.get(),
+                    overlayWidth,
+                    static_cast<unsigned int>(update->dirty.x),
+                    static_cast<unsigned int>(update->dirty.y),
+                    static_cast<unsigned int>(update->dirty.width),
+                    static_cast<unsigned int>(update->dirty.height),
+                    fogRasterizer.getData());
+            }
+        }
 
-        // Rebuilding the texture is the expensive part; skip it while nothing has changed.
+        // The minimap keeps its own one-texel-per-cell copy of the whole map.
+        // It is only a hundred-odd pixels across, so the authored tiles would
+        // be thrown away by the downscale anyway, and this way it does not have
+        // to care where the world's window happens to be.
         if (fogSprite && vis.visible.getVector() == fogVisibleSnapshot && vis.explored.getVector() == fogExploredSnapshot)
         {
             return;
@@ -4150,20 +4223,13 @@ namespace rwe
         fogVisibleSnapshot = vis.visible.getVector();
         fogExploredSnapshot = vis.explored.getVector();
 
-        auto cellsWide = vis.explored.getWidth();
-        auto cellsHigh = vis.explored.getHeight();
-
-        // One texel per sight cell, as in TA. The terrain shader roughens the
-        // boundary itself; the minimap draws this map directly.
-        auto width = cellsWide;
-        auto height = cellsHigh;
         std::vector<Color> pixels;
-        pixels.reserve(static_cast<size_t>(width) * static_cast<size_t>(height));
-        for (int y = 0; y < height; ++y)
+        pixels.reserve(static_cast<size_t>(cellsWide) * static_cast<size_t>(cellsHigh));
+        for (int y = 0; y < cellsHigh; ++y)
         {
-            for (int x = 0; x < width; ++x)
+            for (int x = 0; x < cellsWide; ++x)
             {
-                if (vis.visible.get(x, y))
+                if (vis.visible.get(x, y) != 0)
                 {
                     pixels.emplace_back(0, 0, 0, 0);
                 }
@@ -4178,12 +4244,8 @@ namespace rwe
             }
         }
 
-        SharedTextureHandle texture(sceneContext.graphics->createTexture(width, height, pixels.data()));
+        SharedTextureHandle texture(sceneContext.graphics->createTexture(cellsWide, cellsHigh, pixels.data()));
 
-        // The grid starts at the map's top-left corner and covers whole vision cells,
-        // which may extend slightly past the map's edge.
-        auto cellWorldUnits = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) * static_cast<float>(PlayerVisibility::VisionCellSizeInTiles);
-        auto corner = simVectorToFloat(simulation.terrain.heightmapIndexToWorldCorner(0, 0));
         auto bounds = Rectangle2f::fromTopLeft(corner.x, corner.z, cellsWide * cellWorldUnits, cellsHigh * cellWorldUnits);
         auto region = Rectangle2f::fromTopLeft(0.0f, 0.0f, 1.0f, 1.0f);
         fogSprite = sceneContext.graphics->createSprite(bounds, region, texture);
