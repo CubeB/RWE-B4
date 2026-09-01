@@ -838,6 +838,7 @@ set(TEST_FILES
     src/rwe/sim/util.test.cpp
     src/rwe/sim/recoil.test.cpp
     src/rwe/sim/targeting.test.cpp
+    src/rwe/sim/turret.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp
     src/rwe/util/Result.test.cpp
     src/rwe/util/SimpleLogger.test.cpp

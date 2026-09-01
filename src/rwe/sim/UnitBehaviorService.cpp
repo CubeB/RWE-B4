@@ -643,6 +643,26 @@ namespace rwe
                 auto heading = headingAndPitch.first;
                 auto pitch = headingAndPitch.second;
 
+                if (weaponNeedsTheHullTurned(weaponDefinition))
+                {
+                    // Nothing on a mount to swing, so there is no aim script to
+                    // run and nothing to wait for: the original skips straight
+                    // past the script call for these (0x49E205) and lets the
+                    // fire handler decide. That handler measures the bearing to
+                    // the target against the unit's own heading and declines
+                    // the shot if the two are further apart than tolerance
+                    // (0x49DA59 into the check at 0x49D880), so the gun stays
+                    // quiet until whatever is steering the unit brings it round.
+                    if (angleBetweenIsLessOrEqual(heading, SimAngle(0), weaponDefinition.tolerance)
+                        && sim->gameTime >= weapon->readyTime)
+                    {
+                        aimingState->attackInfo = UnitWeaponStateAttacking::FireInfo{heading, pitch, *targetPosition, std::nullopt, 0, GameTime(0)};
+                        tryFireWeapon(id, weaponIndex);
+                    }
+
+                    return;
+                }
+
                 auto threadId = unit.cobEnvironment->createThread(getAimScriptName(weaponIndex), {toCobAngle(heading).value, toCobAngle(pitch).value});
 
                 if (threadId)

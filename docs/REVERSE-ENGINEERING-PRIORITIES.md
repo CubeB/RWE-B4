@@ -276,6 +276,25 @@ limit, and `aimrate`/`holdtime` (2 each) for how the turret tracks.
 **Effort / risk.** 1–2 days. Medium risk — interacts with the existing aim-script
 flow, and issue #42 (aiming scripts running twice) is in the same code.
 
+**Done, and three things above are wrong** — written up as `TOTALA-EXE.md` §11.
+
+- The `turret=0` weapons are **not hull-mounted tank guns**; there is no such
+  thing in the shipped data. They are aircraft weapons, torpedoes, vertical-launch
+  missiles and bombs. What the fix actually buys is a gunship that has to point
+  at its target, not a tank that turns its body.
+- `minbarrelangle` is a **float at `wdef+0xC8`**, not a word at `+0xFE` (that is
+  `holdtime`), and it is **not a depression limit**: its only reader can never
+  return a negative elevation, so every negative value in the data — which is all
+  of them — is dead. Confirmed by replaying the decoded routine over 72,900
+  geometries.
+- `aimrate` **is not a key the original knows**. The string is absent from the
+  binary; the two weapons that set it are ignored.
+
+Implemented: the hull-heading gate for a plain `turret=0` weapon, skipping its
+aim script the way the original does, and `pitchtolerance` falling back to
+`tolerance`. Not implemented: the pitch half of the gate (RWE has no hull pitch),
+`holdtime` (no reader found), `minbarrelangle` and `aimrate` (nothing to do).
+
 ---
 
 ## Tier 2 — high value but harder
@@ -362,7 +381,7 @@ that side besides `hitDensity`. ~half a day, low risk.
 
 Already on the roadmap. 559 features set it, it is parsed and copied
 (`LoadingScene.cpp:585`) and never read. A shot should stop on a rock in the way.
-The findings doc's §12 flags the pass-through-chance reading as unconfirmed;
+The findings doc's §13 flags the pass-through-chance reading as unconfirmed;
 confirming it in the binary is the actual task here, and the pivot is the
 projectile-vs-feature collision rather than the feature TDF.
 
@@ -394,7 +413,7 @@ projectile-vs-feature collision rather than the feature TDF.
     `norestrict` (6), `digger`, `teleporter`, `immunetoparalyzer`,
     `cantbetransported` (1). Each is an hour or two. `canstop` and `shootme` are
     the two with enough coverage to matter.
-23. **TA's Permanent and Circular LOS modes.** Already in `TOTALA-EXE.md` §12.
+23. **TA's Permanent and Circular LOS modes.** Already in `TOTALA-EXE.md` §13.
     Circular is fully understood (a `vismasks.gaf` stamp, radius
     `clamp(SightDistance/32, 5, 14)`); Permanent has not been looked at. Only
     reachable once there is a skirmish option to select them, so low urgency.
@@ -430,7 +449,7 @@ projectile-vs-feature collision rather than the feature TDF.
 
 26. **`sortbias`** — parsed by the original into `def+0x21A` and read nowhere.
     Already recorded in the findings doc; leave dead.
-27. **The five deliberate departures in `TOTALA-EXE.md` §11** — the nanolathe
+27. **The deliberate departures in `TOTALA-EXE.md` §12** — the nanolathe
     spray landing on the roof, depth-tested exhaust occlusion, the
     camera-windowed fog raster, off-map fog cells reading as the nearest on-map
     cell, and the absent `BrakeRate` nose re-aim. These are decisions, not gaps.

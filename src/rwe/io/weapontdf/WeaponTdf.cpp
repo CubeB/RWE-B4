@@ -72,7 +72,11 @@ namespace rwe
         tdf.readOrDefault("burnBlow", w.burnBlow);
         tdf.readOrDefault("accuracy", w.accuracy);
         tdf.readOrDefault("tolerance", w.tolerance, 256u);
-        tdf.readOrDefault("pitchTolerance", w.pitchTolerance, 256u);
+        // A weapon that names a tolerance and stays quiet about pitch gets the
+        // same figure for both: the original reads pitchtolerance and, finding
+        // it zero, substitutes tolerance (0x49D8B4-0x49D8CF). Only one weapon
+        // in the shipped data sets both, and sixty set tolerance alone.
+        tdf.readOrDefault("pitchTolerance", w.pitchTolerance, w.tolerance);
         tdf.readOrDefault("aimRate", w.aimRate);
         tdf.readOrDefault("holdTime", w.holdTime);
 
