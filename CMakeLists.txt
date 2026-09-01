@@ -835,6 +835,7 @@ set(TEST_FILES
     src/rwe/pathfinding/pathing.test.cpp
     src/rwe/sim/economy.test.cpp
     src/rwe/sim/visibility.test.cpp
+    src/rwe/sim/concealment.test.cpp
     src/rwe/sim/UnitState_util.test.cpp
     src/rwe/sim/util.test.cpp
     src/rwe/sim/recoil.test.cpp
