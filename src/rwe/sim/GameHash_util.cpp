@@ -151,6 +151,7 @@ namespace rwe
     {
         return combineHashes(
             p.station,
+            p.targetPosition,
             static_cast<uint32_t>(p.swingPositive),
             p.outOfRangeArrivals,
             static_cast<uint32_t>(p.phase));

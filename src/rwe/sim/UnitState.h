@@ -284,6 +284,14 @@ namespace rwe
          */
         SimVector station{0_ss, 0_ss, 0_ss};
 
+        /**
+         * Where the thing it is shooting at is, refreshed every tick. The
+         * gunship keeps its nose on this while it slides sideways around the
+         * ring, which is both what the swing looks like and what lets it
+         * shoot: its gun is bolted to the hull.
+         */
+        SimVector targetPosition{0_ss, 0_ss, 0_ss};
+
         /** Which way round the ring the next swing goes; the first one is negative. */
         bool swingPositive{false};
 

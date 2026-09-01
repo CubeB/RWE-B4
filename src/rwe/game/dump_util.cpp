@@ -140,6 +140,7 @@ namespace rwe
         return nlohmann::json{
             {"phase", phaseName},
             {"station", dumpJson(p.station)},
+            {"targetPosition", dumpJson(p.targetPosition)},
             {"swingPositive", p.swingPositive},
             {"outOfRangeArrivals", p.outOfRangeArrivals},
         };

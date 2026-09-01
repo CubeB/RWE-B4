@@ -963,18 +963,25 @@ namespace rwe
                         unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, targetAngle, turnRateThisFrame);
                     },
                     [&](const AirMovementStateHoverAttack& m) {
-                        // The nose follows the flight path here too. A gunship
-                        // therefore crosses its ring side-on to the target,
-                        // which is what the swing looks like from the ground.
-                        // It keeps shooting anyway: the original holds the aim
-                        // from the moment it arrives and fires whenever the
-                        // target is in range, without waiting to be pointed at it.
-                        SimVector heading(m.currentVelocity.x, 0_ss, m.currentVelocity.z);
-                        if (heading.lengthSquared() == 0_ss)
+                        // A gunship keeps its nose on the target and slides
+                        // sideways around the ring, which is what the swing
+                        // looks like from the ground and, more to the point,
+                        // the only way it can shoot at all: both gunship
+                        // weapons say turret=0, so the gun is bolted to the
+                        // hull and only bears within about a third of a right
+                        // angle of straight ahead. Pointing the nose along the
+                        // flight path instead leaves it crossing the target at
+                        // better than sixty degrees off, and it managed under
+                        // a quarter of the fire it should.
+                        SimVector toTarget(
+                            m.targetPosition.x - unitInfo.state->position.x,
+                            0_ss,
+                            m.targetPosition.z - unitInfo.state->position.z);
+                        if (toTarget.lengthSquared() == 0_ss)
                         {
                             return;
                         }
-                        unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, UnitState::toRotation(heading), turnRateThisFrame);
+                        unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, UnitState::toRotation(toTarget), turnRateThisFrame);
                     });
             });
     }
@@ -2141,6 +2148,7 @@ namespace rwe
             return false;
         }
         hover->target = target;
+        hover->targetPosition = targetPosition;
 
         SimVector toStation(hover->station.x - unitInfo.state->position.x, 0_ss, hover->station.z - unitInfo.state->position.z);
         SimVector toTarget(targetPosition.x - unitInfo.state->position.x, 0_ss, targetPosition.z - unitInfo.state->position.z);

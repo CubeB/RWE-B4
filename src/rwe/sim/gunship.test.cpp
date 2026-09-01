@@ -103,6 +103,13 @@ namespace rwe
             w.burst = 4;
             w.burstInterval = SimScalar(0.1f);
             w.velocity = 450_ss / 30_ss;
+            // VTOL_EMG says turret=0, so the gun is bolted to the hull and the
+            // Brawler has to be pointing at what it wants to shoot. That is the
+            // whole reason a gunship holds its nose on the target while it
+            // slides around the ring.
+            w.turret = false;
+            w.tolerance = SimAngle(6000);
+            w.pitchTolerance = SimAngle(12000);
             w.damageRadius = 4_ss;
             w.damage["DEFAULT"] = 10;
             sim.weaponDefinitions["emg"] = w;
@@ -205,8 +212,14 @@ namespace rwe
         CAPTURE(simScalarToFloat(closest));
         CAPTURE(simScalarToFloat(lowest));
 
-        // It is shooting...
-        REQUIRE(sim.getUnitState(targetId).hitPoints < startingHitPoints);
+        auto dealt = startingHitPoints - sim.getUnitState(targetId).hitPoints;
+        CAPTURE(dealt);
+        // It is shooting, and shooting properly rather than snatching the
+        // odd round as it swings through. Both gunship weapons are bolted
+        // to the hull, so this only holds while the nose stays on the
+        // target: pointing it along the flight path instead drops this to
+        // 480 over the same stretch, under a quarter of what it should be.
+        REQUIRE(dealt > 1500u);
         // ...it stays in the air rather than breaking off to land...
         REQUIRE(lowest > 30_ss);
         // ...and it settles onto the ring instead of firing from wherever.
