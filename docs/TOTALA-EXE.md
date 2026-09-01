@@ -264,7 +264,39 @@ black cycle for it.
 
 ---
 
-## 4. `SFXTYPE_VTOL` — the Atlas exhaust
+## 4. Effects a script asks for: `emit-sfx`
+
+`TAObjScr::EmitSfx` transforms the emitter piece and then dispatches on the
+type: 0–5 through the jump table at `0x481128`, and 257–259 by three compares at
+`0x480FDE`–`0x4810D2`. Every handler allocates one emitter object, calls its
+`Init`, and files it in one of the ten particle layers of §5 — the layer is a
+literal at the call site, not a property of the effect.
+
+| Type | Name | Handler | Layer | Sequence |
+|---|---|---|---|---|
+| 0 | `SFXTYPE_VTOL` | `0x472330` | 7 | `flamestream` |
+| 1 | thrust | `0x472330` | 7 | `flamestream` |
+| 2–5 | the four wakes | `0x472430` | 2 | `smoke 1`, palette 97–103 |
+| 257 | `SFXTYPE_WHITESMOKE` | `0x472810` | 9 | `smoke 1` |
+| 258 | `SFXTYPE_BLACKSMOKE` | `0x4728F0` | 9 | `smoke 2` |
+| 259 | `SFXTYPE_SUBBUBBLES` | `0x472530` | 7 | — |
+
+The sequences all come out of `anims/FX.GAF`, loaded once at `0x429870` into a
+run of slots on the globals block: `+0x147CF` `smoke 1`, `+0x147D3` `smoke 2`,
+`+0x147D7` `fire1`, and on through `+0x147F3` `flamestream`.
+
+**That slot map is direct, and an earlier reading of this document that said the
+loader stores each handle one slot late was wrong.** The store *looks* misplaced
+because the compiler schedules it between the *next* call's argument pushes —
+`0x4298AC` pushes `"smoke 2"` and only then does `0x4298B2` write `eax`, which
+still holds the result of the `"smoke 1"` call at `0x4298A1`. Reading the two
+uses settles it independently: the wake emitter at `0x474A7F` loads `+0x147CF`
+and immediately loads `0x61` and `0x67` — palette 97–103, pale blue to deep
+blue, which is water foam and so has to be `smoke 1`; the Atlas exhaust at
+`0x474526` loads `+0x147F3`, which is `flamestream`. Both identifications below
+stand; only the explanation of why did not.
+
+### `SFXTYPE_VTOL` — the Atlas exhaust
 
 `TAObjScr::EmitSfx`'s jump table sends type 0 to a handler that passes the
 emitter piece's two vertices to a particle playing the **`flamestream`** sequence
@@ -278,14 +310,115 @@ yellow that get larger as they descend" the effect is recognised by. **It is a
 sprite, not coloured dots.** Neither Spring nor TA3D found this: Spring draws a
 generic heat cloud, TA3D a fire texture with no growth at all.
 
-One trap worth recording: **FX.GAF's loader stores each handle into the *next*
-iteration's slot.** The off-by-one is confirmed independently by the wake
-emitter, which uses `smoke 1` with a hardcoded palette ramp of indices 97–103 —
-pale blue to deep blue, i.e. water foam, which is obviously right for a wake and
-would be obviously wrong one slot over.
-
 In the game data, the Atlas and Valkyrie are the only OTA units that emit
 `SFXTYPE_VTOL`, from three (four) thruster pieces at `sleep 67`.
+
+### Smoke from a damaged unit
+
+**Nothing in the engine decides when a unit smokes.** There is no health
+threshold in the per-tick unit update, and there is no code path from a unit's
+hit points to a smoke emitter at all: every call site of every spawner in the
+particle manager is accounted for below, and none of them is in a unit update.
+The whole trigger is the unit's own `SmokeUnit` script, which `Create` launches
+as a thread and which then loops for the life of the unit.
+
+Straight out of `ARMSOLAR.COB`, and identical word for word in 186 of the 200
+scripts shipped in `rev31`:
+
+```
+SmokeUnit(healthpercent, sleeptime, smoketype)
+{
+    while (get BUILD_PERCENT_LEFT) sleep 400;
+    while (TRUE)
+    {
+        healthpercent = get HEALTH;
+        if (healthpercent < 66)
+        {
+            smoketype = 256 | 2;                              // black
+            if (Rand(1, 66) < healthpercent) smoketype = 256 | 1;   // white
+            emit-sfx smoketype from base;
+        }
+        sleeptime = healthpercent * 50;
+        if (sleeptime < 200) sleeptime = 200;
+        sleep sleeptime;
+    }
+}
+```
+
+So, answering the questions in the shape they are usually asked:
+
+- **The threshold is 66% and there is only one of it.** Above it a unit does not
+  smoke at all.
+- **The rate scales with the damage**: one puff every `max(health% × 50, 200)`
+  milliseconds, so 3.25 s just under the threshold and a floor of 200 ms —
+  every sixth tick — from 4% health down.
+- **Light and heavy are mixed, not staged.** Every puff rolls `Rand(1, 66)` and
+  comes out white when the roll is below the health percentage, so a unit just
+  under the threshold is nearly all white and one about to die is nearly all
+  black, with a mix in between. `Rand` never returns below its low bound, so at
+  1% health the smoke is black without exception.
+- **It comes off one piece**, the one named in the `emit-sfx` — `base` on a
+  building, `torso` on a Peewee. The engine adds no offset and no spread: the
+  puff starts at the piece's origin exactly.
+
+The engine's half is the emitter class at vtable `0x4FD618`, shared by every
+`smoke 1`/`smoke 2` effect in the game:
+
+| | |
+|---|---|
+| constructor | `0x474CD0` |
+| `Init` | `0x474D50` |
+| emit one puff | `0x474DF0` |
+| per-tick update | `0x475340` |
+| is it due to emit | `0x475440` |
+| is it finished | `0x474F80` |
+
+`Init(position, frameCap, interval, framePeriod, lifetime, useSmoke2)`. A
+whitesmoke gets `(piece, 0, 1, 0, 0, 0)` and a blacksmoke the same with the last
+argument 1; a zero `framePeriod` defaults to 7 at `0x474DD5`. **A zero lifetime
+means one puff and no more**: `0x471D70` sets the emitter's end time to `now`,
+`Init` emits once directly at `0x474DCA`, and that emit pushes the next emission
+to `now + 1`, which `0x475440` then refuses for being past the end. So one
+`emit-sfx` is one puff, and the script's sleep is the entire emission rate.
+
+A puff is a 32-byte record — sequence, position, stopping frame, current frame,
+frame period, countdown — and `0x475340` steps every one of them each tick:
+
+- `x += windX × 8`, `z += windZ × 8`, `y += gravity × 4`. The wind is the same
+  two words at `globals+0x37ECC` the ballistic projectiles use (§7); gravity is
+  the one at `globals+0x14263`, which at the 112 nearly every map ships with
+  works out at 0.498 world units of lift per tick.
+- The countdown starts at the frame period, 7. When it runs out the frame
+  advances and the countdown is reloaded with `half + rand·half/0x8000` where
+  `half` is the period halved — **3 to 5 ticks per frame after the first, which
+  gets the full 7**.
+- **A puff stops on a frame drawn when it is born**, `2 + rand·(frameCount −
+  3)/0x8000`, and is deleted when the current frame reaches it (`0x4753D3`).
+  `smoke 1` has twelve frames and `smoke 2` sixteen, so a puff shows between two
+  and ten, or two and fourteen, of them. Most therefore die while they are still
+  small blobs and the last frame of a sequence is never reached at all. That
+  spread, not the drift, is what stops a smoking unit reading as a column of
+  identical clouds.
+
+The same class does the rest of the game's smoke, so the numbers are worth
+having in one place:
+
+| Effect | Spawner | Called from | `interval` | `lifetime` | Layer |
+|---|---|---|---|---|---|
+| damage smoke | `0x472810` / `0x4728F0` | `EmitSfx` 257 / 258 | 1 | 0 (one puff) | 9 |
+| explosion smoke | `0x472630` | `0x420AE1` | 7 | 15 | 9 |
+| burning wreck | `0x472630` | `0x48644B` | 15 | 900 (30 s) | 9 |
+| weapon smoke trail | `0x4729D0` | `0x49CC07`, `0x49CDC3`, `0x49CFE6` | 1 | 0 | 9 |
+
+Two details from that table. The explosion and wreck emitters check the world
+`y` of the point against the sea level byte at `globals+0x1427F` first
+(`0x420AD4`, `0x4863E7`) and **emit nothing underwater**. And the weapon smoke
+trail passes a `frameCap` of 3 and a `framePeriod` of 30, which pins its
+stopping frame at exactly 2 — a trail puff is two frames of `smoke 1` held for
+30 then 15–29 ticks, far slower and far smaller than a damage puff.
+
+There is a fifth spawner, `0x472720`, identical to `0x472630` but asking for
+`smoke 2`. Nothing references it; it is dead in this build.
 
 ---
 
@@ -550,6 +683,15 @@ have to dive to reach its cruise height.
 Ballistic and dropped projectiles have the map's wind vector added to their
 position every tick (`0x49BD10`, the three words at `globals+0x37ECC`), on top
 of gravity. Not ported; recorded because it is easy to miss.
+
+The vector is built once at `0x490CA4`–`0x490D35`: the speed is
+`minwindspeed + rand(maxwindspeed − minwindspeed)` straight out of the OTA, the
+direction is `rand(0x10000)`, and the two components stored are
+`−2·cos(dir)·speed` and `−2·sin(dir)·speed` in the same 16.16 units as a
+position. Smoke uses the same two words, scaled by 8 per tick (§4), which is the
+one place the missing wind is actually conspicuous — every puff in the original
+leans downwind together. Porting it needs a map-wide wind vector RWE does not
+have yet, so the smoke rises straight up for now.
 
 ---
 
@@ -1232,6 +1374,14 @@ original:
   is honoured only in that such a unit is never given an attack order to begin
   with. The original's version is the `0x43B1F0` gate and the anchor order it
   plants at `unit+0x6a`.
+- **Smoke does not drift downwind.** The vector and the ×8 scaling are decoded
+  (§4, §7) but RWE has no map wind, so every puff goes straight up. The lift
+  itself is right: RWE's half a unit a tick is the original's gravity × 4 on the
+  112 that nearly every map uses, though it will not track a map that sets
+  gravity to something else.
+- The **explosion smoke** (`0x472630` from `0x420AE1`, three puffs seven ticks
+  apart) and the **30-second burning wreck plume** (`0x48644B`) are decoded but
+  not ported; RWE's explosions and wreckage do not smoke afterwards.
 
 ---
 

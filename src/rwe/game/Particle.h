@@ -1,11 +1,13 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <rwe/math/Vector3f.h>
 #include <rwe/render/SpriteSeries.h>
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/SimVector.h>
 #include <variant>
+#include <vector>
 
 namespace rwe
 {
@@ -33,6 +35,16 @@ namespace rwe
          * the aircraft to hide it, since it comes out underneath.
          */
         bool inWorld{false};
+
+        /**
+         * When this is not empty it replaces frameDuration and finishTime.
+         * Entry i is the age in ticks at which frame i comes up, and the last
+         * entry is the age at which the particle goes away, so the sequence
+         * shows one frame fewer than the schedule has entries. Smoke needs it
+         * because the original neither holds every frame for the same time nor
+         * plays the sequence to the end; see makeSmokePuffFrameSchedule.
+         */
+        std::vector<GameTime> frameStartTimes;
     };
 
     struct ParticleRenderTypeWake
@@ -76,7 +88,33 @@ namespace rwe
         GameTime startTime;
 
         bool isStarted(GameTime currentTime) const;
-        unsigned int getFrameIndex(GameTime currentTime, GameTime frameDuration, int totalFrames) const;
-        bool isFinished(GameTime currentTime, const ParticleFinishTime& finishTime, GameTime frameDuration, int numberOfFrames) const;
+        unsigned int getFrameIndex(GameTime currentTime, const ParticleRenderTypeSprite& renderType, int totalFrames) const;
+        bool isFinished(GameTime currentTime, const ParticleRenderTypeSprite& renderType, int numberOfFrames) const;
     };
+
+    /** The first frame of a puff of smoke is held for this many ticks. */
+    const unsigned int smokePuffFirstFrameTicks = 7;
+
+    /** Every frame after the first is held for this many ticks plus a roll of the same again. */
+    const unsigned int smokePuffLaterFrameTicks = 3;
+
+    /**
+     * How one puff of smoke plays in the original.
+     *
+     * A puff does not run its sequence out. It picks, when it is born, the
+     * frame it will stop on -- uniformly between two and two short of the last
+     * one -- so most puffs die while they are still small blobs and only the
+     * occasional one lives long enough to reach the fat frames at the end.
+     * That spread is what keeps a damaged unit's smoke from reading as a
+     * column of identical clouds.
+     *
+     * The timing is uneven too. The first frame gets the emitter's own seven
+     * tick period, and every frame after it gets half of that plus a fresh
+     * roll of the same, so three to five ticks each. Rolling every hold up
+     * front is equivalent to the original rolling one at a time, since each
+     * roll is independent of everything before it.
+     *
+     * randomBelow must return a uniform value in [0, n) for n > 0.
+     */
+    std::vector<GameTime> makeSmokePuffFrameSchedule(int numberOfFrames, const std::function<int(int)>& randomBelow);
 }

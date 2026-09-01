@@ -4661,13 +4661,13 @@ namespace rwe
     void GameScene::emitLightSmokeFromPiece(UnitId unitId, const std::string& pieceName)
     {
         auto position = simulation.getUnitPiecePosition(unitId, pieceName);
-        spawnSmoke(simVectorToFloat(position), "FX", "smoke 1", ParticleFinishTimeEndOfFrames(), GameTime(2));
+        spawnSmokePuff(simVectorToFloat(position), "smoke 1");
     }
 
     void GameScene::emitBlackSmokeFromPiece(UnitId unitId, const std::string& pieceName)
     {
         auto position = simulation.getUnitPiecePosition(unitId, pieceName);
-        spawnSmoke(simVectorToFloat(position), "FX", "smoke 2", ParticleFinishTimeEndOfFrames(), GameTime(2));
+        spawnSmokePuff(simVectorToFloat(position), "smoke 2");
     }
 
     float randomFloat(float low, float high)
@@ -5590,6 +5590,34 @@ namespace rwe
             duration,
             frameDuration,
             true,
+        };
+        particle.startTime = simulation.gameTime;
+
+        particles.push_back(particle);
+    }
+
+    void GameScene::spawnSmokePuff(const Vector3f& position, const std::string& anim)
+    {
+        auto numberOfFrames = static_cast<int>(gameMediaDatabase.getSpriteSeries("FX", anim).value()->sprites.size());
+
+        Particle particle;
+        particle.position = position;
+
+        // The original lifts a puff by four times the map's gravity every
+        // tick. On the 112 that nearly every shipped map uses that works out
+        // at 0.498 world units, so the half a unit the rest of the smoke here
+        // already rises by is the right answer for all but a handful of maps
+        // and is not worth threading the map's gravity through to reach.
+        particle.velocity = Vector3f(0.0f, 0.5f, 0.0f);
+
+        particle.renderType = ParticleRenderTypeSprite{
+            "FX",
+            anim,
+            ParticleFinishTimeEndOfFrames(),
+            GameTime(2),
+            true,
+            false,
+            makeSmokePuffFrameSchedule(numberOfFrames, [](int n) { return std::rand() % n; }),
         };
         particle.startTime = simulation.gameTime;
 
