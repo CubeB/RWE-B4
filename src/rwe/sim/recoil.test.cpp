@@ -17,9 +17,11 @@ namespace rwe
 {
     namespace
     {
-        // Big enough that the rock is well clear of the noise in converting a
-        // 16-bit turn to radians and back; the sim's own cap is 900.
-        const SimScalar RockAngle = 900_ss;
+        // The one angle the original ever passes, so the numbers the exact
+        // cases below assert are the ones a real shot produces. It is also
+        // big enough that the rock is well clear of the noise in converting a
+        // 16-bit turn to radians and back.
+        const SimScalar RockAngle = intToSimScalar(rockUnitAngle);
 
         MapTerrain makeMinimalTerrain()
         {
@@ -112,7 +114,7 @@ namespace rwe
             // Dead ahead is the one case where the numbers are exact: the
             // whole rock is a backwards pitch about the x axis and nothing
             // about the z.
-            REQUIRE(rock.angles.first == -900);
+            REQUIRE(rock.angles.first == -rockUnitAngle);
             REQUIRE(rock.angles.second == 0);
         }
 
@@ -175,6 +177,80 @@ namespace rwe
                     REQUIRE(rocked.y.value > 0.0f);
                 }
             }
+        }
+    }
+
+    TEST_CASE("recoil is the same size for every weapon", "[recoil]")
+    {
+        // The original pushes the literal 0x320 at all three of its projectile
+        // spawn routines and passes it straight to RockUnit, so a Peewee's
+        // machine gun heaves its hull exactly as far as a Bulldog's cannon
+        // does. RWE used to invent an angle from the weapon's damage instead,
+        // which put a light gun at 141 units and capped a heavy one at 900.
+
+        SECTION("the angle is the constant the original passes")
+        {
+            REQUIRE(rockUnitAngle == 800);
+        }
+
+        SECTION("a shot dead ahead pitches by exactly that much and rolls not at all")
+        {
+            auto angles = computeRockUnitAngles(SimAngle(0), SimVector(0_ss, 0_ss, 1_ss), RockAngle);
+
+            REQUIRE(angles.first == -800);
+            REQUIRE(angles.second == 0);
+        }
+
+        SECTION("a shot off the right beam rolls by exactly that much and pitches not at all")
+        {
+            // The unit faces world +z, so its right is world -x.
+            auto angles = computeRockUnitAngles(SimAngle(0), SimVector(-1_ss, 0_ss, 0_ss), RockAngle);
+
+            REQUIRE(angles.first == 0);
+            REQUIRE(angles.second == 800);
+        }
+    }
+
+    TEST_CASE("only a unit whose script defines RockUnit recoils", "[recoil]")
+    {
+        // The engine asks for RockUnit on every unit that fires; what decides
+        // whether anything happens is whether the script has one. The
+        // original looks the name up in the script's own name table
+        // (0x4B0A70), gets -1 when it is absent, and 0x4B0B00 returns without
+        // starting a thread. Only seventeen of the two hundred shipped
+        // scripts include rockunit.h, which is why a Peewee stands still and
+        // a Stumpy rocks.
+
+        SECTION("a script with no RockUnit starts nothing")
+        {
+            CobScript script;
+            script.staticVariableCount = 0;
+            script.pieces = {"base"};
+            script.functions = {CobFunctionInfo{"FirePrimary", 0}};
+            script.instructions = {0};
+
+            CobEnvironment env(&script);
+            auto thread = env.createThread("RockUnit", {-800, 0});
+
+            REQUIRE(!thread.has_value());
+            REQUIRE(env.threads.empty());
+        }
+
+        SECTION("a script that defines one gets a thread with both angles")
+        {
+            CobScript script;
+            script.staticVariableCount = 0;
+            script.pieces = {"base"};
+            script.functions = {CobFunctionInfo{"FirePrimary", 0}, CobFunctionInfo{"RockUnit", 1}};
+            script.instructions = {0, 0};
+
+            CobEnvironment env(&script);
+            auto thread = env.createThread("RockUnit", {-800, 0});
+
+            REQUIRE(thread.has_value());
+            REQUIRE(env.threads.size() == 1);
+            REQUIRE((*thread)->callStack.top().locals.at(0) == -800);
+            REQUIRE((*thread)->callStack.top().locals.at(1) == 0);
         }
     }
 }

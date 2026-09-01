@@ -709,8 +709,16 @@ namespace rwe
 
         void spawnSmoke(const Vector3f& position, const std::string& gaf, const std::string& anim, ParticleFinishTime duration, GameTime frameDuration);
 
-        /** One puff of the smoke a damaged unit's SmokeUnit script asks for, out of anims/FX.GAF. */
-        void spawnSmokePuff(const Vector3f& position, const std::string& anim);
+        /**
+         * One puff of smoke out of anims/FX.GAF, played the way the original's
+         * puffs play. riseRate is how far it climbs each tick: a damaged unit's
+         * smoke and a thermal vent's steam share this emitter class in the
+         * original and differ only in that.
+         */
+        void spawnSmokePuff(const Vector3f& position, const std::string& anim, float riseRate);
+
+        /** This tick's steam from every thermal vent on the map. */
+        void spawnGeoVentSteam();
 
         void spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration);
 

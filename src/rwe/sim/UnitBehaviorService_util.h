@@ -45,6 +45,18 @@ namespace rwe
     std::optional<std::pair<SimAngle, SimAngle>> computeFiringAngles(SimScalar speed, SimScalar gravity, SimScalar targetX, SimScalar targetY);
 
     /**
+     * How far the hull heels when a weapon fires, in COB's 16-bit turn units,
+     * so about four and a half degrees.
+     *
+     * The original passes this same constant for every shot of every weapon:
+     * it is the literal 0x320 pushed at 0x49CB9C, 0x49CD57 and 0x49CF7B, the
+     * three projectile spawn routines. Nothing scales it -- not the weapon,
+     * not its damage, not the unit. What decides whether a unit rocks at all
+     * is only whether its script defines RockUnit.
+     */
+    const int rockUnitAngle = 800;
+
+    /**
      * The pair of angles to hand a unit's RockUnit script -- one about the x
      * axis, one about the z, in COB's 16-bit turn units -- so that the hull
      * heels away from a shot leaving in the given world direction.

@@ -838,6 +838,7 @@ set(TEST_FILES
     src/rwe/sim/UnitState_util.test.cpp
     src/rwe/sim/util.test.cpp
     src/rwe/sim/recoil.test.cpp
+    src/rwe/sim/geovent.test.cpp
     src/rwe/sim/standingorders.test.cpp
     src/rwe/sim/targeting.test.cpp
     src/rwe/sim/turret.test.cpp
