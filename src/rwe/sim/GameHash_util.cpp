@@ -66,10 +66,14 @@ namespace rwe
             p.desiredEnergyConsumptionBuffer,
             p.previousDesiredMetalConsumptionBuffer,
             p.previousDesiredEnergyConsumptionBuffer,
-            p.actualMetalConsumptionBuffer,
-            p.actualEnergyConsumptionBuffer,
+            p.metalRequestBuffer,
+            p.energyRequestBuffer,
+            p.metalDebt,
+            p.energyDebt,
             p.metalProductionBuffer,
-            p.energyProductionBuffer);
+            p.energyProductionBuffer,
+            p.previousMetalProductionBuffer,
+            p.previousEnergyProductionBuffer);
     }
 
     GameHash computeHashOf(const UnitState& u)
@@ -106,10 +110,16 @@ namespace rwe
             u.isSufficientlyPowered,
             u.energyProductionBuffer,
             u.metalProductionBuffer,
+            u.previousEnergyProductionBuffer,
+            u.previousMetalProductionBuffer,
             u.previousEnergyConsumptionBuffer,
             u.previousMetalConsumptionBuffer,
             u.energyConsumptionBuffer,
-            u.metalConsumptionBuffer);
+            u.metalConsumptionBuffer,
+            u.energyRequestBuffer,
+            u.metalRequestBuffer,
+            u.energyDebt,
+            u.metalDebt);
     }
 
     GameHash computeHashOf(const UnitPhysicsInfoGround& p)

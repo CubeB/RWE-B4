@@ -20,25 +20,55 @@
 
 namespace rwe
 {
+    ResourceSettlement settleResourcePool(float supply, float debt, float requested)
+    {
+        // The original never reaches here with a negative supply, because the
+        // stockpile it feeds in is the previous second's remainder and that is
+        // floored at zero. Say so explicitly rather than divide by a debt of
+        // nothing on the way to finding out.
+        if (supply < 0.0f)
+        {
+            supply = 0.0f;
+        }
+
+        ResourceSettlement result{};
+
+        float afterDebt;
+        if (debt <= supply)
+        {
+            result.debtFraction = 1.0f;
+            afterDebt = supply - debt;
+        }
+        else
+        {
+            result.debtFraction = supply / debt;
+            afterDebt = 0.0f;
+        }
+
+        if (requested <= afterDebt)
+        {
+            result.requestFraction = 1.0f;
+            result.remaining = afterDebt - requested;
+        }
+        else
+        {
+            result.requestFraction = afterDebt / requested;
+            result.remaining = 0.0f;
+        }
+
+        result.stalled = result.debtFraction < 1.0f || result.requestFraction < 1.0f;
+        return result;
+    }
+
     bool GamePlayerInfo::addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal)
     {
         recordDesire(apparentEnergy);
         recordDesire(apparentMetal);
 
-        // Spending is checked against what is actually on hand right now, so
-        // when the stockpile is empty work carries on at the rate income
-        // arrives instead of stopping for a whole second and then bursting.
-        auto energyOk = canAfford(actualEnergy);
-        auto metalOk = canAfford(actualMetal);
-        if (!energyOk)
-        {
-            energyStalled = true;
-        }
-        if (!metalOk)
-        {
-            metalStalled = true;
-        }
-        if (!energyOk || !metalOk)
+        // Nothing here asks whether the money is on hand. The original decides
+        // that once a second for the whole player at once, and a consumer's only
+        // gate in between is whether it is still paying off the last shortfall.
+        if (inResourceDebt())
         {
             return false;
         }
@@ -64,24 +94,9 @@ namespace rwe
         }
     }
 
-    bool GamePlayerInfo::canAfford(const rwe::Energy& delta) const
+    bool GamePlayerInfo::inResourceDebt() const
     {
-        if (delta >= Energy(0))
-        {
-            return true;
-        }
-        auto available = energy + energyProductionBuffer - actualEnergyConsumptionBuffer;
-        return available + delta >= Energy(0);
-    }
-
-    bool GamePlayerInfo::canAfford(const rwe::Metal& delta) const
-    {
-        if (delta >= Metal(0))
-        {
-            return true;
-        }
-        auto available = metal + metalProductionBuffer - actualMetalConsumptionBuffer;
-        return available + delta >= Metal(0);
+        return energyDebt > Energy(0) || metalDebt > Metal(0);
     }
 
     void GamePlayerInfo::acceptResource(const rwe::Energy& energy)
@@ -92,7 +107,7 @@ namespace rwe
         }
         else
         {
-            actualEnergyConsumptionBuffer -= energy;
+            energyRequestBuffer -= energy;
         }
     }
 
@@ -104,7 +119,7 @@ namespace rwe
         }
         else
         {
-            actualMetalConsumptionBuffer -= metal;
+            metalRequestBuffer -= metal;
         }
     }
 
@@ -1867,9 +1882,26 @@ namespace rwe
         auto& unit = getUnitState(unitId);
         auto& player = getPlayer(unit.owner);
 
-        unit.addEnergyDelta(apparentEnergy);
-        unit.addMetalDelta(apparentMetal);
-        return player.addResourceDelta(apparentEnergy, apparentMetal, actualEnergy, actualMetal);
+        // The unit that asked is the one that is told yes or no, and the one
+        // that carries any debt: a builder hands its own economy block to the
+        // request at 0x41BC5A. The player-level buffers are the running totals
+        // the settle and the resource display need.
+        player.recordDesire(apparentEnergy);
+        player.recordDesire(apparentMetal);
+
+        // Income is never refused. The original does not ask for what a unit
+        // makes, it adds it straight into the unit's block (0x4016E2, 0x401749),
+        // so a generator that happens to owe for something else still earns.
+        if (apparentEnergy >= Energy(0))
+        {
+            player.energyProductionBuffer += apparentEnergy;
+        }
+        if (apparentMetal >= Metal(0))
+        {
+            player.metalProductionBuffer += apparentMetal;
+        }
+
+        return unit.addResourceDelta(apparentEnergy, apparentMetal, actualEnergy, actualMetal);
     }
 
     bool GameSimulation::trySetYardOpen(const UnitId& unitId, bool open)
@@ -2730,14 +2762,17 @@ namespace rwe
             nextWindSpeedChange = gameTime + GameTime(durationDist(rng) * SimTicksPerSecond);
 
             // the new wind speed is taken from a uniform distribution between the min and max speeds
-            std::uniform_int_distribution<int> speedDist(minWindSpeed, maxWindSpeed);
+            std::uniform_int_distribution<int> speedDist(minWindSpeed, std::max(minWindSpeed, maxWindSpeed));
             auto currentWindSpeed = speedDist(rng);
 
             // the new wind direction is a random angle
             std::uniform_int_distribution<int> directionDist(MinAngle.value, MaxAngle.value);
             auto currentWindDirection = SimAngle(directionDist(rng));
 
-            currentWindGenerationFactor = SimScalar(currentWindSpeed) / SimScalar(MaxUtilizableWindSpeed);
+            // A generator gets the wind as a fraction of the speed the game
+            // considers a full gale, and no more than all of it however hard
+            // the map says the wind blows (TotalA.exe 0x490D5E).
+            currentWindGenerationFactor = rweMin(1_ss, SimScalar(currentWindSpeed) / SimScalar(MaxUtilizableWindSpeed));
 
             UnitBehaviorService(this).updateWind(currentWindGenerationFactor, currentWindDirection);
         }
@@ -2775,75 +2810,21 @@ namespace rwe
                 }
             }
 
-            for (Index i = 0; i < getSize(players); ++i)
-            {
-                auto& player = players[i];
-                // Brutal computer players get a little extra for every unit of income.
-                auto bonus = resourceBonusFor(PlayerId(i));
-                player.metal += Metal(player.metalProductionBuffer.value * bonus);
-                player.metalProductionBuffer = Metal(0);
-                player.energy += Energy(player.energyProductionBuffer.value * bonus);
-                player.energyProductionBuffer = Energy(0);
-
-                if (player.metal > Metal(0))
-                {
-                    player.metal -= player.actualMetalConsumptionBuffer;
-                    player.actualMetalConsumptionBuffer = Metal(0);
-                    player.metalStalled = false;
-                }
-                else
-                {
-                    player.metalStalled = true;
-                }
-
-                player.previousDesiredMetalConsumptionBuffer = player.desiredMetalConsumptionBuffer;
-                player.desiredMetalConsumptionBuffer = Metal(0);
-
-                if (player.energy > Energy(0))
-                {
-                    player.energy -= player.actualEnergyConsumptionBuffer;
-                    player.actualEnergyConsumptionBuffer = Energy(0);
-                    player.energyStalled = false;
-                }
-                else
-                {
-                    player.energyStalled = true;
-                }
-
-                player.previousDesiredEnergyConsumptionBuffer = player.desiredEnergyConsumptionBuffer;
-                player.desiredEnergyConsumptionBuffer = Energy(0);
-
-                if (player.metal > player.maxMetal)
-                {
-                    player.metal = player.maxMetal;
-                }
-
-                if (player.energy > player.maxEnergy)
-                {
-                    player.energy = player.maxEnergy;
-                }
-            }
-
+            // The make-and-use pass comes before the settle, so a generator's
+            // output is available to the same second that pays for the work
+            // beside it. The order inside a unit matters too: the original
+            // decides whether the unit is powered from its energy draw and then
+            // gates the metal it makes on that same answer, rather than on last
+            // second's.
             for (auto& entry : units)
             {
                 const auto& unitId = entry.first;
                 auto& unit = entry.second;
                 const auto& unitDefinition = unitDefinitions.at(unit.unitType);
 
-                unit.resetResourceBuffers();
-
-                if (!unit.isBeingBuilt(unitDefinition))
-                {
-                    addResourceDelta(unitId, unitDefinition.energyMake, unitDefinition.metalMake);
-                }
-
                 if (unit.activated)
                 {
-                    if (unitDefinition.windGenerator != Energy(0))
-                    {
-                        // generate energy from wind
-                        addResourceDelta(unitId, unitDefinition.windGenerator * currentWindGenerationFactor, Metal(0));
-                    }
+                    unit.isSufficientlyPowered = addResourceDelta(unitId, -unitDefinition.energyUse, -unitDefinition.metalUse);
 
                     if (unit.isSufficientlyPowered)
                     {
@@ -2862,8 +2843,105 @@ namespace rwe
                         }
                     }
 
-                    unit.isSufficientlyPowered = addResourceDelta(unitId, -unitDefinition.energyUse, -unitDefinition.metalUse);
+                    // Wind and tidal are not gated on being powered: they are
+                    // what makes the power.
+                    if (unitDefinition.windGenerator != Energy(0))
+                    {
+                        addResourceDelta(unitId, unitDefinition.windGenerator * currentWindGenerationFactor, Metal(0));
+                    }
+
+                    if (unitDefinition.tidalGenerator != Energy(0))
+                    {
+                        addResourceDelta(unitId, unitDefinition.tidalGenerator * SimScalar(static_cast<float>(tidalStrength)), Metal(0));
+                    }
                 }
+
+                if (!unit.isBeingBuilt(unitDefinition))
+                {
+                    addResourceDelta(unitId, unitDefinition.energyMake, unitDefinition.metalMake);
+                }
+            }
+
+            // Now settle. Everything asked for this second is pooled, and one
+            // fraction per resource decides what share of it every consumer
+            // gets, so a shortfall slows the whole player down evenly instead of
+            // starving whoever happens to be last in the list. Debt already owed
+            // is paid before anything new.
+            for (Index i = 0; i < getSize(players); ++i)
+            {
+                auto& player = players[i];
+                // Brutal computer players get a little extra for every unit of income.
+                auto bonus = resourceBonusFor(PlayerId(i));
+
+                auto metalDebt = player.metalDebt;
+                auto energyDebt = player.energyDebt;
+                auto metalRequested = player.metalRequestBuffer;
+                auto energyRequested = player.energyRequestBuffer;
+                for (const auto& entry : units)
+                {
+                    const auto& unit = entry.second;
+                    if (!unit.isOwnedBy(PlayerId(i)))
+                    {
+                        continue;
+                    }
+                    metalDebt += unit.metalDebt;
+                    energyDebt += unit.energyDebt;
+                    metalRequested += unit.metalRequestBuffer;
+                    energyRequested += unit.energyRequestBuffer;
+                }
+
+                player.metalProductionBuffer = Metal(player.metalProductionBuffer.value * bonus);
+                player.energyProductionBuffer = Energy(player.energyProductionBuffer.value * bonus);
+
+                auto metalSupply = player.metal + player.metalProductionBuffer;
+                auto energySupply = player.energy + player.energyProductionBuffer;
+
+                auto metalSettlement = settleResourcePool(metalSupply.value, metalDebt.value, metalRequested.value);
+                auto energySettlement = settleResourcePool(energySupply.value, energyDebt.value, energyRequested.value);
+
+                player.metal = Metal(metalSettlement.remaining);
+                player.energy = Energy(energySettlement.remaining);
+                player.metalStalled = metalSettlement.stalled;
+                player.energyStalled = energySettlement.stalled;
+
+                if (player.metal > player.maxMetal)
+                {
+                    player.metal = player.maxMetal;
+                }
+
+                if (player.energy > player.maxEnergy)
+                {
+                    player.energy = player.maxEnergy;
+                }
+
+                for (auto& entry : units)
+                {
+                    auto& unit = entry.second;
+                    if (!unit.isOwnedBy(PlayerId(i)))
+                    {
+                        continue;
+                    }
+                    unit.settleResources(
+                        energySettlement.requestFraction,
+                        energySettlement.debtFraction,
+                        metalSettlement.requestFraction,
+                        metalSettlement.debtFraction);
+                }
+
+                player.metalDebt = Metal(player.metalRequestBuffer.value * (1.0f - metalSettlement.requestFraction) + player.metalDebt.value * (1.0f - metalSettlement.debtFraction));
+                player.energyDebt = Energy(player.energyRequestBuffer.value * (1.0f - energySettlement.requestFraction) + player.energyDebt.value * (1.0f - energySettlement.debtFraction));
+                player.metalRequestBuffer = Metal(0);
+                player.energyRequestBuffer = Energy(0);
+
+                player.previousMetalProductionBuffer = player.metalProductionBuffer;
+                player.previousEnergyProductionBuffer = player.energyProductionBuffer;
+                player.metalProductionBuffer = Metal(0);
+                player.energyProductionBuffer = Energy(0);
+
+                player.previousDesiredMetalConsumptionBuffer = player.desiredMetalConsumptionBuffer;
+                player.previousDesiredEnergyConsumptionBuffer = player.desiredEnergyConsumptionBuffer;
+                player.desiredMetalConsumptionBuffer = Metal(0);
+                player.desiredEnergyConsumptionBuffer = Energy(0);
             }
         }
     }

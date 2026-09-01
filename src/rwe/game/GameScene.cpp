@@ -412,7 +412,7 @@ namespace rwe
         }
         {
             const auto& rect = localSideData.energyProduced;
-            auto text = formatResourceDelta(getPlayer(localPlayerId).energyProductionBuffer);
+            auto text = formatResourceDelta(getPlayer(localPlayerId).previousEnergyProductionBuffer);
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont, Color(83, 223, 79));
         }
         {
@@ -453,7 +453,7 @@ namespace rwe
         }
         {
             const auto& rect = localSideData.metalProduced;
-            auto text = formatResourceDelta(getPlayer(localPlayerId).metalProductionBuffer);
+            auto text = formatResourceDelta(getPlayer(localPlayerId).previousMetalProductionBuffer);
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont, Color(83, 223, 79));
         }
         {

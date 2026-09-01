@@ -175,6 +175,7 @@ namespace rwe
         unsigned int metalStorage;
 
         unsigned int windGenerator;
+        unsigned int tidalGenerator;
 
         bool hideDamage;
         bool showPlayerName;

@@ -45,10 +45,14 @@ namespace rwe
             {"desiredEnergyConsumptionBuffer", dumpJson(p.desiredEnergyConsumptionBuffer)},
             {"previousDesiredMetalConsumptionBuffer", dumpJson(p.previousDesiredMetalConsumptionBuffer)},
             {"previousDesiredEnergyConsumptionBuffer", dumpJson(p.previousDesiredEnergyConsumptionBuffer)},
-            {"actualMetalConsumptionBuffer", dumpJson(p.actualMetalConsumptionBuffer)},
-            {"actualEnergyConsumptionBuffer", dumpJson(p.actualEnergyConsumptionBuffer)},
+            {"metalRequestBuffer", dumpJson(p.metalRequestBuffer)},
+            {"energyRequestBuffer", dumpJson(p.energyRequestBuffer)},
+            {"metalDebt", dumpJson(p.metalDebt)},
+            {"energyDebt", dumpJson(p.energyDebt)},
             {"metalProductionBuffer", dumpJson(p.metalProductionBuffer)},
-            {"energyProductionBuffer", dumpJson(p.energyProductionBuffer)}};
+            {"energyProductionBuffer", dumpJson(p.energyProductionBuffer)},
+            {"previousMetalProductionBuffer", dumpJson(p.previousMetalProductionBuffer)},
+            {"previousEnergyProductionBuffer", dumpJson(p.previousEnergyProductionBuffer)}};
     }
     nlohmann::json dumpJson(const UnitState& u)
     {
@@ -81,7 +85,13 @@ namespace rwe
             {"previousEnergyConsumptionBuffer", dumpJson(u.previousEnergyConsumptionBuffer)},
             {"previousMetalConsumptionBuffer", dumpJson(u.previousMetalConsumptionBuffer)},
             {"energyConsumptionBuffer", dumpJson(u.energyConsumptionBuffer)},
-            {"metalConsumptionBuffer", dumpJson(u.metalConsumptionBuffer)}};
+            {"metalConsumptionBuffer", dumpJson(u.metalConsumptionBuffer)},
+            {"previousEnergyProductionBuffer", dumpJson(u.previousEnergyProductionBuffer)},
+            {"previousMetalProductionBuffer", dumpJson(u.previousMetalProductionBuffer)},
+            {"energyRequestBuffer", dumpJson(u.energyRequestBuffer)},
+            {"metalRequestBuffer", dumpJson(u.metalRequestBuffer)},
+            {"energyDebt", dumpJson(u.energyDebt)},
+            {"metalDebt", dumpJson(u.metalDebt)}};
     }
 
     nlohmann::json dumpJson(const UnitPhysicsInfoGround& p)

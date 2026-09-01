@@ -213,6 +213,7 @@ namespace rwe
         Metal metalStorage;
 
         Energy windGenerator;
+        Energy tidalGenerator;
 
         std::optional<Grid<YardMapCell>> yardMap;
         bool yardMapContainsGeo;

@@ -130,9 +130,8 @@ namespace rwe
         REQUIRE(std::holds_alternative<UnitBehaviorStateIdle>(builder.behaviourState));
 
         // Repairing is free.
-        const auto& info = sim.getPlayer(player);
-        REQUIRE(info.actualMetalConsumptionBuffer.value == 0.0f);
-        REQUIRE(info.actualEnergyConsumptionBuffer.value == 0.0f);
+        REQUIRE(builder.metalRequestBuffer.value == 0.0f);
+        REQUIRE(builder.energyRequestBuffer.value == 0.0f);
     }
 
     TEST_CASE("a repair order on an unfinished unit completes its construction", "[repair]")

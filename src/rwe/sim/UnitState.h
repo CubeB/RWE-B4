@@ -459,12 +459,26 @@ namespace rwe
         bool activated{false};
         bool isSufficientlyPowered{false};
 
+        /**
+         * The unit's own slice of the streaming economy, laid out as the
+         * original's is at `unit+0xBC`: what it made this second, what it asked
+         * for, what of that it was allowed to ask for, and what it still owes.
+         * The settle in GameSimulation::updateResources sums these across the
+         * player, works out what fraction of the whole can be paid, and hands
+         * back the unpaid remainder as debt.
+         */
         Energy energyProductionBuffer{0};
         Metal metalProductionBuffer{0};
+        Energy previousEnergyProductionBuffer{0};
+        Metal previousMetalProductionBuffer{0};
         Energy previousEnergyConsumptionBuffer{0};
         Metal previousMetalConsumptionBuffer{0};
         Energy energyConsumptionBuffer{0};
         Metal metalConsumptionBuffer{0};
+        Energy energyRequestBuffer{0};
+        Metal metalRequestBuffer{0};
+        Energy energyDebt{0};
+        Metal metalDebt{0};
 
         std::deque<std::pair<std::string, int>> buildQueue;
         FactoryBehaviorState factoryState;
@@ -553,6 +567,29 @@ namespace rwe
 
         void addEnergyDelta(const Energy& energy);
         void addMetalDelta(const Metal& metal);
+
+        /**
+         * Books a resource request against this unit and says whether the work
+         * it pays for may go ahead. Income is always taken. Spending is refused
+         * outright while the unit still owes for work it has already done, and
+         * granted in full otherwise: how much of the second's granted requests
+         * can actually be paid is not decided here but at the settle, which is
+         * where the shortfall turns back into debt.
+         *
+         * The apparent amounts are what the resource display should show; the
+         * actual amounts are what is charged.
+         */
+        bool addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal);
+
+        /** True while this unit owes for work already done, and so may not start more. */
+        bool inResourceDebt() const;
+
+        /**
+         * Pays down this second's requests and the older debt at the fractions
+         * the player could afford, and carries the rest forward. Rolls the
+         * second's figures into the display copies and clears the accumulators.
+         */
+        void settleResources(float energyRequestFraction, float energyDebtFraction, float metalRequestFraction, float metalDebtFraction);
 
         void resetResourceBuffers();
 

@@ -409,6 +409,7 @@ namespace rwe
         u.metalStorage = Metal(fbi.metalStorage);
 
         u.windGenerator = Energy(fbi.windGenerator);
+        u.tidalGenerator = Energy(fbi.tidalGenerator);
 
         u.corpse = fbi.corpse;
 
