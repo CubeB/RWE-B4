@@ -320,17 +320,19 @@ namespace rwe
 
         SECTION("a unit that has not asked for it pays nothing and stays visible")
         {
+            auto before = sim.getPlayer(us).energy;
             tickTo(sim, FirstEconomyTick);
             REQUIRE_FALSE(sim.getUnitState(unitId).cloaked);
-            REQUIRE(sim.getPlayer(us).actualEnergyConsumptionBuffer.value == Catch::Approx(0.0f));
+            REQUIRE(sim.getPlayer(us).energy.value == Catch::Approx(before.value));
         }
 
         SECTION("standing still it pays CloakCost")
         {
             sim.getUnitState(unitId).cloakRequested = true;
+            auto before = sim.getPlayer(us).energy;
             tickTo(sim, FirstEconomyTick);
             REQUIRE(sim.getUnitState(unitId).cloaked);
-            REQUIRE(sim.getPlayer(us).actualEnergyConsumptionBuffer.value == Catch::Approx(200.0f));
+            REQUIRE(sim.getPlayer(us).energy.value == Catch::Approx(before.value - 200.0f));
         }
 
         SECTION("moving it pays CloakCostMoving instead")
@@ -341,9 +343,10 @@ namespace rwe
             // A unit is moving exactly when it has left where it was last tick,
             // which is the same test the StartMoving callback uses.
             unit.previousPosition = unit.position - SimVector(4_ss, 0_ss, 0_ss);
+            auto before = sim.getPlayer(us).energy;
             sim.tick();
             REQUIRE(sim.getUnitState(unitId).cloaked);
-            REQUIRE(sim.getPlayer(us).actualEnergyConsumptionBuffer.value == Catch::Approx(1000.0f));
+            REQUIRE(sim.getPlayer(us).energy.value == Catch::Approx(before.value - 1000.0f));
         }
 
         SECTION("with the energy gone it takes nothing at all and decloaks")
@@ -352,7 +355,10 @@ namespace rwe
             sim.getPlayer(us).energy = Energy(50.0f);
             tickTo(sim, FirstEconomyTick);
             REQUIRE_FALSE(sim.getUnitState(unitId).cloaked);
-            REQUIRE(sim.getPlayer(us).actualEnergyConsumptionBuffer.value == Catch::Approx(0.0f));
+            // All or nothing: it does not take a part payment and it does not
+            // put the player into debt for a cloak it cannot have.
+            REQUIRE(sim.getPlayer(us).energy.value == Catch::Approx(50.0f));
+            REQUIRE(sim.getPlayer(us).energyDebt.value == Catch::Approx(0.0f));
         }
     }
 

@@ -898,9 +898,20 @@ namespace rwe
                 return;
             }
         }
-        else if (!sim->addResourceDelta(id, -weaponDefinition.energyPerShot, -weaponDefinition.metalPerShot))
+        else
         {
-            return;
+            // Asked against the stores directly rather than through the
+            // ordinary request-and-settle path. That path pays every consumer
+            // a share of whatever there is and carries the rest as debt, which
+            // is right for a builder but not for a shot: the original settles
+            // the price before the round leaves the barrel, and a weapon that
+            // cannot cover it in full simply does not fire.
+            const auto& player = sim->getPlayer(unit.owner);
+            if (player.energy < weaponDefinition.energyPerShot || player.metal < weaponDefinition.metalPerShot)
+            {
+                return;
+            }
+            sim->addResourceDelta(id, -weaponDefinition.energyPerShot, -weaponDefinition.metalPerShot);
         }
 
         // spawn a projectile from the firing point

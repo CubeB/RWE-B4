@@ -570,12 +570,12 @@ namespace rwe
 
     Metal UnitState::getMetalMake() const
     {
-        return metalProductionBuffer;
+        return previousMetalProductionBuffer;
     }
 
     Energy UnitState::getEnergyMake() const
     {
-        return energyProductionBuffer;
+        return previousEnergyProductionBuffer;
     }
 
     Metal UnitState::getMetalUse() const
@@ -612,8 +612,45 @@ namespace rwe
         }
     }
 
+    bool UnitState::addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal)
+    {
+        addEnergyDelta(apparentEnergy);
+        addMetalDelta(apparentMetal);
+
+        if (inResourceDebt())
+        {
+            return false;
+        }
+
+        if (actualEnergy < Energy(0))
+        {
+            energyRequestBuffer -= actualEnergy;
+        }
+        if (actualMetal < Metal(0))
+        {
+            metalRequestBuffer -= actualMetal;
+        }
+        return true;
+    }
+
+    bool UnitState::inResourceDebt() const
+    {
+        return energyDebt > Energy(0) || metalDebt > Metal(0);
+    }
+
+    void UnitState::settleResources(float energyRequestFraction, float energyDebtFraction, float metalRequestFraction, float metalDebtFraction)
+    {
+        energyDebt = Energy(energyRequestBuffer.value * (1.0f - energyRequestFraction) + energyDebt.value * (1.0f - energyDebtFraction));
+        metalDebt = Metal(metalRequestBuffer.value * (1.0f - metalRequestFraction) + metalDebt.value * (1.0f - metalDebtFraction));
+        energyRequestBuffer = Energy(0);
+        metalRequestBuffer = Metal(0);
+        resetResourceBuffers();
+    }
+
     void UnitState::resetResourceBuffers()
     {
+        previousEnergyProductionBuffer = energyProductionBuffer;
+        previousMetalProductionBuffer = metalProductionBuffer;
         energyProductionBuffer = Energy(0);
         metalProductionBuffer = Metal(0);
         previousEnergyConsumptionBuffer = energyConsumptionBuffer;

@@ -242,11 +242,19 @@ namespace rwe
         }
     }
 
-    TEST_CASE("a launcher that cannot pay builds nothing rather than going into debt", "[stockpile]")
+    TEST_CASE("a launcher on a dead economy stalls in the middle of its build", "[stockpile]")
     {
         // 0x402C9C: the resource call fails, the progress is not advanced and
         // the order comes back in ten ticks instead of five. A silo on a dead
         // economy sits at the same point in the build for as long as it takes.
+        //
+        // It does get going, though, and the original is the same: the request
+        // at 0x4011C0 refuses a consumer only once it already owes for the last
+        // shortfall, and never looks at the stockpile. So the first second is
+        // paid on credit and it is the debt that stops the second one. This
+        // test asserted the silo never moved at all, which was written against
+        // an earlier reading of the economy where a request was weighed against
+        // the stores on the spot; the settle decoded since says otherwise.
         auto script = makeStockpileScript();
         GameSimulation sim(makeStockpileTerrain(), 0u, 0, 0);
         auto us = addStockpilePlayer(sim, "us", 0.0f, 0.0f);
@@ -259,9 +267,14 @@ namespace rwe
         sim.modifyStockpileQueue(siloId, 1);
 
         tick(sim, 200);
+        auto stalled = weaponOf(sim, siloId).stockpileProgress;
         REQUIRE(weaponOf(sim, siloId).stockedRounds == 0);
-        REQUIRE(weaponOf(sim, siloId).stockpileProgress == 0);
         REQUIRE(weaponOf(sim, siloId).queuedRounds == 1);
+        // Stuck part way in, not finished and not moving.
+        REQUIRE(stalled > 0);
+        tick(sim, 200);
+        REQUIRE(weaponOf(sim, siloId).stockpileProgress == stalled);
+        REQUIRE(weaponOf(sim, siloId).stockedRounds == 0);
 
         // Pay the bill and the same order finishes.
         sim.getPlayer(us).metal = Metal(100000.0f);

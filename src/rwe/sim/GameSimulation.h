@@ -42,6 +42,32 @@ namespace rwe
     /** A hit of at least this much goes through armour untouched (TotalA.exe 0x489BD1). */
     constexpr int ArmourBypassDamage = 30000;
 
+    /** What one second's settle decided for one resource. */
+    struct ResourceSettlement
+    {
+        /** The share of this second's requests that could be paid, 0 to 1. */
+        float requestFraction;
+        /** The share of the debt carried in from earlier seconds that could be paid, 0 to 1. */
+        float debtFraction;
+        /** What is left in the stockpile once both have been paid. */
+        float remaining;
+        /** True when either share fell short of the whole. */
+        bool stalled;
+    };
+
+    /**
+     * Divides a second's supply between what is already owed and what has been
+     * asked for since. Debt is paid first and in preference: if it cannot be
+     * paid in full then nothing new gets anything at all this second. Whatever
+     * fraction comes back is the same for every consumer of that resource, so a
+     * player who can afford two thirds of its outgoings has every builder,
+     * every metal maker and every cloak working at two thirds rather than a
+     * lucky two thirds of them working and the rest stopped.
+     *
+     * This is TotalA.exe 0x401A4D, run once for energy and once for metal.
+     */
+    ResourceSettlement settleResourcePool(float supply, float debt, float requested);
+
     enum class GamePlayerStatus
     {
         Alive,
@@ -96,26 +122,36 @@ namespace rwe
         Metal previousDesiredMetalConsumptionBuffer{0};
         Energy previousDesiredEnergyConsumptionBuffer{0};
 
-        Metal actualMetalConsumptionBuffer{0};
-        Energy actualEnergyConsumptionBuffer{0};
-
+        /** Everything the player's units and the player itself earned this second. */
         Metal metalProductionBuffer{0};
         Energy energyProductionBuffer{0};
 
+        Metal previousMetalProductionBuffer{0};
+        Energy previousEnergyProductionBuffer{0};
+
         /**
-         * Tries to apply a resource change. Income is always accepted. Spending
-         * is accepted only if the stockpile plus this second's income, less what
-         * has already been spent this second, covers it; otherwise nothing is
-         * taken, the player is flagged as stalled, and false is returned. Spending
-         * that cannot be met is still recorded as demand for the resource display.
+         * The player's own slice of the economy, for income and spending that
+         * belongs to nobody in particular rather than to one of its units. The
+         * original keeps an identical block hanging off the player at
+         * `player+0xEC` and folds it into the same totals as the per-unit ones.
+         */
+        Metal metalRequestBuffer{0};
+        Energy energyRequestBuffer{0};
+        Metal metalDebt{0};
+        Energy energyDebt{0};
+
+        /**
+         * Books a resource change against the player directly. Income is always
+         * taken. Spending is refused while the player-level block still owes for
+         * earlier work, on the same rule a unit follows; what is granted is only
+         * a claim on the second's income, settled at the end of it.
          */
         bool addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal);
         void recordDesire(const Energy& energy);
         void recordDesire(const Metal& metal);
-        bool canAfford(const Energy& energy) const;
-        bool canAfford(const Metal& metal) const;
         void acceptResource(const Energy& energy);
         void acceptResource(const Metal& metal);
+        bool inResourceDebt() const;
     };
 
     struct PathRequest
@@ -374,6 +410,13 @@ namespace rwe
         const int minWindSpeed;
 
         const int maxWindSpeed;
+
+        /**
+         * The map's `tidalstrength`, which is what a tidal generator's
+         * `TidalGenerator` is multiplied by. Set from the OTA once the map is
+         * loaded; unlike the wind it never changes during a game.
+         */
+        int tidalStrength{0};
 
         GameTime nextWindSpeedChange;
 

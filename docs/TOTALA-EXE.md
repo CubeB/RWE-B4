@@ -2420,3 +2420,312 @@ Every part of what it does comes out of that.
 - **The damage-type death causes** 4, 5, 7 and 9 are decoded as a set but not
   individually named; nothing was traced far enough to say which weapon or
   event produces each.
+
+## NN. The streaming economy
+
+Metal and energy are not spent tick by tick. Consumers ask every tick, and once
+a second the whole player's asking is added up and settled against one number.
+That is what makes a shortfall feel like everything slowing down together
+rather than some things stopping.
+
+### The tick order
+
+The sim step increments the game tick at `0x4954BD` and then runs its phases,
+of which the per-player pass `0x464F80` is one. Inside that pass, each player
+reaches `0x465077`:
+
+```
+465077  mov eax,[edi+0xf0]              ; the player's next economy tick
+465083  cmp eax,[ecx+0x38a47]           ; against the game tick
+465089  ja  0x4655a6                    ; not yet -> skip the rest of this player
+46508f  add eax,0x1e                    ; +30
+```
+
+`global+0x38A47` is the game tick counter. `player+0xF0` is pushed thirty ticks
+ahead every time it fires, so the settle at `0x46555A -> 0x401360` runs **once a
+second per player**, staggered by whatever each player's counter started at. The
+gate the call itself sits behind (`0x46554F`, a word at `global+0x39239` that
+must be negative) is initialised to `0xFFFF` at `0x498199` and only ever moved by
+the endgame sequences, so in ordinary play it is always open.
+
+Everything between the settles just accumulates. `0x401360` then, in this order:
+
+1. Sweeps the player's units, adding each one's `EnergyUse`, `EnergyMake`,
+   `MetalMake`, extraction, wind and tidal for the second, and totalling the
+   four numbers each unit carries.
+2. Adds the player-level block at `player+0xEC`, which has the same layout.
+3. Computes the two throttle fractions, `0x401A4D`.
+4. Writes the leftover back as the stockpile and clamps it to storage,
+   `0x401AB3`.
+5. Sweeps the units again to hand back the unpaid remainder as debt and clear
+   the accumulators, `0x401B37`.
+
+### The per-unit block, `unit+0xBC`
+
+Twelve floats, six per resource. The player-level block at `player+0xEC` is the
+same layout with the display copies dropped.
+
+| Offset | Energy | Metal |
+|---|---|---|
+| produced this second | `+0xBC` | `+0xD4` |
+| asked for this second | `+0xC0` | `+0xD8` |
+| granted this second | `+0xC4` | `+0xDC` |
+| still owed | `+0xC8` | `+0xE0` |
+| produced, last second (display) | `+0xCC` | `+0xE4` |
+| asked for, last second (display) | `+0xD0` | `+0xE8` |
+
+Unit stride is `0x118` (`0x401900`).
+
+### The throttle, `0x401A4D`
+
+A consumer asks through `0x4011C0`, which takes the block in `ecx` and an
+energy and a metal amount:
+
+```
+4011c0  fld [ecx+0xc]   ; energy still owed
+4011e0  test ah,0x41    ; owed <= 0 ?
+4011e6  je  0x401218    ; no -> refuse, return 0
+4011e8  fld [ecx+0x24]  ; metal still owed
+4011f6  je  0x401218    ; same test, same refusal
+4011f8..40120f          ; granted += both; return 1
+```
+
+**Nothing here looks at the stockpile.** The only gate on a consumer is whether
+it is still paying off a previous shortfall, and the demand is recorded for the
+display either way. Once a second `0x401A4D` runs twice, energy then metal, on
+the totals:
+
+```
+S = stockpile + everything produced this second
+D = everything still owed
+N = everything granted this second
+
+if D <= S: debtFraction = 1        ; R = S - D
+else:      debtFraction = S / D    ; R = 0
+if N <= R: newFraction  = 1        ; stockpile = R - N
+else:      newFraction  = R / N    ; stockpile = 0
+```
+
+and `0x401B37` gives each unit back what it did not get paid for:
+
+```
+owed' = granted * (1 - newFraction) + owed * (1 - debtFraction)
+```
+
+So the answer to "who gets what" is: **a single global fraction per resource,
+identical for every consumer**. Not first come first served, and no priority
+between building, reclaiming and repairing — they are all the same call.
+Debt is paid before anything new, and a debt too big to clear means nothing new
+is paid at all this second.
+
+The felt behaviour is a duty cycle rather than a slowdown. A builder that asked
+for more than the player could afford is refused outright on the following
+ticks, does no work at all, and resumes when its debt reaches zero — but because
+the fraction is global, every consumer's duty cycle has the same shape, so at
+the scale a player watches it looks like the whole base running at the same
+reduced rate.
+
+### Build rate, `0x41BA60`
+
+Called as `(builder, target, amount)`. Every caller passes the same amount
+(`0x402A09`, `0x403E43`, `0x404139`, `0x414235`, `0x414656`):
+
+```
+4029db  mov eax,0x88888889
+4029e6  mov cx,[edx+0x1fe]     ; the BUILDER's workertime
+4029ed  imul ecx               ; the standard signed divide by 30
+4029fc..402a04                 ; amount = (float)(workertime / 30)
+```
+
+`workertime / 30` is an **integer** division, truncating. An ARMCK rated at 80
+builds at 2, not 2.67 — a quarter of its rated worker time is thrown away by the
+rounding — and anything below 30 would build at nothing at all.
+
+`unit+0x104` is the target's remaining build fraction, counting **down** from
+1.0 to 0.0; zero means finished, which is why `0x4016C5` tests it before
+crediting `EnergyMake` and storage. One call does:
+
+```
+41bacd  fild [ecx+0x1ea]       ; the TARGET's buildtime
+41bad3  fdivr [esp+0x28]       ; amount / buildtime
+41bad7  fsubr st,st(1)         ; progress - that
+41bae4..41bb1e                 ; clamped into [0, 1]
+41bb32  fsub [esp+0x24]        ; delta = the fraction actually applied
+41bb36  fld [ecx+0x186]        ; buildcostenergy * delta
+41bb3c  fld [ecx+0x18a]        ; buildcostmetal  * delta
+41bb72  call 0x4e43a0          ; hit points are trunc(progress * maxdamage),
+41bb7d  call 0x4e43a0          ;   differenced across the step
+41bc5a  lea ecx,[ebp+0xbc]     ; charged to the BUILDER's own block
+41bc60  call 0x4011c0
+41bc67  je  0x41bcaa           ; refused -> no progress at all this tick
+```
+
+So the per-tick spend is `buildCost * (workerTime / 30) / buildTime` for each
+resource, the whole job takes `buildTime * 30 / workerTime` ticks, and the
+answer to "what happens to progress when the spend is throttled" is: **nothing
+happens to it**. Progress is applied in full on the ticks the request is
+accepted and not at all on the ticks it is refused. The throttle acts on the
+resources; the debt it leaves behind is what stops the builder next tick.
+
+A negative amount runs the same routine backwards: `0x41BBA1` refunds
+`buildcostmetal * delta` into the builder's metal production. Energy is not
+refunded.
+
+Replaying this against real FBI data, an ARMCOM (`WorkerTime=300`) building an
+ARMSOLAR (`BuildTime=2495`, `BuildCostMetal=145`, `BuildCostEnergy=760`) takes
+250 ticks — 8.33 seconds — and drains 17.43 metal and 91.38 energy per second,
+which are the numbers the original shows.
+
+### What counts as production
+
+FBI keys, from the parse block at `0x42C27F`–`0x42C372` (each key's value is
+stored by the instruction after the *next* key's push, so the pairing has to be
+made call-to-store):
+
+| Key | Offset | Type |
+|---|---|---|
+| `energymake` | `def+0x1C2` | float |
+| `energyuse` | `def+0x1C6` | float |
+| `metalmake` | `def+0x1CA` | float |
+| `extractsmetal` | `def+0x1CE` | float |
+| `windgenerator` | `def+0x1D2` | float |
+| `tidalgenerator` | `def+0x1D6` | float |
+| `cloakcost` | `def+0x1DA` | float |
+| `cloakcostmoving` | `def+0x1DE` | float |
+| `energystorage` | `def+0x1E2` | float |
+| `metalstorage` | `def+0x1E6` | float |
+| `buildtime` | `def+0x1EA` | dword |
+| `workertime` | `def+0x1FE` | **word** |
+| `makesmetal` | `def+0x22D` | byte |
+| `buildcostenergy` | `def+0x186` | float, from an int |
+| `buildcostmetal` | `def+0x18A` | float, from an int |
+
+`buildcostenergy` and `buildcostmetal` are confirmed at a second site,
+`0x42AD40`; `workertime` and `buildtime` by the chain that lands `sightdistance`
+on the `def+0x202` already in §10.
+
+**There is no `MetalUse` key.** `metaluse` does not appear in the binary at all,
+only the display string `UNITMETALUSE`. Metal is spent by building, by weapons
+and by nothing else.
+
+The generation block at `0x4013AC` reads, for a unit that is finished and alive
+(`unit+0x110` bit 28):
+
+- If the unit has a switch (`unit+0x110` bit 29) it must be **on**
+  (`unit+0x10E` bit 0) or it does nothing at all. If it has no switch, its
+  `EnergyUse` is charged only while it is on *or* moving (`unit+0x110` bits 2–3,
+  `0x401620`).
+- `EnergyUse` **below zero is production**, not consumption (`0x401429`). This is
+  how a solar collector works: ARMSOLAR has `EnergyUse=-20` and `EnergyMake=0`,
+  so switching it off does stop it. Above zero it is charged through the same
+  request path as everything else, and whether the request was accepted is the
+  "powered" flag that gates what follows.
+- Then exactly one of four, as an if/else chain: `extractsmetal` (times the
+  metal under the footprint), `makesmetal`, `windgenerator`, `tidalgenerator`.
+  The first two are gated on that powered flag; **wind and tidal are not** —
+  they are what makes the power.
+- `windgenerator` is multiplied by `global+0x37EDE` (`0x401575`), which
+  `0x490D40` sets to `windspeed / global+0x37EC8`, and `0x37EC8` is `0x1388` =
+  **5000**, set at `0x4918ED`. `0x490D5E` clamps that ratio to **1.0**, so a map
+  whose wind blows harder than 5000 gains nothing by it.
+- `tidalgenerator` is multiplied by `global+0x14267` (`0x4015DF`), the map's
+  `tidalstrength`.
+- `EnergyMake`, `MetalMake` and both storage figures are added at `0x4016C5`
+  only when `unit+0x104` is zero, so **a unit still under construction produces
+  nothing and stores nothing**. They are not gated on the switch.
+
+A computer player is handicapped on every one of these: `0x40144E` multiplies
+its production by 0.7 or 0.5 depending on `global+0x37EEE` (0 gives 0.5, 1 gives
+0.7, anything else full), and the same pair of constants appears at each
+production site including the starting stockpile at `0x465451` and reclaim at
+`0x4026B9`.
+
+### Storage and overflow
+
+`player+0xA4` and `player+0xA8` are zeroed at the top of the settle and rebuilt
+from the `EnergyStorage` and `MetalStorage` of every finished unit
+(`0x40179B`–`0x4017CB`). A per-player base is added on top at `0x401988` when
+`player+0x149` bit 0 is set, from `player+0xDC` and `player+0xE0`, which
+`0x4661B1` and `0x4661C7` read from a save or scenario as `PlayerEnergyStorage`
+and `PlayerMetalStorage`.
+
+Overflow is dropped and counted: `0x401AB3` clamps the stockpile to the cap and
+adds the excess to a lifetime waste total at `player+0xCC` / `player+0xD4`.
+
+### Reclaim and death metal
+
+Reclaiming a **feature** pays both resources in one lump from the feature
+definition (`0x423907`, energy from `featdef+0xEC`, metal from `featdef+0xF0`),
+into the reclaimer's own production, handicap and all.
+
+Reclaiming a **unit** pays `trunc((1 - progress) * buildcostmetal)` at
+`0x402666`, metal only, in one go, and then kills the target. Only the share
+that was actually built comes back.
+
+There is no death metal as such: a unit that dies leaves a wreck to be
+reclaimed. The one exception is `0x486CAD`, which credits the **killer** with
+`(1 - progress) * buildcostmetal` when the killing damage type nibble is `0x50`
+— the D-gun.
+
+### Weapons and cloak
+
+`energypershot` and `metalpershot` (`wdef+0xC0` / `+0xC4`) and the cloak cost do
+**not** go through the throttle. They are taken straight out of the stockpile
+if it covers them and refused if it does not: `0x401220`, `0x401260` and
+`0x4012A0` read the player through the block's back pointer at `block+0x30` and
+subtract from `player+0x8C` / `player+0x98` there and then. Cloak, at
+`0x40182F`, truncates its cost to an integer first and books the amount as
+demand for the display.
+
+### What RWE now does
+
+RWE settles once a second already, and its build arithmetic was already right:
+`workerTimePerTick = workerTime / 30` with the same integer division, and a
+per-tick spend of `buildCost * workerTimePerTick / buildTime`. `EnergyMake`,
+`MetalMake`, `ExtractsMetal`, `MakesMetal`, the "under construction produces
+nothing" rule, the storage recompute, the overflow clamp and
+`MaxUtilizableWindSpeed = 5000` all matched.
+
+What did not, and now does:
+
+- **The throttle.** RWE served consumers first come first served against the
+  stockpile as it stood at that moment, and a consumer that could not be served
+  simply lost the work. It now grants every request whose unit is out of debt,
+  settles the second against one fraction per resource, and carries the
+  remainder as debt on the unit that asked. `settleResourcePool` is `0x401A4D`
+  and `UnitState::addResourceDelta` is `0x4011C0`.
+- **Tidal generators**, which were not implemented at all: `TidalGenerator` was
+  not parsed and the map's `tidalstrength` never reached the simulation.
+- **The wind cap** was applied to the map's maximum wind speed at load rather
+  than to the generation factor, which left a map whose *minimum* wind is above
+  5000 with an inverted range to draw a speed from.
+- **`isSufficientlyPowered`** was computed after the metal a unit makes had
+  already been credited, so a metal maker was gated on the previous second's
+  answer. The original decides it from the same second's energy draw.
+- The make-and-use pass now runs **before** the settle rather than after it, so
+  a generator's output pays for the work beside it in the same second instead of
+  the next one.
+
+### Not ported, and why
+
+- **The AI production handicap.** RWE has its own `resourceBonusFor`, which
+  scales a computer player's income up for Brutal rather than down for easy and
+  medium. Replacing one tuning knob with another is not a compatibility
+  question, and RWE's AI is not the original's.
+- **The per-player base storage.** The original's comes from
+  `PlayerEnergyStorage` and `PlayerMetalStorage` on the player, gated by a flag
+  read out of a save or scenario file; where a skirmish gets its own values from
+  has not been found. RWE keeps giving the commander the side's starting
+  stockpile as storage instead.
+- **Reclaiming a unit** is instantaneous in the original, metal only, and
+  RWE's is gradual and pays energy too. Changing it would be a gameplay
+  decision rather than a correction, and `0x402640` is reached from one caller
+  that has not been identified.
+- **`MetalUse`** is an RWE extension with no counterpart in the original. It is
+  still parsed and charged; no stock unit sets it, so it costs nothing to keep.
+- **The if/else chain** between extraction, `MakesMetal`, wind and tidal. RWE
+  runs all four independently. No unit in the game data sets more than one of
+  them, so the two agree on real data.
+- **The lifetime production, demand and waste totals** at `player+0xAC` through
+  `player+0xD4`. They are statistics for the end-of-game screen, which RWE
+  does not have.

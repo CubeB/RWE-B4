@@ -133,6 +133,7 @@ namespace rwe
             unsigned char surfaceMetal;
             int minWindSpeed;
             int maxWindSpeed;
+            int tidalStrength;
             std::vector<std::pair<Point, std::string>> features;
             MapTerrainGraphics terrainGraphics;
         };

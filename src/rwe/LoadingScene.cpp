@@ -172,7 +172,12 @@ namespace rwe
 
         auto movementClassCollisionService = createMovementClassCollisionService(mapInfo.terrain, dataMaps.movementClassDatabase);
 
-        GameSimulation simulation(std::move(mapInfo.terrain), mapInfo.surfaceMetal, std::max(0, mapInfo.minWindSpeed), std::min(mapInfo.maxWindSpeed, MaxUtilizableWindSpeed));
+        // The wind speed range goes through as the map wrote it. The original
+        // caps what a generator can make out of it by clamping the ratio, not
+        // the speed, so clamping the speed here as well would have left a map
+        // whose minimum is above the cap with an empty range to draw from.
+        GameSimulation simulation(std::move(mapInfo.terrain), mapInfo.surfaceMetal, std::max(0, mapInfo.minWindSpeed), std::max(0, mapInfo.maxWindSpeed));
+        simulation.tidalStrength = std::max(0, mapInfo.tidalStrength);
 
         simulation.unitDefinitions = std::move(dataMaps.unitDefinitions);
         simulation.weaponDefinitions = std::move(dataMaps.weaponDefinitions);
@@ -410,7 +415,7 @@ namespace rwe
             features.emplace_back(Point(f.xPos, f.zPos), f.featureName);
         }
 
-        return LoadMapResult{std::move(terrain), static_cast<unsigned char>(schema.surfaceMetal), ota.minWindSpeed, ota.maxWindSpeed, std::move(features), std::move(terrainGraphics)};
+        return LoadMapResult{std::move(terrain), static_cast<unsigned char>(schema.surfaceMetal), ota.minWindSpeed, ota.maxWindSpeed, ota.tidalStrength, std::move(features), std::move(terrainGraphics)};
     }
 
     std::vector<TextureArrayRegion> LoadingScene::getTileTextures(TntArchive& tnt)
