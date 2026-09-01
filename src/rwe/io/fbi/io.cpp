@@ -72,6 +72,11 @@ namespace rwe
         tdf.readOrDefault("CanCapture", u.canCapture);
         tdf.readOrDefault("Cloakable", u.cloakable);
 
+        tdf.readOrDefault("MobileStandOrders", u.mobileStandOrders, false);
+        tdf.readOrDefault("FireStandOrders", u.fireStandOrders, false);
+        tdf.readOrDefault("StandingMoveOrder", u.standingMoveOrder, 2u);
+        tdf.readOrDefault("StandingFireOrder", u.standingFireOrder, 2u);
+
         tdf.readOrDefault("Commander", u.commander);
 
         tdf.readOrDefault("MaxDamage", u.maxDamage);

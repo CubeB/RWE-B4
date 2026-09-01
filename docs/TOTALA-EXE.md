@@ -750,6 +750,119 @@ All of it is gated on `unit+0x110 & 0x300000` being **non-zero** (`0x4070F2`),
 i.e. Return Fire *or* Fire At Will. That single test is the difference between
 the two modes: both shoot back, only Fire At Will goes looking.
 
+### Where both modes come from, and the movement mode beside them
+
+The firing mode is not the only two-bit field in `unit+0x110`. **Bits 18–19 are
+the movement mode**, written by the `Standing_MoveOrder` handler at `0x4030D0`
+exactly as `0x403100` writes the firing mode, and the pair are seeded together
+out of the definition when a unit is built:
+
+```
+485c8a  mov edx, [ecx+0x241]      ; ecx = the definition
+485c90  and eax, 0xfff3ffff       ; eax = unit+0x110
+485c95  and edx, 0x3              ; StandingMoveOrder
+485c98  shl edx, 0x12             ; -> bits 18-19
+485c9d  mov [esi+0x110], eax
+485ca3  mov edx, [ecx+0x241]
+485ca9  and edx, 0xc              ; StandingFireOrder
+485cac  and eax, 0xffcfffff
+485cb1  shl edx, 0x12             ; -> bits 20-21
+485cb6  mov [esi+0x110], eax
+```
+
+That is the only copy: from there on the two are the unit's own state and only
+the buttons and the COB `SET` move them. So the FBI decides what a unit is
+built doing, not what it can be told to do.
+
+The parser puts `standingmoveorder` in **bits 0–1 of `def+0x241`** (`0x42C419`,
+stored `0x42C445` with the usual xor-and-xor bitfield insert) and
+`standingfireorder` in **bits 2–3 of the same dword** (`0x42C437`, stored
+`0x42C465`). **Both default to 2** — the `push 0x2` at `0x42C417` and
+`0x42C433`. The pipeline alignment is checked by the store immediately before
+them, `mov BYTE PTR [ebp+0x22f], al` at `0x42C422`, which is `bmcode` at the
+offset §10 already records.
+
+Values run 0, 1, 2 for both, and the buttons cycle them 0 → 1 → 2 → 0
+(`0x41A4F6`, a four-way jump over a global order state where 3 means "the
+selection disagrees"). The movement values are **0 hold position, 1 maneuver,
+2 roam**, settled by `0x43B1F0`, the routine that turns a retaliation or an
+idle sighting into an attack: it returns without doing anything when bits 18–19
+are zero (`0x43B211`), and when they are exactly 1 (`0x43B25D`) it plants a
+second order at the unit's own position, `unit+0x6a`, before the attack — the
+leash that makes Maneuver come home and Roam not.
+
+In the shipped data **every mobile unit names a `StandingMoveOrder`**; the 67
+that stay silent are all buildings, so the default of 2 is never what a moving
+unit ends up with. 117 say 1, one vehicle plant says 2, and four say 0 —
+`armcom`, `corcom`, `armyork` and `corsent`. `StandingFireOrder` is 2 on 104
+and **0 on thirteen**: `armbrtha`, `armemp`, `armlance`, `armsilo`, `armsnipe`,
+`armthund`, `armvader`, `corint`, `corroach`, `corshad`, `corsilo`, `cortitan`,
+`cortron` — the long-range artillery, the nuke silos, the mines and the
+bombers, i.e. exactly the things that must not open fire on their own.
+
+### `MobileStandOrders` and `FireStandOrders` gate the buttons
+
+They are **bits 0 and 1 of `def+0x245`** (`0x42C8C4` stored `0x42C8EB`,
+`0x42C8DD` stored `0x42C910`), and they default to **0** — `esi`, zeroed at
+`0x42BE76` in the parser's prologue. They sit at the bottom of the same dword
+as the capability flags: bit 2 `onoffable`, 3 `canstop`, **4 `canattack`**,
+5 `canguard`, 6 `canpatrol`, 7 `canmove`, 8 `canload`, 10 `canreclamate`,
+11 `canresurrect`. `canattack` at bit 4 is independently fixed by the missions
+document §3, where `0x43F154` refuses to build an attack mission without it, so
+the pairing here is checked against something outside the parser.
+
+The reader settles what they do. `0x41B3F6`–`0x41B44E` walks the selection and
+accumulates, per capability, what the order panel should show:
+
+```
+41b3f6  mov edi, [esi+0x245]      ; esi = the definition
+41b3fe  shr ecx, 1
+41b400  test cl, 0x1              ; FireStandOrders
+41b40c  shr ebx, 0x14 / and 3     ;   -> the firing mode
+41b425  test BYTE [esi+0x245], 0x1 ; MobileStandOrders
+41b435  shr edx, 0x12 / and 3     ;   -> the movement mode
+```
+
+Each starts at a sentinel 4, takes the first unit's value, and drops to 3 when
+a later unit disagrees. A definition without the flag is skipped entirely, so
+**the priorities note's guess is right: these decide whether the button is
+offered at all**, and a unit that does not offer one is not dragged round the
+cycle with the rest of a mixed selection. The data agrees — `armsolar` names
+neither, `armllt` names only `firestandorders`, and the only four units that
+write an explicit `0` are the transports `armatlas`, `armtship`, `cortship`
+and `corvalk`.
+
+### `DefaultMissionType` is what a unit does when it runs out of orders
+
+A string key, read at `0x42BFE2` and turned into a mission id by
+`MissionId::FromName` (`0x438760`, the binary search the missions document
+describes) and stored as a **`BYTE` at `def+0x230`** at `0x42C018`. That it is
+a byte is confirmed away from the parser by the definition-copy routine, which
+moves it with `mov dl, [ecx+0x230]` / `mov [eax+0x230], dl` at `0x42B7D9`.
+
+It is applied at the tail of the per-tick mission service loop `0x43B7C0`, at
+`0x43B9AD`–`0x43BA30`, on the branch taken when the unit's mission list has
+just become **empty**. So it is not a build-time thing and not an idle-time
+thing but both through one path: a new unit has no missions, so its first
+service tick installs it, and so does every later tick on which the unit runs
+out. It is gated on the owning player's type byte `player+0x73` being 1 or 2,
+and a zero id — the value `FromName` returns for a name it does not know, and
+for the 63 units that name nothing — installs no mission and leaves the unit
+idle.
+
+The three names in the data resolve to:
+
+| Name | Handler | What it is |
+|---|---|---|
+| `Standby` | `0x405FE0` | Call `0x43B700` (the sight-range search) and hand any sighting to `0x43B1F0`; on a miss, clear the weapons' targets and sleep `rand(30)+30` ticks |
+| `Guard_NoMove` | `0x4021F0` | Free all three weapons (`0x489800(unit, 3)`), sleep 30 ticks, and never search |
+| `VTOL_Standby` | `0x40F7D0` | The aircraft equivalent, record 0 of the VTOL table |
+
+`Standby` is therefore the "go and look for a fight about once a second" loop,
+and it is the one place the standing move order earns its keep: `0x43B1F0`'s
+two gates are what stop a unit on Hold Position or Hold Fire from acting on
+what it sees.
+
 ### What RWE does with this
 
 Implemented: the two-bucket bad-target preference, the `rand(d²)` scoring,
@@ -791,6 +904,12 @@ definition layout:
 | `builddistance` | `def+0x212` | |
 | `sortbias` | `def+0x21A` | parsed, never read — dead |
 | `bmcode` | `def+0x22F` | `BYTE`; 1 = mobile, 0 = building |
+| `defaultmissiontype` | `def+0x230` | `BYTE` mission id, 0 = none — see §9 |
+| `standingmoveorder` | `def+0x241` bits 0–1 | default 2; 0 hold, 1 maneuver, 2 roam |
+| `standingfireorder` | `def+0x241` bits 2–3 | default 2; 0 hold, 1 return, 2 at will |
+| `mobilestandorders` | `def+0x245` bit 0 | default 0 — offer the move button |
+| `firestandorders` | `def+0x245` bit 1 | default 0 — offer the fire button |
+| `canattack` | `def+0x245` bit 4 | the rest of that dword is in §9 |
 
 Weapon TDF key names are compared through `0x42E484`–`0x42EFC3`. The pipeline
 stores a key's parsed value *after the next key has been pushed*, so pairing a
@@ -857,6 +976,8 @@ Unit instance fields:
 | roll | `unit+0x64` |
 | heading | `unit+0x66` |
 | pitch | `unit+0x68` |
+| movement mode | `unit+0x110` bits 18–19 |
+| firing mode | `unit+0x110` bits 20–21 |
 
 Useful routines:
 
@@ -1098,6 +1219,19 @@ original:
   keeps its own 256 default rather than guess.
 - **`holdtime` has no known reader** — see §11. `aimrate` is not a key the
   original recognises at all, so there is nothing there to find.
+- **`DefaultMissionType`** is decoded (§9) but not ported. RWE seeds a new
+  unit's standing orders from the definition and lets its ordinary idle
+  targeting stand in for `Standby`; what it has no equivalent of is the
+  sight-range search `0x43B700`, which is the only thing that makes `Standby`
+  and `Guard_NoMove` behave differently. Until a unit can decide to walk off
+  and find a fight, the key has nothing to change.
+- **The movement mode is stored but not acted on.** RWE now builds a unit on
+  the Hold Position, Maneuver or Roam its FBI names and reports it to the COB
+  scripts, but nothing reads it back: there is no leash on a unit that breaks
+  off to attack, so Maneuver and Roam come to the same thing and Hold Position
+  is honoured only in that such a unit is never given an attack order to begin
+  with. The original's version is the `0x43B1F0` gate and the anchor order it
+  plants at `unit+0x6a`.
 
 ---
 

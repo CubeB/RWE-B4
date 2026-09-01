@@ -5012,6 +5012,16 @@ namespace rwe
             {
                 // FIXME: should set all to a consistent single fire order rather than advancing all
                 auto& u = getUnit(selectedUnit);
+
+                // The original gathers this button out of FireStandOrders and
+                // skips any unit in the selection that does not name it, so a
+                // transport picked up along with an escort keeps its own order
+                // instead of being dragged round the cycle with everything else.
+                if (!simulation.unitDefinitions.at(u.unitType).fireStandOrders)
+                {
+                    continue;
+                }
+
                 auto newFireOrders = nextFireOrders(u.fireOrders);
                 localPlayerSetFireOrders(selectedUnit, newFireOrders);
             }

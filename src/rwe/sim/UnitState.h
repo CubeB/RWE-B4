@@ -386,8 +386,13 @@ namespace rwe
 
         std::array<std::optional<UnitWeapon>, 3> weapons;
 
+        /**
+         * Seeded from the unit's definition the moment it is built. These two
+         * only stand in for a unit put together without one, so they match the
+         * original's FBI parser defaults rather than picking their own.
+         */
         UnitFireOrders fireOrders{UnitFireOrders::FireAtWill};
-        UnitMovementOrders moveOrders{UnitMovementOrders::Maneuver};
+        UnitMovementOrders moveOrders{UnitMovementOrders::Roam};
 
         bool cobBusy{false};
         bool buggerOffActive{false};

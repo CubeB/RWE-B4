@@ -71,6 +71,28 @@ namespace rwe
         bool canCapture;
         bool cloakable;
 
+        /**
+         * Whether this unit offers the standing move order and standing fire
+         * order buttons. They sit in the same run of capability flags as
+         * CanAttack and CanMove and the original treats them the same way:
+         * silence means no button, which is why a solar collector names
+         * neither and a light laser tower names only the fire one. The four
+         * transports set them to zero outright.
+         */
+        bool mobileStandOrders{false};
+        bool fireStandOrders{false};
+
+        /**
+         * The order each button starts on, 0 to 2 — hold position, maneuver,
+         * roam, and hold fire, return fire, fire at will. The original
+         * defaults both to 2 when the key is absent, which in the shipped
+         * data only ever lands on buildings: every mobile unit names a
+         * StandingMoveOrder, and all but the Commander, the Sentinel, the
+         * Yorktown and a vehicle plant name 1.
+         */
+        unsigned int standingMoveOrder{2};
+        unsigned int standingFireOrder{2};
+
         bool commander;
 
         unsigned int maxDamage;

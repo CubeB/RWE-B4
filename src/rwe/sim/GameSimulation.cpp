@@ -1204,6 +1204,12 @@ namespace rwe
         unit.position = position;
         unit.previousPosition = position;
 
+        // The original seeds both standing orders from the definition here and
+        // never consults it again, so anything that moves them afterwards --
+        // the buttons, a script -- sticks for the life of the unit.
+        unit.moveOrders = unitDefinition.standingMoveOrder;
+        unit.fireOrders = unitDefinition.standingFireOrder;
+
         if (rotation)
         {
             unit.rotation = *rotation;

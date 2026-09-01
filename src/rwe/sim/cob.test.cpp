@@ -58,9 +58,13 @@ namespace rwe
             REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::StandingFireOrders{}}) == 2);
         }
 
-        SECTION("GET StandingMoveOrders default is Maneuver (1)")
+        SECTION("GET StandingMoveOrders default is Roam (2)")
         {
-            REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::StandingMoveOrders{}}) == 1);
+            // A unit with no StandingMoveOrder in its FBI gets the original's
+            // parser default of 2, and a bare unit here has no definition to
+            // take one from. In the shipped data only buildings ever land on
+            // it: every mobile unit names one, and almost all of them say 1.
+            REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::StandingMoveOrders{}}) == 2);
         }
 
         SECTION("SET/GET round-trip for StandingMoveOrders")

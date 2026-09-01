@@ -7,6 +7,8 @@
 #include <rwe/sim/MovementClassId.h>
 #include <rwe/sim/SimAngle.h>
 #include <rwe/sim/SimScalar.h>
+#include <rwe/sim/UnitFireOrders.h>
+#include <rwe/sim/UnitMovementOrders.h>
 #include <string>
 #include <variant>
 
@@ -88,6 +90,27 @@ namespace rwe
         bool canCapture;
         /** Can hide from enemy sight (TA Cloakable). Only this shows the CLOAK button. */
         bool cloakable{false};
+
+        /**
+         * Whether the standing move order and standing fire order buttons are
+         * offered for this unit at all. The original gathers the buttons for a
+         * selection out of these two flags and refuses to cycle an order the
+         * unit never advertised, so a transport cannot be told to hold fire and
+         * a solar collector is offered nothing.
+         */
+        bool mobileStandOrders{false};
+        bool fireStandOrders{false};
+
+        /**
+         * What the two standing orders start on when the unit is built. The
+         * original copies them out of the definition once, in the same routine
+         * that gives a fresh unit its type index and frees its weapons; from
+         * then on they are the unit's own state and the buttons move them.
+         * They are what stops a nuke silo launching at the first thing that
+         * wanders past and what keeps the Commander from strolling off.
+         */
+        UnitMovementOrders standingMoveOrder{UnitMovementOrders::Roam};
+        UnitFireOrders standingFireOrder{UnitFireOrders::FireAtWill};
 
         /** If true, the unit is considered a commander for victory conditions. */
         bool commander;

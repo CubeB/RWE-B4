@@ -47,6 +47,10 @@ namespace rwe
 
     Grid<YardMapCell> parseYardMap(unsigned int width, unsigned int height, const std::string& yardMap);
 
+    UnitMovementOrders parseStandingMoveOrder(unsigned int value);
+
+    UnitFireOrders parseStandingFireOrder(unsigned int value);
+
     UnitDefinition parseUnitDefinition(const UnitFbi& fbi, MovementClassDatabase& movementClassDatabase);
 
     WeaponMediaInfo parseWeaponMediaInfo(const std::vector<Color>& palette, const std::vector<Color>& guiPalette, const WeaponTdf& tdf);
