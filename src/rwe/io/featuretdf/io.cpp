@@ -46,7 +46,7 @@ namespace rwe
 
         f.hitDensity = tdf.extractUint("hitdensity").value_or(0);
 
-        f.reproduce = tdf.extractBool("reproduce").value_or(false);
+        f.reproduce = tdf.extractUint("reproduce").value_or(0);
         f.reproduceArea = tdf.extractUint("reproducearea").value_or(0);
 
         f.noDisplayInfo = tdf.extractBool("nodisplayinfo").value_or(false);

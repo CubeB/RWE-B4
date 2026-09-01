@@ -43,6 +43,9 @@ namespace rwe
         tdf.readOrDefault("wspe_badTargetCategory", u.wspeBadTargetCategory);
         tdf.readOrDefault("NoChaseCategory", u.noChaseCategory);
         tdf.readOrDefault("ShootMe", u.shootMe);
+        tdf.readOrDefault("kamikaze", u.kamikaze);
+        tdf.readOrDefault("kamikazedistance", u.kamikazeDistance, 0u);
+        tdf.readOrDefault("immunetoparalyzer", u.immuneToParalyzer);
         tdf.readOrDefault("SightDistance", u.sightDistance, 0u);
         tdf.readOrDefault("RadarDistance", u.radarDistance, 0u);
         tdf.readOrDefault("SonarDistance", u.sonarDistance, 0u);
@@ -98,6 +101,11 @@ namespace rwe
         // The original defaults this to one, so an aircraft whose FBI is
         // silent still banks like an aircraft.
         tdf.readOrDefault("BankScale", u.bankScale, 1.0f);
+
+        // Zero means absent: no shipped unit names a MoveRate of nought, and
+        // the original substitutes twice MaxVelocity when the key is missing.
+        tdf.readOrDefault("MoveRate1", u.moveRate1, 0.0f);
+        tdf.readOrDefault("MoveRate2", u.moveRate2, 0.0f);
 
         tdf.readOrDefault("Weapon1", u.weapon1);
         tdf.readOrDefault("Weapon2", u.weapon2);

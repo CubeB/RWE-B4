@@ -179,6 +179,18 @@ namespace rwe
         bool attackTargetAir(UnitInfo unitInfo, const AttackTarget& target);
 
         /**
+         * Walks a crawling bomb onto its target and detonates it. The original's
+         * ATTACK_KAMIKAZE mission handler, 0x403336 / 0x4032B4.
+         */
+        bool kamikazeRun(UnitInfo unitInfo, const AttackTarget& target);
+
+        /**
+         * Works out which speed band the unit is now in and, if it has changed,
+         * runs the script the original would. TotalA.exe 0x43DA70.
+         */
+        void updateMoveRateBand(UnitInfo unitInfo);
+
+        /**
          * Gunship attack handler, for the two units in the original data with
          * HoverAttack set. Closes to weapon range, then holds a ring at two
          * thirds of that range and shuttles 45 degrees back and forth around

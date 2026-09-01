@@ -227,6 +227,7 @@ namespace rwe
         weaponDefinition.fireStarter = static_cast<unsigned int>(std::clamp(tdf.fireStarter, 0.0f, 100.0f));
 
         weaponDefinition.waterWeapon = tdf.waterWeapon;
+        weaponDefinition.paralyzer = tdf.paralyzer;
         weaponDefinition.toAirWeapon = tdf.toAirWeapon;
 
         weaponDefinition.randomDecay = GameTime(static_cast<unsigned int>(tdf.randomDecay * 30.0f));
@@ -337,6 +338,12 @@ namespace rwe
 
         u.turnRate = SimScalar(fbi.turnRate);
         u.maxVelocity = SimScalar(fbi.maxVelocity);
+
+        // A missing MoveRate is twice the unit's top speed in the original, so
+        // the threshold is one the unit can never cross and everything that
+        // moves is in the first band.
+        u.moveRate1 = fbi.moveRate1 > 0.0f ? SimScalar(fbi.moveRate1) : SimScalar(fbi.maxVelocity) * 2_ss;
+        u.moveRate2 = fbi.moveRate2 > 0.0f ? SimScalar(fbi.moveRate2) : SimScalar(fbi.maxVelocity) * 2_ss;
         u.acceleration = SimScalar(fbi.acceleration);
         u.brakeRate = SimScalar(fbi.brakeRate);
 
@@ -425,6 +432,9 @@ namespace rwe
         u.badTargetCategory = {fbi.wpriBadTargetCategory, fbi.wsecBadTargetCategory, fbi.wspeBadTargetCategory};
         u.noChaseCategory = fbi.noChaseCategory;
         u.shootMe = fbi.shootMe;
+        u.kamikaze = fbi.kamikaze;
+        u.kamikazeDistance = fbi.kamikazeDistance;
+        u.immuneToParalyzer = fbi.immuneToParalyzer;
         u.sightDistance = fbi.sightDistance;
         u.radarDistance = fbi.radarDistance;
         u.sonarDistance = fbi.sonarDistance;

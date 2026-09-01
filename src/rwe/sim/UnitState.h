@@ -417,6 +417,22 @@ namespace rwe
         /** When set, the game time at which this unit will self-destruct. */
         std::optional<GameTime> selfDestructTime;
 
+        /**
+         * When set, the game time this unit comes round from an EMP hit. The
+         * original models the stun as a sleeping order in front of the unit's
+         * own (0x402D10), which is why a unit picks up what it was doing rather
+         * than standing idle afterwards.
+         */
+        std::optional<GameTime> paralyzedUntil;
+
+        /**
+         * Which move-rate band the unit is in: 0 stopped, 1 to 3 the three
+         * speed bands. The original keeps it in bits 2-3 of `unit+0x110` and
+         * only calls a script when it changes (0x43DACD), so a unit crossing a
+         * threshold once does not restart its flame loop every tick.
+         */
+        unsigned int moveRateBand{0};
+
         /** The transport carrying this unit, if any. While set the unit does nothing and follows the transport. */
         std::optional<UnitId> carriedBy;
 
@@ -528,6 +544,12 @@ namespace rwe
         void setWeaponTarget(unsigned int weaponIndex, const SimVector& target);
         void clearWeaponTarget(unsigned int weaponIndex);
         void clearWeaponTargets();
+
+        /** Whether the unit is still stunned at the given game time. */
+        bool isParalyzed(GameTime now) const
+        {
+            return paralyzedUntil && now < *paralyzedUntil;
+        }
 
         /**
          * Changes the firing mode, dropping whatever the unit had picked out

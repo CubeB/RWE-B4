@@ -383,45 +383,83 @@ weapon exists in the shipped data and RWE has a render type for it with
 (`src/rwe/game/GameScene_util.cpp:1205–1206`). Note the `>= 30000` armour bypass
 found in §5 is exactly the D-gun's signature. ~1–2 days.
 
-### 13. Paralyzer / EMP
+### 13. Paralyzer / EMP — **done**
 
-3 weapons (`ArmEMP` and friends). `paralyzer` parsed at `0x42EB95` into the
-`wdef+0x111` bitfield, unused in RWE. Needs a "stunned" unit state, so it
-touches the sim state and the hash. ~1 day.
+3 weapons (`ArmEMP` and friends). `paralyzer` is bit 7 of `wdef+0x111`
+(`0x42EB95`) and turns every hit into damage **type 2** (`0x499E20`), which the
+damage handler branches away at `0x489DEB` and which therefore **never reaches
+the hit-point subtraction at `0x489EB1`**: a paralyzer does no damage at all.
+The `[DAMAGE]` number is the stun length in ticks, exactly as the game data's
+own comment in `WEAPONS.TDF` says, which is what makes the EMP missile's 1800
+against every CORE unit a minute of paralysis rather than an instant kill.
+Repeat hits **add** to the remaining time (`0x489E69`) and the total is clamped
+to 1800 ticks (`0x402D33`); `immunetoparalyzer` is bit 26 of `def+0x241`
+(`0x42C7FA`) and both commanders have it. Implemented: `WeaponDefinition::paralyzer`,
+`UnitDefinition::immuneToParalyzer`, `UnitState::paralyzedUntil` (hashed and
+dumped), `src/rwe/sim/paralyzer.test.cpp`. See `TOTALA-EXE.md` §NN.
 
-### 14. Kamikaze
+### 14. Kamikaze — **done**
 
 The Roach and the Invader. `kamikaze` is bit 28 of `def+0x241` (`0x42CB18`),
-`kamikazedistance` → `WORD def+0x218` (`0x42CB29`), read at `0x40335D`,
-`0x4391B6`, `0x4393E6`. Small, self-contained, and two units in the base data
-are useless without it. ~4 hours.
+`kamikazedistance` → `WORD def+0x218` (`0x42CB29`). Both offsets confirmed. The
+two readers at `0x4391B6` and `0x4393E6` turned out to be **cosmetic** — the
+selected-unit range ring and a debug circle labelled with the key's own name.
+The mechanic is an **order**, not a proximity fuse: a kamikaze unit's attack
+command becomes the `ATTACK_KAMIKAZE` mission (`0x43F38A`), whose handler
+(`0x403336`) closes to `max(kamikazedistance, 16)` and then issues the ordinary
+`SELFDESTRUCT` order (`0x4032E4`), so the blast is `SelfDestructAs`. The player
+has to order it. Implemented in `UnitBehaviorService::kamikazeRun`, with
+`src/rwe/sim/kamikaze.test.cpp`. Still not ported: the original also lets a
+kamikaze chase off its own bat (`0x407025`, `0x40B901`), which RWE cannot do
+because its auto-targeting needs a weapon to pick a target with.
 
-### 15. `MoveRate1` / `MoveRate2` and their COB callbacks
+### 15. `MoveRate1` / `MoveRate2` and their COB callbacks — **done**
 
-`moverate1` on 7 units, `moverate2` on 1; `def+0x1AE` and `+0x1B2`, read at
-`0x43DA9A`/`0x43DAA9` in the movement code and again around `0x4C2394`. Play-test
-round 9 already found that never calling `MoveRate1` silently killed the Atlas
-exhaust, because the script starts its flame loop there. The same omission is
-very likely suppressing wheel/track animations and dust on the units that set it.
-Worth a couple of hours just to see what those seven units do when the callback
-fires.
+`moverate1` on 7 units, `moverate2` on 1; `def+0x1AE` and `+0x1B2`, read by the
+band machine at `0x43DA70`. The thing that had been missed is the **default**:
+both keys default to `MaxVelocity * 2` (`0x42C1E6`, `0x42C206`), a speed nothing
+can reach, so *every* moving unit is in band 1 and calls `MoveRate1` — which is
+why the Atlas, which names no threshold at all, starts its exhaust there. Only
+five of the two hundred shipped scripts define any `MoveRate` function: the
+Atlas and the Valkyrie define all three and use them to drive their thruster
+flames, and the Fighter, the Hawk and the Vamp define only `MoveRate2`, whose
+body in all three is a one-in-ten **barrel roll**. So the play-visible effect is
+thruster flames and the occasional fighter roll — no wheel or track animation
+hangs off these anywhere in the shipped data. Implemented as
+`UnitBehaviorService::updateMoveRateBand` with `UnitState::moveRateBand`
+(hashed and dumped); `src/rwe/sim/moverate.test.cpp`.
 
-### 16. Trees and grass regrow — `reproduce` / `reproduceArea`
+### 16. Trees and grass regrow — `reproduce` / `reproduceArea` — **done, but inert on stock data**
 
-83 features set `reproduce`; both fields are parsed
-(`src/rwe/io/featuretdf/io.cpp`) and copied into `FeatureDefinition`
-(`src/rwe/LoadingScene.cpp:587–588`) and then read by nothing. In TA a forest
-slowly grows back into cleared ground, which changes reclaim economics on long
-games. Feature parsing is otherwise complete, so this is the only real gap on
-that side besides `hitDensity`. ~half a day, low risk.
+Both are bytes at `feat+0xFC` / `feat+0xFD` (`0x422A13`, `0x422A27`) and both
+are read by the sweep at the tail of `0x424050`. The rule: one map square is
+examined per tick, walking the grid backwards and wrapping at the bottom, so a
+square gets one chance per full sweep; `reproduce` is a **percentage** rolled
+against `rand(100)`, not a flag; the seed lands at a uniform offset of
+`rand(area) - area/2` on each axis; the destination square's feature slot must
+be exactly empty and the source square must carry no unit.
 
-### 17. `hitDensity` — projectiles pass through scenery
+**The premise of this entry was wrong.** Every feature in every extract sets
+`reproduce=0` — all 83 that name the key — so in stock Total Annihilation a
+forest never grows back and there are no reclaim economics to change. The
+mechanism is implemented anyway
+(`GameSimulation::updateFeatureRegrowth`, cursor hashed and dumped;
+`src/rwe/sim/regrowth.test.cpp`) so a mod can use it, and
+`FeatureDefinition::reproduce` is now an `unsigned int`.
 
-Already on the roadmap. 559 features set it, it is parsed and copied
-(`LoadingScene.cpp:585`) and never read. A shot should stop on a rock in the way.
-The findings doc's §13 flags the pass-through-chance reading as unconfirmed;
-confirming it in the binary is the actual task here, and the pivot is the
-projectile-vs-feature collision rather than the feature TDF.
+### 17. `hitDensity` — **refuted; nothing to implement**
+
+The guess was wrong, and not merely unconfirmed. **The string `hitdensity` does
+not occur anywhere in `TotalA.exe`** — nor in `TAE.EXE` or the shipped DLLs —
+and the feature TDF parser pushes every key it reads as a literal, so the key
+has no reader in this build at all. The projectile-versus-feature collision at
+`0x49B2B3` is purely geometric: same map square, and the shot below
+`squareGroundHeight + featureDefinition.height`. There is no roll and no
+density. RWE already does exactly this, so **no code was changed**; only
+`src/rwe/sim/hitdensity.test.cpp`, which fires the same shot at the same rock at
+each of the four densities the shipped data uses and requires it to stop every
+time, so nobody implements the guess later. `TOTALA-EXE.md` §13's note should be
+read together with §NN.
 
 ---
 

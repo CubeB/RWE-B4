@@ -1385,3 +1385,227 @@ original:
 
 ---
 
+## NN. Small systems: hit density, regrowth, kamikaze, paralysis, move rate
+
+Five small keys that the shipped data sets and RWE parsed but never read. Four
+of them turned out to have real machinery behind them. One of them does not
+exist in the binary at all.
+
+### `hitDensity` is not read by the original — the pass-through guess is wrong
+
+The string `hitdensity` **does not occur anywhere in `TotalA.exe`**, in any
+case, and not in `TAE.EXE` or any of the shipped DLLs either. The feature TDF
+parser at `0x4224C9`–`0x422B30` pushes every key it reads as a literal — the
+same `push <keystring>` / `call 0x4C46C0` pipeline the FBI parser uses — and
+`hitdensity` is not among them. 559 features name it; the engine of this build
+ignores every one.
+
+So §13's note that it is "very likely the pass-through chance for projectiles
+hitting features" is **refuted**, not merely unconfirmed.
+
+What the original actually does with a shot and a feature is at `0x49B2B3`,
+inside the per-projectile collision check `0x49B090`:
+
+```
+49b2b3  mov dx, WORD PTR [ebx+0x8]     ; the map square's feature slot
+49b2bd  cmp dx, 0xfffb                 ; >= -5 is a marker, not an index
+49b2dc  cmp dx, 0xfffe                 ; -2: follow the back-reference at
+49b2e7  ...                            ;     [sq+0xa]/[sq+0xb] to the anchor
+49b31b  ecx = featureDefs + (idx << 8) ; a feature definition is 0x100 bytes
+49b32e  mov al, BYTE PTR [ecx+0xfa]    ; the definition's height
+49b334  mov dl, BYTE PTR [ebx+0x6]     ; the square's ground height
+49b337  add eax,edx                    ; the top of the feature
+49b339  movsx edx, WORD PTR [esi+0xa]  ; the shot's y
+49b33f  jle miss                       ; above the top -> straight through
+```
+
+That is the whole test: same map square, and the shot below the feature's top.
+There is no roll and no density. A smudge, whose definition height is zero, is
+therefore transparent by geometry rather than by chance, and a rock is solid.
+RWE already does exactly this (`GameSimulation.cpp`, `projectileCollides`), so
+**nothing was implemented for this entry** — only `hitdensity.test.cpp`, which
+fires the same shot at the same rock at each of the four densities the shipped
+data actually uses (0, 5, 10, 100) and requires it to stop every time.
+
+Two map-square facts fell out and are worth keeping: a square record is **13
+bytes** (`0x481550` indexes `base + 13*(y*width + x)`), and a square is 16 world
+units across (`0x4815A0` takes `pos >> 20` of a 16.16 coordinate).
+
+### Feature regrowth: `reproduce` is a percentage, and the shipped data is all zero
+
+Both keys are parsed at `0x422A13` / `0x422A27` into **bytes** at `feat+0xFC`
+and `feat+0xFD`, and both have a reader — the tail of the per-tick world update
+at `0x424050`:
+
+```
+4240a3  ecx = [globals+0x14257]         ; the sweep cursor
+4240a9  dec ecx                         ; one square a tick, walking backwards
+4240bc  jns 0x4240d7                    ; ran off the bottom?
+4240be  cursor = width*height - 1       ; reload and idle this tick
+4240e9  ax = WORD [sq+0x8]              ; a feature type must stand here
+4240f7  test BYTE PTR [sq+0xc],0x1      ; and it must be the anchor square
+42410f  push 0x64 ; call 0x4b6c30       ; rand(100)
+42411a  cl = BYTE PTR [esi+0xfc]        ; `reproduce`
+424122  jge nothing                     ; rand >= reproduce -> no seed
+42414a  dl = BYTE PTR [esi+0xfd]        ; `reproducearea`
+424158..424178                          ; dx, dy = rand(area) - area/2
+42417c  call 0x481550                   ; the destination square
+424189  cmp WORD PTR [ecx],0x0          ; a unit on the SOURCE square vetoes it
+42418f  cmp WORD PTR [eax+0x8],0xffff   ; the destination must be truly empty
+4241a3  call 0x423c50                   ; plant the parent's own type there
+```
+
+So `reproduce` is a **percentage out of 100, not a flag**, the period is one
+full sweep of the map (width × height ticks — about two and a quarter minutes on
+a 64×64-square map), the seed is a uniform offset in a `reproducearea` box
+either way, and what stops a wood covering the map is that the destination
+square's feature slot must be exactly `-1`: not blocked, not a continuation of
+somebody else's footprint, not already planted.
+
+**Every feature in the shipped data sets `reproduce=0`.** All 83 that name the
+key set it to zero, in `rev31`, `totala1` and `totala2` alike, with
+`reproducearea=6` beside it. In stock Total Annihilation a cleared forest never
+grows back; the machinery is there and the data switches it off. RWE now
+implements the rule (`GameSimulation::updateFeatureRegrowth`) so a mod can use
+it, and `FeatureDefinition::reproduce` became an `unsigned int` to carry the
+percentage.
+
+One deliberate difference. The original derives the row from the cursor by
+dividing by the map's **height** (`0x424142`) where every other square lookup in
+the binary divides by the width — `0x481550` and the feature placer `0x423CCD`
+both index `y*width + x`. On a square map the two agree; on any other map the
+original plants seeds in the wrong row and, when the map is wider than it is
+tall, drops them off the end entirely. RWE divides by the width.
+
+### Kamikaze: an ordered run, not a proximity fuse
+
+`kamikaze` is bit 28 of `def+0x241` (parsed `0x42CB18`, stored `0x42CB1D`) and
+`kamikazedistance` the word at `def+0x218` (parsed `0x42CB29`, stored
+`0x42CB32`). Two units in the shipped data set them: the Roach at 40 and the
+Invader at 80. Neither has a weapon of any kind.
+
+The mechanism is an **order**, not an automatic detonation:
+
+- `0x43F38A` is the command-name resolver. Given a unit whose definition has bit
+  28, an attack turns into the mission named `ATTACK_KAMIKAZE` (`0x5053AC`), so
+  the player has to point the thing at something.
+- The mission handler is `0x403260`. In its first state (`0x403336`) it reads
+  `WORD [def+0x218]`, **clamps it up to a minimum of 16** (`0x403364`), and
+  plants a move-to-target sub-order with that arrival radius.
+- In its second state (`0x4032B4`), on arrival, it allocates a fresh order named
+  `SELFDESTRUCT` (`0x501520`) and hands it to the unit (`0x4032F7`). The blast
+  is therefore the ordinary self-destruct one — `SelfDestructAs`, `CRAWL_BLAST`
+  rather than the smaller `CRAWL_BLASTSML` the unit explodes as when something
+  else kills it.
+- The two other readers of `def+0x218` are cosmetic: `0x4391B6` draws the
+  selected unit's range ring and `0x4393E6` labels a debug circle with the
+  literal string `kamikazedistance`.
+
+There is one thing not ported. The original also lets a kamikaze *chase*:
+`0x407025` tests bits 16 and 28 of `def+0x241` together inside the
+"I have been attacked" reaction, and `0x40B901` skips the usual reachability
+test for one. RWE's own auto-targeting needs a weapon to pick a target at all,
+so a Roach still only goes where it is sent.
+
+### Paralysis: a stun with no damage, and it stacks
+
+`paralyzer` is bit 7 of `wdef+0x111` (parsed `0x42EB95`), and the game data's
+own comment in `WEAPONS.TDF` says what it means outright:
+
+> `paralyzer = Weapon will stun the enemy for a length of time described in the damage field, time=ticks.`
+
+The binary agrees, and adds the detail that matters most:
+
+```
+499e20  ecx = [wdef+0x111]
+499e26  shr ecx,7 ; and cl,1
+499e32  inc ecx                     ; damage TYPE = paralyzer ? 2 : 1
+499e37  call 0x489bb0               ; armour, both veterancies, then the message
+...
+489deb  cmp BYTE PTR [msg+0x8],0x2  ; type 2 -> the paralysis branch
+489def  jne 0x489eb1                ;           which never returns to
+489eb5  sub WORD PTR [esi+0x108],ax ;           the hit-point subtraction
+```
+
+So a paralyzer hit takes **no hit points at all**. It is the only thing that
+makes the EMP missile's `[DAMAGE]` table — 1800 against every CORE unit —
+sensible: 1800 ticks is sixty seconds, not eighteen hundred points.
+
+The rest of the branch:
+
+- `0x489E39` — `immunetoparalyzer`, **bit 26 of `def+0x241`** (parsed
+  `0x42C7FA`), skips the whole thing. Both commanders set it.
+- `0x489E69` — if the victim is **already** stunned, the new duration is *added*
+  to what is left rather than replacing it.
+- `0x402D33` — the order handler clamps the total to `0x708` = **1800 ticks, 60
+  seconds**, which is exactly what one EMP missile buys anyway.
+- `0x402D46`–`0x402D5F` — entering the stun clears all three weapons' aim.
+- `0x402D10` — the stun *is* an order, sleeping for the duration in front of the
+  unit's own orders, so a unit resumes what it was doing when it comes round.
+- The duration is the damage number **after** armour class lookup,
+  `DamageModifier` and both veterancy adjustments, since it is the `WORD` at
+  `msg+5` that `0x489BB0` wrote.
+- Targeting: a paralyzer weapon declines a target that is already stunned
+  (`0x408AFF`, `0x40B972`, testing bit 4 of `unit+0x10E`).
+
+Not ported, and marked as inference in the code: exactly what a stunned unit
+*can* still do. The paralysed flag itself is read at only those two targeting
+sites and has no handler in the flag setter `0x48B090`, so everything that stops
+a stunned unit acting in the original is a consequence of the sleeping order
+holding its order slot. RWE takes that literally — a stunned unit stops moving,
+stops firing, stops building and keeps its orders — but the equivalence is
+reasoning about the order machine, not a gate read out of the binary.
+
+Two conditions in the paralysis branch are **networking, not game rules**, and
+were deliberately not ported: `[victim+0x110]` bit 28 set with bit 14 clear is
+the general "alive and finished" test, and `[victim+0x96][0x73] ∈ {1,2}` is the
+same player-type check that gates declaring a unit dead at `0x489ED1` and
+sending the damage message at `0x489C99` — it means "this machine owns the
+simulation of that unit".
+
+### `MoveRate1` / `MoveRate2`: three speed bands, and why the Atlas needs the first
+
+The two keys are read at `0x42C1EF` and `0x42C217` into 16.16 values at
+`def+0x1AE` and `def+0x1B2`, and the **default supplied to the reader is
+`MaxVelocity * 2`** (`0x42C1E6` and `0x42C206` both load `[def+0x192]` and shift
+it left one). That is the whole reason this matters: a threshold at twice the
+unit's top speed is one it can never cross, so a unit that names neither key is
+in the first band the whole time it is moving.
+
+The band machine is `0x43DA70`, called from the movement update:
+
+```
+43da87  eax = DWORD [mov+0x20]      ; the unit's current speed
+43da8c  ...                         ; zero (and no turn) -> band 0
+43da9a  cmp eax, [ecx+0x1ae]        ; <= MoveRate1  -> band 1
+43daa9  esi = [ecx+0x1b2]           ; <= MoveRate2  -> band 2, else band 3
+43dac7  ecx = ([unit+0x110] >> 2) & 3   ; the band it was in
+43dacf  je  done                    ; unchanged -> run no script at all
+43dad5  push 0x50523c               ; new band 0 -> "StopMoving"
+43dadf  test al,0xc                 ; old band 0 -> "StartMoving" first
+43dafa..43db1c                      ; then "MoveRate1"/"2"/"3"
+43db35  store the new band in bits 2-3 of [unit+0x110]
+```
+
+Seven units name `moverate1` (ARMFIG, ARMHAWK, ARMLANCE, CORTITAN, CORVENG and
+CORVAMP at 8; CORVALK at 1) and one names `moverate2` (CORVALK at 2). Only five
+of the two hundred shipped scripts define any `MoveRate` function at all:
+
+- **ARMATLAS** and **CORVALK** define all three. Each one signals its flame
+  thread dead, restarts `ProcessFlames`, and sets a static to 1, 2 or 3;
+  `ProcessFlames` loops on `emit-sfx 0` from the three thruster pieces every 67
+  ms while that static is 1 or 2, and `StopMoving` sets it to 0. The Atlas names
+  no threshold, so it lives in band 1 and it is `MoveRate1` that lights it — the
+  §4 finding, now with the reason attached.
+- **ARMFIG**, **ARMHAWK** and **CORVENG** define only `MoveRate2`, and all three
+  bodies are word-for-word the same: a one-in-ten roll, guarded by a static so
+  it cannot re-enter, then `turn base around z-axis` to 21845, 32768 and back to
+  0 — a **barrel roll**. With `MoveRate1=8` against a `MaxVelocity` of 10 or 11,
+  that is a fighter rolling occasionally once it is up to speed.
+
+RWE now runs the same machine (`UnitBehaviorService::updateMoveRateBand`), with
+the band kept on `UnitState::moveRateBand`. One difference: the original reads
+its movement object's speed word, and treats a unit that is turning on the spot
+with no linear speed as moving (`0x43DA8E` also tests `WORD [mov+0x24]`); RWE
+measures the distance the unit actually covered this tick and calls anything
+under a tenth of a unit stopped.
