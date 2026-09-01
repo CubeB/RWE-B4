@@ -761,6 +761,16 @@ namespace rwe
 
         void updateVisibility();
 
+        /**
+         * Holds off the cloak of any cloakable unit with a live enemy standing
+         * within its MinCloakDistance, for three seconds counted from the last
+         * tick one was that close.
+         */
+        void updateCloakSuppression();
+
+        /** The height of a definition's model, or zero if it has none loaded. */
+        SimScalar modelHeightOf(const UnitDefinition& unitDefinition) const;
+
         void deleteDeadProjectiles();
 
         void spawnNewUnits();

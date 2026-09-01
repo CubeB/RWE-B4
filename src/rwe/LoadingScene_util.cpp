@@ -1,5 +1,6 @@
 #include "LoadingScene_util.h"
 #include <algorithm>
+#include <cmath>
 
 #include <rwe/util/SpanStream.h>
 #include <rwe/sim/UnitState.h>
@@ -344,7 +345,10 @@ namespace rwe
         u.canMove = fbi.canMove;
         u.canGuard = fbi.canGuard;
         u.canCapture = fbi.canCapture;
-        u.cloakable = fbi.cloakable;
+        // The original has no Cloakable key: it derives the flag from CloakCost
+        // being greater than zero, and nothing in the shipped data writes the
+        // key. Honour both so a mod that only says Cloakable still works.
+        u.cloakable = fbi.cloakable || fbi.cloakCost > 0.0f;
 
         u.mobileStandOrders = fbi.mobileStandOrders;
         u.fireStandOrders = fbi.fireStandOrders;
@@ -428,6 +432,16 @@ namespace rwe
         u.sightDistance = fbi.sightDistance;
         u.radarDistance = fbi.radarDistance;
         u.sonarDistance = fbi.sonarDistance;
+        u.radarDistanceJam = fbi.radarDistanceJam;
+        u.sonarDistanceJam = fbi.sonarDistanceJam;
+        u.stealth = fbi.stealth;
+
+        // The original truncates both cloak costs to whole numbers as it parses
+        // them, so it never spends a fraction of an energy.
+        u.cloakCost = Energy(std::trunc(fbi.cloakCost));
+        u.cloakCostMoving = Energy(std::trunc(fbi.cloakCostMoving));
+        u.minCloakDistance = fbi.minCloakDistance;
+        u.initCloaked = fbi.initCloaked;
 
         u.yardMapContainsGeo = false;
 

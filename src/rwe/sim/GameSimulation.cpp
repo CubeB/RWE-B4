@@ -20,6 +20,42 @@
 
 namespace rwe
 {
+    namespace
+    {
+        /**
+         * How long a cloak stays off after an enemy has been inside
+         * MinCloakDistance. Ninety ticks; the original stamps
+         * `unit+0xB0 = tick + 0x5A` every tick one is that close.
+         */
+        constexpr unsigned int CloakSuppressionTicks = 90;
+
+        /**
+         * Whether any of the dishes or jammers of the given kind reaches the
+         * point, measured in the map plane. Both lists carry their radius
+         * already squared.
+         */
+        template <typename T>
+        bool isInRangeOfAny(const std::vector<T>& sources, const SimVector& position, bool sonar)
+        {
+            for (const auto& source : sources)
+            {
+                if (source.sonar != sonar)
+                {
+                    continue;
+                }
+
+                auto dx = position.x - source.position.x;
+                auto dz = position.z - source.position.z;
+                if (((dx * dx) + (dz * dz)) <= source.rangeSquared)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
     bool GamePlayerInfo::addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal)
     {
         recordDesire(apparentEnergy);
@@ -973,13 +1009,31 @@ namespace rwe
     bool GameSimulation::canSeeUnit(PlayerId viewer, UnitId unitId) const
     {
         const auto& unit = getUnitState(unitId);
-        return unit.isOwnedBy(viewer) || isVisibleTo(viewer, unit.position);
+        if (unit.isOwnedBy(viewer))
+        {
+            return true;
+        }
+
+        // A cloaked unit is out of sight however well lit the ground under it
+        // is. The original asks this in the same order, own units first, in the
+        // predicate that decides whether to draw a unit at all.
+        return !unit.cloaked && isVisibleTo(viewer, unit.position);
     }
 
     bool GameSimulation::canDetectUnit(PlayerId viewer, UnitId unitId) const
     {
         const auto& unit = getUnitState(unitId);
-        if (unit.isOwnedBy(viewer) || isVisibleTo(viewer, unit.position))
+        if (unit.isOwnedBy(viewer))
+        {
+            return true;
+        }
+
+        if (unit.cloaked)
+        {
+            return false;
+        }
+
+        if (isVisibleTo(viewer, unit.position))
         {
             return true;
         }
@@ -1063,6 +1117,16 @@ namespace rwe
         }
     }
 
+    SimScalar GameSimulation::modelHeightOf(const UnitDefinition& unitDefinition) const
+    {
+        if (auto model = unitModelDefinitions.find(unitDefinition.objectName); model != unitModelDefinitions.end())
+        {
+            return model->second.height;
+        }
+
+        return 0_ss;
+    }
+
     void GameSimulation::updateVisibility()
     {
         for (auto& v : playerVisibility)
@@ -1086,11 +1150,7 @@ namespace rwe
             // The eye sits at the top of the unit's model, never below the
             // water's surface, and the whole thing lives in the heightmap's
             // 0..255 range.
-            auto modelHeight = 0;
-            if (auto model = unitModelDefinitions.find(unitDefinition.objectName); model != unitModelDefinitions.end())
-            {
-                modelHeight = static_cast<int>(std::floor(model->second.height.value));
-            }
+            auto modelHeight = static_cast<int>(std::floor(modelHeightOf(unitDefinition).value));
             auto groundLevel = std::max(static_cast<int>(std::floor(unit.position.y.value)), seaLevel + 1);
             auto eyeHeight = std::clamp(groundLevel + modelHeight, 0, 255);
 
@@ -1103,27 +1163,54 @@ namespace rwe
 
             vis.revealWithLineOfSight(visionCellAt(unit.position), radius, visionHeights, eyeHeight, losTables);
 
-            // Radar and sonar need the unit switched on if it can be switched
-            // at all. Altitude extends radar; sonar is flat.
+            // Radar, sonar and jamming all need the unit switched on if it can
+            // be switched at all. Altitude extends radar; sonar is flat.
             auto detectorActive = (!unitDefinition.onOffable || unit.activated) && !unit.isBeingBuilt(unitDefinition);
-            if (detectorActive)
+            if (!detectorActive)
             {
-                auto altitude = rweMax(unit.position.y, 0_ss);
-                if (unitDefinition.radarDistance > 0)
+                continue;
+            }
+
+            auto altitude = rweMax(unit.position.y, 0_ss);
+            if (unitDefinition.radarDistance > 0)
+            {
+                auto range = intToSimScalar(static_cast<int>(unitDefinition.radarDistance)) + (2_ss * altitude);
+                vis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, false});
+            }
+            if (unitDefinition.sonarDistance > 0)
+            {
+                auto range = intToSimScalar(static_cast<int>(unitDefinition.sonarDistance));
+                vis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, true});
+            }
+
+            // A jammer works against everyone but its own owner. The original
+            // builds this list while walking the same unit array, skipping only
+            // the units of the player whose picture it is drawing, so an ally's
+            // jammer blanks your radar exactly as an enemy's does.
+            for (std::size_t i = 0; i < playerVisibility.size(); ++i)
+            {
+                if (i == unit.owner.value)
                 {
-                    auto range = intToSimScalar(static_cast<int>(unitDefinition.radarDistance)) + (2_ss * altitude);
-                    vis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range});
+                    continue;
                 }
-                if (unitDefinition.sonarDistance > 0)
+
+                auto& theirVis = playerVisibility[i];
+                if (unitDefinition.radarDistanceJam > 0)
                 {
-                    auto range = intToSimScalar(static_cast<int>(unitDefinition.sonarDistance));
-                    vis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range});
+                    auto range = intToSimScalar(static_cast<int>(unitDefinition.radarDistanceJam));
+                    theirVis.radarJammers.push_back(PlayerVisibility::RadarJammer{unit.position, range * range, false});
+                }
+                if (unitDefinition.sonarDistanceJam > 0)
+                {
+                    auto range = intToSimScalar(static_cast<int>(unitDefinition.sonarDistanceJam));
+                    theirVis.radarJammers.push_back(PlayerVisibility::RadarJammer{unit.position, range * range, true});
                 }
             }
         }
 
         // Radar is a unit-versus-unit range query, not a grid: terrain never
         // blocks it and it reveals no ground, it only flags contacts.
+        auto seaLevelScalar = terrain.getSeaLevel();
         for (std::size_t i = 0; i < playerVisibility.size(); ++i)
         {
             auto& vis = playerVisibility[i];
@@ -1140,9 +1227,82 @@ namespace rwe
                     continue;
                 }
 
-                if (isOnRadarOf(player, unit.position))
+                // Stealth is absolute: the original's detection visitor drops
+                // the unit before it measures anything.
+                const auto& targetDefinition = unitDefinitions.at(unit.unitType);
+                if (targetDefinition.stealth)
+                {
+                    continue;
+                }
+
+                // Which of the two contacts a unit can be is decided by where
+                // it sits relative to the waterline: sonar finds anything at or
+                // below it, radar anything whose model rises above it. A
+                // half-submerged unit is both, and a unit on dry land at sea
+                // level is too.
+                auto modelTop = unit.position.y + modelHeightOf(targetDefinition);
+                auto byRadar = modelTop >= seaLevelScalar && isInRangeOfAny(vis.radarDetectors, unit.position, false);
+                auto bySonar = unit.position.y <= seaLevelScalar && isInRangeOfAny(vis.radarDetectors, unit.position, true);
+
+                // Jamming runs after detection and wins over it, and it only
+                // touches the contact it is aimed at: a radar jammer says
+                // nothing about what sonar can hear.
+                if (byRadar && isInRangeOfAny(vis.radarJammers, unit.position, false))
+                {
+                    byRadar = false;
+                }
+                if (bySonar && isInRangeOfAny(vis.radarJammers, unit.position, true))
+                {
+                    bySonar = false;
+                }
+
+                if (byRadar || bySonar)
                 {
                     vis.radarContacts.insert(unitId);
+                }
+            }
+        }
+    }
+
+    void GameSimulation::updateCloakSuppression()
+    {
+        // The original runs this in the same per-tick pass as the radar
+        // picture: every cloakable unit asks whether a live enemy is standing
+        // within MinCloakDistance of it, and if one is, its cloak is held off
+        // for the next ninety ticks. The flag is a timestamp rather than a
+        // latch, so the unit stays visible for three seconds after the enemy
+        // walks away instead of blinking back the moment it is out of range.
+        for (auto& [unitId, unit] : units)
+        {
+            (void)unitId;
+            if (unit.isDead())
+            {
+                continue;
+            }
+
+            const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+            if (!unitDefinition.cloakable)
+            {
+                continue;
+            }
+
+            auto minDistance = intToSimScalar(static_cast<int>(unitDefinition.minCloakDistance));
+            auto minDistanceSquared = minDistance * minDistance;
+
+            for (const auto& [otherUnitId, otherUnit] : units)
+            {
+                (void)otherUnitId;
+                if (otherUnit.isDead() || otherUnit.isOwnedBy(unit.owner))
+                {
+                    continue;
+                }
+
+                auto dx = otherUnit.position.x - unit.position.x;
+                auto dz = otherUnit.position.z - unit.position.z;
+                if (((dx * dx) + (dz * dz)) <= minDistanceSquared)
+                {
+                    unit.cloakSuppressedUntil = gameTime + GameTime(CloakSuppressionTicks);
+                    break;
                 }
             }
         }
@@ -1209,6 +1369,11 @@ namespace rwe
         // the buttons, a script -- sticks for the life of the unit.
         unit.moveOrders = unitDefinition.standingMoveOrder;
         unit.fireOrders = unitDefinition.standingFireOrder;
+
+        // Init_Cloaked is seeded in the same breath by the original, out of the
+        // same flags dword. It only asks for the cloak; whether the unit gets
+        // one is still settled a second at a time by the energy.
+        unit.cloakRequested = unitDefinition.initCloaked;
 
         if (rotation)
         {
@@ -2864,6 +3029,26 @@ namespace rwe
 
                     unit.isSufficientlyPowered = addResourceDelta(unitId, -unitDefinition.energyUse, -unitDefinition.metalUse);
                 }
+
+                // Cloak is paid for out of the same second's energy as
+                // everything else. It is all or nothing: the original compares
+                // the whole cost against the stockpile and, when it does not
+                // cover it, takes nothing and leaves the unit visible rather
+                // than running the player into a stall.
+                if (unitDefinition.cloakable && unit.cloakRequested && !unit.isBeingBuilt(unitDefinition) && gameTime >= unit.cloakSuppressedUntil)
+                {
+                    // Moving costs the other number. The original reads the
+                    // unit's move-rate band, which is zero exactly when it is
+                    // standing still, so this is the same test the COB
+                    // StartMoving and StopMoving callbacks use.
+                    auto moving = !areCloserThan(unit.previousPosition, unit.position, 0.1_ssf);
+                    auto cost = moving ? unitDefinition.cloakCostMoving : unitDefinition.cloakCost;
+                    unit.cloaked = addResourceDelta(unitId, -cost, Metal(0));
+                }
+                else
+                {
+                    unit.cloaked = false;
+                }
             }
         }
     }
@@ -3083,6 +3268,8 @@ namespace rwe
         deleteDeadProjectiles();
 
         spawnNewUnits();
+
+        updateCloakSuppression();
 
         updateVisibility();
     }
