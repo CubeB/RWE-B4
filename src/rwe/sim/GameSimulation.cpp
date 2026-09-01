@@ -1272,9 +1272,9 @@ namespace rwe
         // for the next ninety ticks. The flag is a timestamp rather than a
         // latch, so the unit stays visible for three seconds after the enemy
         // walks away instead of blinking back the moment it is out of range.
-        for (auto& [unitId, unit] : units)
+        for (auto& entry : units)
         {
-            (void)unitId;
+            auto& unit = entry.second;
             if (unit.isDead())
             {
                 continue;
@@ -1289,9 +1289,9 @@ namespace rwe
             auto minDistance = intToSimScalar(static_cast<int>(unitDefinition.minCloakDistance));
             auto minDistanceSquared = minDistance * minDistance;
 
-            for (const auto& [otherUnitId, otherUnit] : units)
+            for (const auto& otherEntry : units)
             {
-                (void)otherUnitId;
+                const auto& otherUnit = otherEntry.second;
                 if (otherUnit.isDead() || otherUnit.isOwnedBy(unit.owner))
                 {
                     continue;

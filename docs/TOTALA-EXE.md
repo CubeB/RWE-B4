@@ -1583,7 +1583,10 @@ radius when it is switched on and not the viewer's own; the radar/sonar split by
 sea level; the `mincloakdistance` proximity fuse with its three-second tail; the
 cloak drain, truncated, moving versus still, all-or-nothing, through the ordinary
 consumption path; and a cloaked unit dropping out of `canSeeUnit` and
-`canDetectUnit`.
+`canDetectUnit`. The CLOAK button, which was drawn and wired to nothing, now
+sends a command and lights up while the order stands — it records the request
+rather than the cloak, so a unit an enemy has just walked past keeps its order
+and cloaks again three seconds later.
 
 Deliberately not ported:
 
