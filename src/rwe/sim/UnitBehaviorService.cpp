@@ -213,7 +213,46 @@ namespace rwe
             }
             else if (auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics); airPhysics != nullptr)
             {
-                match(
+                // An aircraft with nothing left to do goes and lands — but not
+                // while there is something in front of it worth shooting. The
+                // original hands an idle unit to a search at sight range and
+                // turns whatever it finds into an attack mission, which for a
+                // gunship is the standoff ring. RWE only ever pointed the
+                // weapon, so a Brawler acquired a target through the ordinary
+                // weapon path and then either shot at it from wherever it
+                // happened to be or broke off to land while still firing,
+                // which is not something either of these two ever does.
+                std::optional<UnitId> freeTarget;
+                if (unitInfo.definition->canAttack && unitInfo.state->fireOrders != UnitFireOrders::HoldFire)
+                {
+                    freeTarget = findEnemyInWeaponRange(unitInfo);
+                    // Only go after something the owner can actually see. The
+                    // search itself does not check, because a unit already on
+                    // patrol breaks off on contact and has been relied on to
+                    // do that from its first tick, before visibility for the
+                    // tick has been worked out.
+                    if (freeTarget && !sim->canDetectUnit(unitInfo.state->owner, *freeTarget))
+                    {
+                        freeTarget.reset();
+                    }
+                }
+
+                if (freeTarget)
+                {
+                    // Give it a real order rather than steering it for one
+                    // tick. The original turns what the search finds into a
+                    // mission and keeps it until the target dies or the leash
+                    // trips, and that persistence matters here: a gunship
+                    // holds its ring at two thirds of weapon range, which for
+                    // a Brawler is further out than the eight-cell cap on its
+                    // own sight, so a unit that re-decided every tick would
+                    // reach its station, lose the target it was already
+                    // shooting at, and go looking for somewhere to land.
+                    unitInfo.state->orders.push_back(createAttackOrder(*freeTarget));
+                }
+                else
+                {
+                    match(
                     airPhysics->movementState,
                     [&](AirMovementStateFlying& m) {
                         if (navigateTo(unitInfo, NavigationGoalLandingLocation()))
@@ -237,10 +276,12 @@ namespace rwe
                     },
                     [&](const AirMovementStateHoverAttack&) {
                         // Same again: a gunship left on station with no orders
-                        // would otherwise shuttle back and forth for ever.
+                        // and nothing in range would otherwise shuttle back and
+                        // forth for ever.
                         airPhysics->movementState = AirMovementStateFlying();
                         unitInfo.state->clearWeaponTargets();
                     });
+                }
             }
             else
             {
@@ -2298,6 +2339,7 @@ namespace rwe
             {
                 continue;
             }
+
             if (!bestDistanceSquared || distanceSquared < *bestDistanceSquared)
             {
                 best = otherId;

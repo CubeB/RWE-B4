@@ -3,6 +3,7 @@
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/LosTables.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
@@ -71,6 +72,8 @@ namespace rwe
             d.brakeRate = 4_ss;
             d.turnRate = 800_ss;
             d.maneuverLeashLength = 1280_ss;
+            d.sightDistance = 350u;
+            d.shootMe = true;
             d.maxHitPoints = 920;
             d.buildTime = 0u;
             d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
@@ -83,6 +86,8 @@ namespace rwe
             d.objectName = "model";
             d.isMobile = true;
             d.canMove = false;
+            d.shootMe = true;
+            d.sightDistance = 100u;
             d.maxHitPoints = 1000000;
             d.buildTime = 0u;
             d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
@@ -127,6 +132,87 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a gunship that picks its own target still works the ring", "[gunship]")
+    {
+        // Reported from play: Brawlers and Rapiers were not swinging. The ring
+        // behaviour was only ever reached from an explicit attack order or
+        // from a patrol engaging en route, so a gunship left to fire at will
+        // acquired a target through the ordinary weapon path and then shot at
+        // it from wherever it happened to be -- and an aircraft with no orders
+        // goes looking for somewhere to land, so it would break off and set
+        // down while still shooting. Nobody plays by right-clicking every
+        // target, so this is the case that matters.
+        auto script = makeGunshipScript();
+        GameSimulation sim(makeGunshipTerrain(256, 256), 0u, 0, 0);
+        auto us = addGunshipPlayer(sim, "us");
+        auto them = addGunshipPlayer(sim, "them");
+        sim.unitDefinitions["gunship"] = makeGunshipDef();
+        sim.unitDefinitions["target"] = makeGunshipTargetDef();
+        registerGunshipModel(sim, "model");
+        defineGun(sim);
+        // Without ray fans a unit sees only the cell it stands in, and
+        // nothing can acquire anything. Eight is the original’s own cap.
+        sim.losTables = generateLosTables(8);
+
+        auto targetPosition = SimVector(0_ss, 0_ss, 0_ss);
+        auto targetId = spawnGunshipUnit(sim, "target", them, targetPosition, script);
+        sim.getUnitState(targetId).hitPoints = 1000000;
+
+        // Inside its own gun range to begin with, so it acquires at once.
+        auto gunshipId = spawnGunshipUnit(sim, "gunship", us, SimVector(0_ss, 60_ss, -200_ss), script);
+        {
+            auto& g = sim.getUnitState(gunshipId);
+            g.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            UnitWeapon weapon;
+            weapon.weaponType = "emg";
+            g.weapons[0] = weapon;
+            // No orders at all: this is a gunship minding its own business.
+        }
+        sim.flyingUnitsSet.insert(gunshipId);
+
+        const auto ring = (2_ss * 370_ss) / 3_ss;
+        auto startingHitPoints = sim.getUnitState(targetId).hitPoints;
+        int measured = 0;
+        int onStation = 0;
+        auto closest = SimScalar(100000.0f);
+        auto lowest = SimScalar(100000.0f);
+
+        for (int tick = 0; tick < 1200; ++tick)
+        {
+            sim.tick();
+            const auto& g = sim.getUnitState(gunshipId);
+            auto d = gunshipFlatDistance(g.position, targetPosition);
+            if (std::getenv("RWE_TRACE_GUNSHIP") && tick % 30 == 0)
+            {
+                std::cout << "t=" << tick << " d=" << simScalarToFloat(d)
+                          << " y=" << simScalarToFloat(g.position.y) << std::endl;
+            }
+            if (tick < 300)
+            {
+                continue;
+            }
+            ++measured;
+            closest = rweMin(closest, d);
+            lowest = rweMin(lowest, g.position.y);
+            if (d > ring * 0.8_ssf && d < ring * 1.2_ssf)
+            {
+                ++onStation;
+            }
+        }
+
+        CAPTURE(measured);
+        CAPTURE(onStation);
+        CAPTURE(simScalarToFloat(closest));
+        CAPTURE(simScalarToFloat(lowest));
+
+        // It is shooting...
+        REQUIRE(sim.getUnitState(targetId).hitPoints < startingHitPoints);
+        // ...it stays in the air rather than breaking off to land...
+        REQUIRE(lowest > 30_ss);
+        // ...and it settles onto the ring instead of firing from wherever.
+        REQUIRE(onStation * 100 / measured >= 80);
+    }
+
     TEST_CASE("a gunship works its target from a standoff ring instead of running past it", "[gunship]")
     {
         // A Brawler or a Rapier does not fly attack runs. It closes to inside
@@ -142,6 +228,9 @@ namespace rwe
         sim.unitDefinitions["target"] = makeGunshipTargetDef();
         registerGunshipModel(sim, "model");
         defineGun(sim);
+        // Without ray fans a unit sees only the cell it stands in, and
+        // nothing can acquire anything. Eight is the original’s own cap.
+        sim.losTables = generateLosTables(8);
 
         auto targetPosition = SimVector(0_ss, 0_ss, 0_ss);
         auto targetId = spawnGunshipUnit(sim, "target", them, targetPosition, script);
