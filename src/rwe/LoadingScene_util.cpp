@@ -292,6 +292,39 @@ namespace rwe
         return Grid<YardMapCell>(width, height, std::move(cells));
     }
 
+    /**
+     * The original stores both standing orders as two-bit fields and reads
+     * them back with a plain mask, so a value it does not recognise wraps
+     * rather than being rejected. Nothing in the shipped data relies on that,
+     * but a third-party unit naming 3 should land somewhere defined instead of
+     * off the end of the enum.
+     */
+    UnitMovementOrders parseStandingMoveOrder(unsigned int value)
+    {
+        switch (value & 3u)
+        {
+            case 0:
+                return UnitMovementOrders::HoldPosition;
+            case 1:
+                return UnitMovementOrders::Maneuver;
+            default:
+                return UnitMovementOrders::Roam;
+        }
+    }
+
+    UnitFireOrders parseStandingFireOrder(unsigned int value)
+    {
+        switch (value & 3u)
+        {
+            case 0:
+                return UnitFireOrders::HoldFire;
+            case 1:
+                return UnitFireOrders::ReturnFire;
+            default:
+                return UnitFireOrders::FireAtWill;
+        }
+    }
+
     UnitDefinition parseUnitDefinition(const UnitFbi& fbi, MovementClassDatabase& movementClassDatabase)
     {
         UnitDefinition u;
@@ -310,6 +343,11 @@ namespace rwe
         u.canGuard = fbi.canGuard;
         u.canCapture = fbi.canCapture;
         u.cloakable = fbi.cloakable;
+
+        u.mobileStandOrders = fbi.mobileStandOrders;
+        u.fireStandOrders = fbi.fireStandOrders;
+        u.standingMoveOrder = parseStandingMoveOrder(fbi.standingMoveOrder);
+        u.standingFireOrder = parseStandingFireOrder(fbi.standingFireOrder);
 
         u.commander = fbi.commander;
 

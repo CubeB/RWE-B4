@@ -255,6 +255,27 @@ table of mission names is next to `0x503EA8`), read at `0x43B9D0`.
 
 **Effort / risk.** Half a day. Low risk.
 
+**Done — see `TOTALA-EXE.md` §9.** Every offset above held up, and the
+`*standorders` guess was right: `0x41B3F6`–`0x41B44E` skips a unit that does
+not name the flag when it gathers the order panel for a selection. Three things
+in the paragraphs above are wrong, though. The counts of units "setting" a key
+read as though the rest were left at some neutral value; the parser defaults
+both standing orders to **2**, and since **every mobile unit names a
+`StandingMoveOrder` of its own**, the 67 silent ones are all buildings and the
+default never reaches anything that moves. The 123/117 counts are also not the
+interesting number: 117 of the move orders say 1, which is what RWE already
+hard-coded, so the whole of the move-order fix is four units. And the real
+payoff is on the fire side, where **thirteen** units say 0 — the artillery, the
+silos, the mines and the bombers.
+
+`defaultmissiontype` turned out not to be a build-time field at all. It is
+applied at `0x43B9AD` on the branch of the mission service loop taken when a
+unit's mission list becomes **empty**, so it covers build time and going idle
+through one path. It is left decoded but unported: `Standby` versus
+`Guard_NoMove` is only the question of whether an idle unit walks off to find a
+fight, and RWE has no equivalent of the sight-range search `0x43B700` that
+would make the two differ.
+
 ### 7. `turret` — weapons that need the hull turned
 
 **Behaviour.** RWE parses `turret` and never reads it. Aiming is delegated

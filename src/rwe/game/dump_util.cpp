@@ -66,6 +66,7 @@ namespace rwe
             {"yardOpen", dumpJson(u.yardOpen)},
             {"inCollision", dumpJson(u.inCollision)},
             {"fireOrders", dumpJson(u.fireOrders)},
+            {"moveOrders", dumpJson(u.moveOrders)},
             {"armored", dumpJson(u.armored)},
             {"kills", dumpJson(u.kills)},
             {"buildTimeCompleted", dumpJson(u.buildTimeCompleted)},
