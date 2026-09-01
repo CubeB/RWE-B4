@@ -53,6 +53,32 @@ namespace rwe
         unsigned int radarDistance{0};
         unsigned int sonarDistance{0};
 
+        /** Radii inside which this unit erases enemy radar and sonar contacts. */
+        unsigned int radarDistanceJam{0};
+        unsigned int sonarDistanceJam{0};
+
+        /** Never shows up on anyone else's radar or sonar at all. */
+        bool stealth{false};
+
+        /**
+         * Energy a second to stay cloaked, standing still and moving. The
+         * original has no Cloakable key: a unit can cloak if and only if
+         * CloakCost is greater than zero, and CloakCostMoving defaults to
+         * CloakCost rather than to nothing.
+         */
+        float cloakCost{0.0f};
+        float cloakCostMoving{0.0f};
+
+        /**
+         * How close an enemy has to come to break the cloak. Defaults to 80
+         * when the FBI is silent, which is the original's own default rather
+         * than a guess.
+         */
+        unsigned int minCloakDistance{80};
+
+        /** Whether the unit is built already cloaked. */
+        bool initCloaked{false};
+
         unsigned int turnRate;
         float maxVelocity;
         float acceleration;

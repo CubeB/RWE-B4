@@ -341,6 +341,14 @@ namespace rwe
         BehaviorSubject<UnitFireOrders> fireOrders{UnitFireOrders::HoldFire};
         BehaviorSubject<bool> onOff{false};
 
+        /**
+         * Whether the selected unit is asking for its cloak. It is what the
+         * button is lit by, and it is deliberately the request rather than the
+         * cloak itself: a unit that has been decloaked by an enemy walking past
+         * still has the order standing.
+         */
+        BehaviorSubject<bool> cloak{false};
+
         UiFactory uiFactory;
 
         /** Sound lookup table, kept so a main menu scene can be built on the way out. */
@@ -546,6 +554,9 @@ namespace rwe
         void localPlayerSetFireOrders(UnitId unitId, UnitFireOrders orders);
 
         void localPlayerSetOnOff(UnitId unitId, bool on);
+
+        /** Ask a unit for its cloak, or drop it. */
+        void localPlayerSetCloak(UnitId unitId, bool cloaked);
 
         void localPlayerModifyBuildQueue(UnitId unitId, const std::string& unitType, int count);
 

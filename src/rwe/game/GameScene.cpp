@@ -3704,6 +3704,11 @@ namespace rwe
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SetOnOff{on}));
     }
 
+    void GameScene::localPlayerSetCloak(UnitId unitId, bool cloaked)
+    {
+        localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SetCloak{cloaked}));
+    }
+
     void GameScene::localPlayerModifyBuildQueue(UnitId unitId, const std::string& unitType, int count)
     {
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::ModifyBuildQueue{count, unitType}));
@@ -4822,6 +4827,11 @@ namespace rwe
             p->get().addSubscription(onOff.subscribe([&p = p->get()](const auto& v) { p.setStage(v ? 1 : 0); }));
         }
 
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "CLOAK"))
+        {
+            p->get().addSubscription(cloak.subscribe([&p = p->get()](const auto& v) { p.setStage(v ? 1 : 0); }));
+        }
+
         currentPanel->groupMessages().subscribe([this](const auto& msg) {
             if (auto activateMessage = std::get_if<ActivateMessage>(&msg.message); activateMessage != nullptr)
             {
@@ -5040,6 +5050,32 @@ namespace rwe
                 auto& u = getUnit(selectedUnit);
                 auto newOnOff = !u.activated;
                 localPlayerSetOnOff(selectedUnit, newOnOff);
+            }
+        }
+        else if (matchesWithSidePrefix("CLOAK", message))
+        {
+            if (sounds.immediateOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.immediateOrders);
+            }
+
+            for (const auto& selectedUnit : selectedUnits)
+            {
+                auto& u = getUnit(selectedUnit);
+
+                // The original offers the button only where CloakCost is set,
+                // so a mixed selection leaves everything else alone.
+                if (!simulation.unitDefinitions.at(u.unitType).cloakable)
+                {
+                    continue;
+                }
+
+                auto newCloak = !u.cloakRequested;
+                localPlayerSetCloak(selectedUnit, newCloak);
+                if (auto singleUnit = getSingleSelectedUnit(); singleUnit && *singleUnit == selectedUnit)
+                {
+                    cloak.next(newCloak);
+                }
             }
         }
         else if (matchesWithSidePrefix("NEXT", message))
@@ -5347,6 +5383,7 @@ namespace rwe
             const auto& unit = unitRef->get();
             fireOrders.next(unit.fireOrders);
             onOff.next(unit.activated);
+            cloak.next(unit.cloakRequested);
 
             const auto& guiInfo = getGuiInfo(*unitId);
             auto buildPanelDefinition = getBuilderGui(builderGuisDatabase, unit.unitType, guiInfo.currentBuildPage);
@@ -5536,6 +5573,15 @@ namespace rwe
                 else
                 {
                     simulation.deactivateUnit(unitCommand.unit);
+                }
+            },
+            [&](const PlayerUnitCommand::SetCloak& c) {
+                // This only records what the unit is asking for. Whether it
+                // actually cloaks is settled a second at a time by the energy
+                // and by how close the nearest enemy is standing.
+                if (auto unit = tryGetUnit(unitCommand.unit); unit)
+                {
+                    unit->get().cloakRequested = c.cloaked;
                 }
             },
             [&](const PlayerUnitCommand::CancelBuildOrder& c) {

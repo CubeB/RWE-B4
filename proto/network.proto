@@ -137,6 +137,11 @@ message PlayerUnitCommand
         required bool isOn = 1;
     }
 
+    message SetCloak
+    {
+        required bool isCloaked = 1;
+    }
+
     message SelfDestruct
     {
     }
@@ -156,6 +161,7 @@ message PlayerUnitCommand
         ModifyBuildQueue modify_build_queue = 6;
         SelfDestruct self_destruct = 7;
         CancelBuildOrder cancel_build_order = 8;
+        SetCloak set_cloak = 9;
     }
 }
 

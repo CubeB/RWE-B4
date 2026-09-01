@@ -44,6 +44,27 @@ namespace rwe
 
             /** Squared reach, in world units, measured in the map plane. */
             SimScalar rangeSquared;
+
+            /**
+             * Sonar rather than radar. The original keeps the two contacts
+             * apart because they answer different questions - sonar only ever
+             * finds a unit at or below the waterline, radar only one whose
+             * model rises above it - and because a jammer erases one without
+             * touching the other.
+             */
+            bool sonar{false};
+        };
+
+        /** A radar or sonar jammer: anyone else's unit, and the radius it blanks. */
+        struct RadarJammer
+        {
+            SimVector position;
+
+            /** Squared radius, in world units, measured in the map plane. */
+            SimScalar rangeSquared;
+
+            /** Jams sonar contacts rather than radar ones. */
+            bool sonar{false};
         };
 
         /** Cells that have been seen at some point. Never cleared. */
@@ -60,6 +81,13 @@ namespace rwe
          * Radar reveals no ground at all - it only makes units detectable.
          */
         std::vector<RadarDetector> radarDetectors;
+
+        /**
+         * The jammers working against this player: every other player's active
+         * jammer, rebuilt every tick. The original skips only the viewer's own,
+         * so an ally's jammer blanks your radar just as an enemy's does.
+         */
+        std::vector<RadarJammer> radarJammers;
 
         /**
          * Units currently inside one of those dishes' reach. Rebuilt every

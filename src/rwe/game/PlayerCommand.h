@@ -45,6 +45,16 @@ namespace rwe
             bool on;
         };
 
+        /**
+         * Ask for or drop the cloak. Whether the unit actually cloaks is still
+         * settled a second at a time by the energy and by whether an enemy is
+         * standing too close.
+         */
+        struct SetCloak
+        {
+            bool cloaked;
+        };
+
         struct SelfDestruct
         {
         };
@@ -55,7 +65,7 @@ namespace rwe
             SimVector position;
         };
 
-        using Command = std::variant<IssueOrder, ModifyBuildQueue, Stop, SetFireOrders, SetOnOff, SelfDestruct, CancelBuildOrder>;
+        using Command = std::variant<IssueOrder, ModifyBuildQueue, Stop, SetFireOrders, SetOnOff, SetCloak, SelfDestruct, CancelBuildOrder>;
 
         UnitId unit;
         Command command;

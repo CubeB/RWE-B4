@@ -158,6 +158,12 @@ namespace rwe
             out.set_ison(c.on);
         }
 
+        void operator()(const PlayerUnitCommand::SetCloak& c)
+        {
+            auto& out = *cmd->mutable_set_cloak();
+            out.set_iscloaked(c.cloaked);
+        }
+
         void operator()(const PlayerUnitCommand::SelfDestruct&)
         {
             cmd->mutable_self_destruct();
@@ -309,6 +315,11 @@ namespace rwe
         if (cmd.has_set_on_off())
         {
             return PlayerUnitCommand(UnitId(cmd.unit()), PlayerUnitCommand::SetOnOff{cmd.set_on_off().ison()});
+        }
+
+        if (cmd.has_set_cloak())
+        {
+            return PlayerUnitCommand(UnitId(cmd.unit()), PlayerUnitCommand::SetCloak{cmd.set_cloak().iscloaked()});
         }
 
         if (cmd.has_self_destruct())

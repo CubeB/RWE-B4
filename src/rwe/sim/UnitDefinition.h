@@ -88,7 +88,12 @@ namespace rwe
         bool canMove;
         bool canGuard;
         bool canCapture;
-        /** Can hide from enemy sight (TA Cloakable). Only this shows the CLOAK button. */
+        /**
+         * Can hide from enemy sight. Only this shows the CLOAK button. The
+         * original has no Cloakable key at all and derives this from CloakCost
+         * being greater than zero; nothing in the shipped data writes the key,
+         * so honouring it alone gives the button to nothing.
+         */
         bool cloakable{false};
 
         /**
@@ -262,5 +267,37 @@ namespace rwe
         unsigned int sightDistance{0};
         unsigned int radarDistance{0};
         unsigned int sonarDistance{0};
+
+        /**
+         * Radii inside which this unit erases everyone else's radar and sonar
+         * contacts. A jammer hides what is in the bubble rather than producing
+         * false contacts, it has to be switched on, and it leaves its own
+         * owner's picture alone.
+         */
+        unsigned int radarDistanceJam{0};
+        unsigned int sonarDistanceJam{0};
+
+        /** Never becomes a radar or a sonar contact for anybody. */
+        bool stealth{false};
+
+        /**
+         * Energy per second to stay cloaked, standing still and moving. The
+         * original truncates both to whole numbers before it spends them and
+         * takes nothing at all when the player cannot afford the whole amount,
+         * so a unit short of energy decloaks rather than running a deficit.
+         */
+        Energy cloakCost{0};
+        Energy cloakCostMoving{0};
+
+        /**
+         * How close a live enemy has to come to break the cloak. It is a
+         * proximity fuse rather than a refusal to cloak: coming inside it
+         * decloaks the unit for three seconds, counted from the last tick an
+         * enemy was that close.
+         */
+        unsigned int minCloakDistance{80};
+
+        /** Whether the unit is built with its cloak already asked for. */
+        bool initCloaked{false};
     };
 }

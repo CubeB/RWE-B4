@@ -495,6 +495,29 @@ namespace rwe
         bool activated{false};
         bool isSufficientlyPowered{false};
 
+        /**
+         * Whether the player has asked for the cloak, seeded from the
+         * definition's Init_Cloaked. In the original this is a mission rather
+         * than a flag the button writes, but it comes to the same thing: it
+         * only says what the unit wants, not what it is.
+         */
+        bool cloakRequested{false};
+
+        /**
+         * Whether the unit is actually cloaked, decided once a second when the
+         * energy is spent. Wanting to cloak is not enough: an enemy standing
+         * too close or an empty energy bar both leave this false.
+         */
+        bool cloaked{false};
+
+        /**
+         * The tick before which cloaking is refused. Set to three seconds ahead
+         * every tick a live enemy stands within MinCloakDistance, so the unit
+         * stays visible for three seconds after the enemy walks away rather
+         * than blinking back the moment it is out of range.
+         */
+        GameTime cloakSuppressedUntil{0};
+
         Energy energyProductionBuffer{0};
         Metal metalProductionBuffer{0};
         Energy previousEnergyConsumptionBuffer{0};

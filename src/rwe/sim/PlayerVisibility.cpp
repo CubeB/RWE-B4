@@ -82,6 +82,7 @@ namespace rwe
         std::fill(cells.begin(), cells.end(), static_cast<unsigned char>(0));
 
         radarDetectors.clear();
+        radarJammers.clear();
         radarContacts.clear();
     }
 

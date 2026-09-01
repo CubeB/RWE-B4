@@ -46,6 +46,18 @@ namespace rwe
         tdf.readOrDefault("SightDistance", u.sightDistance, 0u);
         tdf.readOrDefault("RadarDistance", u.radarDistance, 0u);
         tdf.readOrDefault("SonarDistance", u.sonarDistance, 0u);
+        tdf.readOrDefault("RadarDistanceJam", u.radarDistanceJam, 0u);
+        tdf.readOrDefault("SonarDistanceJam", u.sonarDistanceJam, 0u);
+        tdf.readOrDefault("Stealth", u.stealth);
+
+        // CloakCostMoving takes CloakCost as its default: the original's parser
+        // leaves the parsed CloakCost on the FPU stack and pushes it as the
+        // default argument for the next read, so a unit that names only a
+        // standing cost pays the same either way.
+        tdf.readOrDefault("CloakCost", u.cloakCost, 0.0f);
+        tdf.readOrDefault("CloakCostMoving", u.cloakCostMoving, u.cloakCost);
+        tdf.readOrDefault("MinCloakDistance", u.minCloakDistance, 80u);
+        tdf.readOrDefault("Init_Cloaked", u.initCloaked);
 
         tdf.readOrDefault("TurnRate", u.turnRate);
         tdf.readOrDefault("MaxVelocity", u.maxVelocity);

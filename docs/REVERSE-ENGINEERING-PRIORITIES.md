@@ -347,24 +347,40 @@ Still open from the same reading: smoke does not drift downwind (the wind vector
 is decoded, RWE has no map wind), and neither explosions nor wreckage smoke
 afterwards. Both are noted in `TOTALA-EXE.md` §12.
 
-### 9. Radar jammers, stealth, sonar jamming
+### 9. Radar jammers, stealth, sonar jamming — DONE
 
-`radardistancejam` on 6 units, `sonardistancejam`, `stealth` on 2. None parsed.
-Given that radar is already a per-tick unit-vs-unit range query in RWE, a jammer
-is a small addition. `radardistancejam` → `WORD def+0x20A` (`0x42C3D6`), read at
-`0x4392F8` and — worth a look — at `0x466FFC` and `0x467610`, in the
-render/overlay path, which suggests the jammed area is drawn. `stealth` is bit 8
-of `def+0x241` (`0x42C4D8`). ~1–2 days.
+Every offset above is confirmed, and the jammer is real gameplay rather than
+only a drawing: the readers at `0x466FFC` and `0x467610` are the minimap and
+main-view range rings, but the same word is also read at `0x4675EC`, inside the
+per-tick visibility pass at `0x467440`, where it drives a spatial visit that
+**clears the radar contact flag on every unit inside the radius**. A jammer
+hides units, it does not produce false contacts; it must be switched on; and it
+does not jam its owner's own picture, only everybody else's. `stealth` is read
+once, at `0x467881`, and keeps a unit off radar and sonar entirely.
 
-### 10. Cloaking
+All of it is implemented, with `src/rwe/sim/concealment.test.cpp` covering it.
+The full write-up, with the loop-by-loop decode of `0x467440`, is in
+`TOTALA-EXE.md` under "Jamming, stealth and cloaking".
 
-RWE shows the CLOAK button (`cloakable` is parsed) and does nothing else.
-`cloakcost` → float `def+0x1DA` (`0x42C4FE`), `cloakcostmoving` → `+0x1DE`,
-`mincloakdistance` → `WORD def+0x208` (`0x42C531`; note `0x42D135` supplies a
-default of `0x50` = 80 when the FBI is silent, and `0x4390D2` reads it),
-`init_cloaked` bit 4 of `def+0x241`. Four units set `cloakcost`, three
-`cloakcostmoving`/`mincloakdistance` — but cloaking is player-facing on the
-commander, so impact is out of proportion to the counts. ~2 days.
+### 10. Cloaking — DONE
+
+The offsets are confirmed, and three things the note above had wrong or
+missing:
+
+- **`cloakable` is not an FBI key.** No such string exists in the binary.
+  `0x42CA5A` derives the flag from `cloakcost > 0`, which is why RWE's parsed
+  `Cloakable` never fired: nothing in the shipped data writes it.
+- **`cloakcostmoving` defaults to `cloakcost`**, pushed as the default argument
+  at `0x42C525`.
+- **`mincloakdistance` is a proximity fuse, not a refusal to cloak.**
+  `0x467690` checks every cloakable unit against `0x40B0D0` — is a live enemy
+  within that distance — and on a hit stamps `unit+0xB0 = tick + 90` and
+  decloaks it. The unit stays decloaked for three seconds after the enemy
+  leaves. `0x4390D2` only draws the ring.
+
+The drain is at `0x4017CB`, once per economy tick, truncated to a whole number,
+all-or-nothing: if the player's energy will not cover it the unit simply does
+not cloak. Implemented, with tests; see `TOTALA-EXE.md` as above.
 
 ### 11. Nukes, stockpiles and anti-nukes
 

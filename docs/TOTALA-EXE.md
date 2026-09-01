@@ -1942,3 +1942,233 @@ Not ported:
   no map wind, so a vent's plume goes straight up.
 
 ---
+
+## NN. Jamming, stealth and cloaking
+
+Three keys that change who can see or shoot whom. They are one section because
+the original answers all three in one routine — the per-tick visibility pass at
+`0x467440` — and because all three land in the same place in RWE: the radar
+query that `GameSimulation::updateVisibility` builds and `canDetectUnit` reads.
+
+### The field offsets
+
+Read off the FBI parser under the pipeline rule §10 describes — a key's value is
+stored *after the next key's push* — and cross-checked against the
+definition-copy routine at `0x42B68F`–`0x42B6DF`, which moves the same run of
+words with the same widths.
+
+| FBI key | Offset | Pushed at | Stored at |
+|---|---|---|---|
+| `sightdistance` | `WORD def+0x202` | `0x42C395` | `0x42C3B3` |
+| `radardistance` | `WORD def+0x204` | `0x42C3AA` | `0x42C3C9` |
+| `sonardistance` | `WORD def+0x206` | `0x42C3C0` | `0x42C3DF` |
+| `mincloakdistance` | `WORD def+0x208` | `0x42C531` | `0x42C557` |
+| `radardistancejam` | `WORD def+0x20A` | `0x42C3D6` | `0x42C3F5` |
+| `sonardistancejam` | `WORD def+0x20C` | `0x42C3EC` | `0x42C40B` |
+| `init_cloaked` | `def+0x241` bit 4 | `0x42C466` | `0x42C491` |
+| `stealth` | `def+0x241` bit 8 | `0x42C4D8` | `0x42C503` |
+| `cloakcost` | float `def+0x1DA` | `0x42C4FE` | `0x42C516` (`fst`) |
+| `cloakcostmoving` | float `def+0x1DE` | `0x42C526` | `0x42C542` (`fstp`) |
+
+Two things fall out of that listing that the priorities note did not have.
+
+**`cloakcostmoving` defaults to `cloakcost`.** The `fst` at `0x42C516` leaves the
+parsed `cloakcost` on the FPU stack, `0x42C51C` truncates it to an integer, and
+`0x42C525` pushes *that* as the default argument for the `cloakcostmoving` read.
+A unit with a cost and no moving cost pays the same either way — which is the
+Cloakable Fusion Reactor, and it never moves.
+
+**`Cloakable` is not a key.** There is no such string anywhere in the binary.
+`0x42CA5A`–`0x42CA96` sets `def+0x245` bit 13 from `cloakcost > 0.0` (the
+constant at `0x4FD210` is zero), and that bit is what the Cloak_On mission
+handler tests before it will do anything. None of the shipped FBIs writes
+`Cloakable` either, so a build that honours only the key gives the button to
+nothing. The neighbouring bits in that dword are `canresurrect` 11, `cancapture`
+12, `candgun` 14, which settles the ambiguity §B of the priorities note left
+there.
+
+`mincloakdistance` defaults to **80** when the FBI is silent: `0x42D135` tests
+the stored word for zero and `0x42D13F` writes `0x50`.
+
+### The unit instance
+
+| Field | Meaning | Settled by |
+|---|---|---|
+| `unit+0xB0` | tick before which cloaking is refused | `0x4676E0`, read `0x4017F8` |
+| `unit+0x10E` bit 0 | switched on | `0x48B090` |
+| `unit+0x10E` bit 2 | **cloaked** | `0x48B090` |
+| `unit+0x110` bits 2–3 | movement rate band, 0 = stopped | `0x43DB2C` |
+| `unit+0x110` bit 8 | radar contact | `0x467937` |
+| `unit+0x110` bit 9 | sonar contact | `0x4678FF` |
+| `unit+0x110` bit 10 | jammed | `0x46796D`, `0x46798D` |
+| `unit+0x110` bit 11 | **cloak wanted** | `0x40308E` / `0x4030BE` |
+| `unit+0x110` bit 12 | **an enemy is inside `mincloakdistance`** | `0x4676E8` |
+
+Bits 2–3 are the move-rate band rather than anything to do with cloak: the
+routine at `0x43DACF`–`0x43DB3D` writes them from the unit's speed band at the
+same time as it calls the COB functions `StopMoving` (`0x50523C`), `StartMoving`
+(`0x505230`), `MoveRate1` (`0x50520C`) and `MoveRate2` (`0x505218`). Non-zero
+therefore means moving, which is how the cloak cost picks between its two
+numbers.
+
+### Turning cloak on
+
+Cloak is a **mission**, not a flag the button writes. The ground mission table at
+`0x4FC490` holds `Cloak_On` at record `0x4FC4F4` (handler `0x403070`, display
+"Cloaking") and `Cloak_Off` at `0x4FC50D` (handler `0x4030A0`, display
+"Decloaking"). Both handlers do one thing: check `def+0x245` bit 13 and set or
+clear `unit+0x110` bit 11.
+
+A fresh unit is seeded from the definition in the same routine that seeds the
+standing orders — `0x485CBC`–`0x485CCF` copies `def+0x241` bit 4 (`init_cloaked`)
+into `unit+0x110` bit 11.
+
+### The drain
+
+Inside the per-unit economy routine, `0x4017CB`–`0x401872`:
+
+- the whole block is skipped when the owning player's type byte `player+0x73` is
+  3;
+- `unit+0x110` bit 11 must be set and bit 12 clear, and `unit+0xB0` must not be
+  greater than the current tick (`0x4017F8`, against `[ds:0x511DE8 + 0x38A47]`);
+- the cost is `cloakcostmoving` when `unit+0x110 & 0xC` is non-zero and
+  `cloakcost` otherwise (`0x401806`), and it is **truncated to a whole number** by
+  `0x4E43A0` at `0x401824` before it is spent;
+- it is compared against the player's energy stock `player+0x8C` and, if the
+  stock covers it, subtracted there and then and added to the unit's own
+  energy-used accumulator `unit+0xC0`. If it does not, **nothing is taken and the
+  unit simply does not cloak** — there is no partial payment and no stall;
+- either way `0x48B090(unit, 4, cloaked)` writes `unit+0x10E` bit 2, which on a
+  change fires COB event `0xE` / `0xF` and ORs render flag `0x10000` into every
+  piece of the model.
+
+### The visibility pass, `0x467440`
+
+Runs per tick, and computes flags for **one** viewing player — the index it reads
+from `ds:0x511DE8 + 0x2A43` at `0x46745B`. Four loops over the unit list.
+
+**Loop 0, `0x467499`.** For every live unit: clear `unit+0x110` bit 12. Then, if
+the unit is the viewer's own or an ally sharing vision, set bits 8 and 9;
+otherwise clear bits 8, 9 and 10. So the radar picture is rebuilt from nothing
+every tick, and a unit you own is never off it.
+
+**Loop 1, `0x467521`.** Each of the viewer's live units that is **switched on**
+(`unit+0x10E` bit 0) and names a `radardistance` or a `sonardistance` becomes a
+source. It calls `0x47E890(position, max(radar, sonar) << 16, &visitor)`, which
+walks a 128-world-unit cell grid over the bounding box and then does a real
+circular test — `d² <= r²` in whole world units at `0x47E9E4` — before calling
+the visitor. The visitor is `0x467840`, and it:
+
+- skips units belonging to the viewer;
+- **skips any unit whose definition sets `stealth`** (`0x467881`–`0x46788C`);
+- sets bit 9 when the unit's `y` is at or below sea level and
+  `d² <= sonardistance²`;
+- sets bit 8 when `y + def+0x16E` (the model's height) is at or above sea level
+  and `d² <= (radardistance + 2 × unit+0x70)²`.
+
+That is where §2's `RadarDistance + 2 × altitude` lives, and the split explains
+what sonar is for: a submerged unit is only ever a sonar contact, a unit standing
+clear of the water only ever a radar one, and a half-submerged one can be both.
+
+**Loop 2, `0x4675EC` — the jammer.** Every live unit **not owned by the viewer**
+that is switched on and names a `radardistancejam` calls the same `0x47E890` with
+that radius and the visitor at `0x467960`, which clears bit 8 and sets bit 10 on
+everything it reaches. `sonardistancejam` does the same through `0x467980` for
+bit 9. So:
+
+- a jammer **hides units, it does not fake contacts**. There is no false-blip
+  code anywhere near it;
+- it hides *everything* inside the bubble, its own side included, not just its
+  owner's units — the visitors do not look at who owns what;
+- it must be **switched on**; both jammers in the shipped data set `onoffable=1`;
+- it does **not** jam its owner's own picture, because the loop skips units owned
+  by the viewing player. It does jam an ally's, which reads as a quirk of the
+  original rather than a considered decision;
+- it runs after the detection loop, so jamming always wins over radar;
+- it touches only bits 8 and 9. A jammer does nothing at all to a unit you can
+  actually see: line of sight is `unit+0x9C`, and loop 4 sets it afterwards.
+
+**Loop 3, `0x467690` — `mincloakdistance`.** For every live **cloakable** unit
+whose owner is of type 1 or 2, `0x40B0D0(owner, &position, mincloakdistance)` asks
+whether any live enemy of that owner is within that distance in the map plane. If
+one is, `unit+0xB0` is set to the current tick **+ 0x5A (90 ticks, three seconds)**
+and `unit+0x110` bit 12 is set. Bit 12 is cleared again at the top of the next
+tick's loop 0, so it is the timestamp that does the work: an enemy walking past a
+cloaked Commander decloaks it, and it stays decloaked for three seconds after the
+enemy leaves. `mincloakdistance` does **not** refuse to cloak in advance and it is
+not a range at which anything is revealed — it is a proximity fuse on the unit's
+own cloak.
+
+### What a cloaked unit is invisible to
+
+`unit+0x10E` bit 2 is read in exactly five places:
+
+- `0x465AE8` — the "can this viewer see this unit" predicate. Own units pass at
+  `0x465AD7`; a cloaked one returns 0 before anything else is looked at;
+- `0x40729C` — the computer player's nearest-enemy search (`0x4071F0`), which
+  skips cloaked units;
+- `0x4390E2`, `0x45937D`, `0x459779` — drawing: the mincloak range ring, and the
+  two sprite paths that shade a cloaked unit differently.
+
+It is **not** read by the weapon target scan. Neither `0x40AD80` (gather enemies
+in radius), `0x40B7B0` (choose one) nor `0x49ABB0` (can this weapon engage that
+unit) looks at it. In the original a cloaked unit standing inside an enemy gun's
+range is still shot at; cloak hides it from your eyes and from the AI's search,
+not from a turret already pointed at it.
+
+### Where the ranges are drawn
+
+`radardistancejam` and `sonardistancejam` are read by three drawing routines
+besides loop 2 — `0x4392F8`/`0x439332` (the range display), `0x466FFC`/`0x46703F`
+(minimap) and `0x46760D`/`0x467633` (main view) — and `mincloakdistance` by
+`0x4390D2`, `0x439205` and `0x4676B9`. The jammed area and the mincloak radius
+are both drawn as circles.
+
+### The shipped data
+
+Counted over `rev31/units`: `CloakCost` on four units — `armcom` and `corcom`
+200, `armsnipe` 780, `armckfus` 450; `CloakCostMoving` on three — 1000, 1000,
+1100; `mincloakdistance=40` on the same three that move. `RadarDistanceJam` on
+six: 400, 420, 490, 500, 700, 730. `Stealth=1` on two, the stealth fighters.
+**No `SonarDistanceJam`, no `init_cloaked` and no `Cloakable` anywhere.**
+
+### What RWE does with this
+
+Implemented: the six FBI fields and the derived `cloakable`; `stealth` keeping a
+unit off radar and sonar; the jammer clearing radar and sonar contacts inside its
+radius when it is switched on and not the viewer's own; the radar/sonar split by
+sea level; the `mincloakdistance` proximity fuse with its three-second tail; the
+cloak drain, truncated, moving versus still, all-or-nothing, through the ordinary
+consumption path; and a cloaked unit dropping out of `canSeeUnit` and
+`canDetectUnit`. The CLOAK button, which was drawn and wired to nothing, now
+sends a command and lights up while the order stands — it records the request
+rather than the cloak, so a unit an enemy has just walked past keeps its order
+and cloaks again three seconds later.
+
+Deliberately not ported:
+
+- **Cloak being invisible to the eye but not to a gun.** RWE's target scan runs
+  through `canDetectUnit`, which is already a deliberate difference from the
+  original (§9), so a cloaked unit falls out of targeting as well. Matching the
+  original here would mean a cloaked Commander still being shot at by everything
+  it walks past, which is not what the key is for.
+- **The single-viewer visibility pass.** The original computes these flags for
+  the local player only and stores them on the unit; RWE computes them per
+  player, which is what a deterministic simulation with more than one human in it
+  needs.
+- **The `player+0x73 == 3` exemption** on the drain, and the type 1-or-2 gate on
+  the `mincloakdistance` loop. Both are about the original's spectator and
+  script-driven player types, which RWE does not have.
+
+Still unported from this reading:
+
+- **The COB side.** Events `0xE` and `0xF` at `0x48B14E`/`0x48B1A7` are not
+  raised, so a script cannot react to its unit cloaking, and the `0x10000` render
+  flag is not set on the pieces — a cloaked unit is simply not drawn to an enemy
+  rather than being drawn shaded.
+- **Bit 10, "jammed".** The original marks a unit a jammer has erased separately
+  from one that was never seen. Nothing in RWE reads it, and nothing in the
+  original appears to either beyond the flag itself.
+- **The jammer's effect on an ally's radar.** RWE follows the original in
+  skipping only the viewer's own jammers, so allies do jam each other; it is
+  recorded here in case it ever looks like a bug.
