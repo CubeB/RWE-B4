@@ -1033,12 +1033,12 @@ namespace rwe
 
         auto spriteSeries = gameMediaDatabase.getSpriteSeries(spriteRenderInfo->gafName, spriteRenderInfo->animName).value();
 
-        if (!particle.isStarted(currentTime) || particle.isFinished(currentTime, spriteRenderInfo->finishTime, spriteRenderInfo->frameDuration, spriteSeries->sprites.size()))
+        if (!particle.isStarted(currentTime) || particle.isFinished(currentTime, *spriteRenderInfo, spriteSeries->sprites.size()))
         {
             return;
         }
 
-        auto frameIndex = particle.getFrameIndex(currentTime, spriteRenderInfo->frameDuration, spriteSeries->sprites.size());
+        auto frameIndex = particle.getFrameIndex(currentTime, *spriteRenderInfo, spriteSeries->sprites.size());
         const auto& sprite = *spriteSeries->sprites[frameIndex];
 
         Vector3f snappedPosition(
@@ -1067,7 +1067,7 @@ namespace rwe
                 particle.renderType,
                 [&](const ParticleRenderTypeSprite& s) {
                     const auto anim = gameMediaDatabase.getSpriteSeries(s.gafName, s.animName).value();
-                    return particle.isFinished(currentTime, s.finishTime, s.frameDuration, anim->sprites.size());
+                    return particle.isFinished(currentTime, s, anim->sprites.size());
                 },
                 [&](const ParticleRenderTypeWake& w) {
                     return currentTime >= w.finishTime;

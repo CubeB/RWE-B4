@@ -709,6 +709,9 @@ namespace rwe
 
         void spawnSmoke(const Vector3f& position, const std::string& gaf, const std::string& anim, ParticleFinishTime duration, GameTime frameDuration);
 
+        /** One puff of the smoke a damaged unit's SmokeUnit script asks for, out of anims/FX.GAF. */
+        void spawnSmokePuff(const Vector3f& position, const std::string& anim);
+
         void spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration);
 
         /** Emits this tick's nanolathe spray for every builder the local player can see. */

@@ -282,13 +282,30 @@ flow, and issue #42 (aiming scripts running twice) is in the same code.
 
 ### 8. Smoke from damaged units
 
-Every damaged unit in TA trails smoke; RWE has none (`grep -i smoke` in
-`src/rwe` finds only weapon smoke trails and debris trails at
-`game/GameScene.cpp:4095–4104`). The findings doc already establishes that
-damage smoke lives on particle layer 9, drawn over everything including health
-bars — so the layer table found for §5 of `TOTALA-EXE.md` is the way in; what is
-missing is the health threshold and emission rate in the per-tick unit update.
-Cheap to spot on screen, so low risk. ~1 day.
+Done, and this entry was wrong about almost all of it. Written up as
+`TOTALA-EXE.md` §4.
+
+Two of its premises did not survive contact with the binary. **There is no
+health threshold or emission rate in the per-tick unit update**, because there
+is no engine code for damage smoke at all: the trigger is the `SmokeUnit` thread
+in each unit's own COB, which smokes below 66% health and sleeps
+`max(health% × 50, 200)` milliseconds between puffs. And **RWE was not missing
+the effect** — `emit-sfx` 257/258 already reached `emitLightSmokeFromPiece` /
+`emitBlackSmokeFromPiece`, so damaged units did smoke; the `grep` above only
+missed it because those functions are named after the sfx type rather than after
+smoke.
+
+What was actually wrong was the puff itself. RWE played every puff's whole
+sequence at an even two ticks a frame, so each one ballooned to full size and
+they all looked alike; the original holds the first frame for seven ticks, three
+to five for each one after, and stops on a frame drawn at random when the puff
+is born, so most die small. That is now `makeSmokePuffFrameSchedule` in
+`game/Particle.h`, with `game/damagesmoke.test.cpp` covering the threshold, the
+rate and the frame walk.
+
+Still open from the same reading: smoke does not drift downwind (the wind vector
+is decoded, RWE has no map wind), and neither explosions nor wreckage smoke
+afterwards. Both are noted in `TOTALA-EXE.md` §12.
 
 ### 9. Radar jammers, stealth, sonar jamming
 

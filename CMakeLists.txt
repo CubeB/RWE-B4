@@ -780,6 +780,7 @@ set(TEST_FILES
     src/rwe/collections/MinHeap.test.cpp
     src/rwe/collections/VectorMap.test.cpp
     src/rwe/game/GameSpeed.test.cpp
+    src/rwe/game/damagesmoke.test.cpp
     src/rwe/game/PlayerCommand_hotkey.test.cpp
     src/rwe/game/PlayerCommand_speed.test.cpp
     src/rwe/game/dump_util.test.cpp
