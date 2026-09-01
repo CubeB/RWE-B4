@@ -109,7 +109,17 @@ namespace rwe
             u.previousEnergyConsumptionBuffer,
             u.previousMetalConsumptionBuffer,
             u.energyConsumptionBuffer,
-            u.metalConsumptionBuffer);
+            u.metalConsumptionBuffer,
+            u.weapons);
+    }
+
+    GameHash computeHashOf(const UnitWeapon& w)
+    {
+        return combineHashes(
+            w.stockedRounds,
+            w.queuedRounds,
+            w.stockpileProgress,
+            w.stockpileStepDelay);
     }
 
     GameHash computeHashOf(const UnitPhysicsInfoGround& p)

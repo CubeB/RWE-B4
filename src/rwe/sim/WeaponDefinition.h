@@ -3,6 +3,7 @@
 #include <optional>
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/GameTime.h>
+#include <rwe/sim/Metal.h>
 #include <rwe/sim/ProjectilePhysicsType.h>
 #include <rwe/sim/SimAngle.h>
 #include <rwe/sim/SimScalar.h>
@@ -58,6 +59,25 @@ namespace rwe
         bool groundBounce;
 
         Energy energyPerShot;
+
+        /**
+         * TA metalpershot, which sits beside energypershot and is taken the same
+         * way: the original tests both against the player's stores before the
+         * shot and simply does not fire if either is short (0x49E3ED), then takes
+         * them as the shot leaves (0x49E51F). Only eight weapons ship one and
+         * they are the expensive ones -- 200 metal for an anti-nuke, 2000 for a
+         * nuclear missile.
+         */
+        Metal metalPerShot{0};
+
+        /**
+         * TA stockpile. The weapon is not paid for out of the economy as it
+         * fires; rounds are built one at a time beforehand and firing spends one
+         * out of the stock (0x49E3D5, 0x49E447). A stockpiled weapon never gets
+         * a reload timer -- the original skips setting one -- so it is ready
+         * again the moment another round is finished.
+         */
+        bool stockpile{false};
 
         /** Percent chance that an impact sets flammable features in the blast alight. */
         unsigned int fireStarter{0};

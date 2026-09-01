@@ -25,6 +25,13 @@ namespace rwe
 
     GameHash computeHashOf(const UnitState& u);
 
+    /**
+     * Only the stockpile counters. The rest of a weapon's state is not in the
+     * hash yet, and cannot be until the aiming state stops carrying a raw
+     * CobThread pointer, which differs between machines.
+     */
+    GameHash computeHashOf(const UnitWeapon& w);
+
     GameHash computeHashOf(const UnitPhysicsInfoGround& p);
     GameHash computeHashOf(const UnitPhysicsInfoAir& p);
     GameHash computeHashOf(const AirMovementStateTakingOff& p);
@@ -92,6 +99,17 @@ namespace rwe
     {
         GameHash sum(0);
         for (const auto& x : v)
+        {
+            sum += computeHashOf(x);
+        }
+        return sum;
+    }
+
+    template <typename T, std::size_t N>
+    GameHash computeHashOf(const std::array<T, N>& a)
+    {
+        GameHash sum(0);
+        for (const auto& x : a)
         {
             sum += computeHashOf(x);
         }

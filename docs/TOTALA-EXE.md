@@ -1385,3 +1385,251 @@ original:
 
 ---
 
+
+## NN. Stockpiled weapons and interception
+
+Eight weapons in the shipped data carry `stockpile`, and none of them fires out
+of the economy the way the rest do. The round is built beforehand, at a price,
+and the launcher spends it.
+
+### The unit's weapon records
+
+Three of them, twenty-eight bytes each, starting at `unit+0x04`. The fire loop
+walks them with `lea esi,[edi+0x1f]` and `add esi,0x1c` (`0x49E1B8`,
+`0x49E54C`), so the offsets fall out as:
+
+| Field | Record | Weapon one |
+|---|---|---|
+| weapon definition pointer | `+0x0C` | `unit+0x10` |
+| reload countdown, `WORD` | `+0x14` | `unit+0x18` |
+| rounds in the magazine, `BYTE` | `+0x1A` | `unit+0x1E` |
+| flags — bit 0 aiming, bit 1 enabled, bit 4 may auto-target | `+0x1B` | `unit+0x1F` |
+
+The magazine byte is the whole of a launcher's stockpile. The order menu shows
+it as `N +M` where `M` is what is still on order (`0x419A2B` formats `%d` and
+then ` +%d` from the count and from `0x439D80`, which totals the outstanding
+orders), and the UI only ever looks at **weapon one** (`[unit+0x1E]` hard-coded
+at `0x419A33`). Both launchers that ship — `ARMSILO`/`CORSILO` and
+`ARMAMD`/`CORFMD` — put their missile in `Weapon1`, so that is not a limitation
+anyone would notice.
+
+### Building a round, `0x402B70`
+
+The order handler is a three-state machine on `[order+0x05]`, re-scheduled by
+`0x439E80` rather than run every tick:
+
+- **state 0, `0x402CB4`** — nothing queued, so the order is finished and popped;
+  or the magazine is at **200** (`cmp BYTE PTR [eax+0x1e],0xc8`) and the order
+  waits **300** ticks and looks again; otherwise the progress is zeroed and the
+  state advances.
+- **state 1, `0x402BD4`** — one step of the build, below.
+- **state 2, `0x402BB3`** — the magazine goes up by one, the outstanding count
+  down by one, and `0x41C150` refreshes the button.
+
+The build step advances **five ticks at a time** and the total time is the
+weapon's own `reloadtime` — `WORD wdef+0xE4`, which the parser has already
+multiplied by 30:
+
+```
+402bd4  mov eax,[esi+0x3e]        ; P, ticks already paid for
+402be0  mov ax,[edi+0xe4]         ; T, reloadtime in ticks
+402bdb  lea ecx,[eax+5]           ; Q = min(P + 5, T)
+402c01  fmul [edi+0xc4]           ; metalpershot
+402c0f  call 0x4e43a0             ; trunc(P * metalpershot / T)
+402c20  call 0x4e43a0             ; trunc(Q * metalpershot / T)
+402c2b  sub eax,ebp               ; the difference is what this step costs
+402c42..402c4c                    ; the same again for energypershot at +0xC0
+402c6b  call 0x4011c0             ; ask the economy for it
+402c72  je 0x402c9c               ; refused -> no progress, retry in 10 ticks
+402c76  mov [esi+0x3e],ebx        ; paid -> progress = Q
+402c88  call 0x439e80             ; and again in 5
+```
+
+Truncating the **running total** at each end rather than truncating the step is
+the whole trick: it makes the run come to exactly the TDF number however
+awkwardly the cost divides by the tick count. Replaying it against the shipped
+data gives a `NUCLEAR_MISSILE` 5400 ticks (180 s), 2000 metal and 180000 energy
+to the unit, and the anti-nuke 3600 ticks, 200 metal and 10000 energy. A naive
+`cost / steps` charged per step loses 46% of a nuke's metal and **all** of an
+anti-nuke's, because 200 metal over 720 steps rounds down to nothing.
+
+`0x4011C0` is the ordinary per-unit resource request — it books the demand at
+`unit+0xBC+0x04` and `+0x1C` and only accepts it if both resources are satisfied
+— so a launcher on a stalled economy stops where it is and keeps the part-built
+round rather than going into debt.
+
+### Firing, `0x49E3D5`
+
+The per-weapon fire routine settles the price before it does anything else:
+
+```
+49e3d5  test stockpile            ; a stockpiled weapon needs a round
+49e3e4  mov al,[esi-0x1]          ;   magazine != 0
+49e3ed  mov ecx,[edi+0xec]        ; otherwise the player
+49e3f3  fld [ecx+0x8c] ; fcomp [ebx+0xc0]   ; stored energy >= energypershot
+49e406  fld [ecx+0x98] ; fcomp [ebx+0xc4]   ; stored metal  >= metalpershot
+49e420  je ...                    ; short of either -> the weapon does not fire
+49e447  test stockpile
+49e459  dec cl                    ;   spend a round, and set NO reload timer
+49e51f  call 0x4012a0             ;   otherwise take the two out of the stores
+```
+
+Two things follow that RWE did not have. **`metalpershot` is real and is weighed
+the same way `energypershot` is**, and **a weapon that cannot pay does not fire
+at all** — the original never lets the shot go and takes the debt afterwards.
+And a stockpiled weapon gets no reload timer whatever: `0x49E463` jumps straight
+over the calculation, because the wait was the build.
+
+`0x49E4F2` then sets `unit[0xBA] |= commandfire ? 0x800 : 0x400`, which is how
+the rest of the frame is told a shot went off.
+
+### The reload time is not just `reloadtime`
+
+The branch a non-stockpiled weapon takes at `0x49E468` is worth recording on its
+own, because RWE uses the flat TDF number:
+
+```
+reloadTicks = ((120 - 20 * hp / maxdamage) * ((100 - 6 * tier) * reloadtime / 100)) / 100
+```
+
+with `tier = min(5, kills / 5)` as everywhere else, `hp` the word at
+`unit+0x108` and `maxdamage` the dword at `def+0x1FA`. A veteran of 25 kills
+reloads in 70% of the time; a unit at the point of death takes 120%. **Decoded,
+not ported.**
+
+### `commandfire`
+
+Bit 26 of `wdef+0x111`, and it means one thing: the weapon is never given a
+target by the machine. The auto-target scan skips it (`0x40643F`, `0x407131`,
+`0x40FDE5`) and so does the return-fire path, which takes an "is this an
+explicit order" argument and only consults the bit when that is zero
+(`0x408A88`–`0x408A96`). Sixteen weapons carry it — the D-gun, the nukes, the
+anti-nukes, the Krogoth's tremor.
+
+### `coverage`, `targetable`, `interceptor`
+
+`coverage` is `wdef+0xE0` (`0x42E539`, checked against the pipeline rule) and
+belongs to the interceptor; `targetable` (bit 29) belongs to the thing being shot
+at. The chain is:
+
+1. **Acquisition, `0x49D120`.** An `interceptor` weapon does not look for a unit
+   at all: the auto-target scan calls this instead (`0x408B31`) and aims at what
+   it returns (`0x48A0A0`). It refuses outright if the magazine is empty
+   (`mov cl,[ebp+ecx*4+0x1e]`), then walks the live projectiles and takes the
+   first that is not the launcher's own, whose weapon has `targetable`, and
+   whose **aim point** — `proj+0x28`, not its current position — is within
+   `coverage` of the launcher. The test is a **square**, `|dx| <= coverage` and
+   `|dz| <= coverage` done as an unsigned compare against `2 * coverage` in 16.16
+   units, and **Y is not looked at**. A last pass over every projectile's `+0x56`
+   makes sure nothing else has already claimed it, so two anti-nukes never waste
+   themselves on one missile.
+2. **Launch, `0x49DC17`.** Vertical launch again, but the target projectile is
+   fetched first and **the launch is abandoned if there is none**. `0x49CC20`
+   stores it at `newproj+0x56`.
+3. **Flight, `0x49B47A`.** The aim point routine returns `target + 4`, the
+   target's live position, ahead of any unit target — the case §7 recorded as
+   decoded but unfillable.
+4. **Detonation, `0x49B106`.** The collision check gives an interceptor an extra
+   clause: if it is within its own `areaofeffect` of the target projectile it
+   goes off there and then.
+5. **The kill, `0x49A664`.** This is the piece that was missing. When a
+   projectile explodes, *if its own weapon has `interceptor`*, the routine walks
+   every live projectile and detonates each one within `areaofeffect` of the
+   blast. It does not re-check `targetable`; anything in the blast dies. That is
+   how the nuke comes apart, and it is also why one anti-nuke can clear a salvo.
+
+An `interceptor` or `targetable` projectile is also drawn differently on the
+minimap (`0x46720E` tests both bits at once).
+
+### `antiweapons`
+
+Bit 29 of `def+0x241`, pushed at `0x42C84C`. Two units set it, and they are the
+two anti-nuke launchers. No reader was found for it; on the evidence it is a
+label for the target-category machinery rather than anything that gates the
+interception above, which keys entirely off the weapon flags. **Not ported, and
+not understood.**
+
+### A correction to §10: `holdtime` does have a reader
+
+`WORD wdef+0xFE` is read at `0x499E81` and `0x49C8D6`, both on the path that
+retires the projectile the camera is following (`globals+0x142F7`), and stored
+into `globals+0x1434B`. It is how long the view holds on the impact — the nuke
+cam. Nothing in the simulation reads it.
+
+### Decoded but not ported
+
+- **Interception in full.** Everything in the five steps above is decoded and
+  none of it is in RWE: there is no interceptor weapon behaviour, no
+  projectile-targets-projectile slot, and no blast that kills projectiles.
+  `coverage` and `targetable` are parsed and unused.
+- **`antiweapons`**, as above.
+- **The veterancy and damage terms on reload time** (`0x49E468`).
+- **The queue button.** RWE has the order
+  (`PlayerUnitCommand::ModifyStockpile`) and the simulation behind it, but
+  nothing in the GUI raises it yet, so a launcher's magazine can only be filled
+  from code or a test.
+- **The 300-tick wait on a full magazine** is implemented, but nothing in RWE
+  can reach 200 rounds in practice.
+- **Per burst, not per shot.** The cost check, the spend and the round out of
+  the magazine all sit in the per-weapon routine that runs once a tick, and a
+  burst is expanded afterwards from the projectile's own `+0x60` counter, so the
+  original pays for a burst once. RWE charges each shot of a burst separately,
+  as it always has for `energypershot`. Nothing in the shipped data can tell the
+  difference: the four weapons with a burst — the flamethrower and the three
+  EMGs — name no `energypershot`, no `metalpershot` and no `stockpile`.
+
+## NN. The D-gun
+
+There is less to it than the name suggests. `ARM_DISINTEGRATOR` — and its Core
+twin — is an ordinary weapon:
+
+```
+rendertype=3;  lineofsight=1;  turret=1;  beamweapon=1;  noexplode=1;
+commandfire=1;  model=dgun;
+range=240;  reloadtime=1.2;  weapontimer=4;  weaponvelocity=200;
+areaofeffect=48;  energypershot=400;  firestarter=70;
+[DAMAGE] { default=30000; }
+```
+
+Every part of what it does comes out of that.
+
+- **The damage.** 30000 is exactly the figure the armour cut-out at `0x489BD1`
+  tests against (`cmp edi,0x7530`), so the shot goes through a `DamageModifier`
+  that would otherwise take most of it off. Nothing anywhere in the binary
+  special-cases the weapon; the number is the mechanism. RWE already has the
+  cut-out (`ArmourBypassDamage`), so this half was in place.
+- **The cost.** 400 energy, no metal, weighed against the player's *stored*
+  energy before the shot and taken as it leaves (`0x49E3ED`, `0x49E51F` — see
+  the section above). A commander with a flat battery cannot D-gun.
+- **The button.** `candgun` is bit 14 of `def+0x245`, pushed at `0x42CAA3` and
+  masked with `shl eax,0xe` at `0x42CABA` — verified, and set by the two
+  commanders and nothing else. `commandfire` on the weapon is what keeps the
+  commander from disintegrating passers-by; `candgun` on the unit is what puts
+  BLAST on its order menu. RWE was showing BLAST for any unit with a
+  command-fire weapon, which would have put it on a nuclear silo.
+- **The wreck.** There is no D-gun rule here either. `0x4864B0` kills a unit with
+  the *damage type* as its cause (`unit+0xF5`, set from the damage descriptor at
+  `0x489DAC`); causes 4, 5 and 9 leave nothing and skip the death script
+  outright, cause 7 forces a wreck, and everything else — the D-gun included —
+  asks the unit's own COB `Killed` (the name is at `0x508BE8`, called through
+  `0x4B0BC0` at `0x4865C3`) and takes the corpse level from what the script
+  writes back into the local it is handed, 0 meaning none. The severity handed
+  to the script is `clamp(1, 100, (100 * overkill / maxdamage + unit[0xF7]) / 2)`
+  (`0x48655E`–`0x4865A4`), and a 30000-point hit on a 3000-point commander pins
+  it at 100. So a disintegrated unit leaves nothing because its own script says
+  so at that severity, not because the weapon asked.
+- **The render type.** `rendertype=3` is the ordinary model type, which RWE
+  already handles. The `ProjectileRenderTypeMindgun` TODO in
+  `GameScene_util.cpp` is `rendertype=2`, which belongs to `MINDGUN` — a
+  100-damage `unitsonly` beam that nothing in the shipped data uses. It is not
+  the D-gun, and finishing it would change nothing.
+
+### Decoded but not ported
+
+- **The `Killed` severity formula** above. RWE runs `Killed` but does not feed it
+  the original's overkill-derived severity, so what a script chooses to leave
+  behind may differ.
+- **`unit+0xF7`**, the second term in that severity, is unidentified.
+- **The damage-type death causes** 4, 5, 7 and 9 are decoded as a set but not
+  individually named; nothing was traced far enough to say which weapon or
+  event produces each.

@@ -31,6 +31,17 @@ namespace rwe
             std::string unitType;
         };
 
+        /**
+         * Add to (or take off) the number of rounds a stockpiled weapon is
+         * building. The original queues these as ordinary orders on the unit
+         * and shows the outstanding count next to the ready one as "N +M"
+         * (0x419A2B).
+         */
+        struct ModifyStockpile
+        {
+            int count;
+        };
+
         struct Stop
         {
         };
@@ -55,7 +66,7 @@ namespace rwe
             SimVector position;
         };
 
-        using Command = std::variant<IssueOrder, ModifyBuildQueue, Stop, SetFireOrders, SetOnOff, SelfDestruct, CancelBuildOrder>;
+        using Command = std::variant<IssueOrder, ModifyBuildQueue, ModifyStockpile, Stop, SetFireOrders, SetOnOff, SelfDestruct, CancelBuildOrder>;
 
         UnitId unit;
         Command command;

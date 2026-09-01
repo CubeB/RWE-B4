@@ -25,6 +25,9 @@ namespace rwe
 
     nlohmann::json dumpJson(const UnitState& u);
 
+    /** Only the stockpile counters, to match what the hash covers. */
+    nlohmann::json dumpJson(const UnitWeapon& w);
+
     nlohmann::json dumpJson(const UnitPhysicsInfoGround& p);
     nlohmann::json dumpJson(const UnitPhysicsInfoAir& p);
     nlohmann::json dumpJson(const AirMovementStateTakingOff& p);
@@ -92,6 +95,17 @@ namespace rwe
     {
         nlohmann::json j;
         for (const auto& e : v)
+        {
+            j.push_back(dumpJson(e));
+        }
+        return j;
+    }
+
+    template <typename T, std::size_t N>
+    nlohmann::json dumpJson(const std::array<T, N>& a)
+    {
+        nlohmann::json j;
+        for (const auto& e : a)
         {
             j.push_back(dumpJson(e));
         }

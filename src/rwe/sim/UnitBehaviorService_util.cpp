@@ -96,6 +96,20 @@ namespace rwe
         return !std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType);
     }
 
+    long long stockpileRampTotal(int ticks, int totalTicks, float cost)
+    {
+        if (totalTicks <= 0 || cost <= 0.0f)
+        {
+            return 0;
+        }
+
+        // The TDF number is whole in every weapon that ships one, and the
+        // original holds it as a float and truncates the product, so taking the
+        // whole part of it here loses nothing and keeps the arithmetic exact.
+        auto wholeCost = static_cast<long long>(cost);
+        return (static_cast<long long>(ticks) * wholeCost) / static_cast<long long>(totalTicks);
+    }
+
     std::pair<SimAngle, SimAngle> computeHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, SimScalar zOffset, ProjectilePhysicsType projectileType)
     {
         return match(

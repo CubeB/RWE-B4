@@ -162,6 +162,8 @@ namespace rwe
         weaponDefinition.sprayAngle = SimAngle(tdf.sprayAngle);
 
         weaponDefinition.energyPerShot = Energy(tdf.energyPerShot);
+        weaponDefinition.metalPerShot = Metal(tdf.metalPerShot);
+        weaponDefinition.stockpile = tdf.stockpile;
 
         if (tdf.selfProp)
         {
@@ -344,6 +346,7 @@ namespace rwe
         u.canMove = fbi.canMove;
         u.canGuard = fbi.canGuard;
         u.canCapture = fbi.canCapture;
+        u.canDgun = fbi.canDgun;
         u.cloakable = fbi.cloakable;
 
         u.mobileStandOrders = fbi.mobileStandOrders;

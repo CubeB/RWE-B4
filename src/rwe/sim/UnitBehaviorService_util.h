@@ -36,6 +36,18 @@ namespace rwe
      */
     bool weaponNeedsTheHullTurned(const WeaponDefinition& weaponDefinition);
 
+    /**
+     * How much of a stockpiled round's cost has been paid by the time `ticks` of
+     * its `totalTicks` build have gone by.
+     *
+     * TotalA.exe 0x402BF3 works this out in floats and truncates, and it
+     * truncates at each end rather than truncating the step, which is what makes
+     * the whole run come to exactly `cost` no matter how badly the division goes.
+     * Whole numbers of resource are what comes out either way, so the integer
+     * arithmetic here follows the original exactly while staying determinate.
+     */
+    long long stockpileRampTotal(int ticks, int totalTicks, float cost);
+
     std::pair<SimAngle, SimAngle> computeHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, SimScalar zOffset, ProjectilePhysicsType projectileType);
 
     std::pair<SimAngle, SimAngle> computeLineOfSightHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to);

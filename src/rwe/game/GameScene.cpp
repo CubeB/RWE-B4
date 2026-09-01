@@ -3992,7 +3992,10 @@ namespace rwe
             panel->removeChildrenWithPrefix(sidePrefix + "LOAD");
             panel->removeChildrenWithPrefix(sidePrefix + "UNLOAD");
         }
-        if (definition.isTransport() || !hasCommandFireWeapon)
+        // BLAST is the D-gun, and the original gates it on `candgun` rather than
+        // on owning a command-fire weapon: a nuclear silo has one of those too,
+        // and its button is a stockpile order, not a D-gun.
+        if (definition.isTransport() || !definition.canDgun || !hasCommandFireWeapon)
         {
             panel->removeChildrenWithPrefix(sidePrefix + "BLAST");
         }
@@ -5519,6 +5522,9 @@ namespace rwe
             },
             [&](const PlayerUnitCommand::ModifyBuildQueue& c) {
                 modifyBuildQueue(unitCommand.unit, c.unitType, c.count);
+            },
+            [&](const PlayerUnitCommand::ModifyStockpile& c) {
+                simulation.modifyStockpileQueue(unitCommand.unit, c.count);
             },
             [&](const PlayerUnitCommand::Stop&) {
                 stopUnit(unitCommand.unit);

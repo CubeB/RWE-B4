@@ -310,6 +310,7 @@ namespace rwe
 
             for (Index i = 0; i < getSize(unitInfo.state->weapons); ++i)
             {
+                updateWeaponStockpile(unitId, i);
                 updateWeapon(unitId, i);
             }
         }
@@ -522,6 +523,79 @@ namespace rwe
 
         physics.steeringInfo = seek(*unitInfo.state, *unitInfo.definition, destination);
         return false;
+    }
+
+    void UnitBehaviorService::updateWeaponStockpile(UnitId id, unsigned int weaponIndex)
+    {
+        auto& unit = sim->getUnitState(id);
+        auto& weapon = unit.weapons[weaponIndex];
+        if (!weapon)
+        {
+            return;
+        }
+
+        const auto& weaponDefinition = sim->weaponDefinitions.at(weapon->weaponType);
+        if (!weaponDefinition.stockpile)
+        {
+            return;
+        }
+
+        if (weapon->stockpileStepDelay > 0)
+        {
+            --weapon->stockpileStepDelay;
+            return;
+        }
+
+        if (weapon->queuedRounds <= 0)
+        {
+            return;
+        }
+
+        // A full magazine holds on to the order rather than dropping it: the
+        // original sits still and looks again in ten seconds (0x402CD0).
+        if (weapon->stockedRounds >= MaxStockedRounds)
+        {
+            weapon->stockpileStepDelay = StockpileFullRetryTicks;
+            return;
+        }
+
+        // TotalA.exe 0x402BD4. A round takes the weapon's own reloadtime to
+        // build, and the cost is a straight ramp across that: after P ticks the
+        // total spent is trunc(P * cost / T), and this step pays the difference.
+        // Truncating each end rather than the step itself is what makes the
+        // whole run come to exactly what the TDF asked for, however awkward the
+        // division -- replaying it against the shipped numbers gives a nuclear
+        // missile 180 seconds, 2000 metal and 180000 energy to the unit.
+        auto totalTicks = std::max(1, static_cast<int>(deltaSecondsToTicks(weaponDefinition.reloadTime).value));
+        auto from = weapon->stockpileProgress;
+        auto to = std::min(from + StockpileStepTicks, totalTicks);
+
+        auto energy = Energy(static_cast<float>(
+            stockpileRampTotal(to, totalTicks, weaponDefinition.energyPerShot.value)
+            - stockpileRampTotal(from, totalTicks, weaponDefinition.energyPerShot.value)));
+        auto metal = Metal(static_cast<float>(
+            stockpileRampTotal(to, totalTicks, weaponDefinition.metalPerShot.value)
+            - stockpileRampTotal(from, totalTicks, weaponDefinition.metalPerShot.value)));
+
+        if (!sim->addResourceDelta(id, -energy, -metal))
+        {
+            // Nothing was taken, so nothing was built. The original makes no
+            // progress and comes back in ten ticks rather than five (0x402C9C),
+            // so a stalled silo asks the economy half as often.
+            weapon->stockpileStepDelay = StockpileStallRetryTicks;
+            return;
+        }
+
+        weapon->stockpileProgress = to;
+        // The work happens on one tick in five, so four idle ticks follow it.
+        weapon->stockpileStepDelay = StockpileStepTicks - 1;
+
+        if (to >= totalTicks)
+        {
+            ++weapon->stockedRounds;
+            --weapon->queuedRounds;
+            weapon->stockpileProgress = 0;
+        }
     }
 
     void UnitBehaviorService::updateWeapon(UnitId id, unsigned int weaponIndex)
@@ -758,6 +832,25 @@ namespace rwe
             return;
         }
 
+        // What the shot costs is settled before anything else happens
+        // (TotalA.exe 0x49E3D5). A stockpiled weapon needs a round in the
+        // magazine; everything else has to find its energypershot and
+        // metalpershot in the player's stores there and then. Either way a
+        // weapon that cannot pay simply does not fire -- the original never
+        // lets the shot go and takes the debt afterwards, which is what stops a
+        // commander with a flat battery from D-gunning anything.
+        if (weaponDefinition.stockpile)
+        {
+            if (weapon->stockedRounds <= 0)
+            {
+                return;
+            }
+        }
+        else if (!sim->addResourceDelta(id, -weaponDefinition.energyPerShot, -weaponDefinition.metalPerShot))
+        {
+            return;
+        }
+
         // spawn a projectile from the firing point
         if (!fireInfo->firingPiece)
         {
@@ -842,13 +935,22 @@ namespace rwe
 
         sim->events.push_back(FireWeaponEvent{weapon->weaponType, fireInfo->burstsFired, firingPoint});
 
-        sim->addResourceDelta(id, -weaponDefinition.energyPerShot, Metal(0));
+        if (weaponDefinition.stockpile)
+        {
+            --weapon->stockedRounds;
+        }
 
         // If we just started the burst, set the reload timer
         if (fireInfo->burstsFired == 0)
         {
             unit.cobEnvironment->createThread(getFireScriptName(weaponIndex));
-            weapon->readyTime = gameTime + deltaSecondsToTicks(weaponDefinition.reloadTime);
+            if (!weaponDefinition.stockpile)
+            {
+                // A stockpiled weapon gets no reload timer at all: the original
+                // takes the round and jumps straight past the reload
+                // calculation (0x49E455), because the wait was the build.
+                weapon->readyTime = gameTime + deltaSecondsToTicks(weaponDefinition.reloadTime);
+            }
         }
 
         // Recoil: let the script rock the unit away from the shot. TA's own
