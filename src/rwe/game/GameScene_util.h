@@ -171,6 +171,44 @@ namespace rwe
 
     void updateParticles(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, std::vector<Particle>& particles);
 
+    /**
+     * A thermal vent puffs once every this many ticks, for as long as the map
+     * lasts.
+     *
+     * The original gives every geothermal feature its own emitter object the
+     * moment the feature is placed (0x423F73 reads the geothermal bit,
+     * 0x423FE3 makes the emitter). Init at 0x475150 sets the interval to five
+     * ticks, and the emitter's is-it-finished at 0x475330 is `return 0`, so it
+     * never stops. Every vent on a map is placed on the same tick, so they all
+     * puff together; what stops that reading as a metronome is that each puff
+     * rolls its own frame schedule.
+     */
+    const unsigned int geoVentSteamIntervalTicks = 5;
+
+    /**
+     * How fast a vent's steam rises, in world units per tick.
+     *
+     * The vent emitter's per-tick update at 0x475640 lifts a puff by sixteen
+     * times the map's gravity, where the damage smoke of the same class
+     * (0x475380) lifts it by only four. On the 112 that nearly every shipped
+     * map uses, four works out at the half a unit the rest of the smoke here
+     * uses, so sixteen is two.
+     */
+    const float geoVentSteamRiseRate = 2.0f;
+
+    /**
+     * Where on the map steam is coming out of the ground.
+     *
+     * One point per geothermal feature, at the centre of its footprint on the
+     * ground, which is exactly where the original puts the emitter: when no
+     * position is handed to it, 0x423F8D computes `(2*cell + footprint) << 19`
+     * for each of x and z and takes the ground height between them, which is
+     * the same point computeFeaturePosition already stores on the feature.
+     * The puffs carry no spread -- 0x4752A5 copies the emitter's position into
+     * the puff unchanged -- so the plume leaves from one spot.
+     */
+    std::vector<Vector3f> findGeoVentSteamPoints(const GameSimulation& simulation);
+
     void drawProjectiles(
         const GameSimulation& sim,
         const GameMediaDatabase& gameMediaDatabase,

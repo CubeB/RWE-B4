@@ -1667,3 +1667,278 @@ fight". That is true of the two ground missions but not of the third value in
 the data. `VTOL_Standby` also decides whether an idle aircraft hops about or
 goes and lands, on `unit+0x8A`, and that half of it does not need `0x43B700` at
 all.
+
+## NN. Recoil
+
+Only some units rock when they fire, and the amount they rock by is a constant.
+
+### The engine asks every unit; the script decides
+
+There are exactly four places in the image that push the string `"RockUnit"`
+(`0x5096F8`), and three of them are live: `0x49CBE6`, `0x49CDA1` and
+`0x49CFC5`, one in each of the three projectile spawn routines `0x49C9C0`
+(line-of-sight and self-propelled), `0x49CC20` (vertical launch) and `0x49CDE0`
+(ballistic). The dispatcher at `0x49D0C0` picks between them off the weapon
+flags at `wdef+0x111`, and a weapon that is none of those three spawns nothing
+at all.
+
+The fourth push, at `0x499C57`, is inside `0x499C10`, which is byte-for-byte
+the same routine as the block in the other three and is **dead in this build**:
+no `call` resolves to it and `xref.py` finds no absolute reference either.
+
+**Bombs do not rock the unit.** `0x49DD60`, the fire handler a `dropped` weapon
+gets, builds its projectile by calling `0x49C740` directly instead of going
+through one of the three spawn routines, and never pushes `"RockUnit"`.
+
+All three live sites do the same thing, immediately after starting the weapon's
+own `FirePrimary`/`FireSecondary`/`FireTertiary` (the name table at
+`0x509678`, started through `0x4B0940`):
+
+```
+si  = slot[0x16] - unit[0x66]        ; the shot's bearing in the hull's frame
+edi = -(0x320 * sin(si))             ; 0x4B70EF
+eax = -(0x320 * cos(si))             ; 0x4B7123
+StartScriptByName("RockUnit", 0, 0, 2, eax, edi, 0, 0)   ; 0x4B0A70
+```
+
+So `RockUnit(anglex, anglez)` is called with `anglex = -800·cos(bearing)` and
+`anglez = -800·sin(bearing)`. `slot+0x16` is the heading the fire handler
+worked out towards the target (§11), so the bearing is measured from the hull's
+nose and the hull heels away from wherever the round went: firing forwards
+lifts the nose, firing off the beam lifts that flank.
+
+`0x4B0A70` looks the name up in the script's own function-name table and, when
+it is not there, hands `-1` to `0x4B0B00`, which returns without starting
+anything (`0x4B08C0` rejects a negative index at `0x4B08C8`). **A unit with no
+`RockUnit` in its COB therefore does not rock, and that is the entire filter.**
+The same routine also caps a unit at eight concurrent COB threads (`0x4B08E3`).
+
+### The angle is 800, for every weapon and every unit
+
+`0x320` is a literal at all three sites — `0x49CB9C`, `0x49CD57`, `0x49CF7B` —
+and nothing scales it. Not the weapon, not its damage, not the unit's mass. In
+COB's 16-bit turn units that is about 4.4°.
+
+### Which units have a RockUnit
+
+Nine of the 157 scripts in `totala1` and seventeen of the 200 in `rev31`:
+ARMBULL, ARMCROC, ARMFHLT, ARMFRT, ARMLATNK, ARMMANNI, ARMMART, ARMSTUMP,
+CORFHLT, CORFRT, CORGOL, CORLEVLR, CORMART, CORRAID, CORREAP, CORSEAL,
+CORSENT. The nine in the original release are that list without the Core
+Contingency additions.
+
+The scripts do not call it themselves; they only `#include "rockunit.h"`, which
+supplies the body:
+
+```
+RockUnit(anglex, anglez)
+{
+    turn base to x-axis anglex speed <50>;
+    turn base to z-axis anglez speed <50>;
+    wait-for-turn base around z-axis;
+    wait-for-turn base around x-axis;
+    turn base to z-axis <0> speed <20>;
+    turn base to x-axis <0> speed <20>;
+}
+```
+
+There is a second header, `rockwater.h` (also `water2.h`, `WATER3.H`), with the
+same signature and a five-stage overshoot-and-settle for floating structures.
+Either way the engine's side is identical: it does not know or care which one
+the script got.
+
+### Barrel recoil is a separate thing, and it is entirely script-driven
+
+The gun sliding back in its mount is not this. It is in the unit's own fire
+script — `move barrel to z-axis [-2.4] speed [500]` and a slow `move` back in
+ARMSTUMP's `FirePrimary` — so an engine that runs the fire script gets it for
+free with no engine support at all. RWE runs the fire script already; there was
+nothing to add.
+
+### What RWE does
+
+`UnitBehaviorService::tryFireWeapon` starts `RockUnit` after every non-bomb
+shot with the pair of angles from `computeRockUnitAngles`, which matches the
+original's convention, and `CobEnvironment::createThread(name, ...)` returns
+`std::nullopt` and starts nothing when the script has no such function, which
+matches `0x4B0A70`.
+
+**RWE used to invent the angle from the weapon's damage**, `clamp(120 + 3·dmg,
+120, 900)`, on the reasoning that a machine gun and a heavy cannon should not
+heave a hull equally. The original disagrees: it is 800 for both. That is now
+`rockUnitAngle` in `UnitBehaviorService_util.h` and the damage lookup is gone.
+
+Not ported, and small: the original starts the *fire* script inside the
+projectile spawn routine, so a burst weapon runs `FirePrimary` once per
+projectile, where RWE runs it once per burst.
+
+---
+
+## NN. Thermal vents
+
+### What a vent is
+
+A plain map feature with `geothermal=1` in its TDF, which the feature parser
+turns into **bit 5 of the word at `featdef+0xFE`** — the key string `0x502D48`
+is pushed at `0x422B2F`, read at `0x422B3E`, and `and eax,1 / shl eax,5` at
+`0x422B4A`–`0x422B56` puts it in place. The neighbouring bits, worth having
+because the same flag word gates the rest of this section:
+
+| Bit | Key | | Bit | Key |
+|---|---|---|---|---|
+| 0 | *(no `object=` key: a 2-D sprite feature)* | | 6 | `blocking` |
+| 1 | `animating` | | 7 | `reclaimable` |
+| 2 | `animtrans` | | 8 | `autoreclaimable` |
+| 3 | `shadtrans` | | 9 | `indestructible` |
+| 4 | `flamable` | | 10 | `nodisplayinfo` |
+| 5 | **`geothermal`** | | | |
+
+Bit 0 is not a key: `0x4225FB` tests whether the section named an `object`, and
+sets the bit when it did not.
+
+Every vent in the shipped data is written the same way — a 1×1 (2×2 for the
+Urban manholes) `animating=1` sprite with `geothermal=1`, `indestructible=1`,
+`hitdensity=0` and no `blocking` — and in the original release `animating=1` is
+set on **vents and nothing else**; `rev31` adds one non-vent, the acid world's
+Gasbag.
+
+### The steam is engine particles, not the feature's animation
+
+It is tempting to read `animating=1` as the steam, and it is not: every entry
+in every vent GAF (`VENTS.GAF`, `greenvents.GAF`, `WETVENTS.GAF`, …) has
+**exactly one frame**. The sprite is a static hole in the ground.
+
+The steam is a dedicated emitter the engine builds when the feature is placed.
+`0x423C50`, the feature placement routine, tests the geothermal bit at
+`0x423F73` (`mov cl,[esi+0xfe] / shr cl,5 / test cl,1` — which is why a grep
+for `test byte ptr [x+0xfe],0x20` finds only the placement check of the last
+part of this section) and calls `0x472C50` at `0x423FE3` with **particle layer
+4**.
+
+`0x472C50` allocates a 52-byte emitter, constructs it at `0x4750B0` (vtable
+`0x4FD638`) and files it in the layer. Each of the ten layers of §5 holds at
+most 400 entries and drops its oldest to make room (`0x472CD9`).
+
+The class is laid out exactly like the smoke emitter of §4, and the two share
+the puff record and most of the behaviour:
+
+| | vent (`0x4FD638`) | damage smoke (`0x4FD618`) |
+|---|---|---|
+| constructor | `0x4750B0` | `0x474CD0` |
+| `Init` | `0x475150` | `0x474D50` |
+| emit one puff | `0x4751C0` | `0x474DF0` |
+| per-tick update | `0x475600` | `0x475340` |
+| is it due to emit | `0x4750F0` | `0x475440` |
+| is it finished | `0x475330` | `0x474F80` |
+
+`Init(position, 5, 0, 150)`:
+
+- **The sequence is `smoke 1`** out of `anims/FX.GAF` — `globals+0x147CF`,
+  loaded by the §4 slot map, read at `0x475181`.
+- **The interval is 5 ticks** (`this+0x1C`, `0x475175`), and one puff goes out
+  immediately from `Init` itself (`0x4751B2`).
+- The frame period argument is 0, so it defaults to 7 (`0x4751AB`), the same as
+  a damage puff.
+- The 150 is not a lifetime. **`isFinished` at `0x475330` is `xor eax,eax /
+  ret`** — a vent's emitter is immortal and puffs every five ticks for the rest
+  of the game. All 150 does is size the puff vector's first reservation
+  (`0x4751DA`).
+
+Position: when the caller hands `0x423C50` no explicit one, `0x423F8D` computes
+`(2·cell + footprint) << 19` for x and z and takes the ground height between
+them, which is the centre of the feature's footprint on the ground. **The puffs
+carry no spread** — `0x4752A5` copies the emitter's position into the puff
+unchanged — so the plume leaves from one spot. (The burning-feature smoke
+below does scatter; the vent does not.)
+
+Per puff, identical to §4: the stopping frame is drawn at birth as
+`2 + rand·(frameCount − 3)/0x8000`, so 2 to 10 of `smoke 1`'s twelve; the first
+frame is held the full 7 ticks and every frame after it
+`half + rand·half/0x8000`, so 3 to 5.
+
+Per tick, at `0x475620`–`0x475660`, also identical to §4 **except for one
+number**: `x += windX × 8`, `z += windZ × 8`, and
+
+- `y += gravity × 16` (`0x475640`), where damage smoke uses `× 4` (`0x475380`).
+
+**A vent's steam rises four times as fast as a damaged unit's smoke.** That is
+the whole visual difference between the two.
+
+### While decoding this: what makes a burning tree smoke
+
+Not needed for vents but found on the way, and it fills in a gap in §4, whose
+claim that every call site of every smoke spawner is accounted for is not quite
+right — `0x472810` has six, not one. One of the five §4 does not list is
+`0x4243CF`.
+
+The per-tick loop at `0x4241A8` walks the 0x800-entry, 48-byte-stride array at
+`globals+0x1420B` through the list head at `globals+0x14213`. A record is
+either a falling 3-D feature (physics, `0x424214`) or a 2-D sprite feature
+playing an animation, and the sprite ones that have bit 0 of `instance+0x2F`
+set are *burning*: `0x4233A0` is what sets it, and the same routine plays the
+`treeburn` sound (`0x502EE8`). A burning feature emits one white-smoke puff
+**every third tick** (`0x4241B6`–`0x4241C7` divides the game time by 3), at a
+random point in the middle half of its sprite (`0x424345`–`0x4243B5`), on
+**layer 5**. When its burn animation runs out it is replaced by the feature
+named at `featdef+0xF6`.
+
+### Placement: what makes a spot legal for a geothermal plant
+
+The footprint check is `0x47D4B6`–`0x47D769`, walking the unit's parsed yardmap
+(one byte per cell at `unitdef+0x14E`) against the map cells (13 bytes each).
+The yardmap byte's bits:
+
+| Bit | What it checks |
+|---|---|
+| `0x01` | terrain flag `cell+0xC & 2` |
+| `0x02`/`0x04` | occupied by another unit |
+| `0x08` | contributes to the footprint's min/max ground height |
+| `0x10` | contributes to the water clamp |
+| `0x20` | the feature under it must not be `blocking` (bit 6) |
+| `0x40` | the feature under it must not be `indestructible` (bit 9) |
+| `0x80` | **geo**: note that a vent is wanted, and whether one is here |
+
+The geo bit is the only one that does not reject on its own. At `0x47D68F` it
+raises "this unit wants a vent", and at `0x47D708`–`0x47D711`, if the feature
+occupying that cell has the geothermal bit, it raises "found one". The verdict
+is at the end, `0x47D75B`–`0x47D769`: **a unit that wanted a vent and did not
+find one is refused; one that never asked is not checked at all.** One matching
+cell is enough — it does not require every geo cell in the yardmap to be over a
+vent.
+
+### What RWE does
+
+Already right, and now checked against the binary rather than assumed:
+`geothermal` is parsed into `FeatureDefinition`, `GameSimulation::addFeature`
+stamps `geoGrid` over the feature's footprint, and `canBeBuiltAt` refuses a
+`yardMapContainsGeo` unit unless `containsAnyGeoMatch` finds one of its `Geo`
+cells over a stamped tile — the same "one match is enough" rule the original
+uses. `computeFeaturePosition` already puts a feature at the centre of its
+footprint on the ground, which is the point `0x423F8D` computes.
+
+Added here: `GameScene::spawnGeoVentSteam` puts out one `smoke 1` puff per vent
+every `geoVentSteamIntervalTicks` = 5 ticks at `geoVentSteamRiseRate` = 2 world
+units of lift, which is the original's gravity × 16 on the 112 nearly every map
+ships with, against the 0.5 the rest of RWE's smoke uses for × 4. This is
+render-side and uses `rand()` through the existing `spawnSmokePuff`, because
+the original's vent steam is not simulation: nothing about it feeds back into
+the game, the emitter is not part of unit or feature state, and the trigger is
+a plain tick count rather than a script or a random roll. Nothing was added to
+`GameHash_util.cpp` or `dump_util.cpp` for the same reason.
+
+Not ported:
+
+- **The layer.** RWE depth-tests particles against world Y rather than placing
+  them in ten hand-ordered buckets (§5), so the vent's layer 4 has no
+  equivalent. In practice this puts the steam behind a geothermal plant built
+  over it either way.
+- **The `blocking`/`indestructible` guard on the geo grid.** RWE only stamps
+  `geoGrid` for a feature that is non-blocking *and* indestructible as well as
+  geothermal; `0x47D708` tests the geothermal bit alone. Every vent in the
+  shipped data is both, so the two agree on real data, and the extra conditions
+  also guard the metal grid next to it.
+- **The burning-feature smoke** above, and the `treeburn` sound with it.
+- **Downwind drift**, as §13 already records for the rest of the smoke: RWE has
+  no map wind, so a vent's plume goes straight up.
+
+---

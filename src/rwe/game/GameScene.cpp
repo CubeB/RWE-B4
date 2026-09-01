@@ -3363,6 +3363,8 @@ namespace rwe
 
         spawnNanoParticles();
 
+        spawnGeoVentSteam();
+
         updateDebris();
 
         // Testing aid: RWE_DEBUG_SPAWN=<unitType>*<count>@<player>:<seconds>
@@ -4661,13 +4663,13 @@ namespace rwe
     void GameScene::emitLightSmokeFromPiece(UnitId unitId, const std::string& pieceName)
     {
         auto position = simulation.getUnitPiecePosition(unitId, pieceName);
-        spawnSmokePuff(simVectorToFloat(position), "smoke 1");
+        spawnSmokePuff(simVectorToFloat(position), "smoke 1", 0.5f);
     }
 
     void GameScene::emitBlackSmokeFromPiece(UnitId unitId, const std::string& pieceName)
     {
         auto position = simulation.getUnitPiecePosition(unitId, pieceName);
-        spawnSmokePuff(simVectorToFloat(position), "smoke 2");
+        spawnSmokePuff(simVectorToFloat(position), "smoke 2", 0.5f);
     }
 
     float randomFloat(float low, float high)
@@ -5596,19 +5598,20 @@ namespace rwe
         particles.push_back(particle);
     }
 
-    void GameScene::spawnSmokePuff(const Vector3f& position, const std::string& anim)
+    void GameScene::spawnSmokePuff(const Vector3f& position, const std::string& anim, float riseRate)
     {
         auto numberOfFrames = static_cast<int>(gameMediaDatabase.getSpriteSeries("FX", anim).value()->sprites.size());
 
         Particle particle;
         particle.position = position;
 
-        // The original lifts a puff by four times the map's gravity every
-        // tick. On the 112 that nearly every shipped map uses that works out
-        // at 0.498 world units, so the half a unit the rest of the smoke here
-        // already rises by is the right answer for all but a handful of maps
-        // and is not worth threading the map's gravity through to reach.
-        particle.velocity = Vector3f(0.0f, 0.5f, 0.0f);
+        // The original lifts a puff by some multiple of the map's gravity
+        // every tick -- four for a damaged unit, sixteen for a thermal vent.
+        // On the 112 that nearly every shipped map uses four works out at
+        // 0.498 world units, so the callers here pass half a unit and two,
+        // which is the right answer for all but a handful of maps and saves
+        // threading the map's gravity through to reach.
+        particle.velocity = Vector3f(0.0f, riseRate, 0.0f);
 
         particle.renderType = ParticleRenderTypeSprite{
             "FX",
@@ -5622,6 +5625,22 @@ namespace rwe
         particle.startTime = simulation.gameTime;
 
         particles.push_back(particle);
+    }
+
+    void GameScene::spawnGeoVentSteam()
+    {
+        // Every vent puffs on the same ticks because the original makes all
+        // their emitters on the same tick, at map load, and each then counts
+        // its own five ticks from there.
+        if (simulation.gameTime.value % geoVentSteamIntervalTicks != 0)
+        {
+            return;
+        }
+
+        for (const auto& point : findGeoVentSteamPoints(simulation))
+        {
+            spawnSmokePuff(point, "smoke 1", geoVentSteamRiseRate);
+        }
     }
 
     void GameScene::spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration)

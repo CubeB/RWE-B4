@@ -906,22 +906,21 @@ namespace rwe
         // Recoil: let the script rock the unit away from the shot. TA's own
         // rockunit.h takes an angle about each of the x and z axes, heels the
         // hull over that far and lets it settle back.
+        //
+        // The original asks for this after every projectile it spawns and
+        // never asks for a bomb (0x49DD60, the bomb handler, is the one fire
+        // handler that does not go through a spawn routine), and the angle is
+        // always the same rockUnitAngle -- see the note on that constant.
+        // Only seventeen of the two hundred shipped scripts define a
+        // RockUnit, by including rockunit.h or its floating-structure
+        // variant; for the other hundred and eighty-three the original's
+        // script lookup comes back empty and starts nothing, which is what
+        // createThread does here too.
         if (!isBomb)
         {
-            // How hard it kicks follows the calibre. TA's scripts pass a fixed
-            // angle, but a Peewee's machine gun and a Bulldog's cannon should
-            // not heave a hull by the same amount. Damage stands in for
-            // calibre: 7 for that machine gun, 50 for a light cannon, 147 for
-            // the Bulldog, 196 for a Goliath, and the cap keeps a Big Bertha
-            // from throwing its own hull over.
-            auto damageIt = weaponDefinition.damage.find("DEFAULT");
-            auto damage = damageIt == weaponDefinition.damage.end() ? 0u : damageIt->second;
-            // Angles are a 16-bit turn, so 182 units is a degree: this runs
-            // from about half a degree up to five.
-            auto rockAngle = std::clamp(120.0f + (static_cast<float>(damage) * 3.0f), 120.0f, 900.0f);
             // Which way it heels is worked out in the unit's own frame, so a
             // tank broadside on to its target rolls rather than pitches.
-            auto rockAngles = computeRockUnitAngles(unit.rotation, direction, SimScalar(rockAngle));
+            auto rockAngles = computeRockUnitAngles(unit.rotation, direction, intToSimScalar(rockUnitAngle));
             unit.cobEnvironment->createThread("RockUnit", {rockAngles.first, rockAngles.second});
         }
 

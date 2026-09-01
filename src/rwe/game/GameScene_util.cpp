@@ -1089,6 +1089,23 @@ namespace rwe
         particles.erase(end, particles.end());
     }
 
+    std::vector<Vector3f> findGeoVentSteamPoints(const GameSimulation& simulation)
+    {
+        std::vector<Vector3f> points;
+
+        for (const auto& [_, feature] : simulation.features)
+        {
+            if (!simulation.getFeatureDefinition(feature.featureName).geothermal)
+            {
+                continue;
+            }
+
+            points.push_back(simVectorToFloat(feature.position));
+        }
+
+        return points;
+    }
+
     /**
      * Assumes input vector is normalised.
      */
