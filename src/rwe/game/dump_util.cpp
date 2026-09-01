@@ -85,7 +85,18 @@ namespace rwe
             {"previousEnergyConsumptionBuffer", dumpJson(u.previousEnergyConsumptionBuffer)},
             {"previousMetalConsumptionBuffer", dumpJson(u.previousMetalConsumptionBuffer)},
             {"energyConsumptionBuffer", dumpJson(u.energyConsumptionBuffer)},
-            {"metalConsumptionBuffer", dumpJson(u.metalConsumptionBuffer)}};
+            {"metalConsumptionBuffer", dumpJson(u.metalConsumptionBuffer)},
+            {"weapons", dumpJson(u.weapons)}};
+    }
+
+    nlohmann::json dumpJson(const UnitWeapon& w)
+    {
+        // Only the stockpile counters, to match what the hash covers.
+        return nlohmann::json{
+            {"stockedRounds", dumpJson(w.stockedRounds)},
+            {"queuedRounds", dumpJson(w.queuedRounds)},
+            {"stockpileProgress", dumpJson(w.stockpileProgress)},
+            {"stockpileStepDelay", dumpJson(w.stockpileStepDelay)}};
     }
 
     nlohmann::json dumpJson(const UnitPhysicsInfoGround& p)

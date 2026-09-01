@@ -2104,6 +2104,29 @@ namespace rwe
         events.push_back(UnitDeactivatedEvent{unitId});
     }
 
+    void GameSimulation::modifyStockpileQueue(UnitId unitId, int count)
+    {
+        auto& unit = getUnitState(unitId);
+        for (auto& weapon : unit.weapons)
+        {
+            if (!weapon || !weaponDefinitions.at(weapon->weaponType).stockpile)
+            {
+                continue;
+            }
+
+            weapon->queuedRounds = std::max(0, weapon->queuedRounds + count);
+            if (weapon->queuedRounds == 0)
+            {
+                // Cancelling the last one throws away the part-built round and
+                // refunds nothing: the original holds the progress on the order
+                // (0x402BD4, [order+0x3E]) and the order goes with the count.
+                weapon->stockpileProgress = 0;
+                weapon->stockpileStepDelay = 0;
+            }
+            return;
+        }
+    }
+
     void GameSimulation::quietlyKillUnit(UnitId unitId)
     {
         auto& unit = getUnitState(unitId);

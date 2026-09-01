@@ -151,6 +151,11 @@ message PlayerUnitCommand
         required SimVector position = 1;
     }
 
+    message ModifyStockpile
+    {
+        required int32 count = 1;
+    }
+
     required int32 unit = 1;
 
     oneof command {
@@ -162,6 +167,7 @@ message PlayerUnitCommand
         SelfDestruct self_destruct = 7;
         CancelBuildOrder cancel_build_order = 8;
         SetCloak set_cloak = 9;
+        ModifyStockpile modify_stockpile = 10;
     }
 }
 

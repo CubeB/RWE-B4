@@ -95,6 +95,7 @@ namespace rwe
         bool canMove;
         bool canGuard;
         bool canCapture;
+        bool canDgun;
         bool cloakable;
 
         /**

@@ -382,22 +382,69 @@ The drain is at `0x4017CB`, once per economy tick, truncated to a whole number,
 all-or-nothing: if the player's energy will not cover it the unit simply does
 not cloak. Implemented, with tests; see `TOTALA-EXE.md` as above.
 
-### 11. Nukes, stockpiles and anti-nukes
+### 11. Nukes, stockpiles and anti-nukes — *decoded in full; half ported*
 
-`stockpile` 8 weapons, `interceptor` / `coverage` / `targetable` 4 each,
-`commandfire` 16, `metalpershot` 8 non-zero (1000–2000 metal a shot),
-`antiweapons` on 2 units. All parsed into `WeaponTdf`, none used; `metalPerShot`
-in particular is a straight omission next to `energyPerShot`, which *is*
-implemented. This is a whole game-layer, so effort is real (~3–4 days), but it
-is the difference between a skirmish that can end and one that cannot.
+All of it is now read out of the binary and written up in the findings doc under
+"Stockpiled weapons and interception". What has landed in RWE:
 
-### 12. D-gun
+- **`metalPerShot`**, and with it the check the original does *before* the shot
+  rather than after (`0x49E3ED`): a weapon that cannot find both its
+  `energypershot` and its `metalpershot` in the player's stores does not fire.
+  This changed `energyPerShot` too, which RWE used to spend after the fact.
+- **Stockpile accumulation.** `UnitWeapon` carries the magazine, the outstanding
+  count and the progress; a round takes the weapon's `reloadtime` to build and
+  costs `metalpershot` and `energypershot` on the original's truncated ramp,
+  charged one tick in five, stalling without progress when the economy cannot
+  pay, capped at 200. Firing spends a round and sets no reload timer.
+  `src/rwe/sim/stockpile.test.cpp`.
+- **`commandfire`** turned out to be implemented already — the auto-target and
+  return-fire paths both skip it. Only the BLAST button was wrong (see 12).
 
-`candgun` on both commanders (bit 14 of `def+0x245`, `0x42CAA3`); the `MINDGUN`
-weapon exists in the shipped data and RWE has a render type for it with
-`// TODO: implement mindgun if anyone actually uses it`
-(`src/rwe/game/GameScene_util.cpp:1205–1206`). Note the `>= 30000` armour bypass
-found in §5 is exactly the D-gun's signature. ~1–2 days.
+What is left, and it is the larger half:
+
+- **Interception.** The whole chain is decoded — `coverage` as a square around
+  the launcher tested against the incoming missile's *aim point* (`0x49D120`),
+  the launch that aborts without a target (`0x49DC17`), the projectile-targets-
+  projectile slot at `proj+0x56`, the proximity detonation (`0x49B106`) and,
+  the piece §7 was missing, the interceptor blast that detonates every
+  projectile inside its `areaofeffect` (`0x49A664`). None of it is ported.
+  Perhaps a day and a half now the reading is done.
+- **The queue button.** `PlayerUnitCommand::ModifyStockpile` and
+  `GameSimulation::modifyStockpileQueue` exist and are serialised, but no GUI
+  control raises the command, so a magazine can only be filled from a test. The
+  original's button shows `N +M` from `unit+0x1E` and the outstanding order
+  count (`0x419A2B`). Half a day.
+- **`antiweapons`** (bit 29 of `def+0x241`) has no reader anywhere. Two units
+  set it and nothing appears to read it; interception keys entirely off the
+  weapon flags. Recorded as not understood.
+- **The reload-time formula** at `0x49E468`, which scales `reloadtime` by both
+  the firer's veterancy and its damage. Decoded, not ported, and it belongs with
+  whatever picks up the rest of veterancy.
+
+### 12. D-gun — *done, and smaller than it looked*
+
+The D-gun is an ordinary weapon. `ARM_DISINTEGRATOR` is `commandfire=1`,
+`energypershot=400`, `[DAMAGE] default=30000` — and 30000 is exactly the armour
+cut-out at `0x489BD1`, which RWE already had. So the parts that were actually
+missing were both small and both now in:
+
+- **`candgun`** (bit 14 of `def+0x245`, `0x42CAA3` — verified) is parsed and
+  gates the BLAST button. RWE was offering BLAST to any unit with a command-fire
+  weapon, which would have put it on a nuclear silo.
+- **The energy price is now enforced** by the pre-fire check described in 11, so
+  a commander with a flat battery cannot D-gun. `src/rwe/sim/dgun.test.cpp`.
+
+Two things the old entry got wrong and that need no further work:
+
+- The `ProjectileRenderTypeMindgun` TODO is **not** the D-gun. That is
+  `rendertype=2`, which belongs to `MINDGUN`, a 100-damage `unitsonly` beam
+  nothing in the shipped data uses. The D-gun is `rendertype=3`, the ordinary
+  model type, which RWE has handled all along.
+- **Nothing suppresses the wreck.** `0x4864B0` takes the corpse level from the
+  victim's own COB `Killed` script, given a severity derived from the overkill;
+  a 30000-point hit pins that at 100 and the script leaves nothing of its own
+  accord. What is still unported is the severity formula itself — see the
+  findings doc.
 
 ### 13. Paralyzer / EMP
 

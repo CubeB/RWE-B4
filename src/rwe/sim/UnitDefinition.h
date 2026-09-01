@@ -89,6 +89,14 @@ namespace rwe
         bool canGuard;
         bool canCapture;
         /**
+         * TA candgun, bit 14 of the unit definition's second capability word
+         * (parsed at 0x42CAA3). Only the two commanders name it, and it is what
+         * puts the D-gun on their order menu; the weapon behind the button is an
+         * ordinary `commandfire` weapon with an enormous damage number.
+         */
+        bool canDgun{false};
+
+        /**
          * Can hide from enemy sight. Only this shows the CLOAK button. The
          * original has no Cloakable key at all and derives this from CloakCost
          * being greater than zero; nothing in the shipped data writes the key,

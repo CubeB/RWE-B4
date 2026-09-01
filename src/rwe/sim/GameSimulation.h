@@ -697,6 +697,14 @@ namespace rwe
 
         void deactivateUnit(UnitId unitId);
 
+        /**
+         * Add `count` rounds to the queue of the unit's stockpiled weapon, or
+         * take them off again with a negative count. The original's fire button
+         * only ever looks at weapon one and both launchers that ship put their
+         * missile there, so the first stockpiled weapon is the one meant.
+         */
+        void modifyStockpileQueue(UnitId unitId, int count);
+
         void quietlyKillUnit(UnitId unitId);
 
         Matrix4x<SimScalar> getUnitPieceLocalTransform(UnitId unitId, const std::string& pieceName) const;
