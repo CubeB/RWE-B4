@@ -139,6 +139,75 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a gunship in the middle of an attack run converts to the ring", "[gunship]")
+    {
+        // Reported from play: gunships occasionally reverted to flying passes
+        // and squeezing off a few rounds each time. A gunship sent at a patch
+        // of ground flies an ordinary attack run, because the ring is built
+        // around a unit; being handed a unit afterwards used to leave it in
+        // that run for ever, since the handover only ever took over from level
+        // flight. Once it did get onto the ring it stayed there, which is why
+        // it looked intermittent.
+        auto script = makeGunshipScript();
+        GameSimulation sim(makeGunshipTerrain(256, 256), 0u, 0, 0);
+        auto us = addGunshipPlayer(sim, "us");
+        auto them = addGunshipPlayer(sim, "them");
+        sim.unitDefinitions["gunship"] = makeGunshipDef();
+        sim.unitDefinitions["target"] = makeGunshipTargetDef();
+        registerGunshipModel(sim, "model");
+        defineGun(sim);
+        sim.losTables = generateLosTables(8);
+
+        auto targetPosition = SimVector(0_ss, 0_ss, 0_ss);
+        auto targetId = spawnGunshipUnit(sim, "target", them, targetPosition, script);
+        sim.getUnitState(targetId).hitPoints = 1000000;
+
+        auto gunshipId = spawnGunshipUnit(sim, "gunship", us, SimVector(0_ss, 60_ss, -600_ss), script);
+        {
+            auto& g = sim.getUnitState(gunshipId);
+            g.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            UnitWeapon weapon;
+            weapon.weaponType = "emg";
+            g.weapons[0] = weapon;
+            // Sent at the ground first, which is what puts it into a run.
+            g.orders.push_back(createAttackGroundOrder(SimVector(0_ss, 0_ss, 40_ss)));
+        }
+        sim.flyingUnitsSet.insert(gunshipId);
+
+        for (int tick = 0; tick < 120; ++tick)
+        {
+            sim.tick();
+        }
+
+        {
+            const auto& g = sim.getUnitState(gunshipId);
+            const auto& air = std::get<UnitPhysicsInfoAir>(g.physics);
+            REQUIRE(std::holds_alternative<AirMovementStateAttackRun>(air.movementState));
+        }
+
+        // Now hand it a unit while it is still flying that run.
+        {
+            auto& g = sim.getUnitState(gunshipId);
+            g.orders.clear();
+            g.orders.push_back(createAttackOrder(targetId));
+        }
+
+        bool reachedTheRing = false;
+        for (int tick = 0; tick < 900; ++tick)
+        {
+            sim.tick();
+            const auto& g = sim.getUnitState(gunshipId);
+            const auto& air = std::get<UnitPhysicsInfoAir>(g.physics);
+            if (std::holds_alternative<AirMovementStateHoverAttack>(air.movementState))
+            {
+                reachedTheRing = true;
+                break;
+            }
+        }
+
+        REQUIRE(reachedTheRing);
+    }
+
     TEST_CASE("a gunship that picks its own target still works the ring", "[gunship]")
     {
         // Reported from play: Brawlers and Rapiers were not swinging. The ring

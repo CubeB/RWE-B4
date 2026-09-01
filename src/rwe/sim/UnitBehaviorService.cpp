@@ -2107,22 +2107,21 @@ namespace rwe
         auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
         auto radius = hoverAttackRingRadius(weaponMaxRange);
 
-        // Retargeting starts a fresh approach rather than swinging around a
-        // ring centred on somewhere the aircraft is no longer fighting.
-        if (auto existing = std::get_if<AirMovementStateHoverAttack>(&airPhysics->movementState))
-        {
-            if (existing->target != target)
-            {
-                AirMovementStateFlying flying;
-                flying.currentVelocity = existing->currentVelocity;
-                airPhysics->movementState = flying;
-            }
-        }
-
-        if (auto flying = std::get_if<AirMovementStateFlying>(&airPhysics->movementState))
+        // Take over from whatever it was doing, and start again from scratch
+        // if it has been given a different target: the ring is centred on the
+        // thing being shot at, so one built around somewhere else is no use.
+        //
+        // This has to accept an attack run as well as level flight. A gunship
+        // that was working a patch of ground — an attack-move, or an order
+        // given on a spot rather than on a unit — is in a run, and taking over
+        // only from level flight left it flying passes at a unit indefinitely.
+        // That is the old behaviour turning up again at random, which is
+        // exactly what it looked like from the ground.
+        auto existing = std::get_if<AirMovementStateHoverAttack>(&airPhysics->movementState);
+        if (existing == nullptr || existing->target != target)
         {
             AirMovementStateHoverAttack hover(target);
-            hover.currentVelocity = flying->currentVelocity;
+            hover.currentVelocity = airVelocity(airPhysics->movementState);
             hover.phase = AirMovementStateHoverAttack::Phase::Closing;
 
             // Close on a point half way in, thrown up to 45 degrees off the
