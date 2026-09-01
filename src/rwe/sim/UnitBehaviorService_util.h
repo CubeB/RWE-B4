@@ -22,6 +22,20 @@ namespace rwe
 
     std::optional<SimVector> findLandingLocation(const GameSimulation& sim, ConstUnitInfo unitInfo);
 
+    /**
+     * True when the gun is bolted to the hull, so the unit has to be pointing
+     * roughly at what it wants to shoot before it can shoot it.
+     *
+     * The original picks a fire handler per weapon out of the flags at
+     * weapondef+0x111 (0x49E010), and only the one it picks for a plain
+     * `turret=0` weapon -- 0x49D9C0, reached when `lineofsight` or `selfprop`
+     * is set -- measures the bearing to the target against the unit's own
+     * heading. A vertical launch leaves the tube upwards and a bomb is let go
+     * of rather than aimed, so those two get handlers of their own that never
+     * ask which way the unit is facing.
+     */
+    bool weaponNeedsTheHullTurned(const WeaponDefinition& weaponDefinition);
+
     std::pair<SimAngle, SimAngle> computeHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, SimScalar zOffset, ProjectilePhysicsType projectileType);
 
     std::pair<SimAngle, SimAngle> computeLineOfSightHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to);

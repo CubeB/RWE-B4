@@ -804,7 +804,7 @@ put `flighttime` at `+0xFA` when it is at `+0xFC`. Float keys are stored with an
 | `startvelocity` | `wdef+0x6C` | `×65536/30` |
 | `weaponacceleration` | `wdef+0x70` | `×65536/900` |
 | `energypershot` / `metalpershot` | `wdef+0xC0` / `+0xC4` | float |
-| `minbarrelangle` | `wdef+0xC8` | float, **not** a word at `+0xFE` |
+| `minbarrelangle` | `wdef+0xC8` | float radians, default −11.25°; **not** a word at `+0xFE`, and inert — see §11 |
 | `shakemagnitude` / `shakeduration` | `wdef+0xCC` / `+0xD0` | dword; `shakeduration ×30` |
 | `areaofeffect` | `wdef+0xD6` | word |
 | `edgeeffectiveness` | `wdef+0xD8` | float, default 0.0 |
@@ -818,9 +818,9 @@ put `flighttime` at `+0xFA` when it is at `+0xFC`. Float keys are stored with an
 | `duration` / `randomdecay` | `wdef+0xF0` / `+0xF2` | word, `×30` |
 | `smokedelay` | `wdef+0xFA` | word, `×30` |
 | `flighttime` | `wdef+0xFC` | word, `×30` |
-| `holdtime` | `wdef+0xFE` | word, `×30` |
+| `holdtime` | `wdef+0xFE` | word, `×30`; no known reader — see §11 |
 | `accuracy` | `wdef+0x104` | word |
-| `tolerance` / `pitchtolerance` | `wdef+0x106` / `+0x108` | word |
+| `tolerance` / `pitchtolerance` | `wdef+0x106` / `+0x108` | word; a zero `pitchtolerance` falls back to `tolerance` — see §11 |
 | `firestarter` / `rendertype` / `color` / `color2` | `wdef+0x10B`..`+0x10E` | byte |
 | flags | `wdef+0x111` | dword, see below |
 
@@ -892,7 +892,149 @@ Palette ranges that turned up:
 
 ---
 
-## 11. Where RWE deliberately differs
+## 11. `turret`, and what a hull-mounted gun waits for
+
+`turret` is **bit 19 of `wdef+0x111`**, parsed at `0x42E8F9` — the key string is
+pushed there, the read follows at `0x42E906`, and `and eax,1 / shl eax,0x13` at
+`0x42E911`–`0x42E91A` puts it in place. The bits either side are `smoketrail`
+(18, key at `0x504150`) and `selfprop` (20, `0x50413C`), which agrees with the
+table in §10.
+
+### It chooses the weapon's fire handler
+
+`0x49E010(wdef)` writes a function pointer into `wdef+0x60`, and the tests run
+in this order:
+
+| Flag | Handler |
+|---|---|
+| `turret` (19) | `0x49D580` |
+| else `vlaunch` (4) | `0x49DB70` |
+| else `lineofsight` (0) or `selfprop` (20) | `0x49D9C0` |
+| else `dropped` (8) | `0x49DD60` |
+| else | left null |
+
+Because `turret` is tested first, a turreted weapon uses `0x49D580` whatever
+else it sets, and a `turret=0` **ballistic** weapon gets no handler at all — the
+per-tick update bails at `0x49E1F7` when `wdef+0x60` is null, so such a weapon
+can never fire. Nothing in the shipped data is one.
+
+### Only a turret runs an aim script
+
+The per-tick weapon update is `0x49E1A0(unit)`, walking the three slots at
+`unit+0x1F+28*slot`. At `0x49E1FD` it loads the weapon flags and at `0x49E205`
+shifts out bit 19: a turret goes on to compute a heading and pitch and call the
+slot's aim script — `0x509688[slot]`, started on the unit's COB at `0x49E31C`
+and again through `0x456200` at `0x49E3A6` — then sets bit 0 of the slot flag
+byte to say it is waiting. A non-turret falls to `0x49E33D`, which tests
+`vlaunch` and, finding it clear, jumps straight to the fire check at `0x49E3AE`.
+
+**So the original never calls `AimPrimary`/`AimSecondary`/`AimTertiary` for a
+weapon that is neither `turret` nor `vlaunch`.** There is nothing on a mount to
+swing, so there is nothing to wait for.
+
+The two calls at `0x49E31C` and `0x49E3A6` look at first like the script being
+run twice, which would be a tidy explanation for upstream issue #42. It is not
+one: `0x4B0A70` starts the thread on the unit's own COB, whereas `0x456200`
+resolves the script through `0x4B07C0`, checks the global bit
+`[ds:0x511DE8+0x2A44] & 1`, and if it is set packs a 0x16-byte record — type
+`0x10`, the unit id from `unit+0xA8`, the script and its two arguments — and
+hands it to `0x451DF0`, the same emitter `0x49DB4D` uses for a projectile spawn.
+It is the network and replay echo of the call, not a second execution, and it
+does nothing at all in a local game. **Issue #42 is not explained by this.**
+
+### The hull is what has to come round
+
+`0x49D9C0`, the handler a plain `turret=0` weapon gets, takes the muzzle from
+`0x43E240`, works out the bearing to the target with `atan2` (`0x4B715A`) into
+`slot+0x16` and the elevation into `slot+0x18`, and then at `0x49DA59`–`0x49DA65`
+calls the tolerance check with **the unit's own heading `unit+0x66` and pitch
+`unit+0x68`**. If the check says no it returns 0 and the shot does not happen.
+
+The check itself is `0x49D880(unit, slot, heading, pitch)`:
+
+- `tolerance` is `wdef+0x106`. If it is zero, the figure is `0x7D0` (2000, about
+  11°) when `unit+0x110 & 0xC` is set and `0x96` (150, about 0.8°) otherwise
+  (`0x49D895`–`0x49D8B2`).
+- `pitchtolerance` is `wdef+0x108`, and **when it is zero the heading tolerance
+  is used for pitch as well** (`0x49D8B4`–`0x49D8CF`). Sixty of the shipped
+  weapons name a tolerance and stay silent about pitch; exactly one (`vtol_emg`)
+  sets both.
+- Both differences are taken as signed 16-bit quantities and compared by
+  absolute value against `>` (`0x49D8D1`–`0x49D8F9`), so a tolerance of 32767 —
+  what the six torpedoes ask for — admits everything except dead astern, whose
+  difference of 32768 negates to itself.
+
+**The original refuses the shot; it does not steer.** Nothing in the weapon code
+turns the unit: `turnrate` (`def+0x1BA`) is read only in the movement routines
+(`0x43CBCA`, `0x43CF96`, `0x43D014`, `0x43D542`, `0x44EADE`) and in the unit-info
+string builder at `0x48943C`. When the eligibility test rather than the tolerance
+fails, `0x49E53A` and `0x49D664` raise bit 12 of the unit's event word
+`unit+0xBA`, which missions wait on (the dispatcher is at `0x43B7FE`) — but a
+tolerance failure raises nothing at all and simply does nothing that tick.
+
+`0x49DB70` (vertical launch) computes the same two angles and stores them but
+**never calls `0x49D880`**, and `0x49DD60` (bombs) does not either. A silo does
+not have to face what it is firing at.
+
+### Which weapons this is
+
+Merging `totala1\weapons`, `rev31\weapons` and `rev31\gamedata\WEAPONS.TDF`
+gives 132 weapon definitions, 94 with `turret=1`. The 38 without are **not**
+tank hull guns — there is no such thing in the shipped data. They are aircraft
+weapons (12, tolerance 6000–11000), torpedoes and depth charges (9, almost all
+32767), vertical-launch missiles and nukes (12, tolerance 4000), bombs (4), and
+`mindgun`/`noweapon`/`earthquake`. The behaviour this recovers is therefore that
+**a gunship or fighter has to be pointing at its target before it shoots**, not
+that tanks turn their bodies.
+
+### `minbarrelangle` is inert
+
+It is a float in radians at `wdef+0xC8`, read at `0x42E724` and scaled by
+`ds:0x4FD260` = π/180, with a default of `-11.25` degrees supplied as the double
+`0xC026800000000000` pushed at `0x42E70F`. §10 has this right and the priorities
+note had it wrong twice over: `wdef+0xFE` is `holdtime`, and the field is not a
+clamp.
+
+Its only reader is the ballistic launch-elevation solver `0x49A890`, called from
+the eligibility test `0x49AA80` (`0x49AB75`) and from the turret handler
+(`0x49E28E`). That routine solves the standard ballistic quadratic — discriminant
+`v⁴ − 2ghv² − g²X²`, assembled at `0x49A908`–`0x49A964` with the constant
+`ds:0x4FDA60 = -2.0` — and returns `acos(√(vx²)/v)` (`0x4E67F0`, which computes
+`√((1+x)(1−x))` and then `fpatan`) scaled to 16-bit angle units by
+`32768/π` (`ds:0x4FDA88`, `ds:0x4FDA90`). `0x8000` means no solution, and both
+`0x49AA80` and `0x49D580` treat that as "cannot shoot this".
+
+`minbarrelangle` is the lower bound the two roots are tested against at
+`0x49AA11` and `0x49AA39`, with a hard upper bound of π/4 (`ds:0x4FDA80`) that
+selects the flat root of the pair. But an `acos` of a non-negative quantity is
+never negative, so **the returned elevation always lies in [0°, 45°] and a
+negative bound can never bind**. Transcribing the routine and sweeping 72,900
+geometries — ranges 20–2000, height differences ±800, five launch speeds —
+`minbarrelangle = -35°` gave an answer identical to no bound at all in every
+single case, and not one of the 36,734 solved cases produced a negative
+elevation. Every shipped value is negative (17 weapons, −15° to −40°, plus
+`arm_paralyzer` at 0 which is `lineofsight` and so never reaches this routine),
+as is the −11.25° default. **The field does nothing in the original.** What
+actually refuses a shot is the discriminant going negative — the target is out
+of reach — or both roots exceeding 45°.
+
+### `aimrate` is not a key
+
+The string `aimrate` **does not exist anywhere in `TotalA.exe`**, so the two
+weapons that set it (`arm_berthacannon` and `core_intimidator`, both 2500) are
+handing the parser a key it does not recognise and it is discarded. There is
+nothing to implement.
+
+### `holdtime`
+
+`WORD wdef+0xFE`, parsed at `0x42E6F1` and multiplied by `ds:0x4FD250 = 30.0`,
+so it is a count of seconds stored as ticks. The same two weapons set it, both to
+1. No reader has been found: the only word-sized read of `+0xFE` in the image is
+`0x41DD7C`, which is in unrelated code. Left unimplemented for want of evidence.
+
+---
+
+## 12. Where RWE deliberately differs
 
 Recorded so these do not get "fixed" back later by someone comparing against the
 original:
@@ -918,12 +1060,22 @@ original:
   which is what actually points it out of the yard, so a ship coming off a
   slipway keeps the pad's heading rather than being spun a quarter turn.
 - **A gunship's nose follows its flight path**, so it crosses its ring side-on.
-  The original does the same, and holds its aim regardless of where the nose
-  points; RWE relies on the same thing, so a gunship fires across the swing.
+  The original does the same — but it does *not* hold its aim regardless of
+  where the nose points, which an earlier reading of this claimed. Gunship
+  rockets are `turret=0`, so §11 applies to them and the original holds fire
+  until the nose is within the weapon's tolerance, which for `vtol_rocket` and
+  friends is 8000, about 44°. RWE now does the same.
+- **Only the heading half of the `turret=0` check is enforced.** The original
+  compares the required elevation against the hull's own pitch at `unit+0x68`
+  (§11). RWE's simulation has no hull pitch — `UnitState` carries a rotation and
+  nothing else — so comparing against a notional zero would be a different rule
+  wearing the same name rather than the original's. The heading half is the one
+  that stops a unit shooting sideways and backwards, and it is the half that is
+  implemented.
 
 ---
 
-## 12. Still unknown or unported
+## 13. Still unknown or unported
 
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
@@ -940,6 +1092,12 @@ original:
   when the order was given — missions document §8.
 - The exact tick at which the original commits a **bomb release** inside its
   weapon code is still not pinned down; RWE uses its own bombsight.
+- **`unit+0x110` bits 2–3.** They pick the loose 2000 default over the tight 150
+  when a weapon names no tolerance (§11), and are tested at only three places —
+  `0x40458A`, `0x4057D9` and `0x49D899` — none of which says what they mean. RWE
+  keeps its own 256 default rather than guess.
+- **`holdtime` has no known reader** — see §11. `aimrate` is not a key the
+  original recognises at all, so there is nothing there to find.
 
 ---
 

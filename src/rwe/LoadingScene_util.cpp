@@ -153,6 +153,8 @@ namespace rwe
         weaponDefinition.reloadTime = SimScalar(tdf.reloadTime);
         weaponDefinition.tolerance = SimAngle(tdf.tolerance);
         weaponDefinition.pitchTolerance = SimAngle(tdf.pitchTolerance);
+        weaponDefinition.turret = tdf.turret;
+        weaponDefinition.verticalLaunch = tdf.vLaunch;
         weaponDefinition.velocity = SimScalar(static_cast<float>(tdf.weaponVelocity) / 30.0f);
 
         weaponDefinition.burst = tdf.burst;

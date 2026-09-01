@@ -86,6 +86,16 @@ namespace rwe
         return std::nullopt;
     }
 
+    bool weaponNeedsTheHullTurned(const WeaponDefinition& weaponDefinition)
+    {
+        if (weaponDefinition.turret || weaponDefinition.verticalLaunch)
+        {
+            return false;
+        }
+
+        return !std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType);
+    }
+
     std::pair<SimAngle, SimAngle> computeHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, SimScalar zOffset, ProjectilePhysicsType projectileType)
     {
         return match(

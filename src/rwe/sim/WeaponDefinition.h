@@ -67,5 +67,25 @@ namespace rwe
 
         /** TA toairweapon: the flak guns, which will engage nothing that is not in the air. */
         bool toAirWeapon{false};
+
+        /**
+         * TA turret: the gun sits on a mount that can swing round on its own, so
+         * the unit shoots wherever its aim script points. A weapon without one is
+         * bolted to the hull -- aircraft cannon, torpedo tubes, gunship rockets --
+         * and the hull itself has to be brought to bear before it will fire.
+         *
+         * A weapon TDF that says nothing means no turret, as in the original,
+         * and that is what the parser hands over. The default here is the other
+         * way round on purpose, so that a definition built in code rather than
+         * read from a file keeps the free-swinging behaviour rather than
+         * quietly refusing to shoot.
+         */
+        bool turret{true};
+
+        /**
+         * TA vlaunch: the missile leaves the tube straight up and turns onto the
+         * target afterwards, so which way the launcher faces does not matter.
+         */
+        bool verticalLaunch{false};
     };
 }
