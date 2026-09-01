@@ -74,6 +74,7 @@ namespace rwe
             {"captureProgress", dumpJson(u.captureProgress)},
             {"selfDestructTime", dumpJson(u.selfDestructTime)},
             {"carriedBy", dumpJson(u.carriedBy)},
+            {"airLoiter", dumpJson(u.airLoiter)},
             {"activated", dumpJson(u.activated)},
             {"isSufficientlyPowered", dumpJson(u.isSufficientlyPowered)},
             {"energyProductionBuffer", dumpJson(u.energyProductionBuffer)},
@@ -144,6 +145,21 @@ namespace rwe
             {"targetPosition", dumpJson(p.targetPosition)},
             {"swingPositive", p.swingPositive},
             {"outOfRangeArrivals", p.outOfRangeArrivals},
+        };
+    }
+
+    nlohmann::json dumpJson(const UnitState::AirLoiterState& s)
+    {
+        const char* reasonName = "AttackEnded";
+        switch (s.reason)
+        {
+            case UnitState::AirLoiterState::Reason::AttackEnded: reasonName = "AttackEnded"; break;
+            case UnitState::AirLoiterState::Reason::Guarding:    reasonName = "Guarding";    break;
+        }
+        return nlohmann::json{
+            {"reason", reasonName},
+            {"anchor", dumpJson(s.anchor)},
+            {"bearing", dumpJson(s.bearing)},
         };
     }
 

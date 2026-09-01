@@ -1385,3 +1385,285 @@ original:
 
 ---
 
+## NN. What an aircraft does with nothing to do
+
+Two things the player reported, which turn out to be the same question asked
+twice: a bomber "immediately stops in place and lands" once its target is
+destroyed, where the original "flies around after and sometimes goes circling
+back over the now destroyed target"; and construction aircraft guarding an idle
+factory, which in the original "fly around in the nearby vicinity".
+
+The original has three different answers depending on *why* the aircraft has
+nothing to do, and the difference is the whole finding. An attack that runs out
+of target is replaced by a search mission that circles the spot for ever. A
+mission list that merely empties gets `DefaultMissionType`, which for an
+aircraft means going and landing. A guard order flies a circuit of its own for
+as long as the order lasts. RWE had one answer — go and land — for all three.
+
+Companion to the missions document, whose conventions this section uses
+throughout: `Dir(θ)` is the direction an object with heading θ faces, and
+`0x48A980(a, b)` is the bearing such that `Dir` of it points from `a` to `b`.
+Arrival tolerances handed to `0x44E730` are whole world units; distances
+written as `0x1400000` and the like are 16.16.
+
+### 1. An attack that ends because the target died: `VTOL_SeekAttack`
+
+`AirStrike` does not simply finish. Its prologue, at `0x411FEA`, reads the
+mission's target unit; when that is null and `mission+0x42` has bit 9 set — the
+flag that says the mission was created against a unit rather than a patch of
+ground — it allocates a fresh mission, resolves the name `"VTOL_SEEKATTACK"`
+(`0x501C9C`) through `MissionId::FromName`, constructs it with **no target unit
+and the attacker's own position** (`lea edx,[edi+0x6a]` at `0x412020`, where
+`edi` is the unit), appends it with `0x43AD10`, and returns 5 so that the strike
+mission itself is deleted. `AirToGround`, `AirToGroundHover` and `AirToAir` do
+the same on their `flags & 0x1000A` / `0x10008` paths, with the mission's last
+known target position instead.
+
+So the aircraft's next mission is anchored on **where it was standing the moment
+its target went away** — which, at the end of a bombing run, is over or just
+past the wreckage.
+
+**`VTOL_SeekAttack` is `0x4103E0`**, arguments `(unit, mission, flags)`.
+
+Prologue:
+
+* `if (flags & 0x40) return 5` — `0x4103EA`. One of the move-goal outcome bits
+  ends the mission outright.
+* Off-map (`unit+0x82 == [gs+0x142B7]`, the sentinel bucket of §11 of the
+  missions document): waypoint = `unitPos + Dir(0x48A980(unitPos, mapCentre)) ·
+  800`, arrival tolerance `0x80`, `mission+0x06 |= 0xE0`, return 2.
+* Dispatch on `mission+0x05`: 0 → `0x410701`, 1 → `0x41050F`, anything else →
+  return 7 (flush the list).
+
+**State 0 (`0x410701`) — take off, and take a bearing.**
+
+* `unit->mover == 0` or `canfly` clear → return 7.
+* If `mission+0x16` is a live target after all, hand it to `0x43B1F0` and
+  return 0 (restart) if that issues an attack.
+* Otherwise: if `mission+0x22`, `+0x26` and `+0x2A` are all zero, fill them
+  with the unit's own position (`0x41074A`–`0x410771`); then
+  **`mission+0x36 = rand(0x10000)`** (`0x410774`) — a uniform full-circle
+  bearing, the state the circuit runs on — and `mission+0x3A = mission+0x36 & 1`.
+* `0x4898B0(unit, 3)` (the mission owns all three weapons), detach from a pad
+  if `unit+0x86`, `0x48B090(unit, 1, 1)`, and if the mover is in landed mode
+  switch to flying and climb to `cruisealt / 2` on the spot. Return 1.
+
+**State 1 (`0x41050F`) — the circuit. This state never advances.**
+
+```
+41050f  0x489800(unit, 3)                       ; weapons free again
+410518  if (word[unit+0x108] < (dword[def+0x1FA] >> 2) * 3)   ; below 75% health
+            pads = 0x40B530(player, &unitPos, 0xF00, &list)   ; within 3840
+            if (pads not empty):
+                0x4388D0(mission, 0)            ; drop the move goal
+                push VTOL_LANDING (0x501B94) on rand(n) of them, 0x43ACB0
+                mission+0x06 = 0 ; return 0
+4105fa  t = 0x43B700(unit)                      ; the sight-range search
+        if (t && 0x43B1F0(unit, t, 0)) return 5 ; found a fight: this mission is done
+410620  if (flags & 0xE0)                       ; the last hop's goal completed
+            mission+0x36 -= 0x5555 + rand(0x2000)
+41063e  r = ([[unit+0x10] + 0xDC] + 0xA0) << 16 ; weapon 0's range, plus 160
+410654  waypoint = mission+0x22 + Dir(word[mission+0x36]) * r
+4106c4  0x44E730(goal, 0x80)                    ; arrival tolerance 128
+4106d0  0x4388D0(mission, goal)
+4106d8  0x439E80(mission, rand(30) + 30)
+4106ea  mission+0x06 |= 0xE0
+4106f2  return 2
+```
+
+Three things fall out of that.
+
+* **The bearing steps back by `0x5555 + rand(0x2000)`, i.e. 120° to 165°, and
+  only when the previous goal actually completed.** The timer wake re-installs
+  the *same* goal at the *same* bearing, so it changes no geometry; its job is
+  to re-run the health check and the sight search a couple of times a second.
+* **The radius is weapon range plus 160**, which for all four bombers — whose
+  bombs all reach 1280 — is **1440**.
+* **A step of more than a quarter turn and less than half of one means every
+  leg is a chord, not an arc.** A 120° chord of a 1440 circle passes 720 from
+  the centre, a 165° chord passes 188 from it. That is exactly the reported
+  "sometimes goes circling back over the now destroyed target", and it is why
+  the step is worth transcribing rather than rounding to a neat orbit.
+
+Nothing else ends the mission. There is no maneuver leash on it — `0x43A0C0`'s
+sixth argument is pushed as 0 at `0x41201C`, so `mission+0x3E` is zero and the
+handler never tests it anyway. An undamaged bomber whose target dies **circles
+that spot indefinitely**.
+
+### 2. A mission list that merely empties: `VTOL_Standby`
+
+The other case, and the one RWE already had right. §9 records that
+`DefaultMissionType` is installed at `0x43B9AD` on the branch of the service
+loop taken when a unit's mission list becomes empty. All twenty-one aircraft in
+the shipped data name `VTOL_Standby`, whose handler is **`0x40F7D0`**.
+
+**State 0 (`0x40F9B8`)** — `0x4898B0(unit, 3)`, `mission+0x06 |= 0x10000`, wake
+next tick, and then `mission+0x2E = word[unit+0x6C]`, `mission+0x30 =
+word[unit+0x74]`: the anchor is **where the aircraft was standing when it went
+idle**. Return 1.
+
+**State 1 (`0x40F988`)** — `0x43B700` and `0x43B1F0`; if that issues an attack,
+clear the mask, reset to state 0 and return 3. Otherwise return 1.
+
+**State 2 (`0x40F7F8`)** — the decision:
+
+```
+40f808  if (!(def+0x241 & 0x800))        goto sleep   ; canfly
+40f811  if ((unit+0x110 & 3) != 2)       goto sleep   ; not airborne
+40f823  if (unit+0x8A == 0)              goto land
+40f82f  θ = rand(0x10000) ; r = (rand(0x20) + 8) << 16
+        waypoint = anchor + Dir(θ) * r                ; anchor = mission+0x2E, +0x30
+40f8bd  0x44E6C0(goal, word[def+0x21C])               ; full cruisealt, no tolerance
+40f8d4  0x439E80(mission, rand(15) + 30)
+40f8e6  mission+0x05 = 1 ; return 2
+
+sleep (0x40F957):  mask |= 0x10000 ; wake rand(30)+30 ; state = 1 ; return 2
+land  (0x40F8F9):  push VTOL_LANDIFCAN (0x5012BC) at mission+0x22 ; return 5
+```
+
+`unit+0x8A` is the **head of the list of units attached to this one**: it is
+written at `0x48AC82` when something is attached, chained through `unit+0x8E`,
+and `unit+0x86` is the reverse pointer to the carrier
+(`0x48AC15`–`0x48AC82`).
+
+So an idle aircraft **hops about a ring of 8 to 39 units around the spot it
+went idle on, at full cruise altitude, once every 30 to 44 ticks — but only
+while it is carrying something.** Empty, it pushes `VTOL_LandIfCan` and goes
+and lands. RWE's "no orders, go and find somewhere to set down" is the right
+answer for this case; the reported bug was that it was also the answer for
+case 1.
+
+### 3. Guarding: `VTOL_Follow`
+
+A guard order on an aircraft becomes `VTOL_Follow` directly, not `VTOL_SeekGuard`.
+`0x43F4C7` requires `def+0x245` bit 5 (`canguard`) and a target, then tests
+`def+0x241` bit 11 (`canfly`) at `0x43F4E2` and picks the name at `0x505368` =
+`"VTOL_FOLLOW"`. **The handler is `0x40FBE0`**, arguments `(unit, mission, flags)`.
+
+Prologue: if `mission+0x16` is null, or `flags & 0x48`, push a `VTOL_SeekGuard`
+(`0x501B1C`) carrying the same target and position and return 5 (`0x410341`);
+handle the off-map case as above; otherwise **refresh `mission+0x22` from the
+guarded unit's live position every tick** (`0x40FCE9`).
+
+* **State 0 (`0x41025D`)** — announce `"Guarding"` (`0x5014E8`),
+  `0x4898B0(unit, 3)`, detach, `0x48B090(1, 1)`, and if landed switch to flying
+  and climb to `cruisealt / 2` in place. Then `mission+0x36 = rand(0x10000)`
+  and `mission+0x3A = mission+0x36 & 1`. Return 1.
+* **State 1 (`0x410245`)** — `0x489800(unit, 3)`, free all three weapons.
+  Return 1.
+* **State 2 (`0x40FD26`)** — everything else, in order: retaliate on whoever
+  last hit the guarded unit (`guardee+0xF0`, gated on the alliance byte, on
+  `flags & 0x10` and on the guard's own `noChaseCategory` at `def+0x23D`);
+  point each armed, free weapon slot at it; then two attempts to copy the
+  guarded unit's work — `0x4899B0(unit, guardee)` followed by `0x43F0E0` at
+  `0x40FE86`, and cloning the guarded unit's own head mission at `0x40FEDC`
+  through a chain of `FromName` comparisons. If none of those bite, control
+  reaches `0x41013B`, and that is the circuit:
+
+```
+41013b  if (flags & 0xE0)
+            mission+0x36 -= 0x4000 + rand(0x2000)
+41015b  if (unit+0x110 & 0x80000000)
+41016c      r = ([[unit+0x10] + 0xDC] + 0xA0) << 16   ; weapon 0's range, plus 160
+        else
+4101b0      r = 0x1400000                             ; 320
+410193  waypoint = guardeePos + Dir(word[mission+0x36]) * r
+410211  0x44E730(goal, 0x80)                          ; tolerance 128
+410225  0x439E80(mission, 0x1E)                       ; wake in 30 ticks
+41022e  mission+0x06 |= 0xF8
+410236  return 2
+```
+
+Same shape as the search circuit, with a **quarter-turn** base step instead of a
+third, no altitude call (it keeps whatever the take-off left it at), and a
+radius that depends on whether the guard is armed.
+
+**`unit+0x110` bit 31 is "this unit's definition names a weapon".** It is
+copied out of the definition at `0x485AAD`–`0x485AC5`, where
+`(def+0x241 & 0xFFFF0000) << 15` keeps bit 16 alone and everything above it
+shifts out of the register; and `def+0x241` bit 16 is set at `0x42CF19` unless
+all three of `def+0x1EE`, `+0x1F2` and `+0x1F6` — the weapon-1, -2 and -3
+definitions — are null. The test has to be there, because the armed branch
+dereferences weapon slot 0's definition and an unarmed unit has none.
+
+So **a construction aircraft guarding a factory works a ring of 320 world units
+around it, twenty tiles across, moving 90° to 135° round every time it arrives**,
+with a 128-unit arrival tolerance so it really does fly to each point. That is
+the reported milling about, and it is a good deal larger than it looks in the
+disassembly: `0x1400000` is 320, not 20 — `0x140000` is the 20 that `AirToAir`
+uses for its short hops.
+
+An armed guard — a Brawler told to guard something — works a much wider ring,
+`370 + 160 = 530`.
+
+### 4. Constants
+
+| Value | Meaning | Address |
+|---|---|---|
+| `0x5555 + rand(0x2000)` | **120°–165°**, the search circuit's bearing step, subtracted | `0x410625`–`0x41063B` |
+| `0x4000 + rand(0x2000)` | **90°–135°**, the guard circuit's bearing step, subtracted | `0x410142`–`0x410158` |
+| `rand(0x10000)` | the opening bearing of either circuit | `0x410774`, `0x410310` |
+| `+0xA0` | **160** added to weapon 0's range for the circuit radius | `0x41064B`, `0x410175` |
+| `0x1400000` | **320**, the circuit radius for a unit with no weapon | `0x4101B0` |
+| `0x80` | **128**, both circuits' arrival tolerance | `0x4106C4`, `0x410211` |
+| `rand(30) + 30` | the search circuit's wake timer | `0x4106D8` |
+| `0x1E` | **30 ticks**, the guard circuit's wake timer | `0x410225` |
+| `rand(0x20) + 8` | **8–39**, `VTOL_Standby`'s hop radius | `0x40F857`–`0x40F861` |
+| `rand(15) + 30` | `VTOL_Standby`'s hop timer | `0x40F8D4` |
+| `cruisealt` | `VTOL_Standby`'s hop altitude, full rather than half | `0x40F8BD` |
+| `(maxdamage >> 2) * 3` | 75 % health, the search circuit's go-home threshold | `0x410518` |
+| `0xF00` | **3840**, its repair-pad search radius | `0x410558` |
+
+### 5. What RWE does with this
+
+Implemented, in `UnitBehaviorService`:
+
+- `UnitState::AirLoiterState` — an anchor, a bearing, and which of the two
+  circuits it is. `beginAirLoiter` takes the opening bearing from `sim->rng`;
+  `flyAirLoiterCircuit` puts the goal on the ring, steps the bearing when the
+  aircraft is inside 128 of it, and hands the point to `AirMovementStateFlying`
+  directly, the same way the construction aircraft's work pattern does.
+- `attackTargetAir` arms the `AttackEnded` circuit on the tick the target goes
+  away, anchored on the aircraft's own position, and the idle path flies it
+  from the next tick instead of looking for somewhere to land. The circuit
+  takes over from an attack run or from a gunship's ring as well as from level
+  flight; the aircraft really will be in one of those when its target dies, and
+  a handover that only works from level flight leaves it stuck.
+- `handleGuardOrder` flies the `Guarding` circuit around a guarded unit that has
+  no work to hand, at weapon range plus 160 or 320 for something unarmed, and
+  asks a grounded aircraft to take off first. It used to do nothing at all once
+  the guard was within 200 units, which is why the planes hung still.
+- Any order other than `Guard` clears the circuit, so an aircraft that has been
+  given something else to do goes home afterwards as `VTOL_Standby` would; and a
+  cancelled guard clears it on the first idle tick for the same reason.
+
+Decoded here and deliberately **not** ported:
+
+- **The sight-range search `0x43B700`**, which is what both `VTOL_SeekAttack`
+  state 1 and `VTOL_Standby` state 1 do before they fly anywhere. RWE has no
+  equivalent — see §13 — and its own idle weapon acquisition stands in.
+- **The go-home-when-hurt branch.** Below 75 % health with an active repair pad
+  within 3840, both the search circuit and the strafing pass abandon what they
+  are doing and push a `VTOL_LANDING` on a pad chosen at random. RWE has no
+  air repair pads, so there is nothing to fly to.
+- **`VTOL_Standby`'s carrying-something hop** (8–39 units around the idle spot,
+  every 30–44 ticks). It only applies to a transport with units aboard, and RWE
+  parks a loaded transport rather than fidgeting.
+- **`VTOL_Follow`'s work copying** — the `0x43F0E0` order build at `0x40FE86`
+  and the mission clone at `0x40FEDC`. RWE's guard already assists a builder and
+  a factory through `handleGuardOrder`'s own branches; what the original does
+  that RWE does not is copy a *reclaim*, *repair* or *capture* the guarded unit
+  is engaged on.
+- **The wake timers.** Both circuits re-enter on a timer as well as on arrival,
+  but a timer wake re-installs the same goal at the same bearing, so it changes
+  nothing geometrically. RWE checks arrival every tick instead.
+- **The off-map recovery** (`0x41041D`, 800 units back toward the map centre),
+  which shares the unconfirmed reading recorded in the missions document §11.
+
+One correction to `docs/REVERSE-ENGINEERING-PRIORITIES.md`, entry 6: it says
+`DefaultMissionType` is "left decoded but unported" because "`Standby` versus
+`Guard_NoMove` is only the question of whether an idle unit walks off to find a
+fight". That is true of the two ground missions but not of the third value in
+the data. `VTOL_Standby` also decides whether an idle aircraft hops about or
+goes and lands, on `unit+0x8A`, and that half of it does not need `0x43B700` at
+all.

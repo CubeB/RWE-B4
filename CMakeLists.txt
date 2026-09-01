@@ -828,6 +828,7 @@ set(TEST_FILES
     src/rwe/sim/transport.test.cpp
     src/rwe/sim/bomber.test.cpp
     src/rwe/sim/gunship.test.cpp
+    src/rwe/sim/aircraftidle.test.cpp
     src/rwe/sim/missile.test.cpp
     src/rwe/sim/aircraft.test.cpp
     src/rwe/sim/selfdestruct.test.cpp

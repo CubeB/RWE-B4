@@ -63,6 +63,7 @@ namespace rwe
 
     GameHash computeHashOf(const MapFeature& f);
     GameHash computeHashOf(const UnitState::AirWorkOrbitState& s);
+    GameHash computeHashOf(const UnitState::AirLoiterState& s);
 
     GameHash computeHashOf(const GameSimulation& simulation);
 

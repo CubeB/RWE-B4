@@ -79,6 +79,25 @@ namespace rwe
         bool hoverTowards(UnitInfo unitInfo, const SimVector& point);
 
         /**
+         * Starts an aircraft on one of the original's idle circuits, on a
+         * bearing picked at random as it does. Arming it is separate from
+         * flying it because the attack path has to arm the circuit on the tick
+         * the target dies, when the aircraft may still be mid-run.
+         */
+        void beginAirLoiter(UnitInfo unitInfo, UnitState::AirLoiterState::Reason reason, const SimVector& anchor);
+
+        /**
+         * Flies one tick of the circuit around the given point, arming it
+         * first if the aircraft is not already on one for this reason. The
+         * bearing steps back by stepBase plus up to an eighth of a turn each
+         * time the aircraft reaches its station.
+         */
+        void flyAirLoiterCircuit(UnitInfo unitInfo, UnitState::AirLoiterState::Reason reason, const SimVector& anchor, SimAngle stepBase);
+
+        /** How far out an aircraft holds on one of those circuits. */
+        SimScalar airLoiterRadius(UnitInfo unitInfo) const;
+
+        /**
          * Gets a construction aircraft ready to work on something at the given
          * position: it takes off if it is sitting on the ground (the fabricator
          * only reaches from the air), breaks off a landing, and once airborne

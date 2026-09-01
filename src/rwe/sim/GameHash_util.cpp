@@ -101,6 +101,7 @@ namespace rwe
             u.transportScriptTarget,
             u.transportScriptStartedAt,
             u.airWorkOrbit,
+            u.airLoiter,
             u.slowFacePoint,
             u.activated,
             u.isSufficientlyPowered,
@@ -276,6 +277,14 @@ namespace rwe
             s.workPosition,
             s.bearing,
             s.started);
+    }
+
+    GameHash computeHashOf(const UnitState::AirLoiterState& s)
+    {
+        return combineHashes(
+            static_cast<uint32_t>(s.reason),
+            s.anchor,
+            s.bearing);
     }
 
     GameHash computeHashOf(const MapFeature& f)

@@ -449,6 +449,42 @@ namespace rwe
         std::optional<AirWorkOrbitState> airWorkOrbit;
 
         /**
+         * Where an aircraft with nothing to do is milling about. The original
+         * never leaves one hanging in the air. An attack that ends because
+         * there is nothing left to attack is replaced by a search mission
+         * which walks a bearing round the spot indefinitely, and a guard order
+         * on something that has no work to hand does the same around the unit
+         * being guarded. Both keep their goal on a ring, fly to it, and step
+         * the bearing back by rather more than a quarter turn on arrival, so
+         * the aircraft crosses and re-crosses the middle rather than orbiting
+         * it neatly.
+         */
+        struct AirLoiterState
+        {
+            enum class Reason
+            {
+                /**
+                 * The attack ended because the target was gone. This one
+                 * outlives the order that started it, which is the whole
+                 * point: the aircraft keeps flying instead of going home.
+                 */
+                AttackEnded,
+
+                /** Guarding something idle. Lasts only as long as the guard order. */
+                Guarding,
+            };
+
+            Reason reason{Reason::AttackEnded};
+
+            /** The point the circuit is flown around. */
+            SimVector anchor;
+
+            /** Bearing of the current station as seen from the anchor. */
+            SimAngle bearing{0};
+        };
+        std::optional<AirLoiterState> airLoiter;
+
+        /**
          * Set each tick while a construction aircraft holds station: it turns
          * towards this point at a slow fixed rate instead of chasing its
          * flight path. Cleared at the start of every behaviour update.

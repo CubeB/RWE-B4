@@ -22,6 +22,37 @@ namespace rwe
          */
         const SimScalar HoverAttackArrivalTolerance = 16_ss;
 
+        // The original's idle circuits, read out of VTOL_SeekAttack (0x4103E0,
+        // where an aircraft goes when its target dies) and VTOL_Follow
+        // (0x40FBE0, the guard mission). Both build the same thing: a goal on
+        // a ring around a point, and a bearing that steps back by a fixed
+        // amount plus a random eighth of a turn every time the goal is met.
+
+        // The goal's arrival tolerance, 0x80 at 0x4106C4 and 0x410211.
+        const SimScalar AirLoiterArrivalTolerance = 128_ss;
+
+        // The ring is weapon range plus this, 0xA0 at 0x41064B and 0x410175.
+        const SimScalar AirLoiterStandoff = 160_ss;
+
+        // What a unit with no weapon at all uses instead: 0x1400000, i.e. 320
+        // world units, at 0x4101B0. The branch is on unit+0x110 bit 31, which
+        // is copied out of the definition bit meaning "names a Weapon1, 2 or
+        // 3" (0x485AAD), and it has to be there: the armed side reads weapon
+        // slot zero's definition, which an unarmed unit does not have. So a
+        // construction aircraft guarding a factory works a ring twenty tiles
+        // across around it, which is the milling about that was reported.
+        const SimScalar AirLoiterUnarmedRadius = 320_ss;
+
+        // 0x5555, a third of a turn, at 0x410634. The search circuit's step.
+        const SimAngle AirLoiterSeekStep = SimAngle(0x5555);
+
+        // 0x4000, a quarter turn, at 0x410151. The guard circuit's step.
+        const SimAngle AirLoiterGuardStep = SimAngle(0x4000);
+
+        // rand(0x2000) on top of either, at 0x410625 and 0x410142. Both are
+        // subtracted, so a circuit always works round the same way.
+        const SimAngle AirLoiterStepJitter = SimAngle(0x2000);
+
         SimVector airVelocity(const AirMovementState& state)
         {
             return match(
@@ -250,8 +281,29 @@ namespace rwe
                     // shooting at, and go looking for somewhere to land.
                     unitInfo.state->orders.push_back(createAttackOrder(*freeTarget));
                 }
+                else if (unitInfo.state->airLoiter && unitInfo.state->airLoiter->reason == UnitState::AirLoiterState::Reason::AttackEnded)
+                {
+                    // An attack that ran out of target does not end with the
+                    // aircraft going home. AirStrike (0x411F50) hands the
+                    // aircraft a VTOL_SeekAttack anchored on its own position
+                    // the moment its target dies, and that mission walks a
+                    // bearing round the spot for ever — it only ever gives up
+                    // to go and land when the aircraft is below three quarters
+                    // health with a repair pad within reach. So the bomber
+                    // keeps flying over what it just flattened, which is what
+                    // the original looks like and what RWE was missing.
+                    auto anchor = unitInfo.state->airLoiter->anchor;
+                    flyAirLoiterCircuit(unitInfo, UnitState::AirLoiterState::Reason::AttackEnded, anchor, AirLoiterSeekStep);
+                }
                 else
                 {
+                    // Anything else that has simply run out of orders does go
+                    // home: the original installs the definition's
+                    // DefaultMissionType, which for all twenty-one shipped
+                    // aircraft is VTOL_Standby (0x40F7D0), and that hops about
+                    // only while the aircraft is carrying something. Empty, it
+                    // pushes VTOL_LandIfCan and sets down.
+                    unitInfo.state->airLoiter = std::nullopt;
                     match(
                     airPhysics->movementState,
                     [&](AirMovementStateFlying& m) {
@@ -1276,6 +1328,14 @@ namespace rwe
             }
         }
 
+        // Any order at all ends an idle circuit, so that when this one is done
+        // the aircraft goes home as it should. A guard order is the exception:
+        // it flies a circuit of its own and needs the bearing it has built up.
+        if (!std::holds_alternative<GuardOrder>(order))
+        {
+            unitInfo.state->airLoiter = std::nullopt;
+        }
+
         return match(
             order,
             [&](const MoveOrder& o) {
@@ -1364,6 +1424,99 @@ namespace rwe
         // How far a sea transport's crane reaches to a unit on the shore.
         // TA's data does not say; the Hulk's boom animation covers about this.
         const SimScalar CraneReach = 200_ss;
+    }
+
+    SimScalar UnitBehaviorService::airLoiterRadius(UnitInfo unitInfo) const
+    {
+        const auto& weapon = unitInfo.state->weapons[0];
+        if (!weapon)
+        {
+            return AirLoiterUnarmedRadius;
+        }
+        return sim->weaponDefinitions.at(weapon->weaponType).maxRange + AirLoiterStandoff;
+    }
+
+    void UnitBehaviorService::beginAirLoiter(UnitInfo unitInfo, UnitState::AirLoiterState::Reason reason, const SimVector& anchor)
+    {
+        if (!unitInfo.definition->canFly)
+        {
+            return;
+        }
+
+        // The original takes a fresh bearing at random when it sets one of
+        // these up (0x410774 for the search, 0x410310 for the guard), so a
+        // flight coming off the same target does not all end up on one side
+        // of it.
+        std::uniform_int_distribution<unsigned int> anywhere(0, 0xffffu);
+        unitInfo.state->airLoiter = UnitState::AirLoiterState{reason, anchor, SimAngle(anywhere(sim->rng))};
+    }
+
+    void UnitBehaviorService::flyAirLoiterCircuit(UnitInfo unitInfo, UnitState::AirLoiterState::Reason reason, const SimVector& anchor, SimAngle stepBase)
+    {
+        auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
+        if (airPhysics == nullptr)
+        {
+            // Sitting on the ground there is no circuit to fly, and a stale
+            // one left behind would keep the aircraft from ever landing again.
+            unitInfo.state->airLoiter = std::nullopt;
+            return;
+        }
+
+        // Climbing out or setting down: leave the transition alone. The
+        // original's handlers do the same, sleeping until the aircraft is
+        // properly airborne before they command anything (0x40F957).
+        if (std::holds_alternative<AirMovementStateTakingOff>(airPhysics->movementState)
+            || std::holds_alternative<AirMovementStateLanding>(airPhysics->movementState))
+        {
+            return;
+        }
+
+        // The circuit has to be reachable from an attack run and from the
+        // gunship's ring as well as from level flight. The case this was
+        // written for is a bomber whose target dies in the middle of its run,
+        // which is exactly where a handover that only works from level flight
+        // leaves an aircraft stuck.
+        if (!std::holds_alternative<AirMovementStateFlying>(airPhysics->movementState))
+        {
+            AirMovementStateFlying flying;
+            flying.currentVelocity = airVelocity(airPhysics->movementState);
+            airPhysics->movementState = flying;
+            unitInfo.state->clearWeaponTargets();
+        }
+        auto& flying = std::get<AirMovementStateFlying>(airPhysics->movementState);
+
+        if (!unitInfo.state->airLoiter || unitInfo.state->airLoiter->reason != reason)
+        {
+            beginAirLoiter(unitInfo, reason, anchor);
+            if (!unitInfo.state->airLoiter)
+            {
+                return;
+            }
+        }
+        auto& loiter = *unitInfo.state->airLoiter;
+
+        // A guard follows what it is guarding, so the centre is refreshed
+        // every tick; a search circuit is handed the same fixed point back.
+        loiter.anchor = anchor;
+
+        auto radius = airLoiterRadius(unitInfo);
+        auto station = loiter.anchor + (UnitState::toDirection(loiter.bearing) * radius);
+
+        SimVector toStation(station.x - unitInfo.state->position.x, 0_ss, station.z - unitInfo.state->position.z);
+        if (toStation.lengthSquared() <= AirLoiterArrivalTolerance * AirLoiterArrivalTolerance)
+        {
+            // On station. Work the bearing round for the next one. The step is
+            // more than a quarter turn and less than half of one, so successive
+            // stations are joined by chords that pass close to the middle:
+            // this is why a bomber keeps coming back over what it killed
+            // rather than settling into a tidy orbit.
+            std::uniform_int_distribution<unsigned int> jitter(0, AirLoiterStepJitter.value);
+            loiter.bearing = loiter.bearing - stepBase - SimAngle(jitter(sim->rng));
+            station = loiter.anchor + (UnitState::toDirection(loiter.bearing) * radius);
+        }
+
+        station.y = getTargetAltitude(sim->terrain, station.x, station.z, *unitInfo.definition);
+        flying.targetPosition = station;
     }
 
     bool UnitBehaviorService::hoverTowards(UnitInfo unitInfo, const SimVector& point)
@@ -1932,12 +2085,29 @@ namespace rwe
         if (!targetPosition)
         {
             unitInfo.state->clearWeaponTargets();
-            // Reset to plain Flying so the aircraft will drift back to base on idle.
+
+            // The target is gone. The original does not let the aircraft stop
+            // here: AirStrike's prologue appends a VTOL_SeekAttack carrying the
+            // aircraft's own position (0x411FF5-0x412043) and deletes itself,
+            // and that mission circles the spot indefinitely. Arm the circuit
+            // now, on the tick the target dies, so that it survives into the
+            // idle path from the next tick; the aircraft may well still be in
+            // the middle of a run, and the circuit takes over from any state.
+            beginAirLoiter(unitInfo, UnitState::AirLoiterState::Reason::AttackEnded, unitInfo.state->position);
+
+            // Drop the run itself here as well. Whatever picks the aircraft up
+            // next — the circuit, or another order behind this one — expects to
+            // be steering an aircraft in level flight, and neither the run nor
+            // the ring gives up its steering to anyone else.
             if (auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics))
             {
-                if (std::holds_alternative<AirMovementStateAttackRun>(airPhysics->movementState))
+                if (!std::holds_alternative<AirMovementStateFlying>(airPhysics->movementState)
+                    && !std::holds_alternative<AirMovementStateTakingOff>(airPhysics->movementState)
+                    && !std::holds_alternative<AirMovementStateLanding>(airPhysics->movementState))
                 {
-                    airPhysics->movementState = AirMovementStateFlying();
+                    AirMovementStateFlying flying;
+                    flying.currentVelocity = airVelocity(airPhysics->movementState);
+                    airPhysics->movementState = flying;
                 }
             }
             return true;
@@ -2278,6 +2448,29 @@ namespace rwe
                 buildExistingUnit(unitInfo, fs->targetUnit->first);
                 return false;
             }
+        }
+
+        // Nothing to help with. An aircraft does not park over what it is
+        // guarding: a guard order on something that can fly becomes
+        // VTOL_Follow (0x40FBE0, chosen at 0x43F4C7), and with no work to copy
+        // from the guarded unit that mission spends its time putting its goal
+        // on a ring around it and stepping the bearing round on arrival
+        // (0x41013B). The ring is the guard's own weapon range plus 160, or
+        // 320 for something with no weapon at all — so a construction aircraft
+        // guarding an idle factory mills about the neighbourhood rather than
+        // hanging motionless beside it, which is what was reported.
+        if (unitInfo.definition->canFly)
+        {
+            if (auto groundPhysics = std::get_if<UnitPhysicsInfoGround>(&unitInfo.state->physics))
+            {
+                // VTOL_Follow's state 0 puts the aircraft in the air before it
+                // does anything else (0x4102BE).
+                groundPhysics->steeringInfo.shouldTakeOff = true;
+                return false;
+            }
+
+            flyAirLoiterCircuit(unitInfo, UnitState::AirLoiterState::Reason::Guarding, targetUnit.position, AirLoiterGuardStep);
+            return false;
         }
 
         // stay close
