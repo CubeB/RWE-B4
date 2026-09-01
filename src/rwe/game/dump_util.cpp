@@ -77,6 +77,8 @@ namespace rwe
             {"reclaimProgress", dumpJson(u.reclaimProgress)},
             {"captureProgress", dumpJson(u.captureProgress)},
             {"selfDestructTime", dumpJson(u.selfDestructTime)},
+            {"paralyzedUntil", dumpJson(u.paralyzedUntil)},
+            {"moveRateBand", dumpJson(u.moveRateBand)},
             {"carriedBy", dumpJson(u.carriedBy)},
             {"airLoiter", dumpJson(u.airLoiter)},
             {"activated", dumpJson(u.activated)},
@@ -318,6 +320,7 @@ namespace rwe
             {"players", dumpJson(simulation.players)},
             {"units", dumpJson(simulation.units)},
             {"projectiles", dumpJson(simulation.projectiles)},
+            {"featureRegrowthCursor", simulation.featureRegrowthCursor},
         };
     }
 }

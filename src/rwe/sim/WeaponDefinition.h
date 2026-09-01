@@ -85,6 +85,15 @@ namespace rwe
         /** TA waterweapon: torpedoes and depth charges, which travel in the water and can only hit what is in it. */
         bool waterWeapon{false};
 
+        /**
+         * TA paralyzer, bit 7 of `wdef+0x111` (parsed at 0x42EB95). A hit from
+         * one of these does no damage at all: the number the `[DAMAGE]` table
+         * gives is a count of ticks to stun the victim for, which is what the
+         * game data's own comment says and what the EMP missile's 1800 against
+         * every CORE unit means -- sixty seconds, not instant death.
+         */
+        bool paralyzer{false};
+
         /** TA toairweapon: the flak guns, which will engage nothing that is not in the air. */
         bool toAirWeapon{false};
 

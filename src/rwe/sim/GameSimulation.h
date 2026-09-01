@@ -420,6 +420,14 @@ namespace rwe
 
         GameTime nextWindSpeedChange;
 
+        /**
+         * Where the feature regrowth sweep has got to. The original examines one
+         * map square a tick and walks the whole grid backwards, wrapping round at
+         * the bottom, so a feature gets one chance to seed per full sweep however
+         * big the map is. -1 means the sweep just wrapped and this tick is idle.
+         */
+        int featureRegrowthCursor{0};
+
         // Computer-player controllers, owned by the simulation per the
         // locked decision in docs/ai-architecture-proposal.md §12-Q4.
         // Pointed-to via unique_ptr so the AI subsystem header is not
@@ -498,6 +506,14 @@ namespace rwe
 
         /** Length of the self-destruct countdown, as in TA. */
         static constexpr unsigned int SelfDestructCountdownTicks = 5 * SimTicksPerSecond;
+
+        /**
+         * The longest a unit can be stunned for, however many EMP hits land on
+         * it. The original clamps the paralyse order's duration to 0x708
+         * (0x402D33) -- which is also exactly what the EMP missile does to a
+         * CORE unit in one hit, so the shipped nuke buys the whole minute.
+         */
+        static constexpr unsigned int MaxParalysisTicks = 1800;
 
         /** Starts a unit's self-destruct countdown, or cancels it if one is already running. */
         void toggleSelfDestruct(UnitId unitId);
@@ -785,6 +801,12 @@ namespace rwe
          */
         void applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker);
 
+        /**
+         * As above, but `paralyzer` selects TA's damage type 2 (0x499E20): the
+         * number is spent on stun time instead of hit points.
+         */
+        void applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer);
+
         void applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile);
 
         void doProjectileImpact(const Projectile& projectile, ImpactType impactType);
@@ -809,6 +831,14 @@ namespace rwe
         void deleteDeadUnits();
 
         void updateSelfDestructs();
+
+        /**
+         * Gives one map square a chance to seed a copy of whatever feature stands
+         * on it into a nearby empty square. See §NN of docs/TOTALA-EXE.md; nothing
+         * in the shipped data sets `reproduce`, so on stock content this never
+         * fires and only a mod will see it.
+         */
+        void updateFeatureRegrowth();
 
         void updateVisibility();
 

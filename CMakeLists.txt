@@ -825,6 +825,11 @@ set(TEST_FILES
     src/rwe/sim/capture.test.cpp
     src/rwe/sim/burning.test.cpp
     src/rwe/sim/wreckage.test.cpp
+    src/rwe/sim/hitdensity.test.cpp
+    src/rwe/sim/regrowth.test.cpp
+    src/rwe/sim/kamikaze.test.cpp
+    src/rwe/sim/paralyzer.test.cpp
+    src/rwe/sim/moverate.test.cpp
     src/rwe/sim/transport.test.cpp
     src/rwe/sim/bomber.test.cpp
     src/rwe/sim/gunship.test.cpp

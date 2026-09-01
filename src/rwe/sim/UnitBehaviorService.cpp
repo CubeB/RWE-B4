@@ -206,8 +206,20 @@ namespace rwe
         // clear navigation targets
         unitInfo.state->navigationState.desiredDestination = std::nullopt;
 
+        // A stunned unit does nothing at all. The original parks a sleeping
+        // order in front of the unit's own for the duration (0x402D10) and
+        // clears every weapon's aim on the way in (0x402D46), so the unit
+        // coasts to a halt, stops shooting and stops building -- and picks up
+        // whatever it was doing when it comes round, because its orders are
+        // still underneath. The scripts keep running, so it goes on smoking.
+        auto paralyzed = unitInfo.state->isParalyzed(sim->gameTime);
+        if (paralyzed)
+        {
+            unitInfo.state->clearWeaponTargets();
+        }
+
         // Run unit and weapon AI
-        if (!unitInfo.state->isBeingBuilt(*unitInfo.definition))
+        if (!paralyzed && !unitInfo.state->isBeingBuilt(*unitInfo.definition))
         {
             // check our build queue
             if (!unitInfo.state->buildQueue.empty())
@@ -373,26 +385,9 @@ namespace rwe
 
             applyUnitSteering(unitInfo);
 
-            auto previouslyWasMoving = !areCloserThan(unitInfo.state->previousPosition, unitInfo.state->position, 0.1_ssf);
-
             updateUnitPosition(unitInfo);
 
-            auto currentlyIsMoving = !areCloserThan(unitInfo.state->previousPosition, unitInfo.state->position, 0.1_ssf);
-
-            if (currentlyIsMoving && !previouslyWasMoving)
-            {
-                unitInfo.state->cobEnvironment->createThread("StartMoving");
-
-                // Some scripts hang their movement effects off the move-rate
-                // callbacks rather than StartMoving — the Atlas has no
-                // StartMoving at all, and starts its thruster flames from
-                // MoveRate1. A script without the function ignores this.
-                unitInfo.state->cobEnvironment->createThread("MoveRate1");
-            }
-            else if (!currentlyIsMoving && previouslyWasMoving)
-            {
-                unitInfo.state->cobEnvironment->createThread("StopMoving");
-            }
+            updateMoveRateBand(unitInfo);
 
             // do physics transitions
             match(
@@ -2138,6 +2133,16 @@ namespace rwe
 
     bool UnitBehaviorService::attackTarget(UnitInfo unitInfo, const AttackTarget& target)
     {
+        // A crawling bomb has no weapon to aim, so this has to come first. The
+        // original turns an attack order on one of these into its own mission,
+        // ATTACK_KAMIKAZE (0x43F38A), whose handler at 0x403336 walks the unit
+        // to within kamikazedistance of the target and, on arrival, issues the
+        // ordinary SELFDESTRUCT order (0x4032E4).
+        if (unitInfo.definition->kamikaze)
+        {
+            return kamikazeRun(unitInfo, target);
+        }
+
         if (!unitInfo.state->weapons[0])
         {
             return true;
@@ -2188,6 +2193,81 @@ namespace rwe
         }
 
         return false;
+    }
+
+    void UnitBehaviorService::updateMoveRateBand(UnitInfo unitInfo)
+    {
+        // The original's 0x43DA70. A moving unit sits in one of three speed
+        // bands and a stopped unit in band zero; the band is remembered and a
+        // script is run only when it changes. StopMoving fires on the way into
+        // zero, StartMoving on the way out of it, and then whichever of
+        // MoveRate1/2/3 the new band names.
+        //
+        // Almost nothing in the shipped data names a threshold, and both
+        // default to twice the unit's top speed, so in practice a moving unit
+        // is in band one and it is MoveRate1 that fires. That is what the
+        // Atlas hangs its thruster flames off: it has no StartMoving at all.
+        auto speed = unitInfo.state->previousPosition.distance(unitInfo.state->position);
+
+        // The original tests its movement state's speed against zero; RWE reads
+        // the speed back off the step just taken, so it wants a little slack
+        // for fixed-point drift on a unit that is standing still.
+        unsigned int band = 0;
+        if (speed >= 0.1_ssf)
+        {
+            band = speed <= unitInfo.definition->moveRate1
+                ? 1
+                : (speed <= unitInfo.definition->moveRate2 ? 2 : 3);
+        }
+
+        auto previousBand = unitInfo.state->moveRateBand;
+        if (band == previousBand)
+        {
+            return;
+        }
+        unitInfo.state->moveRateBand = band;
+
+        if (band == 0)
+        {
+            unitInfo.state->cobEnvironment->createThread("StopMoving");
+            return;
+        }
+
+        if (previousBand == 0)
+        {
+            unitInfo.state->cobEnvironment->createThread("StartMoving");
+        }
+
+        // A script that does not define the function ignores this.
+        unitInfo.state->cobEnvironment->createThread("MoveRate" + std::to_string(band));
+    }
+
+    bool UnitBehaviorService::kamikazeRun(UnitInfo unitInfo, const AttackTarget& target)
+    {
+        auto targetPosition = getTargetPosition(target);
+        if (!targetPosition)
+        {
+            // Whatever it was chasing has gone; there is nothing left to die on.
+            return true;
+        }
+
+        // 0x403364: the trigger radius is the definition's kamikazedistance with
+        // a floor of sixteen world units, so a unit that names none still goes
+        // off when it arrives rather than grinding into the target forever. The
+        // Roach uses 40 and the Invader 80.
+        auto triggerDistance = SimScalar(static_cast<float>(std::max(unitInfo.definition->kamikazeDistance, 16u)));
+
+        if (unitInfo.state->position.distanceSquared(*targetPosition) > triggerDistance * triggerDistance)
+        {
+            navigateTo(unitInfo, attackTargetToNavigationGoal(target));
+            return false;
+        }
+
+        // Arrived. The original hands off to SELFDESTRUCT, so the blast is the
+        // unit's SelfDestructAs -- CRAWL_BLAST rather than the smaller
+        // CRAWL_BLASTSML it leaves behind when something else kills it.
+        sim->selfDestructUnit(unitInfo.id);
+        return true;
     }
 
     bool UnitBehaviorService::attackTargetAir(UnitInfo unitInfo, const AttackTarget& target)

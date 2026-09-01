@@ -577,6 +577,93 @@ namespace rwe
         }
     }
 
+    void GameSimulation::updateFeatureRegrowth()
+    {
+        // The original's sweep, 0x4240A3-0x4241A3. One map square a tick, walking
+        // the grid backwards; when the cursor runs off the bottom it is reloaded
+        // with the last square and that tick is skipped. So a given square gets
+        // one roll every width*height ticks -- on a 64x64-square map, once every
+        // two and a quarter minutes.
+        auto width = static_cast<int>(occupiedGrid.getWidth());
+        auto height = static_cast<int>(occupiedGrid.getHeight());
+
+        --featureRegrowthCursor;
+        if (featureRegrowthCursor < 0)
+        {
+            featureRegrowthCursor = (width * height) - 1;
+            return;
+        }
+
+        // The original divides the cursor by the map's *height* to get the row,
+        // which is only the same as dividing by the width on a square map. That
+        // is a bug rather than a rule -- every other square lookup in the binary,
+        // 0x481550 included, indexes as y*width+x -- so RWE does it the right way.
+        auto sourceX = featureRegrowthCursor % width;
+        auto sourceY = featureRegrowthCursor / width;
+
+        const auto& sourceCell = occupiedGrid.get(sourceX, sourceY);
+        if (!sourceCell.featureId)
+        {
+            return;
+        }
+
+        // A square that is merely covered by a feature anchored elsewhere holds a
+        // back-reference rather than a type, and the original skips it, so a wide
+        // feature seeds once and not once per square it stands on.
+        const auto& sourceFeature = getFeature(*sourceCell.featureId);
+        const auto& definition = getFeatureDefinition(sourceFeature.featureName);
+        auto footprint = computeFootprintRegion(sourceFeature.position, definition.footprintX, definition.footprintZ);
+        if (footprint.x != sourceX || footprint.y != sourceY)
+        {
+            return;
+        }
+
+        // `reproduce` is a percentage, not a flag: the roll is rand(100) against it.
+        if (definition.reproduce == 0)
+        {
+            return;
+        }
+        std::uniform_int_distribution chanceDist(0, 99);
+        if (chanceDist(rng) >= static_cast<int>(definition.reproduce))
+        {
+            return;
+        }
+
+        // The seed lands in a square drawn uniformly from a box `reproduceArea`
+        // across centred on the parent, which for the shipped value of 6 is the
+        // three squares either way.
+        auto area = static_cast<int>(definition.reproduceArea);
+        if (area <= 0)
+        {
+            return;
+        }
+        std::uniform_int_distribution areaDist(0, area - 1);
+        auto targetX = sourceX + areaDist(rng) - (area / 2);
+        auto targetY = sourceY + areaDist(rng) - (area / 2);
+
+        if (targetX < 0 || targetX >= width || targetY < 0 || targetY >= height)
+        {
+            return;
+        }
+
+        // Nothing grows out from under a unit standing on it (0x424189).
+        if (sourceCell.mobileUnitId || sourceCell.buildingInfo)
+        {
+            return;
+        }
+
+        // The original insists the destination square is genuinely empty, not
+        // merely free of a feature of its own, which is what stops a forest
+        // creeping in under buildings and over the whole map.
+        const auto& targetCell = occupiedGrid.get(targetX, targetY);
+        if (targetCell.featureId || targetCell.mobileUnitId || targetCell.buildingInfo)
+        {
+            return;
+        }
+
+        addFeature(sourceFeature.featureName, targetX, targetY);
+    }
+
     bool GameSimulation::loadUnitIntoTransport(UnitId transportId, UnitId unitId, const std::string& piece)
     {
         auto transportRef = tryGetUnitState(transportId);
@@ -2502,6 +2589,11 @@ namespace rwe
 
     void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker)
     {
+        applyDamage(unitId, damagePoints, attacker, false);
+    }
+
+    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer)
+    {
         if (attacker)
         {
             // The original shoots back from inside the damage message
@@ -2541,6 +2633,32 @@ namespace rwe
         damage = (damage * (100 - 4 * veterancyTier(unit.kills))) / 100;
 
         damagePoints = static_cast<unsigned int>(std::max<int64_t>(0, damage));
+
+        // A paralyzer hit never takes hit points off anything: 0x489DEB sends
+        // damage type 2 down its own path and returns before reaching the
+        // subtraction at 0x489EB1. What the number buys is time, in ticks --
+        // which is why the EMP missile's 1800 against a Krogoth is a minute of
+        // paralysis rather than a kill.
+        if (paralyzer)
+        {
+            if (unitDefinition.immuneToParalyzer || damagePoints == 0)
+            {
+                return;
+            }
+
+            // Hits stack: the original adds the new duration to what is left
+            // (0x489E69) and the order handler then clamps the total to 1800
+            // ticks, sixty seconds (0x402D33).
+            auto remaining = unit.paralyzedUntil && *unit.paralyzedUntil > gameTime
+                ? unit.paralyzedUntil->value - gameTime.value
+                : 0u;
+            remaining = std::min(remaining + damagePoints, MaxParalysisTicks);
+            unit.paralyzedUntil = gameTime + GameTime(remaining);
+
+            // Entering the stun drops every weapon's aim (0x402D46-0x402D5F).
+            unit.clearWeaponTargets();
+            return;
+        }
 
         if (unit.hitPoints <= damagePoints)
         {
@@ -2618,6 +2736,12 @@ namespace rwe
 
         auto radiusSquared = radius * radius;
 
+        // Whether this shot stuns instead of hurting. The original reads the
+        // flag off the weapon definition at the moment it applies the hit
+        // (0x499E20) and turns it into damage type 2.
+        auto weaponIt = weaponDefinitions.find(projectile.weaponType);
+        auto paralyzer = weaponIt != weaponDefinitions.end() && weaponIt->second.paralyzer;
+
         std::unordered_set<UnitId> seenUnits;
 
         // Blasts hurt units only. Wreckage and scenery are not damaged by weapons:
@@ -2679,7 +2803,7 @@ namespace rwe
           auto damageScale = blastDamageScale(rweSqrt(unitDistanceSquared), radius, projectile.edgeEffectiveness);
           auto rawDamage = projectile.getDamage(unit.unitType);
           auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * damageScale);
-          applyDamage(*u, scaledDamage, projectile.attacker); });
+          applyDamage(*u, scaledDamage, projectile.attacker, paralyzer); });
 
         // Apply damage to flying units
         for (const auto& flyingUnitId : flyingUnitsSet)
@@ -2703,7 +2827,7 @@ namespace rwe
             auto damageScale = blastDamageScale(rweSqrt(unitDistanceSquared), radius, projectile.edgeEffectiveness);
             auto rawDamage = projectile.getDamage(unit.unitType);
             auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * damageScale);
-            applyDamage(flyingUnitId, scaledDamage, projectile.attacker);
+            applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer);
         }
     }
 
@@ -3377,6 +3501,8 @@ namespace rwe
         updateProjectiles();
 
         updateBurningFeatures();
+
+        updateFeatureRegrowth();
 
         processVictoryCondition();
 

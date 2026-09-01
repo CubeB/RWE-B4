@@ -92,7 +92,7 @@ namespace rwe
             REQUIRE(f.shadTrans == true);
             REQUIRE(f.flamable == true);
             REQUIRE(f.reclaimable == true);
-            REQUIRE(f.reproduce == false);
+            REQUIRE(f.reproduce == 0);
             REQUIRE(f.reproduceArea == 6);
 
             REQUIRE(f.blocking == 1);

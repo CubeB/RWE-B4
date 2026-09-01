@@ -101,6 +101,8 @@ namespace rwe
             u.reclaimProgress,
             u.captureProgress,
             u.selfDestructTime,
+            u.paralyzedUntil,
+            u.moveRateBand,
             u.carriedBy,
             u.transportScriptTarget,
             u.transportScriptStartedAt,
@@ -329,6 +331,7 @@ namespace rwe
             simulation.players,
             simulation.units,
             simulation.projectiles,
-            simulation.features);
+            simulation.features,
+            simulation.featureRegrowthCursor);
     }
 }

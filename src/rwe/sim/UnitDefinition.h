@@ -75,6 +75,17 @@ namespace rwe
         SimScalar maxVelocity;
 
         /**
+         * The two speed thresholds the move-rate script callbacks are banded
+         * by, in the same game units/tick as maxVelocity. At or below the
+         * first, a moving unit is calling MoveRate1; between the two,
+         * MoveRate2; above the second, MoveRate3. The original defaults both
+         * to twice MaxVelocity (0x42C1E6, 0x42C206) so that a unit naming
+         * neither never leaves the first band.
+         */
+        SimScalar moveRate1;
+        SimScalar moveRate2;
+
+        /**
          * Speed at which the unit accelerates in game units/tick.
          */
         SimScalar acceleration;
@@ -268,6 +279,23 @@ namespace rwe
          * solar collector it is standing next to.
          */
         bool shootMe{false};
+
+        /**
+         * A crawling bomb. An attack order on one of these does not fire a
+         * weapon -- neither the Roach nor the Invader has one -- it closes to
+         * `kamikazeDistance` of the target and self-destructs. The original
+         * floors the distance at sixteen world units (0x403364).
+         */
+        bool kamikaze{false};
+
+        unsigned int kamikazeDistance{0};
+
+        /**
+         * TA immunetoparalyzer, bit 26 of `def+0x241` (parsed at 0x42C7FA and
+         * tested at 0x489E39). Both commanders set it, which is why an EMP
+         * missile cannot simply switch a game off.
+         */
+        bool immuneToParalyzer{false};
 
         // Sight / radar / sonar radii in TA "elmos". 0 = no LOS / no radar /
         // no sonar. Consumed by the visibility pass in GameSimulation:

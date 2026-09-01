@@ -46,6 +46,19 @@ namespace rwe
          */
         bool shootMe{false};
 
+        /**
+         * A crawling bomb: an attack order sends it at the target and it blows
+         * itself up on arrival. `kamikaze` is bit 28 of `def+0x241` in the
+         * original (parsed at 0x42CB18), `kamikazedistance` the word at
+         * `def+0x218` (0x42CB29). The Roach and the Invader are the only two
+         * units in the shipped data that set them, and neither has a weapon.
+         */
+        bool kamikaze{false};
+
+        unsigned int kamikazeDistance{0};
+
+        bool immuneToParalyzer{false};
+
         // Sight and radar radii (in TA "elmos"). The fog-of-war system in
         // Phase 2+ will use these to compute per-player visibility grids.
         // Both default to 0; LOS code must treat 0 as "no signal".
@@ -162,6 +175,17 @@ namespace rwe
          * otherwise, and the construction aircraft ship 1.5.
          */
         float bankScale;
+
+        /**
+         * The two speed thresholds that pick which of the MoveRate1 / MoveRate2
+         * / MoveRate3 script callbacks fires while the unit is moving. Both
+         * default in the original to twice MaxVelocity (0x42C1E6, 0x42C206), a
+         * speed nothing can reach, so a unit that names neither is always in the
+         * first band -- which is why the Atlas, which names neither, starts its
+         * exhaust from MoveRate1. Seven units name the first and one the second.
+         */
+        float moveRate1{0.0f};
+        float moveRate2{0.0f};
 
         std::string weapon1;
         std::string weapon2;

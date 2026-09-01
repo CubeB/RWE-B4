@@ -46,7 +46,7 @@ namespace rwe
 
         unsigned int hitDensity;
 
-        bool reproduce;
+        unsigned int reproduce;
         unsigned int reproduceArea;
 
         bool noDisplayInfo;
