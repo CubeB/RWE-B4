@@ -922,7 +922,7 @@ stored `0x42C445` with the usual xor-and-xor bitfield insert) and
 `0x42C465`). **Both default to 2** — the `push 0x2` at `0x42C417` and
 `0x42C433`. The pipeline alignment is checked by the store immediately before
 them, `mov BYTE PTR [ebp+0x22f], al` at `0x42C422`, which is `bmcode` at the
-offset §10 already records.
+offset §19 already records.
 
 Values run 0, 1, 2 for both, and the buttons cycle them 0 → 1 → 2 → 0
 (`0x41A4F6`, a four-way jump over a global order state where 3 means "the
@@ -1027,141 +1027,13 @@ Deliberately not ported:
 - **`unitsOnly`, `turret`, `lineOfSight`, `minbarrelangle`.** Decoded far enough
   to say they are no part of this decision: `0x49ABB0` never looks at them.
 
-## 10. Field offsets
-
-FBI key names are compared at `0x42C129`–`0x42C1C5`, which gives the unit
-definition layout:
-
-| FBI key | Offset | Notes |
-|---|---|---|
-| `maxvelocity` | `def+0x192` | an asymptote set by drag, never clamped |
-| `brakerate` | `def+0x19A` | used by the nose re-aim only |
-| `acceleration` | `def+0x19E` | |
-| `bankscale` | `def+0x1A2` | default `0x10000` = 1.0 |
-| `pitchscale` | `def+0x1A6` | not implemented in RWE |
-| `turnrate` | `def+0x1BA` | |
-| `sightdistance` | `def+0x202` | |
-| `mincloakdistance` | `def+0x208` | |
-| `buildangle` | `def+0x210` | `WORD`, default 0 — see §8 |
-| `builddistance` | `def+0x212` | |
-| `sortbias` | `def+0x21A` | parsed, never read — dead |
-| `bmcode` | `def+0x22F` | `BYTE`; 1 = mobile, 0 = building |
-| `defaultmissiontype` | `def+0x230` | `BYTE` mission id, 0 = none — see §9 |
-| `standingmoveorder` | `def+0x241` bits 0–1 | default 2; 0 hold, 1 maneuver, 2 roam |
-| `standingfireorder` | `def+0x241` bits 2–3 | default 2; 0 hold, 1 return, 2 at will |
-| `mobilestandorders` | `def+0x245` bit 0 | default 0 — offer the move button |
-| `firestandorders` | `def+0x245` bit 1 | default 0 — offer the fire button |
-| `canattack` | `def+0x245` bit 4 | the rest of that dword is in §9 |
-
-Weapon TDF key names are compared through `0x42E484`–`0x42EFC3`. The pipeline
-stores a key's parsed value *after the next key has been pushed*, so pairing a
-push address with the store that follows it lands one slot early — the trap that
-put `flighttime` at `+0xFA` when it is at `+0xFC`. Float keys are stored with an
-`fstp` immediately after their own read and are unambiguous.
-
-| Weapon key | Offset | Notes |
-|---|---|---|
-| `weaponvelocity` | `wdef+0x68` | `×65536/30`, a cap |
-| `startvelocity` | `wdef+0x6C` | `×65536/30` |
-| `weaponacceleration` | `wdef+0x70` | `×65536/900` |
-| `energypershot` / `metalpershot` | `wdef+0xC0` / `+0xC4` | float |
-| `minbarrelangle` | `wdef+0xC8` | float radians, default −11.25°; **not** a word at `+0xFE`, and inert — see §11 |
-| `shakemagnitude` / `shakeduration` | `wdef+0xCC` / `+0xD0` | dword; `shakeduration ×30` |
-| `areaofeffect` | `wdef+0xD6` | word |
-| `edgeeffectiveness` | `wdef+0xD8` | float, default 0.0 |
-| `range` | `wdef+0xDC` | default `0x7FFF` |
-| `coverage` | `wdef+0xE0` | |
-| `reloadtime` | `wdef+0xE4` | word, `×30` |
-| `weapontimer` | `wdef+0xE6` | word, `×30` |
-| `turnrate` | `wdef+0xE8` | word, `×1/30`, a 16-bit angle per tick |
-| `burst` / `burstrate` | `wdef+0xEA` / `+0xEC` | word; `burstrate ×30` |
-| `sprayangle` | `wdef+0xEE` | word |
-| `duration` / `randomdecay` | `wdef+0xF0` / `+0xF2` | word, `×30` |
-| `smokedelay` | `wdef+0xFA` | word, `×30` |
-| `flighttime` | `wdef+0xFC` | word, `×30` |
-| `holdtime` | `wdef+0xFE` | word, `×30`; no known reader — see §11 |
-| `accuracy` | `wdef+0x104` | word |
-| `tolerance` / `pitchtolerance` | `wdef+0x106` / `+0x108` | word; a zero `pitchtolerance` falls back to `tolerance` — see §11 |
-| `firestarter` / `rendertype` / `color` / `color2` | `wdef+0x10B`..`+0x10E` | byte |
-| flags | `wdef+0x111` | dword, see below |
-
-The flag bits at `wdef+0x111`, read off the parser's shifts: `lineofsight` 0,
-`ballistic` 1, `shellweapon` 2, `beamweapon` 3, `vlaunch` 4, `meteor` 5,
-`dropped` 8, `soundtrigger` 11, `guidance` 12, `tracks` 13, `unitsonly` 14,
-`groundbounce` 15, `waterweapon` 16, `toairweapon` 17, `smoketrail` 18,
-`turret` 19, `selfprop` 20, `propeller` 21, `noexplode` 22, `burnblow` 23,
-`twophase` 24, `cruise` 25, `commandfire` 26, `noautorange` 27, `stockpile` 28,
-`targetable` 29, `interceptor` 30.
-
-Projectile instance fields, stride `0x6B`:
-
-| Field | Offset |
-|---|---|
-| weapon definition pointer | `proj+0x00` |
-| position | `proj+0x04` |
-| velocity | `proj+0x1C` |
-| the point it was fired at | `proj+0x28` |
-| heading / pitch | `proj+0x36` / `+0x38` |
-| speed | `proj+0x3A` |
-| distance to the target at launch | `proj+0x3E` |
-| tick fired | `proj+0x42` |
-| tick the motor stops | `proj+0x46` |
-| target unit | `proj+0x4E` |
-| target projectile (interceptors) | `proj+0x56` |
-| burst shots left | `proj+0x60` |
-| flags, phase counter in bits 4–5 | `proj+0x69` |
-
-Unit instance fields:
-
-| Field | Offset |
-|---|---|
-| roll | `unit+0x64` |
-| heading | `unit+0x66` |
-| pitch | `unit+0x68` |
-| movement mode | `unit+0x110` bits 18–19 |
-| firing mode | `unit+0x110` bits 20–21 |
-
-Useful routines:
-
-| Address | What |
-|---|---|
-| `0x43D0D0` | bank update |
-| `0x43D290` | per-tick air movement |
-| `0x468CF0` | world render |
-| `0x4697ED` | Z bucketing, 16-unit quantisation |
-| `0x469B38` | particle layer 7 draw |
-| `0x469B3D` | airborne object pass |
-| `0x4827B0` | `UpdateUnitLOS` |
-| `0x49B3E0` | pick a projectile's aim point |
-| `0x49B520` | step a projectile's heading and pitch toward it |
-| `0x49B720` | per-tick projectile update, all five kinds |
-| `0x49C920` | set a projectile's motor time |
-| `0x49C980` | set a projectile's launch speed |
-| `0x49C9C0` | spawn, line-of-sight and self-propelled |
-| `0x49CC20` | spawn, vertical launch |
-| `0x49CDE0` | spawn, ballistic |
-| `0x49D42E` | the launch dispatch |
-| `0x4B715A` | atan2 |
-| `0x4B7173` | Rotate2D |
-| `0x4E43A0` | float to integer, rounding mode set to **truncate** |
-
-Palette ranges that turned up:
-
-| Range | Used for |
-|---|---|
-| 97–103 | wake / water foam, pale to deep blue |
-| 160–175 | construction display colours, sixteen greens palest to near black |
-| 161–167 | nanolathe spray, the middle seven of those greens |
-
----
-
-## 11. `turret`, and what a hull-mounted gun waits for
+## 10. `turret`, and what a hull-mounted gun waits for
 
 `turret` is **bit 19 of `wdef+0x111`**, parsed at `0x42E8F9` — the key string is
 pushed there, the read follows at `0x42E906`, and `and eax,1 / shl eax,0x13` at
 `0x42E911`–`0x42E91A` puts it in place. The bits either side are `smoketrail`
 (18, key at `0x504150`) and `selfprop` (20, `0x50413C`), which agrees with the
-table in §10.
+table in §19.
 
 ### It chooses the weapon's fire handler
 
@@ -1254,7 +1126,7 @@ that tanks turn their bodies.
 
 It is a float in radians at `wdef+0xC8`, read at `0x42E724` and scaled by
 `ds:0x4FD260` = π/180, with a default of `-11.25` degrees supplied as the double
-`0xC026800000000000` pushed at `0x42E70F`. §10 has this right and the priorities
+`0xC026800000000000` pushed at `0x42E70F`. §19 has this right and the priorities
 note had it wrong twice over: `wdef+0xFE` is `holdtime`, and the field is not a
 clamp.
 
@@ -1297,95 +1169,7 @@ so it is a count of seconds stored as ticks. The same two weapons set it, both t
 
 ---
 
-## 12. Where RWE deliberately differs
-
-Recorded so these do not get "fixed" back later by someone comparing against the
-original:
-
-- **Nanolathe spray lands on the roof**, not inside the model. The original
-  samples the landing height inside the model too, which it can afford because
-  its spray is composited in a late layer. RWE's is depth-tested so a
-  construction aircraft can cover its own beam, so a landing point inside the
-  geometry would be swallowed.
-- **Exhaust occlusion is depth-tested**, not hand-layered — see §5.
-- **The fog raster is windowed on the camera.** At one texel per world unit a
-  whole 640×640-cell map would be 400 MB, past most drivers' limits, so RWE holds
-  a 2.6 MB window a few tiles larger than the view. This is what the original
-  effectively does anyway, composing its overlay per visible screen tile.
-- **Off-map fog cells read as the nearest on-map cell.** Reading them as "clear"
-  leaves the frame's ragged edge with no neighbouring tile to cover it, and a
-  strip of map shows through at the border.
-- **No `BrakeRate` nose re-aim and no pitch** — see §1.
-- **A mobile unit's `buildangle` is ignored.** The original overwrites a mobile
-  unit's spawn heading with the raw value (§8), which for everything but the ten
-  capital ships is zero and so agrees with RWE's half-turn default anyway. RWE
-  takes a factory-built unit's facing from the pad's `QueryBuildInfo` instead,
-  which is what actually points it out of the yard, so a ship coming off a
-  slipway keeps the pad's heading rather than being spun a quarter turn.
-- **A gunship's nose follows its flight path**, so it crosses its ring side-on.
-  The original does the same — but it does *not* hold its aim regardless of
-  where the nose points, which an earlier reading of this claimed. Gunship
-  rockets are `turret=0`, so §11 applies to them and the original holds fire
-  until the nose is within the weapon's tolerance, which for `vtol_rocket` and
-  friends is 8000, about 44°. RWE now does the same.
-- **Only the heading half of the `turret=0` check is enforced.** The original
-  compares the required elevation against the hull's own pitch at `unit+0x68`
-  (§11). RWE's simulation has no hull pitch — `UnitState` carries a rotation and
-  nothing else — so comparing against a notional zero would be a different rule
-  wearing the same name rather than the original's. The heading half is the one
-  that stops a unit shooting sideways and backwards, and it is the half that is
-  implemented.
-
----
-
-## 13. Still unknown or unported
-
-- TA's **Permanent** LOS mode has not been looked at.
-- **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
-  implemented; RWE always uses True.
-- RWE's explored grid is **per-player** rather than the original's one shared
-  bitmask with a bit per LOS group. Equivalent until allied vision groups exist.
-- `hitDensity` is parsed (100 for solid things, 5–10 for foliage, 0 for smudges)
-  and is very likely the pass-through chance for projectiles hitting features,
-  but this has not been confirmed in the binary.
-- The **strafing pass** (`AirToGround`, `0x412710`) is decoded but not ported:
-  RWE's fighters still fly the generic attack run. See the missions document §5.
-- **`maneuverleashlength`** is now parsed but not enforced. In the original it
-  aborts an attack when the aircraft strays that far from where it was standing
-  when the order was given — missions document §8.
-- The exact tick at which the original commits a **bomb release** inside its
-  weapon code is still not pinned down; RWE uses its own bombsight.
-- **`unit+0x110` bits 2–3.** They pick the loose 2000 default over the tight 150
-  when a weapon names no tolerance (§11), and are tested at only three places —
-  `0x40458A`, `0x4057D9` and `0x49D899` — none of which says what they mean. RWE
-  keeps its own 256 default rather than guess.
-- **`holdtime` has no known reader** — see §11. `aimrate` is not a key the
-  original recognises at all, so there is nothing there to find.
-- **`DefaultMissionType`** is decoded (§9) but not ported. RWE seeds a new
-  unit's standing orders from the definition and lets its ordinary idle
-  targeting stand in for `Standby`; what it has no equivalent of is the
-  sight-range search `0x43B700`, which is the only thing that makes `Standby`
-  and `Guard_NoMove` behave differently. Until a unit can decide to walk off
-  and find a fight, the key has nothing to change.
-- **The movement mode is stored but not acted on.** RWE now builds a unit on
-  the Hold Position, Maneuver or Roam its FBI names and reports it to the COB
-  scripts, but nothing reads it back: there is no leash on a unit that breaks
-  off to attack, so Maneuver and Roam come to the same thing and Hold Position
-  is honoured only in that such a unit is never given an attack order to begin
-  with. The original's version is the `0x43B1F0` gate and the anchor order it
-  plants at `unit+0x6a`.
-- **Smoke does not drift downwind.** The vector and the ×8 scaling are decoded
-  (§4, §7) but RWE has no map wind, so every puff goes straight up. The lift
-  itself is right: RWE's half a unit a tick is the original's gravity × 4 on the
-  112 that nearly every map uses, though it will not track a map that sets
-  gravity to something else.
-- The **explosion smoke** (`0x472630` from `0x420AE1`, three puffs seven ticks
-  apart) and the **30-second burning wreck plume** (`0x48644B`) are decoded but
-  not ported; RWE's explosions and wreckage do not smoke afterwards.
-
----
-
-## NN. What an aircraft does with nothing to do
+## 11. What an aircraft does with nothing to do
 
 Two things the player reported, which turn out to be the same question asked
 twice: a bomber "immediately stops in place and lands" once its target is
@@ -1641,7 +1425,7 @@ Decoded here and deliberately **not** ported:
 
 - **The sight-range search `0x43B700`**, which is what both `VTOL_SeekAttack`
   state 1 and `VTOL_Standby` state 1 do before they fly anywhere. RWE has no
-  equivalent — see §13 — and its own idle weapon acquisition stands in.
+  equivalent — see §21 — and its own idle weapon acquisition stands in.
 - **The go-home-when-hurt branch.** Below 75 % health with an active repair pad
   within 3840, both the search circuit and the strafing pass abandon what they
   are doing and push a `VTOL_LANDING` on a pad chosen at random. RWE has no
@@ -1668,7 +1452,7 @@ the data. `VTOL_Standby` also decides whether an idle aircraft hops about or
 goes and lands, on `unit+0x8A`, and that half of it does not need `0x43B700` at
 all.
 
-## NN. Recoil
+## 12. Recoil
 
 Only some units rock when they fire, and the amount they rock by is a constant.
 
@@ -1703,7 +1487,7 @@ StartScriptByName("RockUnit", 0, 0, 2, eax, edi, 0, 0)   ; 0x4B0A70
 
 So `RockUnit(anglex, anglez)` is called with `anglex = -800·cos(bearing)` and
 `anglez = -800·sin(bearing)`. `slot+0x16` is the heading the fire handler
-worked out towards the target (§11), so the bearing is measured from the hull's
+worked out towards the target (§10), so the bearing is measured from the hull's
 nose and the hull heels away from wherever the round went: firing forwards
 lifts the nose, firing off the beam lifts that flank.
 
@@ -1774,7 +1558,7 @@ projectile, where RWE runs it once per burst.
 
 ---
 
-## NN. Thermal vents
+## 13. Thermal vents
 
 ### What a vent is
 
@@ -1938,12 +1722,12 @@ Not ported:
   shipped data is both, so the two agree on real data, and the extra conditions
   also guard the metal grid next to it.
 - **The burning-feature smoke** above, and the `treeburn` sound with it.
-- **Downwind drift**, as §13 already records for the rest of the smoke: RWE has
+- **Downwind drift**, as §21 already records for the rest of the smoke: RWE has
   no map wind, so a vent's plume goes straight up.
 
 ---
 
-## NN. Jamming, stealth and cloaking
+## 14. Jamming, stealth and cloaking
 
 Three keys that change who can see or shoot whom. They are one section because
 the original answers all three in one routine — the per-tick visibility pass at
@@ -1952,7 +1736,7 @@ query that `GameSimulation::updateVisibility` builds and `canDetectUnit` reads.
 
 ### The field offsets
 
-Read off the FBI parser under the pipeline rule §10 describes — a key's value is
+Read off the FBI parser under the pipeline rule §19 describes — a key's value is
 stored *after the next key's push* — and cross-checked against the
 definition-copy routine at `0x42B68F`–`0x42B6DF`, which moves the same run of
 words with the same widths.
@@ -2173,7 +1957,7 @@ Still unported from this reading:
   skipping only the viewer's own jammers, so allies do jam each other; it is
   recorded here in case it ever looks like a bug.
 
-## NN. Stockpiled weapons and interception
+## 15. Stockpiled weapons and interception
 
 Eight weapons in the shipped data carry `stockpile`, and none of them fires out
 of the economy the way the rest do. The round is built beforehand, at a price,
@@ -2336,7 +2120,7 @@ label for the target-category machinery rather than anything that gates the
 interception above, which keys entirely off the weapon flags. **Not ported, and
 not understood.**
 
-### A correction to §10: `holdtime` does have a reader
+### A correction to §19: `holdtime` does have a reader
 
 `WORD wdef+0xFE` is read at `0x499E81` and `0x49C8D6`, both on the path that
 retires the projectile the camera is following (`globals+0x142F7`), and stored
@@ -2365,7 +2149,7 @@ cam. Nothing in the simulation reads it.
   difference: the four weapons with a burst — the flamethrower and the three
   EMGs — name no `energypershot`, no `metalpershot` and no `stockpile`.
 
-## NN. The D-gun
+## 16. The D-gun
 
 There is less to it than the name suggests. `ARM_DISINTEGRATOR` — and its Core
 twin — is an ordinary weapon:
@@ -2421,7 +2205,7 @@ Every part of what it does comes out of that.
   individually named; nothing was traced far enough to say which weapon or
   event produces each.
 
-## NN. The streaming economy
+## 17. The streaming economy
 
 Metal and energy are not spent tick by tick. Consumers ask every tick, and once
 a second the whole player's asking is added up and settled against one number.
@@ -2602,7 +2386,7 @@ made call-to-store):
 
 `buildcostenergy` and `buildcostmetal` are confirmed at a second site,
 `0x42AD40`; `workertime` and `buildtime` by the chain that lands `sightdistance`
-on the `def+0x202` already in §10.
+on the `def+0x202` already in §19.
 
 **There is no `MetalUse` key.** `metaluse` does not appear in the binary at all,
 only the display string `UNITMETALUSE`. Metal is spent by building, by weapons
@@ -2729,7 +2513,8 @@ What did not, and now does:
 - **The lifetime production, demand and waste totals** at `player+0xAC` through
   `player+0xD4`. They are statistics for the end-of-game screen, which RWE
   does not have.
-## NN. Small systems: hit density, regrowth, kamikaze, paralysis, move rate
+
+## 18. Small systems: hit density, regrowth, kamikaze, paralysis, move rate
 
 Five small keys that the shipped data sets and RWE parsed but never read. Four
 of them turned out to have real machinery behind them. One of them does not
@@ -2744,7 +2529,7 @@ same `push <keystring>` / `call 0x4C46C0` pipeline the FBI parser uses — and
 `hitdensity` is not among them. 559 features name it; the engine of this build
 ignores every one.
 
-So §13's note that it is "very likely the pass-through chance for projectiles
+So §21's note that it is "very likely the pass-through chance for projectiles
 hitting features" is **refuted**, not merely unconfirmed.
 
 What the original actually does with a shot and a feature is at `0x49B2B3`,
@@ -2953,3 +2738,220 @@ its movement object's speed word, and treats a unit that is turning on the spot
 with no linear speed as moving (`0x43DA8E` also tests `WORD [mov+0x24]`); RWE
 measures the distance the unit actually covered this tick and calls anything
 under a tenth of a unit stopped.
+
+## 19. Field offsets
+
+FBI key names are compared at `0x42C129`–`0x42C1C5`, which gives the unit
+definition layout:
+
+| FBI key | Offset | Notes |
+|---|---|---|
+| `maxvelocity` | `def+0x192` | an asymptote set by drag, never clamped |
+| `brakerate` | `def+0x19A` | used by the nose re-aim only |
+| `acceleration` | `def+0x19E` | |
+| `bankscale` | `def+0x1A2` | default `0x10000` = 1.0 |
+| `pitchscale` | `def+0x1A6` | not implemented in RWE |
+| `turnrate` | `def+0x1BA` | |
+| `sightdistance` | `def+0x202` | |
+| `mincloakdistance` | `def+0x208` | |
+| `buildangle` | `def+0x210` | `WORD`, default 0 — see §8 |
+| `builddistance` | `def+0x212` | |
+| `sortbias` | `def+0x21A` | parsed, never read — dead |
+| `bmcode` | `def+0x22F` | `BYTE`; 1 = mobile, 0 = building |
+| `defaultmissiontype` | `def+0x230` | `BYTE` mission id, 0 = none — see §9 |
+| `standingmoveorder` | `def+0x241` bits 0–1 | default 2; 0 hold, 1 maneuver, 2 roam |
+| `standingfireorder` | `def+0x241` bits 2–3 | default 2; 0 hold, 1 return, 2 at will |
+| `mobilestandorders` | `def+0x245` bit 0 | default 0 — offer the move button |
+| `firestandorders` | `def+0x245` bit 1 | default 0 — offer the fire button |
+| `canattack` | `def+0x245` bit 4 | the rest of that dword is in §9 |
+
+Weapon TDF key names are compared through `0x42E484`–`0x42EFC3`. The pipeline
+stores a key's parsed value *after the next key has been pushed*, so pairing a
+push address with the store that follows it lands one slot early — the trap that
+put `flighttime` at `+0xFA` when it is at `+0xFC`. Float keys are stored with an
+`fstp` immediately after their own read and are unambiguous.
+
+| Weapon key | Offset | Notes |
+|---|---|---|
+| `weaponvelocity` | `wdef+0x68` | `×65536/30`, a cap |
+| `startvelocity` | `wdef+0x6C` | `×65536/30` |
+| `weaponacceleration` | `wdef+0x70` | `×65536/900` |
+| `energypershot` / `metalpershot` | `wdef+0xC0` / `+0xC4` | float |
+| `minbarrelangle` | `wdef+0xC8` | float radians, default −11.25°; **not** a word at `+0xFE`, and inert — see §10 |
+| `shakemagnitude` / `shakeduration` | `wdef+0xCC` / `+0xD0` | dword; `shakeduration ×30` |
+| `areaofeffect` | `wdef+0xD6` | word |
+| `edgeeffectiveness` | `wdef+0xD8` | float, default 0.0 |
+| `range` | `wdef+0xDC` | default `0x7FFF` |
+| `coverage` | `wdef+0xE0` | |
+| `reloadtime` | `wdef+0xE4` | word, `×30` |
+| `weapontimer` | `wdef+0xE6` | word, `×30` |
+| `turnrate` | `wdef+0xE8` | word, `×1/30`, a 16-bit angle per tick |
+| `burst` / `burstrate` | `wdef+0xEA` / `+0xEC` | word; `burstrate ×30` |
+| `sprayangle` | `wdef+0xEE` | word |
+| `duration` / `randomdecay` | `wdef+0xF0` / `+0xF2` | word, `×30` |
+| `smokedelay` | `wdef+0xFA` | word, `×30` |
+| `flighttime` | `wdef+0xFC` | word, `×30` |
+| `holdtime` | `wdef+0xFE` | word, `×30`; no known reader — see §10 |
+| `accuracy` | `wdef+0x104` | word |
+| `tolerance` / `pitchtolerance` | `wdef+0x106` / `+0x108` | word; a zero `pitchtolerance` falls back to `tolerance` — see §10 |
+| `firestarter` / `rendertype` / `color` / `color2` | `wdef+0x10B`..`+0x10E` | byte |
+| flags | `wdef+0x111` | dword, see below |
+
+The flag bits at `wdef+0x111`, read off the parser's shifts: `lineofsight` 0,
+`ballistic` 1, `shellweapon` 2, `beamweapon` 3, `vlaunch` 4, `meteor` 5,
+`dropped` 8, `soundtrigger` 11, `guidance` 12, `tracks` 13, `unitsonly` 14,
+`groundbounce` 15, `waterweapon` 16, `toairweapon` 17, `smoketrail` 18,
+`turret` 19, `selfprop` 20, `propeller` 21, `noexplode` 22, `burnblow` 23,
+`twophase` 24, `cruise` 25, `commandfire` 26, `noautorange` 27, `stockpile` 28,
+`targetable` 29, `interceptor` 30.
+
+Projectile instance fields, stride `0x6B`:
+
+| Field | Offset |
+|---|---|
+| weapon definition pointer | `proj+0x00` |
+| position | `proj+0x04` |
+| velocity | `proj+0x1C` |
+| the point it was fired at | `proj+0x28` |
+| heading / pitch | `proj+0x36` / `+0x38` |
+| speed | `proj+0x3A` |
+| distance to the target at launch | `proj+0x3E` |
+| tick fired | `proj+0x42` |
+| tick the motor stops | `proj+0x46` |
+| target unit | `proj+0x4E` |
+| target projectile (interceptors) | `proj+0x56` |
+| burst shots left | `proj+0x60` |
+| flags, phase counter in bits 4–5 | `proj+0x69` |
+
+Unit instance fields:
+
+| Field | Offset |
+|---|---|
+| roll | `unit+0x64` |
+| heading | `unit+0x66` |
+| pitch | `unit+0x68` |
+| movement mode | `unit+0x110` bits 18–19 |
+| firing mode | `unit+0x110` bits 20–21 |
+
+Useful routines:
+
+| Address | What |
+|---|---|
+| `0x43D0D0` | bank update |
+| `0x43D290` | per-tick air movement |
+| `0x468CF0` | world render |
+| `0x4697ED` | Z bucketing, 16-unit quantisation |
+| `0x469B38` | particle layer 7 draw |
+| `0x469B3D` | airborne object pass |
+| `0x4827B0` | `UpdateUnitLOS` |
+| `0x49B3E0` | pick a projectile's aim point |
+| `0x49B520` | step a projectile's heading and pitch toward it |
+| `0x49B720` | per-tick projectile update, all five kinds |
+| `0x49C920` | set a projectile's motor time |
+| `0x49C980` | set a projectile's launch speed |
+| `0x49C9C0` | spawn, line-of-sight and self-propelled |
+| `0x49CC20` | spawn, vertical launch |
+| `0x49CDE0` | spawn, ballistic |
+| `0x49D42E` | the launch dispatch |
+| `0x4B715A` | atan2 |
+| `0x4B7173` | Rotate2D |
+| `0x4E43A0` | float to integer, rounding mode set to **truncate** |
+
+Palette ranges that turned up:
+
+| Range | Used for |
+|---|---|
+| 97–103 | wake / water foam, pale to deep blue |
+| 160–175 | construction display colours, sixteen greens palest to near black |
+| 161–167 | nanolathe spray, the middle seven of those greens |
+
+---
+
+## 20. Where RWE deliberately differs
+
+Recorded so these do not get "fixed" back later by someone comparing against the
+original:
+
+- **Nanolathe spray lands on the roof**, not inside the model. The original
+  samples the landing height inside the model too, which it can afford because
+  its spray is composited in a late layer. RWE's is depth-tested so a
+  construction aircraft can cover its own beam, so a landing point inside the
+  geometry would be swallowed.
+- **Exhaust occlusion is depth-tested**, not hand-layered — see §5.
+- **The fog raster is windowed on the camera.** At one texel per world unit a
+  whole 640×640-cell map would be 400 MB, past most drivers' limits, so RWE holds
+  a 2.6 MB window a few tiles larger than the view. This is what the original
+  effectively does anyway, composing its overlay per visible screen tile.
+- **Off-map fog cells read as the nearest on-map cell.** Reading them as "clear"
+  leaves the frame's ragged edge with no neighbouring tile to cover it, and a
+  strip of map shows through at the border.
+- **No `BrakeRate` nose re-aim and no pitch** — see §1.
+- **A mobile unit's `buildangle` is ignored.** The original overwrites a mobile
+  unit's spawn heading with the raw value (§8), which for everything but the ten
+  capital ships is zero and so agrees with RWE's half-turn default anyway. RWE
+  takes a factory-built unit's facing from the pad's `QueryBuildInfo` instead,
+  which is what actually points it out of the yard, so a ship coming off a
+  slipway keeps the pad's heading rather than being spun a quarter turn.
+- **A gunship's nose follows its flight path**, so it crosses its ring side-on.
+  The original does the same — but it does *not* hold its aim regardless of
+  where the nose points, which an earlier reading of this claimed. Gunship
+  rockets are `turret=0`, so §10 applies to them and the original holds fire
+  until the nose is within the weapon's tolerance, which for `vtol_rocket` and
+  friends is 8000, about 44°. RWE now does the same.
+- **Only the heading half of the `turret=0` check is enforced.** The original
+  compares the required elevation against the hull's own pitch at `unit+0x68`
+  (§10). RWE's simulation has no hull pitch — `UnitState` carries a rotation and
+  nothing else — so comparing against a notional zero would be a different rule
+  wearing the same name rather than the original's. The heading half is the one
+  that stops a unit shooting sideways and backwards, and it is the half that is
+  implemented.
+
+---
+
+## 21. Still unknown or unported
+
+- TA's **Permanent** LOS mode has not been looked at.
+- **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
+  implemented; RWE always uses True.
+- RWE's explored grid is **per-player** rather than the original's one shared
+  bitmask with a bit per LOS group. Equivalent until allied vision groups exist.
+- `hitDensity` is parsed (100 for solid things, 5–10 for foliage, 0 for smudges)
+  and is very likely the pass-through chance for projectiles hitting features,
+  but this has not been confirmed in the binary.
+- The **strafing pass** (`AirToGround`, `0x412710`) is decoded but not ported:
+  RWE's fighters still fly the generic attack run. See the missions document §5.
+- **`maneuverleashlength`** is now parsed but not enforced. In the original it
+  aborts an attack when the aircraft strays that far from where it was standing
+  when the order was given — missions document §8.
+- The exact tick at which the original commits a **bomb release** inside its
+  weapon code is still not pinned down; RWE uses its own bombsight.
+- **`unit+0x110` bits 2–3.** They pick the loose 2000 default over the tight 150
+  when a weapon names no tolerance (§10), and are tested at only three places —
+  `0x40458A`, `0x4057D9` and `0x49D899` — none of which says what they mean. RWE
+  keeps its own 256 default rather than guess.
+- **`holdtime` has no known reader** — see §10. `aimrate` is not a key the
+  original recognises at all, so there is nothing there to find.
+- **`DefaultMissionType`** is decoded (§9) but not ported. RWE seeds a new
+  unit's standing orders from the definition and lets its ordinary idle
+  targeting stand in for `Standby`; what it has no equivalent of is the
+  sight-range search `0x43B700`, which is the only thing that makes `Standby`
+  and `Guard_NoMove` behave differently. Until a unit can decide to walk off
+  and find a fight, the key has nothing to change.
+- **The movement mode is stored but not acted on.** RWE now builds a unit on
+  the Hold Position, Maneuver or Roam its FBI names and reports it to the COB
+  scripts, but nothing reads it back: there is no leash on a unit that breaks
+  off to attack, so Maneuver and Roam come to the same thing and Hold Position
+  is honoured only in that such a unit is never given an attack order to begin
+  with. The original's version is the `0x43B1F0` gate and the anchor order it
+  plants at `unit+0x6a`.
+- **Smoke does not drift downwind.** The vector and the ×8 scaling are decoded
+  (§4, §7) but RWE has no map wind, so every puff goes straight up. The lift
+  itself is right: RWE's half a unit a tick is the original's gravity × 4 on the
+  112 that nearly every map uses, though it will not track a map that sets
+  gravity to something else.
+- The **explosion smoke** (`0x472630` from `0x420AE1`, three puffs seven ticks
+  apart) and the **30-second burning wreck plume** (`0x48644B`) are decoded but
+  not ported; RWE's explosions and wreckage do not smoke afterwards.
+
+---
+

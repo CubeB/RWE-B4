@@ -297,7 +297,7 @@ limit, and `aimrate`/`holdtime` (2 each) for how the turret tracks.
 **Effort / risk.** 1–2 days. Medium risk — interacts with the existing aim-script
 flow, and issue #42 (aiming scripts running twice) is in the same code.
 
-**Done, and three things above are wrong** — written up as `TOTALA-EXE.md` §11.
+**Done, and three things above are wrong** — written up as `TOTALA-EXE.md` §10.
 
 - The `turret=0` weapons are **not hull-mounted tank guns**; there is no such
   thing in the shipped data. They are aircraft weapons, torpedoes, vertical-launch
@@ -345,7 +345,7 @@ rate and the frame walk.
 
 Still open from the same reading: smoke does not drift downwind (the wind vector
 is decoded, RWE has no map wind), and neither explosions nor wreckage smoke
-afterwards. Both are noted in `TOTALA-EXE.md` §12.
+afterwards. Both are noted in `TOTALA-EXE.md` §20.
 
 ### 9. Radar jammers, stealth, sonar jamming — DONE
 
@@ -521,7 +521,7 @@ has no reader in this build at all. The projectile-versus-feature collision at
 density. RWE already does exactly this, so **no code was changed**; only
 `src/rwe/sim/hitdensity.test.cpp`, which fires the same shot at the same rock at
 each of the four densities the shipped data uses and requires it to stop every
-time, so nobody implements the guess later. `TOTALA-EXE.md` §13's note should be
+time, so nobody implements the guess later. `TOTALA-EXE.md` §21's note should be
 read together with §NN.
 
 ---
@@ -552,7 +552,7 @@ read together with §NN.
     `norestrict` (6), `digger`, `teleporter`, `immunetoparalyzer`,
     `cantbetransported` (1). Each is an hour or two. `canstop` and `shootme` are
     the two with enough coverage to matter.
-23. **TA's Permanent and Circular LOS modes.** Already in `TOTALA-EXE.md` §13.
+23. **TA's Permanent and Circular LOS modes.** Already in `TOTALA-EXE.md` §21.
     Circular is fully understood (a `vismasks.gaf` stamp, radius
     `clamp(SightDistance/32, 5, 14)`); Permanent has not been looked at. Only
     reachable once there is a skirmish option to select them, so low urgency.
@@ -588,7 +588,7 @@ read together with §NN.
 
 26. **`sortbias`** — parsed by the original into `def+0x21A` and read nowhere.
     Already recorded in the findings doc; leave dead.
-27. **The deliberate departures in `TOTALA-EXE.md` §12** — the nanolathe
+27. **The deliberate departures in `TOTALA-EXE.md` §20** — the nanolathe
     spray landing on the roof, depth-tested exhaust occlusion, the
     camera-windowed fog raster, off-map fog cells reading as the nearest on-map
     cell, and the absent `BrakeRate` nose re-aim. These are decisions, not gaps.
@@ -683,7 +683,7 @@ a **float** at `+0xC8` and `+0xFE` is `holdtime`; `+0x104` is `accuracy`,
 `+0x106` is `tolerance`, `+0x108` is `pitchtolerance`; `shakemagnitude` is a
 dword at `+0xCC` and `shakeduration` at `+0xD0`. Everything before them in the
 line is right. The full corrected weapon layout, with the flag bit numbers, is
-in `TOTALA-EXE.md` §10.
+in `TOTALA-EXE.md` §19.
 
 Useful new routine addresses:
 
