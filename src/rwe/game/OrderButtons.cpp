@@ -68,6 +68,25 @@ namespace rwe
         return std::nullopt;
     }
 
+    bool isStockpileButtonName(const std::string& name)
+    {
+        return name.find("MAKENUKE") != std::string::npos || name.find("MAKEANTI") != std::string::npos;
+    }
+
+    std::string stockpileButtonLabel(int stockedRounds, int queuedRounds)
+    {
+        std::string label;
+        if (stockedRounds != 0)
+        {
+            label += std::to_string(stockedRounds);
+        }
+        if (queuedRounds != 0)
+        {
+            label += " +" + std::to_string(queuedRounds);
+        }
+        return label;
+    }
+
     bool unitOffersOrderButton(const OrderButtonUnit& unit, OrderButton button)
     {
         const auto& definition = *unit.definition;

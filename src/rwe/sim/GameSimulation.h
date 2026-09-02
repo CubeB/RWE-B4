@@ -779,6 +779,13 @@ namespace rwe
          */
         void modifyStockpileQueue(UnitId unitId, int count);
 
+        /**
+         * The unit's stockpiled weapon, for anything that wants to read the
+         * magazine without knowing which slot it is in. Nothing if the unit has
+         * none, which is every unit but a launcher.
+         */
+        std::optional<std::reference_wrapper<const UnitWeapon>> tryGetStockpileWeapon(UnitId unitId) const;
+
         void quietlyKillUnit(UnitId unitId);
 
         Matrix4x<SimScalar> getUnitPieceLocalTransform(UnitId unitId, const std::string& pieceName) const;

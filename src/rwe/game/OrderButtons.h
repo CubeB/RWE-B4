@@ -63,6 +63,28 @@ namespace rwe
     bool unitOffersOrderButton(const OrderButtonUnit& unit, OrderButton button);
 
     /**
+     * Whether a GUI element is the button that orders a round for a stockpiled
+     * weapon. The original does not compare the name: it runs strstr for
+     * "MAKENUKE" and then for "MAKEANTI" over whatever the gadget happens to be
+     * called (0x419B3C and 0x419B4E, with 0x4E49B0 being strstr) and treats a
+     * hit on either as the same command. It has to be a substring test, because
+     * the six launchers in the shipped data do not agree on a prefix: ARMSILO1
+     * names its button ARMMAKENUKE and CORSILO1 CORMAKENUKE, but ARMEMP1 says
+     * EMPMAKENUKE and CORTRON1 TRONMAKENUKE.
+     */
+    bool isStockpileButtonName(const std::string& name);
+
+    /**
+     * The readout the original prints on that button (0x419A2B): the rounds in
+     * the magazine, then the outstanding order count as " +M". Either being
+     * zero leaves it off, so an empty launcher with three on order reads " +3",
+     * leading space and all -- the original prints the suffix at the end of a
+     * string it has just truncated to nothing, and does not go back for the
+     * space.
+     */
+    std::string stockpileButtonLabel(int stockedRounds, int queuedRounds);
+
+    /**
      * Whether a selection offers a button. The original's accumulator loop
      * ORs the capability bits together -- 0x41B4A1 and its nine neighbours all
      * store a plain 1 into their slot and nothing ever clears one -- so a

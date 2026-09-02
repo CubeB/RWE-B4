@@ -779,18 +779,24 @@ namespace rwe
                 auto unitDefinition = parseUnitDefinition(fbi, dataMaps.movementClassDatabase);
                 dataMaps.unitDefinitions.insert({toUpper(fbi.unitName), std::move(unitDefinition)});
 
-                // if it's a builder, also attempt to read its gui pages
-                if (fbi.builder)
+                // Read the unit's gui pages if it has any. This used to be
+                // gated on Builder=1, which is wrong: the six launchers that
+                // stockpile a round -- ARMSILO, CORSILO, ARMAMD, CORFMD,
+                // ARMEMP, CORTRON -- all say Builder=0 in their FBI and all
+                // ship a page of their own, whose single live gadget is the
+                // MAKENUKE or MAKEANTI button that orders the round. Gating on
+                // the flag left those pages on disk and the button with no way
+                // to reach it. A page only exists if <unitname><n>.GUI does, so
+                // asking for one costs a failed VFS lookup per unit and nothing
+                // more.
+                auto guiPages = loadBuilderGui(fbi.unitName);
+                if (guiPages)
                 {
-                    auto guiPages = loadBuilderGui(fbi.unitName);
-                    if (guiPages)
-                    {
-                        dataMaps.builderGuisDatabase.addBuilderGui(fbi.unitName, std::move(*guiPages));
-                    }
-
-                    // TODO: if no gui defined, attempt to build it dynamically?
-                    // Need a database of download.tdf mappings first...
+                    dataMaps.builderGuisDatabase.addBuilderGui(fbi.unitName, std::move(*guiPages));
                 }
+
+                // TODO: if no gui defined, attempt to build it dynamically?
+                // Need a database of download.tdf mappings first...
 
                 auto meshInfo = meshService.loadUnitMesh(fbi.objectName);
                 dataMaps.modelDefinitions.insert({toUpper(fbi.objectName), std::move(meshInfo.modelDefinition)});

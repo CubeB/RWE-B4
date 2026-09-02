@@ -359,6 +359,9 @@ namespace rwe
 
         std::unordered_map<UnitId, std::unordered_map<std::string, int>> unconfirmedBuildQueueDelta;
 
+        /** The same thing for rounds ordered on a launcher, which has only the one queue. */
+        std::unordered_map<UnitId, int> unconfirmedStockpileDelta;
+
         std::vector<std::pair<GameTime, GameHash>> gameHashes;
 
         std::optional<std::ofstream> stateLogStream;
@@ -513,6 +516,8 @@ namespace rwe
 
         void modifyBuildQueue(UnitId unitId, const std::string& unitType, int count);
 
+        void modifyStockpileQueue(UnitId unitId, int count);
+
         void onChannelFinished(int channel);
 
         static Matrix4f worldToMinimapMatrix(const MapTerrain& terrain, const Rectangle2f& minimapRect);
@@ -572,6 +577,9 @@ namespace rwe
         void localPlayerSetCloak(UnitId unitId, bool cloaked);
 
         void localPlayerModifyBuildQueue(UnitId unitId, const std::string& unitType, int count);
+
+        /** Order another round for the unit's stockpiled weapon, or take one off the queue. */
+        void localPlayerModifyStockpile(UnitId unitId, int count);
 
         void issueUnitOrder(UnitId unitId, const UnitOrder& order);
 
@@ -711,6 +719,14 @@ namespace rwe
         void updateUnconfirmedBuildQueueDelta(UnitId unitId, const std::string& unitType, int count);
 
         int getUnconfirmedBuildQueueCount(UnitId unitId, const std::string& unitType) const;
+
+        /**
+         * Rewrite the "N +M" readout on a launcher's MAKENUKE/MAKEANTI button.
+         * Unlike a build queue this has to be done every frame rather than only
+         * when a command lands: the magazine also goes up on its own when the
+         * simulation finishes a round, with no command to hang the refresh on.
+         */
+        void refreshStockpileGuiTotal();
 
         std::unique_ptr<UiPanel> createBuildPanel(const std::string& guiname, const std::vector<GuiEntry>& panelDefinition, const std::unordered_map<std::string, int>& totals);
 

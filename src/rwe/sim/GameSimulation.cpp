@@ -2287,6 +2287,19 @@ namespace rwe
         }
     }
 
+    std::optional<std::reference_wrapper<const UnitWeapon>> GameSimulation::tryGetStockpileWeapon(UnitId unitId) const
+    {
+        const auto& unit = getUnitState(unitId);
+        for (const auto& weapon : unit.weapons)
+        {
+            if (weapon && weaponDefinitions.at(weapon->weaponType).stockpile)
+            {
+                return std::cref(*weapon);
+            }
+        }
+        return std::nullopt;
+    }
+
     void GameSimulation::quietlyKillUnit(UnitId unitId)
     {
         auto& unit = getUnitState(unitId);
