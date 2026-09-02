@@ -841,6 +841,20 @@ namespace rwe
      * shimmers from pale to dark along its length rather than being dyed one
      * colour per particle.
      */
+    /**
+     * Palette entries 97..103, the seven water blues a wake walks up from
+     * palest to deepest. Read out of the shipped PALETTE.PAL.
+     */
+    static const std::array<Vector3f, 7> WakeColors{
+        Vector3f(203 / 255.0f, 227 / 255.0f, 255 / 255.0f),
+        Vector3f(175 / 255.0f, 207 / 255.0f, 255 / 255.0f),
+        Vector3f(151 / 255.0f, 179 / 255.0f, 255 / 255.0f),
+        Vector3f(123 / 255.0f, 151 / 255.0f, 255 / 255.0f),
+        Vector3f(103 / 255.0f, 127 / 255.0f, 255 / 255.0f),
+        Vector3f(83 / 255.0f, 107 / 255.0f, 239 / 255.0f),
+        Vector3f(63 / 255.0f, 91 / 255.0f, 227 / 255.0f),
+    };
+
     static const std::array<Vector3f, 7> NanoSprayColors{
         Vector3f(171 / 255.0f, 231 / 255.0f, 127 / 255.0f),
         Vector3f(131 / 255.0f, 211 / 255.0f, 91 / 255.0f),
@@ -1013,11 +1027,11 @@ namespace rwe
         const auto bottomLeft = particle.position + Vector3f(-1.0f, 0.0f, 1.0f);
         const auto bottomRight = particle.position + Vector3f(1.0f, 0.0f, 1.0f);
 
-        Vector3f startColor(1.0f, 1.0f, 1.0f);
-        Vector3f finishColor(0.4f, 0.5f, 1.0f);
-        auto duration = wakeRenderInfo->finishTime - particle.startTime;
-        auto timeElapsed = currentTime - particle.startTime;
-        auto color = lerp(startColor, finishColor, static_cast<float>(timeElapsed.value) / static_cast<float>(duration.value));
+        // A discrete step along the seven water blues rather than a fade. The
+        // original advances the palette index by one every rampPeriod ticks
+        // and never wraps, because the life is exactly six steps long.
+        auto age = static_cast<unsigned int>((currentTime - particle.startTime).value);
+        const auto& color = WakeColors[wakeColorIndex(age, wakeRenderInfo->rampPeriod)];
 
         pushTriangle(batch.triangles, topLeft, bottomLeft, bottomRight, color);
         pushTriangle(batch.triangles, topLeft, bottomRight, topRight, color);
@@ -1057,7 +1071,7 @@ namespace rwe
         batch.sprites.push_back(SpriteRenderInfo{&sprite, mvpMatrix, spriteRenderInfo->translucent});
     }
 
-    void updateParticles(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, std::vector<Particle>& particles)
+    void updateParticles(const GameMediaDatabase& gameMediaDatabase, const MapTerrain& terrain, GameTime currentTime, std::vector<Particle>& particles)
     {
         auto end = particles.end();
         for (auto it = particles.begin(); it != end;)
@@ -1070,7 +1084,19 @@ namespace rwe
                     return particle.isFinished(currentTime, s, anim->sprites.size());
                 },
                 [&](const ParticleRenderTypeWake& w) {
-                    return currentTime >= w.finishTime;
+                    if (currentTime >= w.finishTime)
+                    {
+                        return true;
+                    }
+
+                    // The original kills a wake dot the moment the ground
+                    // under it comes up to sea level, which is what makes a
+                    // wake stop cleanly at a shoreline instead of running up
+                    // the beach behind the ship.
+                    auto groundHeight = terrain.getHeightAt(
+                        SimScalar(particle.position.x),
+                        SimScalar(particle.position.z));
+                    return groundHeight >= terrain.getSeaLevel();
                 },
                 [&](const ParticleRenderTypeNano& n) {
                     return currentTime >= n.finishTime;
@@ -1247,6 +1273,32 @@ namespace rwe
         auto mvpMatrix = viewProjectionMatrix * matrix;
 
         batch.meshes.push_back(ColoredMeshRenderInfo{selectionMesh.value().get(), mvpMatrix});
+    }
+
+    WakeEmission computeWakeEmission(const Vector3f& firstVertex, const Vector3f& secondVertex, bool reverse, unsigned int rampPeriod)
+    {
+        // Reverse swaps which end the foam comes off, and with it the drift.
+        const auto& spawnPosition = reverse ? secondVertex : firstVertex;
+        const auto& otherVertex = reverse ? firstVertex : secondVertex;
+
+        // Half a world unit a tick, whatever the two vertices are: the
+        // original normalises the difference before scaling it, so how far
+        // apart the modeller put them makes no difference to the speed.
+        auto offset = otherVertex - spawnPosition;
+        auto velocity = offset.lengthSquared() > 0.0f ? offset.normalized() / 2.0f : Vector3f(0.0f, 0.0f, 0.0f);
+
+        // Six colour steps, so the dot reaches the last blue as it dies.
+        return WakeEmission{spawnPosition, velocity, GameTime(rampPeriod * 6)};
+    }
+
+    std::size_t wakeColorIndex(unsigned int age, unsigned int rampPeriod)
+    {
+        if (rampPeriod == 0)
+        {
+            return 0;
+        }
+
+        return std::min<std::size_t>(age / rampPeriod, WakeColors.size() - 1);
     }
 
     void accumulateScreenShake(ScreenShakeState& state, int magnitude, int durationTicks)

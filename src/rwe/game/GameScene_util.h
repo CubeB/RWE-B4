@@ -169,7 +169,7 @@ namespace rwe
     /** frac is the fraction of the current tick that has elapsed, for smooth motion between ticks. */
     void drawNanoParticle(GameTime currentTime, float frac, const Particle& particle, ColoredMeshBatch& batch);
 
-    void updateParticles(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, std::vector<Particle>& particles);
+    void updateParticles(const GameMediaDatabase& gameMediaDatabase, const MapTerrain& terrain, GameTime currentTime, std::vector<Particle>& particles);
 
     /**
      * A thermal vent puffs once every this many ticks, for as long as the map
@@ -223,6 +223,27 @@ namespace rwe
         UnitMeshBatch& unitMeshBatch);
 
     void drawSelectionRect(const GameMediaDatabase& gameMediaDatabase, const Matrix4f& viewProjectionMatrix, const UnitState& unit, const UnitDefinition& unitDefinition, float frac, ColoredMeshesBatch& batch);
+
+    /**
+     * Where a wake dot starts, which way it drifts and how long it lasts.
+     * All four wake types come out of this one function; see
+     * GameScene::emitWakeFromPiece.
+     */
+    struct WakeEmission
+    {
+        Vector3f spawnPosition;
+        Vector3f velocity;
+        GameTime duration;
+    };
+
+    WakeEmission computeWakeEmission(const Vector3f& firstVertex, const Vector3f& secondVertex, bool reverse, unsigned int rampPeriod);
+
+    /**
+     * Which of the seven water blues a wake dot is showing at a given age.
+     * The original steps one entry every rampPeriod ticks over a life of
+     * exactly six steps, so this never needs to wrap.
+     */
+    std::size_t wakeColorIndex(unsigned int age, unsigned int rampPeriod);
 
     /**
      * The camera shake the original runs from `shakemagnitude` and

@@ -47,9 +47,18 @@ namespace rwe
         std::vector<GameTime> frameStartTimes;
     };
 
+    /**
+     * A single dot of water foam. The original draws one screen pixel filled
+     * with a palette index and walks that index up entries 97..103, one step
+     * every `rampPeriod` ticks, over a life of exactly six steps -- so the dot
+     * reaches the deepest blue on the tick it dies.
+     */
     struct ParticleRenderTypeWake
     {
         GameTime finishTime;
+
+        /** Ticks between colour steps: 16 for Wake1, 8 for the faster Wake2. */
+        unsigned int rampPeriod{16};
     };
 
     /**

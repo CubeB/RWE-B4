@@ -3361,7 +3361,7 @@ namespace rwe
 
         updateScreenShake();
 
-        updateParticles(gameMediaDatabase, simulation.gameTime, particles);
+        updateParticles(gameMediaDatabase, simulation.terrain, simulation.gameTime, particles);
 
         spawnNanoParticles();
 
@@ -4541,10 +4541,22 @@ namespace rwe
                             emitBlackSmokeFromPiece(e.unitId, e.pieceName);
                             break;
                         case EmitParticleFromPieceEvent::SfxType::Wake1:
-                            emitWake1FromPiece(e.unitId, e.pieceName);
+                            emitWakeFromPiece(e.unitId, e.pieceName, false, 16);
+                            break;
+                        case EmitParticleFromPieceEvent::SfxType::Wake2:
+                            emitWakeFromPiece(e.unitId, e.pieceName, false, 8);
+                            break;
+                        case EmitParticleFromPieceEvent::SfxType::ReverseWake1:
+                            emitWakeFromPiece(e.unitId, e.pieceName, true, 16);
+                            break;
+                        case EmitParticleFromPieceEvent::SfxType::ReverseWake2:
+                            emitWakeFromPiece(e.unitId, e.pieceName, true, 8);
                             break;
                         case EmitParticleFromPieceEvent::SfxType::Vtol:
-                            emitVtolFromPiece(e.unitId, e.pieceName);
+                            emitVtolFromPiece(e.unitId, e.pieceName, 6);
+                            break;
+                        case EmitParticleFromPieceEvent::SfxType::Thrust:
+                            emitVtolFromPiece(e.unitId, e.pieceName, 7);
                             break;
                         default:
                             throw std::logic_error("unknown particle type");
@@ -4743,34 +4755,48 @@ namespace rwe
         return low + ((static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) * (high - low));
     }
 
-    void GameScene::emitWake1FromPiece(UnitId unitId, const std::string& pieceName)
+    void GameScene::emitWakeFromPiece(UnitId unitId, const std::string& pieceName, bool reverse, unsigned int rampPeriod)
     {
         const auto& unit = getUnit(unitId);
+        if (!positionIsVisibleToLocalPlayer(unit.position))
+        {
+            // The original refuses every emit-sfx for a unit the local player
+            // cannot see, before it works anything else out (0x480EEA).
+            return;
+        }
+
         const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
         auto pieceTransform = toFloatMatrix(simulation.getUnitPieceTransform(unitId, pieceName));
         const auto& pieceMesh = gameMediaDatabase.getUnitPieceMesh(unitDefinition.objectName, pieceName).value().get();
-        auto spawnPosition = pieceTransform * pieceMesh.firstVertexPosition;
-        auto otherVertexPosition = pieceTransform * pieceMesh.secondVertexPosition;
 
-        // Travel at around 10px per second -- so 1/3rd of a pixel per tick.
-        // Last for about 4 seconds, travelling 40 pixels in total.
-        auto velocity = (otherVertexPosition - spawnPosition).normalized() / 3.0f;
-        auto duration = GameTime(120);
+        // All four wake types are one routine. The only thing that separates
+        // Wake from ReverseWake is which of the emitting piece's two vertices
+        // the foam starts at, which turns the drift round; the only thing that
+        // separates 1 from 2 is the ramp period, and with it the life.
+        auto firstVertex = pieceTransform * pieceMesh.firstVertexPosition;
+        auto secondVertex = pieceTransform * pieceMesh.secondVertexPosition;
+        auto emission = computeWakeEmission(firstVertex, secondVertex, reverse, rampPeriod);
+        const auto& spawnPosition = emission.spawnPosition;
+        const auto& velocity = emission.velocity;
+        auto duration = emission.duration;
 
-        const auto variation = 4.0f;
+        // A whole number of world units on each of the three axes, y included
+        // -- the original adds its roll to the high word of each coordinate,
+        // so the scatter is never fractional and is not confined to the
+        // horizontal.
+        std::uniform_int_distribution<int> jitter(-3, 3);
+        auto scattered = [&]() {
+            return Vector3f(
+                spawnPosition.x + static_cast<float>(jitter(effectsRng)),
+                spawnPosition.y + static_cast<float>(jitter(effectsRng)),
+                spawnPosition.z + static_cast<float>(jitter(effectsRng)));
+        };
 
-        auto spawnPosition1 = Vector3f(
-            spawnPosition.x + randomFloat(-variation, variation),
-            spawnPosition.y,
-            spawnPosition.z + randomFloat(-variation, variation));
-
-        auto spawnPosition2 = Vector3f(
-            spawnPosition.x + randomFloat(-variation, variation),
-            spawnPosition.y,
-            spawnPosition.z + randomFloat(-variation, variation));
-
-        spawnWake(spawnPosition1, velocity, duration);
-        spawnWake(spawnPosition2, velocity, duration);
+        // Two dots per call: one now and one on the following tick. The
+        // emitter is due again the tick after it is created and then never
+        // again, so the repetition rate is entirely up to the ship's script.
+        spawnWake(scattered(), velocity, duration, rampPeriod, simulation.gameTime);
+        spawnWake(scattered(), velocity, duration, rampPeriod, simulation.gameTime + GameTime(1));
     }
 
     void GameScene::modifyBuildQueue(UnitId unitId, const std::string& unitType, int count)
@@ -5753,14 +5779,13 @@ namespace rwe
         }
     }
 
-    void GameScene::spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration)
+    void GameScene::spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration, unsigned int rampPeriod, GameTime startTime)
     {
         Particle particle;
         particle.position = position;
         particle.velocity = velocity;
-        particle.renderType = ParticleRenderTypeWake{
-            simulation.gameTime + duration};
-        particle.startTime = simulation.gameTime;
+        particle.renderType = ParticleRenderTypeWake{startTime + duration, rampPeriod};
+        particle.startTime = startTime;
 
         particles.push_back(particle);
     }
@@ -5902,8 +5927,13 @@ namespace rwe
         particles.push_back(particle);
     }
 
-    void GameScene::emitVtolFromPiece(UnitId unitId, const std::string& pieceName)
+    void GameScene::emitVtolFromPiece(UnitId unitId, const std::string& pieceName, unsigned int divisor)
     {
+        // `Thrust` and `Vtol` are the same emitter with one number changed:
+        // the original passes 6 for one and 7 for the other, and that number
+        // is both the divisor for the drift and the emitter's own lifetime,
+        // so a thrust plume is one puff longer and each puff moves a little
+        // more slowly. Nothing else about them differs.
         const auto& unit = getUnit(unitId);
         if (!positionIsVisibleToLocalPlayer(unit.position))
         {
@@ -5932,7 +5962,7 @@ namespace rwe
         // across. The engine divides the piece vector by six for the drift
         // per tick and gives the particle six ticks to live, so one puff
         // crosses the length of the thruster while it grows.
-        auto velocity = (lowerEnd - upperEnd) / 6.0f;
+        auto velocity = (lowerEnd - upperEnd) / static_cast<float>(divisor);
 
         // TA drops one of these every tick and lets a whole run of them die
         // together, so the plume is a graded line with the biggest, oldest
@@ -5941,7 +5971,7 @@ namespace rwe
         // each starts a frame further into the animation and a step further
         // down, which is exactly where the engine's own would have got to.
         const int particlesPerEmit = 4;
-        const unsigned int lifeInTicks = 7;
+        const unsigned int lifeInTicks = divisor + 1;
         std::uniform_real_distribution<float> scatter(-0.75f, 0.75f);
         for (int i = 0; i < particlesPerEmit; ++i)
         {

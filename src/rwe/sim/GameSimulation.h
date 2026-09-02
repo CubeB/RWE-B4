@@ -237,9 +237,21 @@ namespace rwe
         {
             LightSmoke,
             BlackSmoke,
+            /**
+             * Water foam behind a ship. Wake2 is the same thing at double
+             * speed and half the life, and the Reverse pair are the same
+             * again with the emitting piece's two vertices swapped, which
+             * turns the drift round. The original really does distinguish
+             * them by nothing more than that.
+             */
             Wake1,
+            Wake2,
+            ReverseWake1,
+            ReverseWake2,
             /** An aircraft thruster: the exhaust an Atlas trails from under its arms. */
             Vtol,
+            /** The same emitter as Vtol, one step longer and slower. */
+            Thrust,
         };
 
         SfxType sfxType;

@@ -561,11 +561,16 @@ read together with §NN.
     ship's script waits on before laying a wake. RWE's version of that now
     follows the original's cascade. State 3 needs a model height RWE does not
     carry and is left out.
-21. **The remaining COB SFX types.** `Thrust`, `Wake2`, `ReverseWake1`,
-    `ReverseWake2` are a bare `// TODO: support these SFX types` at
-    `src/rwe/sim/cob.cpp:238–243`. Wakes matter for every ship, and the findings
-    doc already establishes that the wake emitter uses `smoke 1` with a palette
-    ramp of indices 97–103 — so most of the research is done. ~half a day.
+21. **The remaining COB SFX types — done.** All five are routed now. The four
+    wakes turned out to be one routine (`0x472430`) with two knobs: which of
+    the emitting piece's two vertices comes first, which is the whole of the
+    difference between `Wake` and `ReverseWake`, and a ramp period of 16 or 8,
+    which is the whole of the difference between 1 and 2. `Thrust` is the
+    `Vtol` emitter with 6 changed to 7. The premise in the note above was
+    half wrong: the ramp of indices 97–103 is right, but the emitter does
+    **not** draw `smoke 1` — it fills a one-pixel rectangle with a palette
+    index, and the sequence handle it stores is never read. §4 is corrected in
+    the findings doc.
 22. **Small FBI flags nobody has looked at.** `canstop` (148 units), `shootme`
     (135, bit 15 of `def+0x241`), `canreclamate` (16 — RWE currently lets
     anything with `workerTime` reclaim), `upright` (31), `noshadow` (15),

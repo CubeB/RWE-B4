@@ -235,11 +235,17 @@ namespace rwe
                     case CobSfxType::Vtol:
                         simulation.events.push_back(EmitParticleFromPieceEvent{EmitParticleFromPieceEvent::SfxType::Vtol, unitId, objectName});
                         break;
-                    case CobSfxType::Thrust:
                     case CobSfxType::Wake2:
+                        simulation.events.push_back(EmitParticleFromPieceEvent{EmitParticleFromPieceEvent::SfxType::Wake2, unitId, objectName});
+                        break;
                     case CobSfxType::ReverseWake1:
+                        simulation.events.push_back(EmitParticleFromPieceEvent{EmitParticleFromPieceEvent::SfxType::ReverseWake1, unitId, objectName});
+                        break;
                     case CobSfxType::ReverseWake2:
-                        // TODO: support these SFX types
+                        simulation.events.push_back(EmitParticleFromPieceEvent{EmitParticleFromPieceEvent::SfxType::ReverseWake2, unitId, objectName});
+                        break;
+                    case CobSfxType::Thrust:
+                        simulation.events.push_back(EmitParticleFromPieceEvent{EmitParticleFromPieceEvent::SfxType::Thrust, unitId, objectName});
                         break;
                 }
             });

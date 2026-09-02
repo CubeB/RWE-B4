@@ -3340,3 +3340,117 @@ state, and how things float is left alone.
 - The **console command table** at `0x501D38` is decoded far enough to name
   `NoShake`, `Contour`, `ScrollSpeed`, `IFace` and `Give` and to find their
   handlers. Nothing else was pulled out of it.
+
+## NN. Wakes and thrust
+
+The five `emit-sfx` types RWE had never implemented. Wakes are behind every ship
+in the game, so this is the most visible of the remaining gaps.
+
+### The dispatch, `0x480EB0`
+
+`EmitSfx(pieceIndex, sfxType)` takes two arguments. Before it does anything else
+it asks whether the local player can see the unit (`0x465AC0`, tested at
+`0x480EEA`) and **returns doing nothing if not** — so the whole SFX system is
+client-side and no part of it is simulation state. That matches where RWE
+already puts it.
+
+It then takes the emitting piece's **first two transformed vertices**, adds each
+to the unit's world position with the z negated (`0x480F59`–`0x480FD8`), and
+jumps through the table at `0x481128`:
+
+| Id | Type | Handler | Spawner |
+|---|---|---|---|
+| 0 | `Vtol` | `0x481000` | `0x472330` |
+| 1 | `Thrust` | `0x48101F` | `0x472330` |
+| 2 | `Wake1` | `0x48103E` | `0x472430` |
+| 3 | `Wake2` | `0x48105B` | `0x472430` |
+| 4 | `ReverseWake1` | `0x481078` | `0x472430` |
+| 5 | `ReverseWake2` | `0x481095` | `0x472430` |
+
+`SFXTYPE_POINTBASED` (256) falls off the end of the dispatch and does nothing at
+all.
+
+### All four wakes are one routine with two knobs
+
+The four call sites differ in **exactly two** things: which of the two vertices
+is pushed first, and whether the second argument is 16 or 8.
+
+- `Wake1` → `(vertex0, vertex1, 16)`, `Wake2` → `(vertex0, vertex1, 8)`
+- `ReverseWake1` → `(vertex1, vertex0, 16)`, `ReverseWake2` → `(vertex1, vertex0, 8)`
+
+So **"reverse" is nothing but swapping the two vertices**, which turns the drift
+round. There is no test on speed, on throttle, or on the direction of travel
+anywhere in the engine — which of the four a ship uses is entirely its script's
+decision, and the script knows because the engine tells it through
+`setSFXoccupy` (see the `waterline` section).
+
+`Init` at `0x474760` normalises the difference between the two points and scales
+it by 32768 in 16.16 (`0x4747CC`–`0x474819`), so a dot drifts **half a world
+unit a tick whatever the distance between the vertices** — a modeller putting
+them further apart makes no difference to the speed. The `16`/`8` is the colour
+ramp period, and the life is six of those, 96 or 48 ticks. So a Wake1 dot
+travels 48 world units in its life and a Wake2 dot 24.
+
+Each call puts out **two dots: one immediately and one on the following tick**
+(`0x474872` emits, then `0x474AEE` sets the next due time to now + 1, and the
+emitter's end time is also now + 1, so it fires once more and never again).
+There is no cooldown; the repetition rate is whatever `sleep` the ship's script
+uses.
+
+The spawn point is jittered by `rand()*7/0x8000 − 3` — a **whole number of world
+units in [−3, +3], drawn independently for x, y and z** (`0x4749D9`, `0x474A00`,
+`0x474A27`). Note the y: the scatter is not confined to the horizontal.
+
+Per tick (`0x474580`) a dot moves by its velocity with **no gravity and no
+wind**, and steps its palette index one place every `rampPeriod` ticks. It dies
+either at its end time or, per `0x474720`, **the moment the terrain under it is
+at or above sea level** — which is what makes a wake stop cleanly at a shoreline
+instead of running up the beach behind the ship.
+
+### `Thrust` is `Vtol` with one number changed
+
+Both go to the spawner at `0x472330` with the vtable at `0x4FD5D8`, on render
+layer 7, and the only difference is the constant: **6 for `Vtol`, 7 for
+`Thrust`** (`0x481000` versus `0x48101F`). That number is used twice in `Init`
+at `0x4742C0` — as the divisor for the per-tick drift (`0x47432C`–`0x47438B`)
+and as the emitter's own lifetime (`0x4742CB`) — so a thrust plume is one puff
+longer and each puff moves slightly more slowly. Same `flamestream` sequence,
+same layer, same class.
+
+### A correction to §4
+
+§4 records that the wake emitter draws `smoke 1`, on the strength of the palette
+ramp being loaded at `0x474A7F`. The handle **is** written into the puff at
+`+0x00`, but none of the three routines that touch a wake puff — the per-tick
+step `0x474580`, the render `0x4745E0` or the death test `0x474720` — ever reads
+it. `0x4745E0` builds a one-pixel rectangle and calls `0x4BF6F0`, the generic
+palette-index rectangle fill, exactly as the nanolathe spray does at `0x473B1D`.
+**A wake dot is a single screen pixel of a solid palette colour, not a sprite.**
+
+§4's slot map is unaffected — the ordering argument for `smoke 1` at
+`globals+0x147CF` stands on its own from the loader at `0x429879`–`0x4298B8`.
+Only the corroborating remark about the wake using it is wrong.
+
+The colours are palette entries **97–103**, seven water blues, stepped from
+palest to deepest: `(203,227,255)`, `(175,207,255)`, `(151,179,255)`,
+`(123,151,255)`, `(103,127,255)`, `(83,107,239)`, `(63,91,227)`. Read out of the
+shipped `palettes/PALETTE.PAL`; entry 161 in the same file is `(171,231,127)`,
+which matches the nanolathe colour already in RWE and confirms the format.
+Submarine bubbles use the same class and the same seven entries walked the other
+way, starting at 103 with a step of −1 (`0x472584`, `0x4725A2`).
+
+### What RWE now does
+
+All five types are routed. Wakes are one function taking a reverse flag and a
+ramp period; `Thrust` is the existing VTOL emitter with the divisor passed in.
+The dot's colour steps discretely along the seven blues instead of fading, its
+drift is the original's half a unit a tick instead of a guessed third, its life
+is 96 or 48 ticks instead of a guessed 120, the jitter is whole units on all
+three axes instead of fractional ones on two, the second dot is laid a tick
+later rather than alongside the first, and a dot now dies when it drifts over
+land.
+
+Two things are left alone. RWE draws its dot as a small world-space quad rather
+than a literal screen pixel, which is the same choice it already made for the
+nanolathe spray. And the emission rate is still the script's, which is the
+original's behaviour anyway.
