@@ -18,6 +18,7 @@
 #include <rwe/game/GameCameraState.h>
 #include <rwe/game/GameMediaDatabase.h>
 #include <rwe/game/GameNetworkService.h>
+#include <rwe/game/GameScene_util.h>
 #include <rwe/game/GameSpeed.h>
 #include <rwe/game/InGameSoundsInfo.h>
 #include <random>
@@ -400,6 +401,18 @@ namespace rwe
         /** Scatter for purely visual effects; never feeds the simulation. */
         std::minstd_rand effectsRng{20260828u};
 
+        ScreenShakeState screenShake;
+
+        /**
+         * How far the shake has the camera pushed at the moment. Held
+         * separately so it can be taken back off before the next frame's
+         * offset goes on: the original simply adds to the scroll position
+         * every frame and lets the camera random-walk away from where the
+         * player left it, which is the one thing about its shake worth not
+         * copying.
+         */
+        Vector3f appliedShakeOffset{0.0f, 0.0f, 0.0f};
+
         int millisecondsBuffer{0};
 
         GameSpeed gameSpeed;
@@ -613,6 +626,10 @@ namespace rwe
         void processSimEvents();
 
         void updateFlashes();
+
+        void addScreenShakeFromWeapon(const WeaponMediaInfo& weaponMediaInfo);
+
+        void updateScreenShake();
 
         void processActions();
 

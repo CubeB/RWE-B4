@@ -43,6 +43,16 @@ namespace rwe
         std::optional<AnimLocation> explosionAnim;
 
         std::optional<AnimLocation> waterExplosionAnim;
+
+        /**
+         * How hard and how long the camera shakes when a round of this weapon
+         * goes off. The magnitude is in world units and the duration is in
+         * ticks; the original reads the duration as seconds and multiplies by
+         * thirty on the way in (TotalA.exe 0x42EC60).
+         */
+        unsigned int shakeMagnitude{0};
+
+        unsigned int shakeDuration{0};
     };
 
 }

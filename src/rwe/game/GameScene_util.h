@@ -223,4 +223,40 @@ namespace rwe
         UnitMeshBatch& unitMeshBatch);
 
     void drawSelectionRect(const GameMediaDatabase& gameMediaDatabase, const Matrix4f& viewProjectionMatrix, const UnitState& unit, const UnitDefinition& unitDefinition, float frac, ColoredMeshesBatch& batch);
+
+    /**
+     * The camera shake the original runs from `shakemagnitude` and
+     * `shakeduration` (TotalA.exe 0x41C5E0-0x41C7B7). Render-side only: the
+     * original keeps it in globals next to the camera scroll position and
+     * nothing in the simulation ever reads it back.
+     */
+    struct ScreenShakeState
+    {
+        /** Ticks left to run, counted down once a frame. */
+        int ticksRemaining{0};
+
+        /** What ticksRemaining started at, which is what the ramp divides by. */
+        int totalTicks{0};
+
+        int magnitudeX{0};
+        int magnitudeY{0};
+
+        bool running{false};
+    };
+
+    /**
+     * Folds another explosion into whatever shake is already running, the way
+     * 0x41C640 does it: magnitudes add, but durations are *averaged* rather
+     * than taking the longer of the two.
+     */
+    void accumulateScreenShake(ScreenShakeState& state, int magnitude, int durationTicks);
+
+    /**
+     * This frame's amplitudes, which ramp linearly to nothing over the
+     * shake's life (0x41C721).
+     */
+    std::pair<int, int> screenShakeAmplitudes(const ScreenShakeState& state);
+
+    /** Counts the shake down by a frame and retires it when it runs out. */
+    void advanceScreenShake(ScreenShakeState& state);
 }

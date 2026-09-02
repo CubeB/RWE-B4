@@ -513,6 +513,8 @@ namespace rwe
 
         mediaInfo.startSmoke = tdf.startSmoke;
         mediaInfo.endSmoke = tdf.endSmoke;
+        mediaInfo.shakeMagnitude = tdf.shakeMagnitude;
+        mediaInfo.shakeDuration = static_cast<unsigned int>(tdf.shakeDuration * 30.0f);
         if (tdf.smokeTrail)
         {
             mediaInfo.smokeTrail = GameTime(static_cast<unsigned int>(tdf.smokeDelay * 30.0f));

@@ -3359,6 +3359,8 @@ namespace rwe
 
         updateFlashes();
 
+        updateScreenShake();
+
         updateParticles(gameMediaDatabase, simulation.gameTime, particles);
 
         spawnNanoParticles();
@@ -4568,18 +4570,21 @@ namespace rwe
                             if (!unitDefinition.explodeAs.empty())
                             {
                                 doProjectileImpact(e.position, unitDefinition.explodeAs, ImpactType::Normal);
+                                addScreenShakeFromWeapon(gameMediaDatabase.getWeapon(unitDefinition.explodeAs));
                             }
                             break;
                         case UnitDiedEvent::DeathType::WaterExploded:
                             if (!unitDefinition.explodeAs.empty())
                             {
                                 doProjectileImpact(e.position, unitDefinition.explodeAs, ImpactType::Water);
+                                addScreenShakeFromWeapon(gameMediaDatabase.getWeapon(unitDefinition.explodeAs));
                             }
                             break;
                         case UnitDiedEvent::DeathType::SelfDestructed:
                             if (!selfDestructExplosion.empty())
                             {
                                 doProjectileImpact(e.position, selfDestructExplosion, ImpactType::Normal);
+                                addScreenShakeFromWeapon(gameMediaDatabase.getWeapon(selfDestructExplosion));
                             }
                             break;
                         case UnitDiedEvent::DeathType::Deleted:
@@ -4626,9 +4631,11 @@ namespace rwe
                     {
                         case ProjectileDiedEvent::DeathType::NormalImpact:
                             doProjectileImpact(e.position, e.weaponType, ImpactType::Normal);
+                            addScreenShakeFromWeapon(weaponMediaInfo);
                             break;
                         case ProjectileDiedEvent::DeathType::WaterImpact:
                             doProjectileImpact(e.position, e.weaponType, ImpactType::Water);
+                            addScreenShakeFromWeapon(weaponMediaInfo);
                             break;
                         case ProjectileDiedEvent::DeathType::OutOfBounds:
                         case ProjectileDiedEvent::DeathType::EndOfLife:
@@ -4639,6 +4646,57 @@ namespace rwe
         }
 
         simulation.events.clear();
+    }
+
+    void GameScene::addScreenShakeFromWeapon(const WeaponMediaInfo& weaponMediaInfo)
+    {
+        if (weaponMediaInfo.shakeMagnitude == 0 || weaponMediaInfo.shakeDuration == 0)
+        {
+            return;
+        }
+
+        // No falloff with distance, and none in the original either: 0x499FAB
+        // hands the weapon's two numbers straight to the shake without ever
+        // looking at where the explosion was or where the camera is. A blast
+        // in the far corner of the map shakes the screen exactly as hard as
+        // one under the cursor.
+        //
+        // In practice this fires on deaths rather than on shots: every weapon
+        // in the shipped data that sets the keys is an explodeAs or
+        // selfDestructAs -- LARGE_BUILDING, BIG_UNIT, COMMANDER_BLAST,
+        // ATOMIC_BLAST and friends -- and none of them is ever fired at
+        // anything. The projectile path is wired up anyway because the
+        // original's single call site is in the detonation routine and applies
+        // to both.
+        accumulateScreenShake(
+            screenShake,
+            static_cast<int>(weaponMediaInfo.shakeMagnitude),
+            static_cast<int>(weaponMediaInfo.shakeDuration));
+    }
+
+    void GameScene::updateScreenShake()
+    {
+        // Take off whatever the last frame put on, so the jitter is a wobble
+        // about where the player actually left the camera rather than a random
+        // walk away from it. See the note on appliedShakeOffset.
+        worldCameraState.position -= appliedShakeOffset;
+        appliedShakeOffset = Vector3f(0.0f, 0.0f, 0.0f);
+
+        auto [ampX, ampY] = screenShakeAmplitudes(screenShake);
+        if (ampX > 0 || ampY > 0)
+        {
+            // Uniform on [-amp/2, amp/2), which is what 0x41C737-0x41C755
+            // builds out of a rand() and a divide by 0x8000.
+            std::uniform_int_distribution<int> distX(0, ampX > 0 ? ampX - 1 : 0);
+            std::uniform_int_distribution<int> distY(0, ampY > 0 ? ampY - 1 : 0);
+            appliedShakeOffset = Vector3f(
+                static_cast<float>(distX(effectsRng) - ampX / 2),
+                0.0f,
+                static_cast<float>(distY(effectsRng) - ampY / 2));
+            worldCameraState.position += appliedShakeOffset;
+        }
+
+        advanceScreenShake(screenShake);
     }
 
     void GameScene::updateFlashes()

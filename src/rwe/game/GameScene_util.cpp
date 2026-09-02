@@ -1248,4 +1248,66 @@ namespace rwe
 
         batch.meshes.push_back(ColoredMeshRenderInfo{selectionMesh.value().get(), mvpMatrix});
     }
+
+    void accumulateScreenShake(ScreenShakeState& state, int magnitude, int durationTicks)
+    {
+        // A shake that is not already running starts from nothing. The
+        // original clears only the two magnitudes here and leaves the
+        // durations to be averaged in below, which is why a fresh shake ends
+        // up with half the duration its weapon asked for unless the previous
+        // one happened to leave the same number behind.
+        if (!state.running)
+        {
+            state.magnitudeX = 0;
+            state.magnitudeY = 0;
+        }
+
+        // Note that the running total is read here without being cleared even
+        // for a shake that is not running, so a fresh shake is averaged
+        // against whatever the last one left behind. That is what 0x41C67F
+        // does and it is left alone.
+        state.totalTicks = (durationTicks + state.totalTicks) / 2;
+        state.ticksRemaining = state.totalTicks;
+
+        // shakemagnitude is pushed twice at 0x499FB8, once for each axis, so
+        // the horizontal and vertical amplitudes are always the same number.
+        state.magnitudeX += magnitude;
+        state.magnitudeY += magnitude;
+
+        if (state.totalTicks > 0)
+        {
+            state.running = true;
+        }
+    }
+
+    std::pair<int, int> screenShakeAmplitudes(const ScreenShakeState& state)
+    {
+        if (!state.running || state.ticksRemaining <= 0 || state.totalTicks <= 0)
+        {
+            return {0, 0};
+        }
+
+        // Linear ramp down: full strength on the first frame, nothing on the
+        // last. The divisor is the duration the shake started with, which is
+        // why a second explosion arriving mid-shake restarts the ramp.
+        return {
+            state.magnitudeX * state.ticksRemaining / state.totalTicks,
+            state.magnitudeY * state.ticksRemaining / state.totalTicks};
+    }
+
+    void advanceScreenShake(ScreenShakeState& state)
+    {
+        if (!state.running)
+        {
+            return;
+        }
+
+        if (state.ticksRemaining <= 0)
+        {
+            state.running = false;
+            return;
+        }
+
+        --state.ticksRemaining;
+    }
 }

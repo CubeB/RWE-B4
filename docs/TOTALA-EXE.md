@@ -3232,6 +3232,32 @@ components of the camera's scroll position at `[globals+0x1431F]` and
 normally. So it is a screen-space jitter of the scroll, not a change of view
 angle.
 
+Two details of the accumulate are worth having written down because they look
+like bugs and are not. The running duration at `[globals+0x1432F]` is read
+before it is written and is **never cleared**, even for a shake starting from
+nothing — so a weapon asking for two seconds of shake against a standing start
+gets one, and only a second explosion arriving while the first is still running
+gets anything near what it asked for. And because the durations are averaged
+rather than maxed, a small explosion landing during a big one *shortens* the
+big one.
+
+**Which weapons actually shake.** Every weapon in the shipped data that sets
+`shakemagnitude` is an explosion rather than a gun: `LARGE_BUILDING`,
+`LARGE_BUILDINGEX`, `ESTOR_BUILDING`, `BIG_UNIT`, `COMMANDER_BLAST`,
+`CRAWL_BLAST`, `ATOMIC_BLAST`, `EARTHQUAKE` and their variants — the things
+units name in `explodeas` and `selfdestructas`. Magnitudes are 8, 24 or 32 and
+durations 0.3, 0.5, 1.5 or 2 seconds. So the shake is something you feel when a
+big building or a commander dies, or when a nuke goes off, and never when
+artillery lands. RWE hooks both the projectile detonation and the unit death
+because the original's one call site covers both, but only the second will ever
+fire on stock data.
+
+RWE differs in one deliberate way: the original adds its offset to the scroll
+position every frame and never takes it off, so a long shake leaves the camera
+a little way from where the player parked it. RWE remembers the offset it
+applied and removes it before applying the next one, which gives the same
+jitter without walking the view away.
+
 ### `waterline`, `BYTE def+0x22C`
 
 Stored at `0x42C259`, and it has the two readers §B named.
