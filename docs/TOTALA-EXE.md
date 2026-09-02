@@ -3219,7 +3219,12 @@ distance.** The routine never looks at where the explosion was or where the
 camera is. A Big Bertha shell landing in the far corner of the map shakes the
 screen exactly as hard as one landing under the cursor.
 
-The per-frame consumer is `0x41C6F0`:
+The consumer is `0x41C6F0`, which steps the shake on by one each time it is
+called. The original runs its simulation and its display at the same thirty a
+second so it makes no difference there which of the two you call it, but it
+does in RWE, where the display can be faster: `shakeduration` arrives as
+seconds multiplied by thirty, so RWE steps it on the simulation tick and a
+shake lasts the same time whatever the frame rate.
 
 ```
 remaining = [globals+0x14333]
