@@ -286,6 +286,7 @@ namespace rwe
         cursors[*CursorType::Unload] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorunload");
         cursors[*CursorType::Red] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorred");
         cursors[*CursorType::Green] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorgrn");
+        cursors[*CursorType::PathIcon] = textureService.getGafEntry("anims/CURSORS.GAF", "pathicon");
         CursorService cursor(sdlContext, &timeService, cursors);
 
         sdlContext->hideCursor();

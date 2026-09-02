@@ -678,7 +678,30 @@ namespace rwe
 
         void renderDebugWindow();
 
+        /** The radar, sonar and jammer rings the original draws on the minimap around a selected unit. */
+        void renderMinimapDetectionRings(const Matrix4f& worldToMinimap);
+
         void renderUnitOrders(UnitId unitId, bool drawLines);
+
+        /**
+         * When each build order the local player can see first appeared, so
+         * the placement sweep can be played once. The original stamps the tick
+         * onto the order itself; this is kept scene-side instead, because the
+         * effect is decoration and putting it in the simulation would mean
+         * carrying it through the hash, the dump and the network protocol.
+         * Keyed on the footprint's grid origin.
+         */
+        std::unordered_map<uint64_t, GameTime> buildBoxAppearedAt;
+
+        void updateBuildBoxAppearances();
+
+        /** The ten-tick sweep the original plays over a newly placed building. */
+        void renderBuildBoxSweep(const Matrix4f& worldToUi, const DiscreteRect& footprintRect, unsigned int age, bool ownerSelected);
+
+        void renderPlacementSweeps();
+
+        /** The marching string of stars the original draws between queued waypoints. */
+        void drawWaypointTrail(const Matrix4f& worldToUi, const SimVector& from, const SimVector& to);
 
         void renderBuildBoxes(const UnitState& unit, const Color& color);
 

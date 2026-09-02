@@ -922,7 +922,7 @@ stored `0x42C445` with the usual xor-and-xor bitfield insert) and
 `0x42C465`). **Both default to 2** — the `push 0x2` at `0x42C417` and
 `0x42C433`. The pipeline alignment is checked by the store immediately before
 them, `mov BYTE PTR [ebp+0x22f], al` at `0x42C422`, which is `bmcode` at the
-offset §25 already records.
+offset §30 already records.
 
 Values run 0, 1, 2 for both, and the buttons cycle them 0 → 1 → 2 → 0
 (`0x41A4F6`, a four-way jump over a global order state where 3 means "the
@@ -1086,7 +1086,7 @@ zero there would leave hovercraft torpedoable.
 
 The two flag bits are settled in the parser, where the boolean helper's result
 is masked and shifted immediately after the call that read it, so the pipeline
-trap of §25 does not apply:
+trap of §30 does not apply:
 
 | Key | String | Shifted at | Bit of `def+0x241` |
 |---|---|---|---|
@@ -1274,7 +1274,7 @@ it is not part of the re-acquire decision.
 pushed there, the read follows at `0x42E906`, and `and eax,1 / shl eax,0x13` at
 `0x42E911`–`0x42E91A` puts it in place. The bits either side are `smoketrail`
 (18, key at `0x504150`) and `selfprop` (20, `0x50413C`), which agrees with the
-table in §25.
+table in §30.
 
 ### It chooses the weapon's fire handler
 
@@ -1367,7 +1367,7 @@ that tanks turn their bodies.
 
 It is a float in radians at `wdef+0xC8`, read at `0x42E724` and scaled by
 `ds:0x4FD260` = π/180, with a default of `-11.25` degrees supplied as the double
-`0xC026800000000000` pushed at `0x42E70F`. §25 has this right and the priorities
+`0xC026800000000000` pushed at `0x42E70F`. §30 has this right and the priorities
 note had it wrong twice over: `wdef+0xFE` is `holdtime`, and the field is not a
 clamp.
 
@@ -1493,7 +1493,7 @@ here than the original, not less.
 
 ### `accuracy`, `WORD wdef+0x104`
 
-Parsed at `0x42EBFE` and stored at `0x42EC19` — §25's table is right, and the
+Parsed at `0x42EBFE` and stored at `0x42EC19` — §30's table is right, and the
 neighbouring `tolerance` `+0x106` and `pitchtolerance` `+0x108` are right too.
 The data file's own comment defines it: *"amount of accuracy in 64K deg that
 weapon is good for, 0 = 100%"*.
@@ -1633,7 +1633,7 @@ vertical only.
 `shakemagnitude` is read as an integer and stored at `0x42EC5A`;
 `shakeduration` is read as a **float**, multiplied by the 30.0 at `0x4FD250` and
 truncated (`0x42EC60`–`0x42EC70`), so it is seconds on the way in and ticks in
-the struct. §25's offsets are right.
+the struct. §30's offsets are right.
 
 The reader is not obvious, because the weapon definition's own fields are only
 touched at one site and it is easy to miss. The way in is the string `NoShake`
@@ -2063,7 +2063,7 @@ Decoded here and deliberately **not** ported:
 
 - **The sight-range search `0x43B700`**, which is what both `VTOL_SeekAttack`
   state 1 and `VTOL_Standby` state 1 do before they fly anywhere. RWE has no
-  equivalent — see §27 — and its own idle weapon acquisition stands in.
+  equivalent — see §32 — and its own idle weapon acquisition stands in.
 - **The go-home-when-hurt branch.** Below 75 % health with an active repair pad
   within 3840, both the search circuit and the strafing pass abandon what they
   are doing and push a `VTOL_LANDING` on a pad chosen at random. RWE has no
@@ -2360,7 +2360,7 @@ Not ported:
   shipped data is both, so the two agree on real data, and the extra conditions
   also guard the metal grid next to it.
 - **The burning-feature smoke** above, and the `treeburn` sound with it.
-- **Downwind drift**, as §27 already records for the rest of the smoke: RWE has
+- **Downwind drift**, as §32 already records for the rest of the smoke: RWE has
   no map wind, so a vent's plume goes straight up.
 
 ---
@@ -2484,7 +2484,7 @@ original's behaviour anyway.
 Six flags that the bit tables above name but that had never been followed to
 their readers. The parse sites are all in the FBI parser's long run of boolean
 keys, where the helper `0x4C46C0` leaves its answer in `eax` and the
-mask-and-shift follows immediately, so the §25 pipeline trap does not apply and
+mask-and-shift follows immediately, so the §30 pipeline trap does not apply and
 each bit is unambiguous:
 
 | Key | String | Read at | Shifted at | Bit |
@@ -2599,8 +2599,8 @@ Two offsets fall out of that and both need a second site, because the FBI
 parser pipelines its stores. `def+0x22A` and `def+0x22B` come from the same run
 of keys as `waterline`: the strings pushed are `0x503DC8` "waterline",
 `0x503DB8` "transportsize" and `0x503DA4` "transportcapacity", and under the
-§25 rule their values land at `0x42C259`, `0x42C26E` and `0x42C284`. That makes
-`def+0x22C` `waterline`, which §26 already had from elsewhere and which is the
+§30 rule their values land at `0x42C259`, `0x42C26E` and `0x42C284`. That makes
+`def+0x22C` `waterline`, which §31 already had from elsewhere and which is the
 check that the pipeline is being read the right way round, `def+0x22A`
 **`transportsize`**, and `def+0x22B` **`transportcapacity`**.
 
@@ -2703,7 +2703,7 @@ query that `GameSimulation::updateVisibility` builds and `canDetectUnit` reads.
 
 ### The field offsets
 
-Read off the FBI parser under the pipeline rule §25 describes — a key's value is
+Read off the FBI parser under the pipeline rule §30 describes — a key's value is
 stored *after the next key's push* — and cross-checked against the
 definition-copy routine at `0x42B68F`–`0x42B6DF`, which moves the same run of
 words with the same widths.
@@ -3208,7 +3208,7 @@ what the current selection cannot use. There is no per-unit order panel.
 §9 gave bits 0–8, 10 and 11 of this dword and called bit 4 `canattack`. Here is
 the whole of it. The parser's boolean helper leaves its result in `eax`, so the
 key pushed immediately before the `call 0x4C46C0` owns the `shl` immediately
-after it, and the pipeline trap of §25 does not apply.
+after it, and the pipeline trap of §30 does not apply.
 
 | Bit | Key | `shl` at | Second site |
 |---|---|---|---|
@@ -3681,12 +3681,15 @@ name comparison and is not one.
 ### `antiweapons`
 
 Bit 29 of `def+0x241`, pushed at `0x42C84C`. Two units set it, and they are the
-two anti-nuke launchers. No reader was found for it; on the evidence it is a
-label for the target-category machinery rather than anything that gates the
-interception above, which keys entirely off the weapon flags. **Not ported, and
-not understood.**
+two anti-nuke launchers. Nothing in the simulation reads it, and the
+interception above keys entirely off the weapon flags -- but it is not unused,
+which this section said until the minimap was read. **Its one reader is the
+minimap render** (§25): a selected unit with `antiweapons` draws a dashed
+coverage ring for each of its `interceptor` weapons, radius `coverage - 512`.
+So the flag is a *display* flag. Still not ported: RWE draws the detection
+rings but not the coverage ring.
 
-### A correction to §25: `holdtime` does have a reader
+### A correction to §30: `holdtime` does have a reader
 
 `WORD wdef+0xFE` is read at `0x499E81` and `0x49C8D6`, both on the path that
 retires the projectile the camera is following (`globals+0x142F7`), and stored
@@ -3966,7 +3969,7 @@ made call-to-store):
 
 `buildcostenergy` and `buildcostmetal` are confirmed at a second site,
 `0x42AD40`; `workertime` and `buildtime` by the chain that lands `sightdistance`
-on the `def+0x202` already in §25.
+on the `def+0x202` already in §30.
 
 **There is no `MetalUse` key.** `metaluse` does not appear in the binary at all,
 only the display string `UNITMETALUSE`. Metal is spent by building, by weapons
@@ -4109,7 +4112,7 @@ same `push <keystring>` / `call 0x4C46C0` pipeline the FBI parser uses — and
 `hitdensity` is not among them. 559 features name it; the engine of this build
 ignores every one.
 
-So §27's note that it is "very likely the pass-through chance for projectiles
+So §32's note that it is "very likely the pass-through chance for projectiles
 hitting features" is **refuted**, not merely unconfirmed.
 
 What the original actually does with a shot and a feature is at `0x49B2B3`,
@@ -4319,7 +4322,1179 @@ with no linear speed as moving (`0x43DA8E` also tests `WORD [mov+0x24]`); RWE
 measures the distance the unit actually covered this tick and calls anything
 under a tenth of a unit stopped.
 
-## 25. Field offsets
+## 25. The detection rings on the minimap
+
+Sections 25 to 29 read the same part of the game -- what the interface draws
+over the world and on the minimap -- and share a piece of notation. `cfg` is
+the game-state block whose pointer lives at `0x511de8`: a single
+`malloc(0x3924D)` allocated and zeroed at `0x41D920`, so every `cfg+` offset
+below is a byte displacement into that one allocation. Unit structures are
+`0x118` bytes in a flat array between `[cfg+0x14357]` and `[cfg+0x1435B]`.
+World positions are 32-bit fixed point with 16 fractional bits, so `[unit+0x6A]`
+is x, `+0x6E` is y and `+0x72` is z, and the *integer* parts are the words at
+`+0x6C`, `+0x70` and `+0x74`.
+
+
+The whole minimap - TA's own code calls it the *radar screen*; the allocation
+tags are `"RADAR PICTURE"`, `"RADAR MAPPED"`, `"RADAR FINAL"`,
+`"HOT RADAR UNITS"` - is redrawn each frame by `0x466DC0`. That routine walks
+the entire unit array once, plots each unit's dot, and, for units that are
+selected, draws its detection rings. **The rings are drawn only on the minimap.
+There is no ring for `sightdistance`, `radardistance` or `sonardistance` in the
+3D view at all**; the 3D view has a different and much smaller set of circles,
+described at the end of this section.
+
+### Which ranges get a ring
+
+Four, and a fifth family for anti-missile units. Read straight off the unit
+type struct:
+
+```
+466f42   mov    edx,DWORD PTR [ebx+0x110]
+466f48   shr    edx,0x4
+466f4b   test   dl,0x1                       ; unit is SELECTED
+466f4e   je     0x46713b                     ; -> no rings at all
+466f54   test   BYTE PTR [ebx+0x10e],0x1     ; unit is switched ON
+466f5b   jne    0x466f70
+466f5d   mov    eax,DWORD PTR [ebx+0x92]     ; unit type
+466f63   test   BYTE PTR [eax+0x245],0x4     ; onoffable=1
+466f6a   jne    0x46707c                     ; off + onoffable -> skip the four
+466f70   mov    ecx,DWORD PTR [ebx+0x92]
+466f76   mov    cx,WORD PTR [ecx+0x204]      ; radardistance
+466f7d   test   cx,cx
+466f80   je     0x466fb3
+466f82   mov    eax,DWORD PTR [esp+0x14]     ; the colour table, cfg+0xDCB
+466f88   movsx  ecx,cx
+466f8b   mov    dl,BYTE PTR [eax+0xa]        ; colour = cfg[0xDCB + 0x0A]
+466f8e   movsx  eax,WORD PTR [esi+0x142eb]   ; minimap width in pixels
+466f95   imul   eax,ecx
+466f98   push   edx                          ; colour
+466f9a   idiv   DWORD PTR [esi+0x1422b]      ; / map width in world units
+466fa4   push   eax                          ; radius, in minimap pixels
+466fa5   push   ebp                          ; centre y
+466fa6   push   edi                          ; centre x
+466fa7   push   edx                          ; the minimap surface
+466fa8   call   0x4c0070                     ; DrawCircle
+```
+
+The same block repeats verbatim for three more fields, then a fifth, different
+one:
+
+| Field | Type offset | Colour byte | Where |
+|---|---|---|---|
+| `radardistance` | `+0x204` | `cfg[0xDCB+0x0A]` = `cfg+0xDD5` | `0x466F70` |
+| `sonardistance` | `+0x206` | `cfg[0xDCB+0x0A]` = `cfg+0xDD5` | `0x466FB3` |
+| `radardistancejam` | `+0x20A` | `cfg[0xDCB+0x0C]` = `cfg+0xDD7` | `0x466FF6` |
+| `sonardistancejam` | `+0x20C` | `cfg[0xDCB+0x0C]` = `cfg+0xDD7` | `0x467039` |
+| anti-missile `coverage` | weapon `+0xE0` | `cfg[0xDCB+0x0F]` = `cfg+0xDDA` | `0x46707C` |
+
+**`sightdistance` (`+0x202`) does not get a ring.** It is read one slot away
+from `radardistance` and is conspicuously skipped. Nor does `mintime`,
+`maneuverleashlength`, `builddistance` or anything else. A unit can draw up to
+four rings at once - a unit with radar, sonar and both jammers would show four
+concentric circles in two colours - and a plain Radar Tower shows exactly one.
+
+Those five field offsets are confirmed twice over: the FBI parser at
+`0x42C395`-`0x42C40B` stores them in that order (remembering that the parser's
+store lands *after* the next key has been pushed, so `sightdistance`->`+0x202`,
+`radardistance`->`+0x204`, `sonardistance`->`+0x206`,
+`radardistancejam`->`+0x20A`, `sonardistancejam`->`+0x20C`), and the debug
+overlay at `0x439202` independently labels the same offsets with the literal
+strings `"sight"`, `"radar"`, `"sonar"`, `"radarjam"`, `"sonarjam"` at
+`0x505188`, `0x505180`, `0x505178`, `0x50516C`, `0x505160`. `+0x208` sits in
+the gap and is `mincloakdistance`, labelled `"mincloak"`.
+
+### The on/off gate
+
+`[unit+0x10E] & 1` is the unit's activated flag and `[type+0x245] & 4` is
+`onoffable=1` (FBI key `onoffable` at `0x503AE4`, inserted at bit 2 of the dword
+at `+0x245` by `0x42C8AE`). A radar tower the player has switched off is
+`onoffable` with the activated bit clear, and the branch at `0x466F6A` jumps
+past all four rings. **Switching a radar off makes its ring disappear.** The
+anti-missile coverage ring is not behind that gate - the jump lands at
+`0x46707C`, after the four but before the coverage block.
+
+### The anti-missile coverage rings
+
+```
+46707c   mov    eax,DWORD PTR [ebx+0x92]
+467082   mov    ecx,DWORD PTR [eax+0x241]
+467088   shr    ecx,0x1d
+46708b   test   cl,0x1                      ; antiweapons=1
+46708e   je     0x46713b
+467094   lea    edx,[ebx+0x10]              ; &unit.weapon[0], stride 0x1C
+467097   mov    DWORD PTR [esp+0x20],0x3    ; three weapon slots
+4670a3   mov    eax,DWORD PTR [esp+0x18]
+4670a7   mov    ecx,DWORD PTR [eax]         ; the weapon definition
+4670a9   mov    edx,DWORD PTR [ecx+0x111]
+4670af   shr    edx,0x1e
+4670b2   test   dl,0x1                      ; interceptor=1
+4670b5   je     0x467121
+4670b7   movsx  eax,WORD PTR [esi+0x142eb]
+4670be   mov    ecx,DWORD PTR [ecx+0xe0]    ; the weapon's `coverage`
+4670c4   sub    ecx,0x200                   ; minus 512
+4670ca   imul   eax,ecx
+4670ce   idiv   DWORD PTR [esi+0x1422b]
+```
+
+`antiweapons` is bit 29 of the dword at `[type+0x241]` (FBI key at `0x503AF8`,
+inserted by `0x42C86F`); `interceptor` is bit 30 of `[weapon+0x111]` (weapon
+TDF key at `0x5040D4`, inserted at `0x42EAAC`); `coverage` is the dword at
+`[weapon+0xE0]` (weapon TDF key at `0x5042C8`, stored at `0x42E540`, confirmed
+by the debug label `"weapon %d - coverage"` at `0x5051AC`). The `-512` is
+literal and unexplained - I read it as TA shrinking the drawn circle by half a
+map square so it does not overstate the guaranteed intercept area, but that is
+inference.
+
+If the byte at `[unit.weaponSlot+0xE]` is non-zero the ring goes through
+`0x4C01A0` instead of `0x4C0070` - the same circle, but **dashed**: 32 segments
+of which alternate ones are drawn, with the starting parity taken from
+`[cfg+0x142F1] & 1`, the minimap's blink bit. The dashes therefore swap over on
+each blink, giving a chase pattern. The solid form is used otherwise.
+
+### Shape, and how the world radius becomes pixels
+
+A **circle**, not a diamond, and emphatically not the LOS shape. TA's actual
+line of sight is the octant-mirrored raster in `gamedata/LOS.TDF` (tables for
+radii 1 through 12, `numlines` growing 2, 4, 4, 6, 8, 10, 12, 12, 14, 16, 18,
+20); the minimap ring makes no attempt to match it. It is a plain 32-gon:
+
+```
+4c0087   mov    ebx,0x800                  ; angle step: 0x10000 / 32
+4c008c   lea    ebp,[edi+eax*1]            ; first point = (cx + r, cy)
+4c0095   push   edi                        ; r
+4c0096   push   ebx                        ; angle
+4c0097   call   0x4b7123                   ; -> r*cos
+4c00a7   add    esi,ecx                    ; x = cx + r*cos
+4c00a5   push   edi
+4c00a6   push   ebx
+4c00a9   call   0x4b70ef                   ; -> r*sin
+4c00c3   add    edi,ecx                    ; y = cy + r*sin
+   ... clip, then 0x4CC7AB = 1-pixel Bresenham line, colour = arg5 ...
+4c017b   add    ebx,0x800
+4c0183   cmp    ebx,0x10000
+4c018d   jle    0x4c0091
+```
+
+So: **32 straight segments, one pixel wide, solid, closed** (the step runs from
+`0x800` to `0x10000` inclusive, bringing the last vertex back to the start).
+`0x4CC7AB` is a hand-written Bresenham that pokes single bytes into the
+surface; there is no thickness and no antialiasing.
+
+The radius conversion shows it is a circle in *minimap pixel* space, not world
+space:
+
+```
+radiusPx = range * [cfg+0x142EB] / [cfg+0x1422B]
+```
+
+`[cfg+0x142EB]` is the minimap width in screen pixels and `[cfg+0x1422B]` the
+map width in world units - the same pair used to place the unit dots
+(`0x466E83`) and, in reverse, the view rectangle (`0x466B70`). Every ring uses
+the **horizontal** scale, including for its vertical extent; the vertical scale
+`[cfg+0x142ED]/[cfg+0x1422F]` is used for the *centre* but never the radius. On
+a map whose minimap is not scaled identically in both axes the ring is
+therefore slightly wrong vertically, and TA does not care.
+
+The centre is the unit's minimap dot:
+
+```
+mx = ux          * [cfg+0x142EB] / [cfg+0x1422B]
+my = (uz - uy/2) * [cfg+0x142ED] / [cfg+0x1422F]
+```
+
+with `ux`, `uy`, `uz` the integer parts at `[unit+0x6C]`, `+0x70`, `+0x74`.
+Note the `z - y/2`: TA's minimap is in the same sheared space as the 3D view,
+not a true plan view.
+
+### Which units, and enemies
+
+The loop is over *all* units in the world, and each one that is (a) drawn on
+the minimap at all and (b) has `[unit+0x110] & 0x10` set gets its rings. Bit 4
+of `[unit+0x110]` is the selection flag - the box-select routine at `0x48DB80`
+sets and clears exactly that bit (`or edx,0x10` / `and edx,0xFFFFFFEF`) while
+sweeping the unit range. So **every selected unit draws its rings, not just
+one.** Ten selected radar towers give ten circles.
+
+Enemy units are gated earlier, at `0x466E5C`, before the position is even
+computed: unless the global reveal flag is on, a unit that is not the local
+player's and does not have `[unit+0x110] & 0x300` (the visible / on-radar bits)
+is skipped entirely. An enemy unit you can see and have clicked on would reach
+the ring code, and nothing there re-checks ownership - so in principle
+selecting a visible enemy radar shows its coverage. I did not confirm that TA
+ever sets the selection bit on a unit you do not own; treat that last step as
+unverified.
+
+### The 3D view's own circles - a different thing entirely
+
+`0x4390A0` does draw circles in the world, but not these. It is one of five
+handlers hung off the *order overlay* pass (next section), it runs **only while
+Shift is held**, and in a retail build it draws just two things:
+
+* `mincloakdistance` (`[type+0x208]`), and only if the unit is currently
+  cloaked (`[unit+0x10E] & 4`, the bit the visibility test at `0x465AC0` keys
+  off). Colour `cfg+0xDDA`.
+* For a `kamikaze` unit (bit 28 of `[type+0x241]`, FBI key `kamikaze` at
+  `0x503A20`, inserted at `0x42CB12`), a ring whose radius sweeps outward and
+  restarts every 60 ticks:
+
+```
+439137   mov    si,WORD PTR [eax+0xd6]        ; the weapon's areaofeffect
+43913e   mov    eax,DWORD PTR [ecx+0x38a47]   ; global tick counter
+439144   mov    ebp,0x3c
+439149   div    ebp                           ; edx = tick % 60
+43914b   shr    esi,1                         ; areaofeffect / 2
+439157   imul   edx,esi
+43915a   shl    edx,1
+43915c   mul    edx                           ; \ divide by 30
+43915e   shr    edx,0x5                       ; /
+439161   cmp    edx,0x8                       ; floor of 8
+439168   cmp    ebp,esi                       ; ceiling of areaofeffect/2
+```
+
+  i.e. `r = clamp((tick % 60) * areaofeffect / 60, 8, areaofeffect/2)` - it
+  expands to the blast radius over the first thirty ticks and then sits there
+  for thirty more. Followed by one static ring of `kamikazedistance`
+  (`[type+0x218]`) or `sightdistance` depending on a per-unit condition.
+
+Everything else that routine can draw - sight, radar, sonar, both jammers,
+mincloak, builddistance, maneuver leash, kamikazedistance and all three weapon
+ranges, each with its name printed beside it - is behind `[cfg+0x391BF]`, a
+developer flag, and is unreachable in a shipped game. That is where the label
+strings `"sight"/"radar"/"sonar"/"radarjam"/"sonarjam"/"mincloak"/"build
+distance"/"maneuver"` at `0x505144`-`0x505190` live. They are useful as an
+independent check on the field offsets and nothing else.
+
+The world circles are drawn by `0x438EA0`, worth a note because it is *not* the
+flat minimap circle: it samples the ground height under every vertex (`call
+0x485070`, then `max(unitY, groundHeight)`) so the ring drapes over terrain,
+and its segment count is proportional to radius -
+`segments = (int)(r * 2*pi * 0.125)` from the doubles `6.28318530717958` at
+`0x4FD2B0` and `0.125` at `0x4FD2B8`, i.e. one segment per eight world units of
+circumference.
+
+### The colours: what I could and could not read
+
+Every colour above is a byte fetched at runtime from a small table at
+`cfg+0xDCB`, indexed as `cfg[0xDCB + n]`. The ones in play are `n = 0x0A`
+(radar and sonar), `n = 0x0C` (both jammers), `n = 0x0F` (anti-missile
+coverage), plus `n = 0x01`/`0x03`/`0x09`/`0x0A` for the 3D selection brackets.
+
+**I could not determine the actual palette indices, and I am not going to
+guess.** Nothing in `.text` writes that table: an exhaustive scan for stores
+with a displacement in `[0xD00, 0xE00)` against any base register finds none,
+and the block is `malloc`'d and zeroed at `0x41D920`, so the values are filled
+through a pointer the table's address is handed to. The only place its address
+escapes is `0x46ACF5`, which stashes `cfg+0xDCB` and installs it as the current
+colour-remap table for the text and sprite blitter - so this is a
+logical-colour to palette-index map shared with the font renderer, not a
+hand-written list of ring colours. Chasing the fill would mean tracing whoever
+loads that map, which I did not do.
+
+What I can say: `palettes/PALETTE.PAL` puts TA's green ramp at indices 232-239,
+`232 = (123,255,119)` bright down to `239 = (11,31,0)` near black, and the
+waypoint artwork in the next section is painted from `232`-`236`. A green ring
+is consistent with that ramp. The cheap way to settle the exact index is to
+break on `0x466FA8` in a debugger and read `edx`.
+
+### Implementation spec - minimap rings
+
+For each selected unit, in the minimap render:
+
+1. Skip unless the unit is drawn on the minimap at all (own unit, or
+   visible/on-radar).
+2. Centre: the unit's existing minimap dot position.
+3. Unless the unit is switched off while being `onoffable`, draw a circle for
+   each of `radardistance`, `sonardistance`, `radardistancejam`,
+   `sonardistancejam` that is non-zero. Skip `sightdistance`.
+4. Radius in minimap pixels is `range * minimapWidthPx / mapWidthWorldUnits`
+   for all four, using the horizontal scale even for the vertical extent.
+5. Draw a closed 32-segment polygon, one pixel wide, solid. At these sizes the
+   flat facets are visible top and bottom of a large ring - that is correct;
+   do not substitute a smooth circle if you want to match.
+6. Radar and sonar share one colour; the two jammers share a second. Pick two
+   greens from the 232-239 ramp until the indices are recovered; radar/sonar
+   should be the more prominent.
+7. Separately, for a unit with `antiweapons=1`, draw one ring per weapon slot
+   whose weapon has `interceptor=1`, radius `(coverage - 512)` scaled the same
+   way, in a third colour. Dash it - 16 of 32 segments, parity flipping on the
+   minimap blink - to match exactly.
+8. Draw nothing in the 3D view for sight/radar/sonar. TA's only 3D circles are
+   the cloaked-unit `mincloakdistance` ring and the kamikaze pulse, both gated
+   on Shift being held.
+
+---
+
+## 26. The marching waypoint trail
+
+Everything in this section is drawn by one pass, `0x48CC30`, called from the
+frame render at `0x469BFC` - and gated:
+
+```
+469bdc   push   0xf9
+469be1   call   0x4c1b80          ; IsKeyDown
+469be6   test   eax,eax
+469be8   je     0x469c01          ; nothing drawn
+469bea   mov    edx,DWORD PTR ds:0x511de8
+469bf4   add    edx,0x142f3       ; the view context
+469bfa   push   edx
+469bfb   push   eax
+469bfc   call   0x48cc30          ; the order overlay pass
+```
+
+`0x4C1B80` is a `GetKeyState` wrapper with an alias table; `0xF9` resolves
+through the byte table at `0x4C1C6C` and the jump table at `0x4C1C48` to case 5
+at `0x4C1BB5`, which is `push 0x10; call GetKeyState` - **`VK_SHIFT`**. So the
+answer to "only while shift is held, or whenever a unit with a queued order is
+selected" is unambiguous: **only while Shift is held**. Release it and the
+waypoints, the trail, the target brackets and the 3D range circles all vanish
+in the same frame.
+
+### The pass
+
+`0x48CC30` walks the local player's units and, for each live one, calls
+`0x439B30` with a bitmask of which overlays to draw and a flag:
+
+```
+48cd15   cmp    esi,DWORD PTR [edi]        ; is this the view's current unit?
+48cd17   je     0x48cd4a                   ;   -> mask 0x1F, flag 1
+48cd19   mov    ax,WORD PTR [esi+0xa8]     ; the unit's own index
+48cd20   cmp    ax,WORD PTR [edx+0x37e9c]
+48cd27   je     0x48cd4a                   ;   -> mask 0x1F, flag 1
+48cd29   cmp    ax,WORD PTR [edx+0x2cba]
+48cd30   je     0x48cd4a                   ;   -> mask 0x1F, flag 1
+48cd32   shr    ecx,0x4
+48cd35   test   cl,0x1                     ; merely selected?
+48cd38   je     0x48cd3e
+48cd3a   push   0x0                        ;   -> mask 0x1F, flag 0
+```
+
+`0x439B30` walks the unit's order list (`[unit+0x5C]`, chained through
+`[order+0x4A]`) and for each order looks up its type byte `[order+0x4]` in a
+runtime table at `[0x512344]`, 25 bytes per entry (the divide-by-25 magic
+`0x51EB851F >> 3` at `0x43BCAD` confirms the stride). The dword at `+0x0C` of
+the entry is a mask of which of five handlers to run:
+
+| Bit | Handler | What it draws |
+|---|---|---|
+| `0x01` | `0x438C00` | the corner bracket around the order's target |
+| `0x02` | `0x4394E0` | **the waypoint icon and the trail to it** |
+| `0x04` | `0x4399F0` | a flat 16-segment ring around the order's target |
+| `0x08` | `0x439740` | the waypoint icon alone, no trail |
+| `0x10` | `0x4390A0` | the unit's range circles (once per unit) |
+
+An order type gets a trail if its table entry has bit 1, a bare marker if it
+has bit 3. I did not enumerate the table - it is built at runtime through the
+vector at `0x512344`/`0x512348`/`0x51234C` and I ran out of thread to pull.
+
+The **flag** matters. `0x4394E0` draws the waypoint icon first and then:
+
+```
+43951b   test   ebp,ebp          ; the flag
+43951d   je     0x43972f         ; -> icon only, no trail
+```
+
+So the marching trail is drawn for the *current* unit (and for the one or two
+units named by the globals at `[cfg+0x37E9C]` and `[cfg+0x2CBA]`, which are
+unit indices - `0x48CC6C` multiplies them by `0x118` to make pointers), while
+every other selected unit gets its waypoint icons but no trail between them.
+That those two globals are "unit under cursor" and "primary selection" is
+inference; that only one or a few units get the trail is decoded.
+
+### The artwork
+
+`anims/CURSORS.GAF`, sequence **`pathicon`**. Loaded at `0x429E66`:
+
+```
+429e66   push   0x503430          ; "pathicon"
+429e6b   push   esi               ; the CURSORS.GAF handle
+429e72   call   0x4b8d40
+429e83   mov    DWORD PTR [edx+0x148d3],eax
+```
+
+(the store lands one call later than the push, the usual shape in this binary),
+and `[cfg+0x148D3]` is exactly the pointer the trail loop picks up at
+`0x4395A8`.
+
+One frame, 11x11, hotspot `(5,5)`, transparency index 9. Decoded, the pixels
+are a four-armed star - a plus with diagonal spurs:
+
+```
+  .   .   .   .   .  79   .   .   .   .   .
+  .   .   .   .  79 232  79   .   .   .   .
+  .   .   .  79 233 233 233  79   .   .   .
+  .   .  79   .  79 234  79   .  79   .   .
+  .  79 233  79  79 235  79  79 233  79   .
+ 79 232 233 234 235 236 235 234 233 232  79
+  .  79 233  79  79 235  79  79 233  79   .
+  .   .  79   .  79 234  79   .  79   .   .
+  .   .   .  79 233 233 233  79   .   .   .
+  .   .   .   .  79 232  79   .   .   .   .
+  .   .   .   .   .  79   .   .   .   .   .
+```
+
+Index 79 is `(11,11,0)`, a near-black outline; 232-236 are the top of TA's
+green ramp, `232 = (123,255,119)` at the tips fading inward to
+`236 = (27,127,11)` at the centre. The icon is therefore *brightest at its
+extremities and dark in the middle* - a small green sparkle, not a filled blob.
+The colour is baked into the artwork; there is no palette lookup or remap on
+this path.
+
+### Spacing and the march
+
+This is `0x4394E0` after the marker has been drawn. `arg4` is a scratch
+position carrying the running "previous point": `0x439B30` seeds it with the
+unit's own current position and `0x439740` overwrites it with each order's
+position as it goes, so the chain is *unit -> order 1 -> order 2 -> ...*.
+
+```
+439531   mov    eax,DWORD PTR [ebp+0x38a47]  ; global tick counter
+439537   sub    eax,DWORD PTR [ebx+0x46]     ; minus the order's timestamp
+43953a   xor    ebx,ebx
+43953c   cmp    ebx,eax
+43953e   sbb    ebx,ebx
+439542   and    ebx,eax                      ; age = max(tick - issued, 0)
+   ... dx, dy, dz; length = (int)sqrt(dx^2+dy^2+dz^2) ...
+439587   cmp    esi,0x10000
+439593   jl     0x43972f                     ; segment under 1.0 world unit: skip
+439599   mov    eax,ebx
+43959b   mov    ecx,0x1e
+4395a1   idiv   ecx                          ; edx = age % 30
+4395a8   mov    ebp,DWORD PTR [ebp+0x148d3]  ; the pathicon anim
+4395b2   lea    ecx,[edx+edx*2]              ; 3 * (age % 30)
+4395b5   shl    ecx,0x14                     ; << 20
+4395b8   imul   ecx                          ; \
+4395ba   add    edx,ecx                      ;  > / 30
+4395bc   sar    edx,0x4                      ; /
+4395ce   mov    ecx,edx                      ; phase, in 16.16 world units
+4395f7   cmp    ecx,esi
+4395fb   jge    0x43972f                     ; phase past the end: nothing
+```
+
+and then the loop, one iteration per icon:
+
+```
+439631   mov    eax,ebp                      ; distance along the segment
+439633   mov    ecx,0x10
+439639   call   0x4e44f0                     ; << 16, 64-bit
+43964a   call   0x4e4440                     ; / length  -> t in 16.16
+   ... for each of x,y,z:  d * t >> 16, added to the saved "from" ...
+4396d3   movsx  eax,WORD PTR [esp+0x46]      ; y
+4396d8   movsx  ecx,WORD PTR [esp+0x4a]      ; z
+4396dd   movsx  edx,WORD PTR [esp+0x42]      ; x
+4396e2   sar    eax,1
+4396e4   sub    ecx,eax                      ; sy = z - y/2
+4396ed   sub    ecx,[view+0x30]              ;    - scrollY
+4396f2   sub    edx,[view+0x2c]              ; sx = x - scrollX
+4396f8   add    ecx,0x20
+4396fb   add    edx,0x80
+439701   mov    eax,DWORD PTR [esi+ebx*8+0x28]  ; frame ebx of the anim
+43970d   call   0x4b7f90                     ; blit
+439712   lea    eax,[ebx+0x1]
+439717   mov    cx,WORD PTR [esi]            ; frame count
+43971b   idiv   ecx
+439723   mov    ebx,edx                      ; next icon: next frame
+43971d   add    ebp,0x300000                 ; next icon: +48.0 world units
+439725   cmp    ebp,DWORD PTR [esp+0x64]
+439729   jl     0x439631
+```
+
+Reading the constants off:
+
+* **Spacing is a constant 48 world units.** `0x300000` in 16.16 is exactly
+  `48.0`. It is not a division of the segment into equal parts - a long segment
+  just gets more icons, and the last gap before the endpoint is whatever is
+  left over.
+* **The march is a scroll, not a frame cycle.** The phase is
+  `((age % 30) * 3 * 0x100000) / 30`, i.e. `(age % 30) * 1.6` world units,
+  sweeping `0` to `46.4` and wrapping - exactly one icon spacing per 30 ticks.
+  TA's tick is 1/30 s, so **the icons crawl along the path at 48 world units
+  per second, one full spacing per second**, and the wrap is seamless because
+  the sweep equals the spacing.
+* The frame index does advance - once per tick from the age, and once more per
+  icon along the line - but `pathicon` has exactly one frame, so both are
+  no-ops and the icon never changes. TA plainly intended an animated icon here
+  and shipped a still one.
+* The phase runs *forward* from the earlier waypoint, so the icons appear to
+  flow from the unit toward its destination.
+* `age` comes from `[order+0x46]`, the tick the order was issued, so each
+  segment of a long queue has its own phase and they do not march in lockstep.
+  (The same timestamp drives the target bracket in `0x438C00`, which animates
+  its size over the first ten ticks of an order's life.)
+
+### Geometry
+
+The point is a **straight 3D linear interpolation** between the two order
+positions, y included - the trail does not sample the terrain and does not
+follow it. Over level ground the order positions are on the ground and the
+trail hugs it; across a valley the icons cut straight through the air. Contrast
+the range circles in `0x438EA0`, which explicitly call the height lookup at
+every vertex.
+
+The projection is TA's ordinary world-to-screen, the same three lines used by
+the selection brackets and the range circles:
+
+```
+sx = x - scrollX + 0x80
+sy = z - y/2 - scrollY + 0x20
+```
+
+The `+128` / `+32` is a constant origin offset of TA's world render surface and
+carries no meaning for RWE - use your own projection.
+
+### The waypoint markers are not the trail icon
+
+The endpoints are drawn by `0x439740`, and they are **the mouse cursor
+artwork**, not `pathicon`:
+
+```
+4397e2   xor    edx,edx
+4397e4   mov    dl,BYTE PTR [esi+0x4]           ; the order type
+4397e7   lea    edi,[edx+edx*4]
+4397ea   mov    edx,DWORD PTR ds:0x512344
+4397f0   lea    edx,[edx+edi*4]
+4397f3   mov    dl,BYTE PTR [edi+edx*1+0x10]    ; entry+0x10 = the icon index
+4397f7   test   dl,dl
+4397f9   jne    0x439811                        ; 0 -> no icon at all
+   ...
+43997a   mov    ecx,DWORD PTR [edi+ecx*4+0x1487f]  ; the anim for that index
+43999f   mov    eax,DWORD PTR [edi+0x38a47]        ; global tick
+439993   mov    ax,WORD PTR [ecx+0x2c]             ; ticks per frame
+4399a8   shl    esi,1                              ; doubled
+4399aa   div    esi
+4399b0   mov    si,WORD PTR [ecx]                  ; frame count
+4399b3   div    esi
+4399b5   mov    ecx,DWORD PTR [ecx+edx*8+0x28]     ; the frame
+4399bb   call   0x4b8500                           ; blit
+```
+
+`[cfg+0x1487F + i*4]` is the array of cursor animations, loaded from
+`CURSORS.GAF` at `0x429C9F`-`0x429E94`. Recovering the load order (again
+remembering the store lands one call late) gives the whole index map:
+
+| Index | Sequence | Index | Sequence |
+|---|---|---|---|
+| 0 | *(never assigned - no icon)* | 11 | `cursorreclamate` |
+| 1 | `cursorattack` | 12 | `cursorload` |
+| 2 | `cursorairstrike` | 13 | `cursorunload` |
+| 3 | `cursortoofar` | 14 | `cursormove` |
+| 4 | `cursorcapture` | 15 | `cursorselect` |
+| 5 | `cursordefend` | 16 | `cursorfindsite` |
+| 6 | `cursorrepair` | 17 | `cursorred` |
+| 7 | `cursorpatrol` | 18 | `cursorgrn` |
+| 8 | `cursorpickup` | 19 | `cursornormal` |
+| 9 | `cursorteleport` | 20 | `cursorhourglass` |
+| 10 | `cursorrevive` | 21 | `pathicon` |
+
+A queued Move therefore shows an animating `cursormove` at the waypoint, an
+Attack order `cursorattack`, Patrol `cursorpatrol`, Guard `cursordefend`,
+Reclaim `cursorreclamate`, and so on - the marker *is* the cursor you clicked
+with, animating in place. Unlike the trail these markers are keyed off the
+**global** tick, so they all animate in lockstep, at **half** the animation's
+nominal rate (`tick / (2 * frame0.duration)`, then modulo the frame count).
+`cursormove` has 8 frames, `cursorattack` 10, `cursorpatrol` 14,
+`cursordefend` and `cursorload` 16 each.
+
+Where the order names a target unit rather than a point, `0x439740` uses that
+unit's live position, falling back to a snapshot cached in `[order+0x32]` /
+`[order+0x34]` with the flag `0x200000` in `[order+0x42]` once the target stops
+being visible - so the marker freezes where you last saw the thing rather than
+tracking it through fog.
+
+Two more overlays land at the same target while Shift is held, worth knowing so
+they are not mistaken for part of the trail: `0x438C00` draws the four-cornered
+selection bracket sized from the target's model bounds, and `0x4399F0` draws a
+flat 16-segment ring of radius `(int)(footprintRadius * 0.89)` (the double
+`0.89` at `0x4FD2C0`; radius `32` when the order has no target unit), colour
+`cfg+0xDD7`.
+
+### Implementation spec - waypoint trail
+
+For `GameScene.cpp`, while Shift is held and for the primary selected unit:
+
+1. Build the chain of points: the unit's current position, then each queued
+   order's position in turn.
+2. For each consecutive pair, if the 3D distance is under 1.0 world unit, draw
+   nothing.
+3. `age = currentTick - orderIssuedTick`, floored at 0.
+4. `phase = ((age % 30) * 48) / 30` world units, i.e. `1.6 * (age % 30)`. If
+   `phase >= segmentLength`, draw nothing for this segment.
+5. For `d = phase; d < segmentLength; d += 48`, place an icon at
+   `from + (to - from) * d / segmentLength` - a straight 3D lerp, no terrain
+   sampling.
+6. The icon is `CURSORS.GAF` / `pathicon`, one frame, 11x11, drawn centred on
+   its hotspot `(5,5)`, colour baked in (green ramp 232-236, outline 79). No
+   line, no dashes - the "line" is only the row of icons.
+7. At each waypoint draw the cursor animation for that order type
+   (`cursormove`, `cursorattack`, `cursorpatrol`, `cursordefend`,
+   `cursorrepair`, `cursorreclamate`, `cursorcapture`, `cursorload`,
+   `cursorunload`, ...), frame `(globalTick / (2 * frameDuration)) %
+   frameCount` so all markers stay in sync. Some order types have no icon;
+   those draw nothing at the waypoint.
+8. Other selected units that are not the primary get the waypoint icons but
+   **no** trail between them.
+9. For the full TA look, also bracket and ring the order's target while Shift
+   is down.
+
+---
+
+## 27. The building placement box
+
+### Where the footprint comes from, and why it is not the yardmap
+
+The box is the unit's **footprint**, and the footprint has nothing to do with
+`YardMap`. `FootprintX`/`FootprintZ` are not FBI keys at all in the parser's own
+list — `0x42BF6C`-`0x42CF53` walks a hundred-odd key names and neither appears.
+What happens instead is at `0x42CD00`: the FBI parser looks up `movementclass`,
+and if the unit names one it copies the fields out of that `MOVEINFO.TDF` class;
+if it does not, it runs **the movement-class parser over the unit's own FBI
+section**:
+
+```
+42cd06  push 0x503990            ; "movementclass"
+42cd16  call 0x4c48c0
+42cd1d  test eax,eax
+42cd1f  je   0x42cd2f            ; no movement class named
+42cd24  call 0x440420            ;   -> look the class up in MOVEINFO
+42cd43  jne  0x42cd5d
+42cd51  call 0x440340            ;   -> else parse FootPrintX/Z, MaxSlope, ...
+42cd5d  mov cx,[eax+0x4]         ;         out of the FBI section itself
+42cd61  mov [ebp+0x14a],cx       ; def+0x14A = footprint X, in cells
+42cd68  mov dx,[eax+0x6]
+42cd6c  mov [ebp+0x14c],dx       ; def+0x14C = footprint Z, in cells
+```
+
+`0x440340` is the shared reader — `FootPrintX` at `0x505484`, `FootPrintZ`,
+`MaxWaterDepth`, `MinWaterDepth`, `MaxSlope`, `BadSlope`, `MaxWaterSlope`,
+`BadWaterSlope` — which is why buildings, which never name a `movementclass`,
+still get a footprint out of their FBI.
+
+The **yardmap is stretched onto that footprint, not the other way round**
+(`0x42CF3E`-`0x42D071`). The loop runs `footprintZ` rows of `footprintX` columns
+and walks the `YardMap` string one character per cell, except that it stops
+advancing when the next character is NUL:
+
+```
+42d040  mov cl,[esi+0x1]
+42d045  test cl,cl
+42d047  je  0x42d04a            ; last character -> do not advance
+42d049  inc esi
+```
+
+So ARMSILO's `YardMap=ooooooooo` — nine characters — fills a 5x5 grid, all open,
+and `FootprintX=5` is what the box is drawn from. **The two really do disagree in
+the shipped data** and the footprint wins.
+
+One cell is **sixteen world units**. The definition's bounding box falls straight
+out of the same routine at `0x42D079`:
+
+```
+42d079  movsx ecx,WORD PTR [ebp+0x14a]   ; footprintX
+42d082  neg   eax
+42d08b  shl   eax,0x14                   ; * 0x100000
+42d091  sar   eax,1                      ; / 2      -> -footprintX * 0x80000
+42d093  mov   [ebp+0x15e],eax            ; def+0x15E = min X = -footprintX * 8.0
+42d0a5  mov   [ebp+0x166],eax            ; def+0x166 = min Z = -footprintZ * 8.0
+42d0b5  mov   [ebp+0x16a],eax            ; def+0x16A = max X = +footprintX * 8.0
+42d0c5  mov   [ebp+0x172],eax            ; def+0x172 = max Z = +footprintZ * 8.0
+```
+
+Values are 16.16, so `0x80000` is 8.0 — a half-extent of `footprint * 8`, a full
+extent of `footprint * 16`. **No margin of any kind is added anywhere.**
+
+### The box under the cursor, `0x4197D0`
+
+Command mode lives in the byte at `globals+0x2CC3`; **mode `0x0E` is "place a
+building"**, set at `0x41AB89` when a build button is clicked. While that mode is
+live and bit 1 of `globals+0x2CC6` is set, every mouse move calls `0x4197D0`
+(`0x491CDB`, `0x499241`), which recomputes the box:
+
+```
+4197dd  mov cx,[edx+0x2cc4]       ; the unit type being placed
+4197ef  mov eax,[edx+0x1439b]
+4197f5  add esi,eax               ; esi = its definition (stride 0x249)
+4197f7  lea eax,[edx+0x2caa]      ; globals+0x2CAA = cursor world position, 16.16
+4197ff  mov edi,[esi+0x14a]       ; footprintX in the low word, footprintZ high
+419805  mov eax,[ecx]             ; cursor X
+419811  shl edi,0x13              ; footprintX * 0x80000
+419817  sub eax,edi               ;   X - footprintX*8
+41981e  add eax,0x80000           ;   + 8.0
+41982a  sar eax,0x14              ;   / 16.0   -> the cell index
+41982f  mov [esp+0xc],ax          ; cellX
+419840  mov [esp+0xe],cx          ; cellZ
+419849  shl eax,0x4
+41984f  mov [edx+0x2c92],eax      ; x0 = cellX * 16
+41985e  mov [edx+0x2c9a],ecx      ; z0 = cellZ * 16
+419881  shl ecx,0x4
+419886  mov [eax+0x2c9e],ecx      ; x1 = x0 + footprintX * 16
+419894  add edx,[eax+0x2c9a]
+41989a  mov [eax+0x2ca6],edx      ; z1 = z0 + footprintZ * 16
+```
+
+The `+ 8.0` before the shift is a round-to-nearest, so the box snaps to the
+sixteen-unit build grid with the *cursor* at the centre of the footprint rather
+than at a corner.
+
+It then asks whether the site is legal and where the building would stand:
+
+```
+4198c6  call 0x47d2e0            ; can this definition be built at this cell?
+4198d1  and  al,0x1
+4198d3  shl  al,0x6
+4198e1  mov  [ecx+0x2cc6],dl     ; bit 6 of globals+0x2CC6 = the site is OK
+4198ec  test BYTE PTR [eax+0x2cc6],0x40
+4198f3  je   0x4198fc
+4198f5  call 0x47c780            ;   OK -> the levelled height 0x47D2E0 recorded
+4198fe  call 0x47d820            ;   not OK -> just sample the terrain
+419918  mov  [ecx+0x2c96],eax    ; y0
+419925  mov  [edx+0x2ca2],eax    ; y1  (the box is flat)
+```
+
+`0x47D2E0` returns **1 for a buildable site** (`0x47D800 mov eax,1`, against
+`0x47D812 xor eax,eax`) and as a side effect stores the levelled build height as
+a byte in the global at `0x51E684`; `0x47C780` is nothing but
+`mov eax,ds:0x51e684; ret`. So **bit 6 set means the site is good**, which the
+click handler at `0x498F86` confirms independently:
+
+```
+498f86  test BYTE PTR [eax+0x2cc6],0x40
+498f8d  je   0x499016            ; bit clear -> refuse
+498f98  call 0x419670            ; bit set   -> issue the order
+498f9f  push 0x509660            ; "oktobuild"
+```
+
+### Drawing it, inside the world render at `0x469E0B`
+
+The box is drawn by the world render `0x468CF0` itself, sharing its code with the
+drag-select rectangle. Both are **world-space rectangles**, not screen ones; TA
+draws the map orthographically with height only shifting things upward, so an
+axis-aligned world rectangle is an axis-aligned screen rectangle:
+
+```
+469e13  mov edi,[ecx+0x2c96]     ; y0 (a byte height)
+469e19  mov eax,[ecx+0x2c9a]     ; z0
+469e1f  mov edx,[ecx+0x1431f]    ; camera X
+469e25  mov esi,[ecx+0x2c92]     ; x0
+469e37  sar edi,1                ; y0 / 2
+469e39  sub eax,edi              ; z0 - y0/2
+469e41  sub esi,edx              ; x0 - camX
+469e4b  sub eax,ebp              ;   - camZ
+469e59  add esi,0x80             ; + 128
+469e5f  add eax,0x20             ; + 32
+```
+
+so `screenX = worldX - camX + 128` and `screenY = worldZ - height/2 - camZ + 32`.
+**One world unit is one pixel**, the viewport origin is (128, 32), and a height
+contributes half its value upward. Then:
+
+```
+469e6b  cmp bl,0xe               ; command mode 0x0E?
+469e70  mov cl,[ecx+0x2cc6]
+469e76  and cl,0x40
+469e7d  and ecx,0x6
+469e80  add ecx,0x4              ; -> 10 if the site is OK, 4 if it is not
+469e83  mov ebp,ecx
+469e87  mov ebp,0xf              ; not build mode -> 15 (the drag box)
+469e94  mov bl,[ebp+ecx*1+0x0]   ; colour = guicolours[index]
+469ec5  call 0x4bf8c0            ; rectangle (x0,y0)-(x1,y1)
+469eda  inc edi ... dec ecx      ; inset by one pixel all round
+469f1e  call 0x4bf8c0            ; rectangle again, same colour
+```
+
+`0x4BF8C0` draws a one-pixel rectangle outline out of four clipped lines
+(`0x4BEA20` clips, `0x4CC7AB` draws). Two nested calls one pixel apart means the
+placement box is **exactly two pixels thick, both pixels the same colour**. The
+drag-select box goes through the same code but its second, inner ring is drawn in
+`guicolours[0]` instead; that one is two-tone.
+
+So there is **one** cursor box, not several: no dash pattern, no size change, no
+third state. Valid and invalid differ only in colour.
+
+The colour table is a byte array at `globals+0xDCB`, handed to the render frame at
+`0x468D49` (`lea ebx,[eax+0xdcb]`; `mov [esp+0x74],ebx`). Indices in use across
+the UI: 0 and 15 the drag box, **4 the invalid placement box, 10 the valid one**,
+1/3/9/10 the queued build box of the next section, 9 and 12 the order path lines,
+14 the minimap view rectangle.
+
+**I could not find where that table is filled, and I want to be plain about
+that.** The globals block is malloc-ed and zeroed once at `0x41D956`, and nothing
+in `.text` writes `globals+0xDCB`..`+0xDDA`: a raw scan of every byte, word and
+dword store with a `disp32` in that range finds none, there are no runs of
+`mov byte [reg+disp32], imm8` anywhere in the image, and every one of the nine
+`lea`/`add` instructions that computes the address (`0x4183D6`, `0x466DD4`,
+`0x467EC6`, `0x468625`, `0x468D49`, `0x46902F`, `0x46A452`, `0x46ACF4`,
+`0x46B9E0`) is a reader. Either it is written through a pointer aliased from
+somewhere I did not follow, or through a base register holding `globals + K` with
+a compensating displacement. **The palette entries are therefore unknown** — that
+is ignorance, not a guess I am dressing up. The next thing to try is a runtime
+memory dump: attach to the game with the placement box on screen and read sixteen
+bytes at `globals+0xDCB`, rather than more static reading.
+
+### The build-grid overlay is a different thing
+
+`0x418310`, called from the world render at `0x468DBA`, walks the visible map
+cells in sixteen-unit steps and draws a coloured grid over them. It is gated on
+`globals+0x14280 == 1` and its cell states come from the **selected unit's
+movement class** (`def+0x1B6`, two bits per cell, `0x4185D0`-`0x4185FA`), not from
+the build site, so this is the pathability overlay and not part of placement. Its
+three colours are the byte table at `0x4FCC68` = `04 0E 0A`, that is
+`guicolours[4]`, `[14]`, `[10]`. Recorded only so it does not get mistaken later
+for a placement grid.
+
+### A line of buildings
+
+There is no drag-out line. `0x498F70` is the click: after issuing, it tests a
+modifier flag on the event and either **stays in mode `0x0E` with bit 5 of
+`globals+0x2CC6` set** so the next click places another, or drops back to mode 1
+and sends `STOP`:
+
+```
+498fa9  test BYTE PTR [esi+0x8],0x4
+498fb2  je   0x498fc0
+498fb4  or   BYTE PTR [eax+0x2cc6],0x20   ; keep placing
+498fc0  mov  BYTE PTR [eax+0x2cc3],0x1    ; otherwise leave build mode
+```
+
+Each click is an independent order and each gets its own box, drawn by the routine
+in the next section. A row of five buildings is five boxes, each with its own
+animation stamp, and nothing joins them.
+
+### Implementation spec
+
+For `GameScene::renderBuildBoxes` and the `hoverBuildInfo` block around
+`GameScene.cpp:1246`:
+
+- The footprint is `FootprintX`/`FootprintZ` — RWE already gets this right through
+  `computeFootprintRegion` — and **not** the yardmap. Sixteen world units per
+  cell; `MapTerrain::HeightTileWidthInWorldUnits` is already 16.
+- The box is `[cellX*16, cellX*16 + footprintX*16]` by
+  `[cellZ*16, cellZ*16 + footprintZ*16]`. No margin. RWE matches.
+- Snap with round-to-nearest about the cursor:
+  `cell = floor((cursor - footprint*8 + 8) / 16)`, not truncation.
+- Line width is **2 px, both pixels one colour**; RWE's
+  `drawBoxOutline(..., 2.0f)` is right. There is no thicker "confirmed" variant to
+  add.
+- Valid uses `guicolours[10]`, invalid `guicolours[4]`. The palette entries are
+  unknown, so RWE's green and red are as good a stand-in as anything.
+- The box height should be **the levelled build height computed over the whole
+  footprint**, and the same value should be stored on the order, so the box does
+  not jump vertically the instant the order is issued. RWE currently uses
+  `terrain.getHeightAt(centre)` for both, which is close but is not the same rule.
+
+---
+
+## 28. The placement animation
+
+The animation is real, it belongs to the **queued build order** and not to the
+cursor box, and it is drawn by `0x438C00`. `0x439B30` walks a selected unit's
+order queue, looks each order's type up in the descriptor table at `ds:0x512344`
+and dispatches on a flags dword at `+0x0C`: bit 0 draws the build-site box
+(`0x438C00`), bit 1 a waypoint marker (`0x4394E0`), bit 2 the sixteen-segment
+dashed move line (`0x4399F0`), bit 3 a target marker (`0x439740`).
+
+### The box
+
+`0x438C00(surface, view, order, ...)` reads the order's unit type from
+`order+0x36` and its target position from `order+0x22`, and builds the rectangle
+straight out of the definition's bounding box, the same footprint*8 half-extents
+as the previous section:
+
+```
+438c23  mov ebp,[edx+0x22]        ; order position X
+438c26  mov edi,[edx+0x2a]        ; order position Z
+438c41  mov edx,[eax+0x15e]       ; def min X
+438c4d  add edx,ebp               ; -> world x0
+438c4f  mov esi,[eax+0x16a]       ; def max X
+438c59  mov edx,[ecx+0x4]
+438c5c  add edx,ebx               ; position Y + def min Y -> world y0
+438c66  mov edx,[eax+0x166]       ; def min Z  -> world z0
+438c6c  mov eax,[eax+0x172]       ; def max Z  -> world z1
+```
+
+and projects it with exactly the mapping of the previous section. The order's own
+position is the snapped centre of the placement box (`0x41970A`:
+`(2*cell + footprint) * 0x80000`, that is `cell*16 + footprint*8`) and its Y is
+the same levelled height byte the cursor box used (`0x419721`), so **the queued
+box lands on precisely the pixels the cursor box occupied.** Nothing moves and
+nothing resizes at the moment of placement.
+
+### The clock
+
+```
+438cb7  mov eax,[edx+0x38a47]     ; the game tick
+438cc5  mov ebx,[edx+0x46]        ; the tick the order was created
+438cca  sub eax,ebx               ; age
+438cde  cmp edx,eax               ; clamp at zero
+438ce0  sbb edx,edx
+438ce6  and edx,eax
+438ce8  cmp edx,0xa
+438ceb  jae 0x438cfb              ; clamp at ten
+438cfb  mov DWORD PTR [esp+0x48],0xa
+```
+
+`order+0x46` is stamped with `globals+0x38A47`, the 30 Hz simulation tick, by the
+order constructor itself (`0x43A12E`, `0x43A471`) — that is, at the moment you
+click. So `t = clamp(now - createdTick, 0, 10)`: the animation runs for **ten
+ticks, one third of a second**, once, and then holds. It does not repeat while the
+building is under construction and it does not restart when construction begins.
+
+```
+438d07  sub ecx,ebp              ; width  = x1 - x0
+438d0e  imul ecx,edx             ; * t
+438d11  imul                     ; 0x66666667 ...
+438d1c  sar edx,0x2              ; ... / 10
+438d2b  mov ebx,edx              ; dx = width  * t / 10
+438d3d  mov [esp+0x48],edx       ; dy = height * t / 10
+```
+
+**Linear, no easing, no overshoot**, integer-truncated toward zero. The travel is
+a fraction of the box, not a fixed distance: `t/10` of the full width and of the
+full height respectively.
+
+### The eight lines
+
+Two colours, chosen once from a flag on the unit the order belongs to
+(`order+0x0E`, set by the order constructor at `0x43A09F`):
+
+```
+438d45  mov eax,[edx+0xe]        ; the ordering unit
+438d48  mov ecx,[eax+0x110]
+438d53  shr ecx,0x4
+438d56  test cl,0x1              ; bit 4 of unit+0x110 = the unit is selected
+438d5b  mov dl,[eax+0xdce]       ;   set   -> A = guicolours[3]
+438d61  mov al,[eax+0xdd5]       ;             B = guicolours[10]
+438d71  mov cl,[eax+0xdcc]       ;   clear -> A = guicolours[1]
+438d77  mov dl,[eax+0xdd4]       ;             B = guicolours[9]
+```
+
+Bit 4 is the selection flag: the loop at `0x419755` that issues a build order
+skips every unit without it, and the cursor routine at `0x48D2A7` uses the same
+test to collect the units it is deciding a cursor for.
+
+Then, with `(x0,y0)-(x1,y1)` the screen rectangle:
+
+| # | Colour | Geometry |
+|---|---|---|
+| 1 | A | vertical at `x = x0 + dx - 1`, from `y0-1` to `y1+1` |
+| 2 | A | vertical at `x = x1 - dx + 1`, from `y0-1` to `y1+1` |
+| 3 | A | horizontal at `y = y0 + dy - 1`, from `x0-1` to `x1+1` |
+| 4 | A | horizontal at `y = y1 - dy + 1`, from `x0-1` to `x1+1` |
+| 5 | B | vertical at `x = x0 + dx`, from `y0` to `y1` |
+| 6 | B | vertical at `x = x1 - dx`, from `y0` to `y1` |
+| 7 | B | horizontal at `y = y0 + dy`, from `x0` to `x1` |
+| 8 | B | horizontal at `y = y1 - dy`, from `x0` to `x1` |
+
+all through `0x4BE950(surface, x1, y1, x2, y2, colour)`. The excerpt for the first
+two, which fixes both the argument order and the one-pixel offsets:
+
+```
+438d89  lea ecx,[ebx+ebp*1]      ; x0 + dx
+438d91  lea edx,[edi+0x1]        ; y1 + 1
+438d98  dec ecx                  ; x0 + dx - 1
+438d99  push eax                 ;   colour A
+438d9a  lea ebx,[esi-0x1]        ; y0 - 1
+438d9d  push edx
+438d9e  push ecx
+438d9f  push ebx
+438da4  push ecx
+438da5  push ebx                 ;   surface
+438daa  call 0x4be950
+438db7  sub eax,ecx              ; x1 - dx
+438dc1  mov [esp+0x18],eax
+438dc5  inc eax                  ; x1 - dx + 1
+438dce  call 0x4be950
+```
+
+The stack bookkeeping is worth a warning. `0x438DC1` writes `[esp+0x18]` after a
+`push`, so it lands on the slot `0x438D34` used for `dx`, not on the slot
+`0x438D94` used for `x0+dx`. Read it without accounting for that push and lines 5
+and 6 come out as verticals drawn at `x = dx`, which is nonsense, and was my first
+reading.
+
+### What it looks like
+
+**They are not corner brackets and they are not points.** They are four
+full-length lines, two vertical and two horizontal, that sweep across the box.
+What the eye reads as corners are the four crossing points, and each carries tails
+running out to the box edge, so the figure is a hash whose inner rectangle shrinks
+and grows. There are no short legs, so there is no leg length to give.
+
+- `t = 0`: `dx = dy = 0`. The lines sit at `x0-1`/`x0` and `x1`/`x1+1` — the box,
+  one pixel proud of the footprint.
+- `t = 5`: `dx = width/2`. Both verticals are at the centre and both horizontals
+  are at the centre — a plus sign.
+- `t = 10`: `dx = width`, so `x0+dx = x1` and `x1-dx = x0`. **The pairs have
+  crossed over** and land back on the box edges, now occupying `x0`/`x0+1` and
+  `x1-1`/`x1` — exactly the footprint.
+
+Full box, collapse to a cross at the centre over five ticks, expand back to the
+footprint over five more. That is the effect the user describes as the four
+corners sliding inward toward the centre and then returning to the edges.
+
+On the outline changing width: **the line weight does not change.** Both boxes are
+two pixels. What does change, and what I think accounts for the impression, is
+three things together. The animation first frame is one pixel larger than its
+last; the settled queued box carries one-pixel nubs past each corner, because the
+colour-A arms overhang by one, which the cursor box does not have; and the colour
+goes from uniform `guicolours[10]` to two-tone `guicolours[3]` inside and
+`guicolours[10]` outside. The outer pixel keeps the same table entry as the valid
+cursor box, which is why the transition reads as continuous rather than as a swap.
+**I looked for a third outline with a different thickness and there is not one**:
+the only other callers of the rectangle primitive `0x4BF8C0` are the minimap view
+rectangle (`0x466B5E`) and a debug window (`0x467F6C`), and the only other line
+clusters in that part of the binary are the pathability overlay (`0x418310`) and
+the remaining order-queue markers.
+
+The move-order marker `0x4394E0` has an animation of its own on the same
+`order+0x46` stamp but over **thirty** ticks (`0x43959B mov ecx,0x1e`). I did not
+decode it, and it is not this one.
+
+### Implementation spec
+
+In `GameScene::renderBuildBoxes`, replace the single `drawBoxOutline` per build
+order with the eight-line figure, in world-UI space where one world unit is one
+pixel:
+
+- Give `BuildOrder` a `GameTime createdAt`, stamped when the order is created.
+- `t = std::clamp(currentTime - order.createdAt, 0, 10)` in ticks.
+- `dx = (width * t) / 10`, `dy = (height * t) / 10`, integer, truncated toward
+  zero. `width` and `height` are `footprint * 16` world units.
+- Draw the eight one-pixel lines of the table above: colour A for the four that
+  carry the one-pixel overhang, colour B for the four that do not.
+- B is the same colour as the valid placement box, so RWE current green is fine;
+  A is a shade different.
+- Draw it for every queued order for as long as the order is in the queue. The
+  animation is self-limiting because `t` saturates at 10 and the figure settles on
+  the footprint.
+- Do not restart `t` when construction starts; nothing in the original does.
+
+---
+
+## 29. The nuclear silo stockpile and build progress
+
+Most of the mechanism is already in the stockpiled-weapons section of this
+document, and what follows is largely a set of negatives. They are decoded
+negatives, not guesses.
+
+### Where the count is shown
+
+Only in one place: **the caption of the weapon-build button on the launcher own
+build page.** `0x4199B0` rebuilds the caption of every gadget on the page each
+refresh, dispatching on `commonattribs` (`element+0x2A`; the element stride is
+`0x15B` and the caption buffer is `element+0xB6`):
+
+```
+4199f8  test al,0x4              ; bit 2: an ordinary build queue
+419a1e  push 0x502660            ;   "+%d"
+419a2b  test al,0x8              ; bit 3: a weapon build button
+419a33  mov al,[ebp+0x1e]        ;   the magazine byte of weapon one
+419a39  call 0x439d80            ;   how many are still on order
+419a42  mov BYTE PTR [esi],0x0
+419a48  push 0x50266c            ;   "%d"
+419a67  push 0x502664            ;   " +%d"
+419a6f  call 0x4e42b0
+```
+
+The caption is N for the finished rounds with a space, a plus and M appended for
+the outstanding orders, so `3 +2`. With an empty magazine the `"%d"` is skipped
+entirely and the string starts empty, so the append lands at offset zero with its
+leading space still attached and the button reads a space, a plus and the count.
+
+The gadget is identified by `commonattribs=8`, and `ARMSILO1.GUI` says so in as
+many words:
+
+```
+name=ARMMAKENUKE;  xpos=0;  ypos=27;  width=64;  height=64;
+attribs=32;  commonattribs=8;   // Flag this as a weapon build button
+```
+
+`CORSILO1.GUI` is the same with `CORMAKENUKE`. Both silos put their missile in
+`Weapon1`, and `0x419A33` hard-codes `[unit+0x1E]`, the magazine byte of weapon
+record one, so that is the only slot the readout can ever show.
+
+### Where the progress of the round being built is shown
+
+**Nowhere.** There is no percentage, no bar, and no third state on the button. I
+looked in four places and all four come up empty.
+
+**1. The footer RELOAD1/RELOAD2/RELOAD3 rectangles.** These are the obvious
+candidate: three per-weapon regions in `SIDEDATA.TDF`, one for each of a unit
+three weapons, at `x1=132 y1=450 x2=148 y2=458` and two ten-pixel steps below.
+They are parsed at `0x43249A` into `sidestruct+0x1A8`, `+0x1B8`, `+0x1C8`:
+
+```
+43249a  push esi
+43249f  push 0x50477c            ; "RELOAD%d"
+4324b9  call 0x431950
+4324bf  add edi,0x10             ; three of them, sixteen bytes each
+```
+
+and are then **never read**. The side struct is `globals+0x37F3D + side*0x232`,
+the rectangle block starts `0x4A` into it, and its sibling rectangles *are* read
+through that base in the ordinary way: `DAMAGEBAR` at `side+0x152` is loaded at
+`0x46B04C` and `0x46B2DC`, `UNITNAME` at `side+0x142` at `0x46AFD4`. There is no
+`[reg+0x1F2]`, `[reg+0x202]` or `[reg+0x212]` anywhere in `.text` that is not a
+unit-definition field on an unrelated struct. The reload readout is dead data, in
+the same class as `sortbias`.
+
+**2. The unit info panel.** `0x46AD90`-`0x46B400` draws the whole footer for the
+selected unit and its entire vocabulary is: `"%s  M:%d E:%d"` for a build target,
+the unit name, the damage bar off `unit+0x108` against `def+0x1FA`, `"+%.1f"`,
+`"+%.0f"`, `"-%.1f"` and `"-%.0f"` for the four resource rates, and
+`"%d %s - %s"` and `"%d %s"` for kills and Veteran. No stockpile, no reload, no
+percentage.
+
+**3. A format string.** The only doubled percent sign in the binary is the netstat
+line `"pS=%4d pR=%4d (S=%d/%4d, R=%d/%4d) C=%3d%%"`, and the only `"%d/%d"`
+(`0x505710`) has a single caller, `0x441674`, in the mission and save list.
+
+**4. maxstockpile.** It does not exist. A case-insensitive scan of the whole image
+for `stockpile` finds exactly one occurrence, `0x5040EC`, and that is the
+**weapon TDF** flag, bit 28 of `wdef+0x111`. There is no FBI key, no cap field,
+and no per-unit maximum other than the hard-coded `0xC8` = 200 that `0x402CB4`
+compares the magazine against before parking the order for 300 ticks.
+
+### The fields
+
+| What | Where |
+|---|---|
+| finished rounds | `unit+0x1E`, a BYTE: weapon record one magazine (records are `0x1C` apart from `unit+0x04`; the field is `+0x1A` within a record) |
+| rounds still on order | not stored; `0x439D80` totals the outstanding `BUILDWEAPON` orders on demand |
+| progress on the current round | `order+0x3E`, a dword of **ticks already paid for** |
+| the total | `wdef+0xE4`, `reloadtime` already multiplied by 30 |
+| the flag | `stockpile`, bit 28 of `wdef+0x111` |
+
+Progress advances five ticks at a time (`0x402BD4`) and each step cost is the
+difference of two truncated running totals. For `NUCLEAR_MISSILE` the total is
+5400 ticks, 180 seconds, so a percentage would be `order+0x3E * 100 / wdef+0xE4`.
+
+### Implementation spec
+
+To match the original exactly, RWE already does everything there is to do once the
+N and the plus-M caption is in: the original shows the finished count and the
+queue length on the build button and nothing else at all.
+
+To answer the question the user actually asked, how far through the current
+missile the silo is, that is **an addition, not a restoration**, and it belongs in
+the "where RWE deliberately differs" section rather than being presented as TA
+behaviour. The numbers to use:
+
+- Progress fraction is `ticksPaid / (reloadTime * 30)`, where `ticksPaid` is RWE
+  equivalent of `order+0x3E` on the `BuildWeapon` order and `reloadTime` is the
+  weapon own field. It advances in steps of five ticks and stalls outright when
+  the economy refuses a step, so it is not a smooth ramp: draw it as a bar or a
+  whole-number percentage, not as an interpolated animation.
+- The natural home, and the one Humongous evidently intended, is the
+  RELOAD1/RELOAD2/RELOAD3 rectangle of the selected unit side data: three stacked
+  eight-pixel strips down the left of the footer, shipped in both sides
+  `SIDEDATA.TDF`, parsed by the original and used by nothing. Filling them in
+  costs nothing the original was doing with the space.
+- The caption on `ARMMAKENUKE` stays exactly `"%d"` plus `" +%d"`, including the
+  stranded leading space when the magazine is empty.
+
+---
+
+## 30. Field offsets
 
 FBI key names are compared at `0x42C129`–`0x42C1C5`, which gives the unit
 definition layout:
@@ -4447,7 +5622,7 @@ Palette ranges that turned up:
 
 ---
 
-## 26. Where RWE deliberately differs
+## 31. Where RWE deliberately differs
 
 Recorded so these do not get "fixed" back later by someone comparing against the
 original:
@@ -4481,6 +5656,21 @@ original:
   rockets are `turret=0`, so §11 applies to them and the original holds fire
   until the nose is within the weapon's tolerance, which for `vtol_rocket` and
   friends is 8000, about 44°. RWE now does the same.
+- **The waypoint trail marches off the global clock.** The original takes each
+  segment's phase from the age of the order being drawn (§26), so two orders
+  queued a few ticks apart march very slightly out of step. RWE's orders do not
+  record when they were issued, and giving them an issue tick would mean
+  carrying it through the game hash, the state dump and the network protocol to
+  buy an effect nobody can see, so every segment marches together.
+- **The placement sweep is timed scene-side.** Same reasoning: the original
+  stamps the tick onto the order (`order+0x46`, §28) and RWE notes when a build
+  order first appears instead. It is decoration, and decoration does not belong
+  in the simulation.
+- **The silo readout is an addition, not a restoration.** The original shows the
+  stockpile only as the caption on the MAKENUKE button and shows the missile
+  under construction nowhere at all -- no bar, no percentage, no format string
+  (§29). RWE borrows the `RELOAD1` rectangle, which `SIDEDATA.TDF` defines and
+  the original parses and then never reads.
 - **Only the heading half of the `turret=0` check is enforced.** The original
   compares the required elevation against the hull's own pitch at `unit+0x68`
   (§11). RWE's simulation has no hull pitch — `UnitState` carries a rotation and
@@ -4491,7 +5681,7 @@ original:
 
 ---
 
-## 27. Still unknown or unported
+## 32. Still unknown or unported
 
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
@@ -4506,6 +5696,15 @@ original:
 - **`maneuverleashlength`** is now parsed but not enforced. In the original it
   aborts an attack when the aircraft strays that far from where it was standing
   when the order was given — missions document §8.
+- **The interface colour table at `cfg+0xDCB` has no writer anywhere in
+  `.text`.** Every one of the nine accesses is a read; it is a logical-colour to
+  palette remap installed for the blitter. So the exact palette indices for the
+  minimap rings (§25), the placement box (§27) and the sweep (§28) are unknown,
+  and RWE uses greens of its own choosing. Settling it needs a runtime memory
+  dump, not more static reading -- break on `0x466FA8` and read `edx`.
+- **The anti-missile coverage ring** (§25) is decoded -- one dashed ring per
+  `interceptor` weapon on an `antiweapons` unit, radius `coverage - 512` -- but
+  not drawn.
 - The exact tick at which the original commits a **bomb release** inside its
   weapon code is still not pinned down; RWE uses its own bombsight.
 - **`unit+0x110` bits 2–3.** They pick the loose 2000 default over the tight 150

@@ -25,6 +25,12 @@ namespace rwe
         Unload,
         Red,
         Green,
+        /**
+         * Not a cursor: the star the original strings along the line between
+         * queued waypoints. It lives in the same GAF and is loaded the same
+         * way, so it is simplest to keep it here.
+         */
+        PathIcon,
         NUM_CURSORS
     };
 

@@ -80,6 +80,9 @@ namespace rwe
 
         void drawLine(const Vector2f& start, const Vector2f& end);
 
+        /** A closed one-pixel outline through the given points. */
+        void drawLineLoop(const std::vector<Vector2f>& points, const Color& color);
+
         Matrix4f getViewProjectionMatrix() const;
 
         Matrix4f getInverseViewProjectionMatrix() const;

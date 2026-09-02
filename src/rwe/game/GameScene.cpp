@@ -527,6 +527,51 @@ namespace rwe
                     auto text = "-" + formatResourceDelta(unit.getEnergyUse());
                     chromeUiRenderService.drawText(rect.x1, extraBottom + rect.y1, text, *guiFont, Color(255, 71, 0));
                 }
+                // A launcher says how full it is and how far through the next
+                // round it has got. This is an addition, not a restoration:
+                // the original shows the count only as the caption on the
+                // MAKENUKE button, and shows the missile under construction
+                // nowhere at all. It has no percentage format string, and the
+                // RELOAD1/2/3 rectangles SIDEDATA.TDF defines for the footer
+                // are parsed and then never read by anything -- dead data, the
+                // same as `sortbias`. Borrowing the first of them is the
+                // tidiest place to put a bar the original never had.
+                auto stockpileWeapon = simulation.tryGetStockpileWeapon(*hoveredUnit);
+                if (stockpileWeapon)
+                {
+                    const auto& weapon = stockpileWeapon->get();
+                    const auto& weaponDefinition = simulation.weaponDefinitions.at(weapon.weaponType);
+
+                    {
+                        const auto& rect = localSideData.missionText;
+                        auto text = stockpileButtonLabel(weapon.stockedRounds, weapon.queuedRounds);
+                        if (text.empty())
+                        {
+                            text = "0";
+                        }
+                        chromeUiRenderService.drawTextCenteredX(rect.x1, extraBottom + rect.y1, "Stockpile " + text, *guiFont);
+                    }
+
+                    // Progress is the ticks already paid for over the whole
+                    // build, which is the weapon's own reloadtime -- 180
+                    // seconds, 5400 ticks, for a nuclear missile.
+                    auto totalTicks = std::max(1, static_cast<int>(deltaSecondsToTicks(weaponDefinition.reloadTime).value));
+                    auto fraction = static_cast<float>(weapon.stockpileProgress) / static_cast<float>(totalTicks);
+
+                    const auto& bar = localSideData.reload1.toDiscreteRect();
+                    auto barY = static_cast<float>(extraBottom + bar.y);
+                    chromeUiRenderService.fillColor(static_cast<float>(bar.x), barY, static_cast<float>(bar.width), static_cast<float>(bar.height), Color(24, 24, 24));
+                    if (weapon.queuedRounds > 0)
+                    {
+                        chromeUiRenderService.fillColor(
+                            static_cast<float>(bar.x),
+                            barY,
+                            static_cast<float>(bar.width) * std::clamp(fraction, 0.0f, 1.0f),
+                            static_cast<float>(bar.height),
+                            Color(83, 223, 79));
+                    }
+                }
+                else
                 {
                     const auto& rect = localSideData.missionText;
                     auto text = "Standby";
@@ -648,6 +693,9 @@ namespace rwe
             chromeUiRenderService.drawSprite(minimapPos.x, minimapPos.y, *minimapDotHighlight);
         }
 
+        // draw the detection rings of every selected unit
+        renderMinimapDetectionRings(worldToMinimap);
+
         // draw minimap viewport rectangle
         {
             auto transform = worldToMinimap * cameraInverse;
@@ -660,6 +708,81 @@ namespace rwe
                 std::round(topRight.x - bottomLeft.x),
                 std::round(bottomLeft.y - topRight.y),
                 Color(247, 227, 103));
+        }
+    }
+
+    void GameScene::renderMinimapDetectionRings(const Matrix4f& worldToMinimap)
+    {
+        // 0x466DC0, the minimap render, per unit and gated on the selection
+        // bit -- so every selected unit draws its rings, not just one.
+        //
+        // Four ranges get a ring: RadarDistance, SonarDistance and the two
+        // jammer radii. SightDistance does not. It sits one slot away in the
+        // definition (+0x202 against +0x204) and the routine steps over it
+        // deliberately, which is easy to disbelieve until you read it -- the
+        // rings are about what the unit tells you, not about what it can see.
+        //
+        // An onoffable unit that is switched off draws nothing: turning a
+        // radar off takes its ring away with it.
+        //
+        // Honest gap: the colour is a byte out of a runtime table at
+        // cfg+0xDCB, and nothing in .text ever writes that table -- it is a
+        // logical-colour to palette remap installed for the blitter. The
+        // indices could not be recovered without running the game. TA's green
+        // ramp is palette 232-239; these are RWE's own greens, with the
+        // jammers dimmer than the detectors so the pair can be told apart.
+        const int segments = 32;
+        auto mapWidth = simScalarToFloat(simulation.terrain.rightCutoffInWorldUnits() - simulation.terrain.leftInWorldUnits());
+        if (mapWidth <= 0.0f)
+        {
+            return;
+        }
+        auto worldUnitsToMinimapPixels = static_cast<float>(minimapRect.width()) / mapWidth;
+
+        for (const auto& unitId : selectedUnits)
+        {
+            const auto& unit = getUnit(unitId);
+            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+
+            if (unitDefinition.onOffable && !unit.activated)
+            {
+                continue;
+            }
+
+            auto centre = worldToMinimap * simVectorToFloat(unit.position);
+
+            const std::pair<unsigned int, Color> rings[] = {
+                {unitDefinition.radarDistance, Color(83, 223, 79)},
+                {unitDefinition.sonarDistance, Color(83, 223, 79)},
+                {unitDefinition.radarDistanceJam, Color(40, 130, 40)},
+                {unitDefinition.sonarDistanceJam, Color(40, 130, 40)},
+            };
+
+            for (const auto& [range, color] : rings)
+            {
+                if (range == 0)
+                {
+                    continue;
+                }
+
+                // The horizontal scale is used for both axes, even though the
+                // minimap is not square on every map.
+                auto radius = static_cast<float>(range) * worldUnitsToMinimapPixels;
+                if (radius < 1.0f)
+                {
+                    continue;
+                }
+
+                std::vector<Vector2f> points;
+                points.reserve(segments);
+                for (int i = 0; i < segments; ++i)
+                {
+                    auto angle = (2.0f * Pif * static_cast<float>(i)) / static_cast<float>(segments);
+                    points.emplace_back(centre.x + (std::cos(angle) * radius), centre.y + (std::sin(angle) * radius));
+                }
+
+                chromeUiRenderService.drawLineLoop(points, color);
+            }
         }
     }
 
@@ -690,6 +813,195 @@ namespace rwe
                     color,
                     2.0f);
             }
+        }
+    }
+
+    namespace
+    {
+        uint64_t buildBoxKey(const DiscreteRect& rect)
+        {
+            // Grid coordinates, so two build orders can only collide here if
+            // they are for the same square, in which case one sweep is right.
+            return (static_cast<uint64_t>(static_cast<uint32_t>(rect.x)) << 32)
+                | static_cast<uint64_t>(static_cast<uint32_t>(rect.y));
+        }
+
+        /** Ten ticks, a third of a second (0x438C00). */
+        const unsigned int BuildBoxSweepTicks = 10;
+    }
+
+    void GameScene::updateBuildBoxAppearances()
+    {
+        // Note when each build order turns up, whatever put it there: the
+        // local player's click, an ally's, or the AI's. This runs every frame
+        // rather than only while the boxes are being drawn, because the sweep
+        // has to start when the building was placed and not when somebody
+        // happened to hold shift down.
+        std::unordered_map<uint64_t, GameTime> stillThere;
+        for (const auto& [_, unit] : simulation.units)
+        {
+            if (!unit.isOwnedBy(localPlayerId))
+            {
+                continue;
+            }
+
+            for (const auto& order : unit.orders)
+            {
+                const auto buildOrder = std::get_if<BuildOrder>(&order);
+                if (buildOrder == nullptr)
+                {
+                    continue;
+                }
+
+                const auto& unitDefinition = simulation.unitDefinitions.at(buildOrder->unitType);
+                auto key = buildBoxKey(simulation.computeFootprintRegion(buildOrder->position, unitDefinition.movementCollisionInfo));
+                auto existing = buildBoxAppearedAt.find(key);
+                stillThere[key] = existing == buildBoxAppearedAt.end() ? simulation.gameTime : existing->second;
+            }
+        }
+
+        // Anything no longer queued is dropped, so the same spot built on
+        // twice gets its sweep twice.
+        buildBoxAppearedAt = std::move(stillThere);
+    }
+
+    void GameScene::renderBuildBoxSweep(const Matrix4f& worldToUi, const DiscreteRect& footprintRect, unsigned int age, bool ownerSelected)
+    {
+        // 0x438C00. Four full-length lines -- two vertical, two horizontal --
+        // sweeping inwards across the footprint: dx = width * t / 10 and
+        // dy = height * t / 10, so at t=0 they lie on the box, at t=5 all four
+        // meet in the middle, and at t=10 they have crossed and come to rest
+        // back on the footprint the other way round. It is linear, there is no
+        // overshoot, and it plays once.
+        //
+        // Each line is drawn twice: colour A overhangs the corners by a pixel,
+        // colour B does not, which is where the little nubs come from. The
+        // original takes both from a colour table at globals+0xDCB that has no
+        // writer anywhere in .text -- every access to it is a read, so the
+        // palette indices could not be recovered without running the game.
+        // These are RWE's own greens, chosen to look like the original's.
+        auto colorA = ownerSelected ? Color(0, 255, 0) : Color(0, 160, 0);
+        auto colorB = ownerSelected ? Color(160, 255, 160) : Color(0, 96, 0);
+
+        auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(footprintRect.x, footprintRect.y);
+        topLeftWorld.y = simulation.terrain.getHeightAt(
+            topLeftWorld.x + ((SimScalar(footprintRect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss),
+            topLeftWorld.z + ((SimScalar(footprintRect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
+
+        auto topLeftUi = worldToUi * simVectorToFloat(topLeftWorld);
+        auto width = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
+        auto height = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits);
+
+        auto t = static_cast<float>(std::min(age, BuildBoxSweepTicks)) / static_cast<float>(BuildBoxSweepTicks);
+        auto dx = width * t;
+        auto dy = height * t;
+
+        const float thickness = 2.0f;
+        auto x0 = topLeftUi.x;
+        auto y0 = topLeftUi.y;
+
+        for (auto pass = 0; pass < 2; ++pass)
+        {
+            auto color = pass == 0 ? colorA : colorB;
+            auto overhang = pass == 0 ? 1.0f : 0.0f;
+
+            worldUiRenderService.fillColor(x0 + dx, y0 - overhang, thickness, height + (overhang * 2.0f), color);
+            worldUiRenderService.fillColor(x0 + width - dx - thickness, y0 - overhang, thickness, height + (overhang * 2.0f), color);
+            worldUiRenderService.fillColor(x0 - overhang, y0 + dy, width + (overhang * 2.0f), thickness, color);
+            worldUiRenderService.fillColor(x0 - overhang, y0 + height - dy - thickness, width + (overhang * 2.0f), thickness, color);
+        }
+    }
+
+    void GameScene::renderPlacementSweeps()
+    {
+        auto worldToUi = worldUiRenderService.getInverseViewProjectionMatrix()
+            * computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+
+        for (const auto& [_, unit] : simulation.units)
+        {
+            if (!unit.isOwnedBy(localPlayerId))
+            {
+                continue;
+            }
+
+            auto ownerSelected = selectedUnits.find(_) != selectedUnits.end();
+
+            for (const auto& order : unit.orders)
+            {
+                const auto buildOrder = std::get_if<BuildOrder>(&order);
+                if (buildOrder == nullptr)
+                {
+                    continue;
+                }
+
+                const auto& unitDefinition = simulation.unitDefinitions.at(buildOrder->unitType);
+                auto footprintRect = simulation.computeFootprintRegion(buildOrder->position, unitDefinition.movementCollisionInfo);
+                auto it = buildBoxAppearedAt.find(buildBoxKey(footprintRect));
+                if (it == buildBoxAppearedAt.end())
+                {
+                    continue;
+                }
+
+                auto age = simulation.gameTime.value - it->second.value;
+                if (age > BuildBoxSweepTicks)
+                {
+                    continue;
+                }
+
+                renderBuildBoxSweep(worldToUi, footprintRect, age, ownerSelected);
+            }
+        }
+    }
+
+    void GameScene::drawWaypointTrail(const Matrix4f& worldToUi, const SimVector& from, const SimVector& to)
+    {
+        // The original does not draw a line between waypoints at all. It walks
+        // the segment planting a small four-armed star -- `pathicon` in
+        // anims/CURSORS.GAF, eleven pixels square, hotspot dead centre, and
+        // green with the bright end of the ramp at the tips -- every 48 world
+        // units, and slides the whole string of them along by 1.6 world units
+        // a tick. 1.6 x 30 is 48, so after a second every star has arrived
+        // where its neighbour was and the march is seamless.
+        //
+        // Where we differ: the original takes the phase from the age of the
+        // order being drawn, so two orders queued a few ticks apart march very
+        // slightly out of step with one another. RWE's orders do not record
+        // when they were issued, and giving them one would mean carrying it
+        // through the hash, the dump and the network protocol for an effect
+        // nobody can see, so the phase comes off the global clock and every
+        // segment marches together.
+        const float spacing = 48.0f;
+        const float speedPerTick = spacing / 30.0f;
+
+        auto fromF = simVectorToFloat(from);
+        auto toF = simVectorToFloat(to);
+        auto along = toF - fromF;
+        auto length = along.length();
+        if (length < 0.001f)
+        {
+            return;
+        }
+        auto direction = along / length;
+
+        const auto& frames = sceneContext.cursor->getCursor(CursorType::PathIcon)->sprites;
+        if (frames.empty())
+        {
+            return;
+        }
+        const auto& icon = *frames.front();
+
+        // The march wraps every 30 ticks, which is what keeps this in step
+        // with the simulation rather than with the frame rate.
+        auto phase = static_cast<float>(simulation.gameTime.value % 30u) * speedPerTick;
+
+        // The straight line between the two order positions, height included:
+        // the trail does not follow the ground, so on a slope it cuts through
+        // the hill rather than draping over it. That is the original's
+        // behaviour, not an omission.
+        for (auto travelled = phase; travelled < length; travelled += spacing)
+        {
+            auto point = worldToUi * (fromF + (direction * travelled));
+            worldUiRenderService.drawSprite(point.x, point.y, icon);
         }
     }
 
@@ -828,9 +1140,7 @@ namespace rwe
 
                 if (drawLine)
                 {
-                    auto uiPos = worldToUi * simVectorToFloat(pos);
-                    auto uiDest = worldToUi * simVectorToFloat(nextPos);
-                    worldUiRenderService.drawLine(uiPos.xy(), uiDest.xy());
+                    drawWaypointTrail(worldToUi, pos, nextPos);
                 }
             }
 
@@ -1145,6 +1455,11 @@ namespace rwe
         sceneContext.graphics->enableDepthTest();
 
         sceneContext.graphics->enableDepthWrites();
+
+        // The sweep over a freshly placed building plays whether or not shift
+        // is held: it is the acknowledgement of the click, and the original
+        // shows it as soon as the order exists.
+        renderPlacementSweeps();
 
         // in-world UI/overlay rendering
         if (isShiftDown())
@@ -3410,6 +3725,8 @@ namespace rwe
         spawnGeoVentSteam();
 
         updateDebris();
+
+        updateBuildBoxAppearances();
 
         // Testing aid: RWE_DEBUG_SPAWN=<unitType>*<count>@<player>:<seconds>
         // drops finished units of that type, owned by that player, in a ring
