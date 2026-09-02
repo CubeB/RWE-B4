@@ -527,23 +527,28 @@ namespace rwe
                     auto text = "-" + formatResourceDelta(unit.getEnergyUse());
                     chromeUiRenderService.drawText(rect.x1, extraBottom + rect.y1, text, *guiFont, Color(255, 71, 0));
                 }
+                {
+                    const auto& rect = localSideData.missionText;
+                    auto text = "Standby";
+                    chromeUiRenderService.drawTextCenteredX(rect.x1, extraBottom + rect.y1, text, *guiFont);
+                }
+
                 // A launcher says how full it is and how far through the next
-                // round it has got. This is an addition, not a restoration:
-                // the original shows the count only as the caption on the
-                // MAKENUKE button, and shows the missile under construction
-                // nowhere at all. It has no percentage format string, and the
-                // RELOAD1/2/3 rectangles SIDEDATA.TDF defines for the footer
-                // are parsed and then never read by anything -- dead data, the
-                // same as `sortbias`. Borrowing the first of them is the
-                // tidiest place to put a bar the original never had.
-                auto stockpileWeapon = simulation.tryGetStockpileWeapon(*hoveredUnit);
-                if (stockpileWeapon)
+                // round it has got, in the footer's spare name-and-bar slot.
+                // This is an addition, not a restoration: the original shows
+                // the count only as the caption on the MAKENUKE button, and
+                // shows the missile under construction nowhere at all -- no
+                // bar, no percentage, no format string in the binary. The
+                // UNITNAME2/DAMAGEBAR2 rectangles are SIDEDATA.TDF's own, and
+                // the bar is drawn exactly as the damage bar beside it so the
+                // footer keeps one visual language.
+                if (auto stockpileWeapon = simulation.tryGetStockpileWeapon(*hoveredUnit); stockpileWeapon)
                 {
                     const auto& weapon = stockpileWeapon->get();
                     const auto& weaponDefinition = simulation.weaponDefinitions.at(weapon.weaponType);
 
                     {
-                        const auto& rect = localSideData.missionText;
+                        const auto& rect = localSideData.unitName2;
                         auto text = stockpileButtonLabel(weapon.stockedRounds, weapon.queuedRounds);
                         if (text.empty())
                         {
@@ -554,28 +559,17 @@ namespace rwe
 
                     // Progress is the ticks already paid for over the whole
                     // build, which is the weapon's own reloadtime -- 180
-                    // seconds, 5400 ticks, for a nuclear missile.
+                    // seconds, 5400 ticks, for a nuclear missile. An idle
+                    // silo with nothing on order shows an empty bar rather
+                    // than a full red one.
                     auto totalTicks = std::max(1, static_cast<int>(deltaSecondsToTicks(weaponDefinition.reloadTime).value));
-                    auto fraction = static_cast<float>(weapon.stockpileProgress) / static_cast<float>(totalTicks);
+                    auto fraction = std::clamp(static_cast<float>(weapon.stockpileProgress) / static_cast<float>(totalTicks), 0.0f, 1.0f);
 
-                    const auto& bar = localSideData.reload1.toDiscreteRect();
-                    auto barY = static_cast<float>(extraBottom + bar.y);
-                    chromeUiRenderService.fillColor(static_cast<float>(bar.x), barY, static_cast<float>(bar.width), static_cast<float>(bar.height), Color(24, 24, 24));
-                    if (weapon.queuedRounds > 0)
+                    const auto& bar = localSideData.damageBar2.toDiscreteRect();
+                    if (weapon.queuedRounds > 0 || weapon.stockpileProgress > 0)
                     {
-                        chromeUiRenderService.fillColor(
-                            static_cast<float>(bar.x),
-                            barY,
-                            static_cast<float>(bar.width) * std::clamp(fraction, 0.0f, 1.0f),
-                            static_cast<float>(bar.height),
-                            Color(83, 223, 79));
+                        chromeUiRenderService.drawHealthBar2(static_cast<float>(bar.x), static_cast<float>(extraBottom + bar.y), static_cast<float>(bar.width), static_cast<float>(bar.height), fraction);
                     }
-                }
-                else
-                {
-                    const auto& rect = localSideData.missionText;
-                    auto text = "Standby";
-                    chromeUiRenderService.drawTextCenteredX(rect.x1, extraBottom + rect.y1, text, *guiFont);
                 }
             }
         }
@@ -636,6 +630,8 @@ namespace rwe
             float centerX = static_cast<float>(sceneContext.viewport->width()) / 2.0f;
             chromeUiRenderService.drawTextCenteredX(centerX, GuiSizeTop + 8, speedText, *guiFont);
         }
+
+        renderConsole();
 
         if (paused)
         {
@@ -805,13 +801,21 @@ namespace rwe
                     topLeftWorld.z + ((SimScalar(footprintRect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
 
                 auto topLeftUi = worldToUi * simVectorToFloat(topLeftWorld);
-                worldUiRenderService.drawBoxOutline(
-                    topLeftUi.x,
-                    topLeftUi.y,
-                    footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits),
-                    footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits),
-                    color,
-                    2.0f);
+                auto boxWidth = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
+                auto boxHeight = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits);
+
+                // The queued box is not one colour two pixels wide: it is two
+                // nested one-pixel outlines, the outer noticeably darker than
+                // the inner. The exact palette entries live in the interface
+                // colour table at cfg+0xDCB, which nothing in .text writes, so
+                // these are sampled from a screenshot of the original rather
+                // than read out of the binary.
+                auto darker = Color(color.r / 2, (color.g * 3) / 5, color.b / 2);
+                worldUiRenderService.drawBoxOutline(topLeftUi.x, topLeftUi.y, boxWidth, boxHeight, darker, 1.0f);
+                if (boxWidth > 2.0f && boxHeight > 2.0f)
+                {
+                    worldUiRenderService.drawBoxOutline(topLeftUi.x + 1.0f, topLeftUi.y + 1.0f, boxWidth - 2.0f, boxHeight - 2.0f, color, 1.0f);
+                }
             }
         }
     }
@@ -3482,6 +3486,156 @@ namespace rwe
         }
     }
 
+    namespace
+    {
+        /**
+         * TA's ten player colours, read off the shipped palette by eye --
+         * close enough for tinting a line of text.
+         */
+        Color playerColorToRgb(const PlayerColorIndex& index)
+        {
+            static const Color colors[] = {
+                Color(60, 88, 244),   // blue
+                Color(228, 32, 32),   // red
+                Color(252, 252, 252), // white
+                Color(24, 208, 24),   // green
+                Color(44, 60, 148),   // navy
+                Color(180, 72, 180),  // purple
+                Color(252, 252, 0),   // yellow
+                Color(96, 96, 96),    // black, lifted so it still reads
+                Color(128, 192, 252), // sky
+                Color(240, 160, 40),  // orange
+            };
+            return index.value < 10 ? colors[index.value] : Color(255, 255, 255);
+        }
+    }
+
+    void GameScene::printConsole(const std::string& text, const Color& color)
+    {
+        // Five seconds a line, and never more than eight on screen.
+        consoleMessages.push_back(ConsoleMessage{text, color, sceneTime + SceneTime(5u * 30u)});
+        while (consoleMessages.size() > 8)
+        {
+            consoleMessages.pop_front();
+        }
+    }
+
+    void GameScene::renderConsole()
+    {
+        while (!consoleMessages.empty() && consoleMessages.front().expires <= sceneTime)
+        {
+            consoleMessages.pop_front();
+        }
+
+        // Top-left of the world view, under the resource bar, newest line at
+        // the bottom -- where the original prints its speech text.
+        float y = static_cast<float>(GuiSizeTop) + 14.0f;
+        for (const auto& message : consoleMessages)
+        {
+            chromeUiRenderService.drawText(static_cast<float>(GuiSizeLeft) + 8.0f, y, message.text, *guiFont, message.color);
+            y += 12.0f;
+        }
+    }
+
+    void GameScene::updateSelfDestructNotifications()
+    {
+        // "Commander: five", printed and spoken a number a second. The words
+        // zero..five sit beside the count0-count5 speech keys in the binary
+        // with the format "%s: %s" under a "Speech Text" label, and SOUND.TDF
+        // maps them backwards -- count5 plays the file COUNT1 -- because the
+        // recordings are numbered by their position in the countdown, not by
+        // the number they say.
+        static const char* const countWords[] = {"zero", "one", "two", "three", "four", "five"};
+
+        for (const auto& [unitId, unit] : simulation.units)
+        {
+            if (!unit.isOwnedBy(localPlayerId))
+            {
+                continue;
+            }
+
+            auto it = selfDestructAnnounced.find(unitId);
+            if (!unit.isAlive() || !unit.selfDestructTime)
+            {
+                if (it != selfDestructAnnounced.end())
+                {
+                    selfDestructAnnounced.erase(it);
+                    if (unit.isAlive())
+                    {
+                        // Toggled off, not gone off.
+                        const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+                        printConsole(unitDefinition.unitName + ": Self destruct terminated");
+                        playUnitNotificationSound(unit.owner, unit.unitType, UnitSoundType::CancelDestruct);
+                    }
+                }
+                continue;
+            }
+
+            auto ticksLeft = *unit.selfDestructTime > simulation.gameTime
+                ? (*unit.selfDestructTime - simulation.gameTime).value
+                : 0u;
+            auto secondsLeft = (ticksLeft + SimTicksPerSecond - 1) / SimTicksPerSecond;
+            if (it != selfDestructAnnounced.end() && it->second == secondsLeft)
+            {
+                continue;
+            }
+            selfDestructAnnounced[unitId] = secondsLeft;
+
+            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+            auto word = secondsLeft < 6 ? std::string(countWords[secondsLeft]) : std::to_string(secondsLeft);
+            printConsole(unitDefinition.unitName + ": " + word);
+
+            std::optional<UnitSoundType> countSound;
+            switch (secondsLeft)
+            {
+                case 5: countSound = UnitSoundType::Count5; break;
+                case 4: countSound = UnitSoundType::Count4; break;
+                case 3: countSound = UnitSoundType::Count3; break;
+                case 2: countSound = UnitSoundType::Count2; break;
+                case 1: countSound = UnitSoundType::Count1; break;
+                default: break;
+            }
+            if (countSound)
+            {
+                playUnitNotificationSound(unit.owner, unit.unitType, *countSound);
+            }
+        }
+
+        // Ids are reused, so entries for units that no longer exist must go.
+        for (auto it = selfDestructAnnounced.begin(); it != selfDestructAnnounced.end();)
+        {
+            if (!simulation.units.tryGet(it->first))
+            {
+                it = selfDestructAnnounced.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+
+    void GameScene::updateDefeatNotifications()
+    {
+        // "Arm forces have been obliterated", in the fallen side and colour.
+        // The original keeps a family of these -- "forces have gone to a
+        // better place", "vermin have been exterminated" -- but obliterated
+        // is the one everybody remembers.
+        for (unsigned int i = 0; i < simulation.players.size(); ++i)
+        {
+            const auto& player = simulation.players[i];
+            if (player.status != GamePlayerStatus::Dead || defeatAnnounced.count(i) != 0)
+            {
+                continue;
+            }
+            defeatAnnounced.insert(i);
+
+            auto side = player.side;
+            std::transform(side.begin() + 1, side.end(), side.begin() + 1, [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            printConsole(side + " forces have been obliterated", playerColorToRgb(player.color));
+        }
+    }
+
     void GameScene::updateCloakNotifications()
     {
         // Cloaking and decloaking are the only thing about a cloak the original
@@ -3490,9 +3644,9 @@ namespace rwe
         // at `0x5086E8` pairs those with the sounds `cloak` and `uncloak` and
         // the captions "Cloaked" and "Visible". None of it is a COB event --
         // no shipped script of a cloakable unit has a function for either --
-        // and none of it is drawn on the unit. The caption line has nowhere to
-        // go in RWE yet; the sounds have been parsed and loaded all along and
-        // were simply never played.
+        // and none of it is drawn on the unit. The captions go to the console
+        // in the corner, the same place the original prints them; the sounds
+        // were parsed and loaded all along and simply never played.
         for (const auto& [unitId, unit] : simulation.units)
         {
             auto wasCloaked = cloakedUnits.find(unitId) != cloakedUnits.end();
@@ -3501,14 +3655,23 @@ namespace rwe
                 continue;
             }
 
+            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
             if (unit.cloaked)
             {
                 cloakedUnits.insert(unitId);
+                if (unit.isOwnedBy(localPlayerId))
+                {
+                    printConsole(unitDefinition.unitName + ": Cloaked");
+                }
                 playUnitNotificationSound(unit.owner, unit.unitType, UnitSoundType::Cloak);
             }
             else
             {
                 cloakedUnits.erase(unitId);
+                if (unit.isOwnedBy(localPlayerId))
+                {
+                    printConsole(unitDefinition.unitName + ": Visible");
+                }
                 playUnitNotificationSound(unit.owner, unit.unitType, UnitSoundType::Uncloak);
             }
         }
@@ -3711,6 +3874,10 @@ namespace rwe
         processSimEvents();
 
         updateCloakNotifications();
+
+        updateSelfDestructNotifications();
+
+        updateDefeatNotifications();
 
         updateProjectiles();
 
@@ -4996,6 +5163,14 @@ namespace rwe
                             }
                             break;
                         case UnitDiedEvent::DeathType::SelfDestructed:
+                            // The last word of the countdown belongs to the
+                            // detonation itself: count0 is mapped to COUNT6,
+                            // the recording the shipped data saves for the end.
+                            if (auto deadUnit = tryGetUnit(e.unitId); deadUnit && deadUnit->get().isOwnedBy(localPlayerId))
+                            {
+                                printConsole(unitDefinition.unitName + ": zero");
+                                playUnitNotificationSound(localPlayerId, e.unitType, UnitSoundType::Count0);
+                            }
                             if (!selfDestructExplosion.empty())
                             {
                                 doProjectileImpact(e.position, selfDestructExplosion, ImpactType::Normal);

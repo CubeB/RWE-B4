@@ -368,6 +368,24 @@ namespace rwe
         /** The same thing for rounds ordered on a launcher, which has only the one queue. */
         std::unordered_map<UnitId, int> unconfirmedStockpileDelta;
 
+        /**
+         * A timed line of text in the top-left of the world view -- TA's
+         * "Speech Text": the countdown, cloak reports, defeat announcements.
+         */
+        struct ConsoleMessage
+        {
+            std::string text;
+            Color color;
+            SceneTime expires;
+        };
+        std::deque<ConsoleMessage> consoleMessages;
+
+        /** The last whole second each counting-down unit announced, so each number is said once. */
+        std::unordered_map<UnitId, unsigned int> selfDestructAnnounced;
+
+        /** Players whose defeat has already been announced. */
+        std::unordered_set<unsigned int> defeatAnnounced;
+
         std::vector<std::pair<GameTime, GameHash>> gameHashes;
 
         std::optional<std::ofstream> stateLogStream;
@@ -499,6 +517,14 @@ namespace rwe
 
         /** Speaks the unit's cloak and uncloak lines as its cloak comes and goes. */
         void updateCloakNotifications();
+
+        void printConsole(const std::string& text, const Color& color = Color(255, 255, 255));
+
+        void updateSelfDestructNotifications();
+
+        void updateDefeatNotifications();
+
+        void renderConsole();
 
         void playSoundAt(const Vector3f& position, const AudioService::SoundHandle& sound);
 
