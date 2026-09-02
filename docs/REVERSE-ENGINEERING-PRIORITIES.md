@@ -528,18 +528,39 @@ read together with §NN.
 
 ## Tier 3 — nice to have
 
-18. **Screen shake.** `shakemagnitude` / `shakeduration` on 18 weapons
-    (non-zero), parsed at `0x42EC3C`/`0x42EC53` into `WORD wdef+0x108` and the
-    pair at `+0xCC`/`+0xD0`. Purely cosmetic but very noticeable on artillery.
-    ~3 hours.
-19. **`accuracy`.** 9 weapons, and the data file's own comment defines it:
-    *"amount of accuracy in 64K deg that weapon is good for, 0 = 100%"* — i.e.
-    a 16-bit angle error, distinct from `sprayangle` (which RWE does implement).
-    Parsed at `0x42EBFE`. ~2 hours.
-20. **`waterline`.** 21 units; `BYTE def+0x22C` (`0x42C23A`), read at
-    `0x43D72E` and `0x43DBA9` — inside the same movement region as the aircraft
-    code already decoded, so the surrounding function is half-familiar. Controls
-    how deep a ship floats. ~3 hours.
+18. **Screen shake — done.** `shakemagnitude` is `DWORD wdef+0xCC` and
+    `shakeduration` `DWORD wdef+0xD0` (seconds × 30 on the way in), both stored
+    from `0x42EC5A`/`0x42EC70`. The `WORD wdef+0x108` in the note above was
+    wrong; that slot is `pitchtolerance`. Nothing reads the weapon struct's
+    copy directly — the way in is the `NoShake` console command at `0x502444`,
+    whose handler `0x416E60` toggles a bit tested only at `0x41C5E6` and
+    `0x41C646`, which are the shake. Accumulated from the one call site
+    `0x499FBA` in the detonation routine; consumed per frame at `0x41C6F0`
+    with a linear ramp-down and **no falloff with distance at all**. Every
+    shipped weapon that sets the keys is an `explodeas`/`selfdestructas`, not
+    a gun, so the note above was also wrong to call it "noticeable on
+    artillery" — it fires on big deaths and nukes. Implemented render-side;
+    see `TOTALA-EXE.md`'s "Where a shell actually lands" section.
+19. **`accuracy` — done, and it was the answer to a player's question.**
+    `WORD wdef+0x104`, parsed `0x42EBFE`, stored `0x42EC19`, and read in
+    exactly one place, `0x49D6D7`, between solving the aim and spawning the
+    projectile — so it reaches every kind of weapon, not just ballistic ones.
+    The cone is the weapon's `accuracy` widened by up to an eighth of a turn as
+    the shooter loses health and narrowed by its kill count over three, and
+    heading and pitch are drawn independently. Deciding this rather than the
+    ballistic solver was the cause of long-range misses meant decoding the
+    solver too (`0x49A890`): it is the same quadratic RWE already had, in
+    double, and the two agree to one part in 65536. Implemented.
+20. **`waterline` — done, but not where it looked.** `BYTE def+0x22C`, read
+    with the integer reader at `0x42C24A` and stored `0x42C259`. Of its two
+    readers only `0x43DBA9` matters: `0x43D72E` is gated on the FBI's
+    `Floater` key, and the twenty-one units that set `waterline` and the
+    eighteen that set `Floater` **do not overlap at all**, so that clamp always
+    reduces to what RWE already did. The live reader is the routine that calls
+    the COB entry point `setSFXoccupy` with a 0–4 water state, which is what a
+    ship's script waits on before laying a wake. RWE's version of that now
+    follows the original's cascade. State 3 needs a model height RWE does not
+    carry and is left out.
 21. **The remaining COB SFX types.** `Thrust`, `Wake2`, `ReverseWake1`,
     `ReverseWake2` are a bare `// TODO: support these SFX types` at
     `src/rwe/sim/cob.cpp:238–243`. Wakes matter for every ship, and the findings
