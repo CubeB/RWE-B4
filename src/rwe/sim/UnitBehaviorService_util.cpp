@@ -23,6 +23,49 @@ namespace rwe
         return Matrix4x<SimScalar>::rotationY(sin(angle), cos(angle)) * direction;
     }
 
+    int computeSfxOccupyState(int unitY, int seaLevel, unsigned int waterLine, bool isSurfaceMover, int previousState)
+    {
+        // The original works this out in whole world units, not in the 16.16
+        // it keeps positions in, and it tells the script only when the answer
+        // changes (TotalA.exe 0x43DB50-0x43DBF3).
+        if (!isSurfaceMover)
+        {
+            return 0;
+        }
+
+        if (unitY > seaLevel)
+        {
+            return 4;
+        }
+
+        // What follows is a cascade of independent tests that each overwrite
+        // the answer, starting from whatever the unit was last told. That is
+        // deliberate on the original's part as far as we can tell, and it
+        // means a unit sitting between the cases keeps its old state rather
+        // than falling back to anything: `mov edi,ebp` at 0x43DB78 seeds the
+        // running value with the previous one.
+        auto state = previousState;
+
+        if (unitY - seaLevel > -5)
+        {
+            state = 1;
+        }
+
+        if (unitY + static_cast<int>(waterLine) == seaLevel)
+        {
+            state = 2;
+        }
+
+        // The original has a fourth case here, state 3, for a hull completely
+        // under the surface: `unitY + WORD[def+0x170] < seaLevel`, where that
+        // field is the height of the model above its own origin. RWE does not
+        // carry a model height on the unit definition, so the case is left
+        // out rather than guessed at, and a submarine will report 2 where the
+        // original would report 3.
+
+        return state;
+    }
+
     SimAngle computeAccuracyCone(SimAngle accuracy, unsigned int health, unsigned int maxHealth, unsigned int kills)
     {
         // A hurt unit shoots worse and a blooded one shoots better, and the

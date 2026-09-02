@@ -406,6 +406,15 @@ namespace rwe
          */
         unsigned int kills{0};
 
+        /**
+         * The last water state handed to the unit's `setSFXoccupy`. The
+         * original keeps the same thing at unit+0x10A and only calls the
+         * script when the state changes, and it also feeds the value back in
+         * as the starting point for the next answer, so this has to be
+         * remembered rather than recomputed.
+         */
+        int sfxOccupyState{0};
+
         unsigned int buildTimeCompleted{0};
 
         /** Reclaim work applied to this unit so far, see GameSimulation::reclaimUnit. */

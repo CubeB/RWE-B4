@@ -1349,22 +1349,22 @@ namespace rwe
         auto footprintRegion = sim->computeFootprintRegion(unitInfo.state->position, unitInfo.definition->movementCollisionInfo);
         sim->moveUnitOccupiedArea(footprintRegion, newFootprintRegion, unitInfo.id);
 
-        auto seaLevel = sim->terrain.getSeaLevel();
-        auto oldTerrainHeight = sim->terrain.getHeightAt(unitInfo.state->position.x, unitInfo.state->position.z);
-        auto oldPosBelowSea = oldTerrainHeight < seaLevel;
-
         unitInfo.state->position = newPosition;
 
-        auto newTerrainHeight = sim->terrain.getHeightAt(unitInfo.state->position.x, unitInfo.state->position.z);
-        auto newPosBelowSea = newTerrainHeight < seaLevel;
-
-        if (oldPosBelowSea && !newPosBelowSea)
+        // Tell the script how the unit is now sitting in the water, if that
+        // has changed. The original asks the unit's own height rather than the
+        // height of the ground under it, which is what lets a ship at its
+        // waterline be told apart from one merely standing over deep water,
+        // and it is state 2 that a ship's script waits for before it lays a
+        // wake (0x43DB50).
+        auto seaLevel = static_cast<int>(sim->terrain.getSeaLevel().value);
+        auto unitY = static_cast<int>(unitInfo.state->position.y.value);
+        auto isSurfaceMover = !unitInfo.definition->canFly;
+        auto newState = computeSfxOccupyState(unitY, seaLevel, unitInfo.definition->waterLine, isSurfaceMover, unitInfo.state->sfxOccupyState);
+        if (newState != unitInfo.state->sfxOccupyState)
         {
-            unitInfo.state->cobEnvironment->createThread("setSFXoccupy", std::vector<int>{4});
-        }
-        else if (!oldPosBelowSea && newPosBelowSea)
-        {
-            unitInfo.state->cobEnvironment->createThread("setSFXoccupy", std::vector<int>{2});
+            unitInfo.state->sfxOccupyState = newState;
+            unitInfo.state->cobEnvironment->createThread("setSFXoccupy", std::vector<int>{newState});
         }
 
         return true;

@@ -155,6 +155,14 @@ namespace rwe
         bool floater;
         bool canHover;
 
+        /**
+         * How far below the water surface the hull rides, in whole world
+         * units. The original uses it in two places (TotalA.exe 0x43D72E and
+         * 0x43DBA9); see the findings doc for why only the second of them has
+         * any effect on shipped data.
+         */
+        unsigned int waterLine{0};
+
         bool canFly;
 
         /** Units it can carry at once; 0 for anything that is not a transport. */

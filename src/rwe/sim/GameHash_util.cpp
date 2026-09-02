@@ -97,6 +97,7 @@ namespace rwe
             u.buggerOffActive,
             u.armored,
             u.kills,
+            u.sfxOccupyState,
             u.buildTimeCompleted,
             u.reclaimProgress,
             u.captureProgress,

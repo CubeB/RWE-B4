@@ -19,6 +19,13 @@ namespace rwe
     SimVector rotateDirectionXZ(const SimVector& direction, SimAngle angle);
 
     /**
+     * Which of the original's five water states a unit is in, which is what
+     * `setSFXoccupy` tells a script and what a ship waits on before it starts
+     * laying a wake. Heights are in whole world units.
+     */
+    int computeSfxOccupyState(int unitY, int seaLevel, unsigned int waterLine, bool isSurfaceMover, int previousState);
+
+    /**
      * How wide the shot may stray, once the shooter's own damage and kill
      * count have had their say on the weapon's `accuracy`.
      */

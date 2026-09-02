@@ -3284,6 +3284,22 @@ identified; it behaves like a hull height.
 State 2 — floating at exactly its waterline — is the settled-ship case, and is
 what a ship's script is waiting for before it starts emitting a wake.
 
+**Which of the two readers actually matters.** Twenty-one shipped units set
+`WaterLine` (submarines at 20, tidal generators at 8, floating shipyards at 1,
+up to 25) and eighteen set `Floater`, and **the two sets do not overlap at
+all** — checked over the whole of `rev31\UNITS`. So the floating clamp at
+`0x43D72E`, which is gated on `Floater`, only ever sees a `waterline` of zero
+and reduces to `max(wantedY, seaLevel)`, which is exactly what RWE already
+did. Everything the key visibly does, it does through `setSFXoccupy`.
+
+That is also why RWE does not apply the clamp. RWE's `floater` is not the FBI
+key: `LoadingScene_util.cpp:481` also sets it for anything whose yard map
+contains water, which catches every floating building — precisely the units
+that *do* set `WaterLine`. Feeding the clamp RWE's broader notion of a floater
+would sink floating shipyards and tidal generators by up to twenty-two units,
+which the original never does. So `waterline` is parsed and used for the water
+state, and how things float is left alone.
+
 ### Recorded, not implemented
 
 - The ballistic spawn at `0x49CE62`–`0x49CE8A` sets the launch `velocity.y` to

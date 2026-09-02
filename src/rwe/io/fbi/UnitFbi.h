@@ -144,6 +144,14 @@ namespace rwe
         bool floater;
         bool canHover;
 
+        /**
+         * How far the hull sits below the water surface, in whole world units.
+         * The original keeps it in a byte and reads it with the integer
+         * reader, so a fractional value in a unit file (only ARMTL has one)
+         * truncates (TotalA.exe 0x42C24A, stored 0x42C259).
+         */
+        unsigned int waterLine;
+
         bool canFly;
         /** How many units it can carry; 0 unless it is a transport. */
         unsigned int transportCapacity;

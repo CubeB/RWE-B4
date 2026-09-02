@@ -73,6 +73,7 @@ namespace rwe
             {"moveOrders", dumpJson(u.moveOrders)},
             {"armored", dumpJson(u.armored)},
             {"kills", dumpJson(u.kills)},
+            {"sfxOccupyState", dumpJson(u.sfxOccupyState)},
             {"buildTimeCompleted", dumpJson(u.buildTimeCompleted)},
             {"reclaimProgress", dumpJson(u.reclaimProgress)},
             {"captureProgress", dumpJson(u.captureProgress)},
