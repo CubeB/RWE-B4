@@ -664,6 +664,89 @@ namespace rwe
         addFeature(sourceFeature.featureName, targetX, targetY);
     }
 
+    bool GameSimulation::canLoadUnitIntoTransport(UnitId transportId, UnitId unitId) const
+    {
+        auto transportRef = tryGetUnitState(transportId);
+        auto targetRef = tryGetUnitState(unitId);
+        if (!transportRef || !targetRef || transportId == unitId)
+        {
+            return false;
+        }
+        const auto& transport = transportRef->get();
+        const auto& target = targetRef->get();
+        if (!transport.isAlive() || !target.isAlive() || target.carriedBy)
+        {
+            return false;
+        }
+
+        const auto& transportDefinition = unitDefinitions.at(transport.unitType);
+        const auto& targetDefinition = unitDefinitions.at(target.unitType);
+
+        // CantBeTransported is the first question the original asks and it
+        // is about the passenger alone: a unit that names it is refused by
+        // every transport there is, however much room the transport has.
+        if (targetDefinition.cantBeTransported || !targetDefinition.isMobile)
+        {
+            return false;
+        }
+
+        // The transport must say canload; and a unit carrying cargo of its
+        // own can never itself be picked up.
+        if (!transportDefinition.canLoad || !target.carriedUnits.empty())
+        {
+            return false;
+        }
+
+        // Capacity is a flat headcount -- a big unit takes one slot or does
+        // not fit at all -- and an air transport carries exactly one
+        // whatever its FBI says: the original's VTOL pickup aborts while
+        // anything is attached, which is why the Atlas's
+        // transportcapacity=5 has never meant five.
+        auto capacity = transportDefinition.canFly ? 1u : transportDefinition.effectiveTransportCapacity();
+        if (transport.carriedUnits.size() >= capacity)
+        {
+            return false;
+        }
+
+        // The size gate is the passenger's footprint X alone against
+        // transportsize. Air transports refuse ships through this gate:
+        // every ship in the game is wider than transportsize 3.
+        auto [footprintX, footprintZ] = getFootprintXZ(targetDefinition.movementCollisionInfo);
+        if (transportDefinition.transportSize > 0 && footprintX > transportDefinition.transportSize)
+        {
+            return false;
+        }
+
+        // A landed aircraft may ride; an airborne one may not.
+        if (std::holds_alternative<UnitPhysicsInfoAir>(target.physics))
+        {
+            return false;
+        }
+
+        // A sea or hover transport refuses anything that needs water under
+        // it -- ships and submarines.
+        auto targetMovement = getAdHocMovementClass(targetDefinition.movementCollisionInfo);
+        if (!transportDefinition.canFly && targetMovement.minWaterDepth > 0)
+        {
+            return false;
+        }
+
+        // No transport of any kind lifts a unit whose top is below the
+        // surface.
+        auto targetModelHeight = unitModelDefinitions.at(targetDefinition.objectName).height;
+        if (target.position.y + targetModelHeight <= terrain.getSeaLevel())
+        {
+            return false;
+        }
+
+        if (target.isBeingBuilt(targetDefinition))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     bool GameSimulation::loadUnitIntoTransport(UnitId transportId, UnitId unitId, const std::string& piece)
     {
         auto transportRef = tryGetUnitState(transportId);
@@ -860,6 +943,11 @@ namespace rwe
 
     void GameSimulation::releaseTransportLinks(UnitId unitId)
     {
+        releaseTransportLinks(unitId, std::nullopt);
+    }
+
+    void GameSimulation::releaseTransportLinks(UnitId unitId, std::optional<UnitId> attacker)
+    {
         auto& unit = getUnitState(unitId);
         if (unit.carriedBy)
         {
@@ -871,7 +959,9 @@ namespace rwe
             // carriedBy stays set so the dead unit is not cleared from ground it never occupied.
         }
 
-        // Whatever it was carrying goes down with it.
+        // Whatever it was carrying goes down with it -- the original deals
+        // each passenger 30000 armour-ignoring damage credited to whoever
+        // killed the transport, so the kills count for the attacker.
         auto carried = unit.carriedUnits;
         unit.carriedUnits.clear();
         for (auto carriedId : carried)
@@ -879,7 +969,7 @@ namespace rwe
             auto carriedRef = tryGetUnitState(carriedId);
             if (carriedRef && carriedRef->get().isAlive())
             {
-                killUnit(carriedId);
+                killUnit(carriedId, attacker);
             }
         }
     }
@@ -2684,7 +2774,7 @@ namespace rwe
 
         unit.markAsDead();
         getPlayer(unit.owner).unitsLost += 1;
-        releaseTransportLinks(unitId);
+        releaseTransportLinks(unitId, attacker);
 
         // Credit the kill to the attacker, if any.
         // Match TA behavior: friendly-fire kills count.

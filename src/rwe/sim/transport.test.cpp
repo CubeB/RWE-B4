@@ -70,6 +70,7 @@ namespace rwe
         UnitDefinition makeTransportDef()
         {
             auto d = makeMobileDef(2u);
+            d.canLoad = true;
             d.transportCapacity = 1;
             d.transportSize = 2;
             return d;
@@ -305,5 +306,90 @@ namespace rwe
         // A second order sets down the other one.
         sim.getUnitState(transportId).orders.push_back(UnloadOrder(destination));
         REQUIRE(tickUntil(sim, 900, [&] { return sim.getUnitState(transportId).carriedUnits.empty(); }));
+    }
+
+    TEST_CASE("who may ride: the original's load predicate", "[transport]")
+    {
+        // 0x489A90, rule by rule. The terrain floor is at zero with the sea
+        // at twenty, so a unit at y=15 with the ten-unit test model pokes
+        // its top above the water and one at y=5 is fully under.
+        auto script = makeEmptyCobScript();
+        Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
+        GameSimulation sim(MapTerrain(std::move(heights), 20_ss), 0u, 0, 0);
+        auto player = addPlayer(sim, "us");
+        registerModel(sim, "model");
+
+        sim.unitDefinitions["seatransport"] = makeTransportDef();
+        auto airDef = makeTransportDef();
+        airDef.canFly = true;
+        airDef.transportCapacity = 5; // the Atlas says 5; the engine says 1
+        sim.unitDefinitions["airtransport"] = airDef;
+        sim.unitDefinitions["kbot"] = makeMobileDef(2u);
+        auto shipDef = makeMobileDef(2u);
+        shipDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 10u, 255u};
+        sim.unitDefinitions["ship"] = shipDef;
+
+        auto transportId = spawnUnit(sim, "seatransport", player, SimVector(100_ss, 15_ss, 100_ss), script);
+        auto airId = spawnUnit(sim, "airtransport", player, SimVector(300_ss, 60_ss, 100_ss), script);
+        auto kbotId = spawnUnit(sim, "kbot", player, SimVector(150_ss, 15_ss, 100_ss), script);
+
+        SECTION("a plain mobile unit may board anything")
+        {
+            REQUIRE(sim.canLoadUnitIntoTransport(transportId, kbotId));
+            REQUIRE(sim.canLoadUnitIntoTransport(airId, kbotId));
+        }
+
+        SECTION("a ship is refused by a sea transport but not on account of the water rule alone")
+        {
+            // minwaterdepth > 0 is the sea/hover refusal; the air transport
+            // in the original refuses ships through the footprint gate
+            // instead, so a narrow test ship is fair game for it.
+            auto shipId = spawnUnit(sim, "ship", player, SimVector(150_ss, 15_ss, 150_ss), script);
+            REQUIRE_FALSE(sim.canLoadUnitIntoTransport(transportId, shipId));
+            REQUIRE(sim.canLoadUnitIntoTransport(airId, shipId));
+        }
+
+        SECTION("nothing lifts a submerged unit")
+        {
+            sim.getUnitState(kbotId).position.y = 5_ss;
+            REQUIRE_FALSE(sim.canLoadUnitIntoTransport(transportId, kbotId));
+            REQUIRE_FALSE(sim.canLoadUnitIntoTransport(airId, kbotId));
+        }
+
+        SECTION("an airborne unit may not be picked up, a landed one may")
+        {
+            sim.getUnitState(kbotId).physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            REQUIRE_FALSE(sim.canLoadUnitIntoTransport(transportId, kbotId));
+            sim.getUnitState(kbotId).physics = UnitPhysicsInfoGround{};
+            REQUIRE(sim.canLoadUnitIntoTransport(transportId, kbotId));
+        }
+
+        SECTION("an air transport carries one, whatever its FBI says")
+        {
+            auto secondId = spawnUnit(sim, "kbot", player, SimVector(170_ss, 15_ss, 100_ss), script);
+            REQUIRE(sim.canLoadUnitIntoTransport(airId, kbotId));
+            REQUIRE(sim.loadUnitIntoTransport(airId, kbotId, std::string()));
+            REQUIRE_FALSE(sim.canLoadUnitIntoTransport(airId, secondId));
+        }
+
+        SECTION("a unit carrying cargo can never itself be loaded")
+        {
+            auto secondId = spawnUnit(sim, "seatransport", player, SimVector(170_ss, 15_ss, 100_ss), script);
+            REQUIRE(sim.loadUnitIntoTransport(secondId, kbotId, std::string()));
+            REQUIRE_FALSE(sim.canLoadUnitIntoTransport(transportId, secondId));
+        }
+
+        SECTION("cantbetransported refuses every transport there is")
+        {
+            sim.unitDefinitions["kbot"].cantBeTransported = true;
+            REQUIRE_FALSE(sim.canLoadUnitIntoTransport(transportId, kbotId));
+            REQUIRE_FALSE(sim.canLoadUnitIntoTransport(airId, kbotId));
+        }
+
+        SECTION("the size gate is footprint X against transportsize")
+        {
+            sim.unitDefinitions["kbot"].movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 2u, 255u, 255u, 0u, 0u};
+            REQUIRE_FALSE(sim.canLoadUnitIntoTransport(transportId, kbotId));
+        }
     }
 }

@@ -1901,21 +1901,19 @@ namespace rwe
         auto& target = targetRef->get();
         const auto& targetDefinition = sim->unitDefinitions.at(target.unitType);
 
-        // Only ground units ride; a transport that is full, or too small for
-        // the unit's footprint, gives up. CantBeTransported is the first
-        // question the original's predicate asks (0x489AA3) and it is about
-        // the passenger alone: a unit that names it is refused by every
-        // transport there is, however much room the transport has.
+        // The original's order-time predicate (0x489A90); the rules live on
+        // the simulation so they can be asked from anywhere.
         auto [footprintX, footprintZ] = sim->getFootprintXZ(targetDefinition.movementCollisionInfo);
-        if (targetDefinition.cantBeTransported
-            || !targetDefinition.isMobile || targetDefinition.canFly || targetDefinition.isTransport()
-            || unitInfo.state->carriedUnits.size() >= unitInfo.definition->effectiveTransportCapacity()
-            || (unitInfo.definition->transportSize > 0 && std::max(footprintX, footprintZ) > unitInfo.definition->transportSize))
+        if (!sim->canLoadUnitIntoTransport(unitInfo.id, loadOrder.target))
         {
             return true;
         }
 
-        bool isShip = unitInfo.definition->floater;
+        // Every transport that is not an aircraft loads with the crane: the
+        // hover transports' scripts are structural copies of the sea
+        // transports', and the original routes any canfly=0 transport's LOAD
+        // order to the same ground pickup mission.
+        bool isShip = !unitInfo.definition->canFly;
         auto dx = unitInfo.state->position.x - target.position.x;
         auto dz = unitInfo.state->position.z - target.position.z;
         auto flatDistanceSquared = (dx * dx) + (dz * dz);
@@ -2026,11 +2024,15 @@ namespace rwe
             return true;
         }
 
+        // Every non-flying transport unloads with the crane, hover ones
+        // included -- their scripts are copies of the sea transports'.
+        bool crane = !unitInfo.definition->canFly;
+
         auto dx = unitInfo.state->position.x - unloadOrder.destination.x;
         auto dz = unitInfo.state->position.z - unloadOrder.destination.z;
         // An aircraft needs room to stop, so it starts its descent from
         // further out than a ship's crane needs.
-        auto dropRange = unitInfo.definition->floater
+        auto dropRange = crane
             ? CraneReach
             : rweMax(32_ss, unitInfo.definition->maxVelocity * 8_ss);
         if ((dx * dx) + (dz * dz) > dropRange * dropRange)
@@ -2039,7 +2041,7 @@ namespace rwe
             return false;
         }
 
-        if (unitInfo.definition->floater)
+        if (crane)
         {
             // TransportDrop(unit, xz) swings one unit ashore and lets go with
             // drop-unit, which sets it down where it hangs. One order sets

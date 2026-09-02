@@ -742,7 +742,16 @@ namespace rwe
         void updateCarriedUnits();
 
         /** On death: leaves the transport it was in, and kills whatever it was carrying. */
+        /**
+         * The original's order-time load predicate (0x489A90), in full: may
+         * this transport take this unit aboard? Capacity is a flat headcount
+         * and an air transport carries exactly one whatever its FBI says.
+         */
+        bool canLoadUnitIntoTransport(UnitId transportId, UnitId unitId) const;
+
         void releaseTransportLinks(UnitId unitId);
+
+        void releaseTransportLinks(UnitId unitId, std::optional<UnitId> attacker);
 
         std::optional<std::reference_wrapper<MapFeature>> tryGetFeature(FeatureId id);
 
