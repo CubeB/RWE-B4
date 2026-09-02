@@ -40,16 +40,11 @@ namespace rwe
 
     void MainMenuScene::init()
     {
-        // The title theme, looping, as long as the menu is up. The playlist
-        // is whatever mp3s the music directory holds; the file with "theme"
-        // in its name is the title music. Quietly nothing without any.
+        // The menu has no music: the original plays only the [BGM] ambience
+        // (the drone from ALLSOUND.TDF) over its front end, and so does RWE.
+        // The playlist is still gathered so the options music page's CD
+        // controls can preview tracks.
         menuPlaylist = sceneContext.audioService->getMusicPlaylist();
-        if (auto theme = sceneContext.audioService->getThemePath())
-        {
-            auto it = std::find(menuPlaylist.begin(), menuPlaylist.end(), *theme);
-            menuPlaylistIndex = it == menuPlaylist.end() ? 0 : static_cast<std::size_t>(it - menuPlaylist.begin());
-        }
-        playMenuMusic();
 
         bgm = startBgm();
         goToMainMenu();
@@ -123,8 +118,6 @@ namespace rwe
         if (!sceneContext.audioService->playMusic(path, true))
         {
             LOG_ERROR << "Failed to start menu music: " << path;
-            // Do not spin on a file that will not play.
-            menuMusicStopped = true;
         }
     }
 
@@ -142,12 +135,7 @@ namespace rwe
         auto* audio = sceneContext.audioService;
         audio->setSoundVolume(static_cast<float>(state.soundVolume) / 100.0f);
         audio->setMusicVolume(static_cast<float>(state.musicVolume) / 100.0f);
-        auto wasEnabled = audio->isMusicEnabled();
         audio->setMusicEnabled(state.musicEnabled);
-        if (state.musicEnabled && !wasEnabled)
-        {
-            playMenuMusic();
-        }
         pendingWindowMode = state.windowMode;
     }
 
@@ -383,17 +371,6 @@ namespace rwe
     void MainMenuScene::update(int millisecondsElapsed)
     {
         topPanel().update(static_cast<float>(millisecondsElapsed) / 1000.0f);
-
-        // Keep the title music going. Whatever once stopped it -- a movie, a
-        // transient failure, a return from elsewhere -- one quiet frame later
-        // it starts again, unless the player pressed stop themselves.
-        if (!menuMusicStopped
-            && !menuPlaylist.empty()
-            && sceneContext.audioService->isMusicEnabled()
-            && !sceneContext.audioService->musicPlaying())
-        {
-            playMenuMusic();
-        }
     }
 
     void MainMenuScene::onMouseWheel(MouseWheelEvent event)
@@ -531,23 +508,17 @@ namespace rwe
             }
             else if (message == "NOTRAK")
             {
-                // The button has already cycled its own Off|On label.
+                // The button has already cycled its own Off|On label; the
+                // setting takes effect in game, the menu stays quiet.
                 auto* audio = sceneContext.audioService;
-                auto enabling = !audio->isMusicEnabled();
-                audio->setMusicEnabled(enabling);
-                if (enabling)
-                {
-                    playMenuMusic();
-                }
+                audio->setMusicEnabled(!audio->isMusicEnabled());
             }
             else if (message == "CDPLAY")
             {
-                menuMusicStopped = false;
                 playMenuMusic();
             }
             else if (message == "CDSTOP")
             {
-                menuMusicStopped = true;
                 sceneContext.audioService->stopMusic();
             }
             else if (message == "CDNEXT" || message == "CDPREV")
