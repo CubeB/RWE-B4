@@ -139,7 +139,7 @@ namespace rwe
 
         void updateWeaponStockpile(UnitId id, unsigned int weaponIndex);
 
-        SimVector changeDirectionByRandomAngle(const SimVector& direction, SimAngle maxAngle);
+        SimVector changeDirectionByRandomAngle(const SimVector& direction, SimAngle spread);
 
         void tryFireWeapon(UnitId id, unsigned int weaponIndex);
 

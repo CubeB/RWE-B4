@@ -3149,23 +3149,21 @@ both are inside the **burst-continuation** branch of the per-tick projectile
 update `0x49B720` — the branch entered only when the projectile's burst counter
 `proj+0x60` is non-zero. Two consequences that RWE does not currently match:
 
-- The original's spread is **half as wide as RWE's**. It draws
-  `rand(sprayangle) − sprayangle/2`, which is uniform on
-  `[−sprayangle/2, +sprayangle/2)`. RWE's `changeDirectionByRandomAngle`
-  (`UnitBehaviorService.cpp:837`) draws `[0, sprayangle]` and then flips the
-  sign at random, giving `[−sprayangle, +sprayangle]`.
+- **`sprayangle` is the whole width of the spread, not the deviation either
+  side of the aim.** The original draws `rand(sprayangle) − sprayangle/2`,
+  uniform on `[−sprayangle/2, +sprayangle/2)`. RWE drew `[0, sprayangle]` and
+  flipped a coin for the sign, so every burst weapon in the game scattered
+  twice as wide as it should. All five weapons that set the key set it to
+  1024, so the spread was ±5.6° where it should have been ±2.8°. **Fixed.**
 - The original does not spray **the first shot of a burst**, only the
   continuations — the readers are inside the branch guarded by a non-zero burst
-  counter. RWE sprays every shot.
+  counter. RWE sprays every shot. Recorded, not changed: unpicking it would
+  mean threading a shot index through the fire path for very little.
 
 The axis is the same in both: the original rebuilds `velocity.x` and
 `velocity.z` from the sprayed heading (`0x49B932`–`0x49B94B`) and leaves
 `velocity.y` alone, and RWE's `rotateDirectionXZ` likewise turns about the
-vertical only. Both differences are recorded, not changed — no shipped weapon
-combines `sprayangle` with a long enough range for either to be conspicuous,
-and unpicking the burst behaviour would mean threading a shot index through the
-fire path for no visible gain. Worth revisiting if `sprayangle` ever looks
-wrong.
+vertical only.
 
 ### Screen shake, `DWORD wdef+0xCC` and `DWORD wdef+0xD0`
 

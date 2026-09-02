@@ -834,16 +834,22 @@ namespace rwe
         }
     }
 
-    SimVector UnitBehaviorService::changeDirectionByRandomAngle(const SimVector& direction, SimAngle maxAngle)
+    SimVector UnitBehaviorService::changeDirectionByRandomAngle(const SimVector& direction, SimAngle spread)
     {
-        std::uniform_int_distribution dist(SimAngle(0).value, maxAngle.value);
-        std::uniform_int_distribution dist2(0, 1);
-        auto& rng = sim->rng;
-        auto angle = SimAngle(dist(rng));
-        if (dist2(rng))
+        // `sprayangle` is the whole width of the spread, not the deviation
+        // either side of the aim: the original draws rand(sprayangle) and
+        // takes half of it back off (0x49B903-0x49B91B), landing uniformly on
+        // [-sprayangle/2, sprayangle/2). Drawing the full angle and flipping a
+        // coin for the sign, as this used to, made every burst weapon in the
+        // game scatter twice as wide as it should.
+        if (spread == SimAngle(0))
         {
-            angle = SimAngle(0) - angle;
+            return direction;
         }
+
+        std::uniform_int_distribution<unsigned int> dist(0, spread.value - 1u);
+        auto& rng = sim->rng;
+        auto angle = SimAngle(dist(rng)) - SimAngle(spread.value / 2u);
 
         return rotateDirectionXZ(direction, angle);
     }
