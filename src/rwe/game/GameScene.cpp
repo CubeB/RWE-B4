@@ -4795,8 +4795,12 @@ namespace rwe
         // Two dots per call: one now and one on the following tick. The
         // emitter is due again the tick after it is created and then never
         // again, so the repetition rate is entirely up to the ship's script.
+        //
+        // Particles drift whether or not they have started, so the second one
+        // is seeded a tick's travel upstream to land on the emitter's anchor
+        // at the moment it appears, which is where the original puts it.
         spawnWake(scattered(), velocity, duration, rampPeriod, simulation.gameTime);
-        spawnWake(scattered(), velocity, duration, rampPeriod, simulation.gameTime + GameTime(1));
+        spawnWake(scattered() - velocity, velocity, duration, rampPeriod, simulation.gameTime + GameTime(1));
     }
 
     void GameScene::modifyBuildQueue(UnitId unitId, const std::string& unitType, int count)
