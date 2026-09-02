@@ -3148,3 +3148,23 @@ unit would engage a submarine, neither of which the original can do.
   `dx² + dz²` makes a target directly overhead free, which — given that nothing
   else stops a ground weapon engaging an aircraft — would make ground fire at
   aircraft *more* common than RWE's, not less.
+
+### One correction to §9
+
+§9 says the per-tick scan keeps an existing target "unless it has become
+allied, has left range, or is in that slot's bad-target set". The range half of
+that is not there. `0x4089A0` fetches the current target with `0x48A190` and
+then tests exactly three things before deciding to re-acquire:
+
+```
+408ac4  cmp BYTE [players + idx + 0x108],0 / jne drop   ; the target became allied
+408af2  test [def + 4*slot + 0x231], bit                ; it is in the bad-target set
+408aff  test BYTE [weapon+0x111],0x80 / test [target+0x10e],0x10  ; paralyzer, already paralysed
+```
+
+and `0x48A190` itself is a pure accessor — it checks `WORD [slot+0x6] ==
+0x8000`, the marker that says the slot holds a unit rather than a position,
+looks the unit id up in the table at `[world+0x14357]`, and returns. No
+distance is measured anywhere on that path. Dropping a target that has walked
+out of range must happen in the weapon's own service, if it happens at all;
+it is not part of the re-acquire decision.
