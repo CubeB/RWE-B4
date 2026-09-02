@@ -1182,6 +1182,34 @@ at `0x40B927`, under `cmp [esp+0x54],ebp` — only when the third argument is 0,
 the sight-range search. That is why a Peewee ignores an aircraft it would have
 to walk towards and still shoots one that comes to it.
 
+### The same preference read the other way: the fighter
+
+The interesting case is the reverse of the Peewee's. Every fighter carries
+`wpri_badTargetCategory=NOTAIR`, and **143 of the 157 shipped units name
+`NOTAIR` in their own `Category`** — every building, every tank, every kbot.
+So a Freedom Fighter's bad-target set is not a handful of awkward targets, it
+is nearly the whole map. Nothing else holds it back: `ARMVTOL_MISSILE` has no
+`toairweapon`, `ARMFIG.FBI` has no `NoChaseCategory`, and an attack order onto
+a ground unit produces a perfectly ordinary `AIRTOGROUND` mission
+(`0x43F2FA`). A fighter *can* strafe a tank, and with an empty sky it will.
+
+What it cannot do is prefer one. That is the whole of the behaviour, and it
+only works if the preference is applied to the decision to **break off** as
+well as to the decision to fire — which it is, because there is no separate
+routine for breaking off. `0x43B700` is four instructions: test that the unit
+is on Fire At Will, and tail-call `0x40B7B0` with its third argument zero. Six
+mission handlers call it (`0x4033DE`, `0x406002`, `0x4060B6`, and, for
+aircraft, `0x40F98D` in `VTOL_Standby`, `0x4105FB` in `VTOL_SeekAttack` and
+`0x41106D` in `VTOL_Patrol`), and all six therefore get the bad-target buckets,
+the `ShootMe` rule and the `rand(distance²)` scoring, not just a nearest-enemy
+sweep.
+
+RWE had a second search here — nearest living enemy inside weapon range, with
+`NoChaseCategory` and `0x49ABB0` applied and nothing else — so fighters took
+whatever was closest. The two are now one function with a mode argument; the
+mode changes the radius (weapon range against `SightDistance`) and whether
+`NoChaseCategory` is consulted, and nothing else.
+
 Only four shipped weapons set `toairweapon`: `armyork`, `armflak`, `corsent`
 and `corflak`. The Samson's `armtruck_missile` does not, so §9's "a Samson with
 no aircraft about still shoots at tanks" is right, and is a statement about the
