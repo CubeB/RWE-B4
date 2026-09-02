@@ -2955,3 +2955,341 @@ original:
 
 ---
 
+
+## NN. Where a shell actually lands, screen shake, and waterline
+
+Three keys that were parsed and thrown away — `accuracy`, `shakemagnitude` /
+`shakeduration`, and `waterline` — and, because the first of them could not be
+answered without it, the whole of the original's ballistic firing solution.
+
+The question that started this was a player's: *"Vulcan was very inaccurate over
+long distance, that might be intentional."* It is intentional, and it is
+`accuracy`. The rest of this section is the working.
+
+### The ballistic firing solution, `0x49A890`
+
+A ballistic weapon aims in two halves. The heading is a plain
+`atan2` (`0x49D5EE`), taken from the muzzle to the target and then relieved of
+the unit's own heading (`sub ax,[edi+0x66]` at `0x49D5F3`). The pitch is
+`0x49A890`, called at `0x49D614` with five arguments pushed at `0x49D60F`:
+
+```
+0x49A890(dx, dy, dz, weaponvelocity, minbarrelangle)
+```
+
+where `dx`/`dy`/`dz` are **muzzle minus target** (`0x49D5DA`–`0x49D5E6`, note
+the direction — it is not target minus muzzle) and `minbarrelangle` is the float
+at `wdef+0xC8`. It returns a 16-bit pitch, or **`0x8000` meaning "no solution",
+in which case the weapon does not fire at all** (`cmp ax,0x8000` at `0x49D61B`).
+
+The routine is IEEE double throughout. Writing `d` for the horizontal distance
+`hypot(dx, dz)` (`0x4FB440`), `s` for the speed and `G` for the per-tick
+gravity, it forms
+
+```
+D = (s² + G·dy)² − G²·(d² + dy²)          ; = s⁴ + 2·G·s²·dy − G²·d²
+```
+
+at `0x49A908`–`0x49A964`, gives up if `D < 0` (`0x49A966`), and then solves not
+for `tan(pitch)` but for the **square of the vertical launch speed**:
+
+```
+vy² = d²·(s² + G·dy ± √D) / (2·(d² + dy²))
+```
+
+taking `√` of that and dividing by the speed to get a sine, then `asin`
+(`0x4E67F0`, at `0x49A9C8` and `0x49A9FE`). Written out with `dy` flipped to the
+usual "target minus muzzle" sense, `D` is `s⁴ − 2gs²y − g²x²` — **exactly the
+discriminant RWE's `computeFiringAngles` already computes**, arrived at by a
+different factoring.
+
+Which root it uses is decided at `0x49AA11`–`0x49AA53` against two constants:
+`minbarrelangle` as a floor, and `0x4FDA80` = **π/4** as a ceiling. It tries the
+`+√D` root first and the `−√D` root second. Since the high root exceeds 45° for
+every target inside the gun's maximum range and only equals it exactly at that
+range, **the 45° ceiling means the high shot is always rejected and the original
+always fires the flat one** — the same choice RWE makes with `pitches->second`.
+The result is scaled to a 16-bit angle by `× 32768 × (1/π)` (`0x4FDA88`,
+`0x4FDA90`) and truncated (`0x4E43A0`).
+
+So there is no lofted artillery arc in Total Annihilation. Every ballistic gun
+in the game is a flat-trajectory direct-fire weapon whose barrel never goes above
+45°, and a target it cannot reach under that cap simply does not get shot at.
+
+### The original's trigonometry is coarse
+
+`0x4B70EF` (sine × length) and `0x4B7123` (cosine × length, the same table read
+a quarter turn along) index the table at `0x509F00` with
+
+```
+byteOffset = ((angle + 0x20) >> 6) & 0x3FE
+```
+
+The mask drops the low bit of a value that ranges over 0–1023, so the table is
+**512 entries per full turn** — confirmed by reading it: entry 0 is 0, entry 1 is
+101, entry 128 is `0x2000`, entry 384 is `−0x2000`, i.e. `round(8192·sin(2πk/512))`.
+The mantissa is 13-bit: `(table[i] × len + 0x1000) >> 13`.
+
+One table step is **128 of 65536, 0.703°**. Whatever the double-precision solver
+decides, the shell leaves the barrel on one of 512 headings and one of 512
+pitches. Replaying it, half a step of pitch moves the fall of shot by up to 98
+units for a Big Bertha and 180 for an Intimidator. RWE's `sin`/`cos` in
+`SimAngle.cpp` are `std::sin`/`std::cos` on a float, so RWE is *more* precise
+here than the original, not less.
+
+### `accuracy`, `WORD wdef+0x104`
+
+Parsed at `0x42EBFE` and stored at `0x42EC19` — §19's table is right, and the
+neighbouring `tolerance` `+0x106` and `pitchtolerance` `+0x108` are right too.
+The data file's own comment defines it: *"amount of accuracy in 64K deg that
+weapon is good for, 0 = 100%"*.
+
+There is exactly one reader, `0x49D6D7`, and it sits in the fire path **after**
+the aim has been solved and the unit's heading added to it (`0x49D6B4`), and
+**before** the spawn dispatch (`0x49D742`) hands off to the ballistic
+(`0x49CDE0`) or line-of-sight (`0x49C9C0`) spawn. Both of those read the aim
+angles straight back out of the weapon slot (`0x49CE4F`–`0x49CE5B`), so the
+jitter reaches every kind of projectile, not just ballistic ones.
+
+The whole of it, `0x49D6BC`–`0x49D73E`:
+
+```
+acc  = WORD[wdef+0x104]                        ; accuracy
+acc -= (health << 11) / maxdamage              ; 0x49D6C2-0x49D6CE, 0x49D6E7
+acc += 0x800                                   ; 0x49D6F5
+vet  = killcount / 3                           ; 0x49D6E0-0x49D700
+if (vet > 1) acc /= vet                        ; 0x49D702-0x49D711
+if (acc != 0) {
+    heading += rand(acc) - acc/2               ; 0x49D723-0x49D72F
+    pitch   += rand(acc) - acc/2               ; 0x49D733-0x49D73E
+}
+```
+
+Everything is 16-bit: `acc` lives in `cx`, the halving is an unsigned `shr` and
+the arithmetic is masked to 16 bits at each use, so the intermediate carry out of
+bit 15 that `add ecx,0x800` can produce is discarded.
+
+Three things fall out of that:
+
+- **The health term cancels at full health.** `(health << 11) / maxdamage` is
+  exactly `0x800` when `health == maxdamage`, so an undamaged unit gets its
+  weapon's `accuracy` unmodified. As it takes damage the term shrinks and the
+  error cone grows, by up to a full `0x800` — **11.25°** — at the point of death.
+  A half-dead Big Bertha's cone goes from 500 to 1524, three times worse.
+- **Kills make a unit more accurate.** This is the veterancy the original
+  actually has: three kills do nothing, six halve the cone, nine divide it by
+  three. It is an integer divide, so it never reaches zero.
+- **Heading and pitch are drawn independently**, each uniform on
+  `[−acc/2, acc/2)` — two separate calls to `0x4B6C30`, which returns
+  `[0, n)`. The error is not a cone around the aim line; it is a rectangle in
+  (heading, pitch).
+
+### What that does to a long shot
+
+`ARMVULC_WEAPON` is not in the retail data — the Vulcan is a Core Contingency
+unit and its files live in `ccdata.ccx`. Read out of the archive, it is
+`range=3080`, `weaponvelocity=800`, `areaofeffect=100`, **`accuracy=800`**, on a
+unit with `MaxDamage=1400`. Its Core opposite number `CORBUZZ_WEAPON` (Buzzsaw)
+is `range=3800`, `weaponvelocity=900`, `areaofeffect=120`, `accuracy=800`. The
+two retail long guns are `ARM_BERTHACANNON` (4096, 800, AoE 80, `accuracy=500`)
+and `CORE_INTIMIDATOR` (5120, 1000, AoE 100, `accuracy=1000`).
+
+Transcribing `0x49A890`, the 512-entry sine table, the original's integration
+order and the `accuracy` draw into a standalone program and firing 50 000 rounds
+at each gun's full range over flat ground gives, in world units:
+
+| Weapon | range | AoE | `accuracy` | range error sd | range error min/max | lateral sd | lateral min/max |
+|---|---|---|---|---|---|---|---|
+| Vulcan | 3080 | 100 | 800 | 219 | −361 / +350 | 68 | ±132 |
+| Buzzsaw | 3800 | 120 | 800 | 277 | −519 / +393 | 84 | ±161 |
+| Big Bertha | 4096 | 80 | 500 | 114 | −234 / +163 | 57 | ±102 |
+| Intimidator | 5120 | 100 | 1000 | 407 | −687 / +743 | 141 | ±276 |
+
+The player's reading was right. A Vulcan firing at its own maximum range in the
+original puts its shells anywhere in a patch roughly 700 units deep and 260
+across, and its blast is 100 across. It is *supposed* to walk its fire over the
+target and connect only some of the time — which is what the quarter-second
+reload is for.
+
+### And what RWE does instead
+
+The same replay, run through RWE's own arithmetic — `computeFiringAngles` in
+float, `SimAngle`'s `std::sin`, and `updateProjectiles`' integration:
+
+| Weapon | TA solved pitch | RWE solved pitch | TA lands at | RWE lands at |
+|---|---|---|---|---|
+| Vulcan | 2968 | 2969 | 3083 (+3) | 3055 (−25) |
+| Buzzsaw | 2885 | 2885 | 3747 (−53) | 3771 (−29) |
+| Big Bertha | 4167 | 4168 | 4065 (−31) | 4071 (−25) |
+| Intimidator | 3184 | 3185 | 5173 (+53) | 5088 (−32) |
+
+**The two solvers agree to one part in 65536** — a twentieth of a degree, and in
+one case exactly. RWE's solver is not losing precision at long range and there is
+nothing to fix in it. `SimScalar` is a `float`, not a fixed-point type, and at
+these magnitudes single precision is comfortably enough: the largest intermediate
+is `s⁴ ≈ 5×10⁵`.
+
+Both engines land a little off the aim point, by 25 to 53 units on shots of three
+to five thousand, and for the same reason: a parabola integrated in whole ticks
+is not a parabola. They differ in the direction of the error because they take
+gravity at opposite ends of the tick — the original does `position += velocity`
+and *then* `velocity.y -= G` (`0x49BCE3`, `0x49BD3F`), while RWE does
+`velocity.y -= G` and then `position += velocity`
+(`GameSimulation.cpp:2957`, `:2996`). Neither is worth changing; both are an
+order of magnitude smaller than the scatter the original deliberately adds.
+
+So the honest answer to the question is that **RWE's long guns are not
+inaccurate, they are too accurate**, and the missing piece is a key that was
+being parsed and dropped on the floor.
+
+### `sprayangle`, `WORD wdef+0xEE`, and where RWE differs
+
+Parsed at `0x42E670`. It has exactly two readers, `0x49B8F1` and `0x49B911`, and
+both are inside the **burst-continuation** branch of the per-tick projectile
+update `0x49B720` — the branch entered only when the projectile's burst counter
+`proj+0x60` is non-zero. Two consequences that RWE does not currently match:
+
+- The original sprays **heading only**. It rebuilds `velocity.x` and
+  `velocity.z` from the sprayed heading (`0x49B932`–`0x49B94B`) and never
+  touches `velocity.y`. RWE turns the whole 3D direction vector with
+  `changeDirectionByRandomAngle` (`UnitBehaviorService.cpp:959`), which
+  scatters elevation as well.
+- The original does not spray **the first shot of a burst**, only the
+  continuations. RWE sprays every shot.
+
+Both are recorded, not changed: RWE's version is the more useful behaviour for a
+weapon like a Gatling gun, and no shipped weapon combines `sprayangle` with a
+long enough range for the elevation half to matter. Worth revisiting if
+`sprayangle` ever looks wrong.
+
+### Screen shake, `DWORD wdef+0xCC` and `DWORD wdef+0xD0`
+
+`shakemagnitude` is read as an integer and stored at `0x42EC5A`;
+`shakeduration` is read as a **float**, multiplied by the 30.0 at `0x4FD250` and
+truncated (`0x42EC60`–`0x42EC70`), so it is seconds on the way in and ticks in
+the struct. §19's offsets are right.
+
+The reader is not obvious, because the weapon definition's own fields are only
+touched at one site and it is easy to miss. The way in is the string `NoShake`
+at `0x502444`, which has no absolute reference anywhere in `.text` — it is a
+console command, sitting in a table of twelve-byte `{name, handler, arity}`
+records at `0x501D38` alongside `Contour`, `ScrollSpeed`, `IFace` and `Give`.
+Its handler is `0x416E60`, and all it does is toggle **bit 4 of
+`WORD [globals+0x37F2F]`**.
+
+That bit is tested in exactly two places, `0x41C5E6` and `0x41C646`, which are
+the two halves of the shake:
+
+- `0x41C5E0(magX, magY, duration)` **sets** a shake: duration into
+  `[globals+0x1432F]` and `[globals+0x14333]`, the two magnitudes into
+  `[globals+0x14337]` and `[globals+0x1433B]`, and bit 0 of
+  `[globals+0x1434E]` to say a shake is running. Nothing calls it.
+- `0x41C640(magX, magY, duration)` **accumulates** into a shake, and is called
+  from exactly one place. If no shake is running it clears both magnitudes
+  first. Then it **averages the durations** — `(new + current) / 2`, an
+  arithmetic mean, at `0x41C67B`–`0x41C690` — and **adds** the magnitudes.
+
+The single caller is `0x499FBA`, in the projectile detonation routine, and it
+passes the weapon definition's own fields straight through:
+
+```
+0x499FAB  mov edx,[edi+0xd0]     ; shakeduration, already in ticks
+0x499FB1  mov eax,[edi+0xcc]     ; shakemagnitude
+0x499FB7  push edx               ; duration
+0x499FB8  push eax               ; magY
+0x499FB9  push eax               ; magX
+0x499FBA  call 0x41C640
+```
+
+`shakemagnitude` is pushed twice, so the horizontal and vertical amplitudes are
+always equal, and — this is the part worth knowing — **there is no falloff with
+distance.** The routine never looks at where the explosion was or where the
+camera is. A Big Bertha shell landing in the far corner of the map shakes the
+screen exactly as hard as one landing under the cursor.
+
+The per-frame consumer is `0x41C6F0`:
+
+```
+remaining = [globals+0x14333]
+if (remaining <= 0) { clear the running bit; return }
+ampX = magX * remaining / duration            ; 0x41C721-0x41C725
+ampY = magY * remaining / duration
+cameraX += rand() * ampX / 0x8000 - ampX/2    ; 0x41C737-0x41C755
+cameraY += rand() * ampY / 0x8000 - ampY/2    ; 0x41C757-0x41C775
+remaining--                                   ; 0x41C7A2
+```
+
+The amplitude ramps down **linearly** to nothing over the shake's life, and each
+frame's offset is uniform on `[−amp/2, amp/2)` — `0x4E4870` is a `rand()` with a
+`0x7FFF` ceiling and the divide by `0x8000` normalises it — applied to the two
+components of the camera's scroll position at `[globals+0x1431F]` and
+`[globals+0x14323]`, which is what `0x41C574` writes when the camera is moved
+normally. So it is a screen-space jitter of the scroll, not a change of view
+angle.
+
+### `waterline`, `BYTE def+0x22C`
+
+Stored at `0x42C259`, and it has the two readers §B named.
+
+`0x43D72E` is the one the key is named for. For a unit with the **`floater`**
+flag (flags word A, `def+0x241` bit 19, tested at `0x43D71E`) the height the
+movement code wants is clamped:
+
+```
+y = max(wantedY, seaLevel − waterline)
+```
+
+`seaLevel` is `BYTE [globals+0x1427F]`, in whole world units. The comparison is
+done in 16.16 and the clamp value is built at `0x43D734`–`0x43D745` by an
+idiom worth writing down, because taken literally it looks like nonsense:
+
+```
+mov eax,edx ; shl eax,0x10 ; sub eax,edx ; add eax,<sea> ; shl eax,0x10
+```
+
+That is `((w << 16) − w + s) << 16`. The `w << 32` term falls off the top of the
+register, so the low 32 bits are exactly `(s − w) << 16` — the compiler's way of
+negating `w` inside a value it is about to shift left by 16 anyway. Sea level
+minus the waterline, in 16.16. A floater is therefore never allowed to sit lower
+than `waterline` below the surface, and since everything else is pushing it down
+it settles exactly there. That is the depth the hull sits at.
+
+`0x43DBA9` is the second reader, and it turned out to be the more interesting
+one: it is the routine that calls the COB entry point **`setSFXoccupy`** (the
+string is at `0x505248`, pushed at `0x43DBE3` into `0x4B0A70`). It works out a
+state number 0–4 describing how the unit sits in the water and, if it has
+changed since last time (`[unit+0x10A]`, `0x43DBCC`), tells the script:
+
+```
+if (movementMode != 1 && movementMode != 2)        state = 0    ; 0x43DB84
+else if (unitY > seaLevel)                         state = 4    ; 0x43DB8C
+else {                                             state = previous
+    if (unitY - seaLevel > -5)                     state = 1    ; 0x43DB9C
+    if (unitY + waterline == seaLevel)             state = 2    ; 0x43DBB5
+    if (unitY + WORD[def+0x170] < seaLevel)        state = 3    ; 0x43DBC7
+}
+```
+
+`unitY` here is `WORD [unit+0x70]`, in whole world units, not 16.16. Note that
+the three tests in the last branch are not exclusive and do not start from
+zero — if none of them fires the unit keeps whatever state it had, which is a
+real quirk of the original and not a mistranscription. `WORD [def+0x170]` is not
+identified; it behaves like a hull height.
+
+State 2 — floating at exactly its waterline — is the settled-ship case, and is
+what a ship's script is waiting for before it starts emitting a wake.
+
+### Recorded, not implemented
+
+- The ballistic spawn at `0x49CE62`–`0x49CE8A` sets the launch `velocity.y` to
+  `sin(pitch)·weaponvelocity − ([slot+0x10] / weaponvelocity)·G` rather than
+  plainly `sin(pitch)·weaponvelocity`. `[slot+0x10]` divided by a speed to give
+  something multiplied by a per-tick gravity has to be a distance, but taken at
+  face value with the flight time the correction is far too large to be the
+  half-tick term the integration order calls for, and no write to `[slot+0x10]`
+  was found to settle it. The term is left out of RWE; every number in the
+  tables above was computed without it, and the systematic errors it would have
+  to explain are only tens of units in any case.
+- The **console command table** at `0x501D38` is decoded far enough to name
+  `NoShake`, `Contour`, `ScrollSpeed`, `IFace` and `Give` and to find their
+  handlers. Nothing else was pulled out of it.
