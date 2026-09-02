@@ -590,10 +590,11 @@ read together with §NN.
       `WORD unit+0x68` pitch and `WORD unit+0x64` roll from the slope. Kbots
       and submarines set it; ARMFIDO explicitly clears it. Worth doing when
       somebody takes on terrain conforming, which RWE does not do at all yet.
-    - **`healtime`** (`WORD def+0x200`, 2 units) — decoded, not implemented.
-      Single reader `0x48AF3D`: every 8th tick, if not at full health, heal
+    - **`healtime`** (`WORD def+0x200`, 2 units) — **done.** Single reader
+      `0x48AF3D`: every 8th tick, if not at full health, heal
       `(healtime * 8) / 30` HP, integer-truncated. The Commanders' 27 works
-      out at 26.25 HP/s. Cheap to add.
+      out at 26.25 HP/s. Implemented free, where the original charges it to
+      the owner's stores, because nothing else RWE repairs costs anything.
     - **`isairbase`** (bit 9, 4 units) — decoded, not implemented. Cached onto
       the instance as `unit+0x110` bit 30 at `0x485AE7`. Three effects: a unit
       held by an air base stays selectable and orderable where one held by

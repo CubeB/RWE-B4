@@ -4036,3 +4036,24 @@ field, so countdowns of 6 or 7 would index past the array; nothing sets them.
 
 What RWE still lacks is the six spoken announcements, the random slop before
 the blast, and the explicit-zero case. The timing is right.
+
+### `healtime`, `WORD def+0x200`
+
+Parsed at `0x42C379`, stored `0x42C388`. One reader, `0x48AF3D`, in the
+per-unit per-tick loop, and it is not a per-tick heal: the whole block runs
+only when the game tick is a multiple of eight (`test BYTE PTR [..],0x7` at
+`0x48AF5E`) and then adds `healtime * 8 / 30`, truncated -- a `shl eax,0x3`
+followed by a divide-by-thirty done with the reciprocal `0x88888889`.
+
+So the key is hit points a **second**, delivered in eight-tick steps. Only
+the two commanders set it, at 27, which is seven points every eight ticks or
+26.25 a second. Implemented, with the granularity kept because it is what the
+health bar visibly does; the original also charges the mending against the
+owner's stores through `0x41BD10`, and RWE does not, because no other repair
+in RWE costs anything and making this the one exception would be stranger
+than leaving it free.
+
+Immediately above it in the same block sits the drowning rule, recorded here
+because it is easy to miss: once a second, a unit whose `WORD unit+0x70` is
+at or below the water level and whose definition is **not** `canhover` takes
+`[gamerules+0xD50]` damage of type 11 (`0x48AF19`-`0x48AF32`).

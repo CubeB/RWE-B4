@@ -156,6 +156,12 @@ namespace rwe
          */
         unsigned int waterLine;
 
+        /**
+         * How fast the unit mends itself, in hit points a second. Only the
+         * two commanders name it (TotalA.exe reader 0x48AF3D).
+         */
+        unsigned int healTime;
+
         bool canFly;
         /** How many units it can carry; 0 unless it is a transport. */
         unsigned int transportCapacity;

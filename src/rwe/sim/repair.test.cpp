@@ -221,4 +221,59 @@ namespace rwe
         REQUIRE(sim.getUnitState(solarId).hitPoints == 10u);
         REQUIRE(sim.getUnitState(factoryId).orders.empty());
     }
+
+    TEST_CASE("a unit with a healtime mends itself in eight-tick steps", "[repair]")
+    {
+        // 0x48AF3D runs only on ticks that are a multiple of eight and then
+        // adds healtime * 8 / 30, truncated. The commanders' shipped 27 gives
+        // 7 points a step, 26.25 a second.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+
+        auto commanderDef = makeSolarDef();
+        commanderDef.healTime = 27u;
+        commanderDef.maxHitPoints = 100u;
+        sim.unitDefinitions["commander"] = commanderDef;
+        auto commanderId = addUnitOfType(sim, "commander", player, SimVector(200_ss, 0_ss, 200_ss), script);
+        sim.getUnitState(commanderId).hitPoints = 10u;
+
+        // Eight ticks buys exactly one step of seven.
+        for (int i = 0; i < 8; ++i)
+        {
+            sim.tick();
+        }
+        REQUIRE(sim.getUnitState(commanderId).hitPoints == 17u);
+
+        for (int i = 0; i < 8; ++i)
+        {
+            sim.tick();
+        }
+        REQUIRE(sim.getUnitState(commanderId).hitPoints == 24u);
+
+        // It stops at full health rather than running over.
+        for (int i = 0; i < 400; ++i)
+        {
+            sim.tick();
+        }
+        REQUIRE(sim.getUnitState(commanderId).hitPoints == 100u);
+    }
+
+    TEST_CASE("a unit without a healtime never mends itself", "[repair]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+
+        sim.unitDefinitions["solar"] = makeSolarDef();
+        auto solarId = addUnitOfType(sim, "solar", player, SimVector(200_ss, 0_ss, 200_ss), script);
+        sim.getUnitState(solarId).hitPoints = 10u;
+
+        for (int i = 0; i < 100; ++i)
+        {
+            sim.tick();
+        }
+
+        REQUIRE(sim.getUnitState(solarId).hitPoints == 10u);
+    }
 }

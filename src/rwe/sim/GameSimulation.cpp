@@ -3502,6 +3502,43 @@ namespace rwe
         unitCreationRequests.clear();
     }
 
+    void GameSimulation::updateSelfRepair()
+    {
+        // `healtime` is hit points a second, but the original does not heal
+        // every tick: 0x48AF3D runs the whole thing only when the game tick
+        // is a multiple of eight (`test BYTE PTR [..],0x7`) and then adds
+        // `healtime * 8 / 30` points, truncated. That works out at roughly
+        // `healtime` a second while arriving in visible steps -- a commander
+        // with the shipped 27 gets 7 points every eight ticks, 26.25 a
+        // second -- and reproducing the granularity matters more than the
+        // average, because it is what the health bar does.
+        if (gameTime.value % 8u != 0u)
+        {
+            return;
+        }
+
+        for (auto& entry : units)
+        {
+            auto& unit = entry.second;
+            const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+            if (unitDefinition.healTime == 0 || unit.isDead() || unit.isBeingBuilt(unitDefinition))
+            {
+                continue;
+            }
+
+            if (unit.hitPoints >= unitDefinition.maxHitPoints)
+            {
+                continue;
+            }
+
+            // Free, as all repair is in RWE. The original charges the mending
+            // against the owner's stores; nothing else here does, and making
+            // this the one exception would be more surprising than useful.
+            auto amount = (unitDefinition.healTime * 8u) / 30u;
+            unit.hitPoints = std::min(unitDefinition.maxHitPoints, unit.hitPoints + amount);
+        }
+    }
+
     void GameSimulation::tick()
     {
         gameTime += GameTime(1);
@@ -3536,6 +3573,8 @@ namespace rwe
         }
 
         updateCarriedUnits();
+
+        updateSelfRepair();
 
         updateSelfDestructs();
 

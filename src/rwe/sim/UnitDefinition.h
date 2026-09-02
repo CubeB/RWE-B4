@@ -173,6 +173,12 @@ namespace rwe
          */
         unsigned int waterLine{0};
 
+        /**
+         * Hit points a second the unit mends itself at, zero for no self
+         * repair. See GameSimulation::updateSelfRepair.
+         */
+        unsigned int healTime{0};
+
         bool canFly;
 
         /** Units it can carry at once; 0 for anything that is not a transport. */

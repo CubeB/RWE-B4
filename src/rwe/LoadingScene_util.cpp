@@ -380,6 +380,7 @@ namespace rwe
         u.floater = fbi.floater;
         u.canHover = fbi.canHover;
         u.waterLine = fbi.waterLine;
+        u.healTime = fbi.healTime;
 
         u.canFly = fbi.canFly;
         u.transportCapacity = fbi.transportCapacity;

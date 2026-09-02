@@ -845,6 +845,8 @@ namespace rwe
 
         void deleteDeadUnits();
 
+        void updateSelfRepair();
+
         void updateSelfDestructs();
 
         /**

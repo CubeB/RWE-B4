@@ -107,6 +107,7 @@ namespace rwe
         tdf.readOrDefault("Floater", u.floater);
         tdf.readOrDefault("CanHover", u.canHover);
         tdf.readOrDefault("WaterLine", u.waterLine);
+        tdf.readOrDefault("HealTime", u.healTime);
 
         tdf.readOrDefault("CanFly", u.canFly);
         tdf.readOrDefault("TransportCapacity", u.transportCapacity);
