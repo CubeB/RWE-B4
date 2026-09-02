@@ -922,7 +922,7 @@ stored `0x42C445` with the usual xor-and-xor bitfield insert) and
 `0x42C465`). **Both default to 2** — the `push 0x2` at `0x42C417` and
 `0x42C433`. The pipeline alignment is checked by the store immediately before
 them, `mov BYTE PTR [ebp+0x22f], al` at `0x42C422`, which is `bmcode` at the
-offset §30 already records.
+offset §50 already records.
 
 Values run 0, 1, 2 for both, and the buttons cycle them 0 → 1 → 2 → 0
 (`0x41A4F6`, a four-way jump over a global order state where 3 means "the
@@ -1086,7 +1086,7 @@ zero there would leave hovercraft torpedoable.
 
 The two flag bits are settled in the parser, where the boolean helper's result
 is masked and shifted immediately after the call that read it, so the pipeline
-trap of §30 does not apply:
+trap of §50 does not apply:
 
 | Key | String | Shifted at | Bit of `def+0x241` |
 |---|---|---|---|
@@ -1274,7 +1274,7 @@ it is not part of the re-acquire decision.
 pushed there, the read follows at `0x42E906`, and `and eax,1 / shl eax,0x13` at
 `0x42E911`–`0x42E91A` puts it in place. The bits either side are `smoketrail`
 (18, key at `0x504150`) and `selfprop` (20, `0x50413C`), which agrees with the
-table in §30.
+table in §50.
 
 ### It chooses the weapon's fire handler
 
@@ -1367,7 +1367,7 @@ that tanks turn their bodies.
 
 It is a float in radians at `wdef+0xC8`, read at `0x42E724` and scaled by
 `ds:0x4FD260` = π/180, with a default of `-11.25` degrees supplied as the double
-`0xC026800000000000` pushed at `0x42E70F`. §30 has this right and the priorities
+`0xC026800000000000` pushed at `0x42E70F`. §50 has this right and the priorities
 note had it wrong twice over: `wdef+0xFE` is `holdtime`, and the field is not a
 clamp.
 
@@ -1493,7 +1493,7 @@ here than the original, not less.
 
 ### `accuracy`, `WORD wdef+0x104`
 
-Parsed at `0x42EBFE` and stored at `0x42EC19` — §30's table is right, and the
+Parsed at `0x42EBFE` and stored at `0x42EC19` — §50's table is right, and the
 neighbouring `tolerance` `+0x106` and `pitchtolerance` `+0x108` are right too.
 The data file's own comment defines it: *"amount of accuracy in 64K deg that
 weapon is good for, 0 = 100%"*.
@@ -1633,7 +1633,7 @@ vertical only.
 `shakemagnitude` is read as an integer and stored at `0x42EC5A`;
 `shakeduration` is read as a **float**, multiplied by the 30.0 at `0x4FD250` and
 truncated (`0x42EC60`–`0x42EC70`), so it is seconds on the way in and ticks in
-the struct. §30's offsets are right.
+the struct. §50's offsets are right.
 
 The reader is not obvious, because the weapon definition's own fields are only
 touched at one site and it is easy to miss. The way in is the string `NoShake`
@@ -2063,7 +2063,7 @@ Decoded here and deliberately **not** ported:
 
 - **The sight-range search `0x43B700`**, which is what both `VTOL_SeekAttack`
   state 1 and `VTOL_Standby` state 1 do before they fly anywhere. RWE has no
-  equivalent — see §32 — and its own idle weapon acquisition stands in.
+  equivalent — see §52 — and its own idle weapon acquisition stands in.
 - **The go-home-when-hurt branch.** Below 75 % health with an active repair pad
   within 3840, both the search circuit and the strafing pass abandon what they
   are doing and push a `VTOL_LANDING` on a pad chosen at random. RWE has no
@@ -2360,7 +2360,7 @@ Not ported:
   shipped data is both, so the two agree on real data, and the extra conditions
   also guard the metal grid next to it.
 - **The burning-feature smoke** above, and the `treeburn` sound with it.
-- **Downwind drift**, as §32 already records for the rest of the smoke: RWE has
+- **Downwind drift**, as §52 already records for the rest of the smoke: RWE has
   no map wind, so a vent's plume goes straight up.
 
 ---
@@ -2484,7 +2484,7 @@ original's behaviour anyway.
 Six flags that the bit tables above name but that had never been followed to
 their readers. The parse sites are all in the FBI parser's long run of boolean
 keys, where the helper `0x4C46C0` leaves its answer in `eax` and the
-mask-and-shift follows immediately, so the §30 pipeline trap does not apply and
+mask-and-shift follows immediately, so the §50 pipeline trap does not apply and
 each bit is unambiguous:
 
 | Key | String | Read at | Shifted at | Bit |
@@ -2599,8 +2599,8 @@ Two offsets fall out of that and both need a second site, because the FBI
 parser pipelines its stores. `def+0x22A` and `def+0x22B` come from the same run
 of keys as `waterline`: the strings pushed are `0x503DC8` "waterline",
 `0x503DB8` "transportsize" and `0x503DA4` "transportcapacity", and under the
-§30 rule their values land at `0x42C259`, `0x42C26E` and `0x42C284`. That makes
-`def+0x22C` `waterline`, which §31 already had from elsewhere and which is the
+§50 rule their values land at `0x42C259`, `0x42C26E` and `0x42C284`. That makes
+`def+0x22C` `waterline`, which §51 already had from elsewhere and which is the
 check that the pipeline is being read the right way round, `def+0x22A`
 **`transportsize`**, and `def+0x22B` **`transportcapacity`**.
 
@@ -2612,9 +2612,13 @@ used when the FBI names no movement class — fills `+0x4` from the key at
 immediately after its own call rather than pipelined. So the size test is
 **the candidate's footprint X against the transport's TransportSize**.
 
-Note what is *not* in that predicate: nothing asks whether the candidate is an
-aircraft, only whether it is currently airborne, and nothing asks whether it is
-mobile.
+That listing stops three checks early, and one conclusion drawn from it was
+wrong: the full decode (§30) finds a mobility test after the airborne one --
+the candidate's mover pointer at `unit+0x00` must be non-null, so buildings
+never ride -- then a submerged test (the candidate's top, `y` plus the model
+height at `def+0x16E`, must be above sea level) and a fully-built test. What
+remains true: nothing asks whether the candidate is an *aircraft*, only
+whether it is airborne right now, so a landed plane may be carried.
 
 ### `noshadow` and `digger` are both shadow-pass flags
 
@@ -2703,7 +2707,7 @@ query that `GameSimulation::updateVisibility` builds and `canDetectUnit` reads.
 
 ### The field offsets
 
-Read off the FBI parser under the pipeline rule §30 describes — a key's value is
+Read off the FBI parser under the pipeline rule §50 describes — a key's value is
 stored *after the next key's push* — and cross-checked against the
 definition-copy routine at `0x42B68F`–`0x42B6DF`, which moves the same run of
 words with the same widths.
@@ -3208,7 +3212,7 @@ what the current selection cannot use. There is no per-unit order panel.
 §9 gave bits 0–8, 10 and 11 of this dword and called bit 4 `canattack`. Here is
 the whole of it. The parser's boolean helper leaves its result in `eax`, so the
 key pushed immediately before the `call 0x4C46C0` owns the `shl` immediately
-after it, and the pipeline trap of §30 does not apply.
+after it, and the pipeline trap of §50 does not apply.
 
 | Bit | Key | `shl` at | Second site |
 |---|---|---|---|
@@ -3689,7 +3693,7 @@ coverage ring for each of its `interceptor` weapons, radius `coverage - 512`.
 So the flag is a *display* flag. Still not ported: RWE draws the detection
 rings but not the coverage ring.
 
-### A correction to §30: `holdtime` does have a reader
+### A correction to §50: `holdtime` does have a reader
 
 `WORD wdef+0xFE` is read at `0x499E81` and `0x49C8D6`, both on the path that
 retires the projectile the camera is following (`globals+0x142F7`), and stored
@@ -3969,7 +3973,7 @@ made call-to-store):
 
 `buildcostenergy` and `buildcostmetal` are confirmed at a second site,
 `0x42AD40`; `workertime` and `buildtime` by the chain that lands `sightdistance`
-on the `def+0x202` already in §30.
+on the `def+0x202` already in §50.
 
 **There is no `MetalUse` key.** `metaluse` does not appear in the binary at all,
 only the display string `UNITMETALUSE`. Metal is spent by building, by weapons
@@ -4112,7 +4116,7 @@ same `push <keystring>` / `call 0x4C46C0` pipeline the FBI parser uses — and
 `hitdensity` is not among them. 559 features name it; the engine of this build
 ignores every one.
 
-So §32's note that it is "very likely the pass-through chance for projectiles
+So §52's note that it is "very likely the pass-through chance for projectiles
 hitting features" is **refuted**, not merely unconfirmed.
 
 What the original actually does with a shot and a feature is at `0x49B2B3`,
@@ -5494,7 +5498,1109 @@ behaviour. The numbers to use:
 
 ---
 
-## 30. Field offsets
+## 30. The FBI keys, and which of them the exe actually reads
+
+The 3.1 exe's string table contains `transportcapacity`, `transportsize`,
+`cantbetransported` and `canload`. It does **not** contain
+`transportmaxunits` anywhere -- that was the 1.0 key, and in the 3.1 exe it is
+dead data. The 3.1 patch rewrote the FBIs to `transportcapacity`, leaving the
+old key behind in a few files.
+
+Parser sites, with the S:30 pipeline rule applied (a key's value is stored
+after the *next* key's push):
+
+```
+42c239  push esi              ; default 0
+42c23a  push 0x503dc8         ; "waterline"
+42c243  mov  [ebp+0x1ba],ax   ; <- turnrate (previous key)
+42c24a  call 0x4c46c0
+42c24f  push esi
+42c250  push 0x503db8         ; "transportsize"
+42c259  mov  [ebp+0x22c],al   ; <- waterline
+42c25f  call 0x4c46c0
+42c264  push esi
+42c265  push 0x503da4         ; "transportcapacity"
+42c26e  mov  [ebp+0x22a],al   ; <- transportsize
+42c274  call 0x4c46c0
+42c279  push esi
+42c27b  push 0x503d98         ; "energymake"
+42c284  mov  [ebp+0x22b],al   ; <- transportcapacity
+```
+
+| Key | Offset | Default | Notes |
+|---|---|---|---|
+| `transportsize` | `def+0x22A`, byte | 0 | read at `0x4067D4`, `0x41125F`, `0x489B0B` |
+| `transportcapacity` | `def+0x22B`, byte | 0 | read **only** at `0x489AEC` |
+| `canload` | bit 8 of `def+0x245` | 0 | `shl eax,0x8` at `0x42C9E2`, between `canmove` (bit 7) and `canreclamate` |
+| `cantbetransported` | bit 19 of `def+0x245` | 0 | `shl eax,0x13` at `0x42CBBF`, after `commander` (bit 18) |
+| `waterline` | `def+0x22C`, byte | 0 | agrees with the doc's independent reading -- the pipeline is aligned |
+
+`cantbetransported` is a bit of **`def+0x245`**, not `def+0x241` (the task
+brief's "bit 19 of def+0x241" conflated the two flag dwords). The reader at
+`0x489A9D` (`mov eax,[esi+0x245]; shr eax,0x13; test al,1`) settles it, and
+`0x42CBA6`/`0x42CBBF` in the parser agree. Only `CORSUMO` and `CORKROG` set it
+in the shipped data.
+
+Also load-bearing here, from the movement-record copy at `0x42CD5D`:
+
+| Field | Offset | Source |
+|---|---|---|
+| footprint X / Z | `def+0x14A` / `+0x14C`, words | movement class record `+0x4`/`+0x6`, **overriding** the FBI's own FootprintX/Z when a `movementclass` is named |
+| `maxwaterdepth` | `def+0x1BE`, word | record `+0x8` |
+| `minwaterdepth` | `def+0x1C0`, word, **signed** | record `+0xA` |
+| `maxslope` | `def+0x228`, byte | record `+0xC` |
+| `maxwaterslope` | `def+0x229`, byte | record `+0xE` |
+| model height | `def+0x16E`, 16.16 (integer part is the word at `+0x170`) | recursive max-Y over the 3DO's vertices and children, `0x4CB5F0`, stored at `0x42D7CA` |
+| footprint Z in world units | word at `def+0x180` = integer part of the 16.16 at `+0x17E` (footprintZ*16) | `0x42D10A` block |
+
+**Record defaults matter.** Both the per-FBI fallback record (`0x4402E0`) and
+the 32 static MOVEINFO class records (initialiser `0x440230`, records at
+`0x512358`, stride 0x20) start as: `maxwaterdepth = 10000` (0x2710),
+`minwaterdepth = -10000` (0xD8F0), all four slopes `255`. `0x440340` then
+overlays only the keys the TDF/FBI actually names. So `TANKHOVER3` (no
+MaxWaterDepth, no MinWaterDepth) leaves hover tanks with maxwaterdepth 10000
+and minwaterdepth -10000 -- which is what lets them be dropped onto any water
+-- while `BOATS4` (MinWaterDepth=6) gives ships a *positive* minwaterdepth,
+which is what locks them out of ground transports (02). A unit's FBI-level
+`MaxWaterDepth=0` (e.g. `ARMANAC`) is **ignored** when a movementclass is
+named; the class wins.
+
+### Unit instance fields used below
+
+| Field | Offset |
+|---|---|
+| mover object (null for buildings) | `unit+0x00` |
+| position x/y/z, 16.16 | `unit+0x6A`/`+0x6E`/`+0x72` |
+| packed current cell (x<<16 or z) | `unit+0x76` |
+| footprint X (low word) / Z, copied from `def+0x14A` at spawn (`0x485AAA`) | `unit+0x7E` dword |
+| **carrier** (the transport holding this unit), 0 if none | `unit+0x86` |
+| **passenger list head** (units I am carrying) | `unit+0x8A` |
+| next passenger in my carrier's list | `unit+0x8E` |
+| unit definition / player | `unit+0x92` / `+0x96` |
+| COB context | `unit+0x9A` |
+| unit id word | `unit+0xA8` |
+| build fraction, float, 1.0f when complete (`0x485B27` stores `0x3f800000`) | `unit+0x104` |
+| COB **busy** flag | bit 1 of the byte at `unit+0x10F` |
+| placement state, bits 0-1 of `unit+0x110`; 2 = airborne | written by the SetPosition family (`0x43DA26`, `0x48B69E`) |
+| **hidden-while-carried**, bit 17 of `unit+0x110` | set iff attached to piece -1 (`0x48AC99`) |
+| attach piece byte | `unit+0xF9` |
+
+---
+
+## 31. Load eligibility -- `0x489A90`, `CanLoadUnit(transport, candidate)`, in full
+
+Called from every order-builder arm that can produce a pickup (`0x43F70C`,
+`0x43F980`, `0x43FB3D`) and from the two cursor/default-action choosers
+(`0x43E7E0`, `0x43EAAF`). This is the *only* reader of `transportcapacity`
+anywhere in the binary.
+
+```
+489a90  ebx = candidate, esi = candidate def
+489a9d  mov eax,[esi+0x245]; shr eax,0x13; test al,1
+        -> cantbetransported set: reject
+489ab2  edi = transport def
+489ab8  mov eax,[edi+0x245]; test ah,0x1
+        -> canload clear: reject
+489acb  walk transport+0x8A (next +0x8E), count entries whose +0x86 == transport
+489aec  mov cl,BYTE [edi+0x22b]          ; transportcapacity
+489af2  cmp edx,ecx; jl ok               ; count >= capacity: reject
+489afe  cmp DWORD [ebx],0x0              ; candidate's mover
+        -> null (a building): reject
+489b0b  movzx dx,BYTE [edi+0x22a]        ; transportsize
+489b13  cmp WORD [esi+0x14a],dx          ; candidate footprint X
+        -> footprintX > transportsize: reject
+489b24  mov eax,[ebx+0x110]; and eax,3; cmp al,2
+        -> airborne: reject
+489b39  mov eax,[edi+0x241]; test ah,0x8 ; transport canfly?
+489b42  jne 489b56                       ; an aircraft skips the next check
+489b44  cmp WORD [esi+0x1c0],0x0; jl 489b56
+        -> ground/hover/sea transport and candidate minwaterdepth >= 0: reject
+489b56  ecx = candidate y (unit+0x6E) + candidate def+0x16E (model height)
+489b71  cmp ecx, seaLevel<<16 (byte [map+0x1427F])
+        -> top at or below the waterline: reject
+489b7d  fld [ebx+0x104]; fcomp 1.0f      ; build fraction
+        -> not exactly complete: reject
+489b98  accept
+```
+
+In words, a transport may load a unit iff:
+
+1. the candidate is not `cantbetransported`;
+2. the transport has `canload=1`;
+3. it currently carries **fewer than `transportcapacity` units** -- a flat
+   headcount. **Nothing anywhere weighs a unit's size against capacity: a big
+   unit consumes exactly one slot.** `transportsize` never touches the count;
+4. the candidate is mobile (has a mover -- buildings are out). TOTALA-EXE.md's
+   existing note on this routine reads `0x489AFE` as "candidate must still
+   exist" and concludes "nothing asks whether it is mobile"; `unit+0x00` is
+   the mover pointer (TOTALA-EXE-MISSIONS.md S:2), so this *is* the mobility
+   check, and that sentence should be corrected;
+5. the candidate's **footprint X** <= the transport's `transportsize` (both
+   sides in footprint cells; the candidate's footprint comes from its
+   movement class when it names one);
+6. the candidate is not airborne;
+7. **a transport that cannot fly** additionally requires the candidate's
+   `minwaterdepth < 0` -- i.e. sea and hover transports refuse anything that
+   *needs* water (ships, subs). Air transports skip this;
+8. the candidate's top -- position y plus model height -- is **above sea
+   level**. This is what excludes submerged submarines and a Triton crawling
+   the seabed, for every transport type;
+9. the candidate is fully built.
+
+The existing partial decode stops at (7); (8) and (9) are new.
+
+Note what is *not* here: no ownership or alliance test (the UI only offers the
+cursor on the player's own units), no `floater`, no `canhover`, no mass, no
+check that the candidate is an aircraft or not.
+
+### Why the folklore comes out the way it does
+
+With the shipped data (`transportsize=3` on all six transports):
+
+- **Ships**: every surface ship is `BOATS4`/`BOATS5`/`BOATS6` (footprint 4-6)
+  -- too big for any transport, air included; and their positive
+  `minwaterdepth` locks them out of sea/hover transports regardless.
+  "Air transports cannot pick up ships" is footprint, not a special case.
+- **Submarines**: `BOATD3` is footprint 3, so a sub passes the size test for
+  an *air* transport -- but a submerged sub fails (8). A sub whose top pokes
+  above the surface in shallow water is genuinely liftable by the exe's rules.
+- **Hovercraft**: `TANKHOVER3` (Anaconda, Snapper, Skimmer, Scarab...) is
+  footprint 3, minwaterdepth -10000, and floats with its top above water -- so
+  hovercraft on open water are loadable by air transports **and** by the
+  Bear/Turtle. `TANKHOVER4` (the hover transports themselves) is footprint 4:
+  too big for anything.
+- All ordinary vehicles/kbots (footprint 2-3) fit everything.
+
+---
+
+## 32. Capacity and size -- the six transports, as the 3.1 exe sees them
+
+Effective values under the GOG install (`rev31.gp3` overriding `ccdata.ccx`
+overriding `totala1.hpi`; `transportmaxunits` is unparsed):
+
+| Unit | Name | transportsize | transportcapacity | dead `transportmaxunits` | Effective |
+|---|---|---|---|---|---|
+| ARMATLAS | Atlas | 3 | **5** | (1.0 file had none) | **1** -- see below |
+| CORVALK | Valkyrie | 3 | 1 | 1 | 1 |
+| ARMTSHIP | Hulk | 3 | **20** | 20 | 20 |
+| CORTSHIP | Envoy | 3 | **5** | 24 | **5** |
+| ARMTHOVR | Bear | 3 | **5** | 6 | **5** |
+| CORTHOVR | Turtle | 3 | **5** | 6 | **5** |
+
+Three corrections to the folk numbers the task brief carried:
+
+- **Bear and Turtle load 5, not 6.** The 6 lives in the dead key.
+- **The Envoy loads 5, not 24** (the Hulk really is 20). Both `rev31` and
+  `ccdata` agree; whether nerf or typo, it is what the parsed key says.
+- The Atlas FBI says capacity **5**, but an air transport can never hold more
+  than one: `VTOL_Pickup`'s preamble aborts the mission outright while
+  anything is attached (`0x41121E`: `mov ecx,[esi+0x8a]; test ecx,ecx; jne`
+  -> return 8). Capacity is only consulted at order time by `0x489A90`;
+  the **1-at-a-time rule for aircraft is hard-coded in the mission**, not
+  data. (Under the 1.0 exe the Atlas presumably keyed off its absent
+  `transportmaxunits`; under 3.1 the FBI was patched to 5 and the hard-coded
+  rule does the limiting.)
+
+A transport with no `transportcapacity` key parses as capacity 0 and can never
+be ordered to load (0 < 0 fails) -- mods beware.
+
+---
+
+## 33. Which mission an order produces
+
+In the order-type dispatcher (jump table `0x4401EC`, same function as S:3 of
+TOTALA-EXE-MISSIONS.md; `esi` = orderer's def, `edi` = target unit):
+
+**LOAD** (`0x43F701`): requires a target unit and `0x489A90` to pass, then
+
+```
+43f719  canfly (def+0x241 bit 11) ?  "VTOL_PICKUP"  : "GROUND_PICKUP"
+```
+
+**UNLOAD** (`0x43F735`):
+
+```
+43f735  if canload && canfly && target unit is an isairbase (targetdef+0x241 bit 9)
+             -> "VTOL_LANDING"           ; landing on a carrier/pad, not an unload
+43f764  if !canload -> no mission
+43f76f  canfly ? "VTOL_UNLOAD" : "GROUND_UNLOAD"
+```
+
+The right-click default-action arm (`0x43F962`-`0x43F99F`) does the same
+CanLoad -> pickup selection, so right-clicking a friendly unit with a loaded
+cursor is the same order. **Hover transports are simply the `canfly=0` branch:
+Bear and Turtle run `Ground_Pickup`/`Ground_Unload`, exactly like the Hulk and
+Envoy.** There is no hover-specific mission.
+
+Ground mission table rows (base `0x4FC490`, 25-byte records):
+
+| # | Name | Handler | Display |
+|---|---|---|---|
+| 14 | `BeCarried` | `0x402FC0` | "Being transported" |
+| 34 | `Ground_Pickup` | `0x406780` | "Loading" |
+| 35 | `Ground_Unload` | `0x406900` | "Unloading" |
+
+VTOL table rows (from TOTALA-EXE-MISSIONS.md S:1): `VTOL_Pickup` -> `0x4111B0`
+("Loading"), `VTOL_Unload` -> `0x411560` ("Unloading").
+
+---
+
+## 34. `Ground_Pickup` -- `0x406780`, the crane flow (sea *and* hover)
+
+Handler args (unit, mission, flags); jump table `0x4068E8`, six states.
+Preamble: no target, or `flags & 8` (target lost) -> announce "Transport
+mission failed" (`0x5016D8`), return 8.
+
+```
+state 0 (0x4067b1)  transport def canload required (else return 7)
+                    movzx cx,BYTE [transportdef+0x22a]   ; transportsize
+                    cmp WORD [target+0x7e],cx            ; target footprintX
+                    -> too big: say "Unit is too large to transport", return 8
+                    announce-once "Loading unit", return 1
+state 1 (0x40685d)  0x438730(unit, mission, 8): while COB busy flag
+                    (unit+0x10F bit 1) is set, sleep on wake mask 8|4; clear -> advance
+state 2 (0x40680f)  start COB "TransportPickup"(targetUnitId)   ; 0x4B0A70, arg = WORD [target+0xa8]
+                    play sound 0xc; mission+0x36++ (attempt count)
+                    wake timer 15 ticks (0x439E80), return 1
+state 3 (0x40685d)  wait for the script's busy flag to clear again
+state 4 (0x40686f)  if target+0x86 != 0  -> attached: return 5 (done, delete mission)
+                    if mission+0x36 >= 3 -> return 9 (park: rand(30)+30 tick timer, restart)
+                    else install a ground move goal at the target's position,
+                    tolerance 0 (0x438930(mission; &target+0x6a, 0)),
+                    wake mask = 0xE8, return 1
+state 5 (0x4068b1)  cancel the goal (0x4388D0(0)), return 0 -> state 0
+```
+
+The shape of it: **try the crane first; if the script could not reach, walk at
+the target and try again on arrival (or on move failure -- mask 0xE8 wakes on
+either), up to three attempts per cycle.** The engine never moves the
+passenger itself -- the COB script does everything (see 10), and the actual
+attachment happens when the script executes `ATTACH_UNIT`. The engine merely
+polls `target+0x86`.
+
+The footprint check here and in `VTOL_Pickup` reads the *instance* copy
+`unit+0x7E`, which `0x485AAA` fills from `def+0x14A` at spawn -- the same
+number `0x489A90` checks.
+
+---
+
+## 35. `Ground_Unload` -- `0x406900`
+
+Jump table `0x406A88`, four states. Preamble: `flags & 8` -> announce
+"Unloading process is proceeding non-optimally", return 8.
+
+```
+state 0 (0x40693e)  canload required
+                    0x489690(&mission+0x12, [transport+0x8a]):
+                        target := current head of the passenger list
+                    no passenger -> return 5 (done)
+                    announce-once "Unloading"
+                    packed = (mission+0x22 & 0xffff0000) | (mission+0x2A >> 16)
+                             ; (intX<<16)|intZ of the ordered drop point
+                    start COB "TransportDrop"(passengerId, packed)
+                    mission+0x36++; wake timer 15; return 1
+state 1 (0x4069de)  wait for the busy flag to clear (0x438730 mask 8)
+state 2 (0x4069f0)  if passenger+0x86 != transport -> dropped: sound 0xd, return 5
+                    if mission+0x36 >= 3 -> return 9
+                    tol = (transportdef+0x241 bit 12, canhover)
+                          ? int(WORD [transportdef+0x180] * 1.5)   ; footprintZ*16*1.5
+                          : 0
+                    install move goal at mission+0x22 with that tolerance,
+                    wake mask 0xE8, return 1
+state 3 (0x406a76)  return 0 -> restart
+```
+
+Two things worth staring at:
+
+- **`canhover` is bit 12 of `def+0x241`** (parser `shl eax,0xc` at
+  `0x42C727`, keyed by the `canhover` push at `0x42C701`) -- a new S:30 entry.
+  A hover transport approaching its drop point is allowed to stop
+  **1.5 x footprintZ x 16 world units short** (96 for the 4-footprint
+  Bear/Turtle) instead of reaching the exact spot -- it is a hovercraft parked
+  on water reaching over the beach with its boom. Sea transports and anything
+  else use tolerance 0. The 1.5 lives as a double at `0x4FC958`.
+- One successful drop ends the mission (return 5). Unloading a full Hulk is
+  the order layer re-issuing: the `Standby` default mission (`0x405FE0`)
+  re-executes the unit's current order (`0x43B700`/`0x43B1F0`) each time the
+  mission list drains, and an empty transport's next `Ground_Unload` returns
+  5 immediately from state 0. (How the order is finally marked consumed was
+  not traced.)
+
+The engine does **not** test drop legality here -- `DROP_UNIT` does (08).
+
+---
+
+## 36. `VTOL_Pickup` (`0x4111B0`) and `VTOL_Unload` (`0x411560`)
+
+### VTOL_Pickup, jump table `0x41153C`, six states
+
+Preamble, every tick: no target or `flags & 0x10048` -> "Transport mission
+failed", return 8. Then the **submersion re-test** (`0x4111D5`-`0x4111F9`):
+`targetY + targetdef+0x16E <= seaLevel<<16` -> failed, return 8 -- a target
+that dives after the order is aborted mid-mission. Then `transport+0x8A != 0`
+(already carrying) -> return 8.
+
+```
+state 0 (0x411241)  canfly required; footprintX vs transportsize
+                    -> too big: "Unit is too heavy to transport" (the message
+                       says heavy; the test is the footprint), return 8
+                    announce "Loading"; weapons to mission control (0x4898B0(3));
+                    if sitting on a pad (unit+0x86) detach (0x48AAC0(u,0,-1,2));
+                    activate (0x48B090(1,1));
+                    if the mover is landed (mover+0x2E & 3 == 1): set mode 2
+                    (take off), goal at own position, altitude cruisealt/2,
+                    wake mask |= 0xE0
+                    return 1
+state 1 (0x41132f)  goal at the target unit (0x44E190), altitude = cruisealt,
+                    tolerance 0x30 (48 wu); wake mask 0x100E8; return 1
+state 2 (0x41138a)  announce "Preparing for transport"; mission+0x36 = -1;
+                    call COB "QueryTransport"(&mission+0x36) (0x4B0BC0)
+                    -> the script returns the grab piece; wake 0x100E8; return 1
+state 3 (0x4113cb)  h = targetdef+0x16E                  ; target model height
+                    start COB "BeginTransport"(h)        ; script drops its hook by h (10)
+                    (0x456200: broadcast the same call to remote players - display only)
+                    resolve the piece's offset (0x43DEF0(unit, mission+0x36));
+                    goal at the target, altitude = -(piece y-offset)
+                    -> descend until the hook piece sits at the target's top;
+                    wake 0x100EA; return 1
+state 4 (0x411479)  if flags & 0x42 -> run "EndTransport", return 8 (aborted)
+                    0x48AAC0(target, transport, mission+0x36)  ; ATTACH at the piece
+                    sound 0xc; goal at own position, altitude cruisealt,
+                    wake |= 0xE0; return 1                     ; climb away loaded
+state 5 (0x4114fe)  return 5 - done
+```
+
+### VTOL_Unload, jump table `0x411828`, four states
+
+Preamble: empty passenger list -> return 5.
+
+```
+state 0 (0x41159d)  canfly required; target := head of passenger list (0x489690);
+                    announce "Unloading";
+                    goal at mission+0x22 (the ordered point), altitude cruisealt,
+                    tolerance 0x140 (320 wu); wake 0xE8; return 1
+state 1 (0x411635)  drop-legality test (see below) at mission+0x22 for the
+                    passenger's def; fail -> "Unable to unload unit", return 9
+                    goal at mission+0x22, altitude = WORD [passengerdef+0x170]
+                    (the passenger's model height - descend until the slung
+                    unit touches the ground); wake 0xE8; return 1
+state 2 (0x4116f2)  flags & 0x40 (move failed) -> return 9
+                    re-run the same legality test; fail -> "Unable to unload
+                    unit", return 9
+                    run COB "EndTransport" (0x4B0940, fire and forget)
+                    0x48AAC0(passenger, 0, -1, mode 1)   ; detach, landed
+                    sound 0xd; goal at own position, altitude cruisealt;
+                    wake 0xE0; return 1                  ; climb away
+state 3 (0x4117fe)  sound 0xd; return 5
+```
+
+The legality test call, both states (`0x41163B`-`0x41168F`):
+
+```
+cellX = (mission.x - (footprintX << 19) + 0x80000) >> 20  ; centre the footprint,
+cellZ = likewise                                          ; round, to cell coords
+0x47DB70(passengerDef, 0, packed cells, 1)
+```
+
+---
+
+## 37. The drop-legality test `0x47DB70`, and `ATTACH_UNIT` / `DROP_UNIT`
+
+`0x47DB70(def, occupantTag, packedCellXZ, mode)` -- "may a unit of this
+definition stand here". Mobile units (`bmcode` != 0; buildings divert to the
+build-placement test `0x47D2E0`) walk every footprint cell (map cell records,
+stride 13 bytes) and require, per cell:
+
+```
+47dc78  word cell+0x08 occupancy: 0xFFFF free; 0xFFFE -> resolve the building
+        root cell (bytes +0xA/+0xB) and require it free; else a feature id ->
+        its record's byte +0xFE bit 6 (blocking) must be clear
+47dcfd  word cell+0x00 (occupying unit id stamp) must be 0 or == occupantTag
+47dd10  byte cell+0x06 (low corner)  >= seaLevel - maxwaterdepth   ; not too deep
+47dd24  byte cell+0x05 (high corner) <= seaLevel - minwaterdepth   ; deep enough
+47dd31  slope = high - low; if slope > maxslope (def+0x228):
+            legal only if the cell is underwater (low < seaLevel) AND
+            slope <= maxwaterslope (def+0x229); else reject
+```
+
+All four numbers come from the movement class (with the 10000/-10000/255
+defaults of 01), so:
+
+- a **tank** (`TANKSH2`, maxwaterdepth 12) can be dropped on land or in water
+  up to 12 deep, and nowhere deeper -- "tanks no";
+- a **hover tank** (`TANKHOVER3`, defaults) can be dropped on any water and on
+  land up to slope 12 -- "hovercraft yes";
+- a **ship or sub** could be dropped only where the water is at least its
+  minwaterdepth -- "ships/subs yes" -- though nothing in the shipped data can
+  actually carry one;
+- an **amphibian** (Triton/Crock, maxwaterdepth 100+) goes anywhere shallower
+  than that.
+
+`floater` and `canhover` are **not consulted**; the water rules are entirely
+maxwaterdepth/minwaterdepth/slopes. The air path calls this test directly
+(07). The ground path gets it for free: the COB `DROP_UNIT` handler
+(`0x4813B0`, vtable slot +0x3C off the dispatch at `0x4B1B58`) refuses to
+release a unit onto an illegal cell:
+
+```
+4813e0  unit must be alive, and attached to this unit
+4813fd  0x47DB70(passengerDef, passengerId, passenger+0x76 (its current packed
+        cell - i.e. wherever the boom has swung it), 1)
+481419  fail -> do nothing (the unit stays attached; the mission retries)
+48141b  ok   -> 0x48AAC0(passenger, 0, -1, mode 1)   ; detach, landed
+```
+
+`ATTACH_UNIT` (slot +0x38, body ending `0x4813A6`) resolves the unit, requires
+it alive and either unattached or already attached **to this unit** (that is
+what lets a script re-attach the same unit to a different piece), then calls
+`0x48AAC0(unit, self, piece, mode)`.
+
+### `0x48AAC0` -- attach/detach, the real state change
+
+Validates (unit alive and not dying; **a unit that is itself carrying
+something cannot be attached** -- `0x48AAE3`; carrier alive, not the unit, and
+not itself carried), then broadcasts a 7-byte type-0xA network message and
+applies it locally at `0x48AB70`:
+
+```
+48ac57  detach path (carrier == 0): clear +0x86/+0x8E, clear hidden bit 17,
+        re-insert into the spatial grid (0x47CB40)
+48ac70  attach path: unit+0x86 = carrier; push onto the head of the carrier's
+        +0x8A list (LIFO); unit+0xF9 = piece;
+48ac99  bit 17 of unit+0x110 (hidden) := (piece == 0xFF)
+            ; attach-unit to piece -1 is how sea/hover transports hide cargo
+            ; inside the hull; the Atlas attaches to a real piece, so its
+            ; cargo dangles visibly
+48ace1  mover mode bits (mover+0x2E & 3) := the mode argument
+            ; pickup-detach passes 2 (airborne), drop-detach passes 1 (landed)
+48acf3  if the unit's player is human/remote and the carrier is NOT an
+        isairbase (def+0x241 bit 9): 0x4384A0(unit)
+            ; flush the mission list and hand the unit "BeCarried"
+            ; (pads skip this - aircraft on a carrier deck keep their orders)
+```
+
+On the attach path the unit was first removed from the spatial grid
+(`0x47CB00` at `0x48AC5D`) if it was unattached.
+
+`BeCarried` (`0x402FC0`) is two states: take all weapons under mission control
+(`0x4898B0(3)` -- weapons hold), then sleep in 10-tick pokes until `unit+0x86`
+clears, whereupon it returns 5 and the unit falls back to its default mission.
+
+---
+
+## 38. The carried state, damage, and dying with the transport
+
+While carried, a unit is: off the spatial grid, hidden if attached to piece
+-1 (the render loops at `0x459423` etc. skip `unit+0x110` bit 17), weapons
+held, missions flushed to `BeCarried`. Because every weapon-target search and
+splash collection runs over the spatial grid (TOTALA-EXE.md S:6/S:12), a
+carried unit **cannot be hit by anything** while aboard -- the reasoned
+consequence of the grid removal; no per-check "is carried" test exists or is
+needed.
+
+When the transport dies, the kill handler (the death-message path around
+`0x4867B0`):
+
+```
+4867ba  if the dying unit is itself attached: detach (0x48AAC0(u,0,-1,1))
+4867d0  while the passenger list is non-empty:
+4867fe      0x489BB0(killer, passenger, 0x7530, deathKind, 0)
+                ; 30000 damage through the normal pipeline - at or over
+                ; 0x7530 armour is ignored (TOTALA-EXE.md S:6), so this
+                ; kills anything the game can carry
+486818      0x48AAC0(passenger, 0, -1, 1)     ; then detach it
+```
+
+So: **passengers are not damageable while carried, and all of them die when
+the transport does** -- killed by 30000 armour-piercing damage, credited to
+the transport's killer, then detached (their wrecks land at the death spot).
+
+---
+
+## 39. The hover transport flow -- what the Bear and Turtle actually are
+
+`ARMTHOVR.COB`/`CORTHOVR.COB` are structural copies of the sea transports'
+scripts (`ARMTSHIP.COB`): pieces `boom1..4`, `magnet`, `link`; functions
+`BoomCalc`, `BoomExtend`, `BoomReset`, `BoomToPad`, **`TransportPickup`**,
+**`TransportDrop`**. There is no `QueryTransport`/`BeginTransport`/
+`EndTransport` -- nothing of the Atlas in them. Decompiled (Bear, functions 11
+and 12; get-value ids 9 = UNIT_XZ, 10 = UNIT_Y, 11 = UNIT_HEIGHT,
+16 = GROUND_HEIGHT, set-value 6 = BUSY):
+
+```
+TransportPickup(u):
+    BoomCalc(UNIT_XZ(u), UNIT_Y(u) + UNIT_HEIGHT(u))   ; aim the crane; sets a
+    if !static4: return                                ; success flag - out of
+    BUSY = 1                                           ; reach fails silently
+    BoomExtend()
+    move link piece to y = -UNIT_HEIGHT(u); ATTACH_UNIT(u, link, 0)
+    BoomToPad(); ATTACH_UNIT(u, -1, 0)                 ; swing in, hide in hull
+    BoomReset(); BUSY = 0
+
+TransportDrop(u, packedXZ):
+    BoomCalc(packedXZ, GROUND_HEIGHT(packedXZ) + UNIT_HEIGHT(u))
+    if !static4: return
+    BUSY = 1
+    BoomToPad(); move link to y = -UNIT_HEIGHT(u); ATTACH_UNIT(u, link, 0)
+    BoomExtend()                                       ; swing out to the point
+    DROP_UNIT(u)                                       ; engine checks 0x47DB70
+    BoomReset(); BUSY = 0
+```
+
+The `BUSY` value is the engine's `unit+0x10F` bit 1 -- exactly what
+`0x438730` polls between mission states. The Atlas COB, for comparison:
+`QueryTransport` returns piece 1 (`link`); `BeginTransport(h)` is one
+instruction, `MOVE_NOW link y -> -h`; `EndTransport` folds the arms back.
+
+So the answer to "how do Bear/Turtle load" is: **crane-style, via
+`Ground_Pickup`/`Ground_Unload` and COB `TransportPickup`/`TransportDrop`,
+identically to the Hulk/Envoy** -- the only hover-specific behaviour in the
+whole path is the 1.5x-footprint unload arrival tolerance of 06 (`canhover`
+bit) and, of course, that a hovercraft's mover can park on water next to its
+cargo. If RWE's hover transports do nothing today, the missing piece is not a
+new mechanism: it is (a) hover movement getting the transport within boom
+reach, and (b) the same crane flow the sea transports already run.
+
+FBI notes: Bear/Turtle are `canload=1`, `transportsize=3`,
+`transportcapacity=5`, `canhover=1`, `MovementClass=TANKHOVER4`,
+`DefaultMissionType=Standby`.
+
+---
+
+## 40. Implementation spec for RWE
+
+Definitions used below: `fpX(u)` = footprint X in cells (movement-class
+override included); `height(u)` = model max-Y; `seaLevel` from the map;
+`minWD(u)`/`maxWD(u)` = the movement parameters with defaults
+**maxWD = 10000, minWD = -10000** when neither the FBI nor the class says
+otherwise; `carried(t)` = number of units attached to `t`.
+
+### Data
+
+| Transport | capacity | size | notes |
+|---|---|---|---|
+| Atlas | 5 (data) -> **1 effective** | 3 | air rule below |
+| Valkyrie | 1 | 3 | |
+| Hulk | 20 | 3 | |
+| Envoy | **5** | 3 | not 24 |
+| Bear | **5** | 3 | not 6 |
+| Turtle | **5** | 3 | not 6 |
+
+Parse `canload` (the button/eligibility gate -- do not key off
+`transportCapacity > 0`) and `cantbetransported`. Ignore `transportmaxunits`
+everywhere.
+
+### Load eligibility (order time and cursor), all transports
+
+```
+canLoad(t, u):
+    !u.def.cantBeTransported
+    && t.def.canLoad
+    && carried(t) < t.def.transportCapacity      // flat headcount
+    && u is mobile                                // no buildings
+    && fpX(u) <= t.def.transportSize
+    && u is not airborne
+    && (t.def.canFly || minWD(u) < 0)             // sea+hover refuse ships/subs
+    && u.position.y + height(u) > seaLevel        // nothing submerged
+    && u fully built
+```
+
+No team check in the sim; RWE should keep its UI-level own-units-only rule.
+
+### Air transports (canFly): capacity is 1, hard
+
+Refuse to begin a pickup while anything is attached, regardless of
+`transportCapacity`. Abort the pickup mission the moment the target's top
+sinks to or below sea level. Flow: climb to cruisealt/2 if landed -> fly to
+48 wu of the target at cruisealt -> `QueryTransport` (script returns the hook
+piece) -> `BeginTransport(height(u))` (script lowers the hook by the cargo's
+height) -> descend to altitude = height(u) (equivalently, -hookPieceYOffset)
+-> attach at the piece -> climb to cruisealt -> done. RWE's existing Atlas
+flow already approximates this; the numbers above (48 wu approach tolerance,
+cruisealt/2 takeoff, descend-to-cargo-height) are the original's.
+
+### Air unload legality (per footprint cell, footprint centred on the click)
+
+```
+cellFree                                          // no unit, no blocking feature
+&& cellLowCorner  >= seaLevel - maxWD(u)          // not too deep for the cargo
+&& cellHighCorner <= seaLevel - minWD(u)          // deep enough (ships/subs)
+&& (slope <= maxSlope(u)
+    || (cellLow < seaLevel && slope <= maxWaterSlope(u)))
+```
+
+Expressed in RWE's current fields: a unit with `maxWaterDepth` w may go where
+`seaLevel - terrainHeight <= w`; a unit with `minWaterDepth` m >= 0 only where
+the water is at least m deep; `floater`/`canHover` play **no part** -- a hover
+tank passes because its effective maxWD is the 10000 default, so RWE must not
+substitute `canHover` for that default. Test before descending and again
+before releasing; on failure say "Unable to unload unit" and back off
+(rand 30-60 ticks) rather than cancelling the order. Fly to within 320 wu of
+the point at cruise altitude first, then descend to altitude = height(u),
+detach in *landed* state, climb away. One unit per mission; re-issue while
+cargo remains.
+
+### Ground/hover transports: the crane flow
+
+One mission shape for Hulk, Envoy, Bear, Turtle:
+
+- **Pickup**: check size (announce "Unit is too large to transport" on
+  failure); wait for the COB busy flag; run `TransportPickup(cargoId)`; wait
+  busy clear; if not attached, path toward the cargo (tolerance 0 -- let the
+  mover get as close as it can; wake on arrival *or* failure) and retry, three
+  attempts then back off. The script's reach check (`BoomCalc`) is the real
+  range gate -- the engine has none.
+- **Unload**: pick the head of the passenger list; run
+  `TransportDrop(cargoId, packedDropXZ)` with packed = (intX<<16)|intZ; wait
+  busy; if still attached, move toward the drop point -- arrival tolerance
+  `1.5 x footprintZ x 16` wu if the transport is `canHover`, else 0 -- and
+  retry x3. `DROP_UNIT` itself must enforce the same per-cell legality as the
+  air unload (at the cargo's current cell, its own id counting as free) and
+  silently keep the unit aboard when it fails. One unit per mission; the
+  order re-issues until empty.
+
+### The carried state
+
+On attach: remove from collision/targeting, hide iff attached to piece -1
+(keep Atlas cargo visible), stop weapons, flush orders to a BeCarried idle
+(unless the carrier is a repair pad), set the passenger's mover to
+landed/airborne per the detach mode. On carrier death: deal each passenger
+30000 armour-ignoring damage credited to the carrier's killer, then detach.
+A unit carrying cargo can itself never be picked up.
+
+---
+
+## 41. Loose ends
+
+- The exact mechanism that consumes an UNLOAD *order* once the transport is
+  empty was not traced (the `Standby` handler `0x405FE0` re-issues the current
+  order via `0x43B1F0`; an empty transport's unload mission returns 5
+  immediately, so the loop terminates behaviourally either way).
+- Wake-mask bit meanings are used as opaque constants above (0xE8, 0x100E8,
+  0xE0; bit 0 = timer, bit 2 = set by the busy-wait, bit 6 = move failed,
+  bit 16 = the clear-weapon-targets event of the framework's step 5). A full
+  decode of the event word `unit+0xBA` remains open.
+- `0x43DEF0` (piece offset resolution) was read only closely enough to see
+  VTOL_Pickup negate the piece's y-offset into a goal altitude; the
+  BeginTransport arithmetic (hook at -height, goal altitude +height) makes the
+  intent unambiguous, but the routine itself was not fully decoded.
+- Whether the 1.0 exe read `transportmaxunits` was not checked (no 1.0 binary
+  at hand); the 3.1 exe certainly does not.
+
+---
+
+## 42. The CD player object
+
+The music engine is one C++ object -- the class name `SJE_CdPlayerClass` is in
+the binary at file offset 0x109bd0 -- hanging off the global game object:
+`[ds:0x511de8 + 0x10]`. Its fields, recovered from the accessors:
+
+| Offset | Meaning |
+|---|---|
+| `+0x00` | MCI device open flag |
+| `+0x14` | aux device id for `auxSetVolume` |
+| `+0x20` | target CD volume (0-0xFFFF) |
+| `+0x1fc` | music mode, 0-4 (setter `0x4CE7A0`) |
+| `+0x200` | number of tracks on the CD, from `status cdaudio number of tracks` |
+| `+0x204` | user-selected track (setter `0x4CE580` clamps to track count; the TRACKNUM display / CDNEXT / CDPREV drive this) |
+| `+0x208` | track currently playing, from `status cdaudio current track` |
+| `+0x20c` | "we started a play" flag |
+| `+0x210` | CD identity (volume serial of the disc, read at `0x4CDA00` via `0x4BB190`/`0x4BB260`) |
+| `+0x214` | **track type array**: 100 bytes, one per track, indexed by 1-based MCI track number (`type[track]`, byte). Getter `0x4CE7E0`, setter `0x4CE7C0`, bulk-load `0x4CE3E0` (copies `count` bytes from a buffer into `+0x215`, i.e. buffer[0] -> track 1) |
+| `+0x278` | **situation state**, 0-4 (setter `0x4CE690`, getter `0x4CE680`) |
+| `+0x27c` | music enabled flag (setter `0x4CEDC0`; when cleared, stops the CD) |
+| `+0x284` | volume fade step per timer tick (negative during fade-out) |
+| `+0x28c` | completion callback, set to `0x490FE0` (the pump, below) |
+
+MCI plumbing: all control goes through `mciSendStringA` with the literal
+strings at file 0x109b58-0x109cc8 (`status cdaudio number of tracks`,
+`status cdaudio mode` -- whose answer is strcmp'd against `playing` --
+`play cdaudio from %i` + ` to %i` + ` notify`, `stop cdaudio`, and so on). A
+play command always carries `notify`; the MM_MCINOTIFY handler (0x4CE130
+area) refreshes status via 0x4CDA00 and then calls the completion callback,
+which is how the playlist advances.
+
+---
+
+## 43. Registry footprint
+
+Everything is stored under **HKEY_CURRENT_USER\Software\Cavedog
+Entertainment\Total Annihilation**. The generic accessor at 0x4B6880 does
+`RegCreateKeyExA(HKEY_CURRENT_USER, "Software")`, then "Cavedog
+Entertainment", then the section name the caller passes ("Total
+Annihilation" at 0x5032E8), with KEY_READ (0x20019) or KEY_WRITE
+(0x20006) picked by a read/write flag. Note this 3.1-era GOG exe uses **HKCU**,
+not the HKLM path older documentation gives -- the constant pushed at
+0x4B68B6 is 0x80000001. (GOG's win32.dll reads the same HKCU path.)
+
+The music-related values, from the settings load at 0x4305A2-0x430760 and
+the save at 0x4313B3-0x431476:
+
+| Value | Type | Backs | Default when absent |
+|---|---|---|---|
+| `musicmode` | DWORD | `[game+0x37f14]` bit 0 -- CD music **on/off** (the "CD Music Off/On" toggle) | on |
+| `cdmode` | DWORD | `[game+0x37f16]` -- the music **mode**, 0-4 | **4** (situational) |
+| `musicvol` | DWORD | `[game+0x37f10]` -- music volume | 0x20 (32) |
+| `CDLISTS` | BINARY, 0xAA0 bytes | the per-CD track-type lists (next section) | zeroed |
+
+Despite the names, `musicmode` is the on/off flag and `cdmode` is the mode.
+The strings sit together in the file at 0x102b20 (`cdmode`) and 0x102b28
+(`musicmode`).
+
+There is also a **dead** routine at 0x42F910 that writes ten DWORD values
+named `track0`..`track9` (sprintf of `track%d` at 0x102968) from a 10-byte
+type array -- no call site anywhere in the binary. It is the leftover of an
+older per-track persistence scheme, superseded by CDLISTS. Do not implement
+it.
+
+---
+
+## 44. Track types and the CDLISTS table
+
+The type of each track is one byte, and the values are exactly the cycle
+positions of the TRACKTYPE gadget in MUSIC.GUI
+(`text=Building|Battle|Victory|Defeat|Unused;`, `stages=5`):
+
+| Value | Label |
+|---|---|
+| 0 | Building |
+| 1 | Battle |
+| 2 | Victory |
+| 3 | Defeat |
+| 4 | Unused |
+
+The GUI handler reads/writes the byte with no translation (0x45C452: gets
+`type[selected]` via 0x4CE7E0 and stuffs it straight into the cycle gadget;
+0x45C561 writes the cycle stage back via 0x4CE7C0), so cycle index = type
+value.
+
+**Constructor default** (0x4CE260): the whole 100-byte array is filled with
+`type[i] = (i % 4) + 1`:
+
+```
+4ce287:  mov  BYTE PTR [esi+0x214],bl      ; type[0] = 1
+4ce28f:  mov  eax,ecx                      ; i
+         cdq / xor / sub / and 3 / ...     ; i % 4 (signed)
+4ce29d:  inc  al                           ; + 1
+4ce29f:  mov  BYTE PTR [ecx+esi*1+0x214],al
+4ce2a6:  inc  ecx
+4ce2a7:  cmp  ecx,0x64                     ; 100 entries
+```
+
+i.e. a cycle of Battle, Victory, Defeat, Unused -- never Building. This is only
+the fallback for an unrecognized CD; on such a disc in situational mode the
+Building state finds no track and music simply stops.
+
+**CDLISTS** is an MRU list of 20 CDs, 0x88 bytes each (20 x 0x88 = 0xAA0),
+living at 0x51E828 and written verbatim as the REG_BINARY value. Entry
+layout (from the search loop at 0x4910C0 and the new-entry writer at
+0x491190):
+
+| Entry offset | Meaning |
+|---|---|
+| `+0x00`-`0x1f` | never written by the code I found (junk/padding) |
+| `+0x20` | CD identity dword (`[obj+0x210]`, the volume serial) |
+| `+0x24` | track types, `type[1..100]` as bytes (buffer[0] = track 1) |
+
+The pump 0x490FE0 runs at init and on every MCI notify. It looks the current
+CD id up in the list; on a hit it moves that entry to slot 0 (MRU) and loads
+its types into the object via 0x4CE3E0. On a miss it shifts the list down
+(dropping the oldest), writes a new slot-0 entry, **and if -- and only if --
+the disc looks like the TA game disc, applies the shipped default types**:
+
+- `status cdaudio number of tracks` must answer exactly **16** (0x491148),
+- `status cdaudio type track 1` must answer something other than `audio`
+  (0x4CE460 -- i.e. track 1 is the data track of a mixed-mode disc).
+
+The default buffer, built on the stack at 0x490FF3-0x491037, is **seven
+1-bytes followed by nine 0-bytes**, applied to tracks 1-16:
+
+- tracks 1-7 -> type 1 (**Battle**) -- track 1 being the unplayable data track,
+- tracks 8-16 -> type 0 (**Building**),
+- **no track defaults to Victory, Defeat, or Unused.**
+
+Saving: 0x490F80 copies `type[1..count]` back into slot 0's +0x24 area and
+writes the whole 0xAA0 blob to CDLISTS (write helper 0x42F960, REG_BINARY).
+It is called when leaving the music settings screen (0x49173D).
+
+### Mapping to the GOG files
+
+GOG replaces the CD with music/<n>.mp3 plus an MCI shim (win32.dll, a
+winmm proxy). Its `play cdaudio from %i` handler parses the track number and
+builds the filename as `"music/" + itoa(n) + ".mp3"` with **no offset**
+(number stored at its 0x10009030, filename assembled at 0x100013FE), so
+<n>.mp3 *is* MCI track n. The shim's own auto-advance wraps in 2..17,
+consistent with track 1 being the data track. So the shipped default translates
+directly:
+
+| CD track / mp3 | Title | Default type |
+|---|---|---|
+| 1 | (data track -- typed Battle but not playable audio) | Battle[1] |
+| 2 | Brutal Battle | **Battle** |
+| 3 | Fire And Ice | **Battle** |
+| 4 | Attack!!! | **Battle** |
+| 5 | Warpath | **Battle** |
+| 6 | The March Unto Death | **Battle** |
+| 7 | Ambush in the Passage | **Battle** |
+| 8 | Forest Green | **Building** |
+| 9 | Death And Decay (file duplicates 0.mp3) | **Building** |
+| 10 | Stealth (file duplicates 1.mp3) | **Building** |
+| 11 | Licking Wounds | **Building** |
+| 12 | Futile Attempt | **Building** |
+| 13 | On Throughout the Night | **Building** |
+| 14 | Desolation | **Building** |
+| 15 | Charred Dreams | **Building** |
+| 16 | Where Am I | **Building** |
+| 17 | Blood of the Machines | *(not on the 16-track disc the default recognizes; GOG extra)* |
+
+[1] The data track genuinely carries type 1 in the default table (buffer byte 0
+is 1 and 0x4CE3E0 maps buffer[0] -> track 1). The random pick below can
+therefore land on it; on real hardware MCI just fails to play it and the next
+notify re-rolls. An implementation should simply not include it.
+
+The battle/building split lands exactly on the aggressive-sounding titles
+(2-7) versus the calm ones (8-16), which is good evidence the alignment is
+right. 0.mp3/1.mp3 are duplicates of tracks 9/10 that the original logic
+never addresses; 17.mp3 is outside the recognized TOC. Treat 17 as a
+Building track if you want it in the rotation (it is a calm track).
+
+---
+
+## 45. The five music modes
+
+`[game+0x37f16]` / registry `cdmode`, copied into the object (+0x1fc) at
+scene start. The chooser (0x4CDB40) dispatches on it through the jump table
+at 0x4CE00C:
+
+| Mode | Handler | Behaviour when the current track ends (or the chooser is poked) |
+|---|---|---|
+| 0 | 0x4CDBEF | nothing new is ever started; when the current play finishes, `stop cdaudio` and clean up |
+| 1 | 0x4CDCC4 | sequential: next = current+1 (wrap to 1 past the end), and it issues one MCI play from that track **through the last track** |
+| 2 | 0x4CDD7B | random: `rand() % count + 1`, play that one track |
+| 3 | 0x4CDDFD | repeat: keep the user-selected track (+0x204) playing; if something else is playing, switch to it |
+| 4 | 0x4CDE96 | situational, by track type (next sections) |
+| - | 0x4CDB5D | before any of that: if the situation state is 4, `stop cdaudio` and reset; if the state is 2 or 3 (Victory/Defeat), jump straight to the type-matched handler regardless of mode |
+
+The TRACKMODE cycle in MUSIC.GUI is `Play All|Random|Repeat|Custom`
+(4 stages) and the code maps it as **mode = stage + 1** (0x45D156: the
+gadget is set to mode - 1). Mode 0 is not on the dial; it exists for
+completeness/off. The out-of-the-box mode is **4, Custom** -- the situational
+system is TA's default.
+
+The TRACKTYPE gadget is only enabled when music is on **and** mode is 4
+(0x45D239: `test [0x37f14],1` / `cmp [0x37f16],4`).
+
+---
+
+## 46. The situation state
+
+`[obj+0x278]`, values matching the track types: 0 Building, 1 Battle,
+2 Victory, 3 Defeat, 4 = silence/stopped. The setter 0x4CE690(newState):
+
+1. If unchanged, return.
+2. Save the currently-playing track into `0x51FF20[oldState]` -- a per-state
+   resume table that is **written and never read** (only xref is the write at
+   0x4CE6AF). Dead.
+3. Record the new state.
+4. If mode != 4 **and** the new state is not 2/3, stop there -- the state is
+   bookkeeping only. Otherwise:
+   - if the old state was 4 (silence): restore volume and call the chooser at
+     once -- no fade;
+   - else start a **fade-out**: step = -volume/18 every 2 ticks (timer set at
+     0x4CE770; the imul by 0xC71C71C7 then `sar 2` is signed /18). When
+     the fade reaches zero (0x4CE5E0): volume 0, and if the new state is 0
+     (Building) arm a one-shot **120-tick** timer before calling the chooser
+     (0x4CE64D), otherwise call the chooser immediately.
+
+Ticks here are the game clock: 0x4B6340 returns
+`timeGetTime() * R / 1000` where R is the tick rate at `[[0x51FBD0]+0xe8]` --
+30 at Normal game speed (inference from the game-speed system; the timer
+service 0x4B63F0 counts these down). So the fade is 18 x 2 = 36 ticks,
+about **1.2 s**, and Building music resumes **4 s** after the fade ends.
+
+**Who sets the state.** Every call site of 0x4CE690, exhaustively:
+
+| Site | State |
+|---|---|
+| 0x491477 | 0 at game-scene init (music starts in Building) |
+| 0x494F8C | 0 or 1 from the battle/peace evaluator (next section) |
+| 0x49848B | 0 on the display-mode-change/resume path |
+| 0x4910A9, 0x49EC2E | restores a saved state around CD re-init / disc change |
+| 0x41ED7E, 0x426462, 0x460602, 0x491B86 (helper 0x491B60, called from six places), 0x4996BE, 0x49986B | **4** -- menus, frontend screens, and both endgame paths |
+| 0x4175F6 | the **MusicMode console command** (table entry at .data file 0x10041C): sets the state to its numeric argument |
+
+The endgame handlers (0x499603 region: `mov edi,4` ... `push edi`) silence the
+music when the game ends -- **they do not set Victory (2) or Defeat (3)**.
+States 2 and 3 are reachable *only* through the debug console command. The
+chooser and the GUI fully support Victory/Defeat track types, but no gameplay
+event ever triggers them; the feature was built and never wired up. (This
+matches the long-standing community observation that the Victory/Defeat
+settings do nothing.)
+
+Also for the record: the string `battlestart` (0x104440) is the name of the
+start button in the multiplayer battle room GUI. It has nothing to do with
+music.
+
+---
+
+## 47. The battle/peace evaluator, 0x494E70
+
+Runs from the in-game per-frame loop (called at 0x4999A1). Gates:
+`[game+0x2a44]` bit 2 must be set (set at mission start
+0x4269B0/0x426BA4, cleared by the endgame music-off helper 0x491B60),
+not paused (`[game+0x38d75]` bits), and it early-outs unless at least
+**30 ticks (about 1 s)** have passed since its last full run (0x51F2F8 holds
+the last run time).
+
+State it keeps:
+
+- 0x51E710: a ring of **30 slots**, one per second, cleared at game start
+  (0x4919F7). Index at 0x51F2DC. Each run advances the ring and zeroes the
+  new slot.
+- 0x51F2FC: seconds since the last state change (reset to 0 on a change).
+- 0x5091D0: the last state the evaluator chose.
+
+**What feeds the ring** -- AddBattleActivity(n) at 0x494FF0 adds n to the
+current slot. Exactly two call sites:
+
+- 0x489DE6, in the weapon-damage application path: **+1** when a unit takes
+  a hit and either the attacker's owner or the victim's owner is the local
+  player (0x489DC6-0x489DE4, local player index at `[game+0x2a42]`).
+- 0x4869EB, in the unit-death path: **+5** when the dying unit's killer
+  (`[unit+0xf4]`, the owner of the last unit that damaged it) is the local
+  player.
+
+**The decision**, once per second, and only when at least 10 s have passed
+since the last change (0x494ED7: `cmp eax,0xa; jle skip`):
+
+- Let sum30 = sum of all 30 slots (last ~30 s), sum5 = sum of the 5 most
+  recent slots (last ~5 s).
+- Currently Building (state 0) -> **switch to Battle** if
+  `sum30 > 50 || sum5 > 30`, **and** the local player's unit count
+  (`word [game + 331*p + 0x1ca7]`, the counter the debug overlay labels
+  "Total Units", p = local player) is **> 30** (0x494F53). A commander
+  skirmish with a handful of units keeps the peace music no matter how hot it
+  gets.
+- Currently Battle (state 1) -> **revert to Building** if
+  `sum30 < 10 && sum5 == 0 && at least 60 s since entering Battle`
+  (0x494F69-0x494F82).
+- On a change: setState, reset the 10 s / 60 s counter.
+
+The evaluator always runs (in any mode); the setter just ignores its result
+unless mode is 4, so flipping to Custom mid-game picks up the current
+situation.
+
+---
+
+## 48. The chooser in situational mode, 0x4CDE96
+
+Poked at every MCI notify (track finished), after every fade, and at scene
+start. With the state in s:
+
+1. If MCI reports `playing` and `type[currentTrack] == s`, do nothing.
+2. Otherwise pick a track: `r = rand() & 0xF`; walk forward from the current
+   track, wrapping past the track count to 1, and take the **(r+1)-th track
+   whose type equals s** -- a uniform-ish random pick among the tracks of the
+   wanted type, with a scan budget of (r+1) x count steps.
+
+```
+4cde96:  call rand ; ebx = eax & 0xF
+4cdf48:  inc  ecx / wrap to 1                ; walk forward
+4cdf54:  mov  al,[ecx+edx*1+0x214]           ; type[track]
+4cdf5b:  cmp  eax,ebp / jne                  ; == state?
+4cdf5f:  dec  ebx / jle found
+4cdf64:  dec  esi / jg loop                  ; budget = (r+1)*count
+```
+
+3. From the chosen track, count how many **consecutive** tracks (no wrap)
+   share the type, and issue a single `play cdaudio from c to c+n notify`
+   (0x4CDF6B-0x4CDF8B, play routine 0x4CEB60). With the default table a
+   battle pick plays through the rest of tracks 2-7 in disc order before the
+   next notify re-rolls.
+4. If the budget runs out with no track of type s on the disc:
+   `stop cdaudio` -- silence until the next state change.
+5. Restore the target volume (0x4D00D0, an `auxSetVolume` on both channels).
+
+Victory (2) and Defeat (3) route into this same type-matched pick regardless
+of mode (checked before the mode dispatch, 0x4CDBC2), which is how they
+*would* have played had anything set them.
+
+The `CDPlay <n>` / `CDStop` console commands (0x4167F0/0x416810) are thin
+wrappers over play-one-track and stop.
+
+---
+
+## 49. What RWE should implement
+
+A playlist of named tracks, each typed Building/Battle/Victory/Defeat/Unused,
+with these defaults (GOG names):
+
+- **Battle**: Brutal Battle, Fire And Ice, Attack!!!, Warpath, The March Unto
+  Death, Ambush in the Passage.
+- **Building**: Forest Green, Death And Decay, Stealth, Licking Wounds,
+  Futile Attempt, On Throughout the Night, Desolation, Charred Dreams,
+  Where Am I -- and Blood of the Machines if we want the whole OST in rotation
+  (it was not on the disc the original's default table covers).
+- **Victory / Defeat**: empty by default, exactly like the original.
+
+Behaviour (all times at Normal speed; internally these are 30 Hz ticks and
+scale with game speed in the original):
+
+1. **Start of a battle scene**: state = Building; pick a random Building track
+   and play it. Menus and the frontend: no music (the original stops the CD
+   there).
+2. **Track selection**: uniform random among tracks of the current state's
+   type. When a track ends, pick again from the same type. (The original's
+   forward-scan from the current track and its consecutive-run playback are
+   CD artifacts; random-per-track is the faithful simplification -- note the
+   original *can* repeat the same track back-to-back, since the scan can lap.)
+3. **Battle detection**, evaluated once per second in-game, not while paused:
+   - Keep a 30-slot one-second ring of "battle points": **+1** whenever a unit
+     belonging to, or attacked by, the local player takes a weapon hit; **+5**
+     whenever the local player's damage kills a unit.
+   - Building -> Battle when (points in last 30 s > 50 **or** points in last
+     5 s > 30) **and** the local player owns more than 30 units.
+   - Battle -> Building when points in last 30 s < 10 **and** last 5 s = 0
+     **and** Battle has held for at least 60 s.
+   - After any switch, no new switch for 10 s.
+4. **On a switch**: fade the current track out over about 1.2 s (18 steps of
+   -vol/18 every 2 ticks). Then, entering Building, wait a further 4 s
+   (120 ticks) of silence before starting the Building track; entering Battle,
+   start the Battle track immediately after the fade.
+5. **Game end (win or lose)**: fade out and stop the music. Do **not** play
+   the Victory/Defeat types -- the original never does; those states exist only
+   behind its debug console command. (If we ever want them: they bypass the
+   mode check and play a random track of the matching type.)
+6. **Modes**, if we surface them: Off, Play All (album order, wrapping),
+   Random (any track), Repeat (one track), Custom (the above). Default Custom.
+   The situational evaluator runs regardless of mode but only Custom acts on
+   it. If a wanted type has no tracks in Custom: silence until the state
+   changes.
+7. **Settings that persist**: music on/off, mode, volume, and the per-track
+   type list (the original keys the list to the disc identity in CDLISTS;
+   RWE has one fixed "disc" and needs just one list).
+
+### Loose ends, labelled
+
+- The per-state resume table (0x51FF20) is dead code in the exe -- the
+  original never resumes a track where it left off; every entry into a state
+  re-rolls.
+- The first 0x20 bytes of a CDLISTS entry are never touched by any code I
+  found; unknown, probably unused.
+- The "> 30 units" gate reads the counter the debug overlay labels "Total
+  Units"; I found its increments (unit creation, 0x486187/0x486322) and
+  its use as the live count against the unit limit, but not the decrement
+  site -- some computed addressing I did not chase. Its role as "current unit
+  count of the local player" is solid from the limit checks and the player-
+  elimination checks that read it.
+- R = 30 ticks/second for all timings is inferred from the game-speed system
+  (Game Speed normal = 30 fps); the arithmetic in 0x4B6340 is exact
+  (`ms * R / 1000`), and R at other speed settings scales the music timings
+  with it.
+
+---
+
+## 50. Field offsets
 
 FBI key names are compared at `0x42C129`–`0x42C1C5`, which gives the unit
 definition layout:
@@ -5622,7 +6728,7 @@ Palette ranges that turned up:
 
 ---
 
-## 31. Where RWE deliberately differs
+## 51. Where RWE deliberately differs
 
 Recorded so these do not get "fixed" back later by someone comparing against the
 original:
@@ -5681,7 +6787,7 @@ original:
 
 ---
 
-## 32. Still unknown or unported
+## 52. Still unknown or unported
 
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
