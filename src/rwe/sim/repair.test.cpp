@@ -48,6 +48,10 @@ namespace rwe
         {
             UnitDefinition d{};
             d.builder = true;
+            // A real construction unit names CanReclamate. The original gates
+            // both reclaiming and repairing on it and never looks at
+            // workertime (0x489960, and the bit 9 mirror at 0x4899CC).
+            d.canReclamate = true;
             d.workerTimePerTick = workerTimePerTick;
             d.maxHitPoints = 100;
             d.buildTime = 0u;
@@ -186,5 +190,35 @@ namespace rwe
 
         REQUIRE(sim.getUnitState(builderId).orders.empty());
         REQUIRE(sim.getUnitState(builderId).hitPoints == 5u);
+    }
+
+    TEST_CASE("a factory cannot repair either, because one key gates both", "[repair]")
+    {
+        // The FBI parser mirrors CanReclamate into bit 9 of the same word
+        // (0x42CA3B-0x42CA4D) and CanRepair at 0x4899CC tests that mirror,
+        // so a unit that may not reclaim may not repair. A factory has a
+        // worker time only so that it can build.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+
+        sim.unitDefinitions["solar"] = makeSolarDef();
+        auto solarId = addUnitOfType(sim, "solar", player, SimVector(200_ss, 0_ss, 200_ss), script);
+        sim.getUnitState(solarId).hitPoints = 10u;
+
+        auto factoryDef = makeBuilderDef(30u);
+        factoryDef.canReclamate = false;
+        sim.unitDefinitions["factory"] = factoryDef;
+        auto factoryId = addUnitOfType(sim, "factory", player, SimVector(240_ss, 0_ss, 200_ss), script);
+        sim.getUnitState(factoryId).inBuildStance = true;
+        sim.getUnitState(factoryId).orders.push_back(RepairOrder(solarId));
+
+        for (int i = 0; i < 20; ++i)
+        {
+            sim.tick();
+        }
+
+        REQUIRE(sim.getUnitState(solarId).hitPoints == 10u);
+        REQUIRE(sim.getUnitState(factoryId).orders.empty());
     }
 }

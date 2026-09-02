@@ -2725,6 +2725,35 @@ namespace rwe
             return true;
         }
 
+        // Reclaiming is gated on `canreclamate` and on nothing else. The
+        // original's CanReclaimTarget (0x489960) tests that bit first and
+        // never looks at `workertime` at all, which is the rule RWE was
+        // missing: sixteen units in the base game name the key, and
+        // twenty-one more have a worker time without it -- every factory,
+        // both air repair pads, both carriers and CORSOLAR. All of those
+        // were happily reclaiming.
+        if (!unitInfo.definition->canReclamate)
+        {
+            return true;
+        }
+
+        if (auto targetUnit = std::get_if<UnitId>(&reclaimOrder.target))
+        {
+            if (auto target = sim->tryGetUnitState(*targetUnit))
+            {
+                // A unit that can capture cannot itself be reclaimed
+                // (0x48998F, mirrored in the capture handler at 0x4042E3).
+                // Only the two Commanders set `cancapture`, so what the rule
+                // amounts to is that a Commander is the one thing you may
+                // not recycle.
+                const auto& targetDefinition = sim->unitDefinitions.at(target->get().unitType);
+                if (targetDefinition.canCapture)
+                {
+                    return true;
+                }
+            }
+        }
+
         return reclaimTarget(unitInfo, reclaimOrder.target);
     }
 
@@ -2753,6 +2782,17 @@ namespace rwe
         if (target.hitPoints >= targetDefinition.maxHitPoints)
         {
             // Nothing to repair.
+            return true;
+        }
+
+        // Repairing is gated on the same FBI key. The parser mirrors
+        // `canreclamate` into bit 9 of the same word (0x42CA3B-0x42CA4D) and
+        // CanRepair at 0x4899CC tests that mirror, so one key really does
+        // govern both: a unit that may not reclaim may not repair either.
+        // Finishing somebody's half-built structure above is construction
+        // rather than repair and is deliberately left outside this gate.
+        if (!unitInfo.definition->canReclamate)
+        {
             return true;
         }
 

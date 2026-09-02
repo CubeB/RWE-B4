@@ -571,21 +571,69 @@ read together with §NN.
     **not** draw `smoke 1` — it fills a one-pixel rectangle with a palette
     index, and the sequence handle it stores is never read. §4 is corrected in
     the findings doc.
-22. **Small FBI flags nobody has looked at.** `canstop` (148 units), `shootme`
-    (135, bit 15 of `def+0x241`), `canreclamate` (16 — RWE currently lets
-    anything with `workerTime` reclaim), `upright` (31), `noshadow` (15),
-    `isairbase` (4), `canload` (4), `healtime` (2, `WORD def+0x200`),
-    `norestrict` (6), `digger`, `teleporter`, `immunetoparalyzer`,
-    `cantbetransported` (1). Each is an hour or two. `canstop` and `shootme` are
-    the two with enough coverage to matter.
+22. **Small FBI flags — decoded; the ones with an effect are done.** Counts
+    below are base OTA only (163 units), no Core Contingency or Battle
+    Tactics.
+
+    - **`canreclamate`** (bit 10, 16 units) — **done, and it was a real gap.**
+      `CanReclaimTarget` `0x489960` tests it and never reads `workertime`; the
+      parser mirrors it into bit 9, which `CanRepair` `0x4899CC` tests, so one
+      key gates reclaiming *and* repairing. 21 units had a worker time without
+      the bit — every factory, both air repair pads, both carriers, CORSOLAR —
+      and all of them could reclaim and repair in RWE. Gated now, along with
+      the target-side rule that a unit with `cancapture` (the Commanders)
+      cannot be reclaimed.
+    - **`upright`** (bit 20, 21 units) — decoded, not implemented. One read
+      site, `0x48A8BF`, in the per-tick ground placement `0x48A870`. Set means
+      "stay vertical, take height from one sample under the centre"; clear
+      means `0x48A490`, which samples four rotated footprint corners and sets
+      `WORD unit+0x68` pitch and `WORD unit+0x64` roll from the slope. Kbots
+      and submarines set it; ARMFIDO explicitly clears it. Worth doing when
+      somebody takes on terrain conforming, which RWE does not do at all yet.
+    - **`healtime`** (`WORD def+0x200`, 2 units) — decoded, not implemented.
+      Single reader `0x48AF3D`: every 8th tick, if not at full health, heal
+      `(healtime * 8) / 30` HP, integer-truncated. The Commanders' 27 works
+      out at 26.25 HP/s. Cheap to add.
+    - **`isairbase`** (bit 9, 4 units) — decoded, not implemented. Cached onto
+      the instance as `unit+0x110` bit 30 at `0x485AE7`. Three effects: a unit
+      held by an air base stays selectable and orderable where one held by
+      anything else is unlinked from the world (`0x48AD19` → `0x4384A0`, and
+      the predicate repeats at some twenty sites); `builder && isairbase`
+      makes the unit an aircraft-repair host and queues a `"SELFREPAIR"` order
+      at `0x411ECE`; and it selects the `VTOL_LANDING` cursor at `0x43EA9A`.
+    - **`noshadow`** (bit 25, 10 units) and **`digger`** (bit 30) — both are
+      shadow-pass flags. `noshadow` skips the shadow at `0x4592A6`/`0x4594BA`;
+      `digger` is **not** a terrain flag at all, it selects a second shadow
+      path at `0x4594D0` and a projection constant of 125 instead of 50. No
+      base-OTA unit sets `digger`.
+    - **`norestrict`** (bit 15, 6 units) — **UI only.** All four read sites
+      (`0x44C15F`, `0x44C4EA`, `0x44C73A`, `0x44CA59`) are the Unit
+      Restrictions screen, which skips defs with the bit so a host cannot
+      switch them off. The 6 are the two Commanders and the map props.
+    - **`cantbetransported`** (bit 19) — decoded. Read at `0x489AA3` in
+      `CanTransport`, which also wants the transport's `canload` (bit 8),
+      counts cargo through `transport+0x8A` against `BYTE def+0x22B`, and
+      requires `WORD candidatedef+0x14A <= BYTE transportdef+0x22A`. No
+      base-OTA unit sets it.
+
+    Also resolved along the way: the `mobilestandorders`/`firestandorders`/
+    `onoffable` ambiguity §B flags is `mobilestandorders` bit 0 (`0x42C8DB`),
+    `firestandorders` bit 1 (`0x42C8FF`), `onoffable` bit 2 (`0x42C8BE`). And
+    the unit definition stride is `0x249`, the instance stride `0x118`.
 23. **TA's Permanent and Circular LOS modes.** Already in `TOTALA-EXE.md` §21.
     Circular is fully understood (a `vismasks.gaf` stamp, radius
     `clamp(SightDistance/32, 5, 14)`); Permanent has not been looked at. Only
     reachable once there is a skirmish option to select them, so low urgency.
-24. **`selfdestructcountdown`.** Parsed into a 3-bit field at `def+0x245` bits
-    20–22 (`0x42CBC8`), so the original supports a per-unit countdown of 0–7
-    seconds. No shipped unit sets it, so RWE's hardcoded 5 s is fine unless mod
-    support is wanted. Recorded so nobody re-derives it.
+24. **`selfdestructcountdown` — checked; nothing to change.** The parser's
+    *absent* case at `0x42CC07` sets the field to **5**, so five seconds is
+    the original's own default and RWE's hardcoded five is already right.
+    An explicit `0` is not "use the default" — `0x402053` detonates at once
+    with no announcement. The reader `0x402010` counts one step a second
+    (`0x4020F6`), announces five down to zero from the table at `0x5086D8`,
+    then waits `rand(0..14)` ticks before dealing 30000 damage — the same
+    armour-bypass threshold as the D-gun. What RWE lacks is the
+    announcements, the random slop and the explicit-zero case, not the
+    timing. Recorded in the findings doc rather than implemented.
 
 ---
 

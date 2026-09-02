@@ -3959,3 +3959,80 @@ It now builds the list of selected definitions and applies
 - **`canstop`.** It is parsed and honoured for the button, but the original's
   own STOP mission builder at `0x43F82C` does not check it, so the flag gates
   the button and nothing else.
+
+## NN. Who may reclaim, and who may not be reclaimed
+
+`canreclamate` is flags word B **bit 10** (parser: push `"canreclamate"`
+`0x503A74` at `0x42C9EF`, `shl eax,0xa` at `0x42CA0F`, store `0x42CA1A`).
+
+### One key, two capabilities
+
+The parser does something easy to miss. Immediately after storing bit 10 it
+**mirrors it into bit 9** (`0x42CA3B`-`0x42CA4D`:
+`mov edx,eax; and ah,0xfd; shr edx,1; and edx,0x200; or edx,eax`). Bit 9 is
+the *repair* capability, and the two are read by different routines:
+
+| Routine | Address | Tests |
+|---|---|---|
+| `CanReclaimTarget(reclaimer, target)` | `0x489960` | bit 10 at `0x48996C` |
+| `CanRepair(...)` | `0x4899B0` | bit 9 at `0x4899CC` |
+
+So a single FBI key governs both, and **`workertime` is never consulted by
+either**. RWE had been gating both on `workerTime` alone.
+
+That is not a distinction without a difference. Sixteen units in the base game
+set `CanReclamate=1` -- the Arm and Core commanders, construction kbots,
+vehicles, aircraft and ships. **Twenty-one more have a non-zero `WorkerTime`
+with the bit clear**: every factory, both air repair pads, both carriers, and
+CORSOLAR. Every one of those could reclaim and repair in RWE and cannot in the
+original. No unit has the bit set with a zero worker time.
+
+The same bit is tested again in the order-issue dispatch at `0x40477A` and
+`0x404B6E`, which is where the refusal is announced: `0x50164C` "That unit
+cannot be reclaimed" and `0x501638` "Reclamation failed".
+
+### The target side
+
+`0x489960` makes two further checks on the target once the reclaimer has
+passed:
+
+- **`target+0x110 & 3 == 2`** rejects (`0x48997B`-`0x489981`). The low two bits
+  of `unit+0x110` are a physical-mode field that is *not* the movement or
+  firing mode at bits 18-21. Value 1 is "on the ground" -- the per-tick ground
+  placement routine `0x48A870` requires it at `0x48A8AE` -- and value 2 is
+  tested here, in `0x401C48` where it gates allocating an air-movement
+  structure for a `canfly` unit, and in the `setSFXoccupy` cascade at
+  `0x43DB7A`. Everything points at 2 meaning **airborne**, which would make
+  this "you cannot reclaim a unit that is in the air" -- but that is inference
+  from three call sites, not a decode of the writer, which was not found.
+  **Not implemented on that basis.**
+- **the target's `cancapture`** (flags B bit 12) rejects (`0x48998F`,
+  byte-verified as `F6 C4 10`). The capture handler mirrors it at
+  `0x4042E3`-`0x4042F5` with `0x501618` "That unit cannot be captured". Only
+  ARMCOM and CORCOM set the key, so what the rule amounts to in play is that
+  **a Commander can capture, and can itself be neither captured nor
+  reclaimed**.
+
+Both the reclaimer gate and the `cancapture` rule are implemented; finishing
+somebody's half-built structure is construction rather than repair and is
+deliberately left outside the gate.
+
+### `selfdestructcountdown`, and why RWE's five seconds was already right
+
+Flags B bits 20-22, parsed at `0x42CBC8`. The part worth recording is the
+**absent** case at `0x42CC07`: `and edx,0xffdfffff; or edx,0x500000` sets the
+field to **5**. So the original's own default is five seconds and RWE's
+hardcoded five is already correct -- there was nothing to change.
+
+An explicit `0` is *not* "use the default": `0x402053` tests the field and
+detonates immediately with no announcement. Otherwise the reader `0x402010`
+counts down one step a second (`push 0x1E` = 30 ticks into `0x439E80` at
+`0x4020F6`), announcing five, four, three, two, one, zero from a message table
+based at `0x5086D8`, and then waits a further `rand(0..14)` ticks
+(`0x402117`) before dealing **30000** damage (`0x40213C`) -- which is exactly
+the armour-bypass threshold at `0x489BD1`, tying it to the D-gun finding in
+the damage section. Only six message-table entries exist for a three-bit
+field, so countdowns of 6 or 7 would index past the array; nothing sets them.
+
+What RWE still lacks is the six spoken announcements, the random slop before
+the blast, and the explicit-zero case. The timing is right.

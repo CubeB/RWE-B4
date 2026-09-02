@@ -65,6 +65,10 @@ namespace rwe
         {
             UnitDefinition d{};
             d.builder = true;
+            // A real construction unit names CanReclamate. The original gates
+            // both reclaiming and repairing on it and never looks at
+            // workertime (0x489960, and the bit 9 mirror at 0x4899CC).
+            d.canReclamate = true;
             d.workerTimePerTick = workerTimePerTick;
             d.maxHitPoints = 100;
             d.buildTime = 0u;
@@ -288,6 +292,67 @@ namespace rwe
             sim.deleteFeature(rockId);
             REQUIRE(sim.reclaimFeature(rockId, player, 30u));
         }
+    }
+
+    TEST_CASE("a factory cannot reclaim, however much worker time it has", "[reclaim]")
+    {
+        // The rule RWE was missing. The original's CanReclaimTarget
+        // (0x489960) tests CanReclamate and never reads workertime at all,
+        // so a factory -- which has a worker time so that it can build --
+        // must refuse. Twenty-one units in the base game are in this
+        // position: every factory, both air repair pads, both carriers and
+        // CORSOLAR.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+
+        auto rockDef = sim.featureDefinitions.insert(makeFeatureDef("rock", 100u, 50u, true));
+        auto rockId = sim.addFeature(rockDef, 4, 4).value();
+        auto rockPosition = sim.getFeature(rockId).position;
+
+        auto factoryDef = makeBuilderDef(30u);
+        factoryDef.canReclamate = false;
+        sim.unitDefinitions["factory"] = factoryDef;
+        auto factoryId = addUnitOfType(sim, "factory", player, rockPosition + SimVector(40_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(factoryId).inBuildStance = true;
+        sim.getUnitState(factoryId).orders.push_back(ReclaimOrder(rockId));
+
+        for (int i = 0; i < 20; ++i)
+        {
+            sim.tick();
+        }
+
+        // The rock survives and the order is dropped rather than left to
+        // block the queue.
+        REQUIRE(sim.tryGetFeature(rockId).has_value());
+        REQUIRE(sim.getUnitState(factoryId).orders.empty());
+    }
+
+    TEST_CASE("a commander cannot be reclaimed", "[reclaim]")
+    {
+        // 0x48998F rejects a target whose definition can capture, and only
+        // the two Commanders set CanCapture. So the observable rule is that
+        // a Commander is the one unit you may not recycle.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+
+        auto commanderDef = makeBuilderDef(30u);
+        commanderDef.canCapture = true;
+        sim.unitDefinitions["commander"] = commanderDef;
+        auto commanderId = addUnitOfType(sim, "commander", player, SimVector(200_ss, 0_ss, 200_ss), script);
+
+        auto builderId = addBuilderUnit(sim, player, SimVector(240_ss, 0_ss, 200_ss), script);
+        sim.getUnitState(builderId).orders.push_back(ReclaimOrder(commanderId));
+
+        auto startingHitPoints = sim.getUnitState(commanderId).hitPoints;
+        for (int i = 0; i < 20; ++i)
+        {
+            sim.tick();
+        }
+
+        REQUIRE(sim.getUnitState(commanderId).hitPoints == startingHitPoints);
+        REQUIRE(sim.getUnitState(builderId).orders.empty());
     }
 
     TEST_CASE("a builder with a reclaim order reclaims the feature over successive ticks", "[reclaim]")
