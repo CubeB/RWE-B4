@@ -807,16 +807,14 @@ namespace rwe
                 auto boxHeight = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits);
 
                 // The queued box is not one colour two pixels wide: it is two
-                // nested one-pixel outlines, the outer noticeably darker than
-                // the inner. The exact palette entries live in the interface
-                // colour table at cfg+0xDCB, which nothing in .text writes, so
-                // these are sampled from a screenshot of the original rather
-                // than read out of the binary.
+                // nested one-pixel outlines, and the darker of the pair is the
+                // INNER line -- confirmed against the real game, where the
+                // bright edge sits on the outside of the frame.
                 auto darker = Color(color.r / 2, (color.g * 3) / 5, color.b / 2);
-                worldUiRenderService.drawBoxOutline(topLeftUi.x, topLeftUi.y, boxWidth, boxHeight, darker, 1.0f);
+                worldUiRenderService.drawBoxOutline(topLeftUi.x, topLeftUi.y, boxWidth, boxHeight, color, 1.0f);
                 if (boxWidth > 2.0f && boxHeight > 2.0f)
                 {
-                    worldUiRenderService.drawBoxOutline(topLeftUi.x + 1.0f, topLeftUi.y + 1.0f, boxWidth - 2.0f, boxHeight - 2.0f, color, 1.0f);
+                    worldUiRenderService.drawBoxOutline(topLeftUi.x + 1.0f, topLeftUi.y + 1.0f, boxWidth - 2.0f, boxHeight - 2.0f, darker, 1.0f);
                 }
             }
         }
