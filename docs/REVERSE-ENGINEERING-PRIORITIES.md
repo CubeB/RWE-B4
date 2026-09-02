@@ -1,6 +1,12 @@
 # What is most worth reverse-engineering next
 
-Research note, 2026-08-31. No source was changed.
+Started as a research note on 2026-08-31; kept up to date since as the work was
+done. **Entries 1 to 22 and 24 are now implemented or refuted** — each one below
+says which, and several say what the entry originally got wrong. The ranking it
+opens with is the ranking as first written, deliberately left alone so that the
+corrections stay legible next to the guesses that prompted them.
+
+Last revised 2026-09-02.
 
 Ranked by (player-visible impact) × (confidence it can be recovered) / (effort).
 Everything below is backed either by a count over the real game data, a
@@ -551,6 +557,21 @@ read together with §NN.
     ballistic solver was the cause of long-range misses meant decoding the
     solver too (`0x49A890`): it is the same quadratic RWE already had, in
     double, and the two agree to one part in 65536. Implemented.
+
+    **Narrowed afterwards, and the "every kind of weapon" above is wrong.** The
+    arithmetic is unconditional in the sense that matters — it runs whatever
+    the weapon's `accuracy` says, and the health term is not gated either, so a
+    weapon with a perfect `accuracy=0` really does start to stray once its
+    owner has been shot up. But it is gated on the *fire handler*. `0x49E010`
+    picks one per weapon out of the flags at `wdef+0x111`, this arithmetic sits
+    inside the turret one, and the handler everything else gets at `0x49D9C0`
+    never calls the random number generator at all: zero calls against the
+    turret handler's two, one for heading and one for pitch. So the forty-one
+    `turret=0` weapons never scatter — the torpedoes, the vertical launches,
+    the bombs, and every aircraft weapon in the game. Both gunship weapons are
+    among them, so applying it to all of them would have had a damaged Brawler
+    missing a target it was pointed straight at. `weaponAimScatters` in
+    `UnitBehaviorService_util.cpp` is the gate.
 20. **`waterline` — done, but not where it looked.** `BYTE def+0x22C`, read
     with the integer reader at `0x42C24A` and stored `0x42C259`. Of its two
     readers only `0x43DBA9` matters: `0x43D72E` is gated on the FBI's

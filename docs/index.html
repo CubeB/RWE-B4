@@ -71,8 +71,8 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <div class="meta">
     <span>branch <b>revival</b></span>
     <span>base <b>upstream master b2d8a31 · 25 Mar 2026</b></span>
-    <span>updated <b>1 Sep 2026</b></span>
-    <span>tests <b>230 cases · 2800 assertions</b></span>
+    <span>updated <b>2 Sep 2026</b></span>
+    <span>tests <b>318 cases · 3256 assertions</b></span>
   </div>
 </header>
 <nav aria-label="Sections">
@@ -102,6 +102,9 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Gunships work a standoff ring instead of flying bomber runs. <code>HoverAttack=1</code> is set on exactly two units in the whole game — the Brawler and the Rapier — and the flag had never been read, so a Brawler spiralled in to half a unit of its target. The original gives them their own mission: close to weapon range, then hold a ring of two thirds of that range (246 units for a Brawler, 300 for a Rapier) and step exactly 45° around it, alternating side on every arrival, so it settles into a two-point shuttle rather than an orbit</li>
   <li>…and it holds its nose on the target while it does so, sliding sideways between stations. Both gunship weapons say <code>turret=0</code>, so the gun is bolted to the hull and only bears within about a third of a right angle of straight ahead; pointing the nose along the flight path instead left it crossing the target at better than sixty degrees off, dealing 480 damage over a stretch where it should deal 2600. Facing the target is both what the swing looks like from the ground and the only way the gun can bear</li>
   <li>…and it engages of its own accord. The ring was only ever reached from an explicit attack order or from a patrol engaging en route, so a gunship left to fire at will shot from wherever it stood — and since an aircraft with no orders goes looking for somewhere to land, it broke off mid-fight and set down. A free aircraft that can see something in weapon range now gets an attack order, which is what the original’s idle handler does: it searches at sight range and turns what it finds into a mission</li>
+  <li>A gun cannot shoot at a submerged submarine, and a torpedo cannot shoot at a tank. Which of the two rules applies turns on the weapon’s <code>waterweapon</code> flag, and “out of the water” is measured to the top of the model rather than to its origin — which is what makes a surfaced submarine shootable by everything and a submerged one shootable only by torpedoes. A hovercraft rides with half its model proud of the surface, and that is what puts it out of a torpedo’s reach</li>
+  <li>The search that breaks a unit off its patrol, and the one an idle aircraft uses to pick a fight, now run the same eligibility test as everything else. They ran none at all, so an idle gunship carrying an anti-air weapon would break off and chase a tank</li>
+  <li>Order buttons are offered only where the unit’s own FBI says they apply — all fifteen of them, across the whole selection rather than only when one unit is picked. A mixed selection offers a button if <em>any</em> unit supports it, which is what the original does. Four of the flags behind them are read here for the first time, and one of them, <code>canreclamate</code>, gates reclaim <em>and</em> repair in the simulation as well: it turns out the parser mirrors the bit and the repair check reads the copy, so a factory or a carrier can no longer reclaim and repair merely because it has a <code>WorkerTime</code></li>
   <li>Ships and shipyards can be placed and built in water (a missing <code>MaxWaterDepth</code> now means any depth); torpedoes only hit units in the water and run under the surface</li>
   <li>Aircraft move off and steer while climbing out, and bombers drop a stick of three per pass</li>
   <li>An attack run holds speed and banks at the aircraft's own turn rate, so the turn back for another pass is an arc of radius <code>speed / turnRate</code> rather than a stop and a pivot; the run-out is sized from that radius, and a run is only committed to when the aircraft is close and lined up — one caught inside its own turn circle extends away first instead of orbiting and missing</li>
@@ -129,6 +132,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Damage is computed the way the original computes it. Blast falloff is <em>quadratic</em>, not linear — <code>(1 − d/r)² × (1 − E) + E</code> — so half way out a blast pays a quarter where we were paying a half, and <code>edgeeffectiveness</code> turns out to be the multiplier at the rim, which is how a Flak gun keeps nine tenths of its bite right out to the edge. Anything with an <code>areaofeffect</code> of sixteen or less skips the curve entirely for full damage, which covers forty-three of the hundred and thirty-six shipped weapons including the twenty-eight machine guns and light lasers at eight. <code>damagemodifier</code> is armour, applied while a unit’s script says it is armoured and ignored outright by any hit of 30000 or more</li>
   <li>TA has hidden veterancy, and it works both ways: a unit deals 6% more damage per tier and takes 4% less, five kills to a tier and five tiers at most. Only the defender’s half was known; implementing that alone would have made every veteran strictly weaker. The COB <code>GET VETERAN_LEVEL</code> query returns nothing at all in the original, so the tier we report is the engine’s own rather than the scheme invented here earlier</li>
   <li>Units rock with recoil when they fire, and now away from the shot rather than into it. The shot direction is turned into the unit’s own frame before it reaches the <code>RockUnit</code> script, and a half turn was being added on top of that — a correction that belongs to <code>XZAtan</code>’s own return value, not to script arguments generally. Every one of the six geometry checks in the new test comes out exactly inverted on the old code</li>
+  <li>…and only the seventeen units whose scripts define <code>RockUnit</code> rock at all, by a flat 800 rather than an angle scaled from the weapon’s damage. The engine asks every unit and the script is the whole filter, so a Peewee no longer rocks. Bombs never rock either</li>
   <li>Pathing: slope‑aware speed and routing, no corner squeezing between obstacles, unreachable destinations end at the closest reachable point</li>
   <li>Builders no longer get stuck on unreachable build sites; nanoframes killed while unattended die cleanly</li>
 </ul>
@@ -149,6 +153,8 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Fog drawn the way TA draws it: remembered ground in grey, unknown ground black, and the boundary its own hand-drawn <code>fog.gaf</code> frames, with the variant fixed in world space so the edge does not shimmer when the map scrolls</li>
   <li>Fog meets the map border flush. Cells off the edge used to read as clear, so the ragged frame there had no neighbouring tile to cover it and a strip of map showed through along the top and left &mdash; the two sides the camera can actually reach</li>
   <li>Minimap only reveals what the player can see or detect</li>
+  <li>Radar contacts belong on the minimap and nowhere else. RWE drew a coloured dot and a white box outline in the 3D world for every contact, which is an invention: the original’s world render is gated on a predicate that never reads the radar bits, so a radar-only contact is not drawn there and cannot be clicked. The minimap is the only reader, and it draws a contact exactly as it draws a unit you can see</li>
+  <li>Jammers, stealth and cloaking. A jammer clears the radar-contact bit for everything inside its radius — it hides units rather than making false ones — and it jams allies but not its owner; a stealth unit is never a contact at all; and cloak is a per-second energy drain, five times as much moving, that fails all-or-nothing rather than part-paying. An enemy inside <code>MinCloakDistance</code> starts a three-second fuse rather than refusing the cloak outright</li>
 </ul>
 
 <h3>Effects</h3>
@@ -213,11 +219,10 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Aiming scripts running twice (#42)</li>
   <li>Reclaim polish: sounds, progress in the info panel, auto‑reclaim for idle builders</li>
   <li>Self‑destruct blink effect; unit debris severity from actual overkill; SHATTER as real polygon fragments; explosions after a script's first sleep</li>
-  <li>Radar jammers, sonar, stealth and cloak</li>
   <li>Fighters still fly the generic attack run rather than the original’s strafing pass, which overshoots to three times weapon range and breaks ninety degrees at random. Decoded, not ported</li>
+  <li>Nukes and anti-nukes cannot be built: the stockpile accumulates, costs and fires correctly, but no control on the panel queues a round, and interception is decoded and unported</li>
+  <li>The reclaim rule <code>target+0x110 &amp; 3 == 2</code> is recorded as inference rather than implemented — three call sites all read as “airborne” but the writer was never found</li>
   <li><code>maneuverleashlength</code> is read but not enforced: an attack should break off once the unit strays that far from where it was standing when the order came</li>
-  <li>Weapon <code>turret</code>, set on 129 of the 170 shipped weapons and read nowhere, so hull-mounted guns fire sideways without turning the body</li>
-  <li>Standing orders from the FBI: thirteen units ship hold-fire and four hold-position, and we hard-code fire-at-will and maneuver for everything</li>
   <li>F2 in‑game menu (#154); unit info panel completeness; build menu paging and queue badges; focused‑control highlight (#5, #6)</li>
   <li>Music playback and the unwired unit sounds</li>
   <li>Hash map features (burning state) in the desync check</li>
