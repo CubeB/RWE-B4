@@ -2955,3 +2955,196 @@ original:
 
 ---
 
+
+## NN. Weapon target eligibility, `0x49ABB0` in full
+
+§9 gave this routine a sentence. It is the whole of "may this weapon shoot at
+that unit", it is asked of every candidate the auto-acquire considers, and two
+of its four rejections were missing from RWE. Here it is branch by branch.
+
+It is `stdcall(attacker, target, slot)` — `ret 0xc` at `0x49AC18`, with the
+three arguments loaded at `0x49ABB0`, `0x49ABC1` and `0x49ABE3`. The slot picks
+the weapon out of the attacker's three 28-byte weapon records, which begin at
+`unit+0x10`:
+
+```
+49abb0  mov  eax,[esp+0xc]              ; slot
+49abb7  and  eax,0xff
+49abc1  mov  esi,[esp+0x1c]             ; the attacker
+49abc6  shl  ecx,0x3 / sub ecx,eax      ; slot*7
+49abcb  mov  edi,[esi+ecx*4+0x10]       ; -> the weapon definition
+49abcf  mov  eax,[edi+0x111]            ; the weapon flags
+49abda  test dl,0x1                     ; bit 16, waterweapon
+49abdd  je   0x49acaf                   ; -> the dry branch
+```
+
+`0x49ADF0` immediately below it is the same address arithmetic on its own,
+returning `[weapon+0xdc]`, the range — which is how `0x40B7B0` gets the radius
+it hands to the candidate gather at `0x40B81F`.
+
+### The wet branch, `0x49ABE3` — a `waterweapon`
+
+```
+49abf3  mov  edx,[targetdef+0x241]
+49abf9  test edx,0x80000                ; bit 19, floater
+49abff  jne  0x49ac1b                   ; a floater is exempt
+49ac01  movzx bp,BYTE [world+0x1427f]   ; sea level
+49ac09  cmp  WORD [target+0x70],bp      ; the integer part of the target's y
+49ac0d  jle  0x49ac1b
+49ac0f  xor  eax,eax / ret              ; above water: reject
+```
+
+then, still on the wet branch:
+
+```
+49ac1b  test dh,0x10                    ; bit 12 of def+0x241, canhover
+49ac1e  je   0x49ac47
+49ac20  movsx ecx,WORD [targetdef+0x170]
+49ac2b  sar  ecx,1                      ; half the model height
+49ac2d  add  edx,ecx                    ;   + the target's y
+49ac37  cmp  edx,ecx / jle 0x49ac47     ; must still be under the surface
+49ac3b  xor  eax,eax / ret              ; reject
+```
+
+So a torpedo may reach anything at or below sea level, plus anything that
+`floater`s whatever its height; and a hovercraft, which sits *on* the surface
+with `y == sealevel`, is thrown out by the second test because half its model
+height is above the water. That is the well known immunity, and it is also what
+identifies `def+0x170`: only a height makes both tests read sensibly, and a
+zero there would leave hovercraft torpedoable.
+
+The two flag bits are settled in the parser, where the boolean helper's result
+is masked and shifted immediately after the call that read it, so the pipeline
+trap of §19 does not apply:
+
+| Key | String | Shifted at | Bit of `def+0x241` |
+|---|---|---|---|
+| `canfly` | `0x503B64` | `0x42C6F4` | 11 |
+| `canhover` | `0x503B58` | `0x42C727` | 12 |
+| `upright` | `0x503B50` | `0x42C746` | 20 |
+| `floater` | `0x503B48` | `0x42C779` | 19 |
+| `amphibious` | `0x503B3C` | `0x42C798` | 21 |
+
+`def+0x170` is the **integer part of the definition's height**: `0x489B5B`
+reads the whole 16.16 dword at `def+0x16E` against a sea level shifted left
+sixteen, and `0x486737` hands the word at `+0x170` to `0x482910` alongside
+`SightDistance`, which is the LOS update. It is written nowhere with an
+absolute displacement, so it is computed from the model at load rather than
+parsed from the FBI — *inference*, but the only reading that fits both uses.
+
+### The dry branch, `0x49ACAF` — everything else
+
+```
+49acbd  mov  cl,BYTE [world+0x1427f]    ; sea level
+49acc3  movsx edx,WORD [attacker+0x70]
+49acc7  movsx ebx,WORD [attackerdef+0x170]
+49acce  add  edx,ebx
+49acd0  cmp  edx,ecx / jg 0x49ace0
+49acd4  xor  eax,eax / ret              ; the SHOOTER is underwater: reject
+49acea  movsx edx,WORD [target+0x70]
+49acee  movsx ebp,WORD [targetdef+0x170]
+49acf5  add  edx,ebp
+49acf7  cmp  edx,ecx / jg 0x49ad07
+49acfb  xor  eax,eax / ret              ; the TARGET is underwater: reject
+```
+
+**This is the submarine rule.** A weapon that is not a `waterweapon` needs both
+ends of the shot out of the water, and "out of the water" is `y + height >
+sealevel` — the top of the model, not its origin. A submerged submarine fails
+it, so a tank, a Peewee or a laser tower is never offered one as a target. Note
+the asymmetry with the wet branch, which compares the raw `y` and not `y + h`:
+the original is deliberately generous about what counts as *in* the water and
+strict about what counts as *out* of it, so a thing sitting at exactly sea level
+is reachable by both kinds of weapon.
+
+Only then does the air rule run, and only on this branch:
+
+```
+49ad07  test eax,0x20000                ; bit 17, toairweapon
+49ad0c  je   0x49ad28
+49ad0e  mov  ecx,[target+0x110] / and ecx,0x3
+49ad17  cmp  cl,0x2 / je 0x49ad28       ; airborne
+49ad1c  xor  eax,eax / ret              ; reject
+```
+
+and then the ballistic arc, and then the range:
+
+```
+49ad28  shr  eax,1 / test al,0x1        ; bit 1, ballistic
+49ad59  push [weapon+0xc8] / push [weapon+0x68]
+49ad67  call 0x49a890                   ; solve the arc
+49ad6c  cmp  ax,0x8000 / jne ok         ; 0x8000 means "no solution"
+49ad7e  ...                             ; dx^2 + dz^2 <= range^2
+```
+
+The range test (`0x49AC47` on the wet branch, `0x49AD7E` on the dry one) is the
+same both times: the two position deltas are 16.16, each square is taken as a
+64-bit product and shifted right 32 (`__allmul` at `0x4E4400`, `__allshr` at
+`0x4E43D0` with `cl = 0x20`), which is the square of the distance in whole
+world units, and it is compared against `range * range`. **It is flat** — `dx`
+and `dz` only, `dy` never enters. A target directly overhead is at distance
+zero as far as this test is concerned.
+
+### The air rule only points one way
+
+This is worth being blunt about, because assuming the symmetry is easy and
+wrong. `toairweapon` is tested in exactly four places in the whole binary —
+`0x49AD07` here, and `0x43E5CF`, `0x43F184` and `0x43F1E1` in the attack-order
+builder — and every one of them asks the same question: *this weapon is
+anti-air, is the target in the air?* **Nothing anywhere refuses an ordinary
+weapon an airborne target.** There is no reciprocal flag, no unit category test
+in `0x40B7B0`, and no filter in the candidate gather `0x40AD80`, which walks the
+player's enemy list applying only a flat radius, the alive bit and bit 14.
+
+What keeps ground units off aircraft is the **preference**, and only the
+preference: sixty of the shipped units name `wpri_badTargetCategory=VTOL` and
+forty-four name `NoChaseCategory=VTOL`. §9 has the mechanism right — the
+bad-target bucket at `0x40BA13` is returned only when the good bucket is empty
+(`0x40BA4D`), so a unit with nothing else in range *does* shoot at the
+aeroplane. `armllt`, the Light Laser Tower, names `wpri_badTargetCategory=VTOL`
+and no `NoChaseCategory` at all, which is exactly why an LLT plinks away at
+passing aircraft in the original. Turning this into a veto would be a larger
+divergence than leaving it alone, so RWE leaves it alone.
+
+`NoChaseCategory` is a veto, but only over *going to look*: `0x40B7B0` tests it
+at `0x40B927`, under `cmp [esp+0x54],ebp` — only when the third argument is 0,
+the sight-range search. That is why a Peewee ignores an aircraft it would have
+to walk towards and still shoots one that comes to it.
+
+Only four shipped weapons set `toairweapon`: `armyork`, `armflak`, `corsent`
+and `corflak`. The Samson's `armtruck_missile` does not, so §9's "a Samson with
+no aircraft about still shoots at tanks" is right, and is a statement about the
+preference rather than about the flag.
+
+### What was wrong in RWE
+
+`GameSimulation::weaponCanHitUnit` implemented one of the four rejections:
+
+- a **non-`waterweapon` had no rule at all**, so a tank, a tower or a Peewee
+  would happily acquire a submerged submarine — the first reported bug, and
+  `0x49ACEA` is the line that forbids it;
+- a `waterweapon` tested only `target.y <= sealevel`, missing both the
+  `floater` exemption and the `canhover` half-height rejection, so a torpedo
+  would refuse a ship and accept a hovercraft;
+- nothing checked that the **shooter** was out of the water (`0x49ACC3`);
+- `toAirWeapon` was tested *instead of* the water rules rather than after them,
+  because it returned early. On the original's control flow the air test is
+  reached only on the dry branch and only once both height tests have passed.
+
+Separately, `UnitBehaviorService::findEnemyInWeaponRange` — the search behind
+the idle-aircraft engagement and the patrol break-off — ran **no eligibility
+test whatever**. The original has one acquisition routine, `0x40B7B0`, whose
+third argument changes only the radius and whether `NoChaseCategory` applies;
+`0x49ABB0` is called on both paths, at `0x40B914`. So in RWE an idle gunship
+carrying an anti-air weapon would break off at a ground unit and a patrolling
+unit would engage a submarine, neither of which the original can do.
+
+### Deliberately not ported
+
+- **The ballistic arc test** (`0x49A890`). RWE has no arc solver and aims its
+  ballistic projectiles from their own code; a reachability gate here would
+  need that solver first.
+- **The flat range test.** RWE measures the full 3D distance. The original's
+  `dx² + dz²` makes a target directly overhead free, which — given that nothing
+  else stops a ground weapon engaging an aircraft — would make ground fire at
+  aircraft *more* common than RWE's, not less.

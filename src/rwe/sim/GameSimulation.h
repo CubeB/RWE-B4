@@ -581,9 +581,12 @@ namespace rwe
         /**
          * Whether the weapon is allowed to engage that unit at all, before
          * range comes into it: a torpedo cannot reach something standing on
-         * dry land, and a flak gun will not point itself at the ground.
+         * dry land, an ordinary gun cannot reach a submerged submarine, and a
+         * flak gun will not point itself at the ground. The attacker matters
+         * because a weapon that is not a water weapon also needs the shooter
+         * itself out of the water.
          */
-        bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& target) const;
+        bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const;
 
         /**
          * Everything a unit does about having just been shot: it points any

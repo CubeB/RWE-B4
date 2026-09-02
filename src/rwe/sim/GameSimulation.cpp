@@ -1144,18 +1144,59 @@ namespace rwe
         return contacts.find(unitId) != contacts.end();
     }
 
-    bool GameSimulation::weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& target) const
+    bool GameSimulation::weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const
     {
-        // The original asks this of every candidate before it looks at range
-        // at all, and answers it in the same routine that measures the range.
-        if (weaponDefinition.toAirWeapon)
-        {
-            return isFlying(target.physics);
-        }
+        // 0x49ABB0, asked of every candidate before range comes into it. The
+        // two branches are exclusive: a water weapon is judged entirely on
+        // where its target is floating, and everything else has to get both
+        // ends of the shot out of the water before the air rule is so much as
+        // looked at.
+        auto seaLevel = terrain.getSeaLevel();
+        const auto& targetDefinition = unitDefinitions.at(target.unitType);
 
         if (weaponDefinition.waterWeapon)
         {
-            return target.position.y <= terrain.getSeaLevel();
+            // 0x49ABF9: a floater is exempt, so a torpedo still reaches a ship
+            // riding on the surface.
+            if (!targetDefinition.floater && target.position.y > seaLevel)
+            {
+                return false;
+            }
+
+            // 0x49AC20: a hovercraft sits on the water rather than in it, and
+            // half its model height standing proud of the surface is what puts
+            // it out of a torpedo's reach.
+            if (targetDefinition.canHover && target.position.y + (modelHeightOf(targetDefinition) / 2_ss) > seaLevel)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        // 0x49ACC3 and 0x49ACEA. "Out of the water" is measured to the top of
+        // the model rather than to its origin, which is what makes a submerged
+        // submarine unshootable by anything that is not a torpedo, and a
+        // surfaced one shootable by everything. The shooter has to be up there
+        // too: a submarine's deck gun does not fire from underneath.
+        const auto& attackerDefinition = unitDefinitions.at(attacker.unitType);
+        if (attacker.position.y + modelHeightOf(attackerDefinition) <= seaLevel)
+        {
+            return false;
+        }
+
+        if (target.position.y + modelHeightOf(targetDefinition) <= seaLevel)
+        {
+            return false;
+        }
+
+        // 0x49AD07, and it only points this way round. The original has no
+        // rule anywhere that refuses an ordinary weapon an airborne target;
+        // what holds a Peewee back is wpri_badTargetCategory, which is a
+        // preference and lives in the choice rather than here.
+        if (weaponDefinition.toAirWeapon && !isFlying(target.physics))
+        {
+            return false;
         }
 
         return true;
@@ -1210,7 +1251,7 @@ namespace rwe
                 continue;
             }
 
-            if (!weaponCanHitUnit(weaponDefinition, attacker))
+            if (!weaponCanHitUnit(weaponDefinition, victim, attacker))
             {
                 continue;
             }

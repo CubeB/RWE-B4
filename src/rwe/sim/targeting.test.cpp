@@ -514,4 +514,239 @@ namespace rwe
             REQUIRE((std::get<PatrolOrder>(sim.getUnitState(tankId).orders.front()).destination == there));
         }
     }
+
+    TEST_CASE("a gun cannot reach a unit that is under the water", "[targeting]")
+    {
+        // 0x49ACEA. A weapon that is not a water weapon needs its target's
+        // model standing above sea level, measured to the top of the model
+        // rather than to its origin, so a submerged submarine is not a legal
+        // target for a tank or a laser tower at all. This is a hard rejection
+        // in the same routine that measures the range, not a preference.
+        auto script = makeTargetingScript();
+        GameSimulation sim(makeTargetingTerrain(), 0u, 0, 0);
+        auto us = addTargetingPlayer(sim, "us", GamePlayerType::Human);
+        auto them = addTargetingPlayer(sim, "them", GamePlayerType::Human);
+        registerTargetingModel(sim);
+        defineShooter(sim, "tank", std::string());
+        defineTarget(sim, "enemySub", "CORE UNDERWATER LEVEL1 TORP WEAPON NOTAIR", true);
+        defineTarget(sim, "enemyTank", "CORE TANK LEVEL1 NOTAIR NOTSUB", true);
+        defineWeapon(sim, "gun", false);
+
+        auto shooterId = spawnTargetingUnit(sim, "tank", us, SimVector(0_ss, 0_ss, 0_ss), script);
+        armWith(sim, shooterId, "gun");
+
+        // The model is ten units tall and the sea is at zero, so twenty units
+        // down puts the whole of it under the surface.
+        auto submerged = SimVector(64_ss, -20_ss, 0_ss);
+
+        SECTION("the submarine is passed over for the tank twice as far away")
+        {
+            auto subId = spawnTargetingUnit(sim, "enemySub", them, submerged, script);
+            auto tankId = spawnTargetingUnit(sim, "enemyTank", them, SimVector(-192_ss, 0_ss, 0_ss), script);
+            REQUIRE(subId.value < tankId.value);
+
+            tickTwice(sim);
+
+            auto target = weaponTarget(sim, shooterId);
+            REQUIRE(target.has_value());
+            REQUIRE(target->value == tankId.value);
+        }
+
+        SECTION("with nothing else about the gun holds its fire")
+        {
+            auto subId = spawnTargetingUnit(sim, "enemySub", them, submerged, script);
+
+            tickTwice(sim);
+
+            REQUIRE_FALSE(weaponTarget(sim, shooterId).has_value());
+            REQUIRE(sim.getUnitState(subId).hitPoints == sim.unitDefinitions.at("enemySub").maxHitPoints);
+        }
+
+        SECTION("the same submarine surfaced is fair game")
+        {
+            auto subId = spawnTargetingUnit(sim, "enemySub", them, SimVector(64_ss, 0_ss, 0_ss), script);
+
+            tickTwice(sim);
+
+            auto target = weaponTarget(sim, shooterId);
+            REQUIRE(target.has_value());
+            REQUIRE(target->value == subId.value);
+        }
+    }
+
+    TEST_CASE("a gun fired from under the water does not fire", "[targeting]")
+    {
+        // 0x49ACC3, the same test applied to the shooter: both ends of the
+        // shot have to be out of the water. A submarine's own gun therefore
+        // stays quiet until it surfaces.
+        auto script = makeTargetingScript();
+        GameSimulation sim(makeTargetingTerrain(), 0u, 0, 0);
+        auto us = addTargetingPlayer(sim, "us", GamePlayerType::Human);
+        auto them = addTargetingPlayer(sim, "them", GamePlayerType::Human);
+        registerTargetingModel(sim);
+        defineShooter(sim, "sub", std::string());
+        defineTarget(sim, "enemyTank", "CORE TANK LEVEL1 NOTAIR NOTSUB", true);
+        defineWeapon(sim, "gun", false);
+
+        auto tankId = spawnTargetingUnit(sim, "enemyTank", them, SimVector(64_ss, 0_ss, 0_ss), script);
+
+        SECTION("submerged it ignores the tank on the beach")
+        {
+            auto shooterId = spawnTargetingUnit(sim, "sub", us, SimVector(0_ss, -20_ss, 0_ss), script);
+            armWith(sim, shooterId, "gun");
+
+            tickTwice(sim);
+
+            REQUIRE_FALSE(weaponTarget(sim, shooterId).has_value());
+            REQUIRE(sim.getUnitState(tankId).hitPoints == sim.unitDefinitions.at("enemyTank").maxHitPoints);
+        }
+
+        SECTION("surfaced it opens fire")
+        {
+            auto shooterId = spawnTargetingUnit(sim, "sub", us, SimVector(0_ss, 0_ss, 0_ss), script);
+            armWith(sim, shooterId, "gun");
+
+            tickTwice(sim);
+
+            auto target = weaponTarget(sim, shooterId);
+            REQUIRE(target.has_value());
+            REQUIRE(target->value == tankId.value);
+        }
+    }
+
+    TEST_CASE("a torpedo only reaches what is actually in the water", "[targeting]")
+    {
+        // 0x49ABE3. The wet branch judges the target's origin against sea
+        // level rather than the top of its model, exempts anything that
+        // floats, and throws out a hovercraft because half its hull rides
+        // proud of the surface -- which is the whole of why hovercraft are
+        // immune to torpedoes in the original.
+        auto script = makeTargetingScript();
+        GameSimulation sim(makeTargetingTerrain(), 0u, 0, 0);
+        auto us = addTargetingPlayer(sim, "us", GamePlayerType::Human);
+        auto them = addTargetingPlayer(sim, "them", GamePlayerType::Human);
+        registerTargetingModel(sim);
+        defineShooter(sim, "torpedoBoat", std::string());
+        sim.unitDefinitions["torpedoBoat"].floater = true;
+        defineTarget(sim, "enemyTank", "CORE TANK LEVEL1 NOTAIR NOTSUB", true);
+        defineTarget(sim, "enemySub", "CORE UNDERWATER LEVEL1 TORP WEAPON NOTAIR", true);
+        defineTarget(sim, "enemyShip", "CORE SHIP LEVEL1 NOTAIR NOTSUB", true);
+        sim.unitDefinitions["enemyShip"].floater = true;
+        defineTarget(sim, "enemyHover", "CORE HOVER LEVEL1 NOTAIR NOTSUB", true);
+        sim.unitDefinitions["enemyHover"].canHover = true;
+        defineWeapon(sim, "torpedo", false);
+        sim.weaponDefinitions["torpedo"].waterWeapon = true;
+
+        auto shooterId = spawnTargetingUnit(sim, "torpedoBoat", us, SimVector(0_ss, 0_ss, 0_ss), script);
+        armWith(sim, shooterId, "torpedo");
+
+        SECTION("a tank up on the shore is left alone")
+        {
+            auto tankId = spawnTargetingUnit(sim, "enemyTank", them, SimVector(64_ss, 24_ss, 0_ss), script);
+
+            tickTwice(sim);
+
+            REQUIRE_FALSE(weaponTarget(sim, shooterId).has_value());
+            REQUIRE(sim.getUnitState(tankId).hitPoints == sim.unitDefinitions.at("enemyTank").maxHitPoints);
+        }
+
+        SECTION("a submerged submarine is what it is for")
+        {
+            auto subId = spawnTargetingUnit(sim, "enemySub", them, SimVector(64_ss, -20_ss, 0_ss), script);
+
+            tickTwice(sim);
+
+            auto target = weaponTarget(sim, shooterId);
+            REQUIRE(target.has_value());
+            REQUIRE(target->value == subId.value);
+        }
+
+        SECTION("a ship on the surface is reachable because it floats")
+        {
+            auto shipId = spawnTargetingUnit(sim, "enemyShip", them, SimVector(64_ss, 4_ss, 0_ss), script);
+
+            tickTwice(sim);
+
+            auto target = weaponTarget(sim, shooterId);
+            REQUIRE(target.has_value());
+            REQUIRE(target->value == shipId.value);
+        }
+
+        SECTION("a hovercraft at sea level is not, because half its hull is above it")
+        {
+            auto hoverId = spawnTargetingUnit(sim, "enemyHover", them, SimVector(64_ss, 0_ss, 0_ss), script);
+
+            tickTwice(sim);
+
+            REQUIRE_FALSE(weaponTarget(sim, shooterId).has_value());
+            REQUIRE(sim.getUnitState(hoverId).hitPoints == sim.unitDefinitions.at("enemyHover").maxHitPoints);
+        }
+    }
+
+    TEST_CASE("what a unit breaks off for is filtered the same way as what it shoots", "[targeting]")
+    {
+        // The original has one acquisition routine: 0x43B700's search hands
+        // 0x40B7B0 a third argument of zero, which changes the radius and
+        // turns NoChaseCategory on, and nothing else. 0x49ABB0 is called
+        // either way (0x40B914), so the patrol break-off cannot pick up
+        // something the weapon could never engage.
+        auto script = makeTargetingScript();
+        GameSimulation sim(makeTargetingTerrain(), 0u, 0, 0);
+        auto us = addTargetingPlayer(sim, "us", GamePlayerType::Human);
+        auto them = addTargetingPlayer(sim, "them", GamePlayerType::Human);
+        registerTargetingModel(sim);
+        defineShooter(sim, "flakTruck", std::string());
+        sim.unitDefinitions["flakTruck"].canMove = true;
+        defineShooter(sim, "tank", std::string());
+        sim.unitDefinitions["tank"].canMove = true;
+        defineTarget(sim, "enemyTank", "CORE TANK LEVEL1 NOTAIR NOTSUB", true);
+        defineTarget(sim, "enemySub", "CORE UNDERWATER LEVEL1 TORP WEAPON NOTAIR", true);
+        defineWeapon(sim, "flak", true);
+        defineWeapon(sim, "gun", false);
+
+        auto here = SimVector(0_ss, 0_ss, 0_ss);
+        auto there = SimVector(256_ss, 0_ss, 0_ss);
+
+        SECTION("an anti-air gun carries its patrol past a ground unit")
+        {
+            spawnTargetingUnit(sim, "enemyTank", them, SimVector(64_ss, 0_ss, 0_ss), script);
+            auto truckId = spawnTargetingUnit(sim, "flakTruck", us, here, script);
+            armWith(sim, truckId, "flak");
+            auto& truck = sim.getUnitState(truckId);
+            truck.orders.push_back(PatrolOrder(here));
+            truck.orders.push_back(PatrolOrder(there));
+
+            sim.tick();
+
+            REQUIRE((std::get<PatrolOrder>(sim.getUnitState(truckId).orders.front()).destination == there));
+        }
+
+        SECTION("an ordinary gun carries its patrol past a submerged submarine")
+        {
+            spawnTargetingUnit(sim, "enemySub", them, SimVector(64_ss, -20_ss, 0_ss), script);
+            auto tankId = spawnTargetingUnit(sim, "tank", us, here, script);
+            armWith(sim, tankId, "gun");
+            auto& tank = sim.getUnitState(tankId);
+            tank.orders.push_back(PatrolOrder(here));
+            tank.orders.push_back(PatrolOrder(there));
+
+            sim.tick();
+
+            REQUIRE((std::get<PatrolOrder>(sim.getUnitState(tankId).orders.front()).destination == there));
+        }
+
+        SECTION("and stops for one it can actually engage")
+        {
+            spawnTargetingUnit(sim, "enemyTank", them, SimVector(64_ss, 0_ss, 0_ss), script);
+            auto tankId = spawnTargetingUnit(sim, "tank", us, here, script);
+            armWith(sim, tankId, "gun");
+            auto& tank = sim.getUnitState(tankId);
+            tank.orders.push_back(PatrolOrder(here));
+            tank.orders.push_back(PatrolOrder(there));
+
+            sim.tick();
+
+            REQUIRE((std::get<PatrolOrder>(sim.getUnitState(tankId).orders.front()).destination == here));
+        }
+    }
 }
