@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
+#include <rwe/game/OrderButtons.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
@@ -379,6 +380,100 @@ namespace rwe
         SECTION("nothing is charged for a free round")
         {
             REQUIRE(rampTotal(60 * 30, 0.0f) == 0);
+        }
+    }
+
+    TEST_CASE("the order button for a round is found by substring", "[stockpile]")
+    {
+        // 0x419B3C and 0x419B4E hand the gadget's name to strstr rather than to
+        // strcmp, which is the only way the six launchers in the shipped data
+        // can share one handler: ARMSILO1.GUI calls its button ARMMAKENUKE and
+        // CORSILO1.GUI CORMAKENUKE, but ARMEMP1.GUI says EMPMAKENUKE and
+        // CORTRON1.GUI TRONMAKENUKE. A prefix rule would miss the last two.
+        REQUIRE(isStockpileButtonName("ARMMAKENUKE"));
+        REQUIRE(isStockpileButtonName("CORMAKENUKE"));
+        REQUIRE(isStockpileButtonName("EMPMAKENUKE"));
+        REQUIRE(isStockpileButtonName("TRONMAKENUKE"));
+        REQUIRE(isStockpileButtonName("ARMMAKEANTI"));
+        REQUIRE(isStockpileButtonName("CORMAKEANTI"));
+
+        // Everything else on a launcher's page, and the unit types a build page
+        // is otherwise full of, must go the ordinary way.
+        REQUIRE_FALSE(isStockpileButtonName("ARMBUILD"));
+        REQUIRE_FALSE(isStockpileButtonName("ARMORDERS"));
+        REQUIRE_FALSE(isStockpileButtonName("IGPATCH"));
+        REQUIRE_FALSE(isStockpileButtonName("ARMSILO"));
+        REQUIRE_FALSE(isStockpileButtonName("ARMNUKE"));
+    }
+
+    TEST_CASE("the readout on the button is the magazine and what is on order", "[stockpile]")
+    {
+        // 0x419A2B: "%d" of the magazine byte, then " +%d" of the outstanding
+        // count, each left off when it is zero.
+        REQUIRE(stockpileButtonLabel(0, 0) == "");
+        REQUIRE(stockpileButtonLabel(3, 0) == "3");
+        REQUIRE(stockpileButtonLabel(3, 2) == "3 +2");
+
+        // With nothing in the magazine the original prints the suffix at the
+        // start of a string it has just emptied (0x419A42 stores the
+        // terminator, and the append at 0x419A5A finds a length of zero), so
+        // the leading space survives.
+        REQUIRE(stockpileButtonLabel(0, 2) == " +2");
+    }
+
+    TEST_CASE("the magazine can be found without knowing which slot holds it", "[stockpile]")
+    {
+        // The readout has to reach the launcher's magazine from the GUI, which
+        // does not know how the unit is armed. The original hard-codes weapon
+        // one (0x419A33 reads unit+0x1E), and every launcher that ships puts
+        // its missile in Weapon1, so looking for the first stockpiled weapon
+        // comes to the same thing and cannot disagree with the queue command,
+        // which picks the weapon the same way.
+        auto script = makeStockpileScript();
+        GameSimulation sim(makeStockpileTerrain(), 0u, 0, 0);
+        auto us = addStockpilePlayer(sim, "us", 100000.0f, 100000.0f);
+        registerStockpileModel(sim);
+        defineStockpileUnit(sim, "silo", true);
+        defineStockpileWeapon(sim, "missile", 2.0f, 200.0f, 1000.0f);
+
+        auto siloId = spawnStockpileUnit(sim, "silo", us, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        SECTION("a unit with no weapon at all has none")
+        {
+            REQUIRE_FALSE(sim.tryGetStockpileWeapon(siloId).has_value());
+        }
+
+        SECTION("an ordinary weapon is not a magazine")
+        {
+            // A gun that pays out of the economy shot by shot has no magazine
+            // to read, so a launcher's readout must not attach itself to one.
+            defineStockpileWeapon(sim, "gun", 2.0f, 0.0f, 0.0f);
+            sim.weaponDefinitions.at("gun").stockpile = false;
+            armWithStockpileWeapon(sim, siloId, "gun");
+
+            REQUIRE_FALSE(sim.tryGetStockpileWeapon(siloId).has_value());
+        }
+
+        SECTION("a launcher's queue and magazine read back through it")
+        {
+            armWithStockpileWeapon(sim, siloId, "missile");
+            REQUIRE(sim.tryGetStockpileWeapon(siloId).has_value());
+            REQUIRE(sim.tryGetStockpileWeapon(siloId)->get().queuedRounds == 0);
+
+            sim.modifyStockpileQueue(siloId, 2);
+            REQUIRE(sim.tryGetStockpileWeapon(siloId)->get().queuedRounds == 2);
+            REQUIRE(stockpileButtonLabel(
+                        sim.tryGetStockpileWeapon(siloId)->get().stockedRounds,
+                        sim.tryGetStockpileWeapon(siloId)->get().queuedRounds)
+                == " +2");
+
+            tick(sim, 2 * 30 + 10);
+            REQUIRE(sim.tryGetStockpileWeapon(siloId)->get().stockedRounds == 1);
+            REQUIRE(sim.tryGetStockpileWeapon(siloId)->get().queuedRounds == 1);
+            REQUIRE(stockpileButtonLabel(
+                        sim.tryGetStockpileWeapon(siloId)->get().stockedRounds,
+                        sim.tryGetStockpileWeapon(siloId)->get().queuedRounds)
+                == "1 +1");
         }
     }
 }

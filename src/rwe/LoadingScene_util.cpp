@@ -167,6 +167,10 @@ namespace rwe
         weaponDefinition.metalPerShot = Metal(tdf.metalPerShot);
         weaponDefinition.stockpile = tdf.stockpile;
 
+        weaponDefinition.interceptor = tdf.interceptor;
+        weaponDefinition.targetable = tdf.targetable;
+        weaponDefinition.coverage = SimScalar(static_cast<float>(tdf.coverage));
+
         if (tdf.selfProp)
         {
             // TA's projectile update tests `selfprop` before anything else, so a

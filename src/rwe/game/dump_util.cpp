@@ -219,7 +219,8 @@ namespace rwe
             {"pitch", dumpJson(projectile.pitch)},
             {"speed", dumpJson(projectile.speed)},
             {"secondPhase", projectile.secondPhase},
-            {"motorOut", projectile.motorOut}};
+            {"motorOut", projectile.motorOut},
+            {"targetProjectile", projectile.targetProjectile ? dumpJson(*projectile.targetProjectile) : nlohmann::json(nullptr)}};
 
         for (const auto& [t, damage] : projectile.damage)
         {

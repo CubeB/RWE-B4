@@ -2886,6 +2886,10 @@ namespace rwe
             millisecondsBuffer = 0;
         }
 
+        // A launcher's magazine fills without anybody ordering anything, so its
+        // readout cannot be refreshed off a command the way a build queue's is.
+        refreshStockpileGuiTotal();
+
         renderDebugWindow();
     }
 
@@ -3713,6 +3717,14 @@ namespace rwe
 
         updateUnconfirmedBuildQueueDelta(unitId, unitType, count);
         refreshBuildGuiTotal(unitId, unitType);
+    }
+
+    void GameScene::localPlayerModifyStockpile(UnitId unitId, int count)
+    {
+        localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::ModifyStockpile{count}));
+
+        unconfirmedStockpileDelta[unitId] += count;
+        refreshStockpileGuiTotal();
     }
 
     void GameScene::issueUnitOrder(UnitId unitId, const UnitOrder& order)
@@ -4836,6 +4848,21 @@ namespace rwe
         }
     }
 
+    void GameScene::modifyStockpileQueue(UnitId unitId, int count)
+    {
+        simulation.modifyStockpileQueue(unitId, count);
+
+        auto it = unconfirmedStockpileDelta.find(unitId);
+        if (it != unconfirmedStockpileDelta.end())
+        {
+            it->second -= count;
+            if (it->second == 0)
+            {
+                unconfirmedStockpileDelta.erase(it);
+            }
+        }
+    }
+
     struct CorpseSpawnInfo
     {
         std::string featureName;
@@ -5276,6 +5303,24 @@ namespace rwe
                 setNextPanel(createOrdersPanel());
             }
         }
+        else if (isStockpileButtonName(message))
+        {
+            // A launcher's build page has one live button and it orders a round
+            // rather than a unit, so the original tests for it before it tries
+            // the name as a unit type (0x419B3C, ahead of the lookup at
+            // 0x419B61) and turns it into the same "BUILDWEAPON" command
+            // whichever of the two names it matched.
+            if (sounds.addBuild)
+            {
+                sceneContext.audioService->playSound(*sounds.addBuild);
+            }
+
+            if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit)
+            {
+                int count = (isShiftDown() ? 5 : 1) * (type == ActivateMessage::Type::Primary ? 1 : -1);
+                localPlayerModifyStockpile(*selectedUnit, count);
+            }
+        }
         else if (isValidUnitType(simulation, message))
         {
             if (sounds.addBuild)
@@ -5604,6 +5649,39 @@ namespace rwe
         return it2->second;
     }
 
+    void GameScene::refreshStockpileGuiTotal()
+    {
+        auto selectedUnit = getSingleSelectedUnit();
+        if (!selectedUnit)
+        {
+            return;
+        }
+
+        auto weapon = simulation.tryGetStockpileWeapon(*selectedUnit);
+        if (!weapon)
+        {
+            return;
+        }
+
+        auto it = unconfirmedStockpileDelta.find(*selectedUnit);
+        auto queued = weapon->get().queuedRounds + (it == unconfirmedStockpileDelta.end() ? 0 : it->second);
+        auto label = stockpileButtonLabel(weapon->get().stockedRounds, std::max(0, queued));
+
+        // The gadget's name is whatever the launcher's own GUI file called it,
+        // so it has to be found the way the original's readout loop finds it:
+        // by walking the panel rather than by looking a name up.
+        for (const auto& child : currentPanel->getChildren())
+        {
+            if (isStockpileButtonName(child->getName()))
+            {
+                if (auto button = dynamic_cast<UiStagedButton*>(child.get()); button != nullptr)
+                {
+                    button->setLabel(label);
+                }
+            }
+        }
+    }
+
     std::unique_ptr<UiPanel> GameScene::createBuildPanel(const std::string& guiName, const std::vector<GuiEntry>& buildPanelDefinition, const std::unordered_map<std::string, int>& totals)
     {
         auto panel = uiFactory.panelFromGuiFile(guiName, buildPanelDefinition);
@@ -5672,7 +5750,7 @@ namespace rwe
                 modifyBuildQueue(unitCommand.unit, c.unitType, c.count);
             },
             [&](const PlayerUnitCommand::ModifyStockpile& c) {
-                simulation.modifyStockpileQueue(unitCommand.unit, c.count);
+                modifyStockpileQueue(unitCommand.unit, c.count);
             },
             [&](const PlayerUnitCommand::Stop&) {
                 stopUnit(unitCommand.unit);

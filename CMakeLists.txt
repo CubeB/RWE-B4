@@ -848,6 +848,7 @@ set(TEST_FILES
     src/rwe/sim/selfdestruct.test.cpp
     src/rwe/sim/damage.test.cpp
     src/rwe/sim/stockpile.test.cpp
+    src/rwe/sim/interception.test.cpp
     src/rwe/sim/dgun.test.cpp
     src/rwe/pathfinding/pathing.test.cpp
     src/rwe/sim/economy.test.cpp

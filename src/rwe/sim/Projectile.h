@@ -3,6 +3,7 @@
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/PlayerId.h>
 #include <rwe/sim/ProjectilePhysicsType.h>
+#include <rwe/sim/ProjectileId.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitId.h>
 #include <variant>
@@ -51,6 +52,15 @@ namespace rwe
 
         /** The unit that this projectile is tracking, if any. */
         std::optional<UnitId> targetUnit;
+
+        /**
+         * The projectile this projectile is chasing, if any -- an anti-nuke's
+         * round, and nothing else. The original keeps it at `proj+0x56` and
+         * uses it for three things: the aim point ahead of any unit target
+         * (0x49B47A), the proximity fuse (0x49B106), and the check that stops
+         * two interceptors from claiming one missile (0x49D1AE).
+         */
+        std::optional<ProjectileId> targetProjectile;
 
         /**
          * Where the shot was aimed. A self-propelled missile that does not

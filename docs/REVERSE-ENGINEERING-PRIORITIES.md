@@ -388,7 +388,7 @@ The drain is at `0x4017CB`, once per economy tick, truncated to a whole number,
 all-or-nothing: if the player's energy will not cover it the unit simply does
 not cloak. Implemented, with tests; see `TOTALA-EXE.md` as above.
 
-### 11. Nukes, stockpiles and anti-nukes — *decoded in full; half ported*
+### 11. Nukes, stockpiles and anti-nukes — *done, bar the veterancy term*
 
 All of it is now read out of the binary and written up in the findings doc under
 "Stockpiled weapons and interception". What has landed in RWE:
@@ -406,23 +406,37 @@ All of it is now read out of the binary and written up in the findings doc under
 - **`commandfire`** turned out to be implemented already — the auto-target and
   return-fire paths both skip it. Only the BLAST button was wrong (see 12).
 
-What is left, and it is the larger half:
+Since landed, and with it the two things that made any of this usable:
 
-- **Interception.** The whole chain is decoded — `coverage` as a square around
-  the launcher tested against the incoming missile's *aim point* (`0x49D120`),
-  the launch that aborts without a target (`0x49DC17`), the projectile-targets-
-  projectile slot at `proj+0x56`, the proximity detonation (`0x49B106`) and,
-  the piece §7 was missing, the interceptor blast that detonates every
-  projectile inside its `areaofeffect` (`0x49A664`). None of it is ported.
-  Perhaps a day and a half now the reading is done.
-- **The queue button.** `PlayerUnitCommand::ModifyStockpile` and
-  `GameSimulation::modifyStockpileQueue` exist and are serialised, but no GUI
-  control raises the command, so a magazine can only be filled from a test. The
-  original's button shows `N +M` from `unit+0x1E` and the outstanding order
-  count (`0x419A2B`). Half a day.
+- **The queue button.** The control was never on the general orders panel. It is
+  a gadget on the launcher's own build page, and the shipped `ARMSILO1.GUI` says
+  so in a comment beside it — `commonattribs=8; // Flag this as a weapon build
+  button`, bit 3 of the byte the readout loop at `0x4199B0` dispatches on. The
+  reason it could not be reached was that all six units with such a page
+  (`ARMSILO`, `CORSILO`, `ARMAMD`, `CORFMD`, `ARMEMP`, `CORTRON`) say
+  `Builder=0`, and RWE only read pages for builders. The name is matched by
+  **substring** (`0x419B3C`, `0x419B4E`, through strstr at `0x4E49B0`), which is
+  forced: `ARMEMP1` calls its button `EMPMAKENUKE` and `CORTRON1`
+  `TRONMAKENUKE`, so nothing keyed on a side prefix would find them.
+- **Interception, the whole chain.** `coverage` as a square around the launcher
+  tested against the incoming missile's *aim point* (`0x49D120`), the launch
+  that aborts without a target (`0x49DC17`), the projectile-targets-projectile
+  slot at `proj+0x56`, the proximity detonation (`0x49B106`) and the interceptor
+  blast that detonates every projectile inside its `areaofeffect` (`0x49A664`),
+  which is the piece §7 was missing. `src/rwe/sim/interception.test.cpp`.
+
+**A correction this made.** The entry above, and §15's `commandfire` paragraph,
+said the anti-nukes carry `commandfire`. They do not — `AMD_ROCKET` and its Core
+twin name no such key, and neither does anything else with `interceptor`. That
+is the mechanism rather than an oversight: an anti-nuke has to engage without
+being told, so the flag that would stop it is absent.
+
+What is left:
+
 - **`antiweapons`** (bit 29 of `def+0x241`) has no reader anywhere. Two units
   set it and nothing appears to read it; interception keys entirely off the
-  weapon flags. Recorded as not understood.
+  weapon flags. Recorded as not understood, and porting the interception without
+  it confirmed that nothing needs it.
 - **The reload-time formula** at `0x49E468`, which scales `reloadtime` by both
   the firer's veterancy and its damage. Decoded, not ported, and it belongs with
   whatever picks up the rest of veterancy.

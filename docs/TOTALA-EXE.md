@@ -1984,6 +1984,45 @@ at `0x419A33`). Both launchers that ship — `ARMSILO`/`CORSILO` and
 `ARMAMD`/`CORFMD` — put their missile in `Weapon1`, so that is not a limitation
 anyone would notice.
 
+With nothing in the magazine the label starts empty and the suffix is printed at
+the end of it, so an empty launcher with three on order reads `" +3"` with the
+leading space still on. `0x419A42` writes the terminator and the append at
+`0x419A5A` measures a length of zero; nothing goes back for the space.
+
+### Where the button is, and what raises it
+
+Not on the general orders panel. It is a gadget on the launcher's own **build
+page**, and the shipped GUI files say so in as many words:
+
+```
+name=ARMMAKENUKE;   ...   commonattribs=8;   // Flag this as a weapon build button
+```
+
+That comment is in `ARMSILO1.GUI` as distributed. `commonattribs` is the byte at
+`element+0x2A` that the readout loop at `0x4199B0` dispatches on — bit 2 for an
+ordinary build queue's `+N`, bit 3 for this `N +M` — and `0x41AE80` stamps a 4
+into the same byte when it builds a page's buttons itself.
+
+Six units ship a page: `ARMSILO1`, `CORSILO1`, `ARMAMD1`, `CORFMD1`, `ARMEMP1`,
+`CORTRON1`. **All six say `Builder=0` in their FBI**, so anything that gates the
+page load on that flag never finds them. RWE did, which is why the control could
+not be reached.
+
+The click handler is `0x419B00`, `f(name, unit, count)`:
+
+- it plays `addbuild` for a positive count and `subbuild` otherwise
+  (`0x419B21`–`0x419B33`);
+- it runs **strstr** for `"MAKENUKE"` and then for `"MAKEANTI"` over the gadget
+  name (`0x419B3C`, `0x419B4E`, through `0x4E49B0`) and on either hit issues a
+  `BUILDWEAPON` command with unit-type index 0 and the count (`0x419B97`);
+- otherwise it looks the name up as a unit type and issues `MOBILEBUILD` or
+  `BUILDINGBUILD` (`0x419B61`–`0x419B87`).
+
+The substring test is not decoration. The six do not share a prefix:
+`ARMSILO1` names its button `ARMMAKENUKE` and `CORSILO1` `CORMAKENUKE`, but
+`ARMEMP1` says `EMPMAKENUKE` and `CORTRON1` `TRONMAKENUKE`. A prefix or an
+equality rule silently loses the last two.
+
 ### Building a round, `0x402B70`
 
 The order handler is a three-state machine on `[order+0x05]`, re-scheduled by
@@ -2074,8 +2113,15 @@ Bit 26 of `wdef+0x111`, and it means one thing: the weapon is never given a
 target by the machine. The auto-target scan skips it (`0x40643F`, `0x407131`,
 `0x40FDE5`) and so does the return-fire path, which takes an "is this an
 explicit order" argument and only consults the bit when that is zero
-(`0x408A88`–`0x408A96`). Sixteen weapons carry it — the D-gun, the nukes, the
-anti-nukes, the Krogoth's tremor.
+(`0x408A88`–`0x408A96`). The D-gun, the nukes and the bombs carry it.
+
+**Correction to an earlier reading here: the anti-nukes do not.** `AMD_ROCKET`
+and its Core twin name no `commandfire` at all, and neither does anything else
+with `interceptor`. That is not an oversight in the data, it is the whole
+mechanism — an anti-nuke has to engage without being told, and the flag that
+would stop it is simply absent. Counted over `rev31`'s `Weapons/*.TDF` the flag
+appears ten times: both nuclear missiles, both big EMP rounds' launch weapons,
+the four bombs and the two disintegrators.
 
 ### `coverage`, `targetable`, `interceptor`
 
@@ -2112,6 +2158,31 @@ at. The chain is:
 An `interceptor` or `targetable` projectile is also drawn differently on the
 minimap (`0x46720E` tests both bits at once).
 
+Four weapons carry `targetable` and they are the four a launcher stockpiles:
+`NUCLEAR_MISSILE`, `CRBLMSSL`, `ARMEMP_WEAPON` and `CORTRON_WEAPON`. Two carry
+`interceptor`, both `coverage=2000`, and both `areaofeffect=96`.
+
+### Three details the five steps above leave out
+
+Read out of the same routines while porting them, and each one changes what the
+code has to do:
+
+- **The acquisition skips by owner, not by launcher.** `0x49D179` compares the
+  projectile's owner byte `proj+0x66` against the unit's `unit+0xFF`, so a
+  launcher ignores everything its own *player* fired, not merely its own rounds.
+- **Both radius tests are strictly inside.** The proximity fuse at `0x49B1A4`
+  and the blast at `0x49A757` both branch away on `jge`, so a projectile exactly
+  `areaofeffect` away survives.
+- **The blast is a sphere; the coverage is a square.** `0x49A6B8`–`0x49A755`
+  squares all three differences and compares against `areaofeffect²`, where the
+  coverage test at `0x49D18D` compares x and z separately and never reads y. The
+  two are not the same shape and it is easy to write them as though they were.
+
+`0x4E49B0`, which the order-panel handler uses on the button name, is strstr and
+not strcmp: it scans the haystack for the needle's first character and returns
+null on failure. That matters because the click handler's dispatch reads as a
+name comparison and is not one.
+
 ### `antiweapons`
 
 Bit 29 of `def+0x241`, pushed at `0x42C84C`. Two units set it, and they are the
@@ -2129,18 +2200,32 @@ cam. Nothing in the simulation reads it.
 
 ### Decoded but not ported
 
-- **Interception in full.** Everything in the five steps above is decoded and
-  none of it is in RWE: there is no interceptor weapon behaviour, no
-  projectile-targets-projectile slot, and no blast that kills projectiles.
-  `coverage` and `targetable` are parsed and unused.
 - **`antiweapons`**, as above.
 - **The veterancy and damage terms on reload time** (`0x49E468`).
-- **The queue button.** RWE has the order
-  (`PlayerUnitCommand::ModifyStockpile`) and the simulation behind it, but
-  nothing in the GUI raises it yet, so a launcher's magazine can only be filled
-  from code or a test.
 - **The 300-tick wait on a full magazine** is implemented, but nothing in RWE
   can reach 200 rounds in practice.
+
+### Ported since
+
+- **The queue button.** The launcher's build page is now loaded whether or not
+  the unit is a `Builder`, the button is matched by substring, and the readout
+  is rebuilt every frame — a magazine fills on its own with no command to hang
+  a refresh on, which is the one way it does not behave like a build queue.
+- **Interception, all five steps.** `interceptor`, `targetable` and `coverage`
+  reach `WeaponDefinition`; a projectile carries the target slot; the
+  auto-target scan hands an interceptor weapon the projectile search instead of
+  the unit one; the launch is abandoned without a target; the aim point comes
+  from the target projectile ahead of any unit; the proximity fuse and the blast
+  that detonates every projectile in it are both in. `src/rwe/sim/interception.test.cpp`.
+
+  Two places where RWE differs deliberately. The engagement gate on a weapon
+  with `interceptor` is `coverage` rather than `maxRange`, checked against the
+  target's aim point every tick rather than against its position, because the
+  original's ordinary range check never runs for these weapons — the two that
+  ship say `range=32000`, which is larger than any map. And a caught projectile
+  is marked dead before its own explosion is run, so an interceptor caught in
+  another interceptor's blast cannot chain back into it; the original has no
+  such guard and no data that would exercise it.
 - **Per burst, not per shot.** The cost check, the spend and the round out of
   the magazine all sit in the per-weapon routine that runs once a tick, and a
   burst is expanded afterwards from the projectile's own `+0x60` counter, so the

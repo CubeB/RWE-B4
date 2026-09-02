@@ -3,6 +3,7 @@
 #include <rwe/cob/CobThread.h>
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/ProjectilePhysicsType.h>
+#include <rwe/sim/ProjectileId.h>
 #include <rwe/sim/UnitId.h>
 #include <rwe/sim/WeaponDefinition.h>
 #include <variant>
@@ -13,7 +14,12 @@ namespace rwe
     {
     };
 
-    using UnitWeaponAttackTarget = std::variant<UnitId, SimVector>;
+    /**
+     * An interceptor is aimed at a projectile rather than at a unit or a place:
+     * the auto-target scan hands it 0x49D120's projectile search and aims at
+     * what that returns (0x408B31, 0x48A0A0).
+     */
+    using UnitWeaponAttackTarget = std::variant<UnitId, SimVector, ProjectileId>;
 
     struct UnitWeaponStateAttacking
     {
