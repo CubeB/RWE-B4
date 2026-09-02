@@ -55,6 +55,14 @@ namespace rwe
 
         void removeChildrenWithPrefix(const std::string& prefix);
 
+        /**
+         * Removes children by exact name. The order panel needs this rather
+         * than the prefix form because ARMMOVE is a prefix of ARMMOVEORD, and
+         * taking the move button away would otherwise take the standing move
+         * order button with it.
+         */
+        void removeChildrenNamed(const std::string& name);
+
         std::vector<std::unique_ptr<UiComponent>>& getChildren();
 
         void setFocus(std::size_t controlIndex);

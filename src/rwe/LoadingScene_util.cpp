@@ -354,6 +354,10 @@ namespace rwe
         u.canMove = fbi.canMove;
         u.canGuard = fbi.canGuard;
         u.canCapture = fbi.canCapture;
+        u.canStop = fbi.canStop;
+        u.canPatrol = fbi.canPatrol;
+        u.canReclamate = fbi.canReclamate;
+        u.canLoad = fbi.canLoad;
         u.canDgun = fbi.canDgun;
         // The original has no Cloakable key: it derives the flag from CloakCost
         // being greater than zero, and nothing in the shipped data writes the

@@ -3168,3 +3168,284 @@ looks the unit id up in the table at `[world+0x14357]`, and returns. No
 distance is measured anywhere on that path. Dropping a target that has walked
 out of range must happen in the weapon's own service, if it happens at all;
 it is not part of the re-acquire decision.
+
+## NN. Where a radar contact is drawn, and where it is not
+
+### The main view never sees one
+
+The world render does not walk the unit list. It consumes a list rebuilt once a
+frame and reads it at `0x4697B7` for the Z buckets and again at `0x469C16` for
+the health-bar pass; every `0x118`-stride walk inside `0x468CF0`–`0x469D1F` is
+over that list. The list lives at `world+0x1435F` with its count at
+`world+0x14367`, allocated at `0x485590` under the tag `"HOT UNITS"`
+(`0x508BC8`).
+
+`0x48BAE0` builds it. Per unit: skip an empty slot (`0x48BB3E`), cull against
+the screen rectangle `world+0x37E27` (`0x48BBD2`–`0x48BC3B`), admit the
+viewer's own unit unconditionally (`0x48BC42`), and otherwise
+
+```
+48bc56  call 0x465AC0        ; the can-see predicate
+48bc5b  test eax,eax / je skip
+48bc63  ...                  ; append WORD unit+0xA8
+```
+
+`0x465AC0` **never reads the radar bits**. It tests own-unit (`0x465AD4`),
+cloak (`unit+0x10E` bit 2, `0x465AE8`), the sonar bit for a submerged unit
+(`0x465B38`), and then the line-of-sight grid or the explored bitmask directly
+(`0x465B5C`, `0x465C04`, `0x408090`). A unit whose only claim on the viewer is a
+radar contact is therefore not in the list, is not drawn, and is not pickable:
+the 3D cursor pick `0x48CD80` iterates the same list (`0x48CDBD`–`0x48CE97`).
+
+There is one HUD response, and it is not in the viewport. The info panel's
+"unit under cursor" branch `0x46AEE0` calls `0x465AC0` at `0x46AF3D` and on
+failure falls to `0x46B6F3`, which picks the prefix `"R: "` (`0x50786C`) or
+`"S: "` (`0x507870`) on `unit+0x110` bit 9 and prints `"Unidentified object"`
+(`0x507858`). So hovering a blip names it as unidentified rather than showing
+nothing — but the hover can only come from the minimap.
+
+### The minimap draws one exactly like anything else
+
+`0x466DC0`, called once a tick for the local player only (`0x465072`, guarded
+at `0x46506A`) and again after a fog-mode rebuild (`0x48191F`). The gate is
+
+```
+466e64  eax = unit+0x110
+466e6a  test ah,0x3          ; bit 8 or bit 9
+466e6d  jne draw
+466e6f  owner == viewer ? draw : skip
+```
+
+and that is the **only** place in the binary that reads those bits raw. The
+sprite is the GAF animation `radlogo` (`world+0x147DF`, loaded by name at
+`0x42990D`), frame = the owner's colour byte, blitted at `0x466ECC`–`0x466F0B`.
+In the shipped `anims/FX.GAF` it is ten frames, every one **4×4 pixels**,
+hotspot (1,1): a two-by-two block of the player's colour inside a ring of
+palette index 89, with the corners transparent. Nothing between `0x466E4E` and
+`0x467135` distinguishes a radar contact from a unit in plain sight — same
+sprite, same size, same colour.
+
+Position is `x·mmW/worldW` and `(z − y/2)·mmH/worldH` (`0x466E83`–`0x466EB7`),
+the same projection the 3D view uses, so an aircraft's blip sits above its
+ground position by half its altitude.
+
+The hovered unit additionally gets `radlogohigh` (`world+0x147E3`, 6×6, hotspot
+(2,2)) — a ring around the dot — and a selected unit gets its radar, sonar, jam
+and weapon range rings (`0x466F42` onwards).
+
+**The blink is not about radar.** `0x466EB9` skips the blip on alternate phases
+only when `unit+0xFA` is non-zero:
+
+```
+466eb9  mov al,BYTE [unit+0xfa]
+466ec1  je draw                        ; timer zero -> always drawn
+466ec3  test BYTE [world+0x142f1],0x1  ; the global blink phase
+466eca  je skip
+```
+
+`unit+0xFA` is a **just-damaged** timer, set to `0xF0` (240 ticks, eight
+seconds) by `0x467950` from the damage applier `0x489CE0` at `0x489D8E`,
+decremented per tick at `0x48ADF0` and cleared on unit init at `0x485C12`. The
+phase bit `world+0x142F1` is flipped every eight ticks by `0x466580`
+(`0x4665A9`–`0x4665BB`), called per tick from `0x4955E5`. So a blip flashes at
+roughly two hertz for eight seconds after the unit is hit, whether it is a radar
+contact or a unit you can see, and a quiet radar contact does not flash at all.
+
+### Nothing stored says "radar only"
+
+`0x467440` recomputes the picture once a tick for the local player alone
+(`0x46745B`) and writes the result into `unit+0x110`: loop 0 clears bits 8–10
+for everyone else and sets 8 and 9 for own and vision-sharing units
+(`0x4674EF`, `0x4674F6`), loop 1 sets bit 9 for sonar and bit 8 for radar
+(`0x4678FF`, `0x467937`), loop 2 lets jammers clear them, and **loop 4 sets bit
+8 again from line of sight** (`0x46780E`).
+
+That last one matters: **bit 8 is not "radar contact", it is "on my picture at
+all"**. The difference between radar and sight is not stored anywhere — it is
+recomputed on demand by calling `0x465AC0`, which is what the render list does.
+The AI does the same, building two lists in `0x40AA40`, one gated on can-see
+(`0x40AB11`) and one on bit 8 (`0x40AB3F`).
+
+This also corrects §14, which says "line of sight is `unit+0x9C`". There is no
+such field: loop 4 biases its cursor by `lea esi,[edi+0x74]` at `0x46770D`, so
+its `[esi+0x9C]` is `unit+0x110` and its `or ebp,0x100` at `0x46780E` is setting
+bit 8 of the same flags word everything else uses.
+
+### What RWE was doing
+
+`GameScene::renderWorldUi` drew, for every radar-only contact, a coloured
+minimap dot and a white box outline in world UI space. That is an RWE
+invention with nothing behind it in the original, and it is gone. RWE's minimap
+already draws radar contacts through `unitIsDetectableByLocalPlayer`, which is
+the right gate, and already rings the hovered one — so the minimap half was
+right all along and only the main view needed taking away.
+
+### Not ported
+
+- **The damage flash.** RWE's minimap dots do not blink. The timer and the
+  eight-tick phase are decoded above; there is no `unit+0xFA` equivalent in the
+  simulation and adding one is a bigger change than the complaint asked for.
+- **"R: Unidentified object".** RWE's info panel has no unknown-contact
+  state.
+- The minimap does **not** test cloak in the original (`0x466E4E`–`0x466ECC`
+  never reads `unit+0x10E`, and the radar visitor `0x467840` skips only
+  `stealth`), so a cloaked enemy inside your radar range still shows a blip
+  there while being invisible in the world. That reads as an oversight rather
+  than a design decision and RWE does not copy it.
+
+## NN. The order panel, and which flag gates which button
+
+Every side loads one panel — `ARMGEN.GUI` or `CORGEN.GUI`, via `0x41B0F0` —
+carrying every order button there is. The game then takes away or greys out
+what the current selection cannot use. There is no per-unit order panel.
+
+### `def+0x245` in full
+
+§9 gave bits 0–8, 10 and 11 of this dword and called bit 4 `canattack`. Here is
+the whole of it. The parser's boolean helper leaves its result in `eax`, so the
+key pushed immediately before the `call 0x4C46C0` owns the `shl` immediately
+after it, and the pipeline trap of §19 does not apply.
+
+| Bit | Key | `shl` at | Second site |
+|---|---|---|---|
+| 0 | `mobilestandorders` | `0x42C8DB` insert | `0x48D104`, under a name compare against `Standing_MoveOrder` |
+| 1 | `firestandorders` | `0x42C8FF` | `0x48D0D7`, likewise for `Standing_FireOrder` |
+| 2 | `onoffable` | `0x42C8BE` | `0x403010` ACTIVATE / `0x403040` DEACTIVATE |
+| 3 | `canstop` | `0x42C92B` | **none** — the order panel is its only reader |
+| 4 | `canattack` | `0x42C94A` | `0x43F154`, `0x401F98` |
+| 5 | `canguard` | `0x42C970` | `0x43E615`, `0x43F4C7` |
+| 6 | `canpatrol` | `0x42C996` | `0x43E5DE` picks cursor 7 over cursor 19 |
+| 7 | `canmove` | `0x42C9C3` | `0x43FE03`, `0x44019D` |
+| 8 | `canload` | `0x42C9E2` | `0x4067C4` the load handler, `0x489ABE` the transporter half of the predicate |
+| **9** | **no key: a copy of bit 10** | `0x42CA3D`–`0x42CA4F` | `0x4899CC`, the can-repair predicate |
+| 10 | `canreclamate` | `0x42CA0F` | `0x48996C` can-reclaim, `0x43FA13` the RECLAIMUNIT mission |
+| 11 | `canresurrect` | `0x42CA2E` | `0x43FF46` → the `RESURRECT` mission |
+| 12 | `cancapture` | `0x42CA72` | `0x4042CF` the CAPTURE handler; also used as a cheap "is this a commander" |
+| **13** | **no key: `cloakcost > 0`** | `0x42CA93` | `0x403080` CLOAK_ON, `0x4676AE` in the cloaked-unit render |
+| 14 | `candgun` | `0x42CABA` | `0x43F7EE` → the `ATTACKSPECIAL` mission |
+| 15 | `norestrict` | `0x42CB4B` | `0x44C165`, the restriction table UI |
+| 16 | `wacky` | `0x42ADC0` (first-pass loader only) | `0x46D33C` — read, meaning unrecovered |
+| 17 | `showplayername` | `0x42CB77` | `0x46AF64` |
+| 18 | `commander` | `0x42CB96` | only jointly with 17 at `0x46AF56` |
+| 19 | `cantbetransported` | `0x42CBBF` | `0x489AA3`, the passenger half of the load predicate |
+| 20–22 | `selfdestructcountdown` | `0x42CBFA`, default 5 at `0x42CC13` | `0x40202D` |
+
+Two entries in that table are not keys at all and are the reason two buttons
+have no FBI field behind them:
+
+```
+42ca3d  and ah,0xfd        ; clear bit 9
+42ca40  shr edx,1
+42ca42  and edx,0x200      ; bit 10 -> bit 9
+42ca4d  or  edx,eax
+```
+
+**Bit 9 is `canreclamate` copied**, and `0x4899CC` — the routine that decides
+whether a unit may repair another — is what reads it. So REPAIR and RECLAIM are
+the same flag twice and always appear together. Likewise **bit 13 is
+`CloakCost > 0`** (`0x42CA5A`–`0x42CA96`, comparing the float at `def+0x1DA`
+against the zero at `0x4FD210`); there is no `Cloakable` key in the binary at
+all, which is why honouring one gives the button to nothing.
+
+The layout is confirmed away from the parser by the field-by-field definition
+copy at `0x42BAC1`–`0x42BCAD`, which moves bits 0–19 as twenty separate one-bit
+members and then `0x700000` as a single three-bit group, and stops there.
+
+Shipped-data check, 189 FBIs: `canload` is exactly `armatlas`, `armtship`,
+`cortship`, `corvalk`; `cancapture` and `candgun` are exactly the two
+commanders; `canresurrect`, `wacky`, `selfdestructcountdown` and `cloakable`
+are named by nothing at all.
+
+### A mixed selection: ANY, not ALL
+
+`0x41B2E0` walks the local player's units (stride `0x118`, from `player+0x67`
+to `player+0x6B`), skipping any without `unit+0x110` bit 4 — selected. It keeps
+two different kinds of accumulator, and the difference is the whole answer.
+
+**The ten capability bits are a plain OR.** `0x41B49F`–`0x41B524` is ten
+repetitions of `shr edi,N / test cl,1 / je skip / mov <slot>,esi` with
+`esi = 1`, and **nothing ever clears a slot**:
+
+| bit | flag | address |
+|---|---|---|
+| 7 | `canmove` | `0x41B4A1` |
+| 3 | `canstop` | `0x41B4AE` |
+| 4 | `canattack` | `0x41B4BC` |
+| 5 | `canguard` | `0x41B4C9` |
+| 6 | `canpatrol` | `0x41B4D7` |
+| 8 | `canload` | `0x41B4E4` |
+| 9 | repair | `0x41B4F2` |
+| 12 | `cancapture` | `0x41B4FD` |
+| 10 | `canreclamate` | `0x41B50B` |
+| 14 | `candgun` | `0x41B518` |
+
+So a button is offered when **any** selected unit names it. Boxing a solar
+collector in with a squad of Peewees does not cost the Peewees their move
+button, and one transport in the box puts LOAD up for the lot.
+
+**The four stateful toggles are a sentinel accumulator**, which is the shape
+§9 already described for the two mode buttons: fire orders start at 4, move
+orders at 4, cloak and on/off at 3; a unit that does not name the flag is
+skipped entirely (`0x41B403`, `0x41B42C`) so it cannot drag the shared state;
+the first offerer's value is taken; a later disagreement collapses to 3
+(`0x41B420`, `0x41B449`) or 2. The sentinel means "nobody offered it" and greys
+the button out (`0x41A243`, `0x41A280`).
+
+The cloak accumulator has a bug worth not copying: `0x41B485`–`0x41B497` does
+not compare at all, so a **second** cloakable unit sets "mixed" even when the
+two agree. On/off, three instructions away at `0x41B893`, does compare.
+
+Results are packed into `world+0x37EC0` (move-order 0–2, cloak 3–4, on/off 5–6,
+canmove 7, canstop 8, canattack 9, canguard 10, canpatrol 11, canload 12,
+canreclamate 13, cancapture 14, repair 15), `world+0x37EBE` bits 12–14 (fire
+order) and `world+0x37EC2` bit 0 (candgun).
+
+### Hidden versus greyed, and the slot LOAD and BLAST share
+
+`0x41A120` is the enable pass — seventeen hardcoded name lookups, each followed
+by one bit test. Almost everything is **greyed**, via `0x4A1200(page, idx, 1)`
+which sets bit 0 of `WORD [ctrl+0x13C]`: MOVE at `0x41A2E8`, STOP `0x41A310`,
+ATTACK `0x41A338`, DEFEND `0x41A35F`, PATROL `0x41A387`, and RECLAIM, REPAIR
+and CAPTURE the same way.
+
+LOAD and BLAST are the exception, because **they are the same slot**: in
+`ARMGEN.GUI` `ARMLOAD` and `ARMBLAST` are both at `xpos=64, ypos=317`, same
+width and height. `0x41A409` resolves it on the ORed `canload` bit —
+
+- nothing can load: LOAD is made inactive (`0x4A03F0(page, idx, 0)`, which
+  writes `BYTE [ctrl+0x29]`), UNLOAD is greyed, BLAST is greyed unless
+  `candgun`;
+- something can load: **BLAST is made inactive** and LOAD and UNLOAD stand.
+
+So selecting a commander together with an Atlas costs you the D-gun button.
+
+One trap for anyone reimplementing this: `0x49FE60` finds a control by
+`strstr`, not by name equality, so `"MOVE"` also matches `ARMMOVEORD` and
+`"LOAD"` also matches `ARMUNLOAD`. It only works because the shipped GUI files
+happen to list the short name first.
+
+### What RWE was doing
+
+`GameScene::createOrdersPanel` gated LOAD, UNLOAD, BLAST and CLOAK, and only
+when **exactly one unit was selected**; a selection of two or more got the raw
+`ARMGEN.GUI` with every button on it, which is the reported complaint. It also
+gated LOAD on having transport capacity rather than on `canload` (the same four
+units in the shipped data, but not the same rule), and gated nothing at all on
+`canstop`, `canpatrol`, `canattack`, `canmove`, `canguard`, `canreclamate` or
+`cancapture` — four of which RWE was not even reading out of the FBI.
+
+It now builds the list of selected definitions and applies
+`selectionOffersOrderButton`, which is the OR above.
+
+### Deliberately not ported
+
+- **Greying.** RWE has no disabled state for a `UiStagedButton`, so a button
+  the selection cannot use is removed rather than drawn dim. Recorded here so
+  it is not mistaken for the original's behaviour: the original greys
+  everything except LOAD and BLAST, which it hides because they overlap.
+- **The cloak accumulator's disagreement bug** at `0x41B485`.
+- **`canresurrect`, `wacky` and `selfdestructcountdown`.** No shipped unit
+  names any of them and RWE has no resurrect order.
+- **`canstop`.** It is parsed and honoured for the button, but the original's
+  own STOP mission builder at `0x43F82C` does not check it, so the flag gates
+  the button and nothing else.

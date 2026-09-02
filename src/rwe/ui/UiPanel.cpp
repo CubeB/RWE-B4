@@ -216,6 +216,22 @@ namespace rwe
             children.end());
     }
 
+    void UiPanel::removeChildrenNamed(const std::string& name)
+    {
+        // Don't leave the focus pointing at a child we are about to destroy.
+        if (focusedChild && (*focusedChild)->getName() == name)
+        {
+            focusedChild = std::nullopt;
+        }
+
+        children.erase(
+            std::remove_if(
+                children.begin(),
+                children.end(),
+                [&name](const auto& e) { return e->getName() == name; }),
+            children.end());
+    }
+
     void UiPanel::setFocusByName(const std::string& name)
     {
         auto it = std::find_if(children.begin(), children.end(), [&name](const auto& c) { return c->getName() == name; });

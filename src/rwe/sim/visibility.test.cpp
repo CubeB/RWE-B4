@@ -567,4 +567,52 @@ namespace rwe
             REQUIRE(sim.canDetectUnit(them, enemyId));
         }
     }
+
+    TEST_CASE("a radar contact is a minimap dot and nothing in the world", "[visibility]")
+    {
+        // The original's world render never walks the unit list: it consumes a
+        // list rebuilt each frame by 0x48BAE0, which admits a unit only if it
+        // is the viewer's own or passes the can-see predicate at 0x465AC0 --
+        // and that predicate reads the line-of-sight grid and never looks at
+        // the radar bits. The minimap draw at 0x466DC0 is the one place that
+        // takes the raw detection bits, so a radar-only contact appears there
+        // and nowhere else. These are the two predicates RWE draws from:
+        // canSeeUnit gates the world, canDetectUnit gates the minimap dot.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        auto them = addPlayer(sim, "them");
+        defineUnit(sim, "radar", /*sight*/ 32u, /*radar*/ 300u, /*onOffable*/ true);
+        defineUnit(sim, "tank", 32u, 0u, false);
+
+        auto radarId = addUnit(sim, "radar", us, SimVector(0_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(radarId).activated = true;
+
+        SECTION("a contact out of sight but on radar gets the dot only")
+        {
+            auto enemyId = addUnit(sim, "tank", them, SimVector(200_ss, 0_ss, 0_ss), script);
+            sim.tick();
+
+            REQUIRE(sim.canDetectUnit(us, enemyId));
+            REQUIRE_FALSE(sim.canSeeUnit(us, enemyId));
+        }
+
+        SECTION("a contact inside sight range gets both")
+        {
+            auto enemyId = addUnit(sim, "tank", them, SimVector(16_ss, 0_ss, 0_ss), script);
+            sim.tick();
+
+            REQUIRE(sim.canDetectUnit(us, enemyId));
+            REQUIRE(sim.canSeeUnit(us, enemyId));
+        }
+
+        SECTION("a contact outside both gets neither")
+        {
+            auto enemyId = addUnit(sim, "tank", them, SimVector(600_ss, 0_ss, 0_ss), script);
+            sim.tick();
+
+            REQUIRE_FALSE(sim.canDetectUnit(us, enemyId));
+            REQUIRE_FALSE(sim.canSeeUnit(us, enemyId));
+        }
+    }
 }
