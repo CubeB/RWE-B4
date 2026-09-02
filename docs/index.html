@@ -72,7 +72,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
     <span>branch <b>revival</b></span>
     <span>base <b>upstream master b2d8a31 · 25 Mar 2026</b></span>
     <span>updated <b>2 Sep 2026</b></span>
-    <span>tests <b>318 cases · 3256 assertions</b></span>
+    <span>tests <b>346 cases · 3353 assertions</b></span>
   </div>
 </header>
 <nav aria-label="Sections">
@@ -154,6 +154,10 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Fog meets the map border flush. Cells off the edge used to read as clear, so the ragged frame there had no neighbouring tile to cover it and a strip of map showed through along the top and left &mdash; the two sides the camera can actually reach</li>
   <li>Minimap only reveals what the player can see or detect</li>
   <li>Radar contacts belong on the minimap and nowhere else. RWE drew a coloured dot and a white box outline in the 3D world for every contact, which is an invention: the original’s world render is gated on a predicate that never reads the radar bits, so a radar-only contact is not drawn there and cannot be clicked. The minimap is the only reader, and it draws a contact exactly as it draws a unit you can see</li>
+  <li>A cloaked unit looks cloaked. The original composites the whole unit into a private bitmap and then picks its blitter on the cloak flag, the cloaked one running every pixel through a 64K “ALPHA TABLE” that averages the unit with whatever is behind it — an even half blend, not a stipple and not a palette ramp on the model. Its own side sees that ghost; an enemy sees nothing at all, and there is no partial reveal up close, since the proximity rule drops the cloak itself rather than thinning it. RWE blends with alpha and a depth prepass instead of the lookup table, which is a different mechanism for the same look</li>
+  <li>…and an enemy’s cloaked unit is no longer drawn at all. It was still rendered, shadowed, clickable and able to be nanolathed while the simulation was already refusing to target it</li>
+  <li>Nukes and anti-nukes can be built and fired. The magazine, the cost ramp and firing from stock all worked, but nothing could queue a round: the button is not on the orders panel at all, it is a gadget on the launcher’s own build page — <code>ARMSILO1.GUI</code> flags it in a shipped comment — and RWE only ever read GUI pages for builders, while all six launchers declare <code>Builder=0</code>. An anti-nuke now intercepts: it is gated on <code>coverage</code>, a square half-extent tested against the incoming missile’s aim point rather than its position, and the kill is that an interceptor’s blast detonates every projectile inside its own area of effect</li>
+  <li>A damaged aircraft flies to a repair pad rather than setting down where it stands. A pad counts only while it is switched on, the search is flat distance with height ignored, and where two qualify the winner is drawn at random — including the original’s habit of not advancing its generator at all when there is only one candidate</li>
   <li>Jammers, stealth and cloaking. A jammer clears the radar-contact bit for everything inside its radius — it hides units rather than making false ones — and it jams allies but not its owner; a stealth unit is never a contact at all; and cloak is a per-second energy drain, five times as much moving, that fails all-or-nothing rather than part-paying. An enemy inside <code>MinCloakDistance</code> starts a three-second fuse rather than refusing the cloak outright</li>
 </ul>
 
@@ -220,8 +224,9 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Reclaim polish: sounds, progress in the info panel, auto‑reclaim for idle builders</li>
   <li>Self‑destruct blink effect; unit debris severity from actual overkill; SHATTER as real polygon fragments; explosions after a script's first sleep</li>
   <li>Fighters still fly the generic attack run rather than the original’s strafing pass, which overshoots to three times weapon range and breaks ninety degrees at random. Decoded, not ported</li>
-  <li>Nukes and anti-nukes cannot be built: the stockpile accumulates, costs and fires correctly, but no control on the panel queues a round, and interception is decoded and unported</li>
   <li>The reclaim rule <code>target+0x110 &amp; 3 == 2</code> is recorded as inference rather than implemented — three call sites all read as “airborne” but the writer was never found</li>
+  <li>Repair pads do not repair. A damaged aircraft now flies to one and sits on it; what the pad does after that was not followed through</li>
+  <li><code>upright</code>, <code>digger</code> and <code>norestrict</code> are decoded and left: RWE has no unit pitch or terrain conforming, one shadow path rather than two, and no unit restrictions screen to attach them to</li>
   <li><code>maneuverleashlength</code> is read but not enforced: an attack should break off once the unit strays that far from where it was standing when the order came</li>
   <li>F2 in‑game menu (#154); unit info panel completeness; build menu paging and queue badges; focused‑control highlight (#5, #6)</li>
   <li>Music playback and the unwired unit sounds</li>
