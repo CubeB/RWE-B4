@@ -771,7 +771,7 @@ namespace rwe
         /** The marching string of stars the original draws between queued waypoints. */
         void drawWaypointTrail(const Matrix4f& worldToUi, const SimVector& from, const SimVector& to);
 
-        void renderBuildBoxes(const UnitState& unit, const Color& color);
+        void renderBuildBoxes(const UnitState& unit, const Color& outerColor, const Color& innerColor);
 
         void attachOrdersMenuEventHandlers();
 

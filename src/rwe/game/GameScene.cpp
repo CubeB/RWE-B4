@@ -784,7 +784,7 @@ namespace rwe
         }
     }
 
-    void GameScene::renderBuildBoxes(const UnitState& unit, const Color& color)
+    void GameScene::renderBuildBoxes(const UnitState& unit, const Color& outerColor, const Color& innerColor)
     {
         auto worldToUi = worldUiRenderService.getInverseViewProjectionMatrix()
             * computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
@@ -806,15 +806,18 @@ namespace rwe
                 auto boxWidth = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
                 auto boxHeight = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits);
 
-                // The queued box is not one colour two pixels wide: it is two
-                // nested one-pixel outlines, and the darker of the pair is the
-                // INNER line -- confirmed against the real game, where the
-                // bright edge sits on the outside of the frame.
-                auto darker = Color(color.r / 2, (color.g * 3) / 5, color.b / 2);
-                worldUiRenderService.drawBoxOutline(topLeftUi.x, topLeftUi.y, boxWidth, boxHeight, color, 1.0f);
+                // Two nested one-pixel outlines with the darker line INSIDE.
+                // The exact colours came out of the binary at last: the
+                // "unwritable" interface colour table is written by 0x4AC7D0
+                // addressing it from a different base, a runtime nearest-match
+                // of GUIPAL.PAL into the screen palette. A selected owner's
+                // queue draws bright green over dark cyan; anyone else's
+                // draws bright blue over navy -- the teal tint in the
+                // screenshot was cyan, not a green.
+                worldUiRenderService.drawBoxOutline(topLeftUi.x, topLeftUi.y, boxWidth, boxHeight, outerColor, 1.0f);
                 if (boxWidth > 2.0f && boxHeight > 2.0f)
                 {
-                    worldUiRenderService.drawBoxOutline(topLeftUi.x + 1.0f, topLeftUi.y + 1.0f, boxWidth - 2.0f, boxHeight - 2.0f, darker, 1.0f);
+                    worldUiRenderService.drawBoxOutline(topLeftUi.x + 1.0f, topLeftUi.y + 1.0f, boxWidth - 2.0f, boxHeight - 2.0f, innerColor, 1.0f);
                 }
             }
         }
@@ -880,12 +883,11 @@ namespace rwe
         //
         // Each line is drawn twice: colour A overhangs the corners by a pixel,
         // colour B does not, which is where the little nubs come from. The
-        // original takes both from a colour table at globals+0xDCB that has no
-        // writer anywhere in .text -- every access to it is a read, so the
-        // palette indices could not be recovered without running the game.
-        // These are RWE's own greens, chosen to look like the original's.
-        auto colorA = ownerSelected ? Color(0, 255, 0) : Color(0, 160, 0);
-        auto colorB = ownerSelected ? Color(160, 255, 160) : Color(0, 96, 0);
+        // colours are the queued box's own, now exact: guicolours[3]/[10]
+        // for a selected owner, [1]/[9] otherwise, through the runtime
+        // GUIPAL nearest-match (0x4AC7D0).
+        auto colorA = ownerSelected ? Color(0, 128, 128) : Color(0, 0, 128);
+        auto colorB = ownerSelected ? Color(83, 223, 79) : Color(84, 84, 252);
 
         auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(footprintRect.x, footprintRect.y);
         topLeftWorld.y = simulation.terrain.getHeightAt(
@@ -1486,7 +1488,7 @@ namespace rwe
                 {
                     if (unit.isOwnedBy(localPlayerId))
                     {
-                        renderBuildBoxes(unit, Color(0, 0, 255));
+                        renderBuildBoxes(unit, Color(84, 84, 252), Color(0, 0, 128));
                     }
                 }
             }
@@ -1500,7 +1502,7 @@ namespace rwe
             // draw orders for all selected units
             for (const auto& selectedUnitId : selectedUnits)
             {
-                renderBuildBoxes(getUnit(selectedUnitId), Color(0, 255, 0));
+                renderBuildBoxes(getUnit(selectedUnitId), Color(83, 223, 79), Color(0, 128, 128));
 
                 if (selectedUnitId != hoveredUnit)
                 {
@@ -1570,10 +1572,14 @@ namespace rwe
             worldUiRenderService.drawTextCentered(uiPos.x, badgeY + (badgeHeight / 2.0f), std::to_string(secondsLeft), *guiFont);
         }
 
-        // Draw build box outline when a unit is selected to be built
+        // Draw build box outline when a unit is selected to be built.
+        // The original's cursor box is two nested one-pixel rectangles in
+        // ONE colour -- guicolours[10]/[4], which the runtime nearest-match
+        // mapping (0x4AC7D0, GUIPAL.PAL into the screen palette) lands on
+        // palette 233 bright green and 213 red.
         if (hoverBuildInfo)
         {
-            Color color = hoverBuildInfo->isValid ? Color(0, 255, 0) : Color(255, 0, 0);
+            Color color = hoverBuildInfo->isValid ? Color(83, 223, 79) : Color(171, 23, 0);
 
             auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(hoverBuildInfo->rect.x, hoverBuildInfo->rect.y);
             topLeftWorld.y = simulation.terrain.getHeightAt(
