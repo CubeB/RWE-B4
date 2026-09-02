@@ -922,7 +922,7 @@ stored `0x42C445` with the usual xor-and-xor bitfield insert) and
 `0x42C465`). **Both default to 2** — the `push 0x2` at `0x42C417` and
 `0x42C433`. The pipeline alignment is checked by the store immediately before
 them, `mov BYTE PTR [ebp+0x22f], al` at `0x42C422`, which is `bmcode` at the
-offset §19 already records.
+offset §25 already records.
 
 Values run 0, 1, 2 for both, and the buttons cycle them 0 → 1 → 2 → 0
 (`0x41A4F6`, a four-way jump over a global order state where 3 means "the
@@ -1027,13 +1027,226 @@ Deliberately not ported:
 - **`unitsOnly`, `turret`, `lineOfSight`, `minbarrelangle`.** Decoded far enough
   to say they are no part of this decision: `0x49ABB0` never looks at them.
 
-## 10. `turret`, and what a hull-mounted gun waits for
+## 10. Weapon target eligibility, `0x49ABB0` in full
+
+§9 gave this routine a sentence. It is the whole of "may this weapon shoot at
+that unit", it is asked of every candidate the auto-acquire considers, and two
+of its four rejections were missing from RWE. Here it is branch by branch.
+
+It is `stdcall(attacker, target, slot)` — `ret 0xc` at `0x49AC18`, with the
+three arguments loaded at `0x49ABB0`, `0x49ABC1` and `0x49ABE3`. The slot picks
+the weapon out of the attacker's three 28-byte weapon records, which begin at
+`unit+0x10`:
+
+```
+49abb0  mov  eax,[esp+0xc]              ; slot
+49abb7  and  eax,0xff
+49abc1  mov  esi,[esp+0x1c]             ; the attacker
+49abc6  shl  ecx,0x3 / sub ecx,eax      ; slot*7
+49abcb  mov  edi,[esi+ecx*4+0x10]       ; -> the weapon definition
+49abcf  mov  eax,[edi+0x111]            ; the weapon flags
+49abda  test dl,0x1                     ; bit 16, waterweapon
+49abdd  je   0x49acaf                   ; -> the dry branch
+```
+
+`0x49ADF0` immediately below it is the same address arithmetic on its own,
+returning `[weapon+0xdc]`, the range — which is how `0x40B7B0` gets the radius
+it hands to the candidate gather at `0x40B81F`.
+
+### The wet branch, `0x49ABE3` — a `waterweapon`
+
+```
+49abf3  mov  edx,[targetdef+0x241]
+49abf9  test edx,0x80000                ; bit 19, floater
+49abff  jne  0x49ac1b                   ; a floater is exempt
+49ac01  movzx bp,BYTE [world+0x1427f]   ; sea level
+49ac09  cmp  WORD [target+0x70],bp      ; the integer part of the target's y
+49ac0d  jle  0x49ac1b
+49ac0f  xor  eax,eax / ret              ; above water: reject
+```
+
+then, still on the wet branch:
+
+```
+49ac1b  test dh,0x10                    ; bit 12 of def+0x241, canhover
+49ac1e  je   0x49ac47
+49ac20  movsx ecx,WORD [targetdef+0x170]
+49ac2b  sar  ecx,1                      ; half the model height
+49ac2d  add  edx,ecx                    ;   + the target's y
+49ac37  cmp  edx,ecx / jle 0x49ac47     ; must still be under the surface
+49ac3b  xor  eax,eax / ret              ; reject
+```
+
+So a torpedo may reach anything at or below sea level, plus anything that
+`floater`s whatever its height; and a hovercraft, which sits *on* the surface
+with `y == sealevel`, is thrown out by the second test because half its model
+height is above the water. That is the well known immunity, and it is also what
+identifies `def+0x170`: only a height makes both tests read sensibly, and a
+zero there would leave hovercraft torpedoable.
+
+The two flag bits are settled in the parser, where the boolean helper's result
+is masked and shifted immediately after the call that read it, so the pipeline
+trap of §25 does not apply:
+
+| Key | String | Shifted at | Bit of `def+0x241` |
+|---|---|---|---|
+| `canfly` | `0x503B64` | `0x42C6F4` | 11 |
+| `canhover` | `0x503B58` | `0x42C727` | 12 |
+| `upright` | `0x503B50` | `0x42C746` | 20 |
+| `floater` | `0x503B48` | `0x42C779` | 19 |
+| `amphibious` | `0x503B3C` | `0x42C798` | 21 |
+
+`def+0x170` is the **integer part of the definition's height**: `0x489B5B`
+reads the whole 16.16 dword at `def+0x16E` against a sea level shifted left
+sixteen, and `0x486737` hands the word at `+0x170` to `0x482910` alongside
+`SightDistance`, which is the LOS update. It is written nowhere with an
+absolute displacement, so it is computed from the model at load rather than
+parsed from the FBI — *inference*, but the only reading that fits both uses.
+
+### The dry branch, `0x49ACAF` — everything else
+
+```
+49acbd  mov  cl,BYTE [world+0x1427f]    ; sea level
+49acc3  movsx edx,WORD [attacker+0x70]
+49acc7  movsx ebx,WORD [attackerdef+0x170]
+49acce  add  edx,ebx
+49acd0  cmp  edx,ecx / jg 0x49ace0
+49acd4  xor  eax,eax / ret              ; the SHOOTER is underwater: reject
+49acea  movsx edx,WORD [target+0x70]
+49acee  movsx ebp,WORD [targetdef+0x170]
+49acf5  add  edx,ebp
+49acf7  cmp  edx,ecx / jg 0x49ad07
+49acfb  xor  eax,eax / ret              ; the TARGET is underwater: reject
+```
+
+**This is the submarine rule.** A weapon that is not a `waterweapon` needs both
+ends of the shot out of the water, and "out of the water" is `y + height >
+sealevel` — the top of the model, not its origin. A submerged submarine fails
+it, so a tank, a Peewee or a laser tower is never offered one as a target. Note
+the asymmetry with the wet branch, which compares the raw `y` and not `y + h`:
+the original is deliberately generous about what counts as *in* the water and
+strict about what counts as *out* of it, so a thing sitting at exactly sea level
+is reachable by both kinds of weapon.
+
+Only then does the air rule run, and only on this branch:
+
+```
+49ad07  test eax,0x20000                ; bit 17, toairweapon
+49ad0c  je   0x49ad28
+49ad0e  mov  ecx,[target+0x110] / and ecx,0x3
+49ad17  cmp  cl,0x2 / je 0x49ad28       ; airborne
+49ad1c  xor  eax,eax / ret              ; reject
+```
+
+and then the ballistic arc, and then the range:
+
+```
+49ad28  shr  eax,1 / test al,0x1        ; bit 1, ballistic
+49ad59  push [weapon+0xc8] / push [weapon+0x68]
+49ad67  call 0x49a890                   ; solve the arc
+49ad6c  cmp  ax,0x8000 / jne ok         ; 0x8000 means "no solution"
+49ad7e  ...                             ; dx^2 + dz^2 <= range^2
+```
+
+The range test (`0x49AC47` on the wet branch, `0x49AD7E` on the dry one) is the
+same both times: the two position deltas are 16.16, each square is taken as a
+64-bit product and shifted right 32 (`__allmul` at `0x4E4400`, `__allshr` at
+`0x4E43D0` with `cl = 0x20`), which is the square of the distance in whole
+world units, and it is compared against `range * range`. **It is flat** — `dx`
+and `dz` only, `dy` never enters. A target directly overhead is at distance
+zero as far as this test is concerned.
+
+### The air rule only points one way
+
+This is worth being blunt about, because assuming the symmetry is easy and
+wrong. `toairweapon` is tested in exactly four places in the whole binary —
+`0x49AD07` here, and `0x43E5CF`, `0x43F184` and `0x43F1E1` in the attack-order
+builder — and every one of them asks the same question: *this weapon is
+anti-air, is the target in the air?* **Nothing anywhere refuses an ordinary
+weapon an airborne target.** There is no reciprocal flag, no unit category test
+in `0x40B7B0`, and no filter in the candidate gather `0x40AD80`, which walks the
+player's enemy list applying only a flat radius, the alive bit and bit 14.
+
+What keeps ground units off aircraft is the **preference**, and only the
+preference: sixty of the shipped units name `wpri_badTargetCategory=VTOL` and
+forty-four name `NoChaseCategory=VTOL`. §9 has the mechanism right — the
+bad-target bucket at `0x40BA13` is returned only when the good bucket is empty
+(`0x40BA4D`), so a unit with nothing else in range *does* shoot at the
+aeroplane. `armllt`, the Light Laser Tower, names `wpri_badTargetCategory=VTOL`
+and no `NoChaseCategory` at all, which is exactly why an LLT plinks away at
+passing aircraft in the original. Turning this into a veto would be a larger
+divergence than leaving it alone, so RWE leaves it alone.
+
+`NoChaseCategory` is a veto, but only over *going to look*: `0x40B7B0` tests it
+at `0x40B927`, under `cmp [esp+0x54],ebp` — only when the third argument is 0,
+the sight-range search. That is why a Peewee ignores an aircraft it would have
+to walk towards and still shoots one that comes to it.
+
+Only four shipped weapons set `toairweapon`: `armyork`, `armflak`, `corsent`
+and `corflak`. The Samson's `armtruck_missile` does not, so §9's "a Samson with
+no aircraft about still shoots at tanks" is right, and is a statement about the
+preference rather than about the flag.
+
+### What was wrong in RWE
+
+`GameSimulation::weaponCanHitUnit` implemented one of the four rejections:
+
+- a **non-`waterweapon` had no rule at all**, so a tank, a tower or a Peewee
+  would happily acquire a submerged submarine — the first reported bug, and
+  `0x49ACEA` is the line that forbids it;
+- a `waterweapon` tested only `target.y <= sealevel`, missing both the
+  `floater` exemption and the `canhover` half-height rejection, so a torpedo
+  would refuse a ship and accept a hovercraft;
+- nothing checked that the **shooter** was out of the water (`0x49ACC3`);
+- `toAirWeapon` was tested *instead of* the water rules rather than after them,
+  because it returned early. On the original's control flow the air test is
+  reached only on the dry branch and only once both height tests have passed.
+
+Separately, `UnitBehaviorService::findEnemyInWeaponRange` — the search behind
+the idle-aircraft engagement and the patrol break-off — ran **no eligibility
+test whatever**. The original has one acquisition routine, `0x40B7B0`, whose
+third argument changes only the radius and whether `NoChaseCategory` applies;
+`0x49ABB0` is called on both paths, at `0x40B914`. So in RWE an idle gunship
+carrying an anti-air weapon would break off at a ground unit and a patrolling
+unit would engage a submarine, neither of which the original can do.
+
+### Deliberately not ported
+
+- **The ballistic arc test** (`0x49A890`). RWE has no arc solver and aims its
+  ballistic projectiles from their own code; a reachability gate here would
+  need that solver first.
+- **The flat range test.** RWE measures the full 3D distance. The original's
+  `dx² + dz²` makes a target directly overhead free, which — given that nothing
+  else stops a ground weapon engaging an aircraft — would make ground fire at
+  aircraft *more* common than RWE's, not less.
+
+### One correction to §9
+
+§9 says the per-tick scan keeps an existing target "unless it has become
+allied, has left range, or is in that slot's bad-target set". The range half of
+that is not there. `0x4089A0` fetches the current target with `0x48A190` and
+then tests exactly three things before deciding to re-acquire:
+
+```
+408ac4  cmp BYTE [players + idx + 0x108],0 / jne drop   ; the target became allied
+408af2  test [def + 4*slot + 0x231], bit                ; it is in the bad-target set
+408aff  test BYTE [weapon+0x111],0x80 / test [target+0x10e],0x10  ; paralyzer, already paralysed
+```
+
+and `0x48A190` itself is a pure accessor — it checks `WORD [slot+0x6] ==
+0x8000`, the marker that says the slot holds a unit rather than a position,
+looks the unit id up in the table at `[world+0x14357]`, and returns. No
+distance is measured anywhere on that path. Dropping a target that has walked
+out of range must happen in the weapon's own service, if it happens at all;
+it is not part of the re-acquire decision.
+
+## 11. `turret`, and what a hull-mounted gun waits for
 
 `turret` is **bit 19 of `wdef+0x111`**, parsed at `0x42E8F9` — the key string is
 pushed there, the read follows at `0x42E906`, and `and eax,1 / shl eax,0x13` at
 `0x42E911`–`0x42E91A` puts it in place. The bits either side are `smoketrail`
 (18, key at `0x504150`) and `selfprop` (20, `0x50413C`), which agrees with the
-table in §19.
+table in §25.
 
 ### It chooses the weapon's fire handler
 
@@ -1126,7 +1339,7 @@ that tanks turn their bodies.
 
 It is a float in radians at `wdef+0xC8`, read at `0x42E724` and scaled by
 `ds:0x4FD260` = π/180, with a default of `-11.25` degrees supplied as the double
-`0xC026800000000000` pushed at `0x42E70F`. §19 has this right and the priorities
+`0xC026800000000000` pushed at `0x42E70F`. §25 has this right and the priorities
 note had it wrong twice over: `wdef+0xFE` is `holdtime`, and the field is not a
 clamp.
 
@@ -1169,7 +1382,404 @@ so it is a count of seconds stored as ticks. The same two weapons set it, both t
 
 ---
 
-## 11. What an aircraft does with nothing to do
+## 12. Where a shell actually lands, screen shake, and waterline
+
+Three keys that were parsed and thrown away — `accuracy`, `shakemagnitude` /
+`shakeduration`, and `waterline` — and, because the first of them could not be
+answered without it, the whole of the original's ballistic firing solution.
+
+The question that started this was a player's: *"Vulcan was very inaccurate over
+long distance, that might be intentional."* It is intentional, and it is
+`accuracy`. The rest of this section is the working.
+
+### The ballistic firing solution, `0x49A890`
+
+A ballistic weapon aims in two halves. The heading is a plain
+`atan2` (`0x49D5EE`), taken from the muzzle to the target and then relieved of
+the unit's own heading (`sub ax,[edi+0x66]` at `0x49D5F3`). The pitch is
+`0x49A890`, called at `0x49D614` with five arguments pushed at `0x49D60F`:
+
+```
+0x49A890(dx, dy, dz, weaponvelocity, minbarrelangle)
+```
+
+where `dx`/`dy`/`dz` are **muzzle minus target** (`0x49D5DA`–`0x49D5E6`, note
+the direction — it is not target minus muzzle) and `minbarrelangle` is the float
+at `wdef+0xC8`. It returns a 16-bit pitch, or **`0x8000` meaning "no solution",
+in which case the weapon does not fire at all** (`cmp ax,0x8000` at `0x49D61B`).
+
+The routine is IEEE double throughout. Writing `d` for the horizontal distance
+`hypot(dx, dz)` (`0x4FB440`), `s` for the speed and `G` for the per-tick
+gravity, it forms
+
+```
+D = (s² + G·dy)² − G²·(d² + dy²)          ; = s⁴ + 2·G·s²·dy − G²·d²
+```
+
+at `0x49A908`–`0x49A964`, gives up if `D < 0` (`0x49A966`), and then solves not
+for `tan(pitch)` but for the **square of the vertical launch speed**:
+
+```
+vy² = d²·(s² + G·dy ± √D) / (2·(d² + dy²))
+```
+
+taking `√` of that and dividing by the speed to get a sine, then `asin`
+(`0x4E67F0`, at `0x49A9C8` and `0x49A9FE`). Written out with `dy` flipped to the
+usual "target minus muzzle" sense, `D` is `s⁴ − 2gs²y − g²x²` — **exactly the
+discriminant RWE's `computeFiringAngles` already computes**, arrived at by a
+different factoring.
+
+Which root it uses is decided at `0x49AA11`–`0x49AA53` against two constants:
+`minbarrelangle` as a floor, and `0x4FDA80` = **π/4** as a ceiling. It tries the
+`+√D` root first and the `−√D` root second. Since the high root exceeds 45° for
+every target inside the gun's maximum range and only equals it exactly at that
+range, **the 45° ceiling means the high shot is always rejected and the original
+always fires the flat one** — the same choice RWE makes with `pitches->second`.
+The result is scaled to a 16-bit angle by `× 32768 × (1/π)` (`0x4FDA88`,
+`0x4FDA90`) and truncated (`0x4E43A0`).
+
+So there is no lofted artillery arc in Total Annihilation. Every ballistic gun
+in the game is a flat-trajectory direct-fire weapon whose barrel never goes above
+45°, and a target it cannot reach under that cap simply does not get shot at.
+
+### The original's trigonometry is coarse
+
+`0x4B70EF` (sine × length) and `0x4B7123` (cosine × length, the same table read
+a quarter turn along) index the table at `0x509F00` with
+
+```
+byteOffset = ((angle + 0x20) >> 6) & 0x3FE
+```
+
+The mask drops the low bit of a value that ranges over 0–1023, so the table is
+**512 entries per full turn** — confirmed by reading it: entry 0 is 0, entry 1 is
+101, entry 128 is `0x2000`, entry 384 is `−0x2000`, i.e. `round(8192·sin(2πk/512))`.
+The mantissa is 13-bit: `(table[i] × len + 0x1000) >> 13`.
+
+One table step is **128 of 65536, 0.703°**. Whatever the double-precision solver
+decides, the shell leaves the barrel on one of 512 headings and one of 512
+pitches. Replaying it, half a step of pitch moves the fall of shot by up to 98
+units for a Big Bertha and 180 for an Intimidator. RWE's `sin`/`cos` in
+`SimAngle.cpp` are `std::sin`/`std::cos` on a float, so RWE is *more* precise
+here than the original, not less.
+
+### `accuracy`, `WORD wdef+0x104`
+
+Parsed at `0x42EBFE` and stored at `0x42EC19` — §25's table is right, and the
+neighbouring `tolerance` `+0x106` and `pitchtolerance` `+0x108` are right too.
+The data file's own comment defines it: *"amount of accuracy in 64K deg that
+weapon is good for, 0 = 100%"*.
+
+There is exactly one reader, `0x49D6D7`, and it sits in the fire path **after**
+the aim has been solved and the unit's heading added to it (`0x49D6B4`), and
+**before** the spawn dispatch (`0x49D742`) hands off to the ballistic
+(`0x49CDE0`) or line-of-sight (`0x49C9C0`) spawn. Both of those read the aim
+angles straight back out of the weapon slot (`0x49CE4F`–`0x49CE5B`), so the
+jitter reaches every kind of projectile, not just ballistic ones.
+
+The whole of it, `0x49D6BC`–`0x49D73E`:
+
+```
+acc  = WORD[wdef+0x104]                        ; accuracy
+acc -= (health << 11) / maxdamage              ; 0x49D6C2-0x49D6CE, 0x49D6E7
+acc += 0x800                                   ; 0x49D6F5
+vet  = killcount / 3                           ; 0x49D6E0-0x49D700
+if (vet > 1) acc /= vet                        ; 0x49D702-0x49D711
+if (acc != 0) {
+    heading += rand(acc) - acc/2               ; 0x49D723-0x49D72F
+    pitch   += rand(acc) - acc/2               ; 0x49D733-0x49D73E
+}
+```
+
+Everything is 16-bit: `acc` lives in `cx`, the halving is an unsigned `shr` and
+the arithmetic is masked to 16 bits at each use, so the intermediate carry out of
+bit 15 that `add ecx,0x800` can produce is discarded.
+
+Three things fall out of that:
+
+- **The health term cancels at full health.** `(health << 11) / maxdamage` is
+  exactly `0x800` when `health == maxdamage`, so an undamaged unit gets its
+  weapon's `accuracy` unmodified. As it takes damage the term shrinks and the
+  error cone grows, by up to a full `0x800` — **11.25°** — at the point of death.
+  A half-dead Big Bertha's cone goes from 500 to 1524, three times worse.
+
+  None of this is conditional on the weapon having an `accuracy` at all. There
+  is no branch around the arithmetic and none around the health term, so
+  **every weapon in the game spreads as its owner is damaged**, including the
+  hundred and sixty that leave the key at zero — a weapon with `accuracy=0` is
+  perfect only while its owner is untouched. Given how carefully the term is
+  arranged to cancel at full health this looks deliberate rather than
+  accidental, but it is worth flagging as the one part of this section with a
+  large blast radius.
+- **Kills make a unit more accurate.** This is the veterancy the original
+  actually has: three kills do nothing, six halve the cone, nine divide it by
+  three. It is an integer divide, so it never reaches zero.
+- **Heading and pitch are drawn independently**, each uniform on
+  `[−acc/2, acc/2)` — two separate calls to `0x4B6C30`, which returns
+  `[0, n)`. The error is not a cone around the aim line; it is a rectangle in
+  (heading, pitch).
+
+### What that does to a long shot
+
+`ARMVULC_WEAPON` is not in the retail data — the Vulcan is a Core Contingency
+unit and its files live in `ccdata.ccx`. Read out of the archive, it is
+`range=3080`, `weaponvelocity=800`, `areaofeffect=100`, **`accuracy=800`**, on a
+unit with `MaxDamage=1400`. Its Core opposite number `CORBUZZ_WEAPON` (Buzzsaw)
+is `range=3800`, `weaponvelocity=900`, `areaofeffect=120`, `accuracy=800`. The
+two retail long guns are `ARM_BERTHACANNON` (4096, 800, AoE 80, `accuracy=500`)
+and `CORE_INTIMIDATOR` (5120, 1000, AoE 100, `accuracy=1000`).
+
+Transcribing `0x49A890`, the 512-entry sine table, the original's integration
+order and the `accuracy` draw into a standalone program and firing 50 000 rounds
+at each gun's full range over flat ground gives, in world units:
+
+| Weapon | range | AoE | `accuracy` | range error sd | range error min/max | lateral sd | lateral min/max |
+|---|---|---|---|---|---|---|---|
+| Vulcan | 3080 | 100 | 800 | 219 | −361 / +350 | 68 | ±132 |
+| Buzzsaw | 3800 | 120 | 800 | 277 | −519 / +393 | 84 | ±161 |
+| Big Bertha | 4096 | 80 | 500 | 114 | −234 / +163 | 57 | ±102 |
+| Intimidator | 5120 | 100 | 1000 | 407 | −687 / +743 | 141 | ±276 |
+
+The player's reading was right. A Vulcan firing at its own maximum range in the
+original puts its shells anywhere in a patch roughly 700 units deep and 260
+across, and its blast is 100 across. It is *supposed* to walk its fire over the
+target and connect only some of the time — which is what the quarter-second
+reload is for.
+
+### And what RWE does instead
+
+The same replay, run through RWE's own arithmetic — `computeFiringAngles` in
+float, `SimAngle`'s `std::sin`, and `updateProjectiles`' integration:
+
+| Weapon | TA solved pitch | RWE solved pitch | TA lands at | RWE lands at |
+|---|---|---|---|---|
+| Vulcan | 2968 | 2969 | 3083 (+3) | 3055 (−25) |
+| Buzzsaw | 2885 | 2885 | 3747 (−53) | 3771 (−29) |
+| Big Bertha | 4167 | 4168 | 4065 (−31) | 4071 (−25) |
+| Intimidator | 3184 | 3185 | 5173 (+53) | 5088 (−32) |
+
+**The two solvers agree to one part in 65536** — a twentieth of a degree, and in
+one case exactly. RWE's solver is not losing precision at long range and there is
+nothing to fix in it. `SimScalar` is a `float`, not a fixed-point type, and at
+these magnitudes single precision is comfortably enough: the largest intermediate
+is `s⁴ ≈ 5×10⁵`.
+
+Both engines land a little off the aim point, by 25 to 53 units on shots of three
+to five thousand, and for the same reason: a parabola integrated in whole ticks
+is not a parabola. They differ in the direction of the error because they take
+gravity at opposite ends of the tick — the original does `position += velocity`
+and *then* `velocity.y -= G` (`0x49BCE3`, `0x49BD3F`), while RWE does
+`velocity.y -= G` and then `position += velocity`
+(`GameSimulation.cpp:2957`, `:2996`). Neither is worth changing; both are an
+order of magnitude smaller than the scatter the original deliberately adds.
+
+So the honest answer to the question is that **RWE's long guns are not
+inaccurate, they are too accurate**, and the missing piece is a key that was
+being parsed and dropped on the floor.
+
+### `sprayangle`, `WORD wdef+0xEE`, and where RWE differs
+
+Parsed at `0x42E670`. It has exactly two readers, `0x49B8F1` and `0x49B911`, and
+both are inside the **burst-continuation** branch of the per-tick projectile
+update `0x49B720` — the branch entered only when the projectile's burst counter
+`proj+0x60` is non-zero. Two consequences that RWE does not currently match:
+
+- **`sprayangle` is the whole width of the spread, not the deviation either
+  side of the aim.** The original draws `rand(sprayangle) − sprayangle/2`,
+  uniform on `[−sprayangle/2, +sprayangle/2)`. RWE drew `[0, sprayangle]` and
+  flipped a coin for the sign, so every burst weapon in the game scattered
+  twice as wide as it should. All five weapons that set the key set it to
+  1024, so the spread was ±5.6° where it should have been ±2.8°. **Fixed.**
+- The original does not spray **the first shot of a burst**, only the
+  continuations — the readers are inside the branch guarded by a non-zero burst
+  counter. RWE sprays every shot. Recorded, not changed: unpicking it would
+  mean threading a shot index through the fire path for very little.
+
+The axis is the same in both: the original rebuilds `velocity.x` and
+`velocity.z` from the sprayed heading (`0x49B932`–`0x49B94B`) and leaves
+`velocity.y` alone, and RWE's `rotateDirectionXZ` likewise turns about the
+vertical only.
+
+### Screen shake, `DWORD wdef+0xCC` and `DWORD wdef+0xD0`
+
+`shakemagnitude` is read as an integer and stored at `0x42EC5A`;
+`shakeduration` is read as a **float**, multiplied by the 30.0 at `0x4FD250` and
+truncated (`0x42EC60`–`0x42EC70`), so it is seconds on the way in and ticks in
+the struct. §25's offsets are right.
+
+The reader is not obvious, because the weapon definition's own fields are only
+touched at one site and it is easy to miss. The way in is the string `NoShake`
+at `0x502444`, which has no absolute reference anywhere in `.text` — it is a
+console command, sitting in a table of twelve-byte `{name, handler, arity}`
+records at `0x501D38` alongside `Contour`, `ScrollSpeed`, `IFace` and `Give`.
+Its handler is `0x416E60`, and all it does is toggle **bit 4 of
+`WORD [globals+0x37F2F]`**.
+
+That bit is tested in exactly two places, `0x41C5E6` and `0x41C646`, which are
+the two halves of the shake:
+
+- `0x41C5E0(magX, magY, duration)` **sets** a shake: duration into
+  `[globals+0x1432F]` and `[globals+0x14333]`, the two magnitudes into
+  `[globals+0x14337]` and `[globals+0x1433B]`, and bit 0 of
+  `[globals+0x1434E]` to say a shake is running. Nothing calls it.
+- `0x41C640(magX, magY, duration)` **accumulates** into a shake, and is called
+  from exactly one place. If no shake is running it clears both magnitudes
+  first. Then it **averages the durations** — `(new + current) / 2`, an
+  arithmetic mean, at `0x41C67B`–`0x41C690` — and **adds** the magnitudes.
+
+The single caller is `0x499FBA`, in the projectile detonation routine, and it
+passes the weapon definition's own fields straight through:
+
+```
+0x499FAB  mov edx,[edi+0xd0]     ; shakeduration, already in ticks
+0x499FB1  mov eax,[edi+0xcc]     ; shakemagnitude
+0x499FB7  push edx               ; duration
+0x499FB8  push eax               ; magY
+0x499FB9  push eax               ; magX
+0x499FBA  call 0x41C640
+```
+
+`shakemagnitude` is pushed twice, so the horizontal and vertical amplitudes are
+always equal, and — this is the part worth knowing — **there is no falloff with
+distance.** The routine never looks at where the explosion was or where the
+camera is. A Big Bertha shell landing in the far corner of the map shakes the
+screen exactly as hard as one landing under the cursor.
+
+The consumer is `0x41C6F0`, which steps the shake on by one each time it is
+called. The original runs its simulation and its display at the same thirty a
+second so it makes no difference there which of the two you call it, but it
+does in RWE, where the display can be faster: `shakeduration` arrives as
+seconds multiplied by thirty, so RWE steps it on the simulation tick and a
+shake lasts the same time whatever the frame rate.
+
+```
+remaining = [globals+0x14333]
+if (remaining <= 0) { clear the running bit; return }
+ampX = magX * remaining / duration            ; 0x41C721-0x41C725
+ampY = magY * remaining / duration
+cameraX += rand() * ampX / 0x8000 - ampX/2    ; 0x41C737-0x41C755
+cameraY += rand() * ampY / 0x8000 - ampY/2    ; 0x41C757-0x41C775
+remaining--                                   ; 0x41C7A2
+```
+
+The amplitude ramps down **linearly** to nothing over the shake's life, and each
+frame's offset is uniform on `[−amp/2, amp/2)` — `0x4E4870` is a `rand()` with a
+`0x7FFF` ceiling and the divide by `0x8000` normalises it — applied to the two
+components of the camera's scroll position at `[globals+0x1431F]` and
+`[globals+0x14323]`, which is what `0x41C574` writes when the camera is moved
+normally. So it is a screen-space jitter of the scroll, not a change of view
+angle.
+
+Two details of the accumulate are worth having written down because they look
+like bugs and are not. The running duration at `[globals+0x1432F]` is read
+before it is written and is **never cleared**, even for a shake starting from
+nothing — so a weapon asking for two seconds of shake against a standing start
+gets one, and only a second explosion arriving while the first is still running
+gets anything near what it asked for. And because the durations are averaged
+rather than maxed, a small explosion landing during a big one *shortens* the
+big one.
+
+**Which weapons actually shake.** Every weapon in the shipped data that sets
+`shakemagnitude` is an explosion rather than a gun: `LARGE_BUILDING`,
+`LARGE_BUILDINGEX`, `ESTOR_BUILDING`, `BIG_UNIT`, `COMMANDER_BLAST`,
+`CRAWL_BLAST`, `ATOMIC_BLAST`, `EARTHQUAKE` and their variants — the things
+units name in `explodeas` and `selfdestructas`. Magnitudes are 8, 24 or 32 and
+durations 0.3, 0.5, 1.5 or 2 seconds. So the shake is something you feel when a
+big building or a commander dies, or when a nuke goes off, and never when
+artillery lands. RWE hooks both the projectile detonation and the unit death
+because the original's one call site covers both, but only the second will ever
+fire on stock data.
+
+RWE differs in one deliberate way: the original adds its offset to the scroll
+position every frame and never takes it off, so a long shake leaves the camera
+a little way from where the player parked it. RWE remembers the offset it
+applied and removes it before applying the next one, which gives the same
+jitter without walking the view away.
+
+### `waterline`, `BYTE def+0x22C`
+
+Stored at `0x42C259`, and it has the two readers §B named.
+
+`0x43D72E` is the one the key is named for. For a unit with the **`floater`**
+flag (flags word A, `def+0x241` bit 19, tested at `0x43D71E`) the height the
+movement code wants is clamped:
+
+```
+y = max(wantedY, seaLevel − waterline)
+```
+
+`seaLevel` is `BYTE [globals+0x1427F]`, in whole world units. The comparison is
+done in 16.16 and the clamp value is built at `0x43D734`–`0x43D745` by an
+idiom worth writing down, because taken literally it looks like nonsense:
+
+```
+mov eax,edx ; shl eax,0x10 ; sub eax,edx ; add eax,<sea> ; shl eax,0x10
+```
+
+That is `((w << 16) − w + s) << 16`. The `w << 32` term falls off the top of the
+register, so the low 32 bits are exactly `(s − w) << 16` — the compiler's way of
+negating `w` inside a value it is about to shift left by 16 anyway. Sea level
+minus the waterline, in 16.16. A floater is therefore never allowed to sit lower
+than `waterline` below the surface, and since everything else is pushing it down
+it settles exactly there. That is the depth the hull sits at.
+
+`0x43DBA9` is the second reader, and it turned out to be the more interesting
+one: it is the routine that calls the COB entry point **`setSFXoccupy`** (the
+string is at `0x505248`, pushed at `0x43DBE3` into `0x4B0A70`). It works out a
+state number 0–4 describing how the unit sits in the water and, if it has
+changed since last time (`[unit+0x10A]`, `0x43DBCC`), tells the script:
+
+```
+if (movementMode != 1 && movementMode != 2)        state = 0    ; 0x43DB84
+else if (unitY > seaLevel)                         state = 4    ; 0x43DB8C
+else {                                             state = previous
+    if (unitY - seaLevel > -5)                     state = 1    ; 0x43DB9C
+    if (unitY + waterline == seaLevel)             state = 2    ; 0x43DBB5
+    if (unitY + WORD[def+0x170] < seaLevel)        state = 3    ; 0x43DBC7
+}
+```
+
+`unitY` here is `WORD [unit+0x70]`, in whole world units, not 16.16. Note that
+the three tests in the last branch are not exclusive and do not start from
+zero — if none of them fires the unit keeps whatever state it had, which is a
+real quirk of the original and not a mistranscription. `WORD [def+0x170]` is not
+identified; it behaves like a hull height.
+
+State 2 — floating at exactly its waterline — is the settled-ship case, and is
+what a ship's script is waiting for before it starts emitting a wake.
+
+**Which of the two readers actually matters.** Twenty-one shipped units set
+`WaterLine` (submarines at 20, tidal generators at 8, floating shipyards at 1,
+up to 25) and eighteen set `Floater`, and **the two sets do not overlap at
+all** — checked over the whole of `rev31\UNITS`. So the floating clamp at
+`0x43D72E`, which is gated on `Floater`, only ever sees a `waterline` of zero
+and reduces to `max(wantedY, seaLevel)`, which is exactly what RWE already
+did. Everything the key visibly does, it does through `setSFXoccupy`.
+
+That is also why RWE does not apply the clamp. RWE's `floater` is not the FBI
+key: `LoadingScene_util.cpp:481` also sets it for anything whose yard map
+contains water, which catches every floating building — precisely the units
+that *do* set `WaterLine`. Feeding the clamp RWE's broader notion of a floater
+would sink floating shipyards and tidal generators by up to twenty-two units,
+which the original never does. So `waterline` is parsed and used for the water
+state, and how things float is left alone.
+
+### Recorded, not implemented
+
+- The ballistic spawn at `0x49CE62`–`0x49CE8A` sets the launch `velocity.y` to
+  `sin(pitch)·weaponvelocity − ([slot+0x10] / weaponvelocity)·G` rather than
+  plainly `sin(pitch)·weaponvelocity`. `[slot+0x10]` divided by a speed to give
+  something multiplied by a per-tick gravity has to be a distance, but taken at
+  face value with the flight time the correction is far too large to be the
+  half-tick term the integration order calls for, and no write to `[slot+0x10]`
+  was found to settle it. The term is left out of RWE; every number in the
+  tables above was computed without it, and the systematic errors it would have
+  to explain are only tens of units in any case.
+- The **console command table** at `0x501D38` is decoded far enough to name
+  `NoShake`, `Contour`, `ScrollSpeed`, `IFace` and `Give` and to find their
+  handlers. Nothing else was pulled out of it.
+
+## 13. What an aircraft does with nothing to do
 
 Two things the player reported, which turn out to be the same question asked
 twice: a bomber "immediately stops in place and lands" once its target is
@@ -1425,7 +2035,7 @@ Decoded here and deliberately **not** ported:
 
 - **The sight-range search `0x43B700`**, which is what both `VTOL_SeekAttack`
   state 1 and `VTOL_Standby` state 1 do before they fly anywhere. RWE has no
-  equivalent — see §21 — and its own idle weapon acquisition stands in.
+  equivalent — see §27 — and its own idle weapon acquisition stands in.
 - **The go-home-when-hurt branch.** Below 75 % health with an active repair pad
   within 3840, both the search circuit and the strafing pass abandon what they
   are doing and push a `VTOL_LANDING` on a pad chosen at random. RWE has no
@@ -1452,7 +2062,7 @@ the data. `VTOL_Standby` also decides whether an idle aircraft hops about or
 goes and lands, on `unit+0x8A`, and that half of it does not need `0x43B700` at
 all.
 
-## 12. Recoil
+## 14. Recoil
 
 Only some units rock when they fire, and the amount they rock by is a constant.
 
@@ -1487,7 +2097,7 @@ StartScriptByName("RockUnit", 0, 0, 2, eax, edi, 0, 0)   ; 0x4B0A70
 
 So `RockUnit(anglex, anglez)` is called with `anglex = -800·cos(bearing)` and
 `anglez = -800·sin(bearing)`. `slot+0x16` is the heading the fire handler
-worked out towards the target (§10), so the bearing is measured from the hull's
+worked out towards the target (§11), so the bearing is measured from the hull's
 nose and the hull heels away from wherever the round went: firing forwards
 lifts the nose, firing off the beam lifts that flank.
 
@@ -1558,7 +2168,7 @@ projectile, where RWE runs it once per burst.
 
 ---
 
-## 13. Thermal vents
+## 15. Thermal vents
 
 ### What a vent is
 
@@ -1722,12 +2332,341 @@ Not ported:
   shipped data is both, so the two agree on real data, and the extra conditions
   also guard the metal grid next to it.
 - **The burning-feature smoke** above, and the `treeburn` sound with it.
-- **Downwind drift**, as §21 already records for the rest of the smoke: RWE has
+- **Downwind drift**, as §27 already records for the rest of the smoke: RWE has
   no map wind, so a vent's plume goes straight up.
 
 ---
 
-## 14. Jamming, stealth and cloaking
+## 16. Wakes, thrust, and the small unit flags
+
+The five `emit-sfx` types RWE had never implemented. Wakes are behind every ship
+in the game, so this is the most visible of the remaining gaps.
+
+### The dispatch, `0x480EB0`
+
+`EmitSfx(pieceIndex, sfxType)` takes two arguments. Before it does anything else
+it asks whether the local player can see the unit (`0x465AC0`, tested at
+`0x480EEA`) and **returns doing nothing if not** — so the whole SFX system is
+client-side and no part of it is simulation state. That matches where RWE
+already puts it.
+
+It then takes the emitting piece's **first two transformed vertices**, adds each
+to the unit's world position with the z negated (`0x480F59`–`0x480FD8`), and
+jumps through the table at `0x481128`:
+
+| Id | Type | Handler | Spawner |
+|---|---|---|---|
+| 0 | `Vtol` | `0x481000` | `0x472330` |
+| 1 | `Thrust` | `0x48101F` | `0x472330` |
+| 2 | `Wake1` | `0x48103E` | `0x472430` |
+| 3 | `Wake2` | `0x48105B` | `0x472430` |
+| 4 | `ReverseWake1` | `0x481078` | `0x472430` |
+| 5 | `ReverseWake2` | `0x481095` | `0x472430` |
+
+`SFXTYPE_POINTBASED` (256) falls off the end of the dispatch and does nothing at
+all.
+
+### All four wakes are one routine with two knobs
+
+The four call sites differ in **exactly two** things: which of the two vertices
+is pushed first, and whether the second argument is 16 or 8.
+
+- `Wake1` → `(vertex0, vertex1, 16)`, `Wake2` → `(vertex0, vertex1, 8)`
+- `ReverseWake1` → `(vertex1, vertex0, 16)`, `ReverseWake2` → `(vertex1, vertex0, 8)`
+
+So **"reverse" is nothing but swapping the two vertices**, which turns the drift
+round. There is no test on speed, on throttle, or on the direction of travel
+anywhere in the engine — which of the four a ship uses is entirely its script's
+decision, and the script knows because the engine tells it through
+`setSFXoccupy` (see the `waterline` section).
+
+`Init` at `0x474760` normalises the difference between the two points and scales
+it by 32768 in 16.16 (`0x4747CC`–`0x474819`), so a dot drifts **half a world
+unit a tick whatever the distance between the vertices** — a modeller putting
+them further apart makes no difference to the speed. The `16`/`8` is the colour
+ramp period, and the life is six of those, 96 or 48 ticks. So a Wake1 dot
+travels 48 world units in its life and a Wake2 dot 24.
+
+Each call puts out **two dots: one immediately and one on the following tick**
+(`0x474872` emits, then `0x474AEE` sets the next due time to now + 1, and the
+emitter's end time is also now + 1, so it fires once more and never again).
+There is no cooldown; the repetition rate is whatever `sleep` the ship's script
+uses.
+
+The spawn point is jittered by `rand()*7/0x8000 − 3` — a **whole number of world
+units in [−3, +3], drawn independently for x, y and z** (`0x4749D9`, `0x474A00`,
+`0x474A27`). Note the y: the scatter is not confined to the horizontal.
+
+Per tick (`0x474580`) a dot moves by its velocity with **no gravity and no
+wind**, and steps its palette index one place every `rampPeriod` ticks. It dies
+either at its end time or, per `0x474720`, **the moment the terrain under it is
+at or above sea level** — which is what makes a wake stop cleanly at a shoreline
+instead of running up the beach behind the ship.
+
+### `Thrust` is `Vtol` with one number changed
+
+Both go to the spawner at `0x472330` with the vtable at `0x4FD5D8`, on render
+layer 7, and the only difference is the constant: **6 for `Vtol`, 7 for
+`Thrust`** (`0x481000` versus `0x48101F`). That number is used twice in `Init`
+at `0x4742C0` — as the divisor for the per-tick drift (`0x47432C`–`0x47438B`)
+and as the emitter's own lifetime (`0x4742CB`) — so a thrust plume is one puff
+longer and each puff moves slightly more slowly. Same `flamestream` sequence,
+same layer, same class.
+
+### A correction to §4
+
+§4 records that the wake emitter draws `smoke 1`, on the strength of the palette
+ramp being loaded at `0x474A7F`. The handle **is** written into the puff at
+`+0x00`, but none of the three routines that touch a wake puff — the per-tick
+step `0x474580`, the render `0x4745E0` or the death test `0x474720` — ever reads
+it. `0x4745E0` builds a one-pixel rectangle and calls `0x4BF6F0`, the generic
+palette-index rectangle fill, exactly as the nanolathe spray does at `0x473B1D`.
+**A wake dot is a single screen pixel of a solid palette colour, not a sprite.**
+
+§4's slot map is unaffected — the ordering argument for `smoke 1` at
+`globals+0x147CF` stands on its own from the loader at `0x429879`–`0x4298B8`.
+Only the corroborating remark about the wake using it is wrong.
+
+The colours are palette entries **97–103**, seven water blues, stepped from
+palest to deepest: `(203,227,255)`, `(175,207,255)`, `(151,179,255)`,
+`(123,151,255)`, `(103,127,255)`, `(83,107,239)`, `(63,91,227)`. Read out of the
+shipped `palettes/PALETTE.PAL`; entry 161 in the same file is `(171,231,127)`,
+which matches the nanolathe colour already in RWE and confirms the format.
+Submarine bubbles use the same class and the same seven entries walked the other
+way, starting at 103 with a step of −1 (`0x472584`, `0x4725A2`).
+
+### What RWE now does
+
+All five types are routed. Wakes are one function taking a reverse flag and a
+ramp period; `Thrust` is the existing VTOL emitter with the divisor passed in.
+The dot's colour steps discretely along the seven blues instead of fading, its
+drift is the original's half a unit a tick instead of a guessed third, its life
+is 96 or 48 ticks instead of a guessed 120, the jitter is whole units on all
+three axes instead of fractional ones on two, the second dot is laid a tick
+later rather than alongside the first, and a dot now dies when it drifts over
+land.
+
+Two things are left alone. RWE draws its dot as a small world-space quad rather
+than a literal screen pixel, which is the same choice it already made for the
+nanolathe spray. And the emission rate is still the script's, which is the
+original's behaviour anyway.
+
+### The small unit flags
+
+Six flags that the bit tables above name but that had never been followed to
+their readers. The parse sites are all in the FBI parser's long run of boolean
+keys, where the helper `0x4C46C0` leaves its answer in `eax` and the
+mask-and-shift follows immediately, so the §25 pipeline trap does not apply and
+each bit is unambiguous:
+
+| Key | String | Read at | Shifted at | Bit |
+|---|---|---|---|---|
+| `isairbase` | `0x503BC4` | `0x42C5DC` | `0x42C5F1` `shl eax,0x9` | `def+0x241` 9 |
+| `noshadow` | `0x503B24` | `0x42C7DC` | `0x42C7EA` `shl eax,0x19` | `def+0x241` 25 |
+| `digger` | `0x503AF0` | `0x42C880` | `0x42C895` `shl eax,0x1e` | `def+0x241` 30 |
+| `upright` | `0x503B50` | — | `0x42C746` | `def+0x241` 20 |
+| `norestrict` | `0x503620` | — | `0x42CB4B` | `def+0x245` 15 |
+| `cantbetransported` | `0x5039DC` | `0x42CBB1` | `0x42CBBF` `shl eax,0x13` | `def+0x245` 19 |
+
+Counted over the 189 FBIs of the extracted data RWE actually loads, which is
+the base game plus Core Contingency: `isairbase` 4 (ARMASP, CORASP, ARMCARRY,
+CORCARRY), `noshadow` 15, `upright` 28 set and 3 explicitly cleared,
+`norestrict` 6, `digger` 2 (ARMAMB, CORTOAST), `cantbetransported` 1
+(CORSUMO). The last two are worth the correction: earlier notes recorded that
+no shipped unit sets either, which is true of the base game on its own and not
+of the data on disk.
+
+### `isairbase`: a damaged aircraft goes home
+
+The definition bit is cached onto the instance as a unit is set up.
+`0x485AE7`–`0x485B03` takes `def+0x241 & 0x200`, shifts it left twenty-one and
+drops it into a cleared bit 30 of `unit+0x110`.
+
+Each player keeps a **list** of its own air bases rather than searching for
+them. `0x40AB96` onwards is the per-player sweep that also counts units by
+type, and three tests put a unit on the list at `0x40ABE4`:
+
+```
+40abc0  mov  eax,[def+0x241]
+40abc6  test al,0x40                ; builder
+40abca  test ah,0x2                 ; isairbase
+40abcf  test BYTE [unit+0x10e],bl   ; bl is 1, set at 0x40AAD0
+40abe4  call 0x408F30               ; push_back onto the vector at player+0x25
+```
+
+**`unit+0x10E` bit 0 is the on/off state.** `0x403010` ACTIVATE calls
+`0x48B090(1, 1)` and `0x403040` DEACTIVATE calls `0x48B090(1, 0)`; that routine
+writes the byte at `0x48B0D8`, and unit init zeroes it at `0x485B7F`. The same
+byte and bit gates the `istargetingupgrade` accumulator two instructions later
+at `0x40ABFE`, which is what settles that it means "switched on" rather than
+anything to do with visibility or ownership. So a pad that has been turned off,
+or one still going up and so never activated, is on nobody's list and nothing
+lands on it.
+
+The query is `0x40B530(playerIndex, position, radius, out)`. It walks that
+player's list, repeats the same three tests at `0x40B578`/`0x40B580`/`0x40B589`
+— the last against a literal `0x1`, which is what pins the bit — and keeps
+every unit inside the radius. The distance is flat: `0x40B5A0` reads only the
+x at `unit+0x6A` and the z at `unit+0x72`, multiplies each difference by itself
+as a 64-bit product and shifts thirty-two off (`0x40B5BB`–`0x40B5E3`), so the
+comparison at `0x40B5E9` is in whole world units squared. **`y` is never
+read**, so an aircraft is not pushed out of range by its own cruise altitude.
+
+Seven callers, and **all seven pass the same two numbers**: `0x41055F`,
+`0x4109B9`, `0x410F95`, `0x412613`, `0x412B91`, `0x413ADC`, `0x4153E3`. Each is
+preceded by the identical health gate,
+
+```
+410525  mov  eax,[def+0x1fa]        ; max hit points
+41052b  shr  eax,0x2
+41052e  lea  ecx,[eax+eax*2]        ; (max >> 2) * 3
+410531  cmp  edx,ecx                ; edx is WORD [unit+0x108], current health
+410533  jae  <skip>
+```
+
+so the threshold is **three quarters of maximum with the quarter truncated
+first**, and an aircraft sitting exactly on it is not hurt enough. The radius
+pushed is `0xf00` at every site and the query squares it at `0x40B542`:
+**3840 world units**.
+
+If the returned vector is not empty — `0x40C560` is its size — the caller picks
+**one at random, not the nearest**. `0x4B6C30(n)` returns zero without touching
+the generator at `0x51FC88` when `n` is below two, and otherwise steps it once
+and takes the remainder (`0x4B6C8C div edi`, `0x4B6C90 mov eax,edx`). The
+chosen unit becomes the target of a mission built from the string at
+`0x501B94`, **`VTOL_LANDING`** (`0x4105B9`, `0x41267B`).
+
+Four more readers hang off the same flag:
+
+- **On arrival**, `0x411E63`–`0x411ED3`: if the aircraft is below full health
+  (`WORD unit+0x108 < DWORD def+0x1FA`) and the mission's target is a
+  `builder && isairbase` whose build progress `unit+0x104` is exactly the float
+  at `0x4FCC40`, the aircraft is handed a further mission built from
+  `0x501C24`, **`SELFREPAIR`**.
+- **The cursor**, `0x43EA83`: the selected unit `canfly` (bit 11) with an
+  `isairbase` unit under the pointer gives cursor 13.
+- **The right-click**, `0x43F735`–`0x43F75E`, `0x43F959`–`0x43F977` and
+  `0x43FAEF`–`0x43FB19`: three separate arms of the order dispatcher test the
+  same pair and all jump to `0x43FB1B`, the `VTOL_LANDING` mission.
+- **Cargo**, `0x48AD0D`–`0x48AD1F`: a unit taken aboard something is unlinked
+  from the world by `0x4384A0` **unless** the thing holding it is an air base,
+  which is why aircraft parked on a carrier stay selectable.
+
+### `cantbetransported`, and the whole of `CanTransport`
+
+`0x489A90(this = transport, candidate)` in order:
+
+```
+489aa3  candidate def+0x245 bit 19  -> cantbetransported: reject
+489abe  transport def+0x245 bit 8   -> canload required
+489acb  walk transport+0x8A, next at +0x8E, owner back-pointer at +0x86,
+489aec  counting against BYTE transportdef+0x22B; >= rejects
+489afe  candidate must still exist
+489b0b  WORD candidatedef+0x14A <= BYTE transportdef+0x22A
+489b24  candidate unit+0x110 & 3 == 2 -> airborne: reject
+489b39  a transport that cannot fly also wants WORD candidatedef+0x1C0 < 0
+```
+
+Two offsets fall out of that and both need a second site, because the FBI
+parser pipelines its stores. `def+0x22A` and `def+0x22B` come from the same run
+of keys as `waterline`: the strings pushed are `0x503DC8` "waterline",
+`0x503DB8` "transportsize" and `0x503DA4` "transportcapacity", and under the
+§25 rule their values land at `0x42C259`, `0x42C26E` and `0x42C284`. That makes
+`def+0x22C` `waterline`, which §26 already had from elsewhere and which is the
+check that the pipeline is being read the right way round, `def+0x22A`
+**`transportsize`**, and `def+0x22B` **`transportcapacity`**.
+
+`def+0x14A` is not parsed from the definition at all. `0x42CD5D` copies
+`WORD [+0x4]` and `WORD [+0x6]` out of the **movement class** record into
+`def+0x14A` and `def+0x14C`, and the record's fallback builder `0x440340` —
+used when the FBI names no movement class — fills `+0x4` from the key at
+`0x505484`, `FootPrintX`, and `+0x6` from `0x505478`, `FootPrintZ`, each store
+immediately after its own call rather than pipelined. So the size test is
+**the candidate's footprint X against the transport's TransportSize**.
+
+Note what is *not* in that predicate: nothing asks whether the candidate is an
+aircraft, only whether it is currently airborne, and nothing asks whether it is
+mobile.
+
+### `noshadow` and `digger` are both shadow-pass flags
+
+Two passes, `0x459288`–`0x4592B6` and `0x4594A2`–`0x4594CA`, and they open
+identically: a global option `WORD [0x511DE8+0x37F06] & 4`, then bit 25 of
+`def+0x241`, then skip the draw. `digger` is tested only in the second, at
+`0x4594D0`, where it selects a path through `0x45A470` and changes one
+constant:
+
+```
+4594f2  shr eax,0x1e / and al,0x1
+4594f7  neg al / sbb eax,eax        ; 0 or -1
+4594fb  and eax,0x4b                ; 0 or 75
+4594fe  add eax,0x32                ; 50 or 125
+```
+
+**It is not a terrain flag.** All ten of its read sites are in that one pass.
+
+### `upright` and `norestrict`
+
+`upright` has exactly one reader, `0x48A8BF`, inside the per-tick ground
+placement `0x48A870`. Set, the unit stays vertical and takes its height from a
+single sample under the centre; clear, `0x48A8CD` falls through to `0x48A938`
+and thence `0x48A490`, which samples four rotated footprint corners and writes
+`WORD unit+0x68` pitch and `WORD unit+0x64` roll from the slope.
+
+`norestrict`'s four readers — `0x44C15F`, `0x44C4EA`, `0x44C73A`, `0x44CA59` —
+are all the Unit Restrictions screen, which skips definitions carrying the bit
+so a host cannot switch them off.
+
+### What RWE now does with them
+
+- **`isairbase` is in.** `findAirBaseToLandOn` in `UnitBehaviorService_util.cpp`
+  is the original's predicate and query together: below three quarters health
+  with the quarter truncated first, the owner's own `Builder` `IsAirBase` units
+  that are activated and alive, within 3840 flat world units, and a draw taken
+  with a modulo that skips the generator entirely when there is only one
+  candidate — which every peer has to agree about or the simulations part
+  company. The choice is remembered in `NavigationStateMovingToLandingSpot`,
+  which is what stops it being re-rolled every tick the way the original's
+  one-off mission swap does.
+- **`cantbetransported` is in**, in the load handler and in the AI's ferry
+  candidate filter, so the AI cannot book a passenger the simulation will then
+  refuse and leave the transport hovering over it for ever.
+- **`noshadow` is in**, as `unitCastsShadow` in `GameScene_util.cpp`.
+
+And what was already right: RWE's transport eligibility had the capacity count,
+the alive test and a size test, and `CanLoad` already gated the order button.
+Its size test measures `max(footprintX, footprintZ)` where the original
+measures footprint X alone — of the twelve shipped units with a non-square
+footprint every one is a building, so the two readings never disagree on real
+data, and the difference has been left where it is. RWE also refuses a
+candidate that is not mobile, that `canFly`, or that is itself a transport,
+none of which the original asks; those are older choices and were left alone
+too.
+
+### Not ported
+
+- **`digger`.** RWE has one shadow path and no projection constant to swap, so
+  there is nothing for the flag to select. It has no global shadows option
+  either, which is why `unitCastsShadow` is only ever asked about the unit.
+- **`upright`.** RWE does not conform anything to the ground: `UnitState`
+  carries a `roll` for the aircraft bank and no pitch at all. The flag chooses
+  between two ground-placement routines neither of which RWE has, so honouring
+  it would mean writing terrain conforming first.
+- **`norestrict`.** There is no Unit Restrictions screen for it to hide a unit
+  from.
+- **The `VTOL_LANDING` cursor and the right-click.** RWE's `CursorType` has no
+  landing cursor and no sprite loaded for one, and a player cannot yet send an
+  aircraft to a pad by hand — only the idle path does. The three dispatcher
+  arms above are where that would go.
+- **`SELFREPAIR`.** What the pad does once the aircraft is on it was not
+  followed past the mission push at `0x411ECE`, so RWE's pads still mend
+  nothing. Everything that gets the aircraft there is in; this is the piece
+  left.
+- **The air base list itself.** RWE walks the unit map where the original keeps
+  a per-player vector. The answer is the same and the walk only runs while a
+  damaged aircraft has nothing else to do.
+
+## 17. Jamming, stealth and cloaking
 
 Three keys that change who can see or shoot whom. They are one section because
 the original answers all three in one routine — the per-tick visibility pass at
@@ -1736,7 +2675,7 @@ query that `GameSimulation::updateVisibility` builds and `canDetectUnit` reads.
 
 ### The field offsets
 
-Read off the FBI parser under the pipeline rule §19 describes — a key's value is
+Read off the FBI parser under the pipeline rule §25 describes — a key's value is
 stored *after the next key's push* — and cross-checked against the
 definition-copy routine at `0x42B68F`–`0x42B6DF`, which moves the same run of
 words with the same widths.
@@ -2106,7 +3045,386 @@ Still unported from this reading:
   skipping only the viewer's own jammers, so allies do jam each other; it is
   recorded here in case it ever looks like a bug.
 
-## 15. Stockpiled weapons and interception
+## 18. Where a radar contact is drawn, and where it is not
+
+### The main view never sees one
+
+The world render does not walk the unit list. It consumes a list rebuilt once a
+frame and reads it at `0x4697B7` for the Z buckets and again at `0x469C16` for
+the health-bar pass; every `0x118`-stride walk inside `0x468CF0`–`0x469D1F` is
+over that list. The list lives at `world+0x1435F` with its count at
+`world+0x14367`, allocated at `0x485590` under the tag `"HOT UNITS"`
+(`0x508BC8`).
+
+`0x48BAE0` builds it. Per unit: skip an empty slot (`0x48BB3E`), cull against
+the screen rectangle `world+0x37E27` (`0x48BBD2`–`0x48BC3B`), admit the
+viewer's own unit unconditionally (`0x48BC42`), and otherwise
+
+```
+48bc56  call 0x465AC0        ; the can-see predicate
+48bc5b  test eax,eax / je skip
+48bc63  ...                  ; append WORD unit+0xA8
+```
+
+`0x465AC0` **never reads the radar bits**. It tests own-unit (`0x465AD4`),
+cloak (`unit+0x10E` bit 2, `0x465AE8`), the sonar bit for a submerged unit
+(`0x465B38`), and then the line-of-sight grid or the explored bitmask directly
+(`0x465B5C`, `0x465C04`, `0x408090`). A unit whose only claim on the viewer is a
+radar contact is therefore not in the list, is not drawn, and is not pickable:
+the 3D cursor pick `0x48CD80` iterates the same list (`0x48CDBD`–`0x48CE97`).
+
+There is one HUD response, and it is not in the viewport. The info panel's
+"unit under cursor" branch `0x46AEE0` calls `0x465AC0` at `0x46AF3D` and on
+failure falls to `0x46B6F3`, which picks the prefix `"R: "` (`0x50786C`) or
+`"S: "` (`0x507870`) on `unit+0x110` bit 9 and prints `"Unidentified object"`
+(`0x507858`). So hovering a blip names it as unidentified rather than showing
+nothing — but the hover can only come from the minimap.
+
+### The minimap draws one exactly like anything else
+
+`0x466DC0`, called once a tick for the local player only (`0x465072`, guarded
+at `0x46506A`) and again after a fog-mode rebuild (`0x48191F`). The gate is
+
+```
+466e64  eax = unit+0x110
+466e6a  test ah,0x3          ; bit 8 or bit 9
+466e6d  jne draw
+466e6f  owner == viewer ? draw : skip
+```
+
+and that is the **only** place in the binary that reads those bits raw. The
+sprite is the GAF animation `radlogo` (`world+0x147DF`, loaded by name at
+`0x42990D`), frame = the owner's colour byte, blitted at `0x466ECC`–`0x466F0B`.
+In the shipped `anims/FX.GAF` it is ten frames, every one **4×4 pixels**,
+hotspot (1,1): a two-by-two block of the player's colour inside a ring of
+palette index 89, with the corners transparent. Nothing between `0x466E4E` and
+`0x467135` distinguishes a radar contact from a unit in plain sight — same
+sprite, same size, same colour.
+
+Position is `x·mmW/worldW` and `(z − y/2)·mmH/worldH` (`0x466E83`–`0x466EB7`),
+the same projection the 3D view uses, so an aircraft's blip sits above its
+ground position by half its altitude.
+
+The hovered unit additionally gets `radlogohigh` (`world+0x147E3`, 6×6, hotspot
+(2,2)) — a ring around the dot — and a selected unit gets its radar, sonar, jam
+and weapon range rings (`0x466F42` onwards).
+
+**The blink is not about radar.** `0x466EB9` skips the blip on alternate phases
+only when `unit+0xFA` is non-zero:
+
+```
+466eb9  mov al,BYTE [unit+0xfa]
+466ec1  je draw                        ; timer zero -> always drawn
+466ec3  test BYTE [world+0x142f1],0x1  ; the global blink phase
+466eca  je skip
+```
+
+`unit+0xFA` is a **just-damaged** timer, set to `0xF0` (240 ticks, eight
+seconds) by `0x467950` from the damage applier `0x489CE0` at `0x489D8E`,
+decremented per tick at `0x48ADF0` and cleared on unit init at `0x485C12`. The
+phase bit `world+0x142F1` is flipped every eight ticks by `0x466580`
+(`0x4665A9`–`0x4665BB`), called per tick from `0x4955E5`. So a blip flashes at
+roughly two hertz for eight seconds after the unit is hit, whether it is a radar
+contact or a unit you can see, and a quiet radar contact does not flash at all.
+
+### Nothing stored says "radar only"
+
+`0x467440` recomputes the picture once a tick for the local player alone
+(`0x46745B`) and writes the result into `unit+0x110`: loop 0 clears bits 8–10
+for everyone else and sets 8 and 9 for own and vision-sharing units
+(`0x4674EF`, `0x4674F6`), loop 1 sets bit 9 for sonar and bit 8 for radar
+(`0x4678FF`, `0x467937`), loop 2 lets jammers clear them, and **loop 4 sets bit
+8 again from line of sight** (`0x46780E`).
+
+That last one matters: **bit 8 is not "radar contact", it is "on my picture at
+all"**. The difference between radar and sight is not stored anywhere — it is
+recomputed on demand by calling `0x465AC0`, which is what the render list does.
+The AI does the same, building two lists in `0x40AA40`, one gated on can-see
+(`0x40AB11`) and one on bit 8 (`0x40AB3F`).
+
+This also corrects §17, which says "line of sight is `unit+0x9C`". There is no
+such field: loop 4 biases its cursor by `lea esi,[edi+0x74]` at `0x46770D`, so
+its `[esi+0x9C]` is `unit+0x110` and its `or ebp,0x100` at `0x46780E` is setting
+bit 8 of the same flags word everything else uses.
+
+### What RWE was doing
+
+`GameScene::renderWorldUi` drew, for every radar-only contact, a coloured
+minimap dot and a white box outline in world UI space. That is an RWE
+invention with nothing behind it in the original, and it is gone. RWE's minimap
+already draws radar contacts through `unitIsDetectableByLocalPlayer`, which is
+the right gate, and already rings the hovered one — so the minimap half was
+right all along and only the main view needed taking away.
+
+### Not ported
+
+- **The damage flash.** RWE's minimap dots do not blink. The timer and the
+  eight-tick phase are decoded above; there is no `unit+0xFA` equivalent in the
+  simulation and adding one is a bigger change than the complaint asked for.
+- **"R: Unidentified object".** RWE's info panel has no unknown-contact
+  state.
+- The minimap does **not** test cloak in the original (`0x466E4E`–`0x466ECC`
+  never reads `unit+0x10E`, and the radar visitor `0x467840` skips only
+  `stealth`), so a cloaked enemy inside your radar range still shows a blip
+  there while being invisible in the world. That reads as an oversight rather
+  than a design decision and RWE does not copy it.
+
+## 19. The order panel, and which flag gates which button
+
+Every side loads one panel — `ARMGEN.GUI` or `CORGEN.GUI`, via `0x41B0F0` —
+carrying every order button there is. The game then takes away or greys out
+what the current selection cannot use. There is no per-unit order panel.
+
+### `def+0x245` in full
+
+§9 gave bits 0–8, 10 and 11 of this dword and called bit 4 `canattack`. Here is
+the whole of it. The parser's boolean helper leaves its result in `eax`, so the
+key pushed immediately before the `call 0x4C46C0` owns the `shl` immediately
+after it, and the pipeline trap of §25 does not apply.
+
+| Bit | Key | `shl` at | Second site |
+|---|---|---|---|
+| 0 | `mobilestandorders` | `0x42C8DB` insert | `0x48D104`, under a name compare against `Standing_MoveOrder` |
+| 1 | `firestandorders` | `0x42C8FF` | `0x48D0D7`, likewise for `Standing_FireOrder` |
+| 2 | `onoffable` | `0x42C8BE` | `0x403010` ACTIVATE / `0x403040` DEACTIVATE |
+| 3 | `canstop` | `0x42C92B` | **none** — the order panel is its only reader |
+| 4 | `canattack` | `0x42C94A` | `0x43F154`, `0x401F98` |
+| 5 | `canguard` | `0x42C970` | `0x43E615`, `0x43F4C7` |
+| 6 | `canpatrol` | `0x42C996` | `0x43E5DE` picks cursor 7 over cursor 19 |
+| 7 | `canmove` | `0x42C9C3` | `0x43FE03`, `0x44019D` |
+| 8 | `canload` | `0x42C9E2` | `0x4067C4` the load handler, `0x489ABE` the transporter half of the predicate |
+| **9** | **no key: a copy of bit 10** | `0x42CA3D`–`0x42CA4F` | `0x4899CC`, the can-repair predicate |
+| 10 | `canreclamate` | `0x42CA0F` | `0x48996C` can-reclaim, `0x43FA13` the RECLAIMUNIT mission |
+| 11 | `canresurrect` | `0x42CA2E` | `0x43FF46` → the `RESURRECT` mission |
+| 12 | `cancapture` | `0x42CA72` | `0x4042CF` the CAPTURE handler; also used as a cheap "is this a commander" |
+| **13** | **no key: `cloakcost > 0`** | `0x42CA93` | `0x403080` CLOAK_ON, `0x4676AE` in the cloaked-unit render |
+| 14 | `candgun` | `0x42CABA` | `0x43F7EE` → the `ATTACKSPECIAL` mission |
+| 15 | `norestrict` | `0x42CB4B` | `0x44C165`, the restriction table UI |
+| 16 | `wacky` | `0x42ADC0` (first-pass loader only) | `0x46D33C` — read, meaning unrecovered |
+| 17 | `showplayername` | `0x42CB77` | `0x46AF64` |
+| 18 | `commander` | `0x42CB96` | only jointly with 17 at `0x46AF56` |
+| 19 | `cantbetransported` | `0x42CBBF` | `0x489AA3`, the passenger half of the load predicate |
+| 20–22 | `selfdestructcountdown` | `0x42CBFA`, default 5 at `0x42CC13` | `0x40202D` |
+
+Two entries in that table are not keys at all and are the reason two buttons
+have no FBI field behind them:
+
+```
+42ca3d  and ah,0xfd        ; clear bit 9
+42ca40  shr edx,1
+42ca42  and edx,0x200      ; bit 10 -> bit 9
+42ca4d  or  edx,eax
+```
+
+**Bit 9 is `canreclamate` copied**, and `0x4899CC` — the routine that decides
+whether a unit may repair another — is what reads it. So REPAIR and RECLAIM are
+the same flag twice and always appear together. Likewise **bit 13 is
+`CloakCost > 0`** (`0x42CA5A`–`0x42CA96`, comparing the float at `def+0x1DA`
+against the zero at `0x4FD210`); there is no `Cloakable` key in the binary at
+all, which is why honouring one gives the button to nothing.
+
+The layout is confirmed away from the parser by the field-by-field definition
+copy at `0x42BAC1`–`0x42BCAD`, which moves bits 0–19 as twenty separate one-bit
+members and then `0x700000` as a single three-bit group, and stops there.
+
+Shipped-data check, 189 FBIs: `canload` is exactly `armatlas`, `armtship`,
+`cortship`, `corvalk`; `cancapture` and `candgun` are exactly the two
+commanders; `canresurrect`, `wacky`, `selfdestructcountdown` and `cloakable`
+are named by nothing at all.
+
+### A mixed selection: ANY, not ALL
+
+`0x41B2E0` walks the local player's units (stride `0x118`, from `player+0x67`
+to `player+0x6B`), skipping any without `unit+0x110` bit 4 — selected. It keeps
+two different kinds of accumulator, and the difference is the whole answer.
+
+**The ten capability bits are a plain OR.** `0x41B49F`–`0x41B524` is ten
+repetitions of `shr edi,N / test cl,1 / je skip / mov <slot>,esi` with
+`esi = 1`, and **nothing ever clears a slot**:
+
+| bit | flag | address |
+|---|---|---|
+| 7 | `canmove` | `0x41B4A1` |
+| 3 | `canstop` | `0x41B4AE` |
+| 4 | `canattack` | `0x41B4BC` |
+| 5 | `canguard` | `0x41B4C9` |
+| 6 | `canpatrol` | `0x41B4D7` |
+| 8 | `canload` | `0x41B4E4` |
+| 9 | repair | `0x41B4F2` |
+| 12 | `cancapture` | `0x41B4FD` |
+| 10 | `canreclamate` | `0x41B50B` |
+| 14 | `candgun` | `0x41B518` |
+
+So a button is offered when **any** selected unit names it. Boxing a solar
+collector in with a squad of Peewees does not cost the Peewees their move
+button, and one transport in the box puts LOAD up for the lot.
+
+**The four stateful toggles are a sentinel accumulator**, which is the shape
+§9 already described for the two mode buttons: fire orders start at 4, move
+orders at 4, cloak and on/off at 3; a unit that does not name the flag is
+skipped entirely (`0x41B403`, `0x41B42C`) so it cannot drag the shared state;
+the first offerer's value is taken; a later disagreement collapses to 3
+(`0x41B420`, `0x41B449`) or 2. The sentinel means "nobody offered it" and greys
+the button out (`0x41A243`, `0x41A280`).
+
+The cloak accumulator has a bug worth not copying: `0x41B485`–`0x41B497` does
+not compare at all, so a **second** cloakable unit sets "mixed" even when the
+two agree. On/off, three instructions away at `0x41B893`, does compare.
+
+Results are packed into `world+0x37EC0` (move-order 0–2, cloak 3–4, on/off 5–6,
+canmove 7, canstop 8, canattack 9, canguard 10, canpatrol 11, canload 12,
+canreclamate 13, cancapture 14, repair 15), `world+0x37EBE` bits 12–14 (fire
+order) and `world+0x37EC2` bit 0 (candgun).
+
+### Hidden versus greyed, and the slot LOAD and BLAST share
+
+`0x41A120` is the enable pass — seventeen hardcoded name lookups, each followed
+by one bit test. Almost everything is **greyed**, via `0x4A1200(page, idx, 1)`
+which sets bit 0 of `WORD [ctrl+0x13C]`: MOVE at `0x41A2E8`, STOP `0x41A310`,
+ATTACK `0x41A338`, DEFEND `0x41A35F`, PATROL `0x41A387`, and RECLAIM, REPAIR
+and CAPTURE the same way.
+
+LOAD and BLAST are the exception, because **they are the same slot**: in
+`ARMGEN.GUI` `ARMLOAD` and `ARMBLAST` are both at `xpos=64, ypos=317`, same
+width and height. `0x41A409` resolves it on the ORed `canload` bit —
+
+- nothing can load: LOAD is made inactive (`0x4A03F0(page, idx, 0)`, which
+  writes `BYTE [ctrl+0x29]`), UNLOAD is greyed, BLAST is greyed unless
+  `candgun`;
+- something can load: **BLAST is made inactive** and LOAD and UNLOAD stand.
+
+So selecting a commander together with an Atlas costs you the D-gun button.
+
+One trap for anyone reimplementing this: `0x49FE60` finds a control by
+`strstr`, not by name equality, so `"MOVE"` also matches `ARMMOVEORD` and
+`"LOAD"` also matches `ARMUNLOAD`. It only works because the shipped GUI files
+happen to list the short name first.
+
+### What RWE was doing
+
+`GameScene::createOrdersPanel` gated LOAD, UNLOAD, BLAST and CLOAK, and only
+when **exactly one unit was selected**; a selection of two or more got the raw
+`ARMGEN.GUI` with every button on it, which is the reported complaint. It also
+gated LOAD on having transport capacity rather than on `canload` (the same four
+units in the shipped data, but not the same rule), and gated nothing at all on
+`canstop`, `canpatrol`, `canattack`, `canmove`, `canguard`, `canreclamate` or
+`cancapture` — four of which RWE was not even reading out of the FBI.
+
+It now builds the list of selected definitions and applies
+`selectionOffersOrderButton`, which is the OR above.
+
+### Deliberately not ported
+
+- **Greying.** RWE has no disabled state for a `UiStagedButton`, so a button
+  the selection cannot use is removed rather than drawn dim. Recorded here so
+  it is not mistaken for the original's behaviour: the original greys
+  everything except LOAD and BLAST, which it hides because they overlap.
+- **The cloak accumulator's disagreement bug** at `0x41B485`.
+- **`canresurrect`, `wacky` and `selfdestructcountdown`.** No shipped unit
+  names any of them and RWE has no resurrect order.
+- **`canstop`.** It is parsed and honoured for the button, but the original's
+  own STOP mission builder at `0x43F82C` does not check it, so the flag gates
+  the button and nothing else.
+
+## 20. Who may reclaim, and who may not be reclaimed
+
+`canreclamate` is flags word B **bit 10** (parser: push `"canreclamate"`
+`0x503A74` at `0x42C9EF`, `shl eax,0xa` at `0x42CA0F`, store `0x42CA1A`).
+
+### One key, two capabilities
+
+The parser does something easy to miss. Immediately after storing bit 10 it
+**mirrors it into bit 9** (`0x42CA3B`-`0x42CA4D`:
+`mov edx,eax; and ah,0xfd; shr edx,1; and edx,0x200; or edx,eax`). Bit 9 is
+the *repair* capability, and the two are read by different routines:
+
+| Routine | Address | Tests |
+|---|---|---|
+| `CanReclaimTarget(reclaimer, target)` | `0x489960` | bit 10 at `0x48996C` |
+| `CanRepair(...)` | `0x4899B0` | bit 9 at `0x4899CC` |
+
+So a single FBI key governs both, and **`workertime` is never consulted by
+either**. RWE had been gating both on `workerTime` alone.
+
+That is not a distinction without a difference. Sixteen units in the base game
+set `CanReclamate=1` -- the Arm and Core commanders, construction kbots,
+vehicles, aircraft and ships. **Twenty-one more have a non-zero `WorkerTime`
+with the bit clear**: every factory, both air repair pads, both carriers, and
+CORSOLAR. Every one of those could reclaim and repair in RWE and cannot in the
+original. No unit has the bit set with a zero worker time.
+
+The same bit is tested again in the order-issue dispatch at `0x40477A` and
+`0x404B6E`, which is where the refusal is announced: `0x50164C` "That unit
+cannot be reclaimed" and `0x501638` "Reclamation failed".
+
+### The target side
+
+`0x489960` makes two further checks on the target once the reclaimer has
+passed:
+
+- **`target+0x110 & 3 == 2`** rejects (`0x48997B`-`0x489981`). The low two bits
+  of `unit+0x110` are a physical-mode field that is *not* the movement or
+  firing mode at bits 18-21. Value 1 is "on the ground" -- the per-tick ground
+  placement routine `0x48A870` requires it at `0x48A8AE` -- and value 2 is
+  tested here, in `0x401C48` where it gates allocating an air-movement
+  structure for a `canfly` unit, and in the `setSFXoccupy` cascade at
+  `0x43DB7A`. Everything points at 2 meaning **airborne**, which would make
+  this "you cannot reclaim a unit that is in the air" -- but that is inference
+  from three call sites, not a decode of the writer, which was not found.
+  **Not implemented on that basis.**
+- **the target's `cancapture`** (flags B bit 12) rejects (`0x48998F`,
+  byte-verified as `F6 C4 10`). The capture handler mirrors it at
+  `0x4042E3`-`0x4042F5` with `0x501618` "That unit cannot be captured". Only
+  ARMCOM and CORCOM set the key, so what the rule amounts to in play is that
+  **a Commander can capture, and can itself be neither captured nor
+  reclaimed**.
+
+Both the reclaimer gate and the `cancapture` rule are implemented; finishing
+somebody's half-built structure is construction rather than repair and is
+deliberately left outside the gate.
+
+### `selfdestructcountdown`, and why RWE's five seconds was already right
+
+Flags B bits 20-22, parsed at `0x42CBC8`. The part worth recording is the
+**absent** case at `0x42CC07`: `and edx,0xffdfffff; or edx,0x500000` sets the
+field to **5**. So the original's own default is five seconds and RWE's
+hardcoded five is already correct -- there was nothing to change.
+
+An explicit `0` is *not* "use the default": `0x402053` tests the field and
+detonates immediately with no announcement. Otherwise the reader `0x402010`
+counts down one step a second (`push 0x1E` = 30 ticks into `0x439E80` at
+`0x4020F6`), announcing five, four, three, two, one, zero from a message table
+based at `0x5086D8`, and then waits a further `rand(0..14)` ticks
+(`0x402117`) before dealing **30000** damage (`0x40213C`) -- which is exactly
+the armour-bypass threshold at `0x489BD1`, tying it to the D-gun finding in
+the damage section. Only six message-table entries exist for a three-bit
+field, so countdowns of 6 or 7 would index past the array; nothing sets them.
+
+What RWE still lacks is the six spoken announcements, the random slop before
+the blast, and the explicit-zero case. The timing is right.
+
+### `healtime`, `WORD def+0x200`
+
+Parsed at `0x42C379`, stored `0x42C388`. One reader, `0x48AF3D`, in the
+per-unit per-tick loop, and it is not a per-tick heal: the whole block runs
+only when the game tick is a multiple of eight (`test BYTE PTR [..],0x7` at
+`0x48AF5E`) and then adds `healtime * 8 / 30`, truncated -- a `shl eax,0x3`
+followed by a divide-by-thirty done with the reciprocal `0x88888889`.
+
+So the key is hit points a **second**, delivered in eight-tick steps. Only
+the two commanders set it, at 27, which is seven points every eight ticks or
+26.25 a second. Implemented, with the granularity kept because it is what the
+health bar visibly does; the original also charges the mending against the
+owner's stores through `0x41BD10`, and RWE does not, because no other repair
+in RWE costs anything and making this the one exception would be stranger
+than leaving it free.
+
+Immediately above it in the same block sits the drowning rule, recorded here
+because it is easy to miss: once a second, a unit whose `WORD unit+0x70` is
+at or below the water level and whose definition is **not** `canhover` takes
+`[gamerules+0xD50]` damage of type 11 (`0x48AF19`-`0x48AF32`).
+
+## 21. Stockpiled weapons and interception
 
 Eight weapons in the shipped data carry `stockpile`, and none of them fires out
 of the economy the way the rest do. The round is built beforehand, at a price,
@@ -2340,7 +3658,7 @@ label for the target-category machinery rather than anything that gates the
 interception above, which keys entirely off the weapon flags. **Not ported, and
 not understood.**
 
-### A correction to §19: `holdtime` does have a reader
+### A correction to §25: `holdtime` does have a reader
 
 `WORD wdef+0xFE` is read at `0x499E81` and `0x49C8D6`, both on the path that
 retires the projectile the camera is following (`globals+0x142F7`), and stored
@@ -2383,7 +3701,7 @@ cam. Nothing in the simulation reads it.
   difference: the four weapons with a burst — the flamethrower and the three
   EMGs — name no `energypershot`, no `metalpershot` and no `stockpile`.
 
-## 16. The D-gun
+## 22. The D-gun
 
 There is less to it than the name suggests. `ARM_DISINTEGRATOR` — and its Core
 twin — is an ordinary weapon:
@@ -2439,7 +3757,7 @@ Every part of what it does comes out of that.
   individually named; nothing was traced far enough to say which weapon or
   event produces each.
 
-## 17. The streaming economy
+## 23. The streaming economy
 
 Metal and energy are not spent tick by tick. Consumers ask every tick, and once
 a second the whole player's asking is added up and settled against one number.
@@ -2620,7 +3938,7 @@ made call-to-store):
 
 `buildcostenergy` and `buildcostmetal` are confirmed at a second site,
 `0x42AD40`; `workertime` and `buildtime` by the chain that lands `sightdistance`
-on the `def+0x202` already in §19.
+on the `def+0x202` already in §25.
 
 **There is no `MetalUse` key.** `metaluse` does not appear in the binary at all,
 only the display string `UNITMETALUSE`. Metal is spent by building, by weapons
@@ -2748,7 +4066,7 @@ What did not, and now does:
   `player+0xD4`. They are statistics for the end-of-game screen, which RWE
   does not have.
 
-## 18. Small systems: hit density, regrowth, kamikaze, paralysis, move rate
+## 24. Small systems: hit density, regrowth, kamikaze, paralysis, move rate
 
 Five small keys that the shipped data sets and RWE parsed but never read. Four
 of them turned out to have real machinery behind them. One of them does not
@@ -2763,7 +4081,7 @@ same `push <keystring>` / `call 0x4C46C0` pipeline the FBI parser uses — and
 `hitdensity` is not among them. 559 features name it; the engine of this build
 ignores every one.
 
-So §21's note that it is "very likely the pass-through chance for projectiles
+So §27's note that it is "very likely the pass-through chance for projectiles
 hitting features" is **refuted**, not merely unconfirmed.
 
 What the original actually does with a shot and a feature is at `0x49B2B3`,
@@ -2973,7 +4291,7 @@ with no linear speed as moving (`0x43DA8E` also tests `WORD [mov+0x24]`); RWE
 measures the distance the unit actually covered this tick and calls anything
 under a tenth of a unit stopped.
 
-## 19. Field offsets
+## 25. Field offsets
 
 FBI key names are compared at `0x42C129`–`0x42C1C5`, which gives the unit
 definition layout:
@@ -3011,7 +4329,7 @@ put `flighttime` at `+0xFA` when it is at `+0xFC`. Float keys are stored with an
 | `startvelocity` | `wdef+0x6C` | `×65536/30` |
 | `weaponacceleration` | `wdef+0x70` | `×65536/900` |
 | `energypershot` / `metalpershot` | `wdef+0xC0` / `+0xC4` | float |
-| `minbarrelangle` | `wdef+0xC8` | float radians, default −11.25°; **not** a word at `+0xFE`, and inert — see §10 |
+| `minbarrelangle` | `wdef+0xC8` | float radians, default −11.25°; **not** a word at `+0xFE`, and inert — see §11 |
 | `shakemagnitude` / `shakeduration` | `wdef+0xCC` / `+0xD0` | dword; `shakeduration ×30` |
 | `areaofeffect` | `wdef+0xD6` | word |
 | `edgeeffectiveness` | `wdef+0xD8` | float, default 0.0 |
@@ -3025,9 +4343,9 @@ put `flighttime` at `+0xFA` when it is at `+0xFC`. Float keys are stored with an
 | `duration` / `randomdecay` | `wdef+0xF0` / `+0xF2` | word, `×30` |
 | `smokedelay` | `wdef+0xFA` | word, `×30` |
 | `flighttime` | `wdef+0xFC` | word, `×30` |
-| `holdtime` | `wdef+0xFE` | word, `×30`; no known reader — see §10 |
+| `holdtime` | `wdef+0xFE` | word, `×30`; no known reader — see §11 |
 | `accuracy` | `wdef+0x104` | word |
-| `tolerance` / `pitchtolerance` | `wdef+0x106` / `+0x108` | word; a zero `pitchtolerance` falls back to `tolerance` — see §10 |
+| `tolerance` / `pitchtolerance` | `wdef+0x106` / `+0x108` | word; a zero `pitchtolerance` falls back to `tolerance` — see §11 |
 | `firestarter` / `rendertype` / `color` / `color2` | `wdef+0x10B`..`+0x10E` | byte |
 | flags | `wdef+0x111` | dword, see below |
 
@@ -3101,7 +4419,7 @@ Palette ranges that turned up:
 
 ---
 
-## 20. Where RWE deliberately differs
+## 26. Where RWE deliberately differs
 
 Recorded so these do not get "fixed" back later by someone comparing against the
 original:
@@ -3114,7 +4432,7 @@ original:
 - **Exhaust occlusion is depth-tested**, not hand-layered — see §5.
 - **A cloaked unit is half-blended with alpha**, not through the original's
   256×256 ALPHA TABLE, and a depth prepass stands in for the private bitmap the
-  original composites into. Same 50%, different mechanism — see §14.
+  original composites into. Same 50%, different mechanism — see §17.
 - **The fog raster is windowed on the camera.** At one texel per world unit a
   whole 640×640-cell map would be 400 MB, past most drivers' limits, so RWE holds
   a 2.6 MB window a few tiles larger than the view. This is what the original
@@ -3132,12 +4450,12 @@ original:
 - **A gunship's nose follows its flight path**, so it crosses its ring side-on.
   The original does the same — but it does *not* hold its aim regardless of
   where the nose points, which an earlier reading of this claimed. Gunship
-  rockets are `turret=0`, so §10 applies to them and the original holds fire
+  rockets are `turret=0`, so §11 applies to them and the original holds fire
   until the nose is within the weapon's tolerance, which for `vtol_rocket` and
   friends is 8000, about 44°. RWE now does the same.
 - **Only the heading half of the `turret=0` check is enforced.** The original
   compares the required elevation against the hull's own pitch at `unit+0x68`
-  (§10). RWE's simulation has no hull pitch — `UnitState` carries a rotation and
+  (§11). RWE's simulation has no hull pitch — `UnitState` carries a rotation and
   nothing else — so comparing against a notional zero would be a different rule
   wearing the same name rather than the original's. The heading half is the one
   that stops a unit shooting sideways and backwards, and it is the half that is
@@ -3145,7 +4463,7 @@ original:
 
 ---
 
-## 21. Still unknown or unported
+## 27. Still unknown or unported
 
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
@@ -3163,10 +4481,10 @@ original:
 - The exact tick at which the original commits a **bomb release** inside its
   weapon code is still not pinned down; RWE uses its own bombsight.
 - **`unit+0x110` bits 2–3.** They pick the loose 2000 default over the tight 150
-  when a weapon names no tolerance (§10), and are tested at only three places —
+  when a weapon names no tolerance (§11), and are tested at only three places —
   `0x40458A`, `0x4057D9` and `0x49D899` — none of which says what they mean. RWE
   keeps its own 256 default rather than guess.
-- **`holdtime` has no known reader** — see §10. `aimrate` is not a key the
+- **`holdtime` has no known reader** — see §11. `aimrate` is not a key the
   original recognises at all, so there is nothing there to find.
 - **`DefaultMissionType`** is decoded (§9) but not ported. RWE seeds a new
   unit's standing orders from the definition and lets its ordinary idle
@@ -3192,1321 +4510,3 @@ original:
 
 ---
 
-
-## NN. Where a shell actually lands, screen shake, and waterline
-
-Three keys that were parsed and thrown away — `accuracy`, `shakemagnitude` /
-`shakeduration`, and `waterline` — and, because the first of them could not be
-answered without it, the whole of the original's ballistic firing solution.
-
-The question that started this was a player's: *"Vulcan was very inaccurate over
-long distance, that might be intentional."* It is intentional, and it is
-`accuracy`. The rest of this section is the working.
-
-### The ballistic firing solution, `0x49A890`
-
-A ballistic weapon aims in two halves. The heading is a plain
-`atan2` (`0x49D5EE`), taken from the muzzle to the target and then relieved of
-the unit's own heading (`sub ax,[edi+0x66]` at `0x49D5F3`). The pitch is
-`0x49A890`, called at `0x49D614` with five arguments pushed at `0x49D60F`:
-
-```
-0x49A890(dx, dy, dz, weaponvelocity, minbarrelangle)
-```
-
-where `dx`/`dy`/`dz` are **muzzle minus target** (`0x49D5DA`–`0x49D5E6`, note
-the direction — it is not target minus muzzle) and `minbarrelangle` is the float
-at `wdef+0xC8`. It returns a 16-bit pitch, or **`0x8000` meaning "no solution",
-in which case the weapon does not fire at all** (`cmp ax,0x8000` at `0x49D61B`).
-
-The routine is IEEE double throughout. Writing `d` for the horizontal distance
-`hypot(dx, dz)` (`0x4FB440`), `s` for the speed and `G` for the per-tick
-gravity, it forms
-
-```
-D = (s² + G·dy)² − G²·(d² + dy²)          ; = s⁴ + 2·G·s²·dy − G²·d²
-```
-
-at `0x49A908`–`0x49A964`, gives up if `D < 0` (`0x49A966`), and then solves not
-for `tan(pitch)` but for the **square of the vertical launch speed**:
-
-```
-vy² = d²·(s² + G·dy ± √D) / (2·(d² + dy²))
-```
-
-taking `√` of that and dividing by the speed to get a sine, then `asin`
-(`0x4E67F0`, at `0x49A9C8` and `0x49A9FE`). Written out with `dy` flipped to the
-usual "target minus muzzle" sense, `D` is `s⁴ − 2gs²y − g²x²` — **exactly the
-discriminant RWE's `computeFiringAngles` already computes**, arrived at by a
-different factoring.
-
-Which root it uses is decided at `0x49AA11`–`0x49AA53` against two constants:
-`minbarrelangle` as a floor, and `0x4FDA80` = **π/4** as a ceiling. It tries the
-`+√D` root first and the `−√D` root second. Since the high root exceeds 45° for
-every target inside the gun's maximum range and only equals it exactly at that
-range, **the 45° ceiling means the high shot is always rejected and the original
-always fires the flat one** — the same choice RWE makes with `pitches->second`.
-The result is scaled to a 16-bit angle by `× 32768 × (1/π)` (`0x4FDA88`,
-`0x4FDA90`) and truncated (`0x4E43A0`).
-
-So there is no lofted artillery arc in Total Annihilation. Every ballistic gun
-in the game is a flat-trajectory direct-fire weapon whose barrel never goes above
-45°, and a target it cannot reach under that cap simply does not get shot at.
-
-### The original's trigonometry is coarse
-
-`0x4B70EF` (sine × length) and `0x4B7123` (cosine × length, the same table read
-a quarter turn along) index the table at `0x509F00` with
-
-```
-byteOffset = ((angle + 0x20) >> 6) & 0x3FE
-```
-
-The mask drops the low bit of a value that ranges over 0–1023, so the table is
-**512 entries per full turn** — confirmed by reading it: entry 0 is 0, entry 1 is
-101, entry 128 is `0x2000`, entry 384 is `−0x2000`, i.e. `round(8192·sin(2πk/512))`.
-The mantissa is 13-bit: `(table[i] × len + 0x1000) >> 13`.
-
-One table step is **128 of 65536, 0.703°**. Whatever the double-precision solver
-decides, the shell leaves the barrel on one of 512 headings and one of 512
-pitches. Replaying it, half a step of pitch moves the fall of shot by up to 98
-units for a Big Bertha and 180 for an Intimidator. RWE's `sin`/`cos` in
-`SimAngle.cpp` are `std::sin`/`std::cos` on a float, so RWE is *more* precise
-here than the original, not less.
-
-### `accuracy`, `WORD wdef+0x104`
-
-Parsed at `0x42EBFE` and stored at `0x42EC19` — §19's table is right, and the
-neighbouring `tolerance` `+0x106` and `pitchtolerance` `+0x108` are right too.
-The data file's own comment defines it: *"amount of accuracy in 64K deg that
-weapon is good for, 0 = 100%"*.
-
-There is exactly one reader, `0x49D6D7`, and it sits in the fire path **after**
-the aim has been solved and the unit's heading added to it (`0x49D6B4`), and
-**before** the spawn dispatch (`0x49D742`) hands off to the ballistic
-(`0x49CDE0`) or line-of-sight (`0x49C9C0`) spawn. Both of those read the aim
-angles straight back out of the weapon slot (`0x49CE4F`–`0x49CE5B`), so the
-jitter reaches every kind of projectile, not just ballistic ones.
-
-The whole of it, `0x49D6BC`–`0x49D73E`:
-
-```
-acc  = WORD[wdef+0x104]                        ; accuracy
-acc -= (health << 11) / maxdamage              ; 0x49D6C2-0x49D6CE, 0x49D6E7
-acc += 0x800                                   ; 0x49D6F5
-vet  = killcount / 3                           ; 0x49D6E0-0x49D700
-if (vet > 1) acc /= vet                        ; 0x49D702-0x49D711
-if (acc != 0) {
-    heading += rand(acc) - acc/2               ; 0x49D723-0x49D72F
-    pitch   += rand(acc) - acc/2               ; 0x49D733-0x49D73E
-}
-```
-
-Everything is 16-bit: `acc` lives in `cx`, the halving is an unsigned `shr` and
-the arithmetic is masked to 16 bits at each use, so the intermediate carry out of
-bit 15 that `add ecx,0x800` can produce is discarded.
-
-Three things fall out of that:
-
-- **The health term cancels at full health.** `(health << 11) / maxdamage` is
-  exactly `0x800` when `health == maxdamage`, so an undamaged unit gets its
-  weapon's `accuracy` unmodified. As it takes damage the term shrinks and the
-  error cone grows, by up to a full `0x800` — **11.25°** — at the point of death.
-  A half-dead Big Bertha's cone goes from 500 to 1524, three times worse.
-
-  None of this is conditional on the weapon having an `accuracy` at all. There
-  is no branch around the arithmetic and none around the health term, so
-  **every weapon in the game spreads as its owner is damaged**, including the
-  hundred and sixty that leave the key at zero — a weapon with `accuracy=0` is
-  perfect only while its owner is untouched. Given how carefully the term is
-  arranged to cancel at full health this looks deliberate rather than
-  accidental, but it is worth flagging as the one part of this section with a
-  large blast radius.
-- **Kills make a unit more accurate.** This is the veterancy the original
-  actually has: three kills do nothing, six halve the cone, nine divide it by
-  three. It is an integer divide, so it never reaches zero.
-- **Heading and pitch are drawn independently**, each uniform on
-  `[−acc/2, acc/2)` — two separate calls to `0x4B6C30`, which returns
-  `[0, n)`. The error is not a cone around the aim line; it is a rectangle in
-  (heading, pitch).
-
-### What that does to a long shot
-
-`ARMVULC_WEAPON` is not in the retail data — the Vulcan is a Core Contingency
-unit and its files live in `ccdata.ccx`. Read out of the archive, it is
-`range=3080`, `weaponvelocity=800`, `areaofeffect=100`, **`accuracy=800`**, on a
-unit with `MaxDamage=1400`. Its Core opposite number `CORBUZZ_WEAPON` (Buzzsaw)
-is `range=3800`, `weaponvelocity=900`, `areaofeffect=120`, `accuracy=800`. The
-two retail long guns are `ARM_BERTHACANNON` (4096, 800, AoE 80, `accuracy=500`)
-and `CORE_INTIMIDATOR` (5120, 1000, AoE 100, `accuracy=1000`).
-
-Transcribing `0x49A890`, the 512-entry sine table, the original's integration
-order and the `accuracy` draw into a standalone program and firing 50 000 rounds
-at each gun's full range over flat ground gives, in world units:
-
-| Weapon | range | AoE | `accuracy` | range error sd | range error min/max | lateral sd | lateral min/max |
-|---|---|---|---|---|---|---|---|
-| Vulcan | 3080 | 100 | 800 | 219 | −361 / +350 | 68 | ±132 |
-| Buzzsaw | 3800 | 120 | 800 | 277 | −519 / +393 | 84 | ±161 |
-| Big Bertha | 4096 | 80 | 500 | 114 | −234 / +163 | 57 | ±102 |
-| Intimidator | 5120 | 100 | 1000 | 407 | −687 / +743 | 141 | ±276 |
-
-The player's reading was right. A Vulcan firing at its own maximum range in the
-original puts its shells anywhere in a patch roughly 700 units deep and 260
-across, and its blast is 100 across. It is *supposed* to walk its fire over the
-target and connect only some of the time — which is what the quarter-second
-reload is for.
-
-### And what RWE does instead
-
-The same replay, run through RWE's own arithmetic — `computeFiringAngles` in
-float, `SimAngle`'s `std::sin`, and `updateProjectiles`' integration:
-
-| Weapon | TA solved pitch | RWE solved pitch | TA lands at | RWE lands at |
-|---|---|---|---|---|
-| Vulcan | 2968 | 2969 | 3083 (+3) | 3055 (−25) |
-| Buzzsaw | 2885 | 2885 | 3747 (−53) | 3771 (−29) |
-| Big Bertha | 4167 | 4168 | 4065 (−31) | 4071 (−25) |
-| Intimidator | 3184 | 3185 | 5173 (+53) | 5088 (−32) |
-
-**The two solvers agree to one part in 65536** — a twentieth of a degree, and in
-one case exactly. RWE's solver is not losing precision at long range and there is
-nothing to fix in it. `SimScalar` is a `float`, not a fixed-point type, and at
-these magnitudes single precision is comfortably enough: the largest intermediate
-is `s⁴ ≈ 5×10⁵`.
-
-Both engines land a little off the aim point, by 25 to 53 units on shots of three
-to five thousand, and for the same reason: a parabola integrated in whole ticks
-is not a parabola. They differ in the direction of the error because they take
-gravity at opposite ends of the tick — the original does `position += velocity`
-and *then* `velocity.y -= G` (`0x49BCE3`, `0x49BD3F`), while RWE does
-`velocity.y -= G` and then `position += velocity`
-(`GameSimulation.cpp:2957`, `:2996`). Neither is worth changing; both are an
-order of magnitude smaller than the scatter the original deliberately adds.
-
-So the honest answer to the question is that **RWE's long guns are not
-inaccurate, they are too accurate**, and the missing piece is a key that was
-being parsed and dropped on the floor.
-
-### `sprayangle`, `WORD wdef+0xEE`, and where RWE differs
-
-Parsed at `0x42E670`. It has exactly two readers, `0x49B8F1` and `0x49B911`, and
-both are inside the **burst-continuation** branch of the per-tick projectile
-update `0x49B720` — the branch entered only when the projectile's burst counter
-`proj+0x60` is non-zero. Two consequences that RWE does not currently match:
-
-- **`sprayangle` is the whole width of the spread, not the deviation either
-  side of the aim.** The original draws `rand(sprayangle) − sprayangle/2`,
-  uniform on `[−sprayangle/2, +sprayangle/2)`. RWE drew `[0, sprayangle]` and
-  flipped a coin for the sign, so every burst weapon in the game scattered
-  twice as wide as it should. All five weapons that set the key set it to
-  1024, so the spread was ±5.6° where it should have been ±2.8°. **Fixed.**
-- The original does not spray **the first shot of a burst**, only the
-  continuations — the readers are inside the branch guarded by a non-zero burst
-  counter. RWE sprays every shot. Recorded, not changed: unpicking it would
-  mean threading a shot index through the fire path for very little.
-
-The axis is the same in both: the original rebuilds `velocity.x` and
-`velocity.z` from the sprayed heading (`0x49B932`–`0x49B94B`) and leaves
-`velocity.y` alone, and RWE's `rotateDirectionXZ` likewise turns about the
-vertical only.
-
-### Screen shake, `DWORD wdef+0xCC` and `DWORD wdef+0xD0`
-
-`shakemagnitude` is read as an integer and stored at `0x42EC5A`;
-`shakeduration` is read as a **float**, multiplied by the 30.0 at `0x4FD250` and
-truncated (`0x42EC60`–`0x42EC70`), so it is seconds on the way in and ticks in
-the struct. §19's offsets are right.
-
-The reader is not obvious, because the weapon definition's own fields are only
-touched at one site and it is easy to miss. The way in is the string `NoShake`
-at `0x502444`, which has no absolute reference anywhere in `.text` — it is a
-console command, sitting in a table of twelve-byte `{name, handler, arity}`
-records at `0x501D38` alongside `Contour`, `ScrollSpeed`, `IFace` and `Give`.
-Its handler is `0x416E60`, and all it does is toggle **bit 4 of
-`WORD [globals+0x37F2F]`**.
-
-That bit is tested in exactly two places, `0x41C5E6` and `0x41C646`, which are
-the two halves of the shake:
-
-- `0x41C5E0(magX, magY, duration)` **sets** a shake: duration into
-  `[globals+0x1432F]` and `[globals+0x14333]`, the two magnitudes into
-  `[globals+0x14337]` and `[globals+0x1433B]`, and bit 0 of
-  `[globals+0x1434E]` to say a shake is running. Nothing calls it.
-- `0x41C640(magX, magY, duration)` **accumulates** into a shake, and is called
-  from exactly one place. If no shake is running it clears both magnitudes
-  first. Then it **averages the durations** — `(new + current) / 2`, an
-  arithmetic mean, at `0x41C67B`–`0x41C690` — and **adds** the magnitudes.
-
-The single caller is `0x499FBA`, in the projectile detonation routine, and it
-passes the weapon definition's own fields straight through:
-
-```
-0x499FAB  mov edx,[edi+0xd0]     ; shakeduration, already in ticks
-0x499FB1  mov eax,[edi+0xcc]     ; shakemagnitude
-0x499FB7  push edx               ; duration
-0x499FB8  push eax               ; magY
-0x499FB9  push eax               ; magX
-0x499FBA  call 0x41C640
-```
-
-`shakemagnitude` is pushed twice, so the horizontal and vertical amplitudes are
-always equal, and — this is the part worth knowing — **there is no falloff with
-distance.** The routine never looks at where the explosion was or where the
-camera is. A Big Bertha shell landing in the far corner of the map shakes the
-screen exactly as hard as one landing under the cursor.
-
-The consumer is `0x41C6F0`, which steps the shake on by one each time it is
-called. The original runs its simulation and its display at the same thirty a
-second so it makes no difference there which of the two you call it, but it
-does in RWE, where the display can be faster: `shakeduration` arrives as
-seconds multiplied by thirty, so RWE steps it on the simulation tick and a
-shake lasts the same time whatever the frame rate.
-
-```
-remaining = [globals+0x14333]
-if (remaining <= 0) { clear the running bit; return }
-ampX = magX * remaining / duration            ; 0x41C721-0x41C725
-ampY = magY * remaining / duration
-cameraX += rand() * ampX / 0x8000 - ampX/2    ; 0x41C737-0x41C755
-cameraY += rand() * ampY / 0x8000 - ampY/2    ; 0x41C757-0x41C775
-remaining--                                   ; 0x41C7A2
-```
-
-The amplitude ramps down **linearly** to nothing over the shake's life, and each
-frame's offset is uniform on `[−amp/2, amp/2)` — `0x4E4870` is a `rand()` with a
-`0x7FFF` ceiling and the divide by `0x8000` normalises it — applied to the two
-components of the camera's scroll position at `[globals+0x1431F]` and
-`[globals+0x14323]`, which is what `0x41C574` writes when the camera is moved
-normally. So it is a screen-space jitter of the scroll, not a change of view
-angle.
-
-Two details of the accumulate are worth having written down because they look
-like bugs and are not. The running duration at `[globals+0x1432F]` is read
-before it is written and is **never cleared**, even for a shake starting from
-nothing — so a weapon asking for two seconds of shake against a standing start
-gets one, and only a second explosion arriving while the first is still running
-gets anything near what it asked for. And because the durations are averaged
-rather than maxed, a small explosion landing during a big one *shortens* the
-big one.
-
-**Which weapons actually shake.** Every weapon in the shipped data that sets
-`shakemagnitude` is an explosion rather than a gun: `LARGE_BUILDING`,
-`LARGE_BUILDINGEX`, `ESTOR_BUILDING`, `BIG_UNIT`, `COMMANDER_BLAST`,
-`CRAWL_BLAST`, `ATOMIC_BLAST`, `EARTHQUAKE` and their variants — the things
-units name in `explodeas` and `selfdestructas`. Magnitudes are 8, 24 or 32 and
-durations 0.3, 0.5, 1.5 or 2 seconds. So the shake is something you feel when a
-big building or a commander dies, or when a nuke goes off, and never when
-artillery lands. RWE hooks both the projectile detonation and the unit death
-because the original's one call site covers both, but only the second will ever
-fire on stock data.
-
-RWE differs in one deliberate way: the original adds its offset to the scroll
-position every frame and never takes it off, so a long shake leaves the camera
-a little way from where the player parked it. RWE remembers the offset it
-applied and removes it before applying the next one, which gives the same
-jitter without walking the view away.
-
-### `waterline`, `BYTE def+0x22C`
-
-Stored at `0x42C259`, and it has the two readers §B named.
-
-`0x43D72E` is the one the key is named for. For a unit with the **`floater`**
-flag (flags word A, `def+0x241` bit 19, tested at `0x43D71E`) the height the
-movement code wants is clamped:
-
-```
-y = max(wantedY, seaLevel − waterline)
-```
-
-`seaLevel` is `BYTE [globals+0x1427F]`, in whole world units. The comparison is
-done in 16.16 and the clamp value is built at `0x43D734`–`0x43D745` by an
-idiom worth writing down, because taken literally it looks like nonsense:
-
-```
-mov eax,edx ; shl eax,0x10 ; sub eax,edx ; add eax,<sea> ; shl eax,0x10
-```
-
-That is `((w << 16) − w + s) << 16`. The `w << 32` term falls off the top of the
-register, so the low 32 bits are exactly `(s − w) << 16` — the compiler's way of
-negating `w` inside a value it is about to shift left by 16 anyway. Sea level
-minus the waterline, in 16.16. A floater is therefore never allowed to sit lower
-than `waterline` below the surface, and since everything else is pushing it down
-it settles exactly there. That is the depth the hull sits at.
-
-`0x43DBA9` is the second reader, and it turned out to be the more interesting
-one: it is the routine that calls the COB entry point **`setSFXoccupy`** (the
-string is at `0x505248`, pushed at `0x43DBE3` into `0x4B0A70`). It works out a
-state number 0–4 describing how the unit sits in the water and, if it has
-changed since last time (`[unit+0x10A]`, `0x43DBCC`), tells the script:
-
-```
-if (movementMode != 1 && movementMode != 2)        state = 0    ; 0x43DB84
-else if (unitY > seaLevel)                         state = 4    ; 0x43DB8C
-else {                                             state = previous
-    if (unitY - seaLevel > -5)                     state = 1    ; 0x43DB9C
-    if (unitY + waterline == seaLevel)             state = 2    ; 0x43DBB5
-    if (unitY + WORD[def+0x170] < seaLevel)        state = 3    ; 0x43DBC7
-}
-```
-
-`unitY` here is `WORD [unit+0x70]`, in whole world units, not 16.16. Note that
-the three tests in the last branch are not exclusive and do not start from
-zero — if none of them fires the unit keeps whatever state it had, which is a
-real quirk of the original and not a mistranscription. `WORD [def+0x170]` is not
-identified; it behaves like a hull height.
-
-State 2 — floating at exactly its waterline — is the settled-ship case, and is
-what a ship's script is waiting for before it starts emitting a wake.
-
-**Which of the two readers actually matters.** Twenty-one shipped units set
-`WaterLine` (submarines at 20, tidal generators at 8, floating shipyards at 1,
-up to 25) and eighteen set `Floater`, and **the two sets do not overlap at
-all** — checked over the whole of `rev31\UNITS`. So the floating clamp at
-`0x43D72E`, which is gated on `Floater`, only ever sees a `waterline` of zero
-and reduces to `max(wantedY, seaLevel)`, which is exactly what RWE already
-did. Everything the key visibly does, it does through `setSFXoccupy`.
-
-That is also why RWE does not apply the clamp. RWE's `floater` is not the FBI
-key: `LoadingScene_util.cpp:481` also sets it for anything whose yard map
-contains water, which catches every floating building — precisely the units
-that *do* set `WaterLine`. Feeding the clamp RWE's broader notion of a floater
-would sink floating shipyards and tidal generators by up to twenty-two units,
-which the original never does. So `waterline` is parsed and used for the water
-state, and how things float is left alone.
-
-### Recorded, not implemented
-
-- The ballistic spawn at `0x49CE62`–`0x49CE8A` sets the launch `velocity.y` to
-  `sin(pitch)·weaponvelocity − ([slot+0x10] / weaponvelocity)·G` rather than
-  plainly `sin(pitch)·weaponvelocity`. `[slot+0x10]` divided by a speed to give
-  something multiplied by a per-tick gravity has to be a distance, but taken at
-  face value with the flight time the correction is far too large to be the
-  half-tick term the integration order calls for, and no write to `[slot+0x10]`
-  was found to settle it. The term is left out of RWE; every number in the
-  tables above was computed without it, and the systematic errors it would have
-  to explain are only tens of units in any case.
-- The **console command table** at `0x501D38` is decoded far enough to name
-  `NoShake`, `Contour`, `ScrollSpeed`, `IFace` and `Give` and to find their
-  handlers. Nothing else was pulled out of it.
-
-## NN. Wakes, thrust, and the small unit flags
-
-The five `emit-sfx` types RWE had never implemented. Wakes are behind every ship
-in the game, so this is the most visible of the remaining gaps.
-
-### The dispatch, `0x480EB0`
-
-`EmitSfx(pieceIndex, sfxType)` takes two arguments. Before it does anything else
-it asks whether the local player can see the unit (`0x465AC0`, tested at
-`0x480EEA`) and **returns doing nothing if not** — so the whole SFX system is
-client-side and no part of it is simulation state. That matches where RWE
-already puts it.
-
-It then takes the emitting piece's **first two transformed vertices**, adds each
-to the unit's world position with the z negated (`0x480F59`–`0x480FD8`), and
-jumps through the table at `0x481128`:
-
-| Id | Type | Handler | Spawner |
-|---|---|---|---|
-| 0 | `Vtol` | `0x481000` | `0x472330` |
-| 1 | `Thrust` | `0x48101F` | `0x472330` |
-| 2 | `Wake1` | `0x48103E` | `0x472430` |
-| 3 | `Wake2` | `0x48105B` | `0x472430` |
-| 4 | `ReverseWake1` | `0x481078` | `0x472430` |
-| 5 | `ReverseWake2` | `0x481095` | `0x472430` |
-
-`SFXTYPE_POINTBASED` (256) falls off the end of the dispatch and does nothing at
-all.
-
-### All four wakes are one routine with two knobs
-
-The four call sites differ in **exactly two** things: which of the two vertices
-is pushed first, and whether the second argument is 16 or 8.
-
-- `Wake1` → `(vertex0, vertex1, 16)`, `Wake2` → `(vertex0, vertex1, 8)`
-- `ReverseWake1` → `(vertex1, vertex0, 16)`, `ReverseWake2` → `(vertex1, vertex0, 8)`
-
-So **"reverse" is nothing but swapping the two vertices**, which turns the drift
-round. There is no test on speed, on throttle, or on the direction of travel
-anywhere in the engine — which of the four a ship uses is entirely its script's
-decision, and the script knows because the engine tells it through
-`setSFXoccupy` (see the `waterline` section).
-
-`Init` at `0x474760` normalises the difference between the two points and scales
-it by 32768 in 16.16 (`0x4747CC`–`0x474819`), so a dot drifts **half a world
-unit a tick whatever the distance between the vertices** — a modeller putting
-them further apart makes no difference to the speed. The `16`/`8` is the colour
-ramp period, and the life is six of those, 96 or 48 ticks. So a Wake1 dot
-travels 48 world units in its life and a Wake2 dot 24.
-
-Each call puts out **two dots: one immediately and one on the following tick**
-(`0x474872` emits, then `0x474AEE` sets the next due time to now + 1, and the
-emitter's end time is also now + 1, so it fires once more and never again).
-There is no cooldown; the repetition rate is whatever `sleep` the ship's script
-uses.
-
-The spawn point is jittered by `rand()*7/0x8000 − 3` — a **whole number of world
-units in [−3, +3], drawn independently for x, y and z** (`0x4749D9`, `0x474A00`,
-`0x474A27`). Note the y: the scatter is not confined to the horizontal.
-
-Per tick (`0x474580`) a dot moves by its velocity with **no gravity and no
-wind**, and steps its palette index one place every `rampPeriod` ticks. It dies
-either at its end time or, per `0x474720`, **the moment the terrain under it is
-at or above sea level** — which is what makes a wake stop cleanly at a shoreline
-instead of running up the beach behind the ship.
-
-### `Thrust` is `Vtol` with one number changed
-
-Both go to the spawner at `0x472330` with the vtable at `0x4FD5D8`, on render
-layer 7, and the only difference is the constant: **6 for `Vtol`, 7 for
-`Thrust`** (`0x481000` versus `0x48101F`). That number is used twice in `Init`
-at `0x4742C0` — as the divisor for the per-tick drift (`0x47432C`–`0x47438B`)
-and as the emitter's own lifetime (`0x4742CB`) — so a thrust plume is one puff
-longer and each puff moves slightly more slowly. Same `flamestream` sequence,
-same layer, same class.
-
-### A correction to §4
-
-§4 records that the wake emitter draws `smoke 1`, on the strength of the palette
-ramp being loaded at `0x474A7F`. The handle **is** written into the puff at
-`+0x00`, but none of the three routines that touch a wake puff — the per-tick
-step `0x474580`, the render `0x4745E0` or the death test `0x474720` — ever reads
-it. `0x4745E0` builds a one-pixel rectangle and calls `0x4BF6F0`, the generic
-palette-index rectangle fill, exactly as the nanolathe spray does at `0x473B1D`.
-**A wake dot is a single screen pixel of a solid palette colour, not a sprite.**
-
-§4's slot map is unaffected — the ordering argument for `smoke 1` at
-`globals+0x147CF` stands on its own from the loader at `0x429879`–`0x4298B8`.
-Only the corroborating remark about the wake using it is wrong.
-
-The colours are palette entries **97–103**, seven water blues, stepped from
-palest to deepest: `(203,227,255)`, `(175,207,255)`, `(151,179,255)`,
-`(123,151,255)`, `(103,127,255)`, `(83,107,239)`, `(63,91,227)`. Read out of the
-shipped `palettes/PALETTE.PAL`; entry 161 in the same file is `(171,231,127)`,
-which matches the nanolathe colour already in RWE and confirms the format.
-Submarine bubbles use the same class and the same seven entries walked the other
-way, starting at 103 with a step of −1 (`0x472584`, `0x4725A2`).
-
-### What RWE now does
-
-All five types are routed. Wakes are one function taking a reverse flag and a
-ramp period; `Thrust` is the existing VTOL emitter with the divisor passed in.
-The dot's colour steps discretely along the seven blues instead of fading, its
-drift is the original's half a unit a tick instead of a guessed third, its life
-is 96 or 48 ticks instead of a guessed 120, the jitter is whole units on all
-three axes instead of fractional ones on two, the second dot is laid a tick
-later rather than alongside the first, and a dot now dies when it drifts over
-land.
-
-Two things are left alone. RWE draws its dot as a small world-space quad rather
-than a literal screen pixel, which is the same choice it already made for the
-nanolathe spray. And the emission rate is still the script's, which is the
-original's behaviour anyway.
-
-### The small unit flags
-
-Six flags that the bit tables above name but that had never been followed to
-their readers. The parse sites are all in the FBI parser's long run of boolean
-keys, where the helper `0x4C46C0` leaves its answer in `eax` and the
-mask-and-shift follows immediately, so the §19 pipeline trap does not apply and
-each bit is unambiguous:
-
-| Key | String | Read at | Shifted at | Bit |
-|---|---|---|---|---|
-| `isairbase` | `0x503BC4` | `0x42C5DC` | `0x42C5F1` `shl eax,0x9` | `def+0x241` 9 |
-| `noshadow` | `0x503B24` | `0x42C7DC` | `0x42C7EA` `shl eax,0x19` | `def+0x241` 25 |
-| `digger` | `0x503AF0` | `0x42C880` | `0x42C895` `shl eax,0x1e` | `def+0x241` 30 |
-| `upright` | `0x503B50` | — | `0x42C746` | `def+0x241` 20 |
-| `norestrict` | `0x503620` | — | `0x42CB4B` | `def+0x245` 15 |
-| `cantbetransported` | `0x5039DC` | `0x42CBB1` | `0x42CBBF` `shl eax,0x13` | `def+0x245` 19 |
-
-Counted over the 189 FBIs of the extracted data RWE actually loads, which is
-the base game plus Core Contingency: `isairbase` 4 (ARMASP, CORASP, ARMCARRY,
-CORCARRY), `noshadow` 15, `upright` 28 set and 3 explicitly cleared,
-`norestrict` 6, `digger` 2 (ARMAMB, CORTOAST), `cantbetransported` 1
-(CORSUMO). The last two are worth the correction: earlier notes recorded that
-no shipped unit sets either, which is true of the base game on its own and not
-of the data on disk.
-
-### `isairbase`: a damaged aircraft goes home
-
-The definition bit is cached onto the instance as a unit is set up.
-`0x485AE7`–`0x485B03` takes `def+0x241 & 0x200`, shifts it left twenty-one and
-drops it into a cleared bit 30 of `unit+0x110`.
-
-Each player keeps a **list** of its own air bases rather than searching for
-them. `0x40AB96` onwards is the per-player sweep that also counts units by
-type, and three tests put a unit on the list at `0x40ABE4`:
-
-```
-40abc0  mov  eax,[def+0x241]
-40abc6  test al,0x40                ; builder
-40abca  test ah,0x2                 ; isairbase
-40abcf  test BYTE [unit+0x10e],bl   ; bl is 1, set at 0x40AAD0
-40abe4  call 0x408F30               ; push_back onto the vector at player+0x25
-```
-
-**`unit+0x10E` bit 0 is the on/off state.** `0x403010` ACTIVATE calls
-`0x48B090(1, 1)` and `0x403040` DEACTIVATE calls `0x48B090(1, 0)`; that routine
-writes the byte at `0x48B0D8`, and unit init zeroes it at `0x485B7F`. The same
-byte and bit gates the `istargetingupgrade` accumulator two instructions later
-at `0x40ABFE`, which is what settles that it means "switched on" rather than
-anything to do with visibility or ownership. So a pad that has been turned off,
-or one still going up and so never activated, is on nobody's list and nothing
-lands on it.
-
-The query is `0x40B530(playerIndex, position, radius, out)`. It walks that
-player's list, repeats the same three tests at `0x40B578`/`0x40B580`/`0x40B589`
-— the last against a literal `0x1`, which is what pins the bit — and keeps
-every unit inside the radius. The distance is flat: `0x40B5A0` reads only the
-x at `unit+0x6A` and the z at `unit+0x72`, multiplies each difference by itself
-as a 64-bit product and shifts thirty-two off (`0x40B5BB`–`0x40B5E3`), so the
-comparison at `0x40B5E9` is in whole world units squared. **`y` is never
-read**, so an aircraft is not pushed out of range by its own cruise altitude.
-
-Seven callers, and **all seven pass the same two numbers**: `0x41055F`,
-`0x4109B9`, `0x410F95`, `0x412613`, `0x412B91`, `0x413ADC`, `0x4153E3`. Each is
-preceded by the identical health gate,
-
-```
-410525  mov  eax,[def+0x1fa]        ; max hit points
-41052b  shr  eax,0x2
-41052e  lea  ecx,[eax+eax*2]        ; (max >> 2) * 3
-410531  cmp  edx,ecx                ; edx is WORD [unit+0x108], current health
-410533  jae  <skip>
-```
-
-so the threshold is **three quarters of maximum with the quarter truncated
-first**, and an aircraft sitting exactly on it is not hurt enough. The radius
-pushed is `0xf00` at every site and the query squares it at `0x40B542`:
-**3840 world units**.
-
-If the returned vector is not empty — `0x40C560` is its size — the caller picks
-**one at random, not the nearest**. `0x4B6C30(n)` returns zero without touching
-the generator at `0x51FC88` when `n` is below two, and otherwise steps it once
-and takes the remainder (`0x4B6C8C div edi`, `0x4B6C90 mov eax,edx`). The
-chosen unit becomes the target of a mission built from the string at
-`0x501B94`, **`VTOL_LANDING`** (`0x4105B9`, `0x41267B`).
-
-Four more readers hang off the same flag:
-
-- **On arrival**, `0x411E63`–`0x411ED3`: if the aircraft is below full health
-  (`WORD unit+0x108 < DWORD def+0x1FA`) and the mission's target is a
-  `builder && isairbase` whose build progress `unit+0x104` is exactly the float
-  at `0x4FCC40`, the aircraft is handed a further mission built from
-  `0x501C24`, **`SELFREPAIR`**.
-- **The cursor**, `0x43EA83`: the selected unit `canfly` (bit 11) with an
-  `isairbase` unit under the pointer gives cursor 13.
-- **The right-click**, `0x43F735`–`0x43F75E`, `0x43F959`–`0x43F977` and
-  `0x43FAEF`–`0x43FB19`: three separate arms of the order dispatcher test the
-  same pair and all jump to `0x43FB1B`, the `VTOL_LANDING` mission.
-- **Cargo**, `0x48AD0D`–`0x48AD1F`: a unit taken aboard something is unlinked
-  from the world by `0x4384A0` **unless** the thing holding it is an air base,
-  which is why aircraft parked on a carrier stay selectable.
-
-### `cantbetransported`, and the whole of `CanTransport`
-
-`0x489A90(this = transport, candidate)` in order:
-
-```
-489aa3  candidate def+0x245 bit 19  -> cantbetransported: reject
-489abe  transport def+0x245 bit 8   -> canload required
-489acb  walk transport+0x8A, next at +0x8E, owner back-pointer at +0x86,
-489aec  counting against BYTE transportdef+0x22B; >= rejects
-489afe  candidate must still exist
-489b0b  WORD candidatedef+0x14A <= BYTE transportdef+0x22A
-489b24  candidate unit+0x110 & 3 == 2 -> airborne: reject
-489b39  a transport that cannot fly also wants WORD candidatedef+0x1C0 < 0
-```
-
-Two offsets fall out of that and both need a second site, because the FBI
-parser pipelines its stores. `def+0x22A` and `def+0x22B` come from the same run
-of keys as `waterline`: the strings pushed are `0x503DC8` "waterline",
-`0x503DB8` "transportsize" and `0x503DA4` "transportcapacity", and under the
-§19 rule their values land at `0x42C259`, `0x42C26E` and `0x42C284`. That makes
-`def+0x22C` `waterline`, which §20 already had from elsewhere and which is the
-check that the pipeline is being read the right way round, `def+0x22A`
-**`transportsize`**, and `def+0x22B` **`transportcapacity`**.
-
-`def+0x14A` is not parsed from the definition at all. `0x42CD5D` copies
-`WORD [+0x4]` and `WORD [+0x6]` out of the **movement class** record into
-`def+0x14A` and `def+0x14C`, and the record's fallback builder `0x440340` —
-used when the FBI names no movement class — fills `+0x4` from the key at
-`0x505484`, `FootPrintX`, and `+0x6` from `0x505478`, `FootPrintZ`, each store
-immediately after its own call rather than pipelined. So the size test is
-**the candidate's footprint X against the transport's TransportSize**.
-
-Note what is *not* in that predicate: nothing asks whether the candidate is an
-aircraft, only whether it is currently airborne, and nothing asks whether it is
-mobile.
-
-### `noshadow` and `digger` are both shadow-pass flags
-
-Two passes, `0x459288`–`0x4592B6` and `0x4594A2`–`0x4594CA`, and they open
-identically: a global option `WORD [0x511DE8+0x37F06] & 4`, then bit 25 of
-`def+0x241`, then skip the draw. `digger` is tested only in the second, at
-`0x4594D0`, where it selects a path through `0x45A470` and changes one
-constant:
-
-```
-4594f2  shr eax,0x1e / and al,0x1
-4594f7  neg al / sbb eax,eax        ; 0 or -1
-4594fb  and eax,0x4b                ; 0 or 75
-4594fe  add eax,0x32                ; 50 or 125
-```
-
-**It is not a terrain flag.** All ten of its read sites are in that one pass.
-
-### `upright` and `norestrict`
-
-`upright` has exactly one reader, `0x48A8BF`, inside the per-tick ground
-placement `0x48A870`. Set, the unit stays vertical and takes its height from a
-single sample under the centre; clear, `0x48A8CD` falls through to `0x48A938`
-and thence `0x48A490`, which samples four rotated footprint corners and writes
-`WORD unit+0x68` pitch and `WORD unit+0x64` roll from the slope.
-
-`norestrict`'s four readers — `0x44C15F`, `0x44C4EA`, `0x44C73A`, `0x44CA59` —
-are all the Unit Restrictions screen, which skips definitions carrying the bit
-so a host cannot switch them off.
-
-### What RWE now does with them
-
-- **`isairbase` is in.** `findAirBaseToLandOn` in `UnitBehaviorService_util.cpp`
-  is the original's predicate and query together: below three quarters health
-  with the quarter truncated first, the owner's own `Builder` `IsAirBase` units
-  that are activated and alive, within 3840 flat world units, and a draw taken
-  with a modulo that skips the generator entirely when there is only one
-  candidate — which every peer has to agree about or the simulations part
-  company. The choice is remembered in `NavigationStateMovingToLandingSpot`,
-  which is what stops it being re-rolled every tick the way the original's
-  one-off mission swap does.
-- **`cantbetransported` is in**, in the load handler and in the AI's ferry
-  candidate filter, so the AI cannot book a passenger the simulation will then
-  refuse and leave the transport hovering over it for ever.
-- **`noshadow` is in**, as `unitCastsShadow` in `GameScene_util.cpp`.
-
-And what was already right: RWE's transport eligibility had the capacity count,
-the alive test and a size test, and `CanLoad` already gated the order button.
-Its size test measures `max(footprintX, footprintZ)` where the original
-measures footprint X alone — of the twelve shipped units with a non-square
-footprint every one is a building, so the two readings never disagree on real
-data, and the difference has been left where it is. RWE also refuses a
-candidate that is not mobile, that `canFly`, or that is itself a transport,
-none of which the original asks; those are older choices and were left alone
-too.
-
-### Not ported
-
-- **`digger`.** RWE has one shadow path and no projection constant to swap, so
-  there is nothing for the flag to select. It has no global shadows option
-  either, which is why `unitCastsShadow` is only ever asked about the unit.
-- **`upright`.** RWE does not conform anything to the ground: `UnitState`
-  carries a `roll` for the aircraft bank and no pitch at all. The flag chooses
-  between two ground-placement routines neither of which RWE has, so honouring
-  it would mean writing terrain conforming first.
-- **`norestrict`.** There is no Unit Restrictions screen for it to hide a unit
-  from.
-- **The `VTOL_LANDING` cursor and the right-click.** RWE's `CursorType` has no
-  landing cursor and no sprite loaded for one, and a player cannot yet send an
-  aircraft to a pad by hand — only the idle path does. The three dispatcher
-  arms above are where that would go.
-- **`SELFREPAIR`.** What the pad does once the aircraft is on it was not
-  followed past the mission push at `0x411ECE`, so RWE's pads still mend
-  nothing. Everything that gets the aircraft there is in; this is the piece
-  left.
-- **The air base list itself.** RWE walks the unit map where the original keeps
-  a per-player vector. The answer is the same and the walk only runs while a
-  damaged aircraft has nothing else to do.
-
-## NN. Weapon target eligibility, `0x49ABB0` in full
-
-§9 gave this routine a sentence. It is the whole of "may this weapon shoot at
-that unit", it is asked of every candidate the auto-acquire considers, and two
-of its four rejections were missing from RWE. Here it is branch by branch.
-
-It is `stdcall(attacker, target, slot)` — `ret 0xc` at `0x49AC18`, with the
-three arguments loaded at `0x49ABB0`, `0x49ABC1` and `0x49ABE3`. The slot picks
-the weapon out of the attacker's three 28-byte weapon records, which begin at
-`unit+0x10`:
-
-```
-49abb0  mov  eax,[esp+0xc]              ; slot
-49abb7  and  eax,0xff
-49abc1  mov  esi,[esp+0x1c]             ; the attacker
-49abc6  shl  ecx,0x3 / sub ecx,eax      ; slot*7
-49abcb  mov  edi,[esi+ecx*4+0x10]       ; -> the weapon definition
-49abcf  mov  eax,[edi+0x111]            ; the weapon flags
-49abda  test dl,0x1                     ; bit 16, waterweapon
-49abdd  je   0x49acaf                   ; -> the dry branch
-```
-
-`0x49ADF0` immediately below it is the same address arithmetic on its own,
-returning `[weapon+0xdc]`, the range — which is how `0x40B7B0` gets the radius
-it hands to the candidate gather at `0x40B81F`.
-
-### The wet branch, `0x49ABE3` — a `waterweapon`
-
-```
-49abf3  mov  edx,[targetdef+0x241]
-49abf9  test edx,0x80000                ; bit 19, floater
-49abff  jne  0x49ac1b                   ; a floater is exempt
-49ac01  movzx bp,BYTE [world+0x1427f]   ; sea level
-49ac09  cmp  WORD [target+0x70],bp      ; the integer part of the target's y
-49ac0d  jle  0x49ac1b
-49ac0f  xor  eax,eax / ret              ; above water: reject
-```
-
-then, still on the wet branch:
-
-```
-49ac1b  test dh,0x10                    ; bit 12 of def+0x241, canhover
-49ac1e  je   0x49ac47
-49ac20  movsx ecx,WORD [targetdef+0x170]
-49ac2b  sar  ecx,1                      ; half the model height
-49ac2d  add  edx,ecx                    ;   + the target's y
-49ac37  cmp  edx,ecx / jle 0x49ac47     ; must still be under the surface
-49ac3b  xor  eax,eax / ret              ; reject
-```
-
-So a torpedo may reach anything at or below sea level, plus anything that
-`floater`s whatever its height; and a hovercraft, which sits *on* the surface
-with `y == sealevel`, is thrown out by the second test because half its model
-height is above the water. That is the well known immunity, and it is also what
-identifies `def+0x170`: only a height makes both tests read sensibly, and a
-zero there would leave hovercraft torpedoable.
-
-The two flag bits are settled in the parser, where the boolean helper's result
-is masked and shifted immediately after the call that read it, so the pipeline
-trap of §19 does not apply:
-
-| Key | String | Shifted at | Bit of `def+0x241` |
-|---|---|---|---|
-| `canfly` | `0x503B64` | `0x42C6F4` | 11 |
-| `canhover` | `0x503B58` | `0x42C727` | 12 |
-| `upright` | `0x503B50` | `0x42C746` | 20 |
-| `floater` | `0x503B48` | `0x42C779` | 19 |
-| `amphibious` | `0x503B3C` | `0x42C798` | 21 |
-
-`def+0x170` is the **integer part of the definition's height**: `0x489B5B`
-reads the whole 16.16 dword at `def+0x16E` against a sea level shifted left
-sixteen, and `0x486737` hands the word at `+0x170` to `0x482910` alongside
-`SightDistance`, which is the LOS update. It is written nowhere with an
-absolute displacement, so it is computed from the model at load rather than
-parsed from the FBI — *inference*, but the only reading that fits both uses.
-
-### The dry branch, `0x49ACAF` — everything else
-
-```
-49acbd  mov  cl,BYTE [world+0x1427f]    ; sea level
-49acc3  movsx edx,WORD [attacker+0x70]
-49acc7  movsx ebx,WORD [attackerdef+0x170]
-49acce  add  edx,ebx
-49acd0  cmp  edx,ecx / jg 0x49ace0
-49acd4  xor  eax,eax / ret              ; the SHOOTER is underwater: reject
-49acea  movsx edx,WORD [target+0x70]
-49acee  movsx ebp,WORD [targetdef+0x170]
-49acf5  add  edx,ebp
-49acf7  cmp  edx,ecx / jg 0x49ad07
-49acfb  xor  eax,eax / ret              ; the TARGET is underwater: reject
-```
-
-**This is the submarine rule.** A weapon that is not a `waterweapon` needs both
-ends of the shot out of the water, and "out of the water" is `y + height >
-sealevel` — the top of the model, not its origin. A submerged submarine fails
-it, so a tank, a Peewee or a laser tower is never offered one as a target. Note
-the asymmetry with the wet branch, which compares the raw `y` and not `y + h`:
-the original is deliberately generous about what counts as *in* the water and
-strict about what counts as *out* of it, so a thing sitting at exactly sea level
-is reachable by both kinds of weapon.
-
-Only then does the air rule run, and only on this branch:
-
-```
-49ad07  test eax,0x20000                ; bit 17, toairweapon
-49ad0c  je   0x49ad28
-49ad0e  mov  ecx,[target+0x110] / and ecx,0x3
-49ad17  cmp  cl,0x2 / je 0x49ad28       ; airborne
-49ad1c  xor  eax,eax / ret              ; reject
-```
-
-and then the ballistic arc, and then the range:
-
-```
-49ad28  shr  eax,1 / test al,0x1        ; bit 1, ballistic
-49ad59  push [weapon+0xc8] / push [weapon+0x68]
-49ad67  call 0x49a890                   ; solve the arc
-49ad6c  cmp  ax,0x8000 / jne ok         ; 0x8000 means "no solution"
-49ad7e  ...                             ; dx^2 + dz^2 <= range^2
-```
-
-The range test (`0x49AC47` on the wet branch, `0x49AD7E` on the dry one) is the
-same both times: the two position deltas are 16.16, each square is taken as a
-64-bit product and shifted right 32 (`__allmul` at `0x4E4400`, `__allshr` at
-`0x4E43D0` with `cl = 0x20`), which is the square of the distance in whole
-world units, and it is compared against `range * range`. **It is flat** — `dx`
-and `dz` only, `dy` never enters. A target directly overhead is at distance
-zero as far as this test is concerned.
-
-### The air rule only points one way
-
-This is worth being blunt about, because assuming the symmetry is easy and
-wrong. `toairweapon` is tested in exactly four places in the whole binary —
-`0x49AD07` here, and `0x43E5CF`, `0x43F184` and `0x43F1E1` in the attack-order
-builder — and every one of them asks the same question: *this weapon is
-anti-air, is the target in the air?* **Nothing anywhere refuses an ordinary
-weapon an airborne target.** There is no reciprocal flag, no unit category test
-in `0x40B7B0`, and no filter in the candidate gather `0x40AD80`, which walks the
-player's enemy list applying only a flat radius, the alive bit and bit 14.
-
-What keeps ground units off aircraft is the **preference**, and only the
-preference: sixty of the shipped units name `wpri_badTargetCategory=VTOL` and
-forty-four name `NoChaseCategory=VTOL`. §9 has the mechanism right — the
-bad-target bucket at `0x40BA13` is returned only when the good bucket is empty
-(`0x40BA4D`), so a unit with nothing else in range *does* shoot at the
-aeroplane. `armllt`, the Light Laser Tower, names `wpri_badTargetCategory=VTOL`
-and no `NoChaseCategory` at all, which is exactly why an LLT plinks away at
-passing aircraft in the original. Turning this into a veto would be a larger
-divergence than leaving it alone, so RWE leaves it alone.
-
-`NoChaseCategory` is a veto, but only over *going to look*: `0x40B7B0` tests it
-at `0x40B927`, under `cmp [esp+0x54],ebp` — only when the third argument is 0,
-the sight-range search. That is why a Peewee ignores an aircraft it would have
-to walk towards and still shoots one that comes to it.
-
-Only four shipped weapons set `toairweapon`: `armyork`, `armflak`, `corsent`
-and `corflak`. The Samson's `armtruck_missile` does not, so §9's "a Samson with
-no aircraft about still shoots at tanks" is right, and is a statement about the
-preference rather than about the flag.
-
-### What was wrong in RWE
-
-`GameSimulation::weaponCanHitUnit` implemented one of the four rejections:
-
-- a **non-`waterweapon` had no rule at all**, so a tank, a tower or a Peewee
-  would happily acquire a submerged submarine — the first reported bug, and
-  `0x49ACEA` is the line that forbids it;
-- a `waterweapon` tested only `target.y <= sealevel`, missing both the
-  `floater` exemption and the `canhover` half-height rejection, so a torpedo
-  would refuse a ship and accept a hovercraft;
-- nothing checked that the **shooter** was out of the water (`0x49ACC3`);
-- `toAirWeapon` was tested *instead of* the water rules rather than after them,
-  because it returned early. On the original's control flow the air test is
-  reached only on the dry branch and only once both height tests have passed.
-
-Separately, `UnitBehaviorService::findEnemyInWeaponRange` — the search behind
-the idle-aircraft engagement and the patrol break-off — ran **no eligibility
-test whatever**. The original has one acquisition routine, `0x40B7B0`, whose
-third argument changes only the radius and whether `NoChaseCategory` applies;
-`0x49ABB0` is called on both paths, at `0x40B914`. So in RWE an idle gunship
-carrying an anti-air weapon would break off at a ground unit and a patrolling
-unit would engage a submarine, neither of which the original can do.
-
-### Deliberately not ported
-
-- **The ballistic arc test** (`0x49A890`). RWE has no arc solver and aims its
-  ballistic projectiles from their own code; a reachability gate here would
-  need that solver first.
-- **The flat range test.** RWE measures the full 3D distance. The original's
-  `dx² + dz²` makes a target directly overhead free, which — given that nothing
-  else stops a ground weapon engaging an aircraft — would make ground fire at
-  aircraft *more* common than RWE's, not less.
-
-### One correction to §9
-
-§9 says the per-tick scan keeps an existing target "unless it has become
-allied, has left range, or is in that slot's bad-target set". The range half of
-that is not there. `0x4089A0` fetches the current target with `0x48A190` and
-then tests exactly three things before deciding to re-acquire:
-
-```
-408ac4  cmp BYTE [players + idx + 0x108],0 / jne drop   ; the target became allied
-408af2  test [def + 4*slot + 0x231], bit                ; it is in the bad-target set
-408aff  test BYTE [weapon+0x111],0x80 / test [target+0x10e],0x10  ; paralyzer, already paralysed
-```
-
-and `0x48A190` itself is a pure accessor — it checks `WORD [slot+0x6] ==
-0x8000`, the marker that says the slot holds a unit rather than a position,
-looks the unit id up in the table at `[world+0x14357]`, and returns. No
-distance is measured anywhere on that path. Dropping a target that has walked
-out of range must happen in the weapon's own service, if it happens at all;
-it is not part of the re-acquire decision.
-
-## NN. Where a radar contact is drawn, and where it is not
-
-### The main view never sees one
-
-The world render does not walk the unit list. It consumes a list rebuilt once a
-frame and reads it at `0x4697B7` for the Z buckets and again at `0x469C16` for
-the health-bar pass; every `0x118`-stride walk inside `0x468CF0`–`0x469D1F` is
-over that list. The list lives at `world+0x1435F` with its count at
-`world+0x14367`, allocated at `0x485590` under the tag `"HOT UNITS"`
-(`0x508BC8`).
-
-`0x48BAE0` builds it. Per unit: skip an empty slot (`0x48BB3E`), cull against
-the screen rectangle `world+0x37E27` (`0x48BBD2`–`0x48BC3B`), admit the
-viewer's own unit unconditionally (`0x48BC42`), and otherwise
-
-```
-48bc56  call 0x465AC0        ; the can-see predicate
-48bc5b  test eax,eax / je skip
-48bc63  ...                  ; append WORD unit+0xA8
-```
-
-`0x465AC0` **never reads the radar bits**. It tests own-unit (`0x465AD4`),
-cloak (`unit+0x10E` bit 2, `0x465AE8`), the sonar bit for a submerged unit
-(`0x465B38`), and then the line-of-sight grid or the explored bitmask directly
-(`0x465B5C`, `0x465C04`, `0x408090`). A unit whose only claim on the viewer is a
-radar contact is therefore not in the list, is not drawn, and is not pickable:
-the 3D cursor pick `0x48CD80` iterates the same list (`0x48CDBD`–`0x48CE97`).
-
-There is one HUD response, and it is not in the viewport. The info panel's
-"unit under cursor" branch `0x46AEE0` calls `0x465AC0` at `0x46AF3D` and on
-failure falls to `0x46B6F3`, which picks the prefix `"R: "` (`0x50786C`) or
-`"S: "` (`0x507870`) on `unit+0x110` bit 9 and prints `"Unidentified object"`
-(`0x507858`). So hovering a blip names it as unidentified rather than showing
-nothing — but the hover can only come from the minimap.
-
-### The minimap draws one exactly like anything else
-
-`0x466DC0`, called once a tick for the local player only (`0x465072`, guarded
-at `0x46506A`) and again after a fog-mode rebuild (`0x48191F`). The gate is
-
-```
-466e64  eax = unit+0x110
-466e6a  test ah,0x3          ; bit 8 or bit 9
-466e6d  jne draw
-466e6f  owner == viewer ? draw : skip
-```
-
-and that is the **only** place in the binary that reads those bits raw. The
-sprite is the GAF animation `radlogo` (`world+0x147DF`, loaded by name at
-`0x42990D`), frame = the owner's colour byte, blitted at `0x466ECC`–`0x466F0B`.
-In the shipped `anims/FX.GAF` it is ten frames, every one **4×4 pixels**,
-hotspot (1,1): a two-by-two block of the player's colour inside a ring of
-palette index 89, with the corners transparent. Nothing between `0x466E4E` and
-`0x467135` distinguishes a radar contact from a unit in plain sight — same
-sprite, same size, same colour.
-
-Position is `x·mmW/worldW` and `(z − y/2)·mmH/worldH` (`0x466E83`–`0x466EB7`),
-the same projection the 3D view uses, so an aircraft's blip sits above its
-ground position by half its altitude.
-
-The hovered unit additionally gets `radlogohigh` (`world+0x147E3`, 6×6, hotspot
-(2,2)) — a ring around the dot — and a selected unit gets its radar, sonar, jam
-and weapon range rings (`0x466F42` onwards).
-
-**The blink is not about radar.** `0x466EB9` skips the blip on alternate phases
-only when `unit+0xFA` is non-zero:
-
-```
-466eb9  mov al,BYTE [unit+0xfa]
-466ec1  je draw                        ; timer zero -> always drawn
-466ec3  test BYTE [world+0x142f1],0x1  ; the global blink phase
-466eca  je skip
-```
-
-`unit+0xFA` is a **just-damaged** timer, set to `0xF0` (240 ticks, eight
-seconds) by `0x467950` from the damage applier `0x489CE0` at `0x489D8E`,
-decremented per tick at `0x48ADF0` and cleared on unit init at `0x485C12`. The
-phase bit `world+0x142F1` is flipped every eight ticks by `0x466580`
-(`0x4665A9`–`0x4665BB`), called per tick from `0x4955E5`. So a blip flashes at
-roughly two hertz for eight seconds after the unit is hit, whether it is a radar
-contact or a unit you can see, and a quiet radar contact does not flash at all.
-
-### Nothing stored says "radar only"
-
-`0x467440` recomputes the picture once a tick for the local player alone
-(`0x46745B`) and writes the result into `unit+0x110`: loop 0 clears bits 8–10
-for everyone else and sets 8 and 9 for own and vision-sharing units
-(`0x4674EF`, `0x4674F6`), loop 1 sets bit 9 for sonar and bit 8 for radar
-(`0x4678FF`, `0x467937`), loop 2 lets jammers clear them, and **loop 4 sets bit
-8 again from line of sight** (`0x46780E`).
-
-That last one matters: **bit 8 is not "radar contact", it is "on my picture at
-all"**. The difference between radar and sight is not stored anywhere — it is
-recomputed on demand by calling `0x465AC0`, which is what the render list does.
-The AI does the same, building two lists in `0x40AA40`, one gated on can-see
-(`0x40AB11`) and one on bit 8 (`0x40AB3F`).
-
-This also corrects §14, which says "line of sight is `unit+0x9C`". There is no
-such field: loop 4 biases its cursor by `lea esi,[edi+0x74]` at `0x46770D`, so
-its `[esi+0x9C]` is `unit+0x110` and its `or ebp,0x100` at `0x46780E` is setting
-bit 8 of the same flags word everything else uses.
-
-### What RWE was doing
-
-`GameScene::renderWorldUi` drew, for every radar-only contact, a coloured
-minimap dot and a white box outline in world UI space. That is an RWE
-invention with nothing behind it in the original, and it is gone. RWE's minimap
-already draws radar contacts through `unitIsDetectableByLocalPlayer`, which is
-the right gate, and already rings the hovered one — so the minimap half was
-right all along and only the main view needed taking away.
-
-### Not ported
-
-- **The damage flash.** RWE's minimap dots do not blink. The timer and the
-  eight-tick phase are decoded above; there is no `unit+0xFA` equivalent in the
-  simulation and adding one is a bigger change than the complaint asked for.
-- **"R: Unidentified object".** RWE's info panel has no unknown-contact
-  state.
-- The minimap does **not** test cloak in the original (`0x466E4E`–`0x466ECC`
-  never reads `unit+0x10E`, and the radar visitor `0x467840` skips only
-  `stealth`), so a cloaked enemy inside your radar range still shows a blip
-  there while being invisible in the world. That reads as an oversight rather
-  than a design decision and RWE does not copy it.
-
-## NN. The order panel, and which flag gates which button
-
-Every side loads one panel — `ARMGEN.GUI` or `CORGEN.GUI`, via `0x41B0F0` —
-carrying every order button there is. The game then takes away or greys out
-what the current selection cannot use. There is no per-unit order panel.
-
-### `def+0x245` in full
-
-§9 gave bits 0–8, 10 and 11 of this dword and called bit 4 `canattack`. Here is
-the whole of it. The parser's boolean helper leaves its result in `eax`, so the
-key pushed immediately before the `call 0x4C46C0` owns the `shl` immediately
-after it, and the pipeline trap of §19 does not apply.
-
-| Bit | Key | `shl` at | Second site |
-|---|---|---|---|
-| 0 | `mobilestandorders` | `0x42C8DB` insert | `0x48D104`, under a name compare against `Standing_MoveOrder` |
-| 1 | `firestandorders` | `0x42C8FF` | `0x48D0D7`, likewise for `Standing_FireOrder` |
-| 2 | `onoffable` | `0x42C8BE` | `0x403010` ACTIVATE / `0x403040` DEACTIVATE |
-| 3 | `canstop` | `0x42C92B` | **none** — the order panel is its only reader |
-| 4 | `canattack` | `0x42C94A` | `0x43F154`, `0x401F98` |
-| 5 | `canguard` | `0x42C970` | `0x43E615`, `0x43F4C7` |
-| 6 | `canpatrol` | `0x42C996` | `0x43E5DE` picks cursor 7 over cursor 19 |
-| 7 | `canmove` | `0x42C9C3` | `0x43FE03`, `0x44019D` |
-| 8 | `canload` | `0x42C9E2` | `0x4067C4` the load handler, `0x489ABE` the transporter half of the predicate |
-| **9** | **no key: a copy of bit 10** | `0x42CA3D`–`0x42CA4F` | `0x4899CC`, the can-repair predicate |
-| 10 | `canreclamate` | `0x42CA0F` | `0x48996C` can-reclaim, `0x43FA13` the RECLAIMUNIT mission |
-| 11 | `canresurrect` | `0x42CA2E` | `0x43FF46` → the `RESURRECT` mission |
-| 12 | `cancapture` | `0x42CA72` | `0x4042CF` the CAPTURE handler; also used as a cheap "is this a commander" |
-| **13** | **no key: `cloakcost > 0`** | `0x42CA93` | `0x403080` CLOAK_ON, `0x4676AE` in the cloaked-unit render |
-| 14 | `candgun` | `0x42CABA` | `0x43F7EE` → the `ATTACKSPECIAL` mission |
-| 15 | `norestrict` | `0x42CB4B` | `0x44C165`, the restriction table UI |
-| 16 | `wacky` | `0x42ADC0` (first-pass loader only) | `0x46D33C` — read, meaning unrecovered |
-| 17 | `showplayername` | `0x42CB77` | `0x46AF64` |
-| 18 | `commander` | `0x42CB96` | only jointly with 17 at `0x46AF56` |
-| 19 | `cantbetransported` | `0x42CBBF` | `0x489AA3`, the passenger half of the load predicate |
-| 20–22 | `selfdestructcountdown` | `0x42CBFA`, default 5 at `0x42CC13` | `0x40202D` |
-
-Two entries in that table are not keys at all and are the reason two buttons
-have no FBI field behind them:
-
-```
-42ca3d  and ah,0xfd        ; clear bit 9
-42ca40  shr edx,1
-42ca42  and edx,0x200      ; bit 10 -> bit 9
-42ca4d  or  edx,eax
-```
-
-**Bit 9 is `canreclamate` copied**, and `0x4899CC` — the routine that decides
-whether a unit may repair another — is what reads it. So REPAIR and RECLAIM are
-the same flag twice and always appear together. Likewise **bit 13 is
-`CloakCost > 0`** (`0x42CA5A`–`0x42CA96`, comparing the float at `def+0x1DA`
-against the zero at `0x4FD210`); there is no `Cloakable` key in the binary at
-all, which is why honouring one gives the button to nothing.
-
-The layout is confirmed away from the parser by the field-by-field definition
-copy at `0x42BAC1`–`0x42BCAD`, which moves bits 0–19 as twenty separate one-bit
-members and then `0x700000` as a single three-bit group, and stops there.
-
-Shipped-data check, 189 FBIs: `canload` is exactly `armatlas`, `armtship`,
-`cortship`, `corvalk`; `cancapture` and `candgun` are exactly the two
-commanders; `canresurrect`, `wacky`, `selfdestructcountdown` and `cloakable`
-are named by nothing at all.
-
-### A mixed selection: ANY, not ALL
-
-`0x41B2E0` walks the local player's units (stride `0x118`, from `player+0x67`
-to `player+0x6B`), skipping any without `unit+0x110` bit 4 — selected. It keeps
-two different kinds of accumulator, and the difference is the whole answer.
-
-**The ten capability bits are a plain OR.** `0x41B49F`–`0x41B524` is ten
-repetitions of `shr edi,N / test cl,1 / je skip / mov <slot>,esi` with
-`esi = 1`, and **nothing ever clears a slot**:
-
-| bit | flag | address |
-|---|---|---|
-| 7 | `canmove` | `0x41B4A1` |
-| 3 | `canstop` | `0x41B4AE` |
-| 4 | `canattack` | `0x41B4BC` |
-| 5 | `canguard` | `0x41B4C9` |
-| 6 | `canpatrol` | `0x41B4D7` |
-| 8 | `canload` | `0x41B4E4` |
-| 9 | repair | `0x41B4F2` |
-| 12 | `cancapture` | `0x41B4FD` |
-| 10 | `canreclamate` | `0x41B50B` |
-| 14 | `candgun` | `0x41B518` |
-
-So a button is offered when **any** selected unit names it. Boxing a solar
-collector in with a squad of Peewees does not cost the Peewees their move
-button, and one transport in the box puts LOAD up for the lot.
-
-**The four stateful toggles are a sentinel accumulator**, which is the shape
-§9 already described for the two mode buttons: fire orders start at 4, move
-orders at 4, cloak and on/off at 3; a unit that does not name the flag is
-skipped entirely (`0x41B403`, `0x41B42C`) so it cannot drag the shared state;
-the first offerer's value is taken; a later disagreement collapses to 3
-(`0x41B420`, `0x41B449`) or 2. The sentinel means "nobody offered it" and greys
-the button out (`0x41A243`, `0x41A280`).
-
-The cloak accumulator has a bug worth not copying: `0x41B485`–`0x41B497` does
-not compare at all, so a **second** cloakable unit sets "mixed" even when the
-two agree. On/off, three instructions away at `0x41B893`, does compare.
-
-Results are packed into `world+0x37EC0` (move-order 0–2, cloak 3–4, on/off 5–6,
-canmove 7, canstop 8, canattack 9, canguard 10, canpatrol 11, canload 12,
-canreclamate 13, cancapture 14, repair 15), `world+0x37EBE` bits 12–14 (fire
-order) and `world+0x37EC2` bit 0 (candgun).
-
-### Hidden versus greyed, and the slot LOAD and BLAST share
-
-`0x41A120` is the enable pass — seventeen hardcoded name lookups, each followed
-by one bit test. Almost everything is **greyed**, via `0x4A1200(page, idx, 1)`
-which sets bit 0 of `WORD [ctrl+0x13C]`: MOVE at `0x41A2E8`, STOP `0x41A310`,
-ATTACK `0x41A338`, DEFEND `0x41A35F`, PATROL `0x41A387`, and RECLAIM, REPAIR
-and CAPTURE the same way.
-
-LOAD and BLAST are the exception, because **they are the same slot**: in
-`ARMGEN.GUI` `ARMLOAD` and `ARMBLAST` are both at `xpos=64, ypos=317`, same
-width and height. `0x41A409` resolves it on the ORed `canload` bit —
-
-- nothing can load: LOAD is made inactive (`0x4A03F0(page, idx, 0)`, which
-  writes `BYTE [ctrl+0x29]`), UNLOAD is greyed, BLAST is greyed unless
-  `candgun`;
-- something can load: **BLAST is made inactive** and LOAD and UNLOAD stand.
-
-So selecting a commander together with an Atlas costs you the D-gun button.
-
-One trap for anyone reimplementing this: `0x49FE60` finds a control by
-`strstr`, not by name equality, so `"MOVE"` also matches `ARMMOVEORD` and
-`"LOAD"` also matches `ARMUNLOAD`. It only works because the shipped GUI files
-happen to list the short name first.
-
-### What RWE was doing
-
-`GameScene::createOrdersPanel` gated LOAD, UNLOAD, BLAST and CLOAK, and only
-when **exactly one unit was selected**; a selection of two or more got the raw
-`ARMGEN.GUI` with every button on it, which is the reported complaint. It also
-gated LOAD on having transport capacity rather than on `canload` (the same four
-units in the shipped data, but not the same rule), and gated nothing at all on
-`canstop`, `canpatrol`, `canattack`, `canmove`, `canguard`, `canreclamate` or
-`cancapture` — four of which RWE was not even reading out of the FBI.
-
-It now builds the list of selected definitions and applies
-`selectionOffersOrderButton`, which is the OR above.
-
-### Deliberately not ported
-
-- **Greying.** RWE has no disabled state for a `UiStagedButton`, so a button
-  the selection cannot use is removed rather than drawn dim. Recorded here so
-  it is not mistaken for the original's behaviour: the original greys
-  everything except LOAD and BLAST, which it hides because they overlap.
-- **The cloak accumulator's disagreement bug** at `0x41B485`.
-- **`canresurrect`, `wacky` and `selfdestructcountdown`.** No shipped unit
-  names any of them and RWE has no resurrect order.
-- **`canstop`.** It is parsed and honoured for the button, but the original's
-  own STOP mission builder at `0x43F82C` does not check it, so the flag gates
-  the button and nothing else.
-
-## NN. Who may reclaim, and who may not be reclaimed
-
-`canreclamate` is flags word B **bit 10** (parser: push `"canreclamate"`
-`0x503A74` at `0x42C9EF`, `shl eax,0xa` at `0x42CA0F`, store `0x42CA1A`).
-
-### One key, two capabilities
-
-The parser does something easy to miss. Immediately after storing bit 10 it
-**mirrors it into bit 9** (`0x42CA3B`-`0x42CA4D`:
-`mov edx,eax; and ah,0xfd; shr edx,1; and edx,0x200; or edx,eax`). Bit 9 is
-the *repair* capability, and the two are read by different routines:
-
-| Routine | Address | Tests |
-|---|---|---|
-| `CanReclaimTarget(reclaimer, target)` | `0x489960` | bit 10 at `0x48996C` |
-| `CanRepair(...)` | `0x4899B0` | bit 9 at `0x4899CC` |
-
-So a single FBI key governs both, and **`workertime` is never consulted by
-either**. RWE had been gating both on `workerTime` alone.
-
-That is not a distinction without a difference. Sixteen units in the base game
-set `CanReclamate=1` -- the Arm and Core commanders, construction kbots,
-vehicles, aircraft and ships. **Twenty-one more have a non-zero `WorkerTime`
-with the bit clear**: every factory, both air repair pads, both carriers, and
-CORSOLAR. Every one of those could reclaim and repair in RWE and cannot in the
-original. No unit has the bit set with a zero worker time.
-
-The same bit is tested again in the order-issue dispatch at `0x40477A` and
-`0x404B6E`, which is where the refusal is announced: `0x50164C` "That unit
-cannot be reclaimed" and `0x501638` "Reclamation failed".
-
-### The target side
-
-`0x489960` makes two further checks on the target once the reclaimer has
-passed:
-
-- **`target+0x110 & 3 == 2`** rejects (`0x48997B`-`0x489981`). The low two bits
-  of `unit+0x110` are a physical-mode field that is *not* the movement or
-  firing mode at bits 18-21. Value 1 is "on the ground" -- the per-tick ground
-  placement routine `0x48A870` requires it at `0x48A8AE` -- and value 2 is
-  tested here, in `0x401C48` where it gates allocating an air-movement
-  structure for a `canfly` unit, and in the `setSFXoccupy` cascade at
-  `0x43DB7A`. Everything points at 2 meaning **airborne**, which would make
-  this "you cannot reclaim a unit that is in the air" -- but that is inference
-  from three call sites, not a decode of the writer, which was not found.
-  **Not implemented on that basis.**
-- **the target's `cancapture`** (flags B bit 12) rejects (`0x48998F`,
-  byte-verified as `F6 C4 10`). The capture handler mirrors it at
-  `0x4042E3`-`0x4042F5` with `0x501618` "That unit cannot be captured". Only
-  ARMCOM and CORCOM set the key, so what the rule amounts to in play is that
-  **a Commander can capture, and can itself be neither captured nor
-  reclaimed**.
-
-Both the reclaimer gate and the `cancapture` rule are implemented; finishing
-somebody's half-built structure is construction rather than repair and is
-deliberately left outside the gate.
-
-### `selfdestructcountdown`, and why RWE's five seconds was already right
-
-Flags B bits 20-22, parsed at `0x42CBC8`. The part worth recording is the
-**absent** case at `0x42CC07`: `and edx,0xffdfffff; or edx,0x500000` sets the
-field to **5**. So the original's own default is five seconds and RWE's
-hardcoded five is already correct -- there was nothing to change.
-
-An explicit `0` is *not* "use the default": `0x402053` tests the field and
-detonates immediately with no announcement. Otherwise the reader `0x402010`
-counts down one step a second (`push 0x1E` = 30 ticks into `0x439E80` at
-`0x4020F6`), announcing five, four, three, two, one, zero from a message table
-based at `0x5086D8`, and then waits a further `rand(0..14)` ticks
-(`0x402117`) before dealing **30000** damage (`0x40213C`) -- which is exactly
-the armour-bypass threshold at `0x489BD1`, tying it to the D-gun finding in
-the damage section. Only six message-table entries exist for a three-bit
-field, so countdowns of 6 or 7 would index past the array; nothing sets them.
-
-What RWE still lacks is the six spoken announcements, the random slop before
-the blast, and the explicit-zero case. The timing is right.
-
-### `healtime`, `WORD def+0x200`
-
-Parsed at `0x42C379`, stored `0x42C388`. One reader, `0x48AF3D`, in the
-per-unit per-tick loop, and it is not a per-tick heal: the whole block runs
-only when the game tick is a multiple of eight (`test BYTE PTR [..],0x7` at
-`0x48AF5E`) and then adds `healtime * 8 / 30`, truncated -- a `shl eax,0x3`
-followed by a divide-by-thirty done with the reciprocal `0x88888889`.
-
-So the key is hit points a **second**, delivered in eight-tick steps. Only
-the two commanders set it, at 27, which is seven points every eight ticks or
-26.25 a second. Implemented, with the granularity kept because it is what the
-health bar visibly does; the original also charges the mending against the
-owner's stores through `0x41BD10`, and RWE does not, because no other repair
-in RWE costs anything and making this the one exception would be stranger
-than leaving it free.
-
-Immediately above it in the same block sits the drowning rule, recorded here
-because it is easy to miss: once a second, a unit whose `WORD unit+0x70` is
-at or below the water level and whose definition is **not** `canhover` takes
-`[gamerules+0xD50]` damage of type 11 (`0x48AF19`-`0x48AF32`).

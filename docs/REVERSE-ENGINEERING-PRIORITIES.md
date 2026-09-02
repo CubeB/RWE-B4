@@ -6,7 +6,14 @@ says which, and several say what the entry originally got wrong. The ranking it
 opens with is the ranking as first written, deliberately left alone so that the
 corrections stay legible next to the guesses that prompted them.
 
-Last revised 2026-09-02.
+Last revised 2026-09-02. **What is left is now shorter than what is done**, so
+it is worth stating plainly rather than leaving to be inferred from twenty-seven
+entries: the strafing pass for fighters, the maneuver leash, `digger`, `upright`
+and `norestrict` (all three of which need machinery RWE does not have), the
+`antiweapons` flag (which has no reader anywhere in the binary), the veterancy
+reload term, TA's Permanent and Circular sight modes, and what a repair pad does
+once an aircraft has landed on it. Everything else in Tiers 1 to 3 is either
+implemented or refuted.
 
 Ranked by (player-visible impact) × (confidence it can be recovered) / (effort).
 Everything below is backed either by a count over the real game data, a
@@ -303,7 +310,7 @@ limit, and `aimrate`/`holdtime` (2 each) for how the turret tracks.
 **Effort / risk.** 1–2 days. Medium risk — interacts with the existing aim-script
 flow, and issue #42 (aiming scripts running twice) is in the same code.
 
-**Done, and three things above are wrong** — written up as `TOTALA-EXE.md` §10.
+**Done, and three things above are wrong** — written up as `TOTALA-EXE.md` §11.
 
 - The `turret=0` weapons are **not hull-mounted tank guns**; there is no such
   thing in the shipped data. They are aircraft weapons, torpedoes, vertical-launch
@@ -351,7 +358,7 @@ rate and the frame walk.
 
 Still open from the same reading: smoke does not drift downwind (the wind vector
 is decoded, RWE has no map wind), and neither explosions nor wreckage smoke
-afterwards. Both are noted in `TOTALA-EXE.md` §20.
+afterwards. Both are noted in `TOTALA-EXE.md` §26.
 
 ### 9. Radar jammers, stealth, sonar jamming — DONE
 
@@ -387,6 +394,33 @@ missing:
 The drain is at `0x4017CB`, once per economy tick, truncated to a whole number,
 all-or-nothing: if the player's energy will not cover it the unit simply does
 not cloak. Implemented, with tests; see `TOTALA-EXE.md` as above.
+
+**The display half, done afterwards, and both leads that pointed at it were
+mislabelled.** The earlier write-up left "the COB cloak events `0xE`/`0xF`" and
+"the `0x10000` piece render flag" as decoded-but-unported. Neither is what its
+name says. `0xE` and `0xF` are indices into the unit-notification table at
+`0x5086E4`/`0x5086E8` — a sound and a caption, `cloak`/"Cloaked" and
+`uncloak`/"Visible" — and the COB calls in that routine are `Activate` and
+`StartBuilding`, reached by name; none of the four units with a `CloakCost`
+defines a cloak function at all. `0x10000` is a bit in a *mission's* pending
+event mask at `mission+0x4E`, tested at `0x43B840`, which clears the unit's aim
+and runs `TargetCleared`. Simulation, not drawing.
+
+What actually draws it: `0x459200` composites the whole unit into a private
+bitmap and then picks its blitter on the cloak flag at `0x459779`, with the
+arguments identical either way. The cloaked one runs every pixel through a
+`0x10000`-byte table tagged **"ALPHA TABLE"** (`0x50A430`) built at `0x4BA772`
+by averaging two palette entries channel by channel and snapping the result back
+to the nearest index. So it is an even fifty per cent blend of the unit with
+whatever is behind it — not a stipple, not a ramp on the model. The owner sees
+that ghost, an enemy sees nothing whatever (there is no partial reveal up close;
+the proximity fuse drops the cloak itself), and neither cloaking nor decloaking
+has any visual transition. RWE blends with alpha and a depth prepass instead of
+the lookup table, recorded as a deliberate difference in mechanism.
+
+Fixed in passing, and the more serious of the two: an enemy's cloaked unit was
+still being drawn, shadowed, clicked and nanolathed while the simulation was
+already refusing to target it.
 
 ### 11. Nukes, stockpiles and anti-nukes — *done, bar the veterancy term*
 
@@ -541,7 +575,7 @@ has no reader in this build at all. The projectile-versus-feature collision at
 density. RWE already does exactly this, so **no code was changed**; only
 `src/rwe/sim/hitdensity.test.cpp`, which fires the same shot at the same rock at
 each of the four densities the shipped data uses and requires it to stop every
-time, so nobody implements the guess later. `TOTALA-EXE.md` §21's note should be
+time, so nobody implements the guess later. `TOTALA-EXE.md` §27's note should be
 read together with §NN.
 
 ---
@@ -678,7 +712,7 @@ read together with §NN.
     `onoffable` ambiguity §B flags is `mobilestandorders` bit 0 (`0x42C8DB`),
     `firestandorders` bit 1 (`0x42C8FF`), `onoffable` bit 2 (`0x42C8BE`). And
     the unit definition stride is `0x249`, the instance stride `0x118`.
-23. **TA's Permanent and Circular LOS modes.** Already in `TOTALA-EXE.md` §21.
+23. **TA's Permanent and Circular LOS modes.** Already in `TOTALA-EXE.md` §27.
     Circular is fully understood (a `vismasks.gaf` stamp, radius
     `clamp(SightDistance/32, 5, 14)`); Permanent has not been looked at. Only
     reachable once there is a skirmish option to select them, so low urgency.
@@ -720,7 +754,7 @@ read together with §NN.
 
 26. **`sortbias`** — parsed by the original into `def+0x21A` and read nowhere.
     Already recorded in the findings doc; leave dead.
-27. **The deliberate departures in `TOTALA-EXE.md` §20** — the nanolathe
+27. **The deliberate departures in `TOTALA-EXE.md` §26** — the nanolathe
     spray landing on the roof, depth-tested exhaust occlusion, the
     camera-windowed fog raster, off-map fog cells reading as the nearest on-map
     cell, and the absent `BrakeRate` nose re-aim. These are decisions, not gaps.
@@ -815,7 +849,7 @@ a **float** at `+0xC8` and `+0xFE` is `holdtime`; `+0x104` is `accuracy`,
 `+0x106` is `tolerance`, `+0x108` is `pitchtolerance`; `shakemagnitude` is a
 dword at `+0xCC` and `shakeduration` at `+0xD0`. Everything before them in the
 line is right. The full corrected weapon layout, with the flag bit numbers, is
-in `TOTALA-EXE.md` §19.
+in `TOTALA-EXE.md` §25.
 
 Useful new routine addresses:
 

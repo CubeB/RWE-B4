@@ -84,10 +84,13 @@ Much of the current work is making RWE behave like the original rather than
 merely look similar. Where a behaviour is meant to match TA, it has usually been
 read out of `TotalA.exe` instead of guessed at.
 
-- `docs/TOTALA-EXE.md` — the findings: addresses, constants and algorithms for
-  the flight model, fog of war and line of sight, the nanolathe and construction
-  display, effects and render order, plus the FBI field offsets. It also records
-  where RWE **deliberately** differs, so those do not get "corrected" back.
+- `docs/TOTALA-EXE.md` — the findings, now twenty-seven sections: the flight
+  model, fog of war and line of sight, the damage pipeline, missile flight,
+  target selection and eligibility, the economy, the nanolathe and construction
+  display, effects and render order, and the FBI and weapon field offsets. The
+  last two sections are the ones to read first if you are about to change
+  something — where RWE **deliberately** differs, so those do not get
+  "corrected" back, and what is decoded but not ported.
 - `docs/TOTALA-EXE-MISSIONS.md` — how aircraft decide *where to go* when
   attacking: the mission name table and its handlers, the bomber attack run,
   the gunship standoff ring, and what `hoverattack` and `maneuverleashlength`
