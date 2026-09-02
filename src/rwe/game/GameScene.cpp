@@ -4,6 +4,8 @@
 #include <functional>
 #include <rwe/CroppedViewport.h>
 #include <rwe/MainMenuScene.h>
+#include <rwe/util.h>
+#include <rwe/MainMenuScene.h>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/Mesh.h>
 #include <rwe/camera_util.h>
@@ -617,6 +619,11 @@ namespace rwe
         }
 
         currentPanel->render(chromeUiRenderService);
+
+        for (auto& panel : gameMenuPanels)
+        {
+            panel->render(chromeUiRenderService);
+        }
     }
 
     void GameScene::renderOverlay()
@@ -1870,6 +1877,28 @@ namespace rwe
 
     void GameScene::onKeyDown(const SDL_KeyboardEvent& keysym)
     {
+        // The game menu owns the keyboard while it is up. Tab and F2 toggle
+        // it (the original's keys: Tab opens GAME OPTIONS in single player,
+        // F2 anywhere) and Escape closes it.
+        if (keysym.key == SDLK_TAB || keysym.key == SDLK_F2)
+        {
+            toggleGameMenu();
+            return;
+        }
+        if (isGameMenuOpen())
+        {
+            if (keysym.key == SDLK_ESCAPE)
+            {
+                closeGameMenu();
+                return;
+            }
+            for (auto& panel : gameMenuPanels)
+            {
+                panel->keyDown(KeyEvent(keysym.key));
+            }
+            return;
+        }
+
         // Suppress UI panel key activation when Ctrl is held — Ctrl+letter is
         // hotkey territory (Ctrl+A select-all, Ctrl+S stop, Ctrl+D self-destruct,
         // etc.), and the panel's letter-bound buttons (e.g. ATTACK on plain "A")
@@ -2198,6 +2227,15 @@ namespace rwe
 
     void GameScene::onMouseDown(MouseButtonEvent event)
     {
+        if (isGameMenuOpen())
+        {
+            for (auto& panel : gameMenuPanels)
+            {
+                panel->mouseDown(event);
+            }
+            return;
+        }
+
         currentPanel->mouseDown(event);
 
         // Debug placing mode: clicks drop units on the map instead of
@@ -2653,6 +2691,15 @@ namespace rwe
 
     void GameScene::onMouseUp(MouseButtonEvent event)
     {
+        if (isGameMenuOpen())
+        {
+            for (auto& panel : gameMenuPanels)
+            {
+                panel->mouseUp(event);
+            }
+            return;
+        }
+
         currentPanel->mouseUp(event);
 
         if (event.button == MouseButtonEvent::MouseButton::Left)
@@ -2842,6 +2889,15 @@ namespace rwe
 
     void GameScene::onMouseMove(MouseMoveEvent event)
     {
+        if (isGameMenuOpen())
+        {
+            for (auto& panel : gameMenuPanels)
+            {
+                panel->mouseMove(event);
+            }
+            return;
+        }
+
         if (auto middleMousePanningState = std::get_if<CameraControlStateMiddleMousePan>(&cameraControlState); middleMousePanningState)
         {
             auto cameraConstraint = computeCameraConstraint(simulation.terrain, worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
@@ -2861,6 +2917,15 @@ namespace rwe
 
     void GameScene::onMouseWheel(MouseWheelEvent event)
     {
+        if (isGameMenuOpen())
+        {
+            for (auto& panel : gameMenuPanels)
+            {
+                panel->mouseWheel(event);
+            }
+            return;
+        }
+
         currentPanel->mouseWheel(event);
     }
 
@@ -4610,6 +4675,286 @@ namespace rwe
     bool GameScene::isShiftDown() const
     {
         return leftShiftDown || rightShiftDown;
+    }
+
+    void GameScene::setMenuPause(bool wantPaused)
+    {
+        // The original pauses when the game menu opens in single player and
+        // never in multiplayer; RWE routes it through the same command path
+        // as the Pause key so peers stay in step either way.
+        if (wantPaused && !paused)
+        {
+            paused = true;
+            menuPausedGame = true;
+            localPlayerCommandBuffer.push_back(PlayerPauseGameCommand{});
+        }
+        else if (!wantPaused && menuPausedGame)
+        {
+            menuPausedGame = false;
+            if (paused)
+            {
+                paused = false;
+                localPlayerCommandBuffer.push_back(PlayerUnpauseGameCommand{});
+            }
+        }
+    }
+
+    void GameScene::setGameMenuPanel(std::unique_ptr<UiPanel>&& panel)
+    {
+        panel->groupMessages().subscribe([this](const auto& msg) {
+            if (std::get_if<ActivateMessage>(&msg.message) != nullptr)
+            {
+                gameMenuMessage(msg.topic, msg.controlName);
+            }
+        });
+        gameMenuPanels.clear();
+        gameMenuPanels.push_back(std::move(panel));
+    }
+
+    void GameScene::toggleGameMenu()
+    {
+        if (isGameMenuOpen())
+        {
+            closeGameMenu();
+        }
+        else
+        {
+            openGameMenuRoot();
+        }
+    }
+
+    void GameScene::openGameMenuRoot()
+    {
+        // The original's GAME OPTIONS panel, drawn over the left unit panel.
+        // Tab opens it in single player (the sliding TABMENU bar it shares a
+        // key with is multiplayer-only), F2 opens it anywhere.
+        const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
+        auto panel = uiFactory.panelFromGuiFile(sidePrefix + "OPT");
+
+        // Save, load, the briefing and help do not exist in RWE yet; the
+        // original greys what does not apply rather than hiding it.
+        for (const auto* name : {"SAVEGAME", "LOADGAME", "MISSION", "HELP"})
+        {
+            if (auto button = panel->find<UiStagedButton>(name))
+            {
+                button->get().setEnabled(false);
+            }
+        }
+
+        setGameMenuPanel(std::move(panel));
+        inGameOptionsPage.clear();
+        setMenuPause(true);
+    }
+
+    void GameScene::openGameExitMenu()
+    {
+        auto panel = uiFactory.panelFromGuiFile("EXITMENU");
+        if (auto button = panel->find<UiStagedButton>("RESTART"))
+        {
+            button->get().setEnabled(false);
+        }
+        setGameMenuPanel(std::move(panel));
+    }
+
+    void GameScene::openInGameOptions(const std::string& page)
+    {
+        // The in-game options screen is the front end's composite with the
+        // in-game skins: PREFS.GUI carries the tabs and OK/Cancel, the RT
+        // pages carry the controls, and the backgrounds resolve out of
+        // commongui.GAF through the ordinary gadget lookup.
+        auto prefsEntries = sceneContext.vfs->readGuiOrThrow(sceneContext.pathMapping->guis + "/PREFS.GUI");
+        if (!page.empty())
+        {
+            auto pageEntries = sceneContext.vfs->readGuiOrThrow(sceneContext.pathMapping->guis + "/" + page + ".GUI");
+            prefsEntries.insert(prefsEntries.end(), pageEntries.begin() + 1, pageEntries.end());
+        }
+
+        auto panel = uiFactory.panelFromGuiFile("PREFS", prefsEntries);
+
+        auto state = currentInGameOptions();
+        if (auto bar = panel->find<UiScrollBar>("FXVOL"))
+        {
+            bar->get().setScrollBarPercent(0.2f);
+            bar->get().setScrollPercent(static_cast<float>(state.soundVolume) / 100.0f);
+            auto sub = bar->get().scrollChanged().subscribe([a = sceneContext.audioService](float v) {
+                a->setSoundVolume(v);
+            });
+            bar->get().addSubscription(std::move(sub));
+        }
+        if (auto bar = panel->find<UiScrollBar>("MUSICVOL"))
+        {
+            bar->get().setScrollBarPercent(0.2f);
+            bar->get().setScrollPercent(static_cast<float>(state.musicVolume) / 100.0f);
+            auto sub = bar->get().scrollChanged().subscribe([a = sceneContext.audioService](float v) {
+                a->setMusicVolume(v);
+            });
+            bar->get().addSubscription(std::move(sub));
+        }
+        if (auto toggle = panel->find<UiStagedButton>("NOTRAK"))
+        {
+            toggle->get().setStage(state.musicEnabled ? 1 : 0);
+        }
+        if (auto bar = panel->find<UiScrollBar>("VIDSLDR"))
+        {
+            bar->get().setScrollBarPercent(0.34f);
+            auto modeToPercent = pendingWindowMode == "fullscreen" ? 1.0f : (pendingWindowMode == "borderless" ? 0.5f : 0.0f);
+            bar->get().setScrollPercent(modeToPercent);
+            auto sub = bar->get().scrollChanged().subscribe([this](float v) {
+                pendingWindowMode = v < 0.33f ? "bordered" : (v < 0.67f ? "borderless" : "fullscreen");
+                if (!gameMenuPanels.empty())
+                {
+                    if (auto label = gameMenuPanels.front()->find<UiLabel>("VIDVAL"))
+                    {
+                        label->get().setText(pendingWindowMode == "borderless" ? "Borderless" : (pendingWindowMode == "fullscreen" ? "Fullscreen" : "Window"));
+                    }
+                }
+            });
+            bar->get().addSubscription(std::move(sub));
+        }
+        if (auto label = panel->find<UiLabel>("VIDVAL"))
+        {
+            label->get().setText(pendingWindowMode == "borderless" ? "Borderless" : (pendingWindowMode == "fullscreen" ? "Fullscreen" : "Window"));
+        }
+
+        setGameMenuPanel(std::move(panel));
+        inGameOptionsPage = page;
+    }
+
+    void GameScene::closeGameMenu()
+    {
+        gameMenuPanels.clear();
+        inGameOptionsPage.clear();
+        setMenuPause(false);
+    }
+
+    GameScene::InGameOptionsState GameScene::currentInGameOptions() const
+    {
+        return InGameOptionsState{
+            static_cast<unsigned int>(sceneContext.audioService->getSoundVolume() * 100.0f),
+            static_cast<unsigned int>(sceneContext.audioService->getMusicVolume() * 100.0f),
+            sceneContext.audioService->isMusicEnabled(),
+            pendingWindowMode};
+    }
+
+    void GameScene::applyInGameOptions(const InGameOptionsState& state)
+    {
+        auto* audio = sceneContext.audioService;
+        audio->setSoundVolume(static_cast<float>(state.soundVolume) / 100.0f);
+        audio->setMusicVolume(static_cast<float>(state.musicVolume) / 100.0f);
+        audio->setMusicEnabled(state.musicEnabled);
+        pendingWindowMode = state.windowMode;
+    }
+
+    void GameScene::saveInGameOptions()
+    {
+        auto localDataPath = getLocalDataPath();
+        if (!localDataPath)
+        {
+            return;
+        }
+        auto state = currentInGameOptions();
+        updateConfigFile(*localDataPath / "rwe.cfg", {
+                                                         {"sound-volume", std::to_string(state.soundVolume)},
+                                                         {"music-volume", std::to_string(state.musicVolume)},
+                                                         {"music", state.musicEnabled ? "true" : "false"},
+                                                         {"window-mode", state.windowMode},
+                                                     });
+    }
+
+    void GameScene::exitToMainMenu()
+    {
+        sceneContext.audioService->stopMusic();
+        auto menu = std::make_shared<MainMenuScene>(
+            sceneContext,
+            audioLookup,
+            sceneContext.viewport->width(),
+            sceneContext.viewport->height());
+        sceneContext.sceneManager->setNextScene(menu);
+    }
+
+    void GameScene::gameMenuMessage(const std::string& topic, const std::string& control)
+    {
+        const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
+        if (topic == sidePrefix + "OPT")
+        {
+            if (control == "OK")
+            {
+                closeGameMenu();
+            }
+            else if (control == "PREFS")
+            {
+                if (pendingWindowMode.empty())
+                {
+                    pendingWindowMode = sceneContext.globalConfig->windowMode;
+                }
+                gameOptionsUndo = currentInGameOptions();
+                openInGameOptions(std::string());
+            }
+            else if (control == "EXIT")
+            {
+                openGameExitMenu();
+            }
+        }
+        else if (topic == "EXITMENU")
+        {
+            if (control == "CANCEL")
+            {
+                openGameMenuRoot();
+            }
+            else if (control == "EXITGAME")
+            {
+                sceneContext.sceneManager->requestExit();
+            }
+            else if (control == "MAINMENU")
+            {
+                exitToMainMenu();
+            }
+        }
+        else if (topic == "PREFS")
+        {
+            if (control == "SOUND")
+            {
+                openInGameOptions("SOUNDSRT");
+            }
+            else if (control == "MUSIC")
+            {
+                openInGameOptions("MUSICRT");
+            }
+            else if (control == "VISUALS")
+            {
+                openInGameOptions("VISUALRT");
+            }
+            else if (control == "SPEEDS")
+            {
+                openInGameOptions("SPEEDSRT");
+            }
+            else if (control == "PREV")
+            {
+                // The button says OK: keep the settings and go back.
+                saveInGameOptions();
+                openGameMenuRoot();
+            }
+            else if (control == "CANCEL")
+            {
+                applyInGameOptions(gameOptionsUndo);
+                openGameMenuRoot();
+            }
+            else if (control == "RESTORE")
+            {
+                applyInGameOptions(InGameOptionsState{100, 100, true, "bordered"});
+                openInGameOptions(inGameOptionsPage);
+            }
+            else if (control == "UNDO")
+            {
+                applyInGameOptions(gameOptionsUndo);
+                openInGameOptions(inGameOptionsPage);
+            }
+            else if (control == "NOTRAK")
+            {
+                auto* audio = sceneContext.audioService;
+                audio->setMusicEnabled(!audio->isMusicEnabled());
+            }
+        }
     }
 
     void GameScene::handleEscapeDown()

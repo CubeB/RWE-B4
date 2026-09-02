@@ -361,6 +361,26 @@ namespace rwe
 
         UiFactory uiFactory;
 
+        /**
+         * The in-game GAME OPTIONS menu (the original's ARMOPT/COROPT panel,
+         * opened by Tab or F2) and whatever screen hangs off it -- the exit
+         * menu, or the options composite. While anything is here, it owns
+         * the input and the game is paused.
+         */
+        std::vector<std::unique_ptr<UiPanel>> gameMenuPanels;
+        bool menuPausedGame{false};
+        std::string inGameOptionsPage;
+
+        struct InGameOptionsState
+        {
+            unsigned int soundVolume;
+            unsigned int musicVolume;
+            bool musicEnabled;
+            std::string windowMode;
+        };
+        InGameOptionsState gameOptionsUndo{100, 100, true, "bordered"};
+        std::string pendingWindowMode;
+
         /** Sound lookup table, kept so a main menu scene can be built on the way out. */
         TdfBlock* audioLookup;
 
@@ -748,6 +768,21 @@ namespace rwe
 
         /** The radar, sonar and jammer rings the original draws on the minimap around a selected unit. */
         void renderMinimapDetectionRings(const Matrix4f& worldToMinimap);
+
+        bool isGameMenuOpen() const { return !gameMenuPanels.empty(); }
+        void toggleGameMenu();
+        void openGameMenuRoot();
+        void openGameExitMenu();
+        void openInGameOptions(const std::string& page);
+        void closeGameMenu();
+        void setGameMenuPanel(std::unique_ptr<UiPanel>&& panel);
+        void gameMenuMessage(const std::string& topic, const std::string& control);
+        void exitToMainMenu();
+        InGameOptionsState currentInGameOptions() const;
+        void applyInGameOptions(const InGameOptionsState& state);
+        void saveInGameOptions();
+        /** Pause the sim for the menu, through the same command path the Pause key uses. */
+        void setMenuPause(bool wantPaused);
 
         void renderUnitOrders(UnitId unitId, bool drawLines);
 
