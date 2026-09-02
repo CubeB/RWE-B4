@@ -1669,8 +1669,7 @@ namespace rwe
         // these up (0x410774 for the search, 0x410310 for the guard), so a
         // flight coming off the same target does not all end up on one side
         // of it.
-        std::uniform_int_distribution<unsigned int> anywhere(0, 0xffffu);
-        unitInfo.state->airLoiter = UnitState::AirLoiterState{reason, anchor, SimAngle(anywhere(sim->rng))};
+        unitInfo.state->airLoiter = UnitState::AirLoiterState{reason, anchor, SimAngle(sim->rng() % 0x10000u)};
     }
 
     void UnitBehaviorService::flyAirLoiterCircuit(UnitInfo unitInfo, UnitState::AirLoiterState::Reason reason, const SimVector& anchor, SimAngle stepBase)
@@ -1732,8 +1731,7 @@ namespace rwe
             // stations are joined by chords that pass close to the middle:
             // this is why a bomber keeps coming back over what it killed
             // rather than settling into a tidy orbit.
-            std::uniform_int_distribution<unsigned int> jitter(0, AirLoiterStepJitter.value);
-            loiter.bearing = loiter.bearing - stepBase - SimAngle(jitter(sim->rng));
+            loiter.bearing = loiter.bearing - stepBase - SimAngle(sim->rng() % (AirLoiterStepJitter.value + 1u));
             station = loiter.anchor + (UnitState::toDirection(loiter.bearing) * radius);
         }
 
@@ -2634,8 +2632,9 @@ namespace rwe
             SimVector toTarget(targetPosition.x - unitInfo.state->position.x, 0_ss, targetPosition.z - unitInfo.state->position.z);
             auto half = toTarget.length() / 2_ss;
             auto heading = toTarget.lengthSquared() > 0_ss ? UnitState::toRotation(toTarget) : unitInfo.state->rotation;
-            std::uniform_int_distribution<unsigned int> spread(0, QuarterTurn.value);
-            auto scatter = SimAngle(spread(sim->rng)) - SimAngle(QuarterTurn.value / 2);
+            // (all four draws here take the modulo rather than going through
+            // uniform_int_distribution: see the note at chooseTarget.)
+            auto scatter = SimAngle(sim->rng() % (QuarterTurn.value + 1u)) - SimAngle(QuarterTurn.value / 2);
             auto direction = UnitState::toDirection(heading + scatter);
             auto altitude = getTargetAltitude(sim->terrain, unitInfo.state->position.x, unitInfo.state->position.z, *unitInfo.definition);
             hover.station = SimVector(
@@ -2721,8 +2720,8 @@ namespace rwe
             // the target has moved off. Stop working round from here and take
             // a fresh bearing at full range instead.
             hover.outOfRangeArrivals = 0;
-            std::uniform_int_distribution<unsigned int> anywhere(0, 0xffffu);
-            auto station = hoverAttackStation(targetPosition, SimAngle(anywhere(sim->rng)), weaponMaxRange);
+
+            auto station = hoverAttackStation(targetPosition, SimAngle(sim->rng() % 0x10000u), weaponMaxRange);
             station.y = stationAltitude(station);
             return station;
         }
