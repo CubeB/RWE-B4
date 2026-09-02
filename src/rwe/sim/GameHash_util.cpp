@@ -208,6 +208,7 @@ namespace rwe
             projectile.pitch,
             projectile.speed,
             projectile.secondPhase,
+            projectile.targetProjectile,
             projectile.motorOut);
 
         for (const auto& [_, damage] : projectile.damage)

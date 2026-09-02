@@ -124,5 +124,32 @@ namespace rwe
          * target afterwards, so which way the launcher faces does not matter.
          */
         bool verticalLaunch{false};
+
+        /**
+         * TA interceptor, bit 30 of `wdef+0x111`. The weapon shoots at other
+         * projectiles rather than at units: the auto-target scan hands it the
+         * projectile search at 0x49D120 instead of the unit one, and its blast
+         * detonates every projectile inside its `areaofeffect` (0x49A664).
+         */
+        bool interceptor{false};
+
+        /**
+         * TA targetable, bit 29 of `wdef+0x111`. The other half of that pair --
+         * what marks a projectile as something an interceptor may shoot at.
+         * Four weapons carry it, and they are the four a launcher stockpiles:
+         * the two nuclear missiles and the two big EMP rounds. Nothing else
+         * does, so an anti-nuke will not spend itself on a Diplomat's rocket.
+         */
+        bool targetable{false};
+
+        /**
+         * TA coverage, `wdef+0xE0`, and an interceptor's real engagement rule --
+         * the weapon's own `range` is 32000, which is the whole map. It is the
+         * half-extent of a square: 0x49D18D tests |dx| and |dz| against it as an
+         * unsigned compare against twice the coverage and never looks at Y, so
+         * what an anti-nuke defends is a box, not a dome. Both that ship say
+         * 2000.
+         */
+        SimScalar coverage{0};
     };
 }

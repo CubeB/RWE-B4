@@ -2026,12 +2026,12 @@ namespace rwe
     static const SimAngle BurnBlowAbortAngle = SimAngle(27000);
 
     Projectile GameSimulation::createProjectileFromWeapon(
-        PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition)
+        PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition, std::optional<ProjectileId> targetProjectile)
     {
-        return createProjectileFromWeapon(owner, weapon.weaponType, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity, targetPosition);
+        return createProjectileFromWeapon(owner, weapon.weaponType, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity, targetPosition, targetProjectile);
     }
 
-    Projectile GameSimulation::createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition)
+    Projectile GameSimulation::createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition, std::optional<ProjectileId> targetProjectile)
     {
         const auto& weaponDefinition = weaponDefinitions.at(weaponType);
 
@@ -2076,6 +2076,7 @@ namespace rwe
 
         projectile.targetUnit = targetUnit;
         projectile.targetPosition = targetPosition;
+        projectile.targetProjectile = targetProjectile;
 
         if (auto selfProp = std::get_if<ProjectilePhysicsTypeSelfPropelled>(&weaponDefinition.physicsType))
         {
@@ -2129,9 +2130,9 @@ namespace rwe
         return projectile;
     }
 
-    void GameSimulation::spawnProjectile(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition)
+    void GameSimulation::spawnProjectile(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition, std::optional<ProjectileId> targetProjectile)
     {
-        projectiles.emplace(createProjectileFromWeapon(owner, weapon, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity, targetPosition));
+        projectiles.emplace(createProjectileFromWeapon(owner, weapon, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity, targetPosition, targetProjectile));
     }
 
     WinStatus GameSimulation::computeWinStatus() const
@@ -2298,6 +2299,112 @@ namespace rwe
             }
         }
         return std::nullopt;
+    }
+
+    bool GameSimulation::isWithinCoverage(const SimVector& launcher, const SimVector& point, SimScalar coverage)
+    {
+        return rweAbs(launcher.x - point.x) <= coverage && rweAbs(launcher.z - point.z) <= coverage;
+    }
+
+    std::optional<ProjectileId> GameSimulation::findInterceptTarget(UnitId launcherId, unsigned int weaponIndex) const
+    {
+        const auto& launcher = getUnitState(launcherId);
+        const auto& weapon = launcher.weapons[weaponIndex];
+        if (!weapon)
+        {
+            return std::nullopt;
+        }
+
+        // No round, no search. The original reads the magazine byte before it
+        // so much as looks at the projectile list (0x49D13C), so an anti-nuke
+        // that has not finished building one does not go through the motions.
+        if (weapon->stockedRounds <= 0)
+        {
+            return std::nullopt;
+        }
+
+        const auto& weaponDefinition = weaponDefinitions.at(weapon->weaponType);
+
+        for (const auto& entry : projectiles)
+        {
+            const auto& candidate = entry.second;
+            if (candidate.isDead || candidate.owner == launcher.owner)
+            {
+                continue;
+            }
+
+            const auto& candidateWeapon = weaponDefinitions.at(candidate.weaponType);
+            if (!candidateWeapon.targetable)
+            {
+                continue;
+            }
+
+            // Where the missile is going, not where it is. That is the whole
+            // point of an area defence: the anti-nuke engages a nuke aimed at
+            // the box it guards, however far away the nuke happens to be at
+            // this moment, and ignores one merely passing overhead.
+            if (!candidate.targetPosition || !isWithinCoverage(launcher.position, *candidate.targetPosition, weaponDefinition.coverage))
+            {
+                continue;
+            }
+
+            // One interceptor per missile. The original settles this by
+            // walking every projectile's target slot rather than by marking
+            // the missile (0x49D1AE), so a round already in the air is what
+            // holds the claim and losing it frees the target again.
+            bool alreadyClaimed = false;
+            for (const auto& other : projectiles)
+            {
+                if (!other.second.isDead && other.second.targetProjectile == entry.first)
+                {
+                    alreadyClaimed = true;
+                    break;
+                }
+            }
+            if (alreadyClaimed)
+            {
+                continue;
+            }
+
+            return entry.first;
+        }
+
+        return std::nullopt;
+    }
+
+    void GameSimulation::detonateProjectilesInBlast(std::optional<ProjectileId> source, const SimVector& position, SimScalar radius)
+    {
+        // Gathered before anything is detonated: an impact can kill a unit,
+        // and a dying unit spawns its own explosion, so the projectile list
+        // must not be walked across a call that might add to it.
+        std::vector<ProjectileId> caught;
+        for (const auto& entry : projectiles)
+        {
+            if (entry.second.isDead || (source && entry.first == *source))
+            {
+                continue;
+            }
+            if (position.distanceSquared(entry.second.position) < radius * radius)
+            {
+                caught.push_back(entry.first);
+            }
+        }
+
+        for (const auto& caughtId : caught)
+        {
+            auto entry = projectiles.tryGet(caughtId);
+            if (!entry || entry->get().isDead)
+            {
+                continue;
+            }
+
+            // Marked dead before it goes off, so that its own blast -- if it
+            // was another interceptor -- cannot come back round to it.
+            entry->get().isDead = true;
+            auto copy = entry->get();
+            doProjectileImpact(copy, ImpactType::Normal, caughtId);
+            events.push_back(ProjectileDiedEvent{caughtId, copy.weaponType, copy.position, ProjectileDiedEvent::DeathType::NormalImpact});
+        }
     }
 
     void GameSimulation::quietlyKillUnit(UnitId unitId)
@@ -2885,13 +2992,22 @@ namespace rwe
         }
     }
 
-    void GameSimulation::doProjectileImpact(const Projectile& projectile, ImpactType impactType)
+    void GameSimulation::doProjectileImpact(const Projectile& projectile, ImpactType impactType, std::optional<ProjectileId> projectileId)
     {
         applyDamageInRadius(projectile.position, projectile.damageRadius, projectile);
 
         if (auto it = weaponDefinitions.find(projectile.weaponType); it != weaponDefinitions.end() && it->second.fireStarter > 0)
         {
             tryIgniteFeaturesInRadius(projectile.position, std::max(projectile.damageRadius, 16_ss), it->second.fireStarter);
+        }
+
+        // The piece that actually kills a nuke. An interceptor's warhead is not
+        // aimed at the missile so much as detonated near it, and what does the
+        // damage is that the blast takes every projectile inside it with it
+        // (0x49A664) -- which is also why one anti-nuke can clear a salvo.
+        if (auto it = weaponDefinitions.find(projectile.weaponType); it != weaponDefinitions.end() && it->second.interceptor)
+        {
+            detonateProjectilesInBlast(projectileId, projectile.position, projectile.damageRadius);
         }
     }
 
@@ -2905,6 +3021,18 @@ namespace rwe
             if (projectile.position.distanceSquared(*projectile.targetPosition) > CruiseHandoverDistance * CruiseHandoverDistance)
             {
                 return SimVector(projectile.targetPosition->x, CruiseAltitude, projectile.targetPosition->z);
+            }
+        }
+
+        // A target projectile comes ahead of a unit target (0x49B47A returns
+        // `target + 4`, the missile's live position, before it looks at
+        // anything else). This is the case section 7 recorded as decoded but
+        // unfillable, because nothing could set the slot yet.
+        if (projectile.targetProjectile)
+        {
+            if (auto target = projectiles.tryGet(*projectile.targetProjectile); target && !target->get().isDead)
+            {
+                return target->get().position;
             }
         }
 
@@ -3048,6 +3176,24 @@ namespace rwe
 
             projectile.previousPosition = projectile.position;
             projectile.position += projectile.velocity;
+
+            // The interceptor's fuse. Its collision check carries one extra
+            // clause (0x49B106): if it is inside its own areaofeffect of the
+            // missile it is chasing it goes off there and then, rather than
+            // waiting to run into something. Strictly inside -- the original's
+            // `jge` at 0x49B1A4 skips at exactly the radius.
+            if (projectile.targetProjectile)
+            {
+                auto target = projectiles.tryGet(*projectile.targetProjectile);
+                if (target && !target->get().isDead
+                    && projectile.position.distanceSquared(target->get().position) < projectile.damageRadius * projectile.damageRadius)
+                {
+                    projectile.isDead = true;
+                    doProjectileImpact(projectile, ImpactType::Normal, id);
+                    events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, ProjectileDiedEvent::DeathType::NormalImpact});
+                    continue;
+                }
+            }
 
             auto collisionInfo = checkProjectileCollision(*this, projectile);
             if (collisionInfo)

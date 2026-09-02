@@ -748,11 +748,11 @@ namespace rwe
 
         void requestPath(UnitId unitId);
 
-        Projectile createProjectileFromWeapon(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker = std::nullopt, std::optional<SimVector> inheritedVelocity = std::nullopt, std::optional<SimVector> targetPosition = std::nullopt);
+        Projectile createProjectileFromWeapon(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker = std::nullopt, std::optional<SimVector> inheritedVelocity = std::nullopt, std::optional<SimVector> targetPosition = std::nullopt, std::optional<ProjectileId> targetProjectile = std::nullopt);
 
-        Projectile createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker = std::nullopt, std::optional<SimVector> inheritedVelocity = std::nullopt, std::optional<SimVector> targetPosition = std::nullopt);
+        Projectile createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker = std::nullopt, std::optional<SimVector> inheritedVelocity = std::nullopt, std::optional<SimVector> targetPosition = std::nullopt, std::optional<ProjectileId> targetProjectile = std::nullopt);
 
-        void spawnProjectile(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker = std::nullopt, std::optional<SimVector> inheritedVelocity = std::nullopt, std::optional<SimVector> targetPosition = std::nullopt);
+        void spawnProjectile(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker = std::nullopt, std::optional<SimVector> inheritedVelocity = std::nullopt, std::optional<SimVector> targetPosition = std::nullopt, std::optional<ProjectileId> targetProjectile = std::nullopt);
 
         WinStatus computeWinStatus() const;
 
@@ -785,6 +785,34 @@ namespace rwe
          * none, which is every unit but a launcher.
          */
         std::optional<std::reference_wrapper<const UnitWeapon>> tryGetStockpileWeapon(UnitId unitId) const;
+
+        /**
+         * Whether a point falls inside an interceptor's coverage. The original
+         * makes this a square rather than a circle and ignores Y outright
+         * (0x49D18D): `|dx|` and `|dz|` are each compared against twice the
+         * coverage after the coverage has been added, which is the usual
+         * unsigned-wrap way of writing `-c <= d <= c` in one branch.
+         */
+        static bool isWithinCoverage(const SimVector& launcher, const SimVector& point, SimScalar coverage);
+
+        /**
+         * What an interceptor weapon should shoot at, or nothing. The original
+         * refuses outright with an empty magazine, then takes the first live
+         * projectile that is not the launcher's own side, whose weapon carries
+         * `targetable`, whose aim point is inside the coverage, and that no
+         * other projectile has already claimed (0x49D120).
+         */
+        std::optional<ProjectileId> findInterceptTarget(UnitId launcherId, unsigned int weaponIndex) const;
+
+        /**
+         * Detonate every live projectile within `radius` of a blast, which is
+         * what an interceptor's explosion does to everything around it
+         * (0x49A664). The test is a sphere and strictly inside -- `jge` skips
+         * at exactly the radius -- and unlike the acquisition it re-checks
+         * nothing: not `targetable`, not the owner. Anything in the blast dies,
+         * which is how one anti-nuke can clear a salvo.
+         */
+        void detonateProjectilesInBlast(std::optional<ProjectileId> source, const SimVector& position, SimScalar radius);
 
         void quietlyKillUnit(UnitId unitId);
 
@@ -831,7 +859,7 @@ namespace rwe
 
         void applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile);
 
-        void doProjectileImpact(const Projectile& projectile, ImpactType impactType);
+        void doProjectileImpact(const Projectile& projectile, ImpactType impactType, std::optional<ProjectileId> projectileId = std::nullopt);
 
         std::optional<SimVector> getSelfPropelledAimPoint(const Projectile& projectile, const ProjectilePhysicsTypeSelfPropelled& p);
 

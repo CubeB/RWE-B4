@@ -443,6 +443,7 @@ namespace rwe
         TargetIsUnitVisitor(UnitId unit) : unit(unit) {}
         bool operator()(UnitId target) const { return unit == target; }
         bool operator()(const SimVector&) const { return false; }
+        bool operator()(ProjectileId) const { return false; }
     };
 
     class IsAttackingUnitVisitor
@@ -466,6 +467,7 @@ namespace rwe
         TargetIsPositionVisitor(const SimVector& position) : position(position) {}
         bool operator()(UnitId) const { return false; }
         bool operator()(const SimVector& target) const { return target == position; }
+        bool operator()(ProjectileId) const { return false; }
     };
 
     class IsAttackingPositionVisitor

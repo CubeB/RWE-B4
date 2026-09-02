@@ -659,7 +659,22 @@ namespace rwe
         if (auto idleState = std::get_if<UnitWeaponStateIdle>(&weapon->state); idleState != nullptr)
         {
             // attempt to acquire a target
-            if (!weaponDefinition.commandFire && unit.fireOrders == UnitFireOrders::FireAtWill)
+            if (weaponDefinition.interceptor)
+            {
+                // An interceptor never looks for a unit: the auto-target scan
+                // hands it the projectile search instead (0x408B31 calling
+                // 0x49D120) and aims at whatever comes back. Neither of the two
+                // anti-nuke weapons in the shipped data carries `commandfire`,
+                // which is what lets them engage on their own.
+                if (unit.fireOrders != UnitFireOrders::HoldFire)
+                {
+                    if (auto target = sim->findInterceptTarget(id, weaponIndex))
+                    {
+                        weapon->state = UnitWeaponStateAttacking(*target);
+                    }
+                }
+            }
+            else if (!weaponDefinition.commandFire && unit.fireOrders == UnitFireOrders::FireAtWill)
             {
                 if (auto target = chooseTarget(id, weaponIndex))
                 {
@@ -702,7 +717,25 @@ namespace rwe
 
             auto targetPosition = getTargetPosition(aimingState->target);
 
-            if (!targetPosition || unit.position.distanceSquared(*targetPosition) > weaponDefinition.maxRange * weaponDefinition.maxRange)
+            // An interceptor's engagement rule is `coverage`, not `range`: both
+            // anti-nukes say range=32000, which is the whole map, and coverage
+            // 2000. What it is held against is the missile's aim point, the
+            // same thing the acquisition tested (0x49D18D), because the box the
+            // launcher defends does not move when the missile does.
+            bool targetLost = !targetPosition;
+            if (weaponDefinition.interceptor)
+            {
+                auto targetProjectile = std::get_if<ProjectileId>(&aimingState->target);
+                auto projectile = targetProjectile == nullptr ? std::nullopt : sim->projectiles.tryGet(*targetProjectile);
+                targetLost = !projectile || projectile->get().isDead || !projectile->get().targetPosition
+                    || !GameSimulation::isWithinCoverage(unit.position, *projectile->get().targetPosition, weaponDefinition.coverage);
+            }
+            else
+            {
+                targetLost = targetLost || unit.position.distanceSquared(*targetPosition) > weaponDefinition.maxRange * weaponDefinition.maxRange;
+            }
+
+            if (targetLost)
             {
                 unit.clearWeaponTarget(weaponIndex);
             }
@@ -895,6 +928,20 @@ namespace rwe
         // weapon that cannot pay simply does not fire -- the original never
         // lets the shot go and takes the debt afterwards, which is what stops a
         // commander with a flat battery from D-gunning anything.
+        // The launch is abandoned outright if the thing it was going to chase
+        // is no longer there (0x49DC17 fetches the target projectile first and
+        // gives up without one). Without this an anti-nuke would spend a round
+        // on a missile that had already gone off.
+        if (weaponDefinition.interceptor)
+        {
+            auto targetProjectile = std::get_if<ProjectileId>(&attackInfo->target);
+            auto projectile = targetProjectile == nullptr ? std::nullopt : sim->projectiles.tryGet(*targetProjectile);
+            if (!projectile || projectile->get().isDead)
+            {
+                return;
+            }
+        }
+
         if (weaponDefinition.stockpile)
         {
             if (weapon->stockedRounds <= 0)
@@ -1040,7 +1087,9 @@ namespace rwe
 
         auto targetUnit = std::get_if<UnitId>(&attackInfo->target);
         auto targetUnitOption = targetUnit == nullptr ? std::optional<UnitId>() : std::make_optional(*targetUnit);
-        sim->spawnProjectile(unit.owner, *weapon, firingPoint, direction, (fireInfo->targetPosition - firingPoint).length(), targetUnitOption, id, inheritedVelocity, fireInfo->targetPosition);
+        auto targetProjectile = std::get_if<ProjectileId>(&attackInfo->target);
+        auto targetProjectileOption = targetProjectile == nullptr ? std::optional<ProjectileId>() : std::make_optional(*targetProjectile);
+        sim->spawnProjectile(unit.owner, *weapon, firingPoint, direction, (fireInfo->targetPosition - firingPoint).length(), targetUnitOption, id, inheritedVelocity, fireInfo->targetPosition, targetProjectileOption);
 
         sim->events.push_back(FireWeaponEvent{weapon->weaponType, fireInfo->burstsFired, firingPoint});
 
@@ -3227,7 +3276,26 @@ namespace rwe
         return match(
             target,
             [](const SimVector& v) { return std::make_optional(v); },
-            [this](UnitId id) { return tryGetSweetSpot(id); });
+            [this](UnitId id) { return tryGetSweetSpot(id); },
+            [this](ProjectileId id) -> std::optional<SimVector> {
+                auto projectile = sim->projectiles.tryGet(id);
+                if (!projectile || projectile->get().isDead)
+                {
+                    return std::nullopt;
+                }
+                return projectile->get().position;
+            });
+    }
+
+    std::optional<SimVector> UnitBehaviorService::getTargetPosition(const AttackTarget& target)
+    {
+        // An order names a unit or a place. A weapon's target can also be a
+        // projectile, which no order can ask for, so the narrower thing is
+        // widened rather than the two answers being written out twice.
+        return getTargetPosition(match(
+            target,
+            [](UnitId id) -> UnitWeaponAttackTarget { return id; },
+            [](const SimVector& v) -> UnitWeaponAttackTarget { return v; }));
     }
 
     PathDestination UnitBehaviorService::resolvePathDestination(UnitState& s, const MovingStateGoal& goal)

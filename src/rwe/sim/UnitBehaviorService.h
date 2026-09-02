@@ -180,6 +180,8 @@ namespace rwe
 
         std::optional<SimVector> getTargetPosition(const UnitWeaponAttackTarget& target);
 
+        std::optional<SimVector> getTargetPosition(const AttackTarget& target);
+
         PathDestination resolvePathDestination(UnitState& s, const MovingStateGoal& goal);
 
         void groundUnitMoveTo(UnitInfo unitInfo, const MovingStateGoal& goal);
