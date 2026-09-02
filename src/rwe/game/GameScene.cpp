@@ -917,14 +917,14 @@ namespace rwe
         auto worldToUi = worldUiRenderService.getInverseViewProjectionMatrix()
             * computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
 
-        for (const auto& [_, unit] : simulation.units)
+        for (const auto& [unitId, unit] : simulation.units)
         {
             if (!unit.isOwnedBy(localPlayerId))
             {
                 continue;
             }
 
-            auto ownerSelected = selectedUnits.find(_) != selectedUnits.end();
+            auto ownerSelected = selectedUnits.find(unitId) != selectedUnits.end();
 
             for (const auto& order : unit.orders)
             {
