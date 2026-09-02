@@ -847,9 +847,12 @@ namespace rwe
             return direction;
         }
 
-        std::uniform_int_distribution<unsigned int> dist(0, spread.value - 1u);
+        // Taken modulo rather than through a uniform_int_distribution, whose
+        // mapping the standard does not pin down: std::minstd_rand itself is
+        // specified exactly, so a modulo keeps every client drawing the same
+        // number. It is also what the original's own rand-below-n does.
         auto& rng = sim->rng;
-        auto angle = SimAngle(dist(rng)) - SimAngle(spread.value / 2u);
+        auto angle = SimAngle(static_cast<uint16_t>(rng() % spread.value)) - SimAngle(spread.value / 2u);
 
         return rotateDirectionXZ(direction, angle);
     }
@@ -974,12 +977,13 @@ namespace rwe
             if (cone != SimAngle(0))
             {
                 // Uniform on [-cone/2, cone/2), drawn twice over, exactly as
-                // the two rand() calls at 0x49D727 and 0x49D733 do it.
-                std::uniform_int_distribution<unsigned int> dist(0, cone.value - 1u);
+                // the two rand() calls at 0x49D727 and 0x49D733 do it. Modulo
+                // rather than a distribution, so that every client draws the
+                // same number -- see changeDirectionByRandomAngle.
                 auto& rng = sim->rng;
                 auto half = SimAngle(cone.value / 2u);
-                auto headingError = SimAngle(dist(rng)) - half;
-                auto pitchError = SimAngle(dist(rng)) - half;
+                auto headingError = SimAngle(static_cast<uint16_t>(rng() % cone.value)) - half;
+                auto pitchError = SimAngle(static_cast<uint16_t>(rng() % cone.value)) - half;
                 direction = applyAimError(direction, headingError, pitchError);
             }
         }
