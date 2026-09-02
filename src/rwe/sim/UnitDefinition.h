@@ -99,6 +99,16 @@ namespace rwe
         bool canMove;
         bool canGuard;
         bool canCapture;
+        bool canStop{false};
+        bool canPatrol{false};
+        bool canReclamate{false};
+        /**
+         * TA canload. Exactly four units name it -- armatlas, armtship,
+         * cortship and corvalk -- and it is what puts LOAD and UNLOAD on the
+         * order menu. Kept separate from being able to carry anything, which
+         * is what transportCapacity says.
+         */
+        bool canLoad{false};
         /**
          * TA candgun, bit 14 of the unit definition's second capability word
          * (parsed at 0x42CAA3). Only the two commanders name it, and it is what

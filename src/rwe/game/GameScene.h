@@ -562,7 +562,7 @@ namespace rwe
         std::optional<SimVector> plannedBuildOrderAt(UnitId unitId, const SimVector& position) const;
 
         /** The ORDERS panel with the buttons a unit cannot use taken out. */
-        std::unique_ptr<UiPanel> createOrdersPanel(std::optional<UnitId> unitId);
+        std::unique_ptr<UiPanel> createOrdersPanel();
 
         void localPlayerSetFireOrders(UnitId unitId, UnitFireOrders orders);
 

@@ -8,6 +8,7 @@
 #include <rwe/Mesh.h>
 #include <rwe/camera_util.h>
 #include <rwe/game/GameScene_util.h>
+#include <rwe/game/OrderButtons.h>
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
 #include <rwe/resource_io.h>
@@ -17,6 +18,7 @@
 #include <rwe/util/Index.h>
 #include <rwe/util/match.h>
 #include <rwe/util/SimpleLogger.h>
+#include <rwe/util/rwe_string.h>
 
 namespace rwe
 {
@@ -1202,23 +1204,13 @@ namespace rwe
             }
         }
 
-        // Radar contacts: enemies we cannot see but our radar can, drawn as blips.
-        if (fogOfWarEnabled)
-        {
-            for (const auto& [_, unit] : simulation.units)
-            {
-                if (unit.isDead() || unit.isOwnedBy(localPlayerId) || unit.carriedBy || unitIsVisibleToLocalPlayer(unit) || !unitIsDetectableByLocalPlayer(unit))
-                {
-                    continue;
-                }
-                auto uiPos = worldUiRenderService.getInverseViewProjectionMatrix()
-                    * viewProjectionMatrix
-                    * simVectorToFloat(unit.position);
-                const auto& color = *minimapDots->sprites[getPlayer(unit.owner).color.value];
-                worldUiRenderService.drawSprite(uiPos.x - 2.0f, uiPos.y - 2.0f, color);
-                worldUiRenderService.drawBoxOutline(uiPos.x - 4.0f, uiPos.y - 4.0f, 8.0f, 8.0f, Color(255, 255, 255, 160));
-            }
-        }
+        // Radar contacts get nothing here. The original's world render never
+        // walks the unit list at all: it consumes a list rebuilt each frame by
+        // 0x48BAE0, which admits a unit only if it is the viewer's own or
+        // passes the can-see predicate 0x465AC0 -- and that predicate does not
+        // look at the radar bits. A contact you only have on radar is a dot on
+        // the minimap and nothing whatever in the main view, which is why it
+        // cannot be clicked there either.
 
         // Self-destruct countdowns: seconds remaining, drawn above the unit.
         for (const auto& [_, unit] : simulation.units)
@@ -3974,44 +3966,69 @@ namespace rwe
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::CancelBuildOrder{position}));
     }
 
-    std::unique_ptr<UiPanel> GameScene::createOrdersPanel(std::optional<UnitId> unitId)
+    std::unique_ptr<UiPanel> GameScene::createOrdersPanel()
     {
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
         auto panel = uiFactory.panelFromGuiFile(sidePrefix + "GEN");
 
-        auto unit = unitId ? tryGetUnit(*unitId) : std::nullopt;
-        if (!unit)
+        // TA shows only the orders the selection can carry out, and it looks at
+        // the whole selection rather than at one unit: the accumulator loop at
+        // 0x41B49F-0x41B524 ORs each capability bit together, so a button is
+        // offered when *any* selected unit names it. Picking up a transport
+        // along with a squad of Peewees therefore gets you LOAD, and picking up
+        // a solar collector with them does not take MOVE away.
+        std::vector<OrderButtonUnit> selection;
+        for (const auto& selectedUnitId : selectedUnits)
+        {
+            auto selectedUnit = tryGetUnit(selectedUnitId);
+            if (!selectedUnit)
+            {
+                continue;
+            }
+
+            bool hasCommandFireWeapon = false;
+            for (const auto& weapon : selectedUnit->get().weapons)
+            {
+                if (weapon && simulation.weaponDefinitions.at(weapon->weaponType).commandFire)
+                {
+                    hasCommandFireWeapon = true;
+                }
+            }
+
+            selection.push_back(OrderButtonUnit{&simulation.unitDefinitions.at(selectedUnit->get().unitType), hasCommandFireWeapon});
+        }
+
+        if (selection.empty())
         {
             return panel;
         }
-        const auto& definition = simulation.unitDefinitions.at(unit->get().unitType);
 
-        // TA shows only the orders a unit can carry out. LOAD and BLAST share a
-        // slot in the GUI, so exactly one of them survives.
-        bool hasCommandFireWeapon = false;
-        for (const auto& weapon : unit->get().weapons)
+        // The original greys these out rather than taking them away, except
+        // LOAD and BLAST which share a slot and so have to be hidden
+        // (0x41A412 and 0x41A471 call the "make inactive" helper, everything
+        // else calls the "grey" one). RWE has no disabled button state to grey
+        // with, so it removes them; see the findings note.
+        std::vector<std::string> doomed;
+        for (const auto& child : panel->getChildren())
         {
-            if (weapon && simulation.weaponDefinitions.at(weapon->weaponType).commandFire)
+            const auto& name = child->getName();
+            if (!startsWith(name, sidePrefix))
             {
-                hasCommandFireWeapon = true;
+                continue;
+            }
+
+            auto button = orderButtonFromName(name.substr(sidePrefix.size()));
+            if (button && !selectionOffersOrderButton(selection, *button))
+            {
+                doomed.push_back(name);
             }
         }
-        if (!definition.isTransport())
+
+        for (const auto& name : doomed)
         {
-            panel->removeChildrenWithPrefix(sidePrefix + "LOAD");
-            panel->removeChildrenWithPrefix(sidePrefix + "UNLOAD");
+            panel->removeChildrenNamed(name);
         }
-        // BLAST is the D-gun, and the original gates it on `candgun` rather than
-        // on owning a command-fire weapon: a nuclear silo has one of those too,
-        // and its button is a stockpile order, not a D-gun.
-        if (definition.isTransport() || !definition.canDgun || !hasCommandFireWeapon)
-        {
-            panel->removeChildrenWithPrefix(sidePrefix + "BLAST");
-        }
-        if (!definition.cloakable)
-        {
-            panel->removeChildrenWithPrefix(sidePrefix + "CLOAK");
-        }
+
         return panel;
     }
 
@@ -5252,7 +5269,7 @@ namespace rwe
                 auto& guiInfo = getGuiInfo(*selectedUnit);
                 guiInfo.section = UnitGuiInfo::Section::Orders;
 
-                setNextPanel(createOrdersPanel(*selectedUnit));
+                setNextPanel(createOrdersPanel());
             }
         }
         else if (isValidUnitType(simulation, message))
@@ -5484,12 +5501,12 @@ namespace rwe
             }
             else
             {
-                setNextPanel(createOrdersPanel(*unitId));
+                setNextPanel(createOrdersPanel());
             }
         }
         else
         {
-            setNextPanel(createOrdersPanel(std::nullopt));
+            setNextPanel(createOrdersPanel());
         }
     }
 

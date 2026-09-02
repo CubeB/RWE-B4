@@ -114,8 +114,8 @@ namespace rwe
         /** Whether the builder's arm reaches the target's footprint from where it stands. */
         bool withinBuildReach(UnitInfo unitInfo, const UnitState& target) const;
 
-        /** Whether this weapon can hit the unit at all (water weapons only reach units in the water). */
-        bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& target) const;
+        /** Whether this weapon can hit the unit at all (water weapons only reach units in the water, ordinary ones only reach units out of it). */
+        bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const;
 
         /**
          * What the unit's given weapon picks to shoot at of its own accord,

@@ -2071,9 +2071,9 @@ namespace rwe
             });
     }
 
-    bool UnitBehaviorService::weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& target) const
+    bool UnitBehaviorService::weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const
     {
-        return sim->weaponCanHitUnit(weaponDefinition, target);
+        return sim->weaponCanHitUnit(weaponDefinition, attacker, target);
     }
 
     std::optional<UnitId> UnitBehaviorService::chooseTarget(UnitId id, unsigned int weaponIndex)
@@ -2129,7 +2129,7 @@ namespace rwe
 
             // Only what the owner can see or has on radar is fair game,
             // and a torpedo cannot reach something standing on land.
-            if (!sim->canDetectUnit(unit.owner, otherUnitId) || !weaponCanHitUnit(weaponDefinition, otherUnit))
+            if (!sim->canDetectUnit(unit.owner, otherUnitId) || !weaponCanHitUnit(weaponDefinition, unit, otherUnit))
             {
                 continue;
             }
@@ -2184,7 +2184,7 @@ namespace rwe
         {
             auto targetUnit = sim->tryGetUnitState(*targetUnitId);
             const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType);
-            if (targetUnit && !weaponCanHitUnit(weaponDefinition, targetUnit->get()))
+            if (targetUnit && !weaponCanHitUnit(weaponDefinition, *unitInfo.state, targetUnit->get()))
             {
                 return true;
             }
@@ -2779,6 +2779,16 @@ namespace rwe
 
             auto distanceSquared = unitInfo.state->position.distanceSquared(other.position);
             if (distanceSquared > maxRangeSquared)
+            {
+                continue;
+            }
+
+            // The original runs this search through the same routine as the
+            // ordinary acquire (0x40B7B0 with its third argument zero), so it
+            // gets 0x49ABB0 too: a gunship carrying an anti-air weapon does
+            // not break off for a tank, and nothing breaks off for a
+            // submarine it cannot reach.
+            if (!weaponCanHitUnit(weaponDefinition, *unitInfo.state, other))
             {
                 continue;
             }

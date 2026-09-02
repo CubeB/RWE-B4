@@ -297,6 +297,8 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_util.h
     src/rwe/game/InGameSoundsInfo.cpp
     src/rwe/game/InGameSoundsInfo.h
+    src/rwe/game/OrderButtons.cpp
+    src/rwe/game/OrderButtons.h
     src/rwe/game/MapTerrainGraphics.cpp
     src/rwe/game/MapTerrainGraphics.h
     src/rwe/game/Particle.cpp
@@ -781,6 +783,7 @@ set(TEST_FILES
     src/rwe/collections/VectorMap.test.cpp
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/damagesmoke.test.cpp
+    src/rwe/game/orderbuttons.test.cpp
     src/rwe/game/PlayerCommand_hotkey.test.cpp
     src/rwe/game/PlayerCommand_speed.test.cpp
     src/rwe/game/dump_util.test.cpp
