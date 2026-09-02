@@ -2879,20 +2879,32 @@ namespace rwe
         }
         if (!musicPlaylist.empty() && sceneContext.audioService->isMusicEnabled() && !sceneContext.audioService->musicPlaying())
         {
-            auto next = static_cast<std::size_t>(effectsRng()) % musicPlaylist.size();
-            if (currentMusicTrack && next == *currentMusicTrack && musicPlaylist.size() > 1)
+            // Drawn from a bag rather than independently: everything plays
+            // once before anything comes round again, and the refilled bag
+            // never leads with the track that just finished.
+            if (musicBag.empty())
             {
-                next = (next + 1) % musicPlaylist.size();
+                musicBag = musicPlaylist;
+                for (auto i = musicBag.size(); i > 1; --i)
+                {
+                    std::swap(musicBag[i - 1], musicBag[effectsRng() % i]);
+                }
+                if (musicBag.size() > 1 && musicBag.back() == lastMusicTrack)
+                {
+                    std::swap(musicBag.back(), musicBag.front());
+                }
             }
-            if (sceneContext.audioService->playMusic(musicPlaylist[next], false))
+
+            auto next = musicBag.back();
+            musicBag.pop_back();
+            if (sceneContext.audioService->playMusic(next, false))
             {
-                currentMusicTrack = next;
+                lastMusicTrack = next;
             }
             else
             {
-                // The file is gone or will not decode; drop it and move on.
-                musicPlaylist.erase(musicPlaylist.begin() + next);
-                currentMusicTrack.reset();
+                // The file is gone or will not decode; drop it for good.
+                musicPlaylist.erase(std::remove(musicPlaylist.begin(), musicPlaylist.end(), next), musicPlaylist.end());
             }
         }
 

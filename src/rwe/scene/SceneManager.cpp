@@ -134,6 +134,12 @@ namespace rwe
                 if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED && event.window.windowID == sdl->getWindowId(window))
                 {
                     viewport->setDimensions(event.window.data1, event.window.data2);
+                    // The GL viewport does not follow the window by itself,
+                    // and only the game scene ever sets it per frame -- the
+                    // menu and the movie player draw through the default one,
+                    // so without this a resized window kept rendering into a
+                    // corner sized like the old window.
+                    graphics->setViewport(0, 0, event.window.data1, event.window.data2);
                     continue;
                 }
 

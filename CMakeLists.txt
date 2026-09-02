@@ -755,6 +755,9 @@ target_link_libraries(cob_test librwe)
 add_executable(smk_test src/smk_test.cpp)
 target_link_libraries(smk_test librwe)
 
+add_executable(music_probe src/music_probe.cpp)
+target_link_libraries(music_probe librwe)
+
 add_executable(fnt_test src/fnt_test.cpp)
 target_link_libraries(fnt_test librwe)
 target_link_libraries(fnt_test ${PNG_LIBRARIES})

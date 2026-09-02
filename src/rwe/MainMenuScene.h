@@ -35,6 +35,9 @@ namespace rwe
         std::string currentOptionsPage;
         std::vector<std::string> menuPlaylist;
         std::size_t menuPlaylistIndex{0};
+
+        /** Set by the music page's stop button so the retry leaves silence alone. */
+        bool menuMusicStopped{false};
         bool lastPanelWasOptions{false};
 
         /** Starts the title music, or whatever the CD controls have picked. */

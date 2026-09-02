@@ -434,7 +434,10 @@ namespace rwe
         /** The in-game music rotation: every mp3 in the music directory bar the title theme. */
         std::vector<std::string> musicPlaylist;
         bool musicPlaylistBuilt{false};
-        std::optional<std::size_t> currentMusicTrack;
+
+        /** The bag: play everything once before anything comes round again. */
+        std::vector<std::string> musicBag;
+        std::string lastMusicTrack;
 
         /** What size the world render textures were made at, so a window resize remakes them. */
         std::pair<unsigned int, unsigned int> worldRenderTextureSize{0, 0};

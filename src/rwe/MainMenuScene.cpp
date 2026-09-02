@@ -1,6 +1,7 @@
 #include "MainMenuScene.h"
 #include <rwe/MovieScene.h>
 #include <rwe/util.h>
+#include <rwe/util/SimpleLogger.h>
 #include <algorithm>
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuModel.h>
@@ -118,7 +119,13 @@ namespace rwe
         {
             return;
         }
-        sceneContext.audioService->playMusic(menuPlaylist[menuPlaylistIndex % menuPlaylist.size()], true);
+        const auto& path = menuPlaylist[menuPlaylistIndex % menuPlaylist.size()];
+        if (!sceneContext.audioService->playMusic(path, true))
+        {
+            LOG_ERROR << "Failed to start menu music: " << path;
+            // Do not spin on a file that will not play.
+            menuMusicStopped = true;
+        }
     }
 
     MainMenuScene::OptionsState MainMenuScene::currentOptions() const
@@ -376,6 +383,17 @@ namespace rwe
     void MainMenuScene::update(int millisecondsElapsed)
     {
         topPanel().update(static_cast<float>(millisecondsElapsed) / 1000.0f);
+
+        // Keep the title music going. Whatever once stopped it -- a movie, a
+        // transient failure, a return from elsewhere -- one quiet frame later
+        // it starts again, unless the player pressed stop themselves.
+        if (!menuMusicStopped
+            && !menuPlaylist.empty()
+            && sceneContext.audioService->isMusicEnabled()
+            && !sceneContext.audioService->musicPlaying())
+        {
+            playMenuMusic();
+        }
     }
 
     void MainMenuScene::onMouseWheel(MouseWheelEvent event)
@@ -405,7 +423,7 @@ namespace rwe
         auto panel = uiFactory.panelFromGuiFile("MAINMENU", "FrontendX", *parsedGui);
         if (auto debugStrLabel = panel->find<UiLabel>("DebugString"))
         {
-            debugStrLabel->get().setText(ProjectNameVersion);
+            debugStrLabel->get().setText(RevivalTitle);
             debugStrLabel->get().setAlignment(UiLabel::Alignment::Center);
         }
         goToMenu(std::move(panel));
@@ -524,10 +542,12 @@ namespace rwe
             }
             else if (message == "CDPLAY")
             {
+                menuMusicStopped = false;
                 playMenuMusic();
             }
             else if (message == "CDSTOP")
             {
+                menuMusicStopped = true;
                 sceneContext.audioService->stopMusic();
             }
             else if (message == "CDNEXT" || message == "CDPREV")

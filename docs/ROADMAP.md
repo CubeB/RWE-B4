@@ -206,6 +206,22 @@ Follows `docs/ai-architecture-proposal.md` (tgunnoe). All AI code stays in `sim/
 - Keep `CLAUDE.md` accurate — it is the onboarding doc for AI-assisted work on the codebase.
 - Public announcement (TAUniverse thread t=45555, upstream issues) is deliberately deferred until the project is playable.
 
+## Phase 6 — Completeness audit and public release
+
+- [ ] **Absorb the Total Annihilation wiki.** Work through the whole TA wiki
+  (units, weapons, mechanics, campaign, interface pages) and confirm every
+  mentioned feature is present in RWE — or recorded in
+  `docs/TOTALA-EXE.md` §31/§32 as deliberately different or not yet ported.
+  Treat the wiki as a checklist, the exe as the authority where they disagree.
+- [ ] **GitHub release preparation.** When the project is ready to push:
+  clone it fresh, then clean the tree of everything that does not belong in a
+  public release — redundant files, scratch tooling, and all files and code
+  comments concerning the disassembly of `TotalA.exe` (the `docs/TOTALA-EXE*`
+  documents, `docs/REVERSE-ENGINEERING-PRIORITIES.md`, `tools/exe/`, and the
+  `0x...` address citations sprinkled through source comments). The findings
+  stay in the private working copy; the public tree describes behaviour, not
+  where it was read from.
+
 ## Issue-to-phase map (open upstream issues)
 
 | Phase | Issues |

@@ -10,6 +10,10 @@ namespace rwe
     static const std::string ProjectBuildType("@CMAKE_BUILD_TYPE@");
 
     static const std::string ProjectNameVersion = ProjectName + " " + GitDescription + "-" + ProjectBuildType;
+
+    /** The revival's own build number, shown under the title. */
+    static const std::string RevivalVersion("1.0");
+    static const std::string RevivalTitle = "RWE Revived v" + RevivalVersion;
 }
 
 #endif
