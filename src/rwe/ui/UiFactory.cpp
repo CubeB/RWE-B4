@@ -191,6 +191,7 @@ namespace rwe
         auto font = textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
 
         auto button = std::make_unique<UiStagedButton>(x, y, width, height, stages, sprites.pressed, font);
+        button->setDisabledSprite(sprites.disabled);
 
         auto sound = deduceButtonSound(guiName, name, width, height);
 
@@ -225,6 +226,7 @@ namespace rwe
         auto font = textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
 
         auto button = std::make_unique<UiStagedButton>(x, y, width, height, stages, sprites.pressed, font);
+        button->setDisabledSprite(sprites.disabled);
 
         auto sound = deduceButtonSound(guiName, name, width, height);
 
@@ -257,6 +259,7 @@ namespace rwe
         }
 
         auto button = std::make_unique<UiStagedButton>(x, y, width, height, stageInfos, sprites.pressed, font);
+        button->setDisabledSprite(sprites.disabled);
 
         // staged buttons always display labels aligned left,
         // they don't care about text alignment attribs.
@@ -347,6 +350,14 @@ namespace rwe
         if (entry.quickKey)
         {
             button->setQuickKey(convertQuickKeyToSdlk(*entry.quickKey));
+        }
+
+        // The gui file can declare a gadget greyed from the start; the
+        // original honours it, so a button marked grayedout=1 comes up in
+        // its disabled frame and stays inert until something enables it.
+        if (entry.grayedOut.value_or(false))
+        {
+            button->setEnabled(false);
         }
 
         return button;

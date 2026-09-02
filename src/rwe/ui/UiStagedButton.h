@@ -57,6 +57,17 @@ namespace rwe
         /** True if the button is a toggle and is toggled on. */
         bool toggledOn{false};
 
+        /**
+         * The greyed-out frame from the button's own GAF -- every shipped
+         * button carries one after its pressed frame. Null when the artwork
+         * has no such frame, in which case a disabled button keeps its
+         * normal face and merely stops responding.
+         */
+        std::shared_ptr<Sprite> disabledSprite;
+
+        /** A disabled button draws its greyed frame and ignores all input. */
+        bool enabled{true};
+
         BehaviorMode behaviorMode{BehaviorMode::Button};
 
         unsigned int currentStage{0};
@@ -106,6 +117,12 @@ namespace rwe
         void setBehaviorMode(BehaviorMode mode);
 
         void setQuickKey(int quickKey);
+
+        void setDisabledSprite(const std::shared_ptr<Sprite>& sprite);
+
+        void setEnabled(bool enabled);
+
+        bool isEnabled() const;
 
     private:
         void activateButton(const ButtonClickEvent& event);

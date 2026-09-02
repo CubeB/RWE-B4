@@ -20,7 +20,9 @@ namespace rwe
 
     void UiStagedButton::render(UiRenderService& graphics) const
     {
-        const auto& sprite = pressed || toggledOn ? *pressedSprite : *stages[currentStage].sprite;
+        const auto& sprite = !enabled && disabledSprite
+            ? *disabledSprite
+            : (pressed || toggledOn ? *pressedSprite : *stages[currentStage].sprite);
 
         graphics.drawSpriteAbs(posX, posY, sprite);
 
@@ -91,6 +93,11 @@ namespace rwe
 
     void UiStagedButton::mouseDown(MouseButtonEvent event)
     {
+        if (!enabled)
+        {
+            return;
+        }
+
         switch (behaviorMode)
         {
             case BehaviorMode::Radio:
@@ -183,6 +190,11 @@ namespace rwe
 
     void UiStagedButton::keyDown(KeyEvent event)
     {
+        if (!enabled)
+        {
+            return;
+        }
+
         if (event.keyCode == SDLK_SPACE || (quickKey && event.keyCode == quickKey))
         {
             activateButton({ButtonClickEvent::Source::Keyboard});
@@ -191,6 +203,11 @@ namespace rwe
 
     void UiStagedButton::activateButton(const ButtonClickEvent& event)
     {
+        if (!enabled)
+        {
+            return;
+        }
+
         switch (behaviorMode)
         {
             case BehaviorMode::Radio:
@@ -261,5 +278,20 @@ namespace rwe
     {
         auto stageCount = stages.size();
         currentStage = (currentStage + 1) % stageCount;
+    }
+
+    void UiStagedButton::setDisabledSprite(const std::shared_ptr<Sprite>& sprite)
+    {
+        disabledSprite = sprite;
+    }
+
+    void UiStagedButton::setEnabled(bool newEnabled)
+    {
+        enabled = newEnabled;
+    }
+
+    bool UiStagedButton::isEnabled() const
+    {
+        return enabled;
     }
 }

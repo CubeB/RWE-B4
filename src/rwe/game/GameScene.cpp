@@ -4559,8 +4559,8 @@ namespace rwe
         // The original greys these out rather than taking them away, except
         // LOAD and BLAST which share a slot and so have to be hidden
         // (0x41A412 and 0x41A471 call the "make inactive" helper, everything
-        // else calls the "grey" one). RWE has no disabled button state to grey
-        // with, so it removes them; see the findings note.
+        // else calls the "grey" one). The greyed frame is in every button's
+        // own GAF, one past the pressed frame.
         std::vector<std::string> doomed;
         for (const auto& child : panel->getChildren())
         {
@@ -4573,7 +4573,14 @@ namespace rwe
             auto button = orderButtonFromName(name.substr(sidePrefix.size()));
             if (button && !selectionOffersOrderButton(selection, *button))
             {
-                doomed.push_back(name);
+                if (*button == OrderButton::Load || *button == OrderButton::Blast)
+                {
+                    doomed.push_back(name);
+                }
+                else if (auto stagedButton = dynamic_cast<UiStagedButton*>(child.get()); stagedButton != nullptr)
+                {
+                    stagedButton->setEnabled(false);
+                }
             }
         }
 
