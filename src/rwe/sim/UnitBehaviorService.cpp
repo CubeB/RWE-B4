@@ -970,15 +970,24 @@ namespace rwe
         // seven hundred units deep against a hundred-unit blast. A bomb is left
         // out because its release is decided by the bombsight rather than by an
         // aim we could perturb.
-        if (!isBomb)
+        // Only a weapon on a turret scatters. The original picks a fire
+        // handler per weapon out of the flags (0x49E010) and the arithmetic
+        // below lives inside the turret one: the handler the other weapons get,
+        // 0x49D9C0, does not call the random number generator at all, where the
+        // turret handler calls it exactly twice. So a torpedo, a bomb, a
+        // vertical launch and every aircraft weapon shoot exactly where they
+        // are pointed however badly hurt the shooter is -- which matters most
+        // for the gunships, since both their weapons are turret=0.
+        if (weaponAimScatters(weaponDefinition))
         {
             // Deliberately not gated on the weapon having an `accuracy`. The
-            // original runs this arithmetic for every shot whatever the weapon
-            // says, and the health term is not conditional either, so a weapon
-            // with a perfect `accuracy=0` still starts to spread once its
-            // owner has been shot up. At full health the term cancels exactly
-            // and such a weapon stays perfect, which is why this is not as
-            // drastic as it sounds -- nothing changes for an undamaged unit.
+            // original runs this arithmetic for every shot the turret handler
+            // takes, whatever the weapon says, and the health term is not
+            // conditional either, so a weapon with a perfect `accuracy=0`
+            // still starts to spread once its owner has been shot up. At full
+            // health the term cancels exactly and such a weapon stays perfect,
+            // which is why this is not as drastic as it sounds -- nothing
+            // changes for an undamaged unit.
             const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
             auto cone = computeAccuracyCone(weaponDefinition.accuracy, unit.hitPoints, unitDefinition.maxHitPoints, unit.kills);
             if (cone != SimAngle(0))

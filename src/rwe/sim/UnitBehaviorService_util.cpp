@@ -97,6 +97,22 @@ namespace rwe
         return SimAngle(cone);
     }
 
+    bool weaponAimScatters(const WeaponDefinition& weaponDefinition)
+    {
+        // The original picks a fire handler per weapon out of the flags at
+        // weapondef+0x111 (0x49E010), and the accuracy arithmetic lives inside
+        // the turret one alone. The handler everything else gets, 0x49D9C0,
+        // never calls the random number generator; the turret handler calls it
+        // exactly twice, once for heading and once for pitch. So a torpedo, a
+        // vertical launch and every aircraft weapon put their shot exactly
+        // where it was aimed however badly hurt the shooter is.
+        //
+        // A bomb is out for a second reason: its release is decided by the
+        // bombsight rather than by an aim there would be any sense in
+        // perturbing.
+        return weaponDefinition.turret && !std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType);
+    }
+
     SimVector applyAimError(const SimVector& direction, SimAngle headingError, SimAngle pitchError)
     {
         // The original perturbs the two angles it stored on the weapon mount

@@ -81,6 +81,38 @@ namespace rwe
         REQUIRE(computeAccuracyCone(SimAngle(0), 1, 1000, 0) == SimAngle(2046));
     }
 
+    TEST_CASE("weaponAimScatters: only a weapon on a turret strays", "[accuracy]")
+    {
+        // The accuracy arithmetic sits inside the original's turret fire
+        // handler. The handler every other weapon gets, 0x49D9C0, never calls
+        // the random number generator, where the turret one calls it twice.
+        // Forty-one of the hundred and seventy shipped weapons say turret=0 --
+        // the torpedoes, the vertical launches, the bombs and every aircraft
+        // weapon there is -- and none of them should wander when its owner is
+        // hurt. Both gunship weapons are among them, so getting this wrong
+        // makes a damaged Brawler miss a target it is pointed straight at.
+        WeaponDefinition w{};
+
+        SECTION("a turret weapon scatters")
+        {
+            w.turret = true;
+            REQUIRE(weaponAimScatters(w));
+        }
+
+        SECTION("a hull-mounted weapon does not")
+        {
+            w.turret = false;
+            REQUIRE_FALSE(weaponAimScatters(w));
+        }
+
+        SECTION("a bomb does not, however it is mounted")
+        {
+            w.turret = true;
+            w.physicsType = ProjectilePhysicsTypeBomb();
+            REQUIRE_FALSE(weaponAimScatters(w));
+        }
+    }
+
     TEST_CASE("applyAimError: zero error leaves the direction alone", "[accuracy]")
     {
         auto direction = toDirection(SimAngle(1234), SimAngle(2345));

@@ -35,6 +35,14 @@ namespace rwe
      * Nudges a launch direction by an independent heading and pitch error,
      * the way the original nudges the two angles on the weapon mount.
      */
+    /**
+     * Whether this weapon’s shots scatter at all. Only a weapon on a
+     * turret does: the original’s accuracy arithmetic lives inside the
+     * turret fire handler, and the handler the rest get never touches the
+     * random number generator.
+     */
+    bool weaponAimScatters(const WeaponDefinition& weaponDefinition);
+
     SimVector applyAimError(const SimVector& direction, SimAngle headingError, SimAngle pitchError);
 
     SimScalar getTurnRadius(SimScalar speed, SimScalar turnRate);
