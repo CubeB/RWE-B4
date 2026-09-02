@@ -107,6 +107,17 @@ namespace rwe
 
         bool musicPlaying();
 
+        /**
+         * Every mp3 in the music directory, as VFS paths. Whatever is in
+         * there plays -- the GOG numbered rips or a properly tagged
+         * soundtrack rip both work. An entry whose name contains "theme"
+         * is the title music; getThemePath finds it, falling back to the
+         * first file.
+         */
+        std::vector<std::string> getMusicPlaylist();
+
+        std::optional<std::string> getThemePath();
+
         void setSoundVolume(float volume);
         float getSoundVolume() const { return soundVolumeScale; }
 

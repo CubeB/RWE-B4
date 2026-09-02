@@ -2862,26 +2862,37 @@ namespace rwe
 
     void GameScene::update(int millisecondsElapsed)
     {
-        // In-game music: the GOG release ships the CD audio as
-        // music/<track>.mp3, tracks 3 to 17, and the original rotated
-        // through the disc. The full battle-versus-monitoring selection
-        // logic has not been read out of the binary, so for now the
-        // rotation is a shuffle that never repeats the track it just
-        // played.
-        if (!musicUnavailable && !sceneContext.audioService->musicPlaying())
+        // In-game music: a shuffle over whatever the music directory holds,
+        // the title theme left out, never repeating the track just played.
+        // The original's real selection -- MUSIC.GUI types every CD track as
+        // Building, Battle, Victory or Defeat and the game picks by state --
+        // is decoded from the gui but not yet from the binary, so the
+        // shuffle stands in.
+        if (!musicPlaylistBuilt)
         {
-            auto next = 3 + static_cast<int>(effectsRng() % 15u);
-            if (currentMusicTrack && next == *currentMusicTrack)
+            musicPlaylistBuilt = true;
+            musicPlaylist = sceneContext.audioService->getMusicPlaylist();
+            if (auto theme = sceneContext.audioService->getThemePath(); theme && musicPlaylist.size() > 1)
             {
-                next = 3 + ((next - 3 + 1) % 15);
+                musicPlaylist.erase(std::remove(musicPlaylist.begin(), musicPlaylist.end(), *theme), musicPlaylist.end());
             }
-            if (sceneContext.audioService->playMusic("music/" + std::to_string(next) + ".mp3", false))
+        }
+        if (!musicPlaylist.empty() && sceneContext.audioService->isMusicEnabled() && !sceneContext.audioService->musicPlaying())
+        {
+            auto next = static_cast<std::size_t>(effectsRng()) % musicPlaylist.size();
+            if (currentMusicTrack && next == *currentMusicTrack && musicPlaylist.size() > 1)
+            {
+                next = (next + 1) % musicPlaylist.size();
+            }
+            if (sceneContext.audioService->playMusic(musicPlaylist[next], false))
             {
                 currentMusicTrack = next;
             }
             else
             {
-                musicUnavailable = true;
+                // The file is gone or will not decode; drop it and move on.
+                musicPlaylist.erase(musicPlaylist.begin() + next);
+                currentMusicTrack.reset();
             }
         }
 

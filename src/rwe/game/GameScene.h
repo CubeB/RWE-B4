@@ -431,9 +431,10 @@ namespace rwe
         /** Scatter for purely visual effects; never feeds the simulation. */
         std::minstd_rand effectsRng{20260828u};
 
-        /** The music track now playing (a GOG CD-track number), and whether to bother trying another. */
-        std::optional<int> currentMusicTrack;
-        bool musicUnavailable{false};
+        /** The in-game music rotation: every mp3 in the music directory bar the title theme. */
+        std::vector<std::string> musicPlaylist;
+        bool musicPlaylistBuilt{false};
+        std::optional<std::size_t> currentMusicTrack;
 
         /** What size the world render textures were made at, so a window resize remakes them. */
         std::pair<unsigned int, unsigned int> worldRenderTextureSize{0, 0};

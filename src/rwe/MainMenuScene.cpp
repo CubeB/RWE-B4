@@ -39,9 +39,16 @@ namespace rwe
 
     void MainMenuScene::init()
     {
-        // The title theme, looping, as long as the menu is up. CD track 2 in
-        // the GOG layout; quietly nothing if the data path has no music.
-        sceneContext.audioService->playMusic("music/2.mp3", true);
+        // The title theme, looping, as long as the menu is up. The playlist
+        // is whatever mp3s the music directory holds; the file with "theme"
+        // in its name is the title music. Quietly nothing without any.
+        menuPlaylist = sceneContext.audioService->getMusicPlaylist();
+        if (auto theme = sceneContext.audioService->getThemePath())
+        {
+            auto it = std::find(menuPlaylist.begin(), menuPlaylist.end(), *theme);
+            menuPlaylistIndex = it == menuPlaylist.end() ? 0 : static_cast<std::size_t>(it - menuPlaylist.begin());
+        }
+        playMenuMusic();
 
         bgm = startBgm();
         goToMainMenu();
@@ -105,6 +112,15 @@ namespace rwe
         return sceneContext.audioService->loopSound(*bgm);
     }
 
+    void MainMenuScene::playMenuMusic()
+    {
+        if (menuPlaylist.empty())
+        {
+            return;
+        }
+        sceneContext.audioService->playMusic(menuPlaylist[menuPlaylistIndex % menuPlaylist.size()], true);
+    }
+
     MainMenuScene::OptionsState MainMenuScene::currentOptions() const
     {
         return OptionsState{
@@ -123,7 +139,7 @@ namespace rwe
         audio->setMusicEnabled(state.musicEnabled);
         if (state.musicEnabled && !wasEnabled)
         {
-            audio->playMusic("music/" + std::to_string(menuMusicTrack) + ".mp3", true);
+            playMenuMusic();
         }
         pendingWindowMode = state.windowMode;
     }
@@ -503,12 +519,12 @@ namespace rwe
                 audio->setMusicEnabled(enabling);
                 if (enabling)
                 {
-                    audio->playMusic("music/" + std::to_string(menuMusicTrack) + ".mp3", true);
+                    playMenuMusic();
                 }
             }
             else if (message == "CDPLAY")
             {
-                sceneContext.audioService->playMusic("music/" + std::to_string(menuMusicTrack) + ".mp3", true);
+                playMenuMusic();
             }
             else if (message == "CDSTOP")
             {
@@ -516,16 +532,12 @@ namespace rwe
             }
             else if (message == "CDNEXT" || message == "CDPREV")
             {
-                menuMusicTrack += message == "CDNEXT" ? 1 : -1;
-                if (menuMusicTrack > 17)
+                if (!menuPlaylist.empty())
                 {
-                    menuMusicTrack = 2;
+                    auto count = menuPlaylist.size();
+                    menuPlaylistIndex = (menuPlaylistIndex + (message == "CDNEXT" ? 1 : count - 1)) % count;
+                    playMenuMusic();
                 }
-                if (menuMusicTrack < 2)
-                {
-                    menuMusicTrack = 17;
-                }
-                sceneContext.audioService->playMusic("music/" + std::to_string(menuMusicTrack) + ".mp3", true);
             }
             else if (message == "TEST")
             {

@@ -83,6 +83,36 @@ namespace rwe
         return LoopToken(this, channel, sound);
     }
 
+    std::vector<std::string> AudioService::getMusicPlaylist()
+    {
+        std::vector<std::string> playlist;
+        for (const auto& name : fileSystem->getFileNames("music", ".mp3"))
+        {
+            playlist.push_back("music/" + name);
+        }
+        std::sort(playlist.begin(), playlist.end());
+        return playlist;
+    }
+
+    std::optional<std::string> AudioService::getThemePath()
+    {
+        auto playlist = getMusicPlaylist();
+        if (playlist.empty())
+        {
+            return std::nullopt;
+        }
+        for (const auto& path : playlist)
+        {
+            auto lower = path;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (lower.find("theme") != std::string::npos)
+            {
+                return path;
+            }
+        }
+        return playlist.front();
+    }
+
     void AudioService::setSoundVolume(float volume)
     {
         soundVolumeScale = std::clamp(volume, 0.0f, 1.0f);

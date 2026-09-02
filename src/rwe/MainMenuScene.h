@@ -33,8 +33,12 @@ namespace rwe
         OptionsState optionsUndo;
         std::string pendingWindowMode;
         std::string currentOptionsPage;
-        int menuMusicTrack{2};
+        std::vector<std::string> menuPlaylist;
+        std::size_t menuPlaylistIndex{0};
         bool lastPanelWasOptions{false};
+
+        /** Starts the title music, or whatever the CD controls have picked. */
+        void playMenuMusic();
 
         UiRenderService scaledUiRenderService;
         UiRenderService nativeUiRenderService;
