@@ -147,34 +147,83 @@ namespace rwe
     {
         Mesh m;
 
-        for (const auto& p : o.primitives)
+        for (Index primitiveIndex = 0; primitiveIndex < getSize(o.primitives); ++primitiveIndex)
         {
+            const auto& p = o.primitives[primitiveIndex];
+
+            // The selection plate is not part of the model. (The original
+            // skips primitive 0 whenever a selection primitive is declared,
+            // which on the wreckage models -- where the plate is not
+            // primitive 0 -- drops a real face and draws the plate; skipping
+            // the declared index is the saner reading of the same intent,
+            // recorded as a deliberate difference.)
+            if (o.selectionPrimitiveIndex && static_cast<Index>(*o.selectionPrimitiveIndex) == primitiveIndex)
+            {
+                continue;
+            }
+
             // handle textured quads
             if (p.vertices.size() == 4 && p.textureName)
             {
                 auto textureBounds = getTextureRegion(atlasMap, teamAtlasMap, *(p.textureName));
 
-                Mesh::Triangle t0(
-                    Mesh::Vertex(vertexToVector(o.vertices[p.vertices[2]]), textureBounds.region.bottomRight()),
-                    Mesh::Vertex(vertexToVector(o.vertices[p.vertices[1]]), textureBounds.region.topRight()),
-                    Mesh::Vertex(vertexToVector(o.vertices[p.vertices[0]]), textureBounds.region.topLeft()));
+                // The original does not split a textured quad into two
+                // triangles: it scan-converts the whole quad, interpolating
+                // the texture along both edge chains, which on a
+                // non-parallelogram face gives a smooth bilinear-style warp.
+                // Two affine triangles kink the mapping along the diagonal
+                // instead -- glaring on the solar collector, whose panels are
+                // trapezoids under a strongly striped texture. So a skewed
+                // quad is tessellated as a bilinear patch; a parallelogram
+                // needs no help, since there the two mappings agree.
+                auto v0 = vertexToVector(o.vertices[p.vertices[0]]);
+                auto v1 = vertexToVector(o.vertices[p.vertices[1]]);
+                auto v2 = vertexToVector(o.vertices[p.vertices[2]]);
+                auto v3 = vertexToVector(o.vertices[p.vertices[3]]);
 
-                Mesh::Triangle t1(
-                    Mesh::Vertex(vertexToVector(o.vertices[p.vertices[3]]), textureBounds.region.bottomLeft()),
-                    Mesh::Vertex(vertexToVector(o.vertices[p.vertices[2]]), textureBounds.region.bottomRight()),
-                    Mesh::Vertex(vertexToVector(o.vertices[p.vertices[0]]), textureBounds.region.topLeft()));
+                auto uv0 = textureBounds.region.topLeft();
+                auto uv1 = textureBounds.region.topRight();
+                auto uv2 = textureBounds.region.bottomRight();
+                auto uv3 = textureBounds.region.bottomLeft();
 
-                if (textureBounds.isTeamColor)
+                bool parallelogram = ((v0 + v2) - (v1 + v3)).lengthSquared() < 0.01f;
+                int subdivisions = parallelogram ? 1 : 4;
+
+                auto bilinearPosition = [&](float s, float t) {
+                    return (v0 * ((1.0f - s) * (1.0f - t))) + (v1 * (s * (1.0f - t))) + (v2 * (s * t)) + (v3 * ((1.0f - s) * t));
+                };
+                auto bilinearUv = [&](float s, float t) {
+                    return (uv0 * ((1.0f - s) * (1.0f - t))) + (uv1 * (s * (1.0f - t))) + (uv2 * (s * t)) + (uv3 * ((1.0f - s) * t));
+                };
+
+                auto& target = textureBounds.isTeamColor ? m.teamFaces : m.faces;
+                for (int row = 0; row < subdivisions; ++row)
                 {
-                    m.teamFaces.push_back(t0);
-                    m.teamFaces.push_back(t1);
-                }
-                else
-                {
-                    m.faces.push_back(t0);
-                    m.faces.push_back(t1);
+                    for (int col = 0; col < subdivisions; ++col)
+                    {
+                        auto s0 = static_cast<float>(col) / static_cast<float>(subdivisions);
+                        auto s1 = static_cast<float>(col + 1) / static_cast<float>(subdivisions);
+                        auto t0 = static_cast<float>(row) / static_cast<float>(subdivisions);
+                        auto t1 = static_cast<float>(row + 1) / static_cast<float>(subdivisions);
+
+                        Mesh::Vertex c00(bilinearPosition(s0, t0), bilinearUv(s0, t0));
+                        Mesh::Vertex c10(bilinearPosition(s1, t0), bilinearUv(s1, t0));
+                        Mesh::Vertex c11(bilinearPosition(s1, t1), bilinearUv(s1, t1));
+                        Mesh::Vertex c01(bilinearPosition(s0, t1), bilinearUv(s0, t1));
+
+                        target.emplace_back(c11, c10, c00);
+                        target.emplace_back(c01, c11, c00);
+                    }
                 }
 
+                continue;
+            }
+
+            // A textured face that is not a quad is never drawn by the
+            // original -- its textured path handles quads alone -- so
+            // drawing it flat here would invent a face TA does not show.
+            if (p.textureName && p.vertices.size() != 4)
+            {
                 continue;
             }
 

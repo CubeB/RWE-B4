@@ -33,26 +33,13 @@ const float heightBias = 50.0;
 
 const vec3 waterTint = vec3(0.5, 0.5, 1.0);
 const vec3 normalTint = vec3(1.0, 1.0, 1.0);
-// The sun sits low to the left and slightly in front, as in TA: faces that
-// look left are brightest, tops a little dimmer, right-facing sides dark.
-// The falloff is wrapped rather than clamped so away-facing surfaces shade
-// off gradually instead of dropping to the ambient floor; see the fuller
-// explanation in unitTexture.frag, which this must match.
-const vec3 lightDirection = normalize(vec3(-1.3, 1.0, 0.3));
-const float ambientLight = 0.72;
-const float directionalLight = 0.36;
-
-float lightIntensity()
-{
-    return shade
-        ? ambientLight + directionalLight * (0.5 + 0.5 * dot(normalize(worldNormal), lightDirection))
-        : 1.0;
-}
+// The original has no model lighting at all -- see unitTexture.frag, which
+// this must match.
 
 vec3 shadeNormal()
 {
     vec3 baseColor = vec3(texture(textureSampler, fragTexCoord));
-    return baseColor * lightIntensity() * (height > seaLevel ? normalTint : waterTint);
+    return baseColor * (height > seaLevel ? normalTint : waterTint);
 }
 
 void main(void)
