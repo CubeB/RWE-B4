@@ -18,6 +18,18 @@ namespace rwe
 
     SimVector rotateDirectionXZ(const SimVector& direction, SimAngle angle);
 
+    /**
+     * How wide the shot may stray, once the shooter's own damage and kill
+     * count have had their say on the weapon's `accuracy`.
+     */
+    SimAngle computeAccuracyCone(SimAngle accuracy, unsigned int health, unsigned int maxHealth, unsigned int kills);
+
+    /**
+     * Nudges a launch direction by an independent heading and pitch error,
+     * the way the original nudges the two angles on the weapon mount.
+     */
+    SimVector applyAimError(const SimVector& direction, SimAngle headingError, SimAngle pitchError);
+
     SimScalar getTurnRadius(SimScalar speed, SimScalar turnRate);
 
     std::optional<SimVector> findLandingLocation(const GameSimulation& sim, ConstUnitInfo unitInfo);

@@ -953,6 +953,31 @@ namespace rwe
             });
 
 
+        // How far the round strays from where the mount was pointed. The
+        // original does this between solving the aim and spawning the
+        // projectile (0x49D6D7), so it lands on every kind of weapon and not
+        // just the ballistic ones, and it is the reason a Vulcan firing at its
+        // own maximum range in the original scatters shells over a patch some
+        // seven hundred units deep against a hundred-unit blast. A bomb is left
+        // out because its release is decided by the bombsight rather than by an
+        // aim we could perturb.
+        if (weaponDefinition.accuracy != SimAngle(0) && !isBomb)
+        {
+            const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
+            auto cone = computeAccuracyCone(weaponDefinition.accuracy, unit.hitPoints, unitDefinition.maxHitPoints, unit.kills);
+            if (cone != SimAngle(0))
+            {
+                // Uniform on [-cone/2, cone/2), drawn twice over, exactly as
+                // the two rand() calls at 0x49D727 and 0x49D733 do it.
+                std::uniform_int_distribution<unsigned int> dist(0, cone.value - 1u);
+                auto& rng = sim->rng;
+                auto half = SimAngle(cone.value / 2u);
+                auto headingError = SimAngle(dist(rng)) - half;
+                auto pitchError = SimAngle(dist(rng)) - half;
+                direction = applyAimError(direction, headingError, pitchError);
+            }
+        }
+
         if (weaponDefinition.sprayAngle != SimAngle(0) && !isBomb)
         {
             // Bombs don't spray — release is deterministic from the bombsight.

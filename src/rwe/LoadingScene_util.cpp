@@ -161,6 +161,7 @@ namespace rwe
         weaponDefinition.burst = tdf.burst;
         weaponDefinition.burstInterval = SimScalar(tdf.burstRate);
         weaponDefinition.sprayAngle = SimAngle(tdf.sprayAngle);
+        weaponDefinition.accuracy = SimAngle(tdf.accuracy);
 
         weaponDefinition.energyPerShot = Energy(tdf.energyPerShot);
         weaponDefinition.metalPerShot = Metal(tdf.metalPerShot);

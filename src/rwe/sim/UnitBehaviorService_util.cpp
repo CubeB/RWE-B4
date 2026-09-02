@@ -23,6 +23,60 @@ namespace rwe
         return Matrix4x<SimScalar>::rotationY(sin(angle), cos(angle)) * direction;
     }
 
+    SimAngle computeAccuracyCone(SimAngle accuracy, unsigned int health, unsigned int maxHealth, unsigned int kills)
+    {
+        // A hurt unit shoots worse and a blooded one shoots better, and the
+        // original does both by widening or narrowing this one number before
+        // it draws anything (TotalA.exe 0x49D6BC-0x49D711).
+        //
+        // The health term is written so that it cancels at full health: an
+        // undamaged unit gets exactly the accuracy its weapon asked for, and
+        // the cone opens up from there to a whole extra eighth of a turn --
+        // 11.25 degrees -- as the shooter is whittled down to nothing.
+        auto healthTerm = maxHealth == 0
+            ? 0x800u
+            : static_cast<unsigned int>((static_cast<uint64_t>(health) << 11u) / maxHealth);
+
+        // Deliberately 16-bit and deliberately wrapping. The original keeps the
+        // running value in cx and masks it back to a word at every use, so a
+        // shooter damaged past the point where the term would go negative wraps
+        // rather than clamping, and we have to wrap with it.
+        auto cone = static_cast<uint16_t>(static_cast<uint16_t>(accuracy.value - healthTerm) + 0x800u);
+
+        // Three kills buy nothing; six halve the cone, nine divide it by three.
+        // An integer divide, so it never quite closes.
+        auto veterancy = kills / 3;
+        if (veterancy > 1)
+        {
+            cone = static_cast<uint16_t>(cone / veterancy);
+        }
+
+        return SimAngle(cone);
+    }
+
+    SimVector applyAimError(const SimVector& direction, SimAngle headingError, SimAngle pitchError)
+    {
+        // The original perturbs the two angles it stored on the weapon mount
+        // and lets the spawn rebuild the launch vector out of them, so the
+        // faithful thing is to take the direction apart the same way rather
+        // than to tilt the vector in some plane of our own choosing. The
+        // errors are independent, which makes the spread a rectangle in
+        // (heading, pitch) rather than a circular cone.
+        SimVector horizontal(direction.x, 0_ss, direction.z);
+        auto horizontalLength = horizontal.length();
+        if (horizontalLength == 0_ss)
+        {
+            // Straight up or straight down has no heading to perturb.
+            return direction;
+        }
+
+        auto heading = atan2(direction.x, direction.z) + headingError;
+        auto pitch = atan2(direction.y, horizontalLength) + pitchError;
+
+        auto newHorizontal = cos(pitch);
+        return SimVector(sin(heading) * newHorizontal, sin(pitch), cos(heading) * newHorizontal);
+    }
+
     SimScalar getTurnRadius(SimScalar speed, SimScalar turnRate)
     {
         return speed / angularToRadians(turnRate);

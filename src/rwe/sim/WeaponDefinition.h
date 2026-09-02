@@ -28,6 +28,14 @@ namespace rwe
         /** Maximum angle deviation of projectiles shot in a burst. */
         SimAngle sprayAngle;
 
+        /**
+         * How wide a spread the weapon shoots, in 16-bit angle units, with
+         * zero meaning perfect. The original draws a fresh error for the
+         * heading and another for the pitch on every shot and adds them to the
+         * aim it just solved (TotalA.exe 0x49D6D7).
+         */
+        SimAngle accuracy;
+
         SimAngle tolerance;
 
         SimAngle pitchTolerance;
