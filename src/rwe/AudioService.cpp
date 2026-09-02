@@ -81,6 +81,59 @@ namespace rwe
         return LoopToken(this, channel, sound);
     }
 
+    bool AudioService::playMusic(const std::string& vfsPath, bool loop)
+    {
+        auto bytes = fileSystem->readFile(vfsPath);
+        if (!bytes)
+        {
+            return false;
+        }
+
+        stopMusic();
+        musicBytes = std::move(*bytes);
+
+        auto rwOps = sdlContext->rwFromConstMem(musicBytes.data(), musicBytes.size());
+        // No predecode: a four-minute track decoded to PCM is tens of
+        // megabytes, and the mixer is perfectly happy streaming the mp3.
+        auto audio = sdlMixerContext->loadAudioIO(rwOps.release(), false, true);
+        if (!audio)
+        {
+            musicBytes.clear();
+            return false;
+        }
+        musicAudio = std::move(audio);
+
+        if (!musicTrack)
+        {
+            musicTrack = sdlMixerContext->createTrack();
+        }
+
+        sdlMixerContext->setTrackAudio(musicTrack.get(), musicAudio.get());
+        sdlMixerContext->setTrackGain(musicTrack.get(), musicGain);
+
+        auto props = SDL_CreateProperties();
+        SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, loop ? -1 : 0);
+        sdlMixerContext->playTrack(musicTrack.get(), props);
+        SDL_DestroyProperties(props);
+
+        return true;
+    }
+
+    void AudioService::stopMusic()
+    {
+        if (musicTrack)
+        {
+            sdlMixerContext->stopTrack(musicTrack.get());
+        }
+        musicAudio.reset();
+        musicBytes.clear();
+    }
+
+    bool AudioService::musicPlaying()
+    {
+        return musicTrack && sdlMixerContext->trackPlaying(musicTrack.get());
+    }
+
     int AudioService::playSound(const SoundHandle& sound)
     {
         int channel = findFreeTrack();

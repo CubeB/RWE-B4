@@ -55,6 +55,20 @@ namespace rwe
         // Default gain applied to sounds on load (equivalent to old MIX_MAX_VOLUME/4)
         static constexpr float defaultGain = 0.25f;
 
+        // Music sits under the effects rather than over them.
+        static constexpr float musicGain = 0.3f;
+
+        /**
+         * The one track music plays on. The GOG release ships the CD audio as
+         * music/<track>.mp3 in the game directory, which the VFS picks up
+         * along with everything else, so music is read the same way as any
+         * other game file. The compressed bytes have to stay alive for as
+         * long as the mixer is streaming from them, hence the buffer here.
+         */
+        SdlMixerContext::TrackPtr musicTrack;
+        SdlMixerContext::AudioPtr musicAudio;
+        std::vector<char> musicBytes;
+
     public:
         AudioService(SdlContext* sdlContext, SdlMixerContext* sdlMixerContext, AbstractVirtualFileSystem* fileSystem);
         AudioService(const AudioService&) = delete;
@@ -73,6 +87,17 @@ namespace rwe
         void reserveChannels(unsigned int count);
 
         void playSoundIfFree(const SoundHandle& sound, unsigned int channel);
+
+        /**
+         * Plays a music file from the VFS on the dedicated music track,
+         * replacing whatever was playing. Returns false when the file is not
+         * there or will not decode, so a caller can stop asking.
+         */
+        bool playMusic(const std::string& vfsPath, bool loop);
+
+        void stopMusic();
+
+        bool musicPlaying();
 
         void setVolume(int channel, int volume);
 

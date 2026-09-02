@@ -37,6 +37,10 @@ namespace rwe
 
     void MainMenuScene::init()
     {
+        // The title theme, looping, as long as the menu is up. CD track 2 in
+        // the GOG layout; quietly nothing if the data path has no music.
+        sceneContext.audioService->playMusic("music/2.mp3", true);
+
         bgm = startBgm();
         goToMainMenu();
     }
@@ -226,6 +230,14 @@ namespace rwe
             else if (message == "SINGLE")
             {
                 goToSingleMenu();
+            }
+            else if (message == "INTRO")
+            {
+                // The intro movie is a Smacker file on the original CD and
+                // the GOG release does not carry it, so the nearest thing on
+                // hand is the title theme played in full -- CD track 2, which
+                // GOG ships as music/2.mp3.
+                sceneContext.audioService->playMusic("music/2.mp3", false);
             }
         }
         else if (topic == "SINGLE")

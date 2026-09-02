@@ -1154,6 +1154,15 @@ namespace rwe
 
     void GameScene::renderWorld()
     {
+        // The window can be resized (or dragged between monitors of
+        // different scale) at any moment; the world is drawn through an
+        // offscreen buffer, which has to follow the viewport or the view
+        // ends up squeezed into a corner of the old size.
+        if (worldRenderTextureSize != std::pair<unsigned int, unsigned int>{worldViewport.width(), worldViewport.height()})
+        {
+            recreateWorldRenderTextures();
+        }
+
         updateFogSprite();
 
         sceneContext.graphics->bindFrameBuffer(worldFrameBuffer.frameBuffer.get());
@@ -2851,6 +2860,29 @@ namespace rwe
 
     void GameScene::update(int millisecondsElapsed)
     {
+        // In-game music: the GOG release ships the CD audio as
+        // music/<track>.mp3, tracks 3 to 17, and the original rotated
+        // through the disc. The full battle-versus-monitoring selection
+        // logic has not been read out of the binary, so for now the
+        // rotation is a shuffle that never repeats the track it just
+        // played.
+        if (!musicUnavailable && !sceneContext.audioService->musicPlaying())
+        {
+            auto next = 3 + static_cast<int>(effectsRng() % 15u);
+            if (currentMusicTrack && next == *currentMusicTrack)
+            {
+                next = 3 + ((next - 3 + 1) % 15);
+            }
+            if (sceneContext.audioService->playMusic("music/" + std::to_string(next) + ".mp3", false))
+            {
+                currentMusicTrack = next;
+            }
+            else
+            {
+                musicUnavailable = true;
+            }
+        }
+
         // Pause halts simulation tick dispatch by not advancing the
         // scaled-time accumulator. Speed scales the accumulator using
         // integer arithmetic to keep determinism friendly: at perMille
@@ -6659,6 +6691,7 @@ namespace rwe
     {
         worldFrameBuffer = sceneContext.graphics->createFrameBuffer(worldViewport.width(), worldViewport.height());
         dodgeMask = sceneContext.graphics->createEmptyTexture(worldViewport.width(), worldViewport.height());
+        worldRenderTextureSize = {worldViewport.width(), worldViewport.height()};
     }
 
     void GameScene::nudgeCamera(int millisecondsElapsed, const Rectangle2f& cameraConstraint, int directionX, int directionZ)

@@ -118,7 +118,17 @@ namespace rwe
         return Ok(std::move(glContext));
     };
 
-    int run(const std::vector<fs::path>& searchPath, const PathMapping& pathMapping, const std::optional<GameParameters>& gameParameters, unsigned int desiredWindowWidth, unsigned int desiredWindowHeight, bool fullscreen, const std::string& imGuiIniPath, GlobalConfig& globalConfig)
+    enum class WindowMode
+    {
+        /** An ordinary window with a title bar: draggable, resizable. */
+        Bordered,
+        /** A borderless window filling the desktop. */
+        Borderless,
+        /** Exclusive fullscreen at the requested resolution. */
+        Fullscreen,
+    };
+
+    int run(const std::vector<fs::path>& searchPath, const PathMapping& pathMapping, const std::optional<GameParameters>& gameParameters, unsigned int desiredWindowWidth, unsigned int desiredWindowHeight, WindowMode windowMode, const std::string& imGuiIniPath, GlobalConfig& globalConfig)
     {
         LOG_INFO << ProjectNameVersion;
         LOG_INFO << "Current directory: " << fs::current_path().string();
@@ -136,17 +146,34 @@ namespace rwe
             throw std::runtime_error(SDL_GetError());
         }
 
+        Uint32 windowFlags = SDL_WINDOW_OPENGL;
+        switch (windowMode)
+        {
+            case WindowMode::Bordered:
+                windowFlags |= SDL_WINDOW_RESIZABLE;
+                break;
+            case WindowMode::Borderless:
+                // In SDL3 a fullscreen window with no exclusive display mode
+                // set is a borderless window over the desktop, which is
+                // exactly what is wanted here.
+                windowFlags |= SDL_WINDOW_FULLSCREEN;
+                break;
+            case WindowMode::Fullscreen:
+                windowFlags |= SDL_WINDOW_FULLSCREEN;
+                break;
+        }
+
         auto window = sdlContext->createWindow(
             "RWE",
             desiredWindowWidth,
             desiredWindowHeight,
-            SDL_WINDOW_OPENGL | (fullscreen ? SDL_WINDOW_FULLSCREEN : 0));
+            windowFlags);
         if (window == nullptr)
         {
             throw std::runtime_error(SDL_GetError());
         }
 
-        if (fullscreen)
+        if (windowMode == WindowMode::Fullscreen)
         {
             SDL_DisplayMode targetMode;
             auto displayID = sdlContext->getWindowDisplayIndex(window.get());
@@ -169,8 +196,14 @@ namespace rwe
 
         // Prevent the mouse from leaving the window.
         // We rely on nudging the edges of the screen to pan the camera,
-        // so this is necessary for the game to work.
-        sdlContext->setWindowGrab(window.get(), true);
+        // so this is necessary for the game to work -- except in a bordered
+        // window, where trapping the cursor would make the title bar
+        // unreachable and the window impossible to drag. There the edges
+        // still pan, just without the fence.
+        if (windowMode != WindowMode::Bordered)
+        {
+            sdlContext->setWindowGrab(window.get(), true);
+        }
 
         int windowWidth;
         int windowHeight;
@@ -527,7 +560,8 @@ int main(int argc, char* argv[])
                       << "  --ai-difficulty <d>   easy | standard | hard | brutal (default: standard)\n"
                       << "  --width <pixels>      Window width (default: 800)\n"
                       << "  --height <pixels>     Window height (default: 600)\n"
-                      << "  --fullscreen          Start in fullscreen mode\n"
+                      << "  --fullscreen          Start in fullscreen mode (same as --window-mode fullscreen)\n"
+                      << "  --window-mode <m>     bordered | borderless | fullscreen (default: bordered)\n"
                       << "  --interface-mode <m>  left-click or right-click (default: left-click)\n"
                       << "  --data-path <path>    Game data search path (repeatable)\n"
                       << "  --map <name>          Launch directly into a game on this map\n"
@@ -604,7 +638,16 @@ int main(int argc, char* argv[])
 
             auto screenWidth = args.getUint("width", 800);
             auto screenHeight = args.getUint("height", 600);
-            auto fullscreen = args.getBool("fullscreen");
+            auto windowMode = rwe::WindowMode::Bordered;
+            auto windowModeString = args.getString("window-mode", "");
+            if (windowModeString == "borderless")
+            {
+                windowMode = rwe::WindowMode::Borderless;
+            }
+            else if (windowModeString == "fullscreen" || args.getBool("fullscreen"))
+            {
+                windowMode = rwe::WindowMode::Fullscreen;
+            }
 
             auto pathMapping = constructDefaultPathMapping();
             pathMapping.ai = args.getString("dir-ai", "ai");
@@ -625,7 +668,7 @@ int main(int argc, char* argv[])
             pathMapping.units = args.getString("dir-units", "units");
             pathMapping.weapons = args.getString("dir-weapons", "weapons");
 
-            return rwe::run(gameDataPaths, pathMapping, gameParameters, screenWidth, screenHeight, fullscreen, imGuiIniFilePath.string(), config);
+            return rwe::run(gameDataPaths, pathMapping, gameParameters, screenWidth, screenHeight, windowMode, imGuiIniFilePath.string(), config);
         }
         catch (const std::exception& e)
         {
