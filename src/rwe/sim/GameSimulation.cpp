@@ -2690,6 +2690,7 @@ namespace rwe
         // Match TA behavior: friendly-fire kills count.
         // Skip if the attacker is dead or no longer exists, and never
         // credit a unit for killing itself (suicide / explodeAs).
+        std::optional<PlayerId> killerOwner;
         if (attacker && *attacker != unitId)
         {
             auto attackerUnit = tryGetUnitState(*attacker);
@@ -2697,11 +2698,12 @@ namespace rwe
             {
                 attackerUnit->get().kills += 1;
                 getPlayer(attackerUnit->get().owner).unitsKilled += 1;
+                killerOwner = attackerUnit->get().owner;
             }
         }
 
         auto deathType = unit.position.y < terrain.getSeaLevel() ? UnitDiedEvent::DeathType::WaterExploded : UnitDiedEvent::DeathType::NormalExploded;
-        events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, deathType});
+        events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, deathType, unit.owner, killerOwner});
 
         // Run the script's Killed(severity, corpsetype) now, while the unit
         // still exists: the piece explosions it fires before its first sleep
@@ -2750,6 +2752,21 @@ namespace rwe
 
     void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer)
     {
+        {
+            // Scored by the music evaluator; carries owners so the scene
+            // does not have to chase ids that may be dead by the time it
+            // drains the queue.
+            std::optional<PlayerId> attackerOwner;
+            if (attacker)
+            {
+                if (auto attackerUnit = tryGetUnitState(*attacker))
+                {
+                    attackerOwner = attackerUnit->get().owner;
+                }
+            }
+            events.push_back(UnitDamagedEvent{unitId, getUnitState(unitId).owner, attackerOwner});
+        }
+
         if (attacker)
         {
             // The original shoots back from inside the damage message

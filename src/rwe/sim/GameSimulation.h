@@ -233,6 +233,22 @@ namespace rwe
             SelfDestructed,
         };
         DeathType deathType;
+
+        /** Who lost the unit and who killed it, where the sim knows. Scene-facing; not hashed. */
+        std::optional<PlayerId> owner;
+        std::optional<PlayerId> killerOwner;
+    };
+
+    /**
+     * A unit took damage. Emitted for the scene -- the original's music
+     * evaluator scores every weapon hit involving the local player -- and
+     * never hashed.
+     */
+    struct UnitDamagedEvent
+    {
+        UnitId unitId;
+        PlayerId victimOwner;
+        std::optional<PlayerId> attackerOwner;
     };
 
     struct UnitStartedBuildingEvent
@@ -328,6 +344,7 @@ namespace rwe
         EmitParticleFromPieceEvent,
         UnitSpawnedEvent,
         UnitDiedEvent,
+        UnitDamagedEvent,
         UnitStartedBuildingEvent,
         ProjectileSpawnedEvent,
         ProjectileDiedEvent,

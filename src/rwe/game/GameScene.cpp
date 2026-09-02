@@ -2862,51 +2862,7 @@ namespace rwe
 
     void GameScene::update(int millisecondsElapsed)
     {
-        // In-game music: a shuffle over whatever the music directory holds,
-        // the title theme left out, never repeating the track just played.
-        // The original's real selection -- MUSIC.GUI types every CD track as
-        // Building, Battle, Victory or Defeat and the game picks by state --
-        // is decoded from the gui but not yet from the binary, so the
-        // shuffle stands in.
-        if (!musicPlaylistBuilt)
-        {
-            musicPlaylistBuilt = true;
-            musicPlaylist = sceneContext.audioService->getMusicPlaylist();
-            if (auto theme = sceneContext.audioService->getThemePath(); theme && musicPlaylist.size() > 1)
-            {
-                musicPlaylist.erase(std::remove(musicPlaylist.begin(), musicPlaylist.end(), *theme), musicPlaylist.end());
-            }
-        }
-        if (!musicPlaylist.empty() && sceneContext.audioService->isMusicEnabled() && !sceneContext.audioService->musicPlaying())
-        {
-            // Drawn from a bag rather than independently: everything plays
-            // once before anything comes round again, and the refilled bag
-            // never leads with the track that just finished.
-            if (musicBag.empty())
-            {
-                musicBag = musicPlaylist;
-                for (auto i = musicBag.size(); i > 1; --i)
-                {
-                    std::swap(musicBag[i - 1], musicBag[effectsRng() % i]);
-                }
-                if (musicBag.size() > 1 && musicBag.back() == lastMusicTrack)
-                {
-                    std::swap(musicBag.back(), musicBag.front());
-                }
-            }
-
-            auto next = musicBag.back();
-            musicBag.pop_back();
-            if (sceneContext.audioService->playMusic(next, false))
-            {
-                lastMusicTrack = next;
-            }
-            else
-            {
-                // The file is gone or will not decode; drop it for good.
-                musicPlaylist.erase(std::remove(musicPlaylist.begin(), musicPlaylist.end(), next), musicPlaylist.end());
-            }
-        }
+        updateMusic();
 
         // Pause halts simulation tick dispatch by not advancing the
         // scaled-time accumulator. Speed scales the accumulator using
@@ -3691,6 +3647,191 @@ namespace rwe
             auto side = player.side;
             std::transform(side.begin() + 1, side.end(), side.begin() + 1, [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             printConsole(side + " forces have been obliterated", playerColorToRgb(player.color));
+        }
+    }
+
+    namespace
+    {
+        /**
+         * The default track types, decoded from the exe: when the original
+         * recognises the game disc it types MCI tracks 1-7 Battle and 8-16
+         * Building (0x42F7xx area), and the GOG shim plays music/<n>.mp3 by
+         * raw track number. Matching the GOG rips to the tagged soundtrack by
+         * duration gives these names. A file the table does not know plays as
+         * Building; the title theme -- which the game itself never plays, it
+         * belongs to the intro -- is left out entirely.
+         */
+        bool isBattleTrackName(const std::string& lowerName)
+        {
+            static const char* const battleNames[] = {
+                "brutal battle",
+                "fire and ice",
+                "attack",
+                "warpath",
+                "march unto death",
+                "ambush in the passage",
+            };
+            for (const auto* name : battleNames)
+            {
+                if (lowerName.find(name) != std::string::npos)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    void GameScene::addBattlePoints(int points)
+    {
+        battlePointsRing[battleRingCursor] += points;
+    }
+
+    void GameScene::updateMusic()
+    {
+        if (!musicPlaylistBuilt)
+        {
+            musicPlaylistBuilt = true;
+            for (const auto& path : sceneContext.audioService->getMusicPlaylist())
+            {
+                auto lower = path;
+                std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (lower.find("theme") != std::string::npos)
+                {
+                    continue;
+                }
+                (isBattleTrackName(lower) ? battleTracks : buildingTracks).push_back(path);
+            }
+            // A one-sided soundtrack plays whatever it has in both moods.
+            if (battleTracks.empty())
+            {
+                battleTracks = buildingTracks;
+            }
+            if (buildingTracks.empty())
+            {
+                buildingTracks = battleTracks;
+            }
+        }
+        if (buildingTracks.empty() || !sceneContext.audioService->isMusicEnabled())
+        {
+            return;
+        }
+
+        // The evaluator runs once a game second, like the original's.
+        auto second = simulation.gameTime.value / static_cast<unsigned int>(SimTicksPerSecond);
+        if (second != lastMusicSecond)
+        {
+            lastMusicSecond = second;
+            battleRingCursor = (battleRingCursor + 1) % battlePointsRing.size();
+            battlePointsRing[battleRingCursor] = 0;
+
+            int sum30 = 0;
+            for (auto v : battlePointsRing)
+            {
+                sum30 += v;
+            }
+            int sum5 = 0;
+            for (unsigned int i = 0; i < 5; ++i)
+            {
+                sum5 += battlePointsRing[(battleRingCursor + battlePointsRing.size() - i) % battlePointsRing.size()];
+            }
+
+            if (!musicFadeTarget && simulation.gameTime >= musicLockoutUntil)
+            {
+                if (musicSituation == MusicSituation::Building)
+                {
+                    // The unit-count gate is the original's: with thirty or
+                    // fewer units the fight is not big enough for war drums.
+                    unsigned int owned = 0;
+                    for (const auto& [_, unit] : simulation.units)
+                    {
+                        if (unit.isAlive() && unit.isOwnedBy(localPlayerId))
+                        {
+                            ++owned;
+                        }
+                    }
+                    if ((sum30 > 50 || sum5 > 30) && owned > 30)
+                    {
+                        musicFadeTarget = MusicSituation::Battle;
+                    }
+                }
+                else
+                {
+                    auto inBattleFor = simulation.gameTime.value - battleEnteredTime.value;
+                    if (sum30 < 10 && sum5 == 0 && inBattleFor >= 60u * SimTicksPerSecond)
+                    {
+                        musicFadeTarget = MusicSituation::Building;
+                    }
+                }
+            }
+        }
+
+        // A switch fades the old track out over about 1.2 seconds, the
+        // original's -vol/18 every other tick.
+        if (musicFadeTarget)
+        {
+            musicFade -= 1.0f / 36.0f;
+            if (musicFade <= 0.0f || !sceneContext.audioService->musicPlaying())
+            {
+                sceneContext.audioService->stopMusic();
+                musicSituation = *musicFadeTarget;
+                musicFadeTarget = std::nullopt;
+                musicFade = 1.0f;
+                sceneContext.audioService->setMusicFadeScale(1.0f);
+                musicLockoutUntil = simulation.gameTime + GameTime(10u * SimTicksPerSecond);
+                musicBag.clear();
+                if (musicSituation == MusicSituation::Battle)
+                {
+                    battleEnteredTime = simulation.gameTime;
+                }
+                else
+                {
+                    // Coming down from battle gets four seconds of quiet.
+                    musicHoldOffUntil = simulation.gameTime + GameTime(4u * SimTicksPerSecond);
+                }
+            }
+            else
+            {
+                sceneContext.audioService->setMusicFadeScale(musicFade);
+            }
+            return;
+        }
+
+        if (sceneContext.audioService->musicPlaying() || simulation.gameTime < musicHoldOffUntil)
+        {
+            return;
+        }
+
+        // Draw the next track of the current mood from a bag, so everything
+        // of that type plays before anything repeats.
+        const auto& tracks = musicSituation == MusicSituation::Battle ? battleTracks : buildingTracks;
+        if (musicBag.empty())
+        {
+            musicBag = tracks;
+            for (auto i = musicBag.size(); i > 1; --i)
+            {
+                std::swap(musicBag[i - 1], musicBag[effectsRng() % i]);
+            }
+            if (musicBag.size() > 1 && musicBag.back() == lastMusicTrack)
+            {
+                std::swap(musicBag.back(), musicBag.front());
+            }
+        }
+        if (musicBag.empty())
+        {
+            return;
+        }
+
+        auto next = musicBag.back();
+        musicBag.pop_back();
+        if (sceneContext.audioService->playMusic(next, false))
+        {
+            lastMusicTrack = next;
+        }
+        else
+        {
+            buildingTracks.erase(std::remove(buildingTracks.begin(), buildingTracks.end(), next), buildingTracks.end());
+            battleTracks.erase(std::remove(battleTracks.begin(), battleTracks.end(), next), battleTracks.end());
         }
     }
 
@@ -5207,8 +5348,23 @@ namespace rwe
                     }
                 },
 
+                [&](const UnitDamagedEvent& e) {
+                    // One point per weapon hit involving the local player,
+                    // either side of it -- the original's scoring.
+                    if (e.victimOwner == localPlayerId || (e.attackerOwner && *e.attackerOwner == localPlayerId))
+                    {
+                        addBattlePoints(1);
+                    }
+                },
                 [&](const UnitDiedEvent& e) {
                     const auto& unitDefinition = simulation.unitDefinitions.at(e.unitType);
+
+                    // Five points per unit the local player kills.
+                    if (e.killerOwner && *e.killerOwner == localPlayerId)
+                    {
+                        addBattlePoints(5);
+                    }
+
 
                     const auto& selfDestructExplosion = unitDefinition.selfDestructAs.empty() ? unitDefinition.explodeAs : unitDefinition.selfDestructAs;
                     switch (e.deathType)

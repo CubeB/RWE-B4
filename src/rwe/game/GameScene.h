@@ -431,13 +431,40 @@ namespace rwe
         /** Scatter for purely visual effects; never feeds the simulation. */
         std::minstd_rand effectsRng{20260828u};
 
-        /** The in-game music rotation: every mp3 in the music directory bar the title theme. */
-        std::vector<std::string> musicPlaylist;
-        bool musicPlaylistBuilt{false};
+        /**
+         * The original's situational music, decoded from the exe: tracks are
+         * typed Building or Battle, a ring of thirty one-second slots scores
+         * combat involving the local player, and the game switches type on
+         * thresholds over that ring. Victory and Defeat types exist in the
+         * original but nothing in gameplay ever triggers them, so neither do
+         * we.
+         */
+        enum class MusicSituation
+        {
+            Building,
+            Battle,
+        };
 
-        /** The bag: play everything once before anything comes round again. */
+        std::vector<std::string> buildingTracks;
+        std::vector<std::string> battleTracks;
         std::vector<std::string> musicBag;
         std::string lastMusicTrack;
+        bool musicPlaylistBuilt{false};
+
+        MusicSituation musicSituation{MusicSituation::Building};
+        std::array<int, 30> battlePointsRing{};
+        unsigned int battleRingCursor{0};
+        unsigned int lastMusicSecond{0};
+        GameTime musicLockoutUntil{0};
+        GameTime battleEnteredTime{0};
+        GameTime musicHoldOffUntil{0};
+
+        /** Set when a type switch is fading the current track out. */
+        std::optional<MusicSituation> musicFadeTarget;
+        float musicFade{1.0f};
+
+        void addBattlePoints(int points);
+        void updateMusic();
 
         /** What size the world render textures were made at, so a window resize remakes them. */
         std::pair<unsigned int, unsigned int> worldRenderTextureSize{0, 0};

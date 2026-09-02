@@ -123,7 +123,16 @@ namespace rwe
         musicVolumeScale = std::clamp(volume, 0.0f, 1.0f);
         if (musicTrack)
         {
-            sdlMixerContext->setTrackGain(musicTrack.get(), musicGain * musicVolumeScale);
+            sdlMixerContext->setTrackGain(musicTrack.get(), musicGain * musicVolumeScale * musicFadeScale);
+        }
+    }
+
+    void AudioService::setMusicFadeScale(float scale)
+    {
+        musicFadeScale = std::clamp(scale, 0.0f, 1.0f);
+        if (musicTrack)
+        {
+            sdlMixerContext->setTrackGain(musicTrack.get(), musicGain * musicVolumeScale * musicFadeScale);
         }
     }
 
@@ -175,6 +184,7 @@ namespace rwe
             musicTrack = sdlMixerContext->createTrack();
         }
 
+        musicFadeScale = 1.0f;
         sdlMixerContext->setTrackAudio(musicTrack.get(), musicAudio.get());
         sdlMixerContext->setTrackGain(musicTrack.get(), musicGain * musicVolumeScale);
 

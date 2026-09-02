@@ -61,6 +61,7 @@ namespace rwe
         // User-set volume scales, 0 to 1, applied on top of the base gains.
         float soundVolumeScale{1.0f};
         float musicVolumeScale{1.0f};
+        float musicFadeScale{1.0f};
         bool musicEnabled{true};
 
         /**
@@ -123,6 +124,9 @@ namespace rwe
 
         /** Applies to the playing track immediately. */
         void setMusicVolume(float volume);
+
+        /** A transient scale for fading a track out; reset to 1 by the next play. */
+        void setMusicFadeScale(float scale);
         float getMusicVolume() const { return musicVolumeScale; }
 
         /** Turning music off stops it there and then; movies are unaffected. */
