@@ -71,6 +71,11 @@ namespace rwe
             d.turnRate = 1000_ss;
             d.maxHitPoints = 100;
             d.buildTime = 0u;
+            // Deciding whether to break off is a search at sight range over
+            // things that ask to be shot at, so a fixture without either of
+            // these is invisible to it.
+            d.sightDistance = 300u;
+            d.shootMe = true;
             d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
             return d;
         }
@@ -148,6 +153,11 @@ namespace rwe
         auto tankId = addUnitOfType(sim, "tank", player, SimVector(100_ss, 0_ss, 100_ss), script);
         armUnit(sim, tankId, 200_ss);
         auto enemyId = addUnitOfType(sim, "tank", enemy, SimVector(150_ss, 0_ss, 100_ss), script);
+
+        // Visibility is recomputed at the end of a tick, so give it one to
+        // settle before the patrol runs: nothing is visible to anyone on the
+        // very first tick of a simulation.
+        sim.tick();
 
         auto& tank = sim.getUnitState(tankId);
         tank.orders.push_back(PatrolOrder(SimVector(100_ss, 0_ss, 100_ss)));

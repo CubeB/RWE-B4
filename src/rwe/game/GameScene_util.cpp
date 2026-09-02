@@ -1225,12 +1225,24 @@ namespace rwe
                     coloredMeshbatch.lines.emplace_back(backPosition + pixelOffset, l.color2);
                 },
                 [&](const ProjectileRenderTypeModel& m) {
-                    // Bombs dropped by hovering aircraft can spawn with
-                    // zero velocity for a tick before gravity kicks in;
-                    // fall back to a sane forward direction instead of
-                    // crashing on normalize().
+                    // A missile flies exactly where its nose points (0x49BA74
+                    // rebuilds the velocity out of the attitude every tick),
+                    // so the velocity vector is the model's heading -- with
+                    // two exceptions where it is not a direction at all.
+                    // Bombs dropped by a hovering aircraft spawn at rest and
+                    // wait a tick for gravity, and a vertical launch spawns at
+                    // rest by definition: `startvelocity` is absent from every
+                    // vlaunch weapon in the game, so a nuke's first frame has
+                    // a zero vector where its heading should be. Falling back
+                    // to due north drew the missile lying flat across the pad
+                    // for that frame before it snapped upright. The attitude
+                    // is right from the moment it is spawned, so use that.
+                    auto velocity = simVectorToFloat(projectile.velocity);
+                    auto direction = velocity.lengthSquared() > 0.0f
+                        ? velocity.normalized()
+                        : simVectorToFloat(toMissileDirection(projectile.heading, projectile.pitch));
                     auto transform = Matrix4f::translation(position)
-                        * pointDirection(simVectorToFloat(projectile.velocity).normalizedOr(Vector3f(0.0f, 0.0f, 1.0f)))
+                        * pointDirection(direction)
                         * rotationModeToMatrix(m.rotationMode);
                     const auto& modelDefinition = sim.unitModelDefinitions.at(m.objectName);
                     drawProjectileUnitMesh(gameMediaDatabase, viewProjectionMatrix, m.objectName, modelDefinition, transform, PlayerColorIndex(0), false, unitTextureAtlas, unitTeamTextureAtlases, unitMeshBatch);

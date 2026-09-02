@@ -106,6 +106,45 @@ namespace rwe
             sim.weaponDefinitions["truckrocket"] = w;
         }
 
+        /**
+         * NUCLEAR_MISSILE, out of ROCKETS.TDF. `weapontimer` is in seconds,
+         * so a nuke climbs vertically for a full five of them -- 150 ticks --
+         * before it turns over, which is much the longest blind climb in the
+         * game and is why one looks like it is never going to lean. Then 400
+         * ticks of guided flight, and `cruise` holds it at altitude over the
+         * aim point before it comes down. `turnrate` is half a turn a second.
+         */
+        void defineNuke(GameSimulation& sim)
+        {
+            WeaponDefinition w{};
+            w.maxRange = 32000_ss;
+            w.reloadTime = SimScalar(180.0f);
+            w.burst = 1;
+            w.burstInterval = 0_ss;
+            w.velocity = 350_ss / 30_ss;
+            w.damageRadius = 512_ss;
+            w.damage["DEFAULT"] = 2500;
+            w.weaponTimer = GameTime(150);
+            w.randomDecay = GameTime(0);
+
+            ProjectilePhysicsTypeSelfPropelled p;
+            p.startVelocity = 0_ss;
+            p.acceleration = 50_ss / 900_ss;
+            p.maxVelocity = 350_ss / 30_ss;
+            p.turnRate = SimAngle(32768u / 30u);
+            p.guidance = true;
+            p.tracks = false;
+            p.twoPhase = true;
+            p.vLaunch = true;
+            p.flightTime = GameTime(400);
+            p.burnBlow = false;
+            p.cruise = true;
+            p.autoRange = false;
+            w.physicsType = p;
+
+            sim.weaponDefinitions["nuke"] = w;
+        }
+
         struct Flight
         {
             /** Position at the end of every tick the projectile was alive for. */
@@ -280,5 +319,54 @@ namespace rwe
         REQUIRE(simScalarToFloat(f.peakHeight) > simScalarToFloat(f.heightAtTurnover));
         REQUIRE(simScalarToFloat(f.peakHeight) < 660.0f);
         REQUIRE(simScalarToFloat(f.closestApproach) < 48.0f);
+    }
+
+    TEST_CASE("a nuclear missile turns over and points where it is going", "[missile]")
+    {
+        // What is drawn is the velocity vector: drawProjectiles orients a
+        // model projectile with pointDirection(velocity). So "the missile
+        // leans over onto its course" and "the velocity vector leans over"
+        // are the same statement, and this pins the second one.
+        GameSimulation sim(makeMissileTerrain(512, 512), 0u, 0, 0);
+        addMissilePlayer(sim);
+        defineNuke(sim);
+
+        UnitWeapon weapon;
+        weapon.weaponType = "nuke";
+        auto from = SimVector(0_ss, 0_ss, 0_ss);
+        auto at = SimVector(6000_ss, 0_ss, 0_ss);
+        auto toTarget = at - from;
+        sim.spawnProjectile(PlayerId(0), weapon, from, toTarget.normalized(), toTarget.length(), std::nullopt, std::nullopt, std::nullopt, at);
+
+        std::vector<SimVector> velocities;
+        for (int t = 0; t < 400; ++t)
+        {
+            sim.tick();
+            if (sim.projectiles.begin() == sim.projectiles.end())
+            {
+                break;
+            }
+            velocities.push_back(sim.projectiles.begin()->second.velocity);
+        }
+
+        REQUIRE(velocities.size() > 300);
+
+        // The climb. A vertical launch spawns at rest, so the very first tick
+        // has no direction at all to draw and the model can only be left
+        // pointing wherever it was; by the second the motor has it moving,
+        // and it is moving straight up.
+        REQUIRE(simScalarToFloat(velocities[1].y) > 0.0f);
+        REQUIRE(std::abs(simScalarToFloat(velocities[1].x)) < 0.01f);
+        REQUIRE(std::abs(simScalarToFloat(velocities[1].z)) < 0.01f);
+
+        // Still climbing dead straight at four seconds. Nothing is wrong at
+        // this point; the missile simply has another second of tube to go.
+        REQUIRE(std::abs(simScalarToFloat(velocities[119].x)) < 0.01f);
+
+        // By the end of the run it is going downrange, not upwards: the
+        // model has to have swung through most of a right angle to do that.
+        const auto& late = velocities[300];
+        REQUIRE(simScalarToFloat(late.x) > 0.0f);
+        REQUIRE(simScalarToFloat(late.x) > std::abs(simScalarToFloat(late.y)));
     }
 }

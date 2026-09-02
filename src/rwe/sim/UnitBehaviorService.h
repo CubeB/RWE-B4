@@ -118,18 +118,37 @@ namespace rwe
         bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const;
 
         /**
+         * The two questions the original's target chooser answers, told apart
+         * by its third argument (0x40B7B0). Both run the same search; they
+         * differ in how far it looks and in whether NoChaseCategory has a say.
+         */
+        enum class TargetSearchMode
+        {
+            /** Argument 1: what an armed weapon may open fire on where it stands. */
+            WeaponRange,
+
+            /** Argument 0: whether to break off and go and find a fight. */
+            SightDistance,
+        };
+
+        /**
          * What the unit's given weapon picks to shoot at of its own accord,
          * out of everything it can reach and its owner can see. Nothing if
          * there is no legal target.
          */
-        std::optional<UnitId> chooseTarget(UnitId id, unsigned int weaponIndex);
+        std::optional<UnitId> chooseTarget(UnitId id, unsigned int weaponIndex, TargetSearchMode mode = TargetSearchMode::WeaponRange);
 
         bool captureExistingUnit(UnitInfo unitInfo, UnitId targetUnitId);
 
         bool deployCaptureArm(UnitInfo unitInfo, UnitId targetUnitId);
 
-        /** Nearest living enemy unit within range of the unit's primary weapon, if any. */
-        std::optional<UnitId> findEnemyInWeaponRange(UnitInfo unitInfo) const;
+        /**
+         * Whether there is anything worth breaking off for: the choice the
+         * primary weapon would make, but over everything inside the unit's own
+         * SightDistance rather than its weapon's range, and with
+         * NoChaseCategory allowed to rule candidates out.
+         */
+        std::optional<UnitId> findEnemyToEngage(UnitInfo unitInfo);
 
         bool handleBuild(UnitInfo unitInfo, const std::string& unitType);
 

@@ -154,6 +154,15 @@ namespace rwe
         bool inResourceDebt() const;
     };
 
+    /**
+     * The direction a missile with this attitude is pointing. TA builds its
+     * velocity this way round every tick -- pitch first, then heading -- so a
+     * missile always flies exactly where its nose points (0x49BA74). That is
+     * why the renderer can take a missile's heading straight off its velocity,
+     * and why it has to come back here on the one frame the velocity is zero.
+     */
+    SimVector toMissileDirection(SimAngle heading, SimAngle pitch);
+
     struct PathRequest
     {
         UnitId unitId;

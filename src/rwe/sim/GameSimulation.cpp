@@ -1998,11 +1998,6 @@ namespace rwe
         pathRequests.push_back(PathRequest{unitId});
     }
 
-    /**
-     * The direction a missile with this attitude is pointing. TA builds its
-     * velocity this way round every tick -- pitch first, then heading -- so a
-     * missile always flies exactly where its nose points (0x49BA74).
-     */
     SimVector toMissileDirection(SimAngle heading, SimAngle pitch)
     {
         auto horizontal = cos(pitch);

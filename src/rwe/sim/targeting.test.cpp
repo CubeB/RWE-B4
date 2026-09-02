@@ -466,6 +466,71 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a fighter breaks off for aircraft before it will look at the ground", "[targeting]")
+    {
+        // Deciding whether to go and fight is the same routine as deciding
+        // what to shoot -- 0x43B700 is four instructions and a tail call into
+        // 0x40B7B0 with its third argument zero -- so the bad target category
+        // has a say in both. Every fighter in the shipped data carries
+        // wpri_badTargetCategory=NOTAIR, and 143 of the 157 units name NOTAIR
+        // in their own Category, so this is what keeps a Freedom Fighter off
+        // the tanks: not a rule against ground targets, but a preference so
+        // broad that it covers the whole map.
+        auto script = makeTargetingScript();
+        GameSimulation sim(makeTargetingTerrain(), 0u, 0, 0);
+        auto us = addTargetingPlayer(sim, "us", GamePlayerType::Human);
+        auto them = addTargetingPlayer(sim, "them", GamePlayerType::Human);
+        registerTargetingModel(sim);
+        defineShooter(sim, "fighter", "NOTAIR");
+        sim.unitDefinitions["fighter"].canMove = true;
+        defineTarget(sim, "enemyTank", "CORE TANK LEVEL1 NOTAIR NOTSUB", true);
+        defineTarget(sim, "enemyPlane", "CORE VTOL LEVEL1 NOTSUB", true);
+        defineWeapon(sim, "missile", false);
+
+        auto here = SimVector(0_ss, 0_ss, 0_ss);
+        auto there = SimVector(256_ss, 0_ss, 0_ss);
+
+        SECTION("it passes a tank under its nose for an aircraft further off")
+        {
+            spawnTargetingUnit(sim, "enemyTank", them, SimVector(32_ss, 0_ss, 0_ss), script);
+            auto planeId = spawnTargetingUnit(sim, "enemyPlane", them, SimVector(-256_ss, 60_ss, 0_ss), script);
+            putInTheAir(sim, planeId);
+
+            auto fighterId = spawnTargetingUnit(sim, "fighter", us, here, script);
+            armWith(sim, fighterId, "missile");
+            sim.tick();
+            auto& fighter = sim.getUnitState(fighterId);
+            fighter.orders.push_back(PatrolOrder(here));
+            fighter.orders.push_back(PatrolOrder(there));
+
+            sim.tick();
+
+            auto target = weaponTarget(sim, fighterId);
+            REQUIRE(target.has_value());
+            REQUIRE(target->value == planeId.value);
+        }
+
+        SECTION("with nothing in the air it does take the tank")
+        {
+            // The fallback at 0x40BA4D returns the best bad candidate when
+            // there is no good one, so this is not an aircraft-only weapon.
+            auto tankId = spawnTargetingUnit(sim, "enemyTank", them, SimVector(32_ss, 0_ss, 0_ss), script);
+
+            auto fighterId = spawnTargetingUnit(sim, "fighter", us, here, script);
+            armWith(sim, fighterId, "missile");
+            sim.tick();
+            auto& fighter = sim.getUnitState(fighterId);
+            fighter.orders.push_back(PatrolOrder(here));
+            fighter.orders.push_back(PatrolOrder(there));
+
+            sim.tick();
+
+            auto target = weaponTarget(sim, fighterId);
+            REQUIRE(target.has_value());
+            REQUIRE(target->value == tankId.value);
+        }
+    }
+
     TEST_CASE("a unit does not leave its post for something it is told not to chase", "[targeting]")
     {
         // NoChaseCategory decides what is worth breaking off for, not what is
@@ -491,6 +556,9 @@ namespace rwe
         {
             auto tankId = spawnTargetingUnit(sim, "tank", us, here, script);
             armWith(sim, tankId, "gun");
+            // Visibility is worked out at the end of a tick and breaking off
+            // is gated on it, so let one go by before the patrol starts.
+            sim.tick();
             auto& tank = sim.getUnitState(tankId);
             tank.orders.push_back(PatrolOrder(here));
             tank.orders.push_back(PatrolOrder(there));
@@ -740,6 +808,7 @@ namespace rwe
             spawnTargetingUnit(sim, "enemyTank", them, SimVector(64_ss, 0_ss, 0_ss), script);
             auto tankId = spawnTargetingUnit(sim, "tank", us, here, script);
             armWith(sim, tankId, "gun");
+            sim.tick();
             auto& tank = sim.getUnitState(tankId);
             tank.orders.push_back(PatrolOrder(here));
             tank.orders.push_back(PatrolOrder(there));

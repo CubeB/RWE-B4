@@ -268,7 +268,7 @@ namespace rwe
                 std::optional<UnitId> freeTarget;
                 if (unitInfo.definition->canAttack && unitInfo.state->fireOrders != UnitFireOrders::HoldFire)
                 {
-                    freeTarget = findEnemyInWeaponRange(unitInfo);
+                    freeTarget = findEnemyToEngage(unitInfo);
                     // Only go after something the owner can actually see. The
                     // search itself does not check, because a unit already on
                     // patrol breaks off on contact and has been relied on to
@@ -2164,12 +2164,22 @@ namespace rwe
         return sim->weaponCanHitUnit(weaponDefinition, attacker, target);
     }
 
-    std::optional<UnitId> UnitBehaviorService::chooseTarget(UnitId id, unsigned int weaponIndex)
+    std::optional<UnitId> UnitBehaviorService::chooseTarget(UnitId id, unsigned int weaponIndex, TargetSearchMode mode)
     {
         const auto& unit = sim->getUnitState(id);
         const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
         const auto& weaponDefinition = sim->weaponDefinitions.at(unit.weapons[weaponIndex]->weaponType);
         const auto& badCategory = unitDefinition.badTargetCategory.at(weaponIndex);
+
+        // The candidate pool comes out of 0x40AD80 with a radius that depends
+        // on what is being asked: the weapon's own range when a gun is looking
+        // for something to shoot at, the unit's SightDistance when the
+        // question is whether to abandon its post and go hunting. For most
+        // units the second is much the larger, but not for all -- a Freedom
+        // Fighter sees 350 and shoots 510.
+        auto searchRadius = mode == TargetSearchMode::SightDistance
+            ? SimScalar(static_cast<float>(unitDefinition.sightDistance))
+            : weaponDefinition.maxRange;
 
         // The original scores each candidate with a random number drawn
         // between zero and the square of the distance to it, and takes the
@@ -2209,8 +2219,19 @@ namespace rwe
                 continue;
             }
 
+            // NoChaseCategory is about leaving your post, not about what you
+            // may shoot: the original only consults it when the third argument
+            // is zero (0x40B8E6). Forty-four of the shipped units name VTOL
+            // there and carry on with what they were doing rather than setting
+            // off after an aircraft, but they still shoot at one in passing.
+            if (mode == TargetSearchMode::SightDistance
+                && categoryListContains(otherUnitDefinition.category, unitDefinition.noChaseCategory))
+            {
+                continue;
+            }
+
             auto distanceSquared = unit.position.distanceSquared(otherUnit.position);
-            if (distanceSquared > weaponDefinition.maxRange * weaponDefinition.maxRange)
+            if (distanceSquared > searchRadius * searchRadius)
             {
                 continue;
             }
@@ -2224,12 +2245,14 @@ namespace rwe
 
             // The draw is over whole world units squared, and the original's
             // random number generator returns zero for anything under two.
+            // Taken modulo rather than through a uniform_int_distribution,
+            // whose bias correction is implementation-defined and would put
+            // two builds of the engine out of step with one another.
             auto range = static_cast<int>(simScalarToUInt(distanceSquared));
             auto score = 0;
             if (range > 1)
             {
-                std::uniform_int_distribution dist(0, range - 1);
-                score = dist(sim->rng);
+                score = static_cast<int>(sim->rng() % static_cast<unsigned int>(range));
             }
 
             if (categoryListContains(otherUnitDefinition.category, badCategory))
@@ -2876,58 +2899,22 @@ namespace rwe
         return repairExistingUnit(unitInfo, repairOrder.target);
     }
 
-    std::optional<UnitId> UnitBehaviorService::findEnemyInWeaponRange(UnitInfo unitInfo) const
+    std::optional<UnitId> UnitBehaviorService::findEnemyToEngage(UnitInfo unitInfo)
     {
-        const auto& weapon = unitInfo.state->weapons[0];
-        if (!weapon)
+        // The original does not have a second search for this. Standby,
+        // patrol and the ground missions all call 0x43B700, which checks the
+        // unit is on Fire At Will and then hands straight over to the ordinary
+        // chooser with its third argument zero. So a unit deciding whether to
+        // go and fight weighs candidates exactly as its gun would, bad target
+        // categories and all -- which is what keeps a Freedom Fighter, whose
+        // wpri_badTargetCategory is NOTAIR, off the tanks for as long as there
+        // is anything in the air to shoot at instead.
+        if (!unitInfo.state->weapons[0])
         {
             return std::nullopt;
         }
-        const auto& weaponDefinition = sim->weaponDefinitions.at(weapon->weaponType);
-        auto maxRangeSquared = weaponDefinition.maxRange * weaponDefinition.maxRange;
 
-        std::optional<UnitId> best;
-        std::optional<SimScalar> bestDistanceSquared;
-        for (const auto& [otherId, other] : sim->units)
-        {
-            if (otherId == unitInfo.id || other.isDead() || other.isOwnedBy(unitInfo.state->owner))
-            {
-                continue;
-            }
-
-            // NoChaseCategory is about leaving your post, not about what you
-            // may shoot: forty-four of the shipped units name VTOL there, and
-            // they carry on with what they were doing rather than stopping
-            // for an aircraft. Fire at will still shoots at it in passing.
-            const auto& otherDefinition = sim->unitDefinitions.at(other.unitType);
-            if (categoryListContains(otherDefinition.category, unitInfo.definition->noChaseCategory))
-            {
-                continue;
-            }
-
-            auto distanceSquared = unitInfo.state->position.distanceSquared(other.position);
-            if (distanceSquared > maxRangeSquared)
-            {
-                continue;
-            }
-
-            // The original runs this search through the same routine as the
-            // ordinary acquire (0x40B7B0 with its third argument zero), so it
-            // gets 0x49ABB0 too: a gunship carrying an anti-air weapon does
-            // not break off for a tank, and nothing breaks off for a
-            // submarine it cannot reach.
-            if (!weaponCanHitUnit(weaponDefinition, *unitInfo.state, other))
-            {
-                continue;
-            }
-
-            if (!bestDistanceSquared || distanceSquared < *bestDistanceSquared)
-            {
-                best = otherId;
-                bestDistanceSquared = distanceSquared;
-            }
-        }
-        return best;
+        return chooseTarget(unitInfo.id, 0, TargetSearchMode::SightDistance);
     }
 
     bool UnitBehaviorService::handlePatrolOrder(UnitInfo unitInfo, const PatrolOrder& patrolOrder)
@@ -2941,7 +2928,7 @@ namespace rwe
         // Engage anything hostile in weapon range before carrying on.
         if (unitInfo.state->fireOrders != UnitFireOrders::HoldFire)
         {
-            if (auto enemy = findEnemyInWeaponRange(unitInfo))
+            if (auto enemy = findEnemyToEngage(unitInfo))
             {
                 attackTarget(unitInfo, AttackTarget(*enemy));
                 return false;
