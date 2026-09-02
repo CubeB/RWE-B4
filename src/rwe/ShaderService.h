@@ -36,6 +36,7 @@ namespace rwe
         UniformLocation modelMatrix;
         UniformLocation seaLevel;
         UniformLocation shade;
+        UniformLocation alpha;
     };
 
     struct UnitShadowShader

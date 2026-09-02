@@ -71,6 +71,17 @@ namespace rwe
         Vector3f buildColorB;
     };
 
+    /**
+     * The share of its own colour a cloaked unit keeps in each pixel it
+     * covers. The original has no alpha at all: it composites the finished
+     * unit into a private bitmap and lays that down through a 256x256
+     * source-by-destination lookup table (`0x4B8500` -> `0x4CBF2C`), and that
+     * table is built at `0x4BA772` as the nearest palette entry to the exact
+     * midpoint of the two colours. So the ratio really is one half, not a
+     * value someone picked because it looked right.
+     */
+    constexpr float CloakBlendFactor = 0.5f;
+
     struct UnitTextureShadowMeshRenderInfo
     {
         const GlMesh* mesh;
@@ -84,6 +95,12 @@ namespace rwe
     {
         std::vector<UnitTextureMeshRenderInfo> meshes;
         std::vector<UnitBuildingMeshRenderInfo> buildingMeshes;
+
+        /**
+         * Cloaked units, held back so they go down over the solid ones and
+         * blend with what is behind them rather than replacing it.
+         */
+        std::vector<UnitTextureMeshRenderInfo> cloakedMeshes;
     };
 
     struct UnitShadowMeshBatch

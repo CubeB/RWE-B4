@@ -339,6 +339,11 @@ namespace rwe
         glDepthFunc(GL_ALWAYS);
     }
 
+    void GraphicsContext::useDepthTestEqual()
+    {
+        glDepthFunc(GL_EQUAL);
+    }
+
     GlMesh GraphicsContext::createTexturedMesh(const std::vector<GlTexturedVertex>& vertices, GLenum usage)
     {
         auto vao = genVertexArray();

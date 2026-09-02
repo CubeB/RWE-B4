@@ -299,6 +299,12 @@ namespace rwe
         static constexpr int ControlGroupCount = 10;
         std::array<std::unordered_set<UnitId>, ControlGroupCount> controlGroups;
 
+        // Which units were cloaked as of last tick. The original announces
+        // cloaking and decloaking to the unit's owner, and nothing about that
+        // reaches its simulation, so the edge is watched from out here rather
+        // than reported out of the sim.
+        std::unordered_set<UnitId> cloakedUnits;
+
         std::optional<HoverBuildInfo> hoverBuildInfo;
 
         bool occupiedGridVisible{false};
@@ -490,6 +496,9 @@ namespace rwe
         void playNotificationSound(const PlayerId& playerId, const AudioService::SoundHandle& sound);
 
         void playUnitNotificationSound(const PlayerId& playerId, const std::string& unitType, UnitSoundType soundType);
+
+        /** Speaks the unit's cloak and uncloak lines as its cloak comes and goes. */
+        void updateCloakNotifications();
 
         void playSoundAt(const Vector3f& position, const AudioService::SoundHandle& sound);
 

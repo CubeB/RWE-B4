@@ -23,6 +23,39 @@
 
 namespace rwe
 {
+    /** What one viewer is shown of one unit. */
+    enum class UnitDrawStyle
+    {
+        /** Nothing at all. */
+        Hidden,
+
+        /** The ordinary opaque draw. */
+        Solid,
+
+        /** Averaged with whatever is behind it. */
+        Cloaked,
+    };
+
+    /**
+     * The original decides whether to draw a unit at all in one predicate,
+     * `0x465AE8`: a unit of your own passes at `0x465AD7` before anything else
+     * is looked at, and a cloaked unit that is not yours returns zero before
+     * line of sight is even consulted. Having decided to draw it, the same
+     * cloak flag picks the blit at `0x459779` -- and there is no ownership test
+     * there, so your own cloaked Commander is a ghost to you as well. Cloak is
+     * therefore not "invisible": it is invisible to everyone else and
+     * see-through to you.
+     */
+    UnitDrawStyle computeUnitDrawStyle(bool ownedByViewer, bool cloaked, bool positionVisible);
+
+    /**
+     * What a pixel of a cloaked unit comes out as over a given background.
+     * This is the CPU statement of what CloakBlendFactor asks the blend
+     * hardware for, and of what the original's ALPHA TABLE holds: the midpoint
+     * of the two, with neither colour privileged over the other.
+     */
+    Vector3f blendCloakedColor(const Vector3f& unitColor, const Vector3f& backgroundColor);
+
     void
     drawPathfindingVisualisation(const MapTerrain& terrain, const AStarPathInfo<Point, PathCost>& pathInfo, ColoredMeshBatch& batch);
 

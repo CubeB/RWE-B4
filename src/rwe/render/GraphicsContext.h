@@ -164,6 +164,13 @@ namespace rwe
 
         void disableDepthTest();
 
+        /**
+         * Lets through only fragments that land exactly on the depth already
+         * written, so a second pass over the same geometry touches each pixel
+         * once. Restore with enableDepthTest.
+         */
+        void useDepthTestEqual();
+
         void enableCulling();
 
 
