@@ -3159,6 +3159,46 @@ namespace rwe
         }
     }
 
+    void GameScene::updateCloakNotifications()
+    {
+        // Cloaking and decloaking are the only thing about a cloak the original
+        // tells anyone about. `0x48B173` raises notification 0xE the tick the
+        // flag comes on and `0x48B1A5` raises 0xF when it goes off; the table
+        // at `0x5086E8` pairs those with the sounds `cloak` and `uncloak` and
+        // the captions "Cloaked" and "Visible". None of it is a COB event --
+        // no shipped script of a cloakable unit has a function for either --
+        // and none of it is drawn on the unit. The caption line has nowhere to
+        // go in RWE yet; the sounds have been parsed and loaded all along and
+        // were simply never played.
+        for (const auto& [unitId, unit] : simulation.units)
+        {
+            auto wasCloaked = cloakedUnits.find(unitId) != cloakedUnits.end();
+            if (unit.cloaked == wasCloaked)
+            {
+                continue;
+            }
+
+            if (unit.cloaked)
+            {
+                cloakedUnits.insert(unitId);
+                playUnitNotificationSound(unit.owner, unit.unitType, UnitSoundType::Cloak);
+            }
+            else
+            {
+                cloakedUnits.erase(unitId);
+                playUnitNotificationSound(unit.owner, unit.unitType, UnitSoundType::Uncloak);
+            }
+        }
+
+        // A unit killed while cloaked leaves its id behind, and ids are reused,
+        // so a later unit would start out believed to be cloaked already and
+        // never announce itself.
+        for (auto it = cloakedUnits.begin(); it != cloakedUnits.end();)
+        {
+            it = simulation.unitExists(*it) ? std::next(it) : cloakedUnits.erase(it);
+        }
+    }
+
     void GameScene::playSoundAt(const Vector3f& /*position*/, const AudioService::SoundHandle& sound)
     {
         // FIXME: should play on a position-aware channel
@@ -3346,6 +3386,8 @@ namespace rwe
         }
 
         processSimEvents();
+
+        updateCloakNotifications();
 
         updateProjectiles();
 
@@ -3918,7 +3960,18 @@ namespace rwe
                 return false;
             }
         }
-        return !fogOfWarEnabled || unit.isOwnedBy(localPlayerId) || simulation.isVisibleTo(localPlayerId, unit.position);
+        if (!fogOfWarEnabled)
+        {
+            return true;
+        }
+
+        // Same three questions the original's draw predicate asks, in the same
+        // order: whose it is, whether it is cloaked, and only then whether the
+        // ground under it is lit. It has to agree with the simulation's
+        // canSeeUnit or a cloaked unit would be drawn to an enemy who cannot
+        // target it.
+        auto style = computeUnitDrawStyle(unit.isOwnedBy(localPlayerId), unit.cloaked, simulation.isVisibleTo(localPlayerId, unit.position));
+        return style != UnitDrawStyle::Hidden;
     }
 
     bool GameScene::unitIsDetectableByLocalPlayer(const UnitState& unit) const

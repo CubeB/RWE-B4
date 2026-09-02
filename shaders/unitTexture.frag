@@ -8,6 +8,10 @@ out vec4 outColor;
 uniform sampler2D textureSampler;
 uniform float seaLevel;
 uniform bool shade;
+// How much of its own colour the model keeps where it covers the screen. 1 for
+// everything except a cloaked unit, which the original averages with whatever
+// is behind it. See RenderService::drawUnitMeshBatch.
+uniform float alpha;
 
 const vec3 waterTint = vec3(0.5, 0.5, 1.0);
 const vec3 normalTint = vec3(1.0, 1.0, 1.0);
@@ -42,5 +46,5 @@ void main(void)
     float lightIntensity = shade
         ? ambientLight + directionalLight * (0.5 + 0.5 * dot(normalize(worldNormal), lightDirection))
         : 1.0;
-    outColor = vec4(vec3(baseColor) * lightIntensity * (height > seaLevel ? normalTint : waterTint), 1.0);
+    outColor = vec4(vec3(baseColor) * lightIntensity * (height > seaLevel ? normalTint : waterTint), alpha);
 }

@@ -6,6 +6,26 @@
 
 namespace rwe
 {
+    UnitDrawStyle computeUnitDrawStyle(bool ownedByViewer, bool cloaked, bool positionVisible)
+    {
+        if (ownedByViewer)
+        {
+            return cloaked ? UnitDrawStyle::Cloaked : UnitDrawStyle::Solid;
+        }
+
+        if (cloaked)
+        {
+            return UnitDrawStyle::Hidden;
+        }
+
+        return positionVisible ? UnitDrawStyle::Solid : UnitDrawStyle::Hidden;
+    }
+
+    Vector3f blendCloakedColor(const Vector3f& unitColor, const Vector3f& backgroundColor)
+    {
+        return (unitColor * CloakBlendFactor) + (backgroundColor * (1.0f - CloakBlendFactor));
+    }
+
     Vector3f colorToVector3f(const Color& color)
     {
         return Vector3f(static_cast<float>(color.r) / 255.0f, static_cast<float>(color.g) / 255.0f, static_cast<float>(color.b) / 255.0f);
@@ -389,7 +409,7 @@ namespace rwe
         float frac,
         TextureIdentifier unitTextureAtlas,
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
-        UnitMeshBatch& batch)
+        std::vector<UnitTextureMeshRenderInfo>& out)
     {
         assert(modelDefinition.pieces.size() == meshes.size());
 
@@ -405,7 +425,7 @@ namespace rwe
             auto matrix = modelMatrix * getPieceTransformForRender(pieceDef.name, modelDefinition, meshes, frac);
 
             const auto& resolvedMesh = *gameMediaDatabase.getUnitPieceMesh(objectName, pieceDef.name).value().get().mesh;
-            drawShaderMesh(viewProjectionMatrix, resolvedMesh, matrix, mesh.shaded, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
+            drawShaderMesh(viewProjectionMatrix, resolvedMesh, matrix, mesh.shaded, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, out);
         }
     }
 
@@ -561,7 +581,12 @@ namespace rwe
         }
         else
         {
-            drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, playerColorIndex, frac, unitTextureAtlas, unitTeamTextureAtlases, batch);
+            // Anything cloaked that got this far belongs to the viewer:
+            // computeUnitDrawStyle turned everyone else's away before the unit
+            // reached the batch. A nanoframe never gets here cloaked either --
+            // the drain skips a unit that is still being built.
+            auto& out = unit.cloaked ? batch.cloakedMeshes : batch.meshes;
+            drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, playerColorIndex, frac, unitTextureAtlas, unitTeamTextureAtlases, out);
         }
     }
 
@@ -830,9 +855,7 @@ namespace rwe
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
         auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
 
-        UnitMeshBatch batch;
-        drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, unitTextureAtlas, unitTeamTextureAtlases, batch);
-        out.insert(out.end(), batch.meshes.begin(), batch.meshes.end());
+        drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, unitTextureAtlas, unitTeamTextureAtlases, out);
     }
 
     /**

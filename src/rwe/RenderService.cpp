@@ -181,6 +181,7 @@ namespace rwe
             const auto& textureShader = shaders->unitTexture;
             graphics->bindShader(textureShader.handle.get());
             graphics->setUniformFloat(textureShader.seaLevel, seaLevel);
+            graphics->setUniformFloat(textureShader.alpha, 1.0f);
             for (const auto& m : batch.meshes)
             {
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
@@ -213,6 +214,48 @@ namespace rwe
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
+        }
+
+        // Cloaked units last of all, so what stands behind them has already
+        // been painted and can show through. The original gets that for free:
+        // it composites the whole unit into a bitmap of its own and blits that
+        // over the finished scene through the ALPHA TABLE, one average per
+        // covered pixel. Blending the model straight into the frame would
+        // instead average a pixel again for every polygon of the unit stacked
+        // over it, and the thick parts would come out nearly solid, so lay the
+        // depth down in a pass of its own first and then let only the nearest
+        // fragment through.
+        if (!batch.cloakedMeshes.empty())
+        {
+            const auto& textureShader = shaders->unitTexture;
+            graphics->bindShader(textureShader.handle.get());
+            graphics->setUniformFloat(textureShader.seaLevel, seaLevel);
+
+            graphics->disableColorBuffer();
+            for (const auto& m : batch.cloakedMeshes)
+            {
+                graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
+                graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
+                graphics->setUniformBool(textureShader.shade, m.shaded);
+                graphics->bindTexture(m.texture);
+                graphics->drawTriangles(*m.mesh);
+            }
+            graphics->enableColorBuffer();
+
+            graphics->setUniformFloat(textureShader.alpha, CloakBlendFactor);
+            graphics->useDepthTestEqual();
+            graphics->disableDepthWrites();
+            for (const auto& m : batch.cloakedMeshes)
+            {
+                graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
+                graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
+                graphics->setUniformBool(textureShader.shade, m.shaded);
+                graphics->bindTexture(m.texture);
+                graphics->drawTriangles(*m.mesh);
+            }
+            graphics->enableDepthWrites();
+            graphics->enableDepthTest();
+            graphics->setUniformFloat(textureShader.alpha, 1.0f);
         }
     }
 
@@ -249,6 +292,7 @@ namespace rwe
             const auto& textureShader = shaders->unitTexture;
             graphics->bindShader(textureShader.handle.get());
             graphics->setUniformFloat(textureShader.seaLevel, 0.0f);
+            graphics->setUniformFloat(textureShader.alpha, 1.0f);
             graphics->setUniformBool(textureShader.shade, false);
             for (const auto& m : batch.cutouts)
             {

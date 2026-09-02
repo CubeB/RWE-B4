@@ -1916,6 +1916,127 @@ Counted over `rev31/units`: `CloakCost` on four units — `armcom` and `corcom`
 six: 400, 420, 490, 500, 700, 730. `Stealth=1` on two, the stealth fighters.
 **No `SonarDistanceJam`, no `init_cloaked` and no `Cloakable` anywhere.**
 
+### What a cloaked unit looks like
+
+Bit 2 of `unit+0x10E` reaches the screen in one place, and it does not touch the
+model at all: it changes the routine that lays the finished unit down.
+
+A unit is drawn by `0x459200`. Everything about it — every piece, the weapons
+hanging off it, the brightness passes at `0x4BA1B0` and `0x4B96E0` — goes into a
+bitmap of its own at `[this+0x10]`, in the GAF frame layout (`+0` width, `+2`
+height, `+4`/`+6` offsets, `+8` the transparent index, `+0x10` the pixels). The
+last thing the routine does is blit that bitmap to the screen, and it picks
+between two blitters on the cloak flag:
+
+```
+459776: mov  edx,[ebp+0xc]              ; the unit
+459779: test BYTE PTR [edx+0x10e],0x4   ; cloaked?
+459780: jne  0x4597ba                   ;   -> 0x4B8500
+459782: mov  eax,ds:0x511de8
+459787: mov  cl,BYTE PTR [eax+0x14280]  ; the draw-everything-see-through toggle
+45978d: test cl,cl
+45978f: jne  0x4597ba
+459791: ...  call 0x4B7F90              ; the ordinary blit
+4597ba: ...  call 0x4B8500              ; the translucent one
+```
+
+`0x45937D` is the same test again on the routine's other path — the one taken
+when `[ebp+0x14]` is set — with the same pair of calls. The arguments are
+identical on both sides: same bitmap, same position, same destination. The only
+difference is which blitter runs.
+
+**The two blitters.** `0x4B7F90` ends in `0x4CBE70`, a plain masked copy —
+`if (src != transparentIndex) dst = src`. `0x4B8500` ends in `0x4CBF2C`, which
+takes one extra argument, `[gfx+0xC0]` where `gfx` is the graphics global
+`ds:0x51FBD0` that `0x4B6220` returns, and does this instead:
+
+```
+4cbf99: mov al,[esi]        ; the unit's pixel
+4cbf9b: cmp al,[ebp+0x18]   ; the transparent index
+4cbf9e: je  0x4cbfae
+4cbfa0: mov ebx,eax
+4cbfa2: shl ebx,0x8
+4cbfa5: mov al,[edi]        ; what is already on the screen
+4cbfa7: add ebx,edx         ; edx = the table
+4cbfa9: mov al,[eax+ebx*1]  ; table[src * 256 + dst]
+4cbfac: mov [edi],al
+```
+
+`dst = table[src][dst]`: a 64 KB lookup on the pair of colours. The compressed
+path, `0x4CC057`, does the same with the same table.
+
+**The table.** `0x4BA5C0` allocates `0x10000` bytes tagged **"ALPHA TABLE"**
+(`0x50A430`) and stores the pointer at `gfx+0xC0`. Its four neighbours are the
+SHADE TABLE (`gfx+0xC4`, `0x2000`), the LIGHT TABLE (`gfx+0xC8`, `0x2000`), the
+GRAY TABLE (`gfx+0xCC`, `0x100`) and the BLUE TABLE (`gfx+0xD0`, `0x100`).
+`0x4BA772` fills the alpha one: for every pair `(i, j)` it averages the two
+palette entries a channel at a time —
+
+```
+4ba7c0: mov al,BYTE PTR [ebp-0x2]   ; pal[i].r
+4ba7c3: mov cl,BYTE PTR [edi-0x2]   ; pal[j].r
+4ba7c6: add eax,ecx
+4ba7d4: sar eax,1                   ; (r_i + r_j) / 2
+```
+
+— and calls `0x4BA9D0`, a nearest-colour search by squared RGB distance over the
+256 entries, to snap the average back into the palette. `i == j` is short-cut to
+`i` at `0x4BA7A7`.
+
+So a cloaked unit is drawn **exactly halfway between itself and whatever is
+behind it**. Not a stipple, not a palette ramp, not a swapped mesh: an even 50%
+blend of the whole silhouette, applied once per covered pixel because the unit
+was composited into a bitmap of its own before any of it reached the screen.
+
+**Who sees it.** Nobody but the owner, and the owner always does. `0x465AE8`
+returns zero for anyone else's cloaked unit before it looks at line of sight, so
+such a unit never reaches the draw list — there is no partial reveal at close
+range and no shimmer to catch. `mincloakdistance` does not reveal anything: it
+drops the cloak, and the unit is then simply solid again. And the blit choice at
+`0x459779` has no ownership test in it, because anything that has got that far
+and is still cloaked is your own. Cloak is not invisibility; it is invisibility
+to everyone else and see-through to you.
+
+**The global at `[0x511DE8+0x14280]`** forces every unit through the translucent
+blitter. `0x495703` cycles it 0..4 from a key handler and `0x4915BA` zeroes it
+when a game starts, so it is a debug view rather than a setting.
+
+**Nothing happens on the transition.** No sprite, no flash, no puff. What the
+original does raise is a notification, and it is **not** a COB event: `0x48B173`
+calls `0x47F780(unit, 0xE, 0)` when the flag comes on, `0x48B1A5` calls it with
+`0xF` when it goes off. `0x47F780` is gated on the unit belonging to the local
+player and looks the event up in a table of 24-byte records whose caption sits
+at `[0x5086E8 + N*24]` and whose sound name sits at `[0x5086E4 + N*24]`:
+
+| N | sound | caption |
+|---|---|---|
+| `0xE` | `cloak` | `Cloaked` |
+| `0xF` | `uncloak` | `Visible` |
+
+The COB calls in that same routine belong to other bits of `unit+0x10E`
+entirely: `Activate`/`Deactivate` on bit 0 (`0x501280`, `0x501274`) and
+`StartBuilding`/`StopBuilding` on bit 3 (`0x5050F4`, `0x505104`), all through
+`0x4B0940`, which takes a **name**, not a number. There is no cloak entry, and
+no shipped script has one to answer it with — between them `ARMCOM`, `CORCOM`,
+`armsnipe` and `ARMCKFUS`, the only four units with a `CloakCost`, name nothing
+but the ordinary set.
+
+**And `0x10000` is not a piece render flag.** `0x48B17D`–`0x48B19C` walks
+`unit+0xA2`, which is the list of **missions** attached to the unit — each node
+is `+0x4` owner, `+0x8` next, `+0xC` the mission, and the mission is built at
+`0x43A0C0` with the one-slot vtable `0x4FD2C8` — and calls that one virtual,
+`0x438870`, which is nothing but `mission->[0x4E] |= arg`. `+0x4E` is the
+mission's pending-event word; the executor reads it at `0x43B805`, and
+`0x43B840` tests `0x10000` and answers it by calling `0x48A0F0(unit, 0..2)`,
+which clears each of the three weapons' aim and runs the COB `TargetCleared`
+(`0x508D58`). Cloaking makes a unit forget what it was aiming at. It has nothing
+to do with drawing.
+
+**The one extra thing on screen.** `0x4390D2`–`0x439106`: when the selected
+unit's `mincloakdistance` is non-zero **and the unit is actually cloaked**, the
+range display draws a circle of that radius around it in colour
+`[0x511DE8+0xDDA]` — the distance at which an enemy will break the cloak.
+
 ### What RWE does with this
 
 Implemented: the six FBI fields and the derived `cloakable`; `stealth` keeping a
@@ -1928,6 +2049,15 @@ consumption path; and a cloaked unit dropping out of `canSeeUnit` and
 sends a command and lights up while the order stands — it records the request
 rather than the cloak, so a unit an enemy has just walked past keeps its order
 and cloaks again three seconds later.
+
+A cloaked unit now also looks like one. The renderer's own predicate asks the
+same three questions in the same order as `0x465AE8` — whose it is, whether it
+is cloaked, and only then whether the ground under it is lit — so someone else's
+cloaked unit is not drawn, not shadowed, not clickable and not sprayed at, and
+what can be shot at and what can be seen agree. Your own is drawn at the ALPHA
+TABLE's even half-blend with what is behind it. And the `cloak` and `uncloak`
+sounds, which had been parsed out of `sound.tdf` and preloaded all along without
+ever being played, now go off on the transition for the unit's owner.
 
 Deliberately not ported:
 
@@ -1943,13 +2073,32 @@ Deliberately not ported:
 - **The `player+0x73 == 3` exemption** on the drain, and the type 1-or-2 gate on
   the `mincloakdistance` loop. Both are about the original's spectator and
   script-driven player types, which RWE does not have.
+- **The half-blend is alpha, not a lookup table.** There is no 8-bit palette to
+  snap an average back into, so RWE asks the blend hardware for the same
+  arithmetic: `SRC_ALPHA`/`ONE_MINUS_SRC_ALPHA` at exactly `0.5`. What it does
+  not get for free is the original's guarantee of one average per covered pixel,
+  which falls out of compositing the unit into its own bitmap first — blending
+  the model straight into the frame would average a pixel again for every
+  polygon of the unit stacked over it, and the thick parts of a Commander would
+  come out nearly solid. So the cloaked units are held back until every solid
+  one is down, then drawn twice: once with colour writes off to lay the depth,
+  once with `GL_EQUAL` and depth writes off so only the nearest fragment blends.
+  Holding them to the end is also what lets what stands behind them show
+  through, which the original gets from painting back to front.
 
 Still unported from this reading:
 
-- **The COB side.** Events `0xE` and `0xF` at `0x48B14E`/`0x48B1A7` are not
-  raised, so a script cannot react to its unit cloaking, and the `0x10000` render
-  flag is not set on the pieces — a cloaked unit is simply not drawn to an enemy
-  rather than being drawn shaded.
+- **The caption line.** `Cloaked` and `Visible` are what the original puts up
+  beside the sound; RWE has nowhere to put a unit notification's text yet, so
+  only the sound plays.
+- **The mincloak ring** on a selected cloaked unit (`0x4390D2`). RWE has no
+  range-circle display for anything yet — the jammer and radar rings are in the
+  same position — so this waits on that rather than on anything about cloak.
+- **`0x10000` clearing the unit's aim** when it cloaks. It is decoded above and
+  it is simulation rather than presentation; RWE's cloaked unit keeps its
+  target, which given that RWE also drops a cloaked unit out of targeting
+  altogether would only matter to the cloaking unit's own gun.
+- **The debug see-everything-translucent toggle** at `[0x511DE8+0x14280]`.
 - **Bit 10, "jammed".** The original marks a unit a jammer has erased separately
   from one that was never seen. Nothing in RWE reads it, and nothing in the
   original appears to either beyond the flag itself.
@@ -2878,6 +3027,9 @@ original:
   construction aircraft can cover its own beam, so a landing point inside the
   geometry would be swallowed.
 - **Exhaust occlusion is depth-tested**, not hand-layered — see §5.
+- **A cloaked unit is half-blended with alpha**, not through the original's
+  256×256 ALPHA TABLE, and a depth prepass stands in for the private bitmap the
+  original composites into. Same 50%, different mechanism — see §14.
 - **The fog raster is windowed on the camera.** At one texel per world unit a
   whole 640×640-cell map would be 400 MB, past most drivers' limits, so RWE holds
   a 2.6 MB window a few tiles larger than the view. This is what the original
