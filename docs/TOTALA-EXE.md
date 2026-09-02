@@ -922,7 +922,7 @@ stored `0x42C445` with the usual xor-and-xor bitfield insert) and
 `0x42C465`). **Both default to 2** — the `push 0x2` at `0x42C417` and
 `0x42C433`. The pipeline alignment is checked by the store immediately before
 them, `mov BYTE PTR [ebp+0x22f], al` at `0x42C422`, which is `bmcode` at the
-offset §50 already records.
+offset §72 already records.
 
 Values run 0, 1, 2 for both, and the buttons cycle them 0 → 1 → 2 → 0
 (`0x41A4F6`, a four-way jump over a global order state where 3 means "the
@@ -1086,7 +1086,7 @@ zero there would leave hovercraft torpedoable.
 
 The two flag bits are settled in the parser, where the boolean helper's result
 is masked and shifted immediately after the call that read it, so the pipeline
-trap of §50 does not apply:
+trap of §72 does not apply:
 
 | Key | String | Shifted at | Bit of `def+0x241` |
 |---|---|---|---|
@@ -1274,7 +1274,7 @@ it is not part of the re-acquire decision.
 pushed there, the read follows at `0x42E906`, and `and eax,1 / shl eax,0x13` at
 `0x42E911`–`0x42E91A` puts it in place. The bits either side are `smoketrail`
 (18, key at `0x504150`) and `selfprop` (20, `0x50413C`), which agrees with the
-table in §50.
+table in §72.
 
 ### It chooses the weapon's fire handler
 
@@ -1367,7 +1367,7 @@ that tanks turn their bodies.
 
 It is a float in radians at `wdef+0xC8`, read at `0x42E724` and scaled by
 `ds:0x4FD260` = π/180, with a default of `-11.25` degrees supplied as the double
-`0xC026800000000000` pushed at `0x42E70F`. §50 has this right and the priorities
+`0xC026800000000000` pushed at `0x42E70F`. §72 has this right and the priorities
 note had it wrong twice over: `wdef+0xFE` is `holdtime`, and the field is not a
 clamp.
 
@@ -1493,7 +1493,7 @@ here than the original, not less.
 
 ### `accuracy`, `WORD wdef+0x104`
 
-Parsed at `0x42EBFE` and stored at `0x42EC19` — §50's table is right, and the
+Parsed at `0x42EBFE` and stored at `0x42EC19` — §72's table is right, and the
 neighbouring `tolerance` `+0x106` and `pitchtolerance` `+0x108` are right too.
 The data file's own comment defines it: *"amount of accuracy in 64K deg that
 weapon is good for, 0 = 100%"*.
@@ -1633,7 +1633,7 @@ vertical only.
 `shakemagnitude` is read as an integer and stored at `0x42EC5A`;
 `shakeduration` is read as a **float**, multiplied by the 30.0 at `0x4FD250` and
 truncated (`0x42EC60`–`0x42EC70`), so it is seconds on the way in and ticks in
-the struct. §50's offsets are right.
+the struct. §72's offsets are right.
 
 The reader is not obvious, because the weapon definition's own fields are only
 touched at one site and it is easy to miss. The way in is the string `NoShake`
@@ -2063,7 +2063,7 @@ Decoded here and deliberately **not** ported:
 
 - **The sight-range search `0x43B700`**, which is what both `VTOL_SeekAttack`
   state 1 and `VTOL_Standby` state 1 do before they fly anywhere. RWE has no
-  equivalent — see §52 — and its own idle weapon acquisition stands in.
+  equivalent — see §74 — and its own idle weapon acquisition stands in.
 - **The go-home-when-hurt branch.** Below 75 % health with an active repair pad
   within 3840, both the search circuit and the strafing pass abandon what they
   are doing and push a `VTOL_LANDING` on a pad chosen at random. RWE has no
@@ -2360,7 +2360,7 @@ Not ported:
   shipped data is both, so the two agree on real data, and the extra conditions
   also guard the metal grid next to it.
 - **The burning-feature smoke** above, and the `treeburn` sound with it.
-- **Downwind drift**, as §52 already records for the rest of the smoke: RWE has
+- **Downwind drift**, as §74 already records for the rest of the smoke: RWE has
   no map wind, so a vent's plume goes straight up.
 
 ---
@@ -2484,7 +2484,7 @@ original's behaviour anyway.
 Six flags that the bit tables above name but that had never been followed to
 their readers. The parse sites are all in the FBI parser's long run of boolean
 keys, where the helper `0x4C46C0` leaves its answer in `eax` and the
-mask-and-shift follows immediately, so the §50 pipeline trap does not apply and
+mask-and-shift follows immediately, so the §72 pipeline trap does not apply and
 each bit is unambiguous:
 
 | Key | String | Read at | Shifted at | Bit |
@@ -2599,8 +2599,8 @@ Two offsets fall out of that and both need a second site, because the FBI
 parser pipelines its stores. `def+0x22A` and `def+0x22B` come from the same run
 of keys as `waterline`: the strings pushed are `0x503DC8` "waterline",
 `0x503DB8` "transportsize" and `0x503DA4` "transportcapacity", and under the
-§50 rule their values land at `0x42C259`, `0x42C26E` and `0x42C284`. That makes
-`def+0x22C` `waterline`, which §51 already had from elsewhere and which is the
+§72 rule their values land at `0x42C259`, `0x42C26E` and `0x42C284`. That makes
+`def+0x22C` `waterline`, which §73 already had from elsewhere and which is the
 check that the pipeline is being read the right way round, `def+0x22A`
 **`transportsize`**, and `def+0x22B` **`transportcapacity`**.
 
@@ -2707,7 +2707,7 @@ query that `GameSimulation::updateVisibility` builds and `canDetectUnit` reads.
 
 ### The field offsets
 
-Read off the FBI parser under the pipeline rule §50 describes — a key's value is
+Read off the FBI parser under the pipeline rule §72 describes — a key's value is
 stored *after the next key's push* — and cross-checked against the
 definition-copy routine at `0x42B68F`–`0x42B6DF`, which moves the same run of
 words with the same widths.
@@ -3212,7 +3212,7 @@ what the current selection cannot use. There is no per-unit order panel.
 §9 gave bits 0–8, 10 and 11 of this dword and called bit 4 `canattack`. Here is
 the whole of it. The parser's boolean helper leaves its result in `eax`, so the
 key pushed immediately before the `call 0x4C46C0` owns the `shl` immediately
-after it, and the pipeline trap of §50 does not apply.
+after it, and the pipeline trap of §72 does not apply.
 
 | Bit | Key | `shl` at | Second site |
 |---|---|---|---|
@@ -3693,7 +3693,7 @@ coverage ring for each of its `interceptor` weapons, radius `coverage - 512`.
 So the flag is a *display* flag. Still not ported: RWE draws the detection
 rings but not the coverage ring.
 
-### A correction to §50: `holdtime` does have a reader
+### A correction to §72: `holdtime` does have a reader
 
 `WORD wdef+0xFE` is read at `0x499E81` and `0x49C8D6`, both on the path that
 retires the projectile the camera is following (`globals+0x142F7`), and stored
@@ -3973,7 +3973,7 @@ made call-to-store):
 
 `buildcostenergy` and `buildcostmetal` are confirmed at a second site,
 `0x42AD40`; `workertime` and `buildtime` by the chain that lands `sightdistance`
-on the `def+0x202` already in §50.
+on the `def+0x202` already in §72.
 
 **There is no `MetalUse` key.** `metaluse` does not appear in the binary at all,
 only the display string `UNITMETALUSE`. Metal is spent by building, by weapons
@@ -4116,7 +4116,7 @@ same `push <keystring>` / `call 0x4C46C0` pipeline the FBI parser uses — and
 `hitdensity` is not among them. 559 features name it; the engine of this build
 ignores every one.
 
-So §52's note that it is "very likely the pass-through chance for projectiles
+So §74's note that it is "very likely the pass-through chance for projectiles
 hitting features" is **refuted**, not merely unconfirmed.
 
 What the original actually does with a shot and a feature is at `0x49B2B3`,
@@ -4584,16 +4584,14 @@ Every colour above is a byte fetched at runtime from a small table at
 (radar and sonar), `n = 0x0C` (both jammers), `n = 0x0F` (anti-missile
 coverage), plus `n = 0x01`/`0x03`/`0x09`/`0x0A` for the 3D selection brackets.
 
-**I could not determine the actual palette indices, and I am not going to
-guess.** Nothing in `.text` writes that table: an exhaustive scan for stores
-with a displacement in `[0xD00, 0xE00)` against any base register finds none,
-and the block is `malloc`'d and zeroed at `0x41D920`, so the values are filled
-through a pointer the table's address is handed to. The only place its address
-escapes is `0x46ACF5`, which stashes `cfg+0xDCB` and installs it as the current
-colour-remap table for the text and sprite blitter - so this is a
-logical-colour to palette-index map shared with the font renderer, not a
-hand-written list of ring colours. Chasing the fill would mean tracing whoever
-loads that map, which I did not do.
+**Since resolved -- see §50.** The scan found no stores because the writer
+addresses the table from a different base: `0x4AC7D0` fills it as
+`cfg+0x519+0x8B2`, nearest-matching `GUIPAL.PAL` into the screen palette at
+game-screen init. GUIPAL's first sixteen entries are the standard VGA text
+palette, so the slots resolve exactly: `0x0A` (radar and sonar) is VGA light
+green, landing on palette 233 = (83,223,79); `0x0C` (both jammers) is VGA
+light red, landing on palette 211 = (255,71,0) -- the jammer rings are
+orange-red, not any green; `0x0F` (anti-missile coverage) is white.
 
 What I can say: `palettes/PALETTE.PAL` puts TA's green ramp at indices 232-239,
 `232 = (123,255,119)` bright down to `239 = (11,31,0)` near black, and the
@@ -6600,7 +6598,946 @@ scale with game speed in the original):
 
 ---
 
-## 50. Field offsets
+## 50. The interface colour table: found, and it was never a table of constants
+
+Sections 25 and 27 said the byte array at `cfg+0xDCB` has no writer anywhere in
+`.text`, and left the palette entries unknown. The scan was right and the
+conclusion was wrong: **nothing writes displacement `0xDCB` because the writer
+addresses the table as `+0x8B2` from `cfg+0x519`.** The table is real, it is
+found, and it is not a hand-written list at all - it is **computed at runtime
+by nearest-colour matching `palettes/GUIPAL.PAL` against the screen palette**.
+
+The chain, all verified in the disassembly:
+
+- `0x42A400` (called from the in-game init `0x491200` at `0x491378`) loads
+  `palettes/PALETTE.PAL` and copies all 256 four-byte entries verbatim into
+  `cfg+0x143A7` (`0x42A415`-`0x42A420`, a rep movs). `0x497FD4` later hands
+  that same block to `0x4BA200` to set the hardware palette, so `cfg+0x143A7`
+  is the screen palette, in file byte order (r,g,b,0).
+- `0x498109`-`0x498148` (the game-screen init; the function that also sets the
+  viewport origin `0x37E27`=0x80, `0x37E2B`=0x20 - the (128,32) of section 27)
+  builds the path `palettes/guipal.PAL` (strings `0x5031BC`/`0x5031C8`/
+  `0x5031D0`), loads it through the VFS (`0x4BBE50`), and calls
+  **`0x4AC7D0(cfg+0x519, cfg+0x143A7, guipalData)`**.
+- `0x4AC7D0` does two things. First it copies the 256 GUIPAL entries to
+  `dst+0xB2` (= `cfg+0x5CB`). Then, for **each of the 256 GUIPAL entries**, it
+  scans all 256 screen-palette entries for the minimum of |dr|+|dg|+|db|
+  (initial best `0x98967F`, strict less-than, so the first index wins ties)
+  and writes the winning index to `dst+0x8B2` - which is **`cfg+0xDCB`**. One
+  byte per entry, 256 bytes: the table actually runs `cfg+0xDCB..0xECA`, and
+  the UI only ever reads the first sixteen.
+
+So `guicolours[n]` = "the PALETTE.PAL index nearest to GUIPAL entry n". And the
+first sixteen GUIPAL entries are nothing exotic: they are the **standard
+VGA/CGA 16-colour text palette** (black, blue, green, cyan, red, magenta,
+brown, light grey, dark grey, then the four brights, yellow, white) - which is
+why every `colorf=` in the `.GUI` files is a small number, and why index 4 is
+the "invalid" colour (VGA red) and 10 the "valid" one (VGA bright green).
+Entries 16+ of GUIPAL are a grey ramp and further ramps; only 0-15 matter here.
+
+Replaying the arithmetic of `0x4AC7D0` exactly (same L1 metric, same tie rule)
+against the shipped `PALETTE.PAL` and `GUIPAL.PAL` gives, for the whole
+16-entry logical palette:
+
+| n | VGA meaning | GUIPAL RGB | palette index | RGB on screen |
+|---|---|---|---|---|
+| 0 | black | (0,0,0) | **0** | (0,0,0) |
+| 1 | blue | (0,0,170) | **4** | (0,0,128) |
+| 2 | green | (0,170,0) | **2** | (0,128,0) |
+| 3 | cyan | (0,170,170) | **6** | (0,128,128) |
+| 4 | red | (170,0,0) | **213** | (171,23,0) |
+| 5 | magenta | (170,0,170) | **5** | (128,0,128) |
+| 6 | brown | (170,85,0) | **203** | (167,27,0) |
+| 7 | light grey | (170,170,170) | **85** | (171,171,171) |
+| 8 | dark grey | (85,85,85) | **90** | (91,91,91) |
+| 9 | bright blue | (85,85,255) | **9** | (84,84,252) |
+| 10 | bright green | (85,255,85) | **233** | (83,223,79) |
+| 11 | bright cyan | (85,255,255) | **32** | (115,255,223) |
+| 12 | bright red | (255,85,85) | **211** | (255,71,0) |
+| 13 | bright magenta | (255,85,255) | **253** | (255,0,255) |
+| 14 | yellow | (255,255,85) | **194** | (247,227,103) |
+| 15 | white | (255,255,255) | **255** | (255,255,255) |
+
+Cross-checks, all of which land right side up:
+
+- Drag-select box: [15] outer, [0] inner - white with a black inner line,
+  which is exactly what the band box in TA looks like.
+- Health bar (`0x46B0BD`/`0x46B0DE`): [0x0A] fill, [0x04] remainder -
+  green/red.
+- Pathability overlay {4, 14, 10} - red / yellow / green, a traffic light.
+- Queued build box of a **non-selected** constructor: [1]/[9] - navy and
+  bright blue. The queues of other constructors really do show blue in TA.
+- Radar rings (`cfg[0xDCB+0x0A]`) - the familiar bright green, palette 233;
+  the open question in section 25 about the ring colour is settled by the
+  same table.
+- The screenshot of live queued boxes shows a bright-green outer line with a
+  distinctly **teal-tinted darker inner line** - that teal is `guicolours[3]`
+  = (0,128,128), dark cyan, and it is not producible from the pure-green ramp
+  at all. The screenshot colours are blended by rescaling so they are
+  corroboration, not proof; the proof is the arithmetic above.
+
+Two corrections to the earlier write-ups while here. First, `0x4C13F0` is a
+*getter* of the colour-table slot of the blitter context (`ctx+0x210`), not an
+installer; `0x46ACF5` merely stashes `cfg+0xDCB` in a local so the frame code
+can pull single colour bytes out of it, and the one call that does store to
+`ctx+0x210` (`0x4C13D0`, called once at `0x491598`) passes the literal `0xFE`.
+Second, the front end calls the same mapper at `0x426503` but with a **null**
+screen-palette pointer, which would read addresses 0-2 - dead code or
+Win9x-tolerated; the in-game call at `0x498148` is the one that fills the
+table the placement code reads.
+
+---
+
+## 51. Which line is darker: the inner - but only where there are two colours
+
+Read straight from the drawing code, geometry first:
+
+- **Cursor placement box** (`0x469E8C`-`0x469F1E`): first `0x4BF8C0` rectangle
+  at (x0,y0)-(x1,y1), then `inc edi/inc esi/dec edx/dec ecx` - the second
+  rectangle is **inset by one on all four sides**. In build mode (`0x2CC3` ==
+  0x0E) the second call pushes the **same** colour register ebx, so the cursor
+  box is two pixels of one colour: `guicolours[10]` valid, `guicolours[4]`
+  invalid. **There is no darker line on the cursor box.** Only the drag box
+  branch (`0x469F0B`) swaps the inner ring to `guicolours[0]` - white outside,
+  black inside, darker within.
+- **Queued build box** (`0x438C00`): the four colour-A lines settle at
+  x0+1/x1-1 (and the same in y), the four colour-B lines at x0/x1 - so at
+  rest **A is the inner line and B is the outer line**. A is `guicolours[3]`
+  (selected) / [1] (not selected), B is `guicolours[10]` / [9]. With the
+  values from section 30: selected = dark cyan (0,128,128) inside, bright
+  green (83,223,79) outside; unselected = navy (0,0,128) inside, bright blue
+  (84,84,252) outside.
+
+The user report that the darker line is on the inside is therefore
+**confirmed for the queued box and the drag box, and does not apply to the
+cursor box**, which is uniform. The visual continuity noted in section 28
+still holds: the outer pixel of the queued box is the same palette entry (233)
+as the whole cursor box, so the moment of ordering reads as the inner pixel
+darkening to teal, not as a new box.
+
+## What RWE should draw
+
+All values are PALETTE.PAL RGB, two-pixel frames, stated inner then outer:
+
+- **Cursor box, valid site**: inner **(83,223,79)**, outer **(83,223,79)** -
+  both pixels palette 233. No two-tone.
+- **Cursor box, invalid site**: inner **(171,23,0)**, outer **(171,23,0)** -
+  both pixels palette 213. Not a pure red.
+- **Queued box, constructor selected**: inner **(0,128,128)** (palette 6, dark
+  cyan), outer **(83,223,79)** (palette 233, bright green).
+- **Queued box, constructor not selected**: inner **(0,0,128)** (palette 4,
+  navy), outer **(84,84,252)** (palette 9, bright blue).
+- Bonus, the band/drag select box: inner **(0,0,0)** (palette 0), outer
+  **(255,255,255)** (palette 255).
+
+---
+
+## 52. The unit model draw path
+
+The whole chain, for every unit (ground pass, air pass and the third pass at
+`0x46A762` all funnel into the same routine):
+
+| Address | Role |
+|---|---|
+| `0x45AC20` | draw one unit: refresh the per-piece working vertex buffers, apply COB piece transforms (`0x45B030`), then draw |
+| `0x458810` | per model instance: compute the animation-freeze flag, then loop the flattened piece list (stride `0x36`) |
+| `0x459200` | variant taken when the unit has a rotation — transforms vertices, then the same per-piece draw |
+| `0x4584D0` | **per piece: project vertices, loop primitives, dispatch to the rasterizers** |
+| `0x4C7580` | textured quad rasterizer (dest, frame, points, uvArray) |
+| `0x4C7310` | its span fill, dispatching on texture width to `0x4CD896`/`0x4CD8DA`/`0x4CD91E`/... |
+| `0x4C0310` | flat-colour n-gon rasterizer (dest, points, count, colourIndex) |
+
+Projection in `0x4584D0` (`0x458513`-`0x45855F`), fixed point 16.16 into the
+unit's scratch bitmap:
+
+```
+screenX = (x >> 16) + 0x80
+screenY = ((zbase - z) >> 16) - ((y >> 16) >> 1) + 0x20
+```
+
+i.e. the documented `screenY = z - y/2` painter projection, nothing new.
+
+Per primitive (stride `0x20`, the raw 3DO primitive struct with offsets
+relocated to pointers at load), the dispatch at `0x4585D7`:
+
+| Condition | What happens |
+|---|---|
+| flags bit 0 set (`+0x1C & 1`) | flat colour: `0x4C0310` with the primitive's ColorIndex, any vertex count |
+| else, vertex count != 4 | **skipped entirely** — a textured triangle or n-gon is never drawn |
+| else (textured quad) | pick the texture frame (below), then `0x4C7580` |
+
+And at `0x458568`: **if the piece declares a selection primitive
+(header `+0x0C` != -1), primitive 0 is skipped** — the loop simply starts at
+index 1. The index stored in the header is not consulted for the skip. On
+every stock construction-unit model the selection plate *is* primitive 0, so
+this is invisible; on the wreckage models (`1x1D.3do`, `2x2A.3do`, ..., where
+`selprim` is 20, 44, 109...) the original genuinely drops one real textured
+face and draws the actual selection plate as a flat colour-0 quad. RWE
+skipping `prims[selectionPrimitiveIndex]` instead is the saner reading —
+worth listing as a deliberate difference, not "correcting".
+
+There is **no backface culling** anywhere in this path — no cross product,
+no winding test. A quad facing away from the camera still rasterizes; its
+vertex order is reversed on screen, so it appears with its texture mirrored.
+Closed models never show this; single-sided decorative quads do.
+
+Painter order only: pieces in tree order, primitives in file order, later
+draws overwrite earlier ones. No depth buffer, consistent with section 5 of
+TOTALA-EXE.md.
+
+---
+
+## 53. There is no lighting. None.
+
+What was checked, so this negative is worth something:
+
+- `0x4584D0` computes screen x,y per vertex and nothing else. No normal is
+  ever formed; the only cross-product-flavoured code near the model system
+  is the explosion-debris builder at `0x421700`, which is motion, not light.
+- `0x4C7580` carries exactly x, u, v per span edge. The span table rows hold
+  left/right x, u, v — no intensity channel exists in the data structures.
+- The width-specialised inner loops (`0x4CD896` and siblings) are a raw
+  copy: `dest[x] = tex[(v>>16)*W + (u>>16)]`. No table indirection, no
+  transparency key, nothing.
+- The flat filler bottoms out in `rep stos` with the colour byte
+  (`0x4C069B`/`0x4C0798`).
+
+So: no lambertian term, no sun direction, no ambient floor, no palette-row
+shading, no gouraud. The light level of every unit texel is exactly 1.0.
+
+**The shading you see in the game is baked into the data.** The stock
+models bind different brightness variants of the same texture per face
+orientation — ARMSOLAR's dishes use `metal3a`/`metal3b`/`metal3c`/`metal3d`
+(the same rivet plate at four bakes) and `Arm01b`/`Arm01c`/`Arm01d` (the
+logo at three), assigned by the artist according to which way the face
+points. One of its textures is literally named `32XGouraud` — a painted
+gradient, 10 team-colour frames, standing in for the vertex shading the
+engine does not do.
+
+RWE's shader term (`unitTexture.frag`, currently
+`0.72 + 0.36 * (0.5 + 0.5 * dot(N, normalize(-1.3, 1.0, 0.3)))`, buildings
+only, and historically `0.58 + 0.6*dot`) has **no counterpart in the
+original**. Whatever constants it uses, it is shading on top of textures
+that were already shaded by hand, which is why mirrored faces carrying the
+same texture come out unequal in RWE and equal in TA.
+
+---
+
+## 54. The palette tables — real, loaded, and not for models
+
+The engine does have palette shading machinery; it just never touches the
+3DO path. Loaded at `0x429340` from `palettes\` via the VFS, allocated per
+display object by named stubs (names in `.data`: `ALPHA TABLE`,
+`SHADE TABLE`, `LIGHT TABLE`, `GRAY TABLE`, `BLUE TABLE`):
+
+| File | Size | Slot | Shape | Content (measured) |
+|---|---|---|---|---|
+| `PALETTE.PAL` | 1,024 | — | 256 x RGBA | the palette itself |
+| `PALETTE.ALP` | 65,536 | `+0xC0` (`0x4BA5C0`) | 256 x 256 | alpha blend: `out = mix(dst, src)` remap |
+| `PALETTE.SHD` | 8,192 | `+0xC4` (`0x4BA610`) | **32 rows x 256** | brightness ramp, row 0 = black, row 16 ~ identity, row 31 ~ 1.55x |
+| `PALETTE.LHT` | 8,192 | `+0xC8` (`0x4BA660`) | 32 rows x 256 | additive light ramp, row 0 = identity, row 31 ~ 1.5x |
+| (computed) | 256 | `+0xCC`/`+0xD0` | 1 row | grey / blue remaps |
+
+Consumers pass `table + (level << 8)` — one 256-entry remap row per light
+level — into the *sprite* blitters (e.g. `0x4B847A`, `0x4B84AE`, feeding
+`0x4CBF2C`/`0x4CC3D0`). Those are the GAF-sprite paths: terrain, shadows,
+fog, UI. Partially traced only — the point that matters here is the model
+rasterizers reference none of them.
+
+The `zbuffer` FBI key is parsed (`0x42C5A6`, into `unitdef+0x241` bit 7)
+and no consumer of that bit was found — same status as `sortbias`: dead in
+this build. No `ThreeD`-style per-vertex mode exists in the renderer.
+
+---
+
+## 55. Texture lookup and frame selection
+
+At 3DO load (`0x42A2C0` reads `objects3d\%s.3do`, `0x4CB590` relocates
+offsets to pointers, `0x42A140` fixes up textures in place), each primitive
+with a texture name has the name resolved against the GAFs from the
+`textures\` directory (list at `ctx+0x148E3`). The primitive's runtime
+fields are then:
+
+| Field | Meaning after fixup |
+|---|---|
+| `+0x10` | single-frame texture: pointer to frame-0 pixels. Multi-frame: current animation frame number |
+| `+0x18` | multi-frame: pointer to the GAF entry (frame table at entry `+0x28`, 8 bytes per frame) |
+| `+0x1C` bit 0 | "draw as flat colour". Set in the *file* for every stock untextured face (3,287 of 3,287 checked); set by the loader, with ColorIndex forced to `0xD1` grey, when a texture name cannot be resolved |
+| `+0x1C` bit 1 | multi-frame texture — frame selected at draw time |
+| `+0x1C` bit 2 | the entry has exactly **10 frames**: a team-colour texture |
+
+At draw (`0x4585EC`):
+
+- team texture: frame = the owning player's colour index
+  (`player+0x96`), via `0x4B7F30`;
+- other multi-frame: the current animation frame via `0x4B7EE0`, except
+  when the freeze flag passed down from `0x458810` is set, which pins
+  frame 0. (The flag comes from unit state — for `0x20000000`-flagged units
+  from `unit+0x10E` bit 0, otherwise from root-piece header word `+0x20`
+  being zero. Reading it as "texture animation runs only while the unit is
+  active" fits, but the state bits were not chased further — inference.)
+- single-frame: the pointer stored at load, no lookup at all.
+
+Note `+0x14`/`+0x18`/`+0x1C` in the *file* are tool leftovers (garbage) for
+textured faces except that bit 0 of `+0x1C` is reliably meaningful across
+the stock data. The exe tests **only bit 0**; RWE's parser treats the whole
+dword as `isColored`, which happens to agree on stock data (garbage values
+are nonzero) but differs in principle.
+
+---
+
+## 56. The quad mapping — decoded from `0x4C7580`
+
+When called with a null uv array (the only way the model path calls it),
+the rasterizer builds the default at `0x4C75EB`, straight from the frame
+header (width word at `+0`, height at `+2`):
+
+```
+uv[0] = (0,     0)        ; vertex 0 <- texture top-left
+uv[1] = (w-1,   0)        ; vertex 1 <- top-right
+uv[2] = (w-1, h-1)        ; vertex 2 <- bottom-right
+uv[3] = (0,   h-1)        ; vertex 3 <- bottom-left
+```
+
+in the primitive's vertex-index order, exactly one copy of the texture
+stretched across the quad. Inclusive texel coordinates: the last column and
+row of texels land exactly on the far edges. There is no tiling, no
+winding-dependent flip, no rotation by normal — a mirrored-on-screen
+(back-facing) quad simply comes out mirrored because the same corners apply
+to the reversed shape.
+
+Then the crucial part: the quad is **scan-converted as a quad**. The code
+finds the topmost vertex, walks the two edge chains (indices decrementing on
+one side, incrementing on the other, `0x4C775E` / `0x4C789F`), interpolates
+x, u, v linearly *along each edge* per scanline into a span table, and fills
+each span interpolating u, v linearly *across* it. That is a screen-space
+bilinear-style warp over the whole quad: continuous everywhere, no diagonal,
+and on a trapezoid the texture fans smoothly from the wide edge to the
+narrow one.
+
+---
+
+## 57. Why ARMSOLAR looks wrong in RWE
+
+RWE's corner assignment in `meshFrom3do` (`src/rwe/mesh_util.cpp`) is
+vertex 0 = topLeft, 1 = topRight, 2 = bottomRight, 3 = bottomLeft — **the
+same as the exe** (and the same as Spring's known-good `3DOParser.cpp`).
+The atlas rectangle preserves GAF row order, so orientation is right too.
+
+The divergence is the next line: RWE splits the quad into two triangles
+(`t0 = v2,v1,v0`, `t1 = v3,v2,v0`) and lets OpenGL interpolate affinely per
+triangle. On a parallelogram that is exact. On anything else the two
+triangles disagree, and the mapping kinks along the v0-v2 diagonal.
+
+ARMSOLAR is made of trapezoids — the four fixed panels of the pyramid
+(`CorSol1a`, prims 11-14 of `base`: top edge ~12.5 wide over a ~31.7
+bottom edge) and the big outer face of each dish. `CorSol1a` is a 32x64
+grid of solar cells with strong vertical bars, so the kink is impossible to
+miss: in TA the bars cross each panel in clean straight rows that fan
+slightly; in RWE each panel shows the bars breaking direction along the
+diagonal. A side-by-side software render of both algorithms on the closed
+model (same pose, same camera) reproduces RWE's crease exactly on the
+triangle side and TA's clean stripes on the scanline side —
+`armsolar_ta_vs_tri.png` in this directory, left = TA quad interpolation,
+right = the affine split.
+
+For the record, the mapping on those panels: with `CorSol1a` being 32 wide
+x 64 tall and vertex 0 at the panel's bottom-left, u (the 32-texel axis)
+runs *up* the panel and v (the 64-texel axis) runs *across* it — the
+texture is authored sideways and the bars therefore streak horizontally
+across the face in the original.
+
+---
+
+## 58. Where RWE diverges, item by item
+
+| # | RWE today | The exe | Verdict |
+|---|---|---|---|
+| 1 | textured quads split into two affine triangles | scanline quad interpolation, seamless | **the ARMSOLAR bug — fix** |
+| 2 | shades buildings with `0.72 + 0.36*(0.5+0.5*dot(N,L))`, `L = norm(-1.3, 1.0, 0.3)` | no lighting whatsoever | fix (or record as deliberate) |
+| 3 | draws every primitive including the selection plate | skips primitive 0 whenever a selection primitive is declared | fix — but skip `prims[selprim]`, see above |
+| 4 | textured triangle / n-gon falls through to the flat-colour path with a garbage colour | never drawn at all | fix (stock data has zero of these; mods will) |
+| 5 | `isColored` = whole `+0x1C` dword truthy | bit 0 only | align while touching the parser; agrees on all 3,287 stock faces |
+| 6 | backface culling | none — backfaces drawn mirrored | keep RWE's culling (deliberate difference; closed stock models are unaffected) |
+| 7 | missing texture drawn flat via atlas miss fallback | flat grey `0xD1` (209) | cosmetic, align if convenient |
+
+---
+
+## 59. Implementation spec for RWE
+
+**Lighting** (`shaders/unitTexture.frag`, `unitBuild.frag`):
+
+- The faithful constants are: ambient **1.0**, directional **0.0** — i.e.
+  delete the term. `lightIntensity = 1.0` for every unit and building,
+  shaded exactly like mobile units already are (the `shade == false` path).
+  Keep the sea-level `waterTint` and cloak `alpha` — those model different
+  original mechanisms (the ALPHA table blends), not lighting.
+- If some directional cue is wanted for depth-reading on RWE's free camera,
+  that is a deliberate difference and belongs in TOTALA-EXE.md section 51
+  with its constants — but the flat look is the original one, and the art
+  carries its own shading (`metal3a`-`d`, `Arm01b`-`d` are per-orientation
+  bakes).
+
+**Texture mapping** (`src/rwe/mesh_util.cpp`, `meshFrom3do`):
+
+- Keep the corner assignment exactly as is (v0 TL, v1 TR, v2 BR, v3 BL) —
+  it is verified correct against `0x4C75EB`.
+- Replace the two-triangle emission for textured quads with a **bilinear
+  patch**. TA interpolates u,v along the projected edges per scanline; for
+  the near-orthographic projections both engines use, that equals the
+  bilinear patch over the four corners (position and uv share the same
+  weights, `P(s,t) = sum wi(s,t)*Pi`,
+  `w = {(1-s)(1-t), s(1-t), st, (1-s)t}`), and affine projection commutes
+  with those weights. Two options:
+  1. *Mesh-side (recommended, no shader work):* tessellate each textured
+     quad into an NxN grid of the patch — positions and uvs both from the
+     bilinear weights — and triangulate the cells. For a parallelogram this
+     is exact at any N; N=1 there. Choose N from corner disagreement, e.g.
+     N=4 when `|(v1-v0) - (v2-v3)|` exceeds a couple of world units, else 1.
+     Grid lines land exactly on TA's mapping; interior error is O(1/N^2)
+     and invisible at N=4 on a 32-texel face.
+  2. *Shader-side (exact):* pass the four corner uvs plus the vertex's
+     patch coordinates, do inverse-bilinear per fragment. Exact, but a new
+     vertex format and a divergence-prone shader for no visible gain over
+     N=4.
+- Skip `prims[o.selectionPrimitiveIndex]` in `meshFrom3do` (and in
+  `polygonEdgesFrom3do`) when the index is present. Stock buildings put the
+  plate at index 0 and the exe skips index 0 unconditionally; skipping the
+  declared index also handles the wreck models the exe gets slightly wrong.
+- Drop textured primitives whose vertex count is not 4 instead of letting
+  them fall into the colour path; the original never draws them, and the
+  colour they'd get from RWE today is uninitialised tool memory.
+- While in the parser: read `isColored` as `(unknown3 & 1) != 0` so the
+  flat-colour gate matches the bit the exe tests.
+
+**Verification**: re-render ARMSOLAR (closed) and compare against
+`armsolar_ta_vs_tri.png` left panel — the `CorSol1a` bars must cross each
+trapezoid panel in unbroken rows with no diagonal crease, and the base
+plate quad (primitive 0) must not appear.
+
+---
+
+## 60. Which keys open what
+
+The in-game keyboard dispatch is at `0x495e90`: the key code is fetched from
+a ring buffer (`0x4c1ab0`), `key - 9` indexes a byte table at `0x496694`
+(0xF0 entries) which selects one of 40 cases in a jump table at `0x4965f4`.
+
+The key codes are TA's own. The VK-to-code translator (around `0x4c1fb9`
+to `0x4c21cb`, feeding the ring buffer via `0x4c1b20`) shows the encoding:
+
+| TA code | Key |
+|---|---|
+| `0x09` | Tab |
+| `0x1b` | Escape |
+| `0xAA`-`0xC3` | Shift+A .. Shift+Z (`'A'+0x69`) |
+| `0xC5`-`0xCD` | Shift+1 .. Shift+9 (`'1'+0x94`) |
+| `0xE2`-`0xED` | F1 .. F12 (Shift+Fn = `0xCE`-`0xD9`) |
+| `0xF8` | Pause |
+
+The cases that matter here:
+
+- **Tab (`0x09`), case at `0x496133`**: query the game type
+  (`0x435100(session)`; 1 = campaign, 2 = skirmish, 3 = multiplayer --
+  inference from how the three values gate briefing/save/gray logic).
+  If multiplayer, and the tab bar isn't locked out (`[game+0x37ebe]&4`
+  clear), call `0x495010` -- **toggle the TABMENU bar**. If *not*
+  multiplayer, fall straight through to the F2 case below -- in single
+  player **Tab opens the GAME OPTIONS menu directly**; there is no tab bar.
+- **F2 (`0xE3`), case at `0x496165`**: if Shift is not held and no menu is
+  already open (`[game+0x37ebe]&1` clear), call `0x460cc0` -- open the GAME
+  OPTIONS menu -- and set `[game+0x37ebe] |= 1` ("menu open"). No game-type
+  check: F2 works in multiplayer too. (With Shift held the case instead
+  records something to `+0x391b9` -- unrelated, not decoded further.)
+- **Escape (`0x1b`), case at `0x495ed4`**: if `[game+0x37ebe]&1` (a menu is
+  open) -- clear the bit and close the stored options panel (name kept in a
+  buffer at `game+0x37ea0`, destroy via `0x4a9660`). Otherwise ESC is the
+  order-reset/deselect key: first press resets the current order mode by
+  pressing the `STOP` gadget of the main panel (string `"STOP"` at
+  `0x502714`, gadget lookup `0x49fe60` + `0x4a6a40`), a further press
+  deselects all units (`0x48bd00`) and closes floating panels
+  (`0x491d70(1)`).
+- **Pause (`0xF8`), case at `0x496099`**: toggle `[game+0x38a51] & 1` -- the
+  pause flag -- and broadcast the new state to the other players (a message
+  built with leading byte `0x19`, formatted through `0x44fdb0(3, ...)` and
+  sent via `0x451df0`). No game-type check; the pause key is the same in
+  single and multiplayer.
+- **`+`/`=` and `-`/`_`** (`0x496570` / `0x496512`): game speed up/down by
+  1, clamped to 1..20 (`0x38a4b` is the desired speed), refused for
+  watchers; applied via `0x490df0(speed, 1)`.
+
+**Does opening the menu pause?** Yes, in single player. `0x460cc0` (GAME
+OPTIONS open) ends with: if game type != 3, `[game+0x38a51] |= 1`
+(`0x460e00`). The menu's close path (`0x460a33`) clears the bit again --
+only when in-game and not multiplayer. Opening the Save (`0x49306d`) and
+Load (`0x493330`) dialogs sets the same bit, and the options screens keep
+it set (`0x45d0a1`). In multiplayer nothing menu-related pauses; only the
+Pause key does, and it is broadcast.
+
+---
+
+## 61. TABMENU.GUI -- the multiplayer drop-down bar
+
+File: `D:\RWE-extract\totala1\guis\TABMENU.GUI`.
+
+Panel `HEADER`: 510x33 at (130, -33) -- it lives above the top edge and
+slides down over the map (the negative `ypos` idiom; ALLIES/SHARE/CONTROL
+use the same trick with y = -372/-429/-402). `crdefault=CANCEL`,
+`escdefault=CANCEL`, `defaultfocus=OPTIONS`. With the 128-wide unit panel
+on the left, 130+510 spans exactly to the right edge of a 640-wide screen.
+
+| Gadget | Pos (in panel) | Size | Label | Quickkey |
+|---|---|---|---|---|
+| `OPTIONS` | (8,6) | 120x21 | "Options Menu" | O |
+| `ALLIES` | (132,6) | 120x20 | "Allies" | A |
+| `CANCEL` | (191,6) | 114x20 | (blank, `active=0`) | Backspace |
+| `SHARE` | (255,6) | 120x20 | "Share" | S |
+| `CONTROL` | (379,6) | 120x20 | "Control" | (none) |
+
+No GAF carries TABMENU art (no `TABMENU.GAF`, no entry in
+`commongui.GAF`), so the bar renders with the engine's default panel/button
+drawing -- text buttons on the standard background, exactly what RWE's
+UiFactory already produces for a GUI with no bitmap.
+
+**Toggle, `0x495010`**: plays UI sound `"BigButton"` (ALLSOUND.TDF ->
+`butmain1`). State lives in `[game+0x2bee]` bits `0xe0`: if any are set the
+bar is up -- clear them and destroy the panel; otherwise set bit `0x20`,
+load `TABMENU.GUI` (via `0x4aa8f0`, flags `0x800`), install the click
+callback `0x494740`, then set button availability:
+
+- Count the *other* live, non-watching players (10 player slots, stride
+  `0x14b`, base `game+0x1b63`; a player is skipped when dead or when
+  `[player+0x9b] & 0x40` -- the watcher bit).
+- If game type != 3, or the local player is a watcher: ALLIES, SHARE and
+  CONTROL are all disabled (`0x4a0570(gui, name, 0)`).
+- Else ALLIES and SHARE are enabled iff at least one other such player
+  exists; CONTROL additionally requires `[game+0x2c74]&1` clear and
+  `0x457a50() != 0` (not decoded further).
+
+`OPTIONS` is never disabled. Finally `0x4a81e0(gui, 0x40)` -- the slide-in
+animation -- runs.
+
+**Click dispatch, `0x494740`** (each button plays sound `"BigButton"`):
+
+| Gadget | Action |
+|---|---|
+| panel-close event (`gadget+0x60 == -1`, i.e. CANCEL/ESC) | clear `[0x2bee]&0xe0`, destroy the bar |
+| `OPTIONS` | `[game+0x37ebe] \|= 1`; `0x460cc0` -- open GAME OPTIONS |
+| `SHARE` | `0x4936f0` -- SHARE.GUI (Transfer Resources: metal/energy sliders with player list, "Chosen Units", "Map Info") |
+| `CONTROL` | `0x4466b0` -- CONTROL.GUI (Reject Player list, "No Watching\|Watching OK") |
+| `ALLIES` | `0x4478b0` -- ALLIES.GUI (per-player ally checkboxes, "Allied Victory Off\|On") |
+
+The three child dialogs all slide down from above the screen (negative
+`ypos` in their GUI files). Also of note: bare key `h` (case `0x4964ae`)
+opens the Share dialog directly in multiplayer.
+
+---
+
+## 62. The GAME OPTIONS menu -- ARMOPT.GUI / COROPT.GUI
+
+Opened by F2 anywhere, Tab in single player, or TABMENU OPTIONS in
+multiplayer. `0x460cc0` loads the literal name `"ARMOPT.GUI"` through the
+GUI loader `0x4aa8f0`, which substitutes the local player's side prefix
+(the same mechanism as `"%sMAIN2.GUI"`); art comes from `anims/ARMOPT.GAF`
+(one entry, `OPTBG`, 128x354).
+
+Panel: 128x352 at **(0, 128)** -- it sits exactly over the left-hand unit
+panel, with the (paused, still rendered) game visible everywhere else.
+There is no snapshot and no dimming at this stage. `crdefault`,
+`escdefault` and `defaultfocus` are all `OK`.
+
+| Gadget | Pos | Size | Label | Quickkey |
+|---|---|---|---|---|
+| `LOADGAME` | (13,22) | 96x31 | "Load Game" | L |
+| `SAVEGAME` | (13,64) | 96x31 | "Save Game" | S |
+| `PREFS` | (13,105) | 96x31 | "Options" | O |
+| `MISSION` | (13,147) | 96x31 | "Briefing" | B |
+| `HELP` | (13,189) | 96x31 | "Help" | -- |
+| `EXIT` | (13,231) | 96x31 | "Exit" | E |
+| `OK` | (14,291) | 96x31 | "Resume" (assoc=78, closes) | R |
+
+There is also a `TEXT` label gadget reading "GAME OPTIONS".
+
+On open (`0x460cc0`): SAVEGAME and LOADGAME are **grayed out in
+multiplayer** (`0x49fdf0`/`0x4a1200` with `gametype==3`); in skirmish they
+stay enabled (skirmish games can be saved). If game type is 2 or 3 the
+MISSION button's text is replaced with **"Settings"** (string `0x506da4`).
+Then the slide-in `0x4a81e0(gui, 0x40)` runs and, if single-player, the
+pause flag is set.
+
+**Click dispatch, `0x4609b0`** (buttons play UI sound `"Options"` ->
+`butoptn`):
+
+| Gadget | Action |
+|---|---|
+| close event (OK/Resume, CR, ESC) | destroy panel, free any options-screen surfaces, clear pause (if in-game, not MP), clear `[0x37ebe]&1` |
+| `LOADGAME` | `0x4931d0` -- Load dialog (LOADGAME.GUI; pauses) |
+| `SAVEGAME` | `0x493060` -- Save dialog (SAVEGAME.GUI; pauses) |
+| `PREFS` | `0x460160` -- the in-game options screens (section 06) |
+| `HELP` | load HELP.GUI (flags `0x1881`), draw bitmap `"dhelp"`, callback `0x45fac0` |
+| `MISSION` | campaign: load BRIEFING.GUI, hide its `MOREBAR`/`TextRegion` gadgets, draw `"igmbrief"`, callback `0x45f770`. Skirmish/MP ("Settings"): `0x45f1d0` -- the settings summary screen ("Max Units:", "Starting Energy:", "Line of Sight:", ... strings at file `0x1050cc`+) |
+| `EXIT` | `0x4608b0` -- the exit menu (section 04) |
+
+**There is no Restart and no Pause button on this menu** -- Restart lives
+inside the Exit menu, and pause is implicit (single player) or a key
+(multiplayer).
+
+`OPTION.GUI` (a 426x410 centred "GAME OPTIONS" with "End Mission",
+"Preferences", "Mission Objective") is referenced nowhere in the exe -- a
+leftover earlier design. The shipped menu is the side-panel ARMOPT.
+
+---
+
+## 63. The exit flow -- EXITMENU.GUI, YESORNO.GUI, RESTART.GUI
+
+`0x4608b0` loads `EXITMENU.GUI` (150x155 at (279,117), a small centred
+menu), callback `0x460800`:
+
+| Gadget | Label | Action |
+|---|---|---|
+| `MAINMENU` | "Exit to Menu" | confirm mode 0 |
+| `EXITGAME` | "Exit Game" | confirm mode 2 |
+| `RESTART` | (text set at runtime) | restart dialog |
+| `CANCEL` | "Cancel" | close |
+
+On open: in campaign/skirmish the RESTART button is enabled and given the
+text **"Restart"** (`0x4c5740(0x506d5c)`); in multiplayer it stays blank
+and dead. In multiplayer, when `[game+0x2bee]&0x10` is set (the
+battle-already-decided flag -- inference), "Exit to Menu" is disabled.
+
+Confirmations go through `YESORNO.GUI` (`0x460680`, callback `0x4605c0`):
+its `TITLE` gadget gets one of
+
+- mode 0 ("Exit to Menu"): `"Surrender this battle and return to main menu?"`
+- mode 2 ("Exit Game"): `"Surrender this battle and exit to Windows?"`, or
+  just `"Exit the Battle"` when `[0x2bee]&0x10` (nothing left to
+  surrender).
+
+Yes (CHOICE1): mode 0/1 -> tear down to the front-end menu
+(`0x491b60`/`0x490b30(1)`); mode 2 -> set `[game+0x3923b]|=4` and quit to
+Windows (`0x491c60`). The buttons are named `CHOICE1`/`CHOICE2` and the
+handler installs them as the panel's cr/esc defaults.
+
+RESTART (`0x4604a0`) loads `RESTART.GUI` (252x221 at (287,106)): bitmap
+`"drestart"`, the mission name is written into `MISSIONNAME`(1), and the
+dialog offers "Adjust Difficulty" (Easy|Medium|Hard), Cancel, Restart;
+callback `0x460340`.
+
+---
+
+## 64. The Save/Load dialogs
+
+Only touched for completeness: `0x493060` (save) and `0x4931d0` (load) set
+the pause bit on open and use `SAVEGAME.GUI`/`LOADGAME.GUI`. Not decoded
+further here.
+
+---
+
+## 65. The in-game options screens -- PREFS.GUI + the RT pages
+
+This is the front end's STARTOPT composite, re-skinned for in-game use.
+The shared plumbing:
+
+**The frame chooser, `0x45cfc0`.** One function serves both worlds: if
+`[game+0x2a44]&4` (the "we are in a game" flag) it loads **`PREFS.GUI`**
+and sets `[game+0x37ebe]|=1`; otherwise it loads **`STARTOPT.GUI`**. So
+`PREFS.GUI` *is* the in-game STARTOPT. It also grays the frame's MUSIC tab
+when no CD device exists (`[game+0x10]->[0] == 0`), and at its end
+(`0x45d09c`) re-asserts the pause flag when in-game and not multiplayer.
+
+**PREFS.GUI** (frame): 128x354 sidebar at **(0, 126)** -- the same place
+ARMOPT occupied. Background gadget `IGOPT` -> `commongui.GAF` entry `IGOPT`
+(128x354, one frame). `crdefault=escdefault=defaultfocus=PREV`.
+
+| Gadget | Pos | Label | Quickkey |
+|---|---|---|---|
+| `SOUND` | (13,24) | "SOUND" | S |
+| `MUSIC` | (13,66) | "MUSIC" | M |
+| `SPEEDS` | (13,108) | "INTERFACE" | I |
+| `VISUALS` | (13,150) | "VISUALS" | V |
+| `PREV` | (13,251) | "OK" | O |
+| `CANCEL` | (13,293) | "Cancel" | C |
+
+(The tab gadgets have `assoc=30` -- radio-style; the exe highlights the
+active tab with `0x4a1110(gui, name, 1)`.)
+
+The `Igoptsoux/Igoptmusx/Igoptvisx/Igoptintx.pcx` files in `bitmaps/` are
+**not referenced by the exe** (no such strings exist in the binary) and the
+shipped GAF has only the single IGOPT frame -- they are source art for
+per-tab sidebar variants that never shipped. Same for `PREFS.GAF`'s
+`PREFSBG` entry.
+
+**Opening a page** (SOUND `0x45de30`, MUSIC `0x45d7c0`, VISUALS
+`0x45e5e0(0)`, SPEEDS `0x45ed50`; dispatched from the frame callback
+`0x45fc60` on tab clicks): each one
+
+1. calls `0x45cfc0` (frame reload -- PREFS or STARTOPT),
+2. destroys the previous page panel (`0x45ce80`),
+3. if `[0x37ebe]&1` (in-game) loads the **RT** GUI -- `SOUNDSRT.GUI`,
+   `MUSICRT.GUI`, `VISUALRT.GUI`, `SPEEDSRT.GUI` (flags `0x200`); else
+   loads the front-end GUI (`SOUNDS`/`MUSIC`/`VISUALS`/`SPEEDS`) *and*
+   draws that page's full-screen backdrop bitmap (`optsound4x`,
+   `optmusic4x`, `optvisual4x`, `optinterface4x` via `0x4288d0`),
+4. installs the page's click callback (sound `0x45da90`, music `0x45d280`,
+   visuals `0x45e100`, speeds `0x45ead0`),
+5. wires the sliders: gadget`+0x13c` = range, `+0x140` = position,
+   `+0x144` = a live callback that fires as the knob moves.
+
+So in-game the composite is: **PREFS sidebar (0,126) + RT page panel at
+(128,128), 150x352** -- the page background is the matching 149x354 frame
+from `commongui.GAF` (`SOUNDSRT`, `MUSICRT`, `VISUALSRT`, `SPEEDSRT`,
+resolved by the background gadget's name as usual; note the visuals GUI's
+background gadget is named `VISUALSRT`). Together they fill x = 0..278;
+the rest of the screen shows the squish animation of section 07 (ending
+black).
+
+**RT pages vs front-end pages** -- the gadget sets are the same except:
+
+- Every RT page adds `RESTORE` ("Restore Defaults") and `UNDO`
+  ("Undo Changes") at y=269/304.
+- `VISUALRT` drops the screen-resolution control (`VIDSLDR`/`VIDVAL`
+  "640x480"/`VIDTEXT`) -- the exe only wires video-mode enumeration and
+  SELVMODE.GUI in the front-end branch (`0x45e6a4` runs only when
+  `[0x37ebe]&1` is clear). **You cannot change resolution in-game.**
+- Minor label drift ("Unit Chat" vs "Unit Text Acks", "Text Delay (secs)"
+  vs "Screen Text Delay", TEST "TEST" vs "Sound Test").
+
+Page contents (RT versions):
+
+- **SOUNDSRT**: `MODE` "Off|Mono|3D" (Sound Mode), `FXVOL` slider (range
+  64, live callback `0x45bde0`), `SPEECH` "Off|Medium|Full" (Unit Sounds),
+  `TEST` -- plays `sounds\explode.wav` (string at file `0x104fd8`).
+- **VISUALRT**: `GAMMA` slider, `SHADING` Off|On, `ANTI` Off|On
+  (antialias), `BSHADOWS` Off|On (building shadows).
+- **SPEEDSRT**: `GAME` slider -- game speed, range 21, live callback
+  `0x45c070`, value `[game+0x38a4b]`, shown as "%d Slow/Normal/Fast/...";
+  `SCREEN` slider -- scroll speed, range 65, value `[game+0x1434d]`;
+  `TXTSCROL` -- text delay "%d secs"; `MAXLINES`; `UNITCHAT`
+  "Off|Medium|Full"; `LEFTCLICK` "Left Click|Right Click" (interface
+  style). The GAME slider is wired in-game too (speed changes go through
+  the same `0x490df0` path as the +/- keys).
+- **MUSICRT**: section 09.
+
+---
+
+## 66. The screen-squish transition (in-game only)
+
+`0x460160` (ARMOPT PREFS-button handler), before opening the frame:
+
+1. allocates `"FLIPSURFACE"` at the full screen size and copies the
+   current framebuffer into it -- a snapshot of the game as it looked,
+2. allocates a cleared 480x300 `"BKUPSURFACE"`,
+3. sets `0x512fe4 = 1`, which arms a per-frame routine `0x45ffb0`,
+4. snapshots every option value (section 08),
+5. slides the frame in (`0x4a81e0(gui, 0xc0)`).
+
+`0x45ffb0` runs each frame while the options are open: a counter
+(`0x512fec`) advances 0x15/frame to 0x115 and the FLIPSURFACE snapshot is
+redrawn progressively squeezed (a growing crop `0x512ff0 += 6`/frame,
+rectangles built around x=127 -- the sidebar edge -- and the screen bottom
+`0x1df`), with the 351x21 `LIGHTBAR` sprite from `commongui.GAF` drawn
+across it during the collapse. The net effect is the familiar CRT-style
+"game screen collapses behind the panel" wipe; the end state is a black
+field behind the sidebar + page. (The rectangle interpretation is partly
+inference; the snapshot/LIGHTBAR/collapse mechanics are decoded fact.) The
+surfaces are freed when the options close (`0x45ff50`).
+
+In the front end the same handler draws the `options4x`/`opt*4x` bitmaps
+instead; no game snapshot is involved.
+
+---
+
+## 67. Settings lifecycle -- live apply, Undo, Restore, OK, Cancel
+
+On options open, `0x460160` copies the whole settings block
+(`game+0x37ee6`, 0x52 bytes -> `0x512f18`) plus the current CD track
+(`0x4ce5a0` -> `0x512fd9`) and all 100 per-track CD types (`0x4ce7e0(i)`
+-> `0x512f75[100]`).
+
+- **Every control applies immediately** -- sliders through their `+0x144`
+  live callbacks (volume audibly changes while dragging), stage buttons in
+  their click handlers (`0x4cdb40` music enable, `0x4ce7a0` track mode,
+  etc.). Nothing waits for OK.
+- **UNDO (per RT page)** restores the entry snapshot for that page's
+  values and re-applies them to the running systems (music page:
+  `0x45d477`; the frame CANCEL uses the same restore code).
+- **RESTORE ("Restore Defaults")** applies hard-coded defaults (music page
+  `0x45d53c`: speech volume 0x20, track mode 4 = Custom, music on).
+- **OK (the `PREV` gadget)**: `0x430f00` -- writes every setting to the
+  registry under key `"Total Annihilation"` (a long series of
+  `0x4b6a50(key, valueName, value)` calls) -- then the panel closes via
+  its default-close path. Plays sound `"Options"`.
+- **CANCEL** (frame): plays `"Previous"`, restores *all* pages' values
+  from the snapshot -- volumes, gamma (value and ramp), shading toggle (it
+  re-toggles the renderer if the bit changed), track mode, track types,
+  game speed (`0x38a4b/0x38a4d`), scroll speed, text delay, chat levels --
+  then closes without touching the registry (`0x45fd73`-`0x45ff28`).
+
+Closing the options in-game returns to the game directly (the GAME
+OPTIONS sidebar is not restacked), and the close path clears the pause
+flag.
+
+---
+
+## 68. MUSICRT -- the CD music panel
+
+Layout (panel 150x352 at (128,128), background GAF entry `MUSICRT`):
+`NOTRAK` "Off|On" (CD music on/off), `MUSICVOL` slider, `TRACKMODE`
+"Play All|Random|Repeat|Custom", CD transport `CDPREV CDSTOP CDPLAY
+CDNEXT` (16x16 buttons at y=151), `TRACKNUM` (y=178), `TRACKTYPE`
+"Building|Battle|Victory|Defeat|Unused" (y=202), RESTORE, UNDO.
+
+State: `[game+0x37f14]&1` = music enabled; `[game+0x37f16]` = track mode
+1-4; `0x512fe0` = the panel's current track number.
+
+Decoded behaviour (populate/sync `0x45d130`, dispatch `0x45d280`, display
+refresh `0x45c3f0`, per-frame track watcher `0x45d0c0`):
+
+- **`TRACKNUM` displays the current CD track number** -- `sprintf("%d")`,
+  or the string **"NO DISC"** when the track is 0. It is display-only (no
+  click case in the dispatch) and grays out when music is off. A per-frame
+  watcher (`0x45d0c0`) keeps it in sync while the CD advances on its own.
+- **`TRACKTYPE` shows the current track's type** (stage =
+  `getTrackType(curTrack)`, `0x4ce7e0`) and **clicking it cycles the stage
+  and assigns that type to the current track** (`0x4ce7c0(curTrack,
+  stage)`, at `0x45d753`) -- confirmed: it retypes the track as
+  Building/Battle/Victory/Defeat/Unused. The types live in a 100-entry
+  table (snapshotted for Undo). TRACKTYPE is only enabled when music is on
+  **and** the mode is Custom (`0x45d234`); in any other mode it sits
+  grayed, showing the type read-only.
+- **`TRACKMODE` cycles Play All -> Random -> Repeat -> Custom**
+  (`[0x37f16]` = 1..4, applied via `0x4ce7a0`). Choosing Repeat pins the
+  current track (`0x4ce580` re-asserted on every refresh); choosing Custom
+  un-grays TRACKTYPE and immediately re-applies the current track's type.
+  Custom is the mode in which track types matter (the game picks tracks by
+  their assigned type), and it is the default -- Restore Defaults sets 4.
+- **Transport**: CDPLAY plays the panel's track (`0x4ceb60(track,1)`);
+  CDSTOP stops (`0x4ced40`) and resets the display to track 1; CDNEXT and
+  CDPREV step with wrap-around at the disc's track count (`0x4ce450`).
+  All four, plus TRACKMODE and MUSICVOL, gray out when NOTRAK is Off.
+- `NOTRAK` toggles the enable bit and calls `0x4cedc0(on)`.
+
+The front-end `MUSIC.GUI` is identical minus RESTORE/UNDO (plus a "CD
+Music" label); both are driven by the same handlers -- the only fork is
+which GUI file loads.
+
+---
+
+## 69. GAMMA.GUI and other leftovers
+
+`GAMMA.GUI` (333x128 centred, "Gamma Correction" with one slider,
+"Set"/"Previous Menu") is referenced **nowhere** in the exe -- no
+`"GAMMA.GUI"` string exists in the binary. The live gamma control is the
+`GAMMA` slider gadget on VISUALS/VISUALRT. GAMMA.GUI hangs off nothing; a
+leftover. Same status: `OPTION.GUI` (section 03), the `Igopt*.pcx`
+bitmaps, `IGOPT0X/1X.PCX`, `igoptionsTEMP.PCX` (section 06).
+
+---
+
+## 70. Pause semantics
+
+The pause flag is `[game+0x38a51] & 1`. It is *only* a sim-tick gate: the
+tick scheduler (`0x49527a`-`0x4953ee`) computes how many sim ticks to run
+this frame and, when the flag is set, forces that count to zero
+(`0x4953d9`) and returns. Everything else -- rendering, mouse scrolling,
+GUI animation, chat -- runs normally; while paused the world renderer
+draws the `igpaused` banner (117x29, from `IGTITLES.GAF`, alongside
+`igvictory` and `igdefeat`) over the view (`0x46a107`).
+
+Set by: the Pause key (toggle, broadcast in MP as message type `0x19`);
+opening GAME OPTIONS / Save / Load / the options screens in a
+single-player or skirmish game (never when game type is 3). Cleared by the
+matching close paths. Bits 1 and 2 of the same word are unrelated (net-lag
+and reduced-speed indicators, `0x49535c`).
+
+Multiplayer note (not deeply decoded): the Pause key path has no
+game-type branch -- a player can toggle the shared pause and the state is
+broadcast; the menus deliberately never pause an MP game.
+
+---
+
+## 71. Implementation spec for RWE
+
+Everything below maps onto `D:\RWE\src\rwe\game\GameScene.cpp` (which
+already has `paused` and `guiVisible`), UiFactory (which already builds
+GUI files and resolves gadget art from GAFs by name), and the
+MainMenuScene options code (which already composites pages over
+STARTOPT.GUI).
+
+**Key bindings** (GameScene key handler):
+
+- `Tab`: multiplayer -> toggle the TABMENU bar; single player -> open
+  GAME OPTIONS.
+- `F2`: open GAME OPTIONS (any game type).
+- `Escape`: if a menu/options panel is open, close it (Cancel semantics
+  for the options screens); else cancel the current order mode, then
+  deselect all.
+- `Pause`: toggle `paused`; in MP broadcast it (when RWE gets there).
+- Menu open in single player/skirmish => `paused = true`; restore on
+  close. Never auto-pause in multiplayer.
+
+**GAME OPTIONS panel** -- build `<side>OPT.GUI` via UiFactory at (0,128),
+over the live scene (no dimming, no snapshot; the game keeps rendering
+behind it, frozen by `paused`). Buttons:
+
+| Button | RWE action |
+|---|---|
+| Load Game / Save Game | gray until save/load exists; then the dialogs (both pause) |
+| Options ("PREFS") | open the in-game options composite below |
+| Briefing / Settings | campaign: BRIEFING.GUI with `igmbrief`; skirmish: a settings summary (can stay grayed initially) |
+| Help | HELP.GUI + `dhelp` bitmap (optional) |
+| Exit | EXITMENU.GUI flow below |
+| Resume (OK; cr/esc default) | close panel, unpause |
+
+Gray Save/Load in multiplayer; retitle MISSION to "Settings" for game
+types 2/3.
+
+**Exit flow** -- EXITMENU.GUI at (279,117): "Exit to Menu" -> YESORNO.GUI
+("Surrender this battle and return to main menu?") -> GameScene exits to
+MainMenuScene; "Exit Game" -> YESORNO ("...and exit to Windows?") ->
+quit; "Restart" (campaign/skirmish only, text set at runtime) ->
+RESTART.GUI -> reload the mission; Cancel closes. YESORNO's buttons are
+CHOICE1 (yes) and CHOICE2 (no); set the TITLE text per mode.
+
+**TABMENU bar** (multiplayer only): TABMENU.GUI at (130, -33 -> 0) with a
+slide-down; OPTIONS always enabled, opening GAME OPTIONS; Allies/Share/
+Control grayed until those dialogs exist (the original grays them by
+player-count/watcher rules anyway). Toggled by Tab; ESC/Backspace closes.
+
+**In-game options composite**: reuse the MainMenuScene composite logic but
+with `PREFS.GUI` as the frame (sidebar at (0,126), GAF entry `IGOPT` as
+background, tabs SOUND/MUSIC/INTERFACE/VISUALS + OK/Cancel) and the
+`*RT.GUI` page at (128,128) -- `SOUNDSRT`, `MUSICRT`, `VISUALRT`,
+`SPEEDSRT`, backgrounds resolved from `commongui.GAF` by the background
+gadget's name (the visuals entry is `VISUALSRT`). Do **not** offer
+resolution switching in-game. The transition can be a simple cut or fade
+to black behind the panels; the original's CRT-squish (snapshot +
+LIGHTBAR collapse) is cosmetic and optional.
+
+**Settings lifecycle**: apply every change immediately (volume while the
+slider drags, gamma, shading, game speed, scroll speed, ...); snapshot all
+values on open; per-page "Undo Changes" and frame-level Cancel restore the
+snapshot; "Restore Defaults" applies per-page hard defaults; OK persists
+(RWE's config file standing in for the registry) and closes. FX volume,
+music volume, scroll speed and game speed map directly onto settings RWE
+already has; shading/shadows/antialias/gamma as available.
+
+**Music page**: if RWE has no CD-audio equivalent, either load
+MUSICRT.GUI faithfully with "NO DISC" in TRACKNUM and the transport
+grayed (the original's no-disc presentation), or gray the MUSIC tab as
+the original does when no CD device exists -- both are authentic. With a
+music backend: TRACKNUM = current track number, TRACKTYPE = current
+track's type (click retypes it; enabled only in Custom mode), TRACKMODE
+cycles Play All/Random/Repeat/Custom, transport = play/stop/next/prev
+with wrap.
+
+**Pause**: keep `paused` a sim-gate only -- camera scrolling, GUI and
+rendering continue; draw the `igpaused` sprite from `IGTITLES.GAF` over
+the world view while paused.
+
+---
+
+## 72. Field offsets
 
 FBI key names are compared at `0x42C129`–`0x42C1C5`, which gives the unit
 definition layout:
@@ -6728,7 +7665,7 @@ Palette ranges that turned up:
 
 ---
 
-## 51. Where RWE deliberately differs
+## 73. Where RWE deliberately differs
 
 Recorded so these do not get "fixed" back later by someone comparing against the
 original:
@@ -6777,6 +7714,19 @@ original:
   under construction nowhere at all -- no bar, no percentage, no format string
   (§29). RWE borrows the `RELOAD1` rectangle, which `SIDEDATA.TDF` defines and
   the original parses and then never reads.
+- **The selection plate is skipped by its declared index.** The original
+  skips primitive 0 whenever a selection primitive is declared (§51), which
+  on the wreckage models drops a real face; RWE skips the index the header
+  names instead.
+- **Backface culling stays on.** The original has none -- a single-sided quad
+  facing away rasterizes with its texture mirrored (§51). Culling matches on
+  every closed model and only hides faces the artists never meant to show
+  twice.
+- **Skewed textured quads are tessellated, not scan-converted.** The original
+  interpolates the texture along the quad's own edges per scanline; RWE
+  approximates that warp with a 4x4 bilinear patch on non-parallelogram faces
+  (§51), which agrees exactly on parallelograms and to within a texel
+  elsewhere.
 - **Only the heading half of the `turret=0` check is enforced.** The original
   compares the required elevation against the hull's own pitch at `unit+0x68`
   (§11). RWE's simulation has no hull pitch — `UnitState` carries a rotation and
@@ -6787,7 +7737,7 @@ original:
 
 ---
 
-## 52. Still unknown or unported
+## 74. Still unknown or unported
 
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
@@ -6802,7 +7752,9 @@ original:
 - **`maneuverleashlength`** is now parsed but not enforced. In the original it
   aborts an attack when the aircraft strays that far from where it was standing
   when the order was given — missions document §8.
-- **The interface colour table at `cfg+0xDCB` has no writer anywhere in
+- ~~The interface colour table~~ Resolved: `0x4AC7D0` writes it from a
+  different base; see §50. The superseded entry read:
+- **(superseded) The interface colour table at `cfg+0xDCB` has no writer anywhere in
   `.text`.** Every one of the nine accesses is a read; it is a logical-colour to
   palette remap installed for the blitter. So the exact palette indices for the
   minimap rings (§25), the placement box (§27) and the sweep (§28) are unknown,

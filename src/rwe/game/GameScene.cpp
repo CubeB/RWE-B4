@@ -756,11 +756,14 @@ namespace rwe
 
             auto centre = worldToMinimap * simVectorToFloat(unit.position);
 
+            // The colours are the interface map's slots 0x0A and 0x0C,
+            // resolved through the runtime GUIPAL nearest-match (0x4AC7D0):
+            // detectors draw bright green, jammers orange-red.
             const std::pair<unsigned int, Color> rings[] = {
                 {unitDefinition.radarDistance, Color(83, 223, 79)},
                 {unitDefinition.sonarDistance, Color(83, 223, 79)},
-                {unitDefinition.radarDistanceJam, Color(40, 130, 40)},
-                {unitDefinition.sonarDistanceJam, Color(40, 130, 40)},
+                {unitDefinition.radarDistanceJam, Color(255, 71, 0)},
+                {unitDefinition.sonarDistanceJam, Color(255, 71, 0)},
             };
 
             for (const auto& [range, color] : rings)
