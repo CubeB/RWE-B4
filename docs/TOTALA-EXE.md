@@ -3353,7 +3353,7 @@ state, and how things float is left alone.
   `NoShake`, `Contour`, `ScrollSpeed`, `IFace` and `Give` and to find their
   handlers. Nothing else was pulled out of it.
 
-## NN. Wakes and thrust
+## NN. Wakes, thrust, and the small unit flags
 
 The five `emit-sfx` types RWE had never implemented. Wakes are behind every ship
 in the game, so this is the most visible of the remaining gaps.
@@ -3466,6 +3466,222 @@ Two things are left alone. RWE draws its dot as a small world-space quad rather
 than a literal screen pixel, which is the same choice it already made for the
 nanolathe spray. And the emission rate is still the script's, which is the
 original's behaviour anyway.
+
+### The small unit flags
+
+Six flags that the bit tables above name but that had never been followed to
+their readers. The parse sites are all in the FBI parser's long run of boolean
+keys, where the helper `0x4C46C0` leaves its answer in `eax` and the
+mask-and-shift follows immediately, so the §19 pipeline trap does not apply and
+each bit is unambiguous:
+
+| Key | String | Read at | Shifted at | Bit |
+|---|---|---|---|---|
+| `isairbase` | `0x503BC4` | `0x42C5DC` | `0x42C5F1` `shl eax,0x9` | `def+0x241` 9 |
+| `noshadow` | `0x503B24` | `0x42C7DC` | `0x42C7EA` `shl eax,0x19` | `def+0x241` 25 |
+| `digger` | `0x503AF0` | `0x42C880` | `0x42C895` `shl eax,0x1e` | `def+0x241` 30 |
+| `upright` | `0x503B50` | — | `0x42C746` | `def+0x241` 20 |
+| `norestrict` | `0x503620` | — | `0x42CB4B` | `def+0x245` 15 |
+| `cantbetransported` | `0x5039DC` | `0x42CBB1` | `0x42CBBF` `shl eax,0x13` | `def+0x245` 19 |
+
+Counted over the 189 FBIs of the extracted data RWE actually loads, which is
+the base game plus Core Contingency: `isairbase` 4 (ARMASP, CORASP, ARMCARRY,
+CORCARRY), `noshadow` 15, `upright` 28 set and 3 explicitly cleared,
+`norestrict` 6, `digger` 2 (ARMAMB, CORTOAST), `cantbetransported` 1
+(CORSUMO). The last two are worth the correction: earlier notes recorded that
+no shipped unit sets either, which is true of the base game on its own and not
+of the data on disk.
+
+### `isairbase`: a damaged aircraft goes home
+
+The definition bit is cached onto the instance as a unit is set up.
+`0x485AE7`–`0x485B03` takes `def+0x241 & 0x200`, shifts it left twenty-one and
+drops it into a cleared bit 30 of `unit+0x110`.
+
+Each player keeps a **list** of its own air bases rather than searching for
+them. `0x40AB96` onwards is the per-player sweep that also counts units by
+type, and three tests put a unit on the list at `0x40ABE4`:
+
+```
+40abc0  mov  eax,[def+0x241]
+40abc6  test al,0x40                ; builder
+40abca  test ah,0x2                 ; isairbase
+40abcf  test BYTE [unit+0x10e],bl   ; bl is 1, set at 0x40AAD0
+40abe4  call 0x408F30               ; push_back onto the vector at player+0x25
+```
+
+**`unit+0x10E` bit 0 is the on/off state.** `0x403010` ACTIVATE calls
+`0x48B090(1, 1)` and `0x403040` DEACTIVATE calls `0x48B090(1, 0)`; that routine
+writes the byte at `0x48B0D8`, and unit init zeroes it at `0x485B7F`. The same
+byte and bit gates the `istargetingupgrade` accumulator two instructions later
+at `0x40ABFE`, which is what settles that it means "switched on" rather than
+anything to do with visibility or ownership. So a pad that has been turned off,
+or one still going up and so never activated, is on nobody's list and nothing
+lands on it.
+
+The query is `0x40B530(playerIndex, position, radius, out)`. It walks that
+player's list, repeats the same three tests at `0x40B578`/`0x40B580`/`0x40B589`
+— the last against a literal `0x1`, which is what pins the bit — and keeps
+every unit inside the radius. The distance is flat: `0x40B5A0` reads only the
+x at `unit+0x6A` and the z at `unit+0x72`, multiplies each difference by itself
+as a 64-bit product and shifts thirty-two off (`0x40B5BB`–`0x40B5E3`), so the
+comparison at `0x40B5E9` is in whole world units squared. **`y` is never
+read**, so an aircraft is not pushed out of range by its own cruise altitude.
+
+Seven callers, and **all seven pass the same two numbers**: `0x41055F`,
+`0x4109B9`, `0x410F95`, `0x412613`, `0x412B91`, `0x413ADC`, `0x4153E3`. Each is
+preceded by the identical health gate,
+
+```
+410525  mov  eax,[def+0x1fa]        ; max hit points
+41052b  shr  eax,0x2
+41052e  lea  ecx,[eax+eax*2]        ; (max >> 2) * 3
+410531  cmp  edx,ecx                ; edx is WORD [unit+0x108], current health
+410533  jae  <skip>
+```
+
+so the threshold is **three quarters of maximum with the quarter truncated
+first**, and an aircraft sitting exactly on it is not hurt enough. The radius
+pushed is `0xf00` at every site and the query squares it at `0x40B542`:
+**3840 world units**.
+
+If the returned vector is not empty — `0x40C560` is its size — the caller picks
+**one at random, not the nearest**. `0x4B6C30(n)` returns zero without touching
+the generator at `0x51FC88` when `n` is below two, and otherwise steps it once
+and takes the remainder (`0x4B6C8C div edi`, `0x4B6C90 mov eax,edx`). The
+chosen unit becomes the target of a mission built from the string at
+`0x501B94`, **`VTOL_LANDING`** (`0x4105B9`, `0x41267B`).
+
+Four more readers hang off the same flag:
+
+- **On arrival**, `0x411E63`–`0x411ED3`: if the aircraft is below full health
+  (`WORD unit+0x108 < DWORD def+0x1FA`) and the mission's target is a
+  `builder && isairbase` whose build progress `unit+0x104` is exactly the float
+  at `0x4FCC40`, the aircraft is handed a further mission built from
+  `0x501C24`, **`SELFREPAIR`**.
+- **The cursor**, `0x43EA83`: the selected unit `canfly` (bit 11) with an
+  `isairbase` unit under the pointer gives cursor 13.
+- **The right-click**, `0x43F735`–`0x43F75E`, `0x43F959`–`0x43F977` and
+  `0x43FAEF`–`0x43FB19`: three separate arms of the order dispatcher test the
+  same pair and all jump to `0x43FB1B`, the `VTOL_LANDING` mission.
+- **Cargo**, `0x48AD0D`–`0x48AD1F`: a unit taken aboard something is unlinked
+  from the world by `0x4384A0` **unless** the thing holding it is an air base,
+  which is why aircraft parked on a carrier stay selectable.
+
+### `cantbetransported`, and the whole of `CanTransport`
+
+`0x489A90(this = transport, candidate)` in order:
+
+```
+489aa3  candidate def+0x245 bit 19  -> cantbetransported: reject
+489abe  transport def+0x245 bit 8   -> canload required
+489acb  walk transport+0x8A, next at +0x8E, owner back-pointer at +0x86,
+489aec  counting against BYTE transportdef+0x22B; >= rejects
+489afe  candidate must still exist
+489b0b  WORD candidatedef+0x14A <= BYTE transportdef+0x22A
+489b24  candidate unit+0x110 & 3 == 2 -> airborne: reject
+489b39  a transport that cannot fly also wants WORD candidatedef+0x1C0 < 0
+```
+
+Two offsets fall out of that and both need a second site, because the FBI
+parser pipelines its stores. `def+0x22A` and `def+0x22B` come from the same run
+of keys as `waterline`: the strings pushed are `0x503DC8` "waterline",
+`0x503DB8` "transportsize" and `0x503DA4` "transportcapacity", and under the
+§19 rule their values land at `0x42C259`, `0x42C26E` and `0x42C284`. That makes
+`def+0x22C` `waterline`, which §20 already had from elsewhere and which is the
+check that the pipeline is being read the right way round, `def+0x22A`
+**`transportsize`**, and `def+0x22B` **`transportcapacity`**.
+
+`def+0x14A` is not parsed from the definition at all. `0x42CD5D` copies
+`WORD [+0x4]` and `WORD [+0x6]` out of the **movement class** record into
+`def+0x14A` and `def+0x14C`, and the record's fallback builder `0x440340` —
+used when the FBI names no movement class — fills `+0x4` from the key at
+`0x505484`, `FootPrintX`, and `+0x6` from `0x505478`, `FootPrintZ`, each store
+immediately after its own call rather than pipelined. So the size test is
+**the candidate's footprint X against the transport's TransportSize**.
+
+Note what is *not* in that predicate: nothing asks whether the candidate is an
+aircraft, only whether it is currently airborne, and nothing asks whether it is
+mobile.
+
+### `noshadow` and `digger` are both shadow-pass flags
+
+Two passes, `0x459288`–`0x4592B6` and `0x4594A2`–`0x4594CA`, and they open
+identically: a global option `WORD [0x511DE8+0x37F06] & 4`, then bit 25 of
+`def+0x241`, then skip the draw. `digger` is tested only in the second, at
+`0x4594D0`, where it selects a path through `0x45A470` and changes one
+constant:
+
+```
+4594f2  shr eax,0x1e / and al,0x1
+4594f7  neg al / sbb eax,eax        ; 0 or -1
+4594fb  and eax,0x4b                ; 0 or 75
+4594fe  add eax,0x32                ; 50 or 125
+```
+
+**It is not a terrain flag.** All ten of its read sites are in that one pass.
+
+### `upright` and `norestrict`
+
+`upright` has exactly one reader, `0x48A8BF`, inside the per-tick ground
+placement `0x48A870`. Set, the unit stays vertical and takes its height from a
+single sample under the centre; clear, `0x48A8CD` falls through to `0x48A938`
+and thence `0x48A490`, which samples four rotated footprint corners and writes
+`WORD unit+0x68` pitch and `WORD unit+0x64` roll from the slope.
+
+`norestrict`'s four readers — `0x44C15F`, `0x44C4EA`, `0x44C73A`, `0x44CA59` —
+are all the Unit Restrictions screen, which skips definitions carrying the bit
+so a host cannot switch them off.
+
+### What RWE now does with them
+
+- **`isairbase` is in.** `findAirBaseToLandOn` in `UnitBehaviorService_util.cpp`
+  is the original's predicate and query together: below three quarters health
+  with the quarter truncated first, the owner's own `Builder` `IsAirBase` units
+  that are activated and alive, within 3840 flat world units, and a draw taken
+  with a modulo that skips the generator entirely when there is only one
+  candidate — which every peer has to agree about or the simulations part
+  company. The choice is remembered in `NavigationStateMovingToLandingSpot`,
+  which is what stops it being re-rolled every tick the way the original's
+  one-off mission swap does.
+- **`cantbetransported` is in**, in the load handler and in the AI's ferry
+  candidate filter, so the AI cannot book a passenger the simulation will then
+  refuse and leave the transport hovering over it for ever.
+- **`noshadow` is in**, as `unitCastsShadow` in `GameScene_util.cpp`.
+
+And what was already right: RWE's transport eligibility had the capacity count,
+the alive test and a size test, and `CanLoad` already gated the order button.
+Its size test measures `max(footprintX, footprintZ)` where the original
+measures footprint X alone — of the twelve shipped units with a non-square
+footprint every one is a building, so the two readings never disagree on real
+data, and the difference has been left where it is. RWE also refuses a
+candidate that is not mobile, that `canFly`, or that is itself a transport,
+none of which the original asks; those are older choices and were left alone
+too.
+
+### Not ported
+
+- **`digger`.** RWE has one shadow path and no projection constant to swap, so
+  there is nothing for the flag to select. It has no global shadows option
+  either, which is why `unitCastsShadow` is only ever asked about the unit.
+- **`upright`.** RWE does not conform anything to the ground: `UnitState`
+  carries a `roll` for the aircraft bank and no pitch at all. The flag chooses
+  between two ground-placement routines neither of which RWE has, so honouring
+  it would mean writing terrain conforming first.
+- **`norestrict`.** There is no Unit Restrictions screen for it to hide a unit
+  from.
+- **The `VTOL_LANDING` cursor and the right-click.** RWE's `CursorType` has no
+  landing cursor and no sprite loaded for one, and a player cannot yet send an
+  aircraft to a pad by hand — only the idle path does. The three dispatcher
+  arms above are where that would go.
+- **`SELFREPAIR`.** What the pad does once the aircraft is on it was not
+  followed past the mission push at `0x411ECE`, so RWE's pads still mend
+  nothing. Everything that gets the aircraft there is in; this is the piece
+  left.
+- **The air base list itself.** RWE walks the unit map where the original keeps
+  a per-player vector. The answer is the same and the walk only runs while a
+  damaged aircraft has nothing else to do.
+
 ## NN. Weapon target eligibility, `0x49ABB0` in full
 
 §9 gave this routine a sentence. It is the whole of "may this weapon shoot at

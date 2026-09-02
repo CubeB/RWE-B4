@@ -295,6 +295,13 @@ namespace rwe
                     {
                         continue;
                     }
+                    // A unit the simulation will refuse to load must not be
+                    // booked onto a ferry either: the transport would fly out,
+                    // hover over it and never pick it up.
+                    if (def.cantBeTransported)
+                    {
+                        continue;
+                    }
                     if (transportDef.transportSize > 0 && def.transportSize > transportDef.transportSize)
                     {
                         continue;

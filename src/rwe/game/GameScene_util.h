@@ -56,6 +56,17 @@ namespace rwe
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitMeshBatch& batch);
 
+    /**
+     * Whether this unit gets a shadow at all.
+     *
+     * The original's two shadow passes both start by testing bit 25 of the
+     * definition's flag word and skipping the draw when it is set
+     * (0x4592AC, 0x4594C0). Both are also under a global shadows-on option,
+     * `WORD [0x511DE8+0x37F06]` bit 2, which RWE has no equivalent of and
+     * which is why the caller is only ever asked about the unit.
+     */
+    bool unitCastsShadow(const UnitDefinition& unitDefinition);
+
     void drawUnitShadow(
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,

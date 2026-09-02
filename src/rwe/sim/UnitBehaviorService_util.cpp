@@ -199,6 +199,85 @@ namespace rwe
         return std::nullopt;
     }
 
+    bool aircraftWantsRepair(const UnitState& state, const UnitDefinition& definition)
+    {
+        // 0x410518-0x410533 and the six other mission handlers that repeat it:
+        // three quarters of the maximum, worked out as (max >> 2) * 3, so the
+        // truncation is on the quarter and not on the product. An aircraft at
+        // exactly three quarters is not damaged enough.
+        auto threshold = (definition.maxHitPoints / 4u) * 3u;
+        return state.hitPoints < threshold;
+    }
+
+    bool unitIsAnUsableAirBase(const UnitState& state, const UnitDefinition& definition)
+    {
+        // The original keeps a list per player and refreshes it in the same
+        // sweep that counts units by type (0x40ABC0-0x40ABE9). Three things
+        // put a unit on it: Builder, IsAirBase, and the on/off bit at
+        // unit+0x10E bit 0, which is what ACTIVATE and DEACTIVATE write
+        // (0x403010, 0x403040 -> 0x48B090). A pad that has been switched off,
+        // or that is still going up and so has never been activated, is not
+        // on the list and nothing lands on it.
+        return definition.builder && definition.isAirBase && state.activated && state.isAlive();
+    }
+
+    std::optional<UnitId> findAirBaseToLandOn(GameSimulation& sim, ConstUnitInfo unitInfo)
+    {
+        if (!unitInfo.definition->canFly)
+        {
+            return std::nullopt;
+        }
+
+        if (!aircraftWantsRepair(*unitInfo.state, *unitInfo.definition))
+        {
+            return std::nullopt;
+        }
+
+        // 0x40B530 walks the owner's air base list and keeps every one whose
+        // flat distance is inside the radius the caller passed, which is
+        // 0xf00 at all seven call sites. The comparison is on the squared
+        // distance with the fractional part shifted off, so it is a plain
+        // whole-unit radius of 3840.
+        auto radiusSquared = AirBaseSearchRadius * AirBaseSearchRadius;
+        std::vector<UnitId> candidates;
+        for (const auto& [otherId, other] : sim.units)
+        {
+            if (!other.isOwnedBy(unitInfo.state->owner))
+            {
+                continue;
+            }
+            const auto& otherDefinition = sim.unitDefinitions.at(other.unitType);
+            if (!unitIsAnUsableAirBase(other, otherDefinition))
+            {
+                continue;
+            }
+            auto dx = other.position.x - unitInfo.state->position.x;
+            auto dz = other.position.z - unitInfo.state->position.z;
+            if ((dx * dx) + (dz * dz) > radiusSquared)
+            {
+                continue;
+            }
+            candidates.push_back(otherId);
+        }
+
+        if (candidates.empty())
+        {
+            return std::nullopt;
+        }
+
+        // The original picks one at random rather than the nearest, so a
+        // squadron coming home off the same raid spreads itself over the
+        // pads instead of queueing on one. Its helper (0x4B6C30) returns
+        // zero without touching the generator when there is only one to
+        // choose from, and that matters for determinism as much as for
+        // faithfulness: every peer must draw the same number of times.
+        if (candidates.size() < 2)
+        {
+            return candidates.front();
+        }
+        return candidates[sim.rng() % candidates.size()];
+    }
+
     bool weaponNeedsTheHullTurned(const WeaponDefinition& weaponDefinition)
     {
         if (weaponDefinition.turret || weaponDefinition.verticalLaunch)

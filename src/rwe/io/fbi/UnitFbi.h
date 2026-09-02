@@ -168,6 +168,24 @@ namespace rwe
         /** Largest footprint it can carry (TA: the unit's footprint must not exceed this). */
         unsigned int transportSize;
 
+        /**
+         * Refuses to be picked up by anything. The first thing the original's
+         * load predicate asks (0x489AA3), ahead of the transport's own
+         * capacity and size, so a unit that names it cannot be carried by any
+         * transport at all.
+         */
+        bool cantBeTransported;
+
+        /**
+         * An aircraft repair pad or a carrier. Four units name it: ARMASP,
+         * CORASP, ARMCARRY, CORCARRY. A damaged aircraft with nothing else to
+         * do goes and lands on one.
+         */
+        bool isAirBase;
+
+        /** Casts no shadow. Fifteen units name it, mostly the map props. */
+        bool noShadow;
+
         unsigned int cruiseAlt;
 
         /**

@@ -391,6 +391,9 @@ namespace rwe
             // the Hulk and Envoy six (the crane loads units onto the deck).
             u.transportCapacity = fbi.floater ? 6u : 1u;
         }
+        u.cantBeTransported = fbi.cantBeTransported;
+        u.isAirBase = fbi.isAirBase;
+        u.noShadow = fbi.noShadow;
 
         u.cruiseAltitude = SimScalar(fbi.cruiseAlt);
         u.bankScale = SimScalar(fbi.bankScale);

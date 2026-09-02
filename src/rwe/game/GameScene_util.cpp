@@ -409,6 +409,11 @@ namespace rwe
         }
     }
 
+    bool unitCastsShadow(const UnitDefinition& unitDefinition)
+    {
+        return !unitDefinition.noShadow;
+    }
+
     void drawUnitShadowMesh(
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,

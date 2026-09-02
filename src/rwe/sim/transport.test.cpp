@@ -185,6 +185,21 @@ namespace rwe
             REQUIRE_FALSE(sim.getUnitState(tankId).carriedBy.has_value());
         }
 
+        SECTION("a unit that says CantBeTransported is refused however much room there is")
+        {
+            // 0x489AA3 is the first thing the load predicate asks, before it
+            // has even looked at the transport, so a unit that names the key
+            // is refused by everything. The Sumo is the one unit in the
+            // shipped data that does; nothing about it is too big or too
+            // heavy for the transports, which is what makes the flag the only
+            // thing standing between it and a free ride.
+            sim.unitDefinitions.at("kbot").cantBeTransported = true;
+            sim.getUnitState(transportId).orders.push_back(LoadOrder(kbotId));
+            sim.tick();
+            REQUIRE(sim.getUnitState(transportId).orders.empty());
+            REQUIRE_FALSE(sim.getUnitState(kbotId).carriedBy.has_value());
+        }
+
         SECTION("only transports respond to load orders")
         {
             sim.getUnitState(kbotId).orders.push_back(LoadOrder(transportId));

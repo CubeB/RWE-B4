@@ -188,6 +188,29 @@ namespace rwe
         bool isTransport() const { return transportCapacity > 0 || transportSize > 0; }
         unsigned int effectiveTransportCapacity() const { return transportCapacity > 0 ? transportCapacity : 1u; }
 
+        /**
+         * Refuses to ride in anything. This is the first question the
+         * original's load predicate asks (0x489AA3), before it looks at the
+         * transport at all, so a unit that sets it cannot be carried by
+         * anything however much room there is. The Sumo is the one unit in
+         * the shipped data that does.
+         */
+        bool cantBeTransported{false};
+
+        /**
+         * An aircraft repair pad or a carrier: the four units that name it
+         * are ARMASP, CORASP, ARMCARRY and CORCARRY. A damaged aircraft that
+         * has run out of orders goes and lands on the nearest one rather than
+         * setting down where it stands.
+         */
+        bool isAirBase{false};
+
+        /**
+         * Casts no shadow. Fifteen units in the shipped data set it, mostly
+         * the map props that are not really objects standing on the ground.
+         */
+        bool noShadow{false};
+
         /** Distance above the ground that the unit flies at. */
         SimScalar cruiseAltitude;
 

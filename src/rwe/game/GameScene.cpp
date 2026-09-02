@@ -941,6 +941,10 @@ namespace rwe
                 continue;
             }
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+            if (!unitCastsShadow(unitDefinition))
+            {
+                continue;
+            }
             const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
 
             auto groundHeight = simulation.terrain.getHeightAt(unit.position.x, unit.position.z);

@@ -50,6 +50,36 @@ namespace rwe
     std::optional<SimVector> findLandingLocation(const GameSimulation& sim, ConstUnitInfo unitInfo);
 
     /**
+     * How far an aircraft will go looking for a repair pad. The original's
+     * seven callers of the air base query all pass 0xf00 (0x410558,
+     * 0x4109B2, 0x410F8E, 0x41260C and three more), and the query squares it
+     * and compares against a squared flat distance with the fraction shifted
+     * away, so it is a whole-unit radius.
+     */
+    constexpr SimScalar AirBaseSearchRadius = 3840_ss;
+
+    /**
+     * Whether an aircraft is hurt enough to break off and go looking for a
+     * pad. The original's threshold is three quarters of maximum health.
+     */
+    bool aircraftWantsRepair(const UnitState& state, const UnitDefinition& definition);
+
+    /**
+     * Whether this unit is somewhere an aircraft may land: a built and
+     * switched-on `IsAirBase` builder. The original keeps these in a list per
+     * player rather than testing them one at a time, but the predicate is the
+     * same one.
+     */
+    bool unitIsAnUsableAirBase(const UnitState& state, const UnitDefinition& definition);
+
+    /**
+     * Picks a repair pad for a damaged aircraft, or nothing if it is not hurt
+     * enough or there is none within reach. Draws from the simulation's
+     * generator when there is more than one to choose from.
+     */
+    std::optional<UnitId> findAirBaseToLandOn(GameSimulation& sim, ConstUnitInfo unitInfo);
+
+    /**
      * True when the gun is bolted to the hull, so the unit has to be pointing
      * roughly at what it wants to shoot before it can shoot it.
      *

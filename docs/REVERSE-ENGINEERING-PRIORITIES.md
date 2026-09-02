@@ -592,9 +592,12 @@ read together with §NN.
     **not** draw `smoke 1` — it fills a one-pixel rectangle with a palette
     index, and the sequence handle it stores is never read. §4 is corrected in
     the findings doc.
-22. **Small FBI flags — decoded; the ones with an effect are done.** Counts
-    below are base OTA only (163 units), no Core Contingency or Battle
-    Tactics.
+22. **Small FBI flags — decoded; everything RWE has the machinery for is
+    done.** Counts below are base OTA only (163 units), no Core Contingency or
+    Battle Tactics, which is why two of them read "no unit sets this" when the
+    189 FBIs RWE actually loads do have one. The full decode, with the
+    addresses, is in the findings doc under "Wakes, thrust, and the small unit
+    flags".
 
     - **`canreclamate`** (bit 10, 16 units) — **done, and it was a real gap.**
       `CanReclaimTarget` `0x489960` tests it and never reads `workertime`; the
@@ -604,39 +607,58 @@ read together with §NN.
       and all of them could reclaim and repair in RWE. Gated now, along with
       the target-side rule that a unit with `cancapture` (the Commanders)
       cannot be reclaimed.
-    - **`upright`** (bit 20, 21 units) — decoded, not implemented. One read
-      site, `0x48A8BF`, in the per-tick ground placement `0x48A870`. Set means
-      "stay vertical, take height from one sample under the centre"; clear
-      means `0x48A490`, which samples four rotated footprint corners and sets
-      `WORD unit+0x68` pitch and `WORD unit+0x64` roll from the slope. Kbots
-      and submarines set it; ARMFIDO explicitly clears it. Worth doing when
-      somebody takes on terrain conforming, which RWE does not do at all yet.
+    - **`upright`** (bit 20, 21 units) — decoded, **deliberately not
+      implemented**. One read site, `0x48A8BF`, in the per-tick ground
+      placement `0x48A870`. Set means "stay vertical, take height from one
+      sample under the centre"; clear means `0x48A490`, which samples four
+      rotated footprint corners and sets `WORD unit+0x68` pitch and
+      `WORD unit+0x64` roll from the slope. Kbots and submarines set it;
+      ARMFIDO explicitly clears it. RWE carries a `roll` for the aircraft bank
+      and no pitch at all, so the flag chooses between two routines neither of
+      which exists here. Whoever takes on terrain conforming inherits it.
     - **`healtime`** (`WORD def+0x200`, 2 units) — **done.** Single reader
       `0x48AF3D`: every 8th tick, if not at full health, heal
       `(healtime * 8) / 30` HP, integer-truncated. The Commanders' 27 works
       out at 26.25 HP/s. Implemented free, where the original charges it to
       the owner's stores, because nothing else RWE repairs costs anything.
-    - **`isairbase`** (bit 9, 4 units) — decoded, not implemented. Cached onto
-      the instance as `unit+0x110` bit 30 at `0x485AE7`. Three effects: a unit
-      held by an air base stays selectable and orderable where one held by
-      anything else is unlinked from the world (`0x48AD19` → `0x4384A0`, and
-      the predicate repeats at some twenty sites); `builder && isairbase`
-      makes the unit an aircraft-repair host and queues a `"SELFREPAIR"` order
-      at `0x411ECE`; and it selects the `VTOL_LANDING` cursor at `0x43EA9A`.
-    - **`noshadow`** (bit 25, 10 units) and **`digger`** (bit 30) — both are
-      shadow-pass flags. `noshadow` skips the shadow at `0x4592A6`/`0x4594BA`;
-      `digger` is **not** a terrain flag at all, it selects a second shadow
-      path at `0x4594D0` and a projection constant of 125 instead of 50. No
-      base-OTA unit sets `digger`.
-    - **`norestrict`** (bit 15, 6 units) — **UI only.** All four read sites
-      (`0x44C15F`, `0x44C4EA`, `0x44C73A`, `0x44CA59`) are the Unit
-      Restrictions screen, which skips defs with the bit so a host cannot
-      switch them off. The 6 are the two Commanders and the map props.
-    - **`cantbetransported`** (bit 19) — decoded. Read at `0x489AA3` in
-      `CanTransport`, which also wants the transport's `canload` (bit 8),
-      counts cargo through `transport+0x8A` against `BYTE def+0x22B`, and
-      requires `WORD candidatedef+0x14A <= BYTE transportdef+0x22A`. No
-      base-OTA unit sets it.
+    - **`isairbase`** (bit 9, 4 units) — **done, and it was the one with real
+      behaviour behind it.** Cached onto the instance as `unit+0x110` bit 30 at
+      `0x485AE7`. The list a player keeps of its own pads takes
+      `builder && isairbase && unit+0x10E bit 0`, and that last is the on/off
+      state written by ACTIVATE and DEACTIVATE, so a switched-off pad is not on
+      it. The query `0x40B530` is flat-distance only and all seven callers pass
+      a radius of `0xf00` = 3840 behind the same health gate of three quarters
+      of maximum with the quarter truncated first; the winner is drawn at
+      random, not nearest, by a helper that skips the generator when there is
+      only one. RWE now sends a damaged idle aircraft to a pad on exactly those
+      terms. Left out: the `VTOL_LANDING` cursor at `0x43EA9A` (no such cursor
+      in RWE), the right-click that issues the same mission by hand, and what
+      the pad does once the aircraft is on it — the `"SELFREPAIR"` mission
+      pushed at `0x411ECE` was not followed further, so RWE's pads still mend
+      nothing.
+    - **`noshadow`** (bit 25, 10 units) — **done.** Both shadow passes skip the
+      draw on it (`0x4592A6`/`0x4592AC`, `0x4594BA`/`0x4594C0`), under a global
+      shadows option RWE has no equivalent of.
+    - **`digger`** (bit 30) — decoded, **deliberately not implemented**. It is
+      **not** a terrain flag: all ten read sites are in the same shadow pass,
+      where it selects a second path at `0x4594D0` and a projection constant of
+      125 instead of 50. No base-OTA unit sets it; ARMAMB and CORTOAST do, both
+      Core Contingency. RWE has one shadow path and no constant to swap.
+    - **`norestrict`** (bit 15, 6 units) — **UI only, deliberately not
+      implemented.** All four read sites (`0x44C15F`, `0x44C4EA`, `0x44C73A`,
+      `0x44CA59`) are the Unit Restrictions screen, which skips defs with the
+      bit so a host cannot switch them off. RWE has no such screen. The 6 are
+      the two Commanders and the map props.
+    - **`cantbetransported`** (bit 19) — **done.** Read at `0x489AA3` in
+      `CanTransport`, ahead of everything else it asks: the transport's
+      `canload` (bit 8), the cargo count through `transport+0x8A` against
+      `BYTE transportdef+0x22B` (`transportcapacity`), and
+      `WORD candidatedef+0x14A <= BYTE transportdef+0x22A`, which is the
+      candidate's FootprintX against the transport's `transportsize`. No
+      base-OTA unit sets it but CORSUMO does, so it is live in the data RWE
+      loads. RWE already had the capacity, size and alive tests; the flag
+      itself was the gap, and it is now in the load handler and in the AI's
+      ferry filter.
 
     Also resolved along the way: the `mobilestandorders`/`firestandorders`/
     `onoffable` ambiguity §B flags is `mobilestandorders` bit 0 (`0x42C8DB`),

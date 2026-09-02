@@ -112,6 +112,9 @@ namespace rwe
         tdf.readOrDefault("CanFly", u.canFly);
         tdf.readOrDefault("TransportCapacity", u.transportCapacity);
         tdf.readOrDefault("TransportSize", u.transportSize);
+        tdf.readOrDefault("CantBeTransported", u.cantBeTransported);
+        tdf.readOrDefault("IsAirBase", u.isAirBase);
+        tdf.readOrDefault("NoShadow", u.noShadow);
 
         tdf.readOrDefault("CruiseAlt", u.cruiseAlt);
         tdf.readOrDefault("HoverAttack", u.hoverAttack);

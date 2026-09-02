@@ -509,6 +509,21 @@ namespace rwe
                 }
                 else
                 {
+                    // A damaged aircraft goes to a repair pad in preference to
+                    // setting down where it stands. The original does this by
+                    // swapping the standby mission for a VTOL_LANDING carrying
+                    // the pad as its target, which then holds until the
+                    // aircraft gets there; here the spot is remembered in
+                    // NavigationStateMovingToLandingSpot, which the branch
+                    // above short-circuits on, so the choice is likewise made
+                    // once and not re-rolled every tick.
+                    if (auto airBase = findAirBaseToLandOn(*sim, unitInfo))
+                    {
+                        auto spot = sim->getUnitState(*airBase).position;
+                        unitInfo.state->navigationState.state = NavigationStateMovingToLandingSpot{spot};
+                        return std::make_optional<MovingStateGoal>(spot);
+                    }
+
                     auto landingLocation = findLandingLocation(*sim, unitInfo);
                     if (!landingLocation)
                     {
@@ -1840,9 +1855,13 @@ namespace rwe
         const auto& targetDefinition = sim->unitDefinitions.at(target.unitType);
 
         // Only ground units ride; a transport that is full, or too small for
-        // the unit's footprint, gives up.
+        // the unit's footprint, gives up. CantBeTransported is the first
+        // question the original's predicate asks (0x489AA3) and it is about
+        // the passenger alone: a unit that names it is refused by every
+        // transport there is, however much room the transport has.
         auto [footprintX, footprintZ] = sim->getFootprintXZ(targetDefinition.movementCollisionInfo);
-        if (!targetDefinition.isMobile || targetDefinition.canFly || targetDefinition.isTransport()
+        if (targetDefinition.cantBeTransported
+            || !targetDefinition.isMobile || targetDefinition.canFly || targetDefinition.isTransport()
             || unitInfo.state->carriedUnits.size() >= unitInfo.definition->effectiveTransportCapacity()
             || (unitInfo.definition->transportSize > 0 && std::max(footprintX, footprintZ) > unitInfo.definition->transportSize))
         {
