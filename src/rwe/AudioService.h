@@ -58,6 +58,11 @@ namespace rwe
         // Music sits under the effects rather than over them.
         static constexpr float musicGain = 0.3f;
 
+        // User-set volume scales, 0 to 1, applied on top of the base gains.
+        float soundVolumeScale{1.0f};
+        float musicVolumeScale{1.0f};
+        bool musicEnabled{true};
+
         /**
          * The one track music plays on. The GOG release ships the CD audio as
          * music/<track>.mp3 in the game directory, which the VFS picks up
@@ -95,9 +100,23 @@ namespace rwe
          */
         bool playMusic(const std::string& vfsPath, bool loop);
 
+        /** As playMusic, but from bytes already in hand (a movie soundtrack). */
+        bool playMusicFromMemory(std::vector<char>&& bytes, bool loop);
+
         void stopMusic();
 
         bool musicPlaying();
+
+        void setSoundVolume(float volume);
+        float getSoundVolume() const { return soundVolumeScale; }
+
+        /** Applies to the playing track immediately. */
+        void setMusicVolume(float volume);
+        float getMusicVolume() const { return musicVolumeScale; }
+
+        /** Turning music off stops it there and then; movies are unaffected. */
+        void setMusicEnabled(bool enabled);
+        bool isMusicEnabled() const { return musicEnabled; }
 
         void setVolume(int channel, int volume);
 

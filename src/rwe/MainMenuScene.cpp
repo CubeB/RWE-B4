@@ -1,4 +1,6 @@
 #include "MainMenuScene.h"
+#include <rwe/MovieScene.h>
+#include <rwe/util.h>
 #include <algorithm>
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuModel.h>
@@ -101,6 +103,209 @@ namespace rwe
         }
 
         return sceneContext.audioService->loopSound(*bgm);
+    }
+
+    MainMenuScene::OptionsState MainMenuScene::currentOptions() const
+    {
+        return OptionsState{
+            static_cast<unsigned int>(sceneContext.audioService->getSoundVolume() * 100.0f),
+            static_cast<unsigned int>(sceneContext.audioService->getMusicVolume() * 100.0f),
+            sceneContext.audioService->isMusicEnabled(),
+            pendingWindowMode};
+    }
+
+    void MainMenuScene::applyOptions(const OptionsState& state)
+    {
+        auto* audio = sceneContext.audioService;
+        audio->setSoundVolume(static_cast<float>(state.soundVolume) / 100.0f);
+        audio->setMusicVolume(static_cast<float>(state.musicVolume) / 100.0f);
+        auto wasEnabled = audio->isMusicEnabled();
+        audio->setMusicEnabled(state.musicEnabled);
+        if (state.musicEnabled && !wasEnabled)
+        {
+            audio->playMusic("music/" + std::to_string(menuMusicTrack) + ".mp3", true);
+        }
+        pendingWindowMode = state.windowMode;
+    }
+
+    void MainMenuScene::saveOptions()
+    {
+        auto localDataPath = getLocalDataPath();
+        if (!localDataPath)
+        {
+            return;
+        }
+        auto configPath = *localDataPath / "rwe.cfg";
+        auto state = currentOptions();
+        updateConfigFile(configPath, {
+                                         {"sound-volume", std::to_string(state.soundVolume)},
+                                         {"music-volume", std::to_string(state.musicVolume)},
+                                         {"music", state.musicEnabled ? "true" : "false"},
+                                         {"window-mode", state.windowMode},
+                                     });
+    }
+
+    void MainMenuScene::goToOptionsMenu()
+    {
+        if (pendingWindowMode.empty())
+        {
+            pendingWindowMode = sceneContext.globalConfig->windowMode;
+        }
+        optionsUndo = currentOptions();
+        currentOptionsPage.clear();
+        goToOptionsPage(std::string());
+    }
+
+    namespace
+    {
+        const char* windowModeDisplayName(const std::string& mode)
+        {
+            if (mode == "borderless")
+            {
+                return "Borderless";
+            }
+            if (mode == "fullscreen")
+            {
+                return "Fullscreen";
+            }
+            return "Window";
+        }
+    }
+
+    void MainMenuScene::goToOptionsPage(const std::string& page)
+    {
+        // The original's options screen is a composite: STARTOPT.GUI holds
+        // the page tabs and OK/Cancel, and the chosen page's own gadgets are
+        // laid over it, each page bringing its own background bitmap. The
+        // same effect here: one panel built from both files' gadgets.
+        auto startOptRaw = sceneContext.vfs->readFile(sceneContext.pathMapping->guis + "/STARTOPT.GUI");
+        if (!startOptRaw)
+        {
+            return;
+        }
+        auto entries = parseGuiFromBytes(*startOptRaw);
+        if (!entries)
+        {
+            return;
+        }
+
+        std::string background = "Options4x";
+        if (!page.empty())
+        {
+            auto pageRaw = sceneContext.vfs->readFile(sceneContext.pathMapping->guis + "/" + page + ".GUI");
+            if (pageRaw)
+            {
+                if (auto pageEntries = parseGuiFromBytes(*pageRaw))
+                {
+                    entries->insert(entries->end(), pageEntries->begin() + 1, pageEntries->end());
+                }
+            }
+            if (page == "SOUNDS")
+            {
+                background = "OptSound4x";
+            }
+            else if (page == "MUSIC")
+            {
+                background = "Optmusic4x";
+            }
+            else if (page == "VISUALS")
+            {
+                background = "OptVisual4x";
+            }
+            else if (page == "SPEEDS")
+            {
+                background = "OptInterface4x";
+            }
+        }
+
+        auto panel = uiFactory.panelFromGuiFile("STARTOPT", background, *entries);
+
+        // Switching pages swaps the panel in place; only the first entry
+        // into the options screen pushes a new one.
+        if (lastPanelWasOptions)
+        {
+            panelStack.pop_back();
+        }
+        currentOptionsPage = page;
+        lastPanelWasOptions = true;
+        goToMenu(std::move(panel));
+
+        auto& active = *panelStack.back();
+        auto state = currentOptions();
+
+        if (auto bar = active.find<UiScrollBar>("FXVOL"))
+        {
+            bar->get().setScrollBarPercent(0.2f);
+            bar->get().setScrollPercent(static_cast<float>(state.soundVolume) / 100.0f);
+            auto sub = bar->get().scrollChanged().subscribe([a = sceneContext.audioService](float v) {
+                a->setSoundVolume(v);
+            });
+            bar->get().addSubscription(std::move(sub));
+        }
+
+        if (auto bar = active.find<UiScrollBar>("MUSICVOL"))
+        {
+            bar->get().setScrollBarPercent(0.2f);
+            bar->get().setScrollPercent(static_cast<float>(state.musicVolume) / 100.0f);
+            auto sub = bar->get().scrollChanged().subscribe([a = sceneContext.audioService](float v) {
+                a->setMusicVolume(v);
+            });
+            bar->get().addSubscription(std::move(sub));
+        }
+
+        if (auto toggle = active.find<UiStagedButton>("NOTRAK"))
+        {
+            toggle->get().setStage(state.musicEnabled ? 1 : 0);
+        }
+
+        if (auto bar = active.find<UiScrollBar>("VIDSLDR"))
+        {
+            bar->get().setScrollBarPercent(0.34f);
+            auto modeToPercent = pendingWindowMode == "fullscreen" ? 1.0f : (pendingWindowMode == "borderless" ? 0.5f : 0.0f);
+            bar->get().setScrollPercent(modeToPercent);
+            auto sub = bar->get().scrollChanged().subscribe([this](float v) {
+                pendingWindowMode = v < 0.33f ? "bordered" : (v < 0.67f ? "borderless" : "fullscreen");
+                if (auto label = panelStack.back()->find<UiLabel>("VIDVAL"))
+                {
+                    label->get().setText(windowModeDisplayName(pendingWindowMode));
+                }
+            });
+            bar->get().addSubscription(std::move(sub));
+        }
+
+        if (auto label = active.find<UiLabel>("VIDVAL"))
+        {
+            label->get().setText(windowModeDisplayName(pendingWindowMode));
+        }
+    }
+
+    void MainMenuScene::playMovie(const std::string& vfsPath)
+    {
+        auto movieBytes = sceneContext.vfs->readFile(vfsPath);
+        if (!movieBytes)
+        {
+            return;
+        }
+
+        // The menu's own music has to stop -- the movie's soundtrack plays
+        // through the same track.
+        sceneContext.audioService->stopMusic();
+        bgm = AudioService::LoopToken();
+
+        auto context = sceneContext;
+        auto lookup = soundLookup;
+        auto scene = std::make_shared<MovieScene>(
+            sceneContext,
+            std::move(*movieBytes),
+            [context, lookup]() {
+                auto menu = std::make_shared<MainMenuScene>(
+                    context,
+                    lookup,
+                    context.viewport->width(),
+                    context.viewport->height());
+                context.sceneManager->setNextScene(menu);
+            });
+        sceneContext.sceneManager->setNextScene(scene);
     }
 
     void MainMenuScene::goToPreviousMenu()
@@ -233,11 +438,7 @@ namespace rwe
             }
             else if (message == "INTRO")
             {
-                // The intro movie is a Smacker file on the original CD and
-                // the GOG release does not carry it, so the nearest thing on
-                // hand is the title theme played in full -- CD track 2, which
-                // GOG ships as music/2.mp3.
-                sceneContext.audioService->playMusic("music/2.mp3", false);
+                playMovie("movies/2.zrb");
             }
         }
         else if (topic == "SINGLE")
@@ -245,6 +446,93 @@ namespace rwe
             if (message == "Skirmish")
             {
                 goToSkirmishMenu();
+            }
+            else if (message == "Options")
+            {
+                goToOptionsMenu();
+            }
+        }
+        else if (topic == "STARTOPT")
+        {
+            if (message == "SOUND")
+            {
+                goToOptionsPage("SOUNDS");
+            }
+            else if (message == "MUSIC")
+            {
+                goToOptionsPage("MUSIC");
+            }
+            else if (message == "VISUALS")
+            {
+                goToOptionsPage("VISUALS");
+            }
+            else if (message == "SPEEDS")
+            {
+                goToOptionsPage("SPEEDS");
+            }
+            else if (message == "PREV")
+            {
+                // The button says OK. Keep the settings and leave.
+                saveOptions();
+                lastPanelWasOptions = false;
+                currentOptionsPage.clear();
+                goToPreviousMenu();
+            }
+            else if (message == "CANCEL")
+            {
+                applyOptions(optionsUndo);
+                lastPanelWasOptions = false;
+                currentOptionsPage.clear();
+                goToPreviousMenu();
+            }
+            else if (message == "RESTORE")
+            {
+                applyOptions(OptionsState{100, 100, true, "bordered"});
+                goToOptionsPage(currentOptionsPage);
+            }
+            else if (message == "UNDO")
+            {
+                applyOptions(optionsUndo);
+                goToOptionsPage(currentOptionsPage);
+            }
+            else if (message == "NOTRAK")
+            {
+                // The button has already cycled its own Off|On label.
+                auto* audio = sceneContext.audioService;
+                auto enabling = !audio->isMusicEnabled();
+                audio->setMusicEnabled(enabling);
+                if (enabling)
+                {
+                    audio->playMusic("music/" + std::to_string(menuMusicTrack) + ".mp3", true);
+                }
+            }
+            else if (message == "CDPLAY")
+            {
+                sceneContext.audioService->playMusic("music/" + std::to_string(menuMusicTrack) + ".mp3", true);
+            }
+            else if (message == "CDSTOP")
+            {
+                sceneContext.audioService->stopMusic();
+            }
+            else if (message == "CDNEXT" || message == "CDPREV")
+            {
+                menuMusicTrack += message == "CDNEXT" ? 1 : -1;
+                if (menuMusicTrack > 17)
+                {
+                    menuMusicTrack = 2;
+                }
+                if (menuMusicTrack < 2)
+                {
+                    menuMusicTrack = 17;
+                }
+                sceneContext.audioService->playMusic("music/" + std::to_string(menuMusicTrack) + ".mp3", true);
+            }
+            else if (message == "TEST")
+            {
+                if (auto sound = sceneContext.audioService->loadSound("BUTTON10"))
+                {
+                    sceneContext.audioService->playSound(*sound);
+                }
             }
         }
         else if (topic == "SKIRMISH")

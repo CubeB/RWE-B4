@@ -1,5 +1,7 @@
 #include "AudioService.h"
 
+#include <algorithm>
+
 namespace rwe
 {
     AudioService::AudioService(
@@ -71,7 +73,7 @@ namespace rwe
 
         auto* track = tracks[channel].get();
         sdlMixerContext->setTrackAudio(track, sound.get());
-        sdlMixerContext->setTrackGain(track, defaultGain);
+        sdlMixerContext->setTrackGain(track, defaultGain * soundVolumeScale);
 
         auto props = SDL_CreateProperties();
         SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, -1);
@@ -81,16 +83,51 @@ namespace rwe
         return LoopToken(this, channel, sound);
     }
 
+    void AudioService::setSoundVolume(float volume)
+    {
+        soundVolumeScale = std::clamp(volume, 0.0f, 1.0f);
+    }
+
+    void AudioService::setMusicVolume(float volume)
+    {
+        musicVolumeScale = std::clamp(volume, 0.0f, 1.0f);
+        if (musicTrack)
+        {
+            sdlMixerContext->setTrackGain(musicTrack.get(), musicGain * musicVolumeScale);
+        }
+    }
+
+    void AudioService::setMusicEnabled(bool enabled)
+    {
+        musicEnabled = enabled;
+        if (!enabled)
+        {
+            stopMusic();
+        }
+    }
+
     bool AudioService::playMusic(const std::string& vfsPath, bool loop)
     {
+        // The enable switch gates game music only; a movie soundtrack comes
+        // through playMusicFromMemory and plays regardless.
+        if (!musicEnabled)
+        {
+            return false;
+        }
+
         auto bytes = fileSystem->readFile(vfsPath);
         if (!bytes)
         {
             return false;
         }
 
+        return playMusicFromMemory(std::move(*bytes), loop);
+    }
+
+    bool AudioService::playMusicFromMemory(std::vector<char>&& bytes, bool loop)
+    {
         stopMusic();
-        musicBytes = std::move(*bytes);
+        musicBytes = std::move(bytes);
 
         auto rwOps = sdlContext->rwFromConstMem(musicBytes.data(), musicBytes.size());
         // No predecode: a four-minute track decoded to PCM is tens of
@@ -109,7 +146,7 @@ namespace rwe
         }
 
         sdlMixerContext->setTrackAudio(musicTrack.get(), musicAudio.get());
-        sdlMixerContext->setTrackGain(musicTrack.get(), musicGain);
+        sdlMixerContext->setTrackGain(musicTrack.get(), musicGain * musicVolumeScale);
 
         auto props = SDL_CreateProperties();
         SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, loop ? -1 : 0);
@@ -144,7 +181,7 @@ namespace rwe
 
         auto* track = tracks[channel].get();
         sdlMixerContext->setTrackAudio(track, sound.get());
-        sdlMixerContext->setTrackGain(track, defaultGain);
+        sdlMixerContext->setTrackGain(track, defaultGain * soundVolumeScale);
         sdlMixerContext->playTrack(track);
 
         return channel;
@@ -208,7 +245,7 @@ namespace rwe
 
         auto* track = tracks[channel].get();
         sdlMixerContext->setTrackAudio(track, sound.get());
-        sdlMixerContext->setTrackGain(track, defaultGain);
+        sdlMixerContext->setTrackGain(track, defaultGain * soundVolumeScale);
         sdlMixerContext->playTrack(track);
     }
 

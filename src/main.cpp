@@ -290,6 +290,9 @@ namespace rwe
         TextureService textureService(&graphics, &vfs, &*palette);
 
         AudioService audioService(sdlContext, sdlManager.getSdlMixerContext(), &vfs);
+        audioService.setSoundVolume(static_cast<float>(globalConfig.soundVolume) / 100.0f);
+        audioService.setMusicVolume(static_cast<float>(globalConfig.musicVolume) / 100.0f);
+        audioService.setMusicEnabled(globalConfig.musicEnabled);
         // Allocate a pool of tracks for sound playback
         audioService.allocateTracks(256);
 
@@ -579,6 +582,9 @@ int main(int argc, char* argv[])
         {
             rwe::GlobalConfig config;
             config.leftClickInterfaceMode = args.getString("interface-mode", "left-click") != "right-click";
+            config.soundVolume = std::min(100u, args.getUint("sound-volume", 100));
+            config.musicVolume = std::min(100u, args.getUint("music-volume", 100));
+            config.musicEnabled = args.getString("music", "true") != "false";
             std::optional<rwe::GameParameters> gameParameters;
             if (args.contains("map"))
             {
@@ -647,7 +653,13 @@ int main(int argc, char* argv[])
             else if (windowModeString == "fullscreen" || args.getBool("fullscreen"))
             {
                 windowMode = rwe::WindowMode::Fullscreen;
+                windowModeString = "fullscreen";
             }
+            if (windowModeString.empty())
+            {
+                windowModeString = "bordered";
+            }
+            config.windowMode = windowModeString;
 
             auto pathMapping = constructDefaultPathMapping();
             pathMapping.ai = args.getString("dir-ai", "ai");

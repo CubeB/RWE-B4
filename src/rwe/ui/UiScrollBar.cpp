@@ -205,6 +205,16 @@ namespace rwe
         }
     }
 
+    void UiScrollBar::setScrollPercent(float percent)
+    {
+        scrollPercent = percent;
+    }
+
+    void UiScrollBar::setScrollBarPercent(float percent)
+    {
+        scrollBarPercent = percent;
+    }
+
     void UiScrollBar::uiMessage(const GroupMessage& message)
     {
         if (message.controlName == name)

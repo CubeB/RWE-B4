@@ -238,6 +238,7 @@ namespace rwe
         const std::shared_ptr<Sprite>& minimapDotHighlight,
         InGameSoundsInfo sounds,
         const std::shared_ptr<SpriteSeries>& guiFont,
+        const std::shared_ptr<SpriteSeries>& speechFont,
         PlayerId localPlayerId,
         TdfBlock* audioLookup,
         std::optional<std::ofstream>&& stateLogStream)
@@ -260,6 +261,7 @@ namespace rwe
           minimapRect(minimapViewport.scaleToFit(this->minimap->bounds)),
           sounds(std::move(sounds)),
           guiFont(guiFont),
+          speechFont(speechFont),
           localPlayerId(localPlayerId),
           uiFactory(sceneContext.textureService, sceneContext.audioService, audioLookup, sceneContext.vfs, sceneContext.pathMapping, sceneContext.viewport->width(), sceneContext.viewport->height()),
           audioLookup(audioLookup),
@@ -3560,12 +3562,13 @@ namespace rwe
         }
 
         // Top-left of the world view, under the resource bar, newest line at
-        // the bottom -- where the original prints its speech text.
-        float y = static_cast<float>(GuiSizeTop) + 14.0f;
+        // the bottom -- where the original prints its speech text, and in the
+        // font it prints it in: COMIX, the taller of its two game fonts.
+        float y = static_cast<float>(GuiSizeTop) + 16.0f;
         for (const auto& message : consoleMessages)
         {
-            chromeUiRenderService.drawText(static_cast<float>(GuiSizeLeft) + 8.0f, y, message.text, *guiFont, message.color);
-            y += 12.0f;
+            chromeUiRenderService.drawText(static_cast<float>(GuiSizeLeft) + 8.0f, y, message.text, *speechFont, message.color);
+            y += 14.0f;
         }
     }
 

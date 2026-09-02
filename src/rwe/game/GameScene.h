@@ -256,6 +256,9 @@ namespace rwe
 
         std::shared_ptr<SpriteSeries> guiFont;
 
+        /** COMIX.FNT, the original's world-text font; the speech console prints in it. */
+        std::shared_ptr<SpriteSeries> speechFont;
+
         PlayerId localPlayerId;
 
         SceneTime sceneTime{0};
@@ -483,6 +486,7 @@ namespace rwe
             const std::shared_ptr<Sprite>& minimapDotHighlight,
             InGameSoundsInfo sounds,
             const std::shared_ptr<SpriteSeries>& guiFont,
+            const std::shared_ptr<SpriteSeries>& speechFont,
             PlayerId localPlayerId,
             TdfBlock* audioLookup,
             std::optional<std::ofstream>&& stateLogStream);

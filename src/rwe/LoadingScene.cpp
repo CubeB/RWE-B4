@@ -292,6 +292,11 @@ namespace rwe
         sounds.selectMultipleUnits = lookUpSound("SelectMultipleUnits");
 
         auto consoleFont = sceneContext.textureService->getFont("fonts/CONSOLE.FNT");
+        // The original loads exactly two in-game fonts (0x42A320): COMIX for
+        // the world text -- the speech console, the countdown -- and SMLFONT
+        // for the tiny build-button overlays. The game-screen setup at
+        // 0x497FBE selects COMIX where the message queue lives.
+        auto speechFont = sceneContext.textureService->getFont("fonts/COMIX.FNT");
 
         std::optional<std::ofstream> stateLogStream;
         if (gameParameters.stateLogFile)
@@ -315,6 +320,7 @@ namespace rwe
             minimapDotHighlight,
             std::move(sounds),
             consoleFont,
+            speechFont,
             *localPlayerId,
             audioLookup,
             std::move(stateLogStream));

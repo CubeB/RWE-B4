@@ -16,9 +16,25 @@ namespace rwe
 {
     class MainMenuScene : public Scene
     {
+    public:
+        /** What the options screen edits, for undo, cancel and restore. */
+        struct OptionsState
+        {
+            unsigned int soundVolume;
+            unsigned int musicVolume;
+            bool musicEnabled;
+            std::string windowMode;
+        };
+
     private:
         SceneContext sceneContext;
         TdfBlock* soundLookup;
+
+        OptionsState optionsUndo;
+        std::string pendingWindowMode;
+        std::string currentOptionsPage;
+        int menuMusicTrack{2};
+        bool lastPanelWasOptions{false};
 
         UiRenderService scaledUiRenderService;
         UiRenderService nativeUiRenderService;
@@ -60,6 +76,24 @@ namespace rwe
         void update(int millisecondsElapsed) override;
 
         void goToPreviousMenu();
+
+        /**
+         * Plays one of the game's Smacker movies and comes back to a fresh
+         * main menu afterwards. Falls back to doing nothing when the file is
+         * not in any data path.
+         */
+        void playMovie(const std::string& vfsPath);
+
+        void goToOptionsMenu();
+
+        /** Swaps which options page shares the screen with the hub buttons; empty means the hub alone. */
+        void goToOptionsPage(const std::string& page);
+
+        void applyOptions(const OptionsState& state);
+
+        OptionsState currentOptions() const;
+
+        void saveOptions();
 
         void goToMenu(std::unique_ptr<UiPanel>&& panel);
 

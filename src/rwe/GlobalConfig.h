@@ -6,5 +6,13 @@ namespace rwe
     {
     public:
         bool leftClickInterfaceMode{true};
+
+        /** bordered, borderless or fullscreen; changing it takes effect on restart. */
+        std::string windowMode{"bordered"};
+
+        /** 0 to 100, as the options screen and rwe.cfg deal in. */
+        unsigned int soundVolume{100};
+        unsigned int musicVolume{100};
+        bool musicEnabled{true};
     };
 }

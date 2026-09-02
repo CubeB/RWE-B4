@@ -370,6 +370,10 @@ set(SOURCE_FILES
     src/rwe/io/hpi/hpi_util.h
     src/rwe/io/io_util.cpp
     src/rwe/io/io_util.h
+    src/rwe/io/smk/SmkDecoder.cpp
+    src/rwe/io/smk/SmkDecoder.h
+    src/rwe/MovieScene.cpp
+    src/rwe/MovieScene.h
     src/rwe/io/lostdf/io.cpp
     src/rwe/io/lostdf/io.h
     src/rwe/io/moveinfotdf/MovementClassTdf.h
@@ -747,6 +751,9 @@ target_link_libraries(3do_test librwe)
 
 add_executable(cob_test src/cob_test.cpp)
 target_link_libraries(cob_test librwe)
+
+add_executable(smk_test src/smk_test.cpp)
+target_link_libraries(smk_test librwe)
 
 add_executable(fnt_test src/fnt_test.cpp)
 target_link_libraries(fnt_test librwe)

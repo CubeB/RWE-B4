@@ -84,6 +84,11 @@ namespace rwe
 
         float getScrollBarPercent() const;
 
+        /** For using the bar as a slider: set the position programmatically. */
+        void setScrollPercent(float percent);
+
+        void setScrollBarPercent(float percent);
+
     private:
         void drawScrollBox(UiRenderService& context, float x, float y, float height) const;
 
