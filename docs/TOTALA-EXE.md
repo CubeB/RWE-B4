@@ -3076,6 +3076,15 @@ Three things fall out of that:
   weapon's `accuracy` unmodified. As it takes damage the term shrinks and the
   error cone grows, by up to a full `0x800` — **11.25°** — at the point of death.
   A half-dead Big Bertha's cone goes from 500 to 1524, three times worse.
+
+  None of this is conditional on the weapon having an `accuracy` at all. There
+  is no branch around the arithmetic and none around the health term, so
+  **every weapon in the game spreads as its owner is damaged**, including the
+  hundred and sixty that leave the key at zero — a weapon with `accuracy=0` is
+  perfect only while its owner is untouched. Given how carefully the term is
+  arranged to cancel at full health this looks deliberate rather than
+  accidental, but it is worth flagging as the one part of this section with a
+  large blast radius.
 - **Kills make a unit more accurate.** This is the veterancy the original
   actually has: three kills do nothing, six halve the cone, nine divide it by
   three. It is an integer divide, so it never reaches zero.

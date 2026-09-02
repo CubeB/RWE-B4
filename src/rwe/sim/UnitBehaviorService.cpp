@@ -970,8 +970,15 @@ namespace rwe
         // seven hundred units deep against a hundred-unit blast. A bomb is left
         // out because its release is decided by the bombsight rather than by an
         // aim we could perturb.
-        if (weaponDefinition.accuracy != SimAngle(0) && !isBomb)
+        if (!isBomb)
         {
+            // Deliberately not gated on the weapon having an `accuracy`. The
+            // original runs this arithmetic for every shot whatever the weapon
+            // says, and the health term is not conditional either, so a weapon
+            // with a perfect `accuracy=0` still starts to spread once its
+            // owner has been shot up. At full health the term cancels exactly
+            // and such a weapon stays perfect, which is why this is not as
+            // drastic as it sounds -- nothing changes for an undamaged unit.
             const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
             auto cone = computeAccuracyCone(weaponDefinition.accuracy, unit.hitPoints, unitDefinition.maxHitPoints, unit.kills);
             if (cone != SimAngle(0))

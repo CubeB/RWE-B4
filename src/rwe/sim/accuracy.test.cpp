@@ -73,6 +73,12 @@ namespace rwe
         // rather than being a decision of ours.
         REQUIRE(computeAccuracyCone(SimAngle(0), 1000, 1000, 0) == SimAngle(0));
         REQUIRE(computeAccuracyCone(SimAngle(0), 500, 1000, 0) == SimAngle(1024));
+
+        // This is the case with the widest reach, because the great majority
+        // of weapons in the game leave the key at zero: an undamaged one is
+        // still perfect, so nothing changes until something has been shot.
+        REQUIRE(computeAccuracyCone(SimAngle(0), 999, 1000, 0) != SimAngle(0));
+        REQUIRE(computeAccuracyCone(SimAngle(0), 1, 1000, 0) == SimAngle(2046));
     }
 
     TEST_CASE("applyAimError: zero error leaves the direction alone", "[accuracy]")
