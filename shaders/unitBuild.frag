@@ -71,11 +71,11 @@ void main(void)
     }
     else if (mode == 1)
     {
-        outColor = vec4(buildColorA * lightIntensity(), 1.0);
+        outColor = vec4(buildColorA, 1.0);
     }
     else if (mode == 2)
     {
-        outColor = vec4(buildColorB * lightIntensity(), 1.0);
+        outColor = vec4(buildColorB, 1.0);
     }
     else
     {
