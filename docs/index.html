@@ -71,8 +71,9 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <div class="meta">
     <span>branch <b>revival</b></span>
     <span>base <b>upstream master b2d8a31 · 25 Mar 2026</b></span>
-    <span>updated <b>2 Sep 2026</b></span>
-    <span>tests <b>346 cases · 3353 assertions</b></span>
+    <span>version <b>RWE Revived v1.0</b></span>
+    <span>updated <b>3 Sep 2026</b></span>
+    <span>tests <b>350 cases · 3484 assertions</b></span>
   </div>
 </header>
 <nav aria-label="Sections">
@@ -118,7 +119,9 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Aircraft count as arrived within a few ticks of travel rather than 8 units — they cannot stop dead, and the tighter figure left orders that never finished and new aircraft hovering over the pad. Landing keeps the tight figure, refuses water, and retries elsewhere if the spot is taken</li>
   <li>Units report arrival at the end of the journey, not at every shift-queued waypoint</li>
   <li>Sea transports load through their own scripts — doors open, the crane swings out and hooks the unit, stows it in the hold — and the Atlas hovers down to lift; LOAD/BLAST/CLOAK buttons appear only where they apply</li>
-  <li>The crane takes one unit at a time and is not free until it has stowed it; one unload order sets down one unit; cargo has no hitbox, stays off the minimap, forgets its old orders and dies with the transport</li>
+  <li>The crane takes one unit at a time and is not free until it has stowed it; one unload order sets down one unit; cargo has no hitbox, stays off the minimap, forgets its old orders and dies with the transport — credited, now, to whoever killed the transport</li>
+  <li><b>Transports run the original's rules in full.</b> The hover transports (Bear, Turtle) work — they are crane transports like the Hulk, and RWE had routed them down the aircraft path — capacities come from the key the 3.1 exe actually reads (Bear/Turtle/Envoy 5, Hulk 20; the wiki's 6/6/20 are a dead 1.0-era key's values), air transports carry exactly one whatever their FBI claims, a landed aircraft may ride, nothing submerged may be lifted, sea and hover transports refuse ships and subs, and an air transport can set anything down on water that can live there</li>
+  <li><b>Fighters prefer the air.</b> The decision to break off and fight runs the same chooser as the gun itself — the original has no second search — so a Freedom Fighter with <code>NOTAIR</code> as its bad-target set takes the aircraft while there is one and only strafes tanks under an empty sky</li>
   <li>Wreckage and scenery have hit points from the feature's <code>damage</code>: blasts break them apart into their <code>featuredead</code> form, and reclaim time follows what is left of them</li>
   <li>The TDF reader takes the files the original actually ships. Running it over all 800 <code>.tdf</code>/<code>.fbi</code>/<code>.ota</code>/<code>.gui</code> files in the game data found three it refused; one was ours, a top-level block closed with <code>};</code>, which <code>UNITVIEW.TDF</code> and <code>Translate.tdf</code> both do. Parse failures also say where they happened now: the line and column were recorded and then kept private with no way to read them, and the wanted character was printed as a number, so a broken mod file reported “Expected 91” and nothing else</li>
   <li>COB VM fixes: script call arguments were passed in reverse, packed positions unpacked unsigned, <code>attach-unit</code>/<code>drop-unit</code> implemented</li>
@@ -145,6 +148,20 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>F1 hotkey reference overlay; F10/F11 toggle the debug windows, Escape closes them and the keyboard is never trapped</li>
 </ul>
 
+<h3>Interface, media and the front end</h3>
+<ul>
+  <li><b>Save and load.</b> The whole simulation round-trips through a save file — units with their COB virtual machines mid-thought, projectiles mid-flight, spreading fires, the economy, the random number generator — proven by the hash harness: save, load into a fresh sim, identical hash, then a hundred further ticks of both with identical hashes after every one. The F2 menu's Save Game and Load Game use the original's own panels with a working name box, Load Game sits on the single-player menu too, and saves are <code>.rwesave</code> files in the local data directory. One documented divergence: AI players re-plan after a load</li>
+  <li><b>The movies play.</b> The GOG release ships them disguised as <code>Data/*.ZRB</code> — ordinary Smacker files inside. RWE grew its own SMK2 decoder, validated byte-for-byte against FFmpeg over all five films, and the INTRO button now shows the real intro, scaled to the window, any key to skip</li>
+  <li><b>Music, the original's way.</b> The soundtrack (the tagged OST, in <code>music/</code>) plays situationally as the exe dictates: peace tracks by default, war drums when a scoring ring over the last thirty seconds of combat crosses the decoded thresholds — and only past thirty owned units — standing down after a quiet minute with a 1.2&nbsp;s fade and four seconds of hush. The menu is silent bar the [BGM] ambience, as the original; Victory/Defeat track types exist in the binary and are triggered by nothing, so RWE invents no trigger</li>
+  <li><b>The in-game menu.</b> Tab or F2 opens the original's GAME OPTIONS panel over the left sidebar, pausing the game; Options inside it opens the in-game options composite (PREFS + the RT pages with their commongui backgrounds); Exit leads to Exit to Menu / Exit Game</li>
+  <li><b>Options that work, front end and in game:</b> sound and music volume (live), music on/off, unit shadows, screen scroll speed (25–200%), window mode (bordered / borderless / fullscreen) on the VISUALS page, game speed on the slider in game, a sound test — all persisted to <code>rwe.cfg</code> with OK/Cancel/Undo/Restore semantics; gadgets with nothing behind them are greyed, not faked</li>
+  <li><b>The speech console.</b> Self-destruct counts down "Commander: five" in the top-left in COMIX.FNT — the words, the <code>%s: %s</code> format and the spoken <code>count5</code>–<code>count0</code> recordings are all the original's — cancel prints "Self destruct terminated", cloaking prints "Cloaked"/"Visible", and a defeated player gets "<i>Side</i> forces have been obliterated" in their own colour</li>
+  <li><b>The exact interface colours,</b> recovered from the binary: the "unwritable" colour table turned out to be written from a different base — a runtime nearest-match of GUIPAL.PAL into the screen palette. Cursor box bright green/red, a selected owner's queued box bright green over dark cyan (dark line inside), other builders' blue over navy, minimap jammer rings orange-red</li>
+  <li><b>Minimap detection rings</b> (radar, sonar, jammers — sight deliberately excluded, as the exe does), the <b>marching waypoint trail</b> (the <code>pathicon</code> star every 48 units, sliding one spacing per second), the <b>placement sweep</b> (ten ticks, four lines crossing to the centre and back), and the silo's stockpile count and build bar in the footer</li>
+  <li><b>Window modes and resize:</b> bordered (draggable, resizable), borderless and fullscreen; the UI keeps its size and the world grows; every scene follows a resize including the movie player</li>
+  <li>"RWE Revived v1.0" under the main-menu title, and the version tag to match</li>
+</ul>
+
 <h3>Visibility</h3>
 <ul>
   <li>Line of sight, fog of war and radar in the deterministic sim; unseen enemies hidden, radar contacts as blips, unexplored features hidden</li>
@@ -169,7 +186,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Weapons do not damage wreckage or scenery; features keep hit points only to set how long they take to reclaim</li>
   <li>Building deaths run the COB <code>Killed</code> script: pieces fly off with smoke and fire trails and impact explosions</li>
   <li>Reclaimed features play their golden dissolve sequence</li>
-  <li>Model lighting matches TA's low sun from the left. The falloff is wrapped rather than clamped, so a building's away-from-sun faces shade off gradually instead of dropping to the ambient floor — which is what made solar collectors read as black beside an unshaded vehicle</li>
+  <li><b>Models draw exactly as the original draws them: unlit.</b> The full renderer decode found no normals, no sun and no shade tables on the model path — every unit texel draws at 1.0, the shading painted into the textures by the artists. The invented sun is gone. And the solar collector's creased panels were triangulation, not bad UVs: the original scan-converts whole quads, so skewed textured quads now tessellate as bilinear patches. Selection plates are no longer drawn as model geometry</li>
 </ul>
 
 <h3>Skirmish AI</h3>
@@ -198,13 +215,15 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <div class="phase"><span class="n">P3</span><div><span class="t">Multiplayer and launcher</span><span class="tag todo">not started</span><p class="s">Launcher dependency refresh, public master server, desync UX, chat, replays, mod management.</p></div></div>
 <div class="phase"><span class="n">P4</span><div><span class="t">Compatibility and content</span><span class="tag todo">not started</span><p class="s">Map‑pack robustness, model and animation fixes, expansion packs and big mods.</p></div></div>
 <div class="phase"><span class="n">P5</span><div><span class="t">Performance, renderer, platform</span><span class="tag todo">not started</span><p class="s">Profiling large maps, batched rendering, SDL_gpu backend, protobuf upgrade, Linux and macOS builds.</p></div></div>
+<div class="phase"><span class="n">P6</span><div><span class="t">Completeness audit and public release</span><span class="tag todo">not started</span><p class="s">Work the whole TA wiki as a checklist against the engine; then a fresh clone swept of scratch tooling for the GitHub release.</p></div></div>
 
 <h2 id="todo">To do<small>Everything else, grouped by phase. Items with issue numbers refer to the upstream tracker.</small></h2>
 
 <h3>Needs checking in‑game</h3>
 <ul>
-  <li>Lighting direction (now a low sun from the left; tune against <code>lightingexample.png</code>)</li>
+  <li>Full-bright models and the de-creased solar collector against the original</li>
   <li>Atlas hover height, transport ship crane reach (200 units is an estimate), AI scout routes and ferry trips on island maps</li>
+  <li>A save/load round trip in a real battle, and how the AI recovers its plan after a load</li>
 </ul>
 
 <h3>Phase 0</h3>
@@ -228,8 +247,9 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li>Repair pads do not repair. A damaged aircraft now flies to one and sits on it; what the pad does after that was not followed through</li>
   <li><code>upright</code>, <code>digger</code> and <code>norestrict</code> are decoded and left: RWE has no unit pitch or terrain conforming, one shadow path rather than two, and no unit restrictions screen to attach them to</li>
   <li><code>maneuverleashlength</code> is read but not enforced: an attack should break off once the unit strays that far from where it was standing when the order came</li>
-  <li>F2 in‑game menu (#154); unit info panel completeness; build menu paging and queue badges; focused‑control highlight (#5, #6)</li>
-  <li>Music playback and the unwired unit sounds</li>
+  <li>Unit info panel completeness; build menu paging and queue badges; focused‑control highlight (#5, #6)</li>
+  <li>The original's Play All / Random / Repeat music modes and the MUSICRT track-typing controls; the ending movies and credits wired to victory and defeat</li>
+  <li>Save/load polish: overwrite confirmation, delete, game-type in the list, shifted characters in names</li>
   <li>Hash map features (burning state) in the desync check</li>
 </ul>
 
