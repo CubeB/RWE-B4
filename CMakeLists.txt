@@ -926,3 +926,6 @@ set(CPACK_NSIS_EXECUTABLES_DIRECTORY ".")
 set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 
 include(CPack)
+
+add_executable(ui_probe src/ui_probe.cpp)
+target_link_libraries(ui_probe librwe)

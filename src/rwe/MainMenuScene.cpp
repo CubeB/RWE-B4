@@ -298,7 +298,7 @@ namespace rwe
             auto modeToPercent = pendingWindowMode == "fullscreen" ? 1.0f : (pendingWindowMode == "borderless" ? 0.5f : 0.0f);
             bar->get().setScrollPercent(modeToPercent);
             auto sub = bar->get().scrollChanged().subscribe([this](float v) {
-                pendingWindowMode = v < 0.33f ? "bordered" : (v < 0.67f ? "borderless" : "fullscreen");
+                pendingWindowMode = v < 0.33f ? "windowed" : (v < 0.67f ? "borderless" : "fullscreen");
                 if (auto label = panelStack.back()->find<UiLabel>("VIDVAL"))
                 {
                     label->get().setText(windowModeDisplayName(pendingWindowMode));

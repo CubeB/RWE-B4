@@ -16,6 +16,15 @@ namespace rwe
             AttribMapping{"position", 0},
             AttribMapping{"color", 1}};
 
+        // The unit meshes interleave position, texCoord, normal and enable
+        // arrays 0/1/2 in that order. A program that reads the normal must
+        // bind it to 2 explicitly: left to the linker it lands anywhere,
+        // and on some drivers the lighting silently reads garbage.
+        std::vector<AttribMapping> texturedNormalVertexAttribs{
+            AttribMapping{"position", 0},
+            AttribMapping{"texCoord", 1},
+            AttribMapping{"normal", 2}};
+
         s.basicColor.handle = loadShader(graphics, "shaders/basicColor.vert", "shaders/basicColor.frag", coloredVertexAttribs);
         s.basicColor.mvpMatrix = graphics.getUniformLocation(s.basicColor.handle.get(), "mvpMatrix");
         s.basicColor.alpha = graphics.getUniformLocation(s.basicColor.handle.get(), "alpha");
@@ -31,7 +40,7 @@ namespace rwe
         s.mapTerrain.fogEnabled = graphics.getUniformLocation(s.mapTerrain.handle.get(), "fogEnabled");
         s.mapTerrain.fogTransform = graphics.getUniformLocation(s.mapTerrain.handle.get(), "fogTransform");
 
-        s.unitTexture.handle = loadShader(graphics, "shaders/unitTexture.vert", "shaders/unitTexture.frag", texturedVertexAttribs);
+        s.unitTexture.handle = loadShader(graphics, "shaders/unitTexture.vert", "shaders/unitTexture.frag", texturedNormalVertexAttribs);
         s.unitTexture.mvpMatrix = graphics.getUniformLocation(s.unitTexture.handle.get(), "mvpMatrix");
         s.unitTexture.modelMatrix = graphics.getUniformLocation(s.unitTexture.handle.get(), "modelMatrix");
         s.unitTexture.seaLevel = graphics.getUniformLocation(s.unitTexture.handle.get(), "seaLevel");
@@ -43,7 +52,7 @@ namespace rwe
         s.unitShadow.modelMatrix = graphics.getUniformLocation(s.unitShadow.handle.get(), "modelMatrix");
         s.unitShadow.groundHeight = graphics.getUniformLocation(s.unitShadow.handle.get(), "groundHeight");
 
-        s.unitBuild.handle = loadShader(graphics, "shaders/unitBuild.vert", "shaders/unitBuild.frag", texturedVertexAttribs);
+        s.unitBuild.handle = loadShader(graphics, "shaders/unitBuild.vert", "shaders/unitBuild.frag", texturedNormalVertexAttribs);
         s.unitBuild.mvpMatrix = graphics.getUniformLocation(s.unitBuild.handle.get(), "mvpMatrix");
         s.unitBuild.unitY = graphics.getUniformLocation(s.unitBuild.handle.get(), "unitY");
         s.unitBuild.modelMatrix = graphics.getUniformLocation(s.unitBuild.handle.get(), "modelMatrix");

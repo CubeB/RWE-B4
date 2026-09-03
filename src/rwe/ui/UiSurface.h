@@ -17,6 +17,16 @@ namespace rwe
 
         void render(UiRenderService& context) const override;
 
+        /**
+         * A surface is scenery -- the options screens carry their background
+         * art as full-panel picture boxes, and a background that answers the
+         * hit test swallows every click meant for the buttons drawn over it.
+         */
+        bool contains(int, int) const override
+        {
+            return false;
+        }
+
         void setBackground(std::shared_ptr<Sprite> newBackground);
         void clearBackground();
     };

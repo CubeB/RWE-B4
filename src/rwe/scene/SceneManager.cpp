@@ -164,6 +164,12 @@ namespace rwe
             imGuiContext->render();
 
             graphics->clear();
+            // The game scene points the GL viewport at its own buffers as
+            // it works (the supersampled world among them), and the menu and
+            // movie scenes draw through whatever is current: without this
+            // reset, leaving a game left the front end rendering into a
+            // stale sub-rectangle while the mouse math used the window.
+            graphics->setViewport(0, 0, viewport->width(), viewport->height());
             currentScene->render();
 
             if (!imGuiContext->io->WantCaptureMouse)

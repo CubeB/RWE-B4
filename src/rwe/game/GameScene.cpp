@@ -5319,8 +5319,11 @@ namespace rwe
                 exitToMainMenu();
             }
         }
-        else if (topic == "PREFS")
+        else if (topic == "PREFS" || topic == "SOUNDSRT" || topic == "MUSICRT" || topic == "VISUALRT" || topic == "SPEEDSRT")
         {
+            // The fold-out is two panels, and each emits under its own name:
+            // the sidebar's tabs come in as PREFS, but every control on a
+            // page arrives under the page's topic.
             if (control == "SOUND")
             {
                 openInGameOptions("SOUNDSRT");
