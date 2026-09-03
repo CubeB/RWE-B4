@@ -78,6 +78,15 @@ Electron app with React/Redux for the multiplayer lobby. Communicates with the e
 
 GitHub Actions runs Linux (gcc-12, clang-15) and Windows (MSVC 2022, MinGW64) builds in both Debug and Release configurations.
 
+## Saved games
+
+Full-state save/load lives in `src/rwe/game/save_util.*` (simulation
+serialization, hash-validated round trip — see `sim/saveload.test.cpp`) and
+`src/rwe/game/SaveFile.*` (the on-disk container with the map/players header).
+Saves are `<name>.rwesave` under the local data path. When adding sim state,
+extend `save_util` alongside `GameHash_util`/`dump_util` — the round-trip test
+will fail if hashed state is missed, but unhashed state needs the discipline.
+
 ## Matching Total Annihilation
 
 Much of the current work is making RWE behave like the original rather than
