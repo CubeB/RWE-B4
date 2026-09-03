@@ -271,6 +271,9 @@ namespace rwe
           speechFont(speechFont),
           shadowsEnabled(sceneContext.globalConfig->shadows),
           scrollSpeedSetting(sceneContext.globalConfig->scrollSpeed),
+          soundModeSetting(static_cast<SoundMode>(sceneContext.globalConfig->soundMode)),
+          unitSpeechSetting(static_cast<UnitSpeechLevel>(sceneContext.globalConfig->unitSpeech)),
+          gammaSetting(sceneContext.globalConfig->gamma),
           gameParameters(gameParameters),
           localPlayerId(localPlayerId),
           uiFactory(sceneContext.textureService, sceneContext.audioService, audioLookup, sceneContext.vfs, sceneContext.pathMapping, sceneContext.viewport->width(), sceneContext.viewport->height()),
@@ -627,11 +630,6 @@ namespace rwe
         }
 
         currentPanel->render(chromeUiRenderService);
-
-        for (auto& panel : gameMenuPanels)
-        {
-            panel->render(chromeUiRenderService);
-        }
     }
 
     void GameScene::renderOverlay()
@@ -649,6 +647,15 @@ namespace rwe
         }
 
         renderConsole();
+
+        // The menu screens are drawn over the game view -- the original folds
+        // its options out across the world rather than tucking them behind
+        // it. This has to be the overlay pass: renderUi runs before the world
+        // and anything it draws outside the sidebar is painted over.
+        for (auto& panel : gameMenuPanels)
+        {
+            panel->render(chromeUiRenderService);
+        }
 
         if (paused)
         {
@@ -1469,6 +1476,7 @@ namespace rwe
         auto quadMesh = sceneContext.graphics->createUnitTexturedQuadFlipped(Rectangle2f::fromTLBR(1.0f, 0.0f, 0.0f, 1.0f));
         sceneContext.graphics->bindShader(sceneContext.shaders->worldPost.handle.get());
         sceneContext.graphics->setUniformInt(sceneContext.shaders->worldPost.dodgeMask, 1);
+        sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.gamma, static_cast<float>(gammaSetting) / 100.0f);
         sceneContext.graphics->bindTexture(worldFrameBuffer.texture.get());
         sceneContext.graphics->setActiveTextureSlot1();
         sceneContext.graphics->bindTexture(dodgeMask.get());
@@ -3615,6 +3623,28 @@ namespace rwe
 
     void GameScene::playUnitNotificationSound(const PlayerId& playerId, const std::string& unitType, UnitSoundType soundType)
     {
+        // SOUNDS.GUI's Unit Sounds setting. Off silences the chatter
+        // entirely; Medium keeps only what a player needs to hear -- the
+        // warnings and the completions -- and drops the acknowledgements.
+        // (Which sounds sit in "medium" is inference: the original's own
+        // split has not been read out of the binary.)
+        if (unitSpeechSetting == UnitSpeechLevel::Off)
+        {
+            return;
+        }
+        if (unitSpeechSetting == UnitSpeechLevel::Medium)
+        {
+            switch (soundType)
+            {
+                case UnitSoundType::Select1:
+                case UnitSoundType::Ok1:
+                case UnitSoundType::Arrived1:
+                    return;
+                default:
+                    break;
+            }
+        }
+
         auto sound = getSound(simulation, gameMediaDatabase, unitType, soundType);
         if (sound)
         {
@@ -4771,6 +4801,19 @@ namespace rwe
 
     namespace
     {
+        const char* windowModeDisplayName(const std::string& mode)
+        {
+            if (mode == "borderless")
+            {
+                return "Borderless";
+            }
+            if (mode == "fullscreen")
+            {
+                return "Fullscreen";
+            }
+            return "Windowed";
+        }
+
         /** Fills the GAMES listbox and mirrors clicks into the name box. */
         void wireSaveList(UiPanel& panel)
         {
@@ -4939,107 +4982,150 @@ namespace rwe
         setGameMenuPanel(std::move(panel));
     }
 
+    void GameScene::addGameMenuPanel(std::unique_ptr<UiPanel>&& panel)
+    {
+        panel->groupMessages().subscribe([this](const auto& msg) {
+            if (std::get_if<ActivateMessage>(&msg.message) != nullptr)
+            {
+                gameMenuMessage(msg.topic, msg.controlName);
+            }
+        });
+        gameMenuPanels.push_back(std::move(panel));
+    }
+
     void GameScene::openInGameOptions(const std::string& page)
     {
-        // The in-game options screen is the front end's composite with the
-        // in-game skins: PREFS.GUI carries the tabs and OK/Cancel, the RT
-        // pages carry the controls, and the backgrounds resolve out of
-        // commongui.GAF through the ordinary gadget lookup.
-        auto prefsEntries = sceneContext.vfs->readGuiOrThrow(sceneContext.pathMapping->guis + "/PREFS.GUI");
+        // The original's options screen is two panels side by side, and the
+        // gui files say so: PREFS.GUI is the sidebar at (0,126) 128 wide,
+        // and each RT page is 150 wide at (128,128) -- it folds out to the
+        // right of the sidebar, over the game view. Merging them into one
+        // panel put the page's gadgets at sidebar-relative coordinates,
+        // which is why the sub-options landed on top of the tab buttons.
+        // Each page carries its own background as a picture-box gadget.
+        gameMenuPanels.clear();
+        inGameOptionsPage = page;
+
+        addGameMenuPanel(uiFactory.panelFromGuiFile("PREFS"));
         if (!page.empty())
         {
-            auto pageEntries = sceneContext.vfs->readGuiOrThrow(sceneContext.pathMapping->guis + "/" + page + ".GUI");
-            prefsEntries.insert(prefsEntries.end(), pageEntries.begin() + 1, pageEntries.end());
+            addGameMenuPanel(uiFactory.panelFromGuiFile(page));
         }
 
-        auto panel = uiFactory.panelFromGuiFile("PREFS", prefsEntries);
+        wireInGameOptionControls();
+    }
 
+    void GameScene::wireInGameOptionControls()
+    {
         auto state = currentInGameOptions();
-        if (auto bar = panel->find<UiScrollBar>("FXVOL"))
+
+        if (auto bar = findInGameMenu<UiScrollBar>("FXVOL"))
         {
-            bar->get().setScrollBarPercent(0.2f);
-            bar->get().setScrollPercent(static_cast<float>(state.soundVolume) / 100.0f);
-            auto sub = bar->get().scrollChanged().subscribe([a = sceneContext.audioService](float v) {
+            bar->setScrollBarPercent(0.2f);
+            bar->setScrollPercent(static_cast<float>(state.soundVolume) / 100.0f);
+            auto sub = bar->scrollChanged().subscribe([a = sceneContext.audioService](float v) {
                 a->setSoundVolume(v);
             });
-            bar->get().addSubscription(std::move(sub));
+            bar->addSubscription(std::move(sub));
         }
-        if (auto bar = panel->find<UiScrollBar>("MUSICVOL"))
+
+        if (auto bar = findInGameMenu<UiScrollBar>("MUSICVOL"))
         {
-            bar->get().setScrollBarPercent(0.2f);
-            bar->get().setScrollPercent(static_cast<float>(state.musicVolume) / 100.0f);
-            auto sub = bar->get().scrollChanged().subscribe([a = sceneContext.audioService](float v) {
+            bar->setScrollBarPercent(0.2f);
+            bar->setScrollPercent(static_cast<float>(state.musicVolume) / 100.0f);
+            auto sub = bar->scrollChanged().subscribe([a = sceneContext.audioService](float v) {
                 a->setMusicVolume(v);
             });
-            bar->get().addSubscription(std::move(sub));
+            bar->addSubscription(std::move(sub));
         }
-        if (auto toggle = panel->find<UiStagedButton>("NOTRAK"))
+
+        if (auto toggle = findInGameMenu<UiStagedButton>("NOTRAK"))
         {
-            toggle->get().setStage(state.musicEnabled ? 1 : 0);
+            toggle->setStage(state.musicEnabled ? 1 : 0);
         }
-        if (auto bar = panel->find<UiScrollBar>("VIDSLDR"))
+
+        if (auto toggle = findInGameMenu<UiStagedButton>("MODE"))
         {
-            bar->get().setScrollBarPercent(0.34f);
-            auto modeToPercent = pendingWindowMode == "fullscreen" ? 1.0f : (pendingWindowMode == "borderless" ? 0.5f : 0.0f);
-            bar->get().setScrollPercent(modeToPercent);
-            auto sub = bar->get().scrollChanged().subscribe([this](float v) {
-                pendingWindowMode = v < 0.33f ? "bordered" : (v < 0.67f ? "borderless" : "fullscreen");
-                if (!gameMenuPanels.empty())
-                {
-                    if (auto label = gameMenuPanels.front()->find<UiLabel>("VIDVAL"))
-                    {
-                        label->get().setText(pendingWindowMode == "borderless" ? "Borderless" : (pendingWindowMode == "fullscreen" ? "Fullscreen" : "Window"));
-                    }
-                }
+            toggle->setStage(static_cast<unsigned int>(state.soundMode));
+        }
+
+        if (auto toggle = findInGameMenu<UiStagedButton>("SPEECH"))
+        {
+            toggle->setStage(static_cast<unsigned int>(state.unitSpeech));
+        }
+
+        if (auto toggle = findInGameMenu<UiStagedButton>("BSHADOWS"))
+        {
+            toggle->setStage(state.shadows ? 1 : 0);
+        }
+
+        if (auto bar = findInGameMenu<UiScrollBar>("GAMMA"))
+        {
+            bar->setScrollBarPercent(0.2f);
+            bar->setScrollPercent((static_cast<float>(state.gamma) - 50.0f) / 150.0f);
+            auto sub = bar->scrollChanged().subscribe([this](float v) {
+                gammaSetting = 50u + static_cast<unsigned int>(v * 150.0f);
+                applyGamma();
             });
-            bar->get().addSubscription(std::move(sub));
-        }
-        if (auto label = panel->find<UiLabel>("VIDVAL"))
-        {
-            label->get().setText(pendingWindowMode == "borderless" ? "Borderless" : (pendingWindowMode == "fullscreen" ? "Fullscreen" : "Window"));
+            bar->addSubscription(std::move(sub));
         }
 
-        if (auto toggle = panel->find<UiStagedButton>("BSHADOWS"))
+        // Screen scroll: how fast the view moves when the cursor is held at
+        // the edge (and on the arrow keys), 25 to 200 percent.
+        if (auto bar = findInGameMenu<UiScrollBar>("SCREEN"))
         {
-            toggle->get().setStage(shadowsEnabled ? 1 : 0);
-        }
-
-        // Screen scroll: 25 to 200 percent across the slider's travel.
-        if (auto bar = panel->find<UiScrollBar>("SCREEN"))
-        {
-            bar->get().setScrollBarPercent(0.2f);
-            bar->get().setScrollPercent((static_cast<float>(scrollSpeedSetting) - 25.0f) / 175.0f);
-            auto sub = bar->get().scrollChanged().subscribe([this](float v) {
+            bar->setScrollBarPercent(0.2f);
+            bar->setScrollPercent((static_cast<float>(state.scrollSpeed) - 25.0f) / 175.0f);
+            auto sub = bar->scrollChanged().subscribe([this](float v) {
                 scrollSpeedSetting = 25u + static_cast<unsigned int>(v * 175.0f);
             });
-            bar->get().addSubscription(std::move(sub));
+            bar->addSubscription(std::move(sub));
         }
 
-        // Game speed maps the slider across the discrete speed steps, applied
-        // through the same command path as the +/- keys.
-        if (auto bar = panel->find<UiScrollBar>("GAME"))
+        // Game speed across the whole -10..+10 range, through the same
+        // lockstep command the +/- keys use.
+        if (auto bar = findInGameMenu<UiScrollBar>("GAME"))
         {
-            bar->get().setScrollBarPercent(0.2f);
-            bar->get().setScrollPercent(static_cast<float>(gameSpeed.index()) / static_cast<float>(GameSpeed::MaxIndex));
-            auto sub = bar->get().scrollChanged().subscribe([this](float v) {
+            bar->setScrollBarPercent(0.2f);
+            bar->setScrollPercent(static_cast<float>(gameSpeed.index()) / static_cast<float>(GameSpeed::MaxIndex));
+            auto sub = bar->scrollChanged().subscribe([this](float v) {
                 auto index = static_cast<int>((v * static_cast<float>(GameSpeed::MaxIndex)) + 0.5f);
-                localPlayerCommandBuffer.push_back(PlayerSetGameSpeedCommand{GameSpeed(index).index()});
+                if (index != gameSpeed.index())
+                {
+                    localPlayerCommandBuffer.push_back(PlayerSetGameSpeedCommand{GameSpeed(index).index()});
+                }
             });
-            bar->get().addSubscription(std::move(sub));
+            bar->addSubscription(std::move(sub));
         }
 
-        // What RWE has no machinery behind stays visible but grey, the way
-        // the original greys what does not apply.
-        for (const auto* name : {"SHADING", "ANTI", "SPEECH", "MODE", "LEFTCLICK", "UNITCHAT"})
+        if (auto bar = findInGameMenu<UiScrollBar>("VIDSLDR"))
         {
-            if (auto button = panel->find<UiStagedButton>(name))
+            bar->setScrollBarPercent(0.34f);
+            auto modeToPercent = pendingWindowMode == "fullscreen" ? 1.0f : (pendingWindowMode == "borderless" ? 0.5f : 0.0f);
+            bar->setScrollPercent(modeToPercent);
+            auto sub = bar->scrollChanged().subscribe([this](float v) {
+                pendingWindowMode = v < 0.33f ? "windowed" : (v < 0.67f ? "borderless" : "fullscreen");
+                if (auto label = findInGameMenu<UiLabel>("VIDVAL"))
+                {
+                    label->setText(windowModeDisplayName(pendingWindowMode));
+                }
+            });
+            bar->addSubscription(std::move(sub));
+        }
+
+        if (auto label = findInGameMenu<UiLabel>("VIDVAL"))
+        {
+            label->setText(windowModeDisplayName(pendingWindowMode));
+        }
+
+        // Still no machinery behind these; the original greys what does not
+        // apply rather than letting it lie.
+        for (const auto* name : {"SHADING", "ANTI", "LEFTCLICK", "UNITCHAT", "TXTSCROL", "MAXLINES"})
+        {
+            if (auto button = findInGameMenu<UiStagedButton>(name))
             {
-                button->get().setEnabled(false);
+                button->setEnabled(false);
             }
         }
-
-        setGameMenuPanel(std::move(panel));
-        inGameOptionsPage = page;
     }
 
     void GameScene::closeGameMenu()
@@ -5057,7 +5143,10 @@ namespace rwe
             sceneContext.audioService->isMusicEnabled(),
             pendingWindowMode,
             shadowsEnabled,
-            scrollSpeedSetting};
+            scrollSpeedSetting,
+            soundModeSetting,
+            unitSpeechSetting,
+            gammaSetting};
     }
 
     void GameScene::applyInGameOptions(const InGameOptionsState& state)
@@ -5069,6 +5158,18 @@ namespace rwe
         pendingWindowMode = state.windowMode;
         shadowsEnabled = state.shadows;
         scrollSpeedSetting = state.scrollSpeed;
+        soundModeSetting = state.soundMode;
+        unitSpeechSetting = state.unitSpeech;
+        audio->setSoundEnabled(state.soundMode != SoundMode::Off);
+        gammaSetting = state.gamma;
+        applyGamma();
+    }
+
+    void GameScene::applyGamma()
+    {
+        // Nothing to push: the world's post-process blit reads gammaSetting
+        // every frame, so moving the slider is visible at once. The hook is
+        // kept so the callers read as intent rather than as an assignment.
     }
 
     void GameScene::saveInGameOptions()
@@ -5086,6 +5187,9 @@ namespace rwe
                                                          {"window-mode", state.windowMode},
                                                          {"shadows", state.shadows ? "true" : "false"},
                                                          {"scroll-speed", std::to_string(state.scrollSpeed)},
+                                                         {"sound-mode", std::to_string(static_cast<unsigned int>(state.soundMode))},
+                                                         {"unit-speech", std::to_string(static_cast<unsigned int>(state.unitSpeech))},
+                                                         {"gamma", std::to_string(state.gamma)},
                                                      });
     }
 
@@ -5222,7 +5326,7 @@ namespace rwe
             }
             else if (control == "RESTORE")
             {
-                applyInGameOptions(InGameOptionsState{100, 100, true, "bordered", true, 100});
+                applyInGameOptions(InGameOptionsState{100, 100, true, "windowed", true, 100, SoundMode::Stereo, UnitSpeechLevel::Full, 100});
                 openInGameOptions(inGameOptionsPage);
             }
             else if (control == "UNDO")
@@ -5238,6 +5342,35 @@ namespace rwe
             else if (control == "BSHADOWS")
             {
                 shadowsEnabled = !shadowsEnabled;
+            }
+            else if (control == "MODE")
+            {
+                // Off | Mono | 3D, cycled by the button itself.
+                soundModeSetting = soundModeSetting == SoundMode::Off
+                    ? SoundMode::Mono
+                    : (soundModeSetting == SoundMode::Mono ? SoundMode::Stereo : SoundMode::Off);
+                sceneContext.audioService->setSoundEnabled(soundModeSetting != SoundMode::Off);
+            }
+            else if (control == "SPEECH")
+            {
+                // Off | Medium | Full: how much of the unit chatter plays.
+                unitSpeechSetting = unitSpeechSetting == UnitSpeechLevel::Off
+                    ? UnitSpeechLevel::Medium
+                    : (unitSpeechSetting == UnitSpeechLevel::Medium ? UnitSpeechLevel::Full : UnitSpeechLevel::Off);
+            }
+            else if (control == "CDPLAY")
+            {
+                sceneContext.audioService->setMusicEnabled(true);
+            }
+            else if (control == "CDSTOP")
+            {
+                sceneContext.audioService->stopMusic();
+            }
+            else if (control == "CDNEXT" || control == "CDPREV")
+            {
+                // The in-game rotation picks its own next track; stopping the
+                // current one is what asks it for another.
+                sceneContext.audioService->stopMusic();
             }
             else if (control == "TEST")
             {

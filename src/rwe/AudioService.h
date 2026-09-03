@@ -63,6 +63,7 @@ namespace rwe
         float musicVolumeScale{1.0f};
         float musicFadeScale{1.0f};
         bool musicEnabled{true};
+        bool soundEnabled{true};
 
         /**
          * The one track music plays on. The GOG release ships the CD audio as
@@ -120,6 +121,10 @@ namespace rwe
         std::optional<std::string> getThemePath();
 
         void setSoundVolume(float volume);
+
+        /** Sound Mode Off silences the effects without disturbing the volume setting. */
+        void setSoundEnabled(bool enabled);
+        bool isSoundEnabled() const { return soundEnabled; }
         float getSoundVolume() const { return soundVolumeScale; }
 
         /** Applies to the playing track immediately. */

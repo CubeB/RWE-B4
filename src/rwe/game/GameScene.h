@@ -372,6 +372,22 @@ namespace rwe
         bool menuPausedGame{false};
         std::string inGameOptionsPage;
 
+        /** SOUNDS.GUI's Sound Mode: Off | Mono | 3D. */
+        enum class SoundMode
+        {
+            Off = 0,
+            Mono = 1,
+            Stereo = 2,
+        };
+
+        /** SOUNDS.GUI's Unit Sounds: Off | Medium | Full. */
+        enum class UnitSpeechLevel
+        {
+            Off = 0,
+            Medium = 1,
+            Full = 2,
+        };
+
         struct InGameOptionsState
         {
             unsigned int soundVolume;
@@ -380,8 +396,35 @@ namespace rwe
             std::string windowMode;
             bool shadows;
             unsigned int scrollSpeed;
+            SoundMode soundMode;
+            UnitSpeechLevel unitSpeech;
+            unsigned int gamma;
         };
-        InGameOptionsState gameOptionsUndo{100, 100, true, "bordered", true, 100};
+        InGameOptionsState gameOptionsUndo{100, 100, true, "windowed", true, 100, SoundMode::Stereo, UnitSpeechLevel::Full, 100};
+
+        SoundMode soundModeSetting{SoundMode::Stereo};
+        UnitSpeechLevel unitSpeechSetting{UnitSpeechLevel::Full};
+        unsigned int gammaSetting{100};
+
+        void applyGamma();
+
+        void addGameMenuPanel(std::unique_ptr<UiPanel>&& panel);
+
+        void wireInGameOptionControls();
+
+        /** Finds a control by name across every open menu panel. */
+        template <typename T>
+        T* findInGameMenu(const std::string& name)
+        {
+            for (auto& panel : gameMenuPanels)
+            {
+                if (auto found = panel->find<T>(name))
+                {
+                    return &found->get();
+                }
+            }
+            return nullptr;
+        }
         std::string pendingWindowMode;
 
         /** Live copies of the display settings the options pages edit. */

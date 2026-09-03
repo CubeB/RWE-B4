@@ -73,7 +73,7 @@ namespace rwe
 
         auto* track = tracks[channel].get();
         sdlMixerContext->setTrackAudio(track, sound.get());
-        sdlMixerContext->setTrackGain(track, defaultGain * soundVolumeScale);
+        sdlMixerContext->setTrackGain(track, soundEnabled ? defaultGain * soundVolumeScale : 0.0f);
 
         auto props = SDL_CreateProperties();
         SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, -1);
@@ -116,6 +116,11 @@ namespace rwe
     void AudioService::setSoundVolume(float volume)
     {
         soundVolumeScale = std::clamp(volume, 0.0f, 1.0f);
+    }
+
+    void AudioService::setSoundEnabled(bool enabled)
+    {
+        soundEnabled = enabled;
     }
 
     void AudioService::setMusicVolume(float volume)
@@ -221,7 +226,7 @@ namespace rwe
 
         auto* track = tracks[channel].get();
         sdlMixerContext->setTrackAudio(track, sound.get());
-        sdlMixerContext->setTrackGain(track, defaultGain * soundVolumeScale);
+        sdlMixerContext->setTrackGain(track, soundEnabled ? defaultGain * soundVolumeScale : 0.0f);
         sdlMixerContext->playTrack(track);
 
         return channel;
@@ -285,7 +290,7 @@ namespace rwe
 
         auto* track = tracks[channel].get();
         sdlMixerContext->setTrackAudio(track, sound.get());
-        sdlMixerContext->setTrackGain(track, defaultGain * soundVolumeScale);
+        sdlMixerContext->setTrackGain(track, soundEnabled ? defaultGain * soundVolumeScale : 0.0f);
         sdlMixerContext->playTrack(track);
     }
 

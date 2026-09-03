@@ -26,15 +26,21 @@ namespace rwe
             std::string windowMode;
             bool shadows;
             unsigned int scrollSpeed;
+            unsigned int soundMode;
+            unsigned int unitSpeech;
+            unsigned int gamma;
         };
 
     private:
         SceneContext sceneContext;
         TdfBlock* soundLookup;
 
-        OptionsState optionsUndo{100, 100, true, "bordered", true, 100};
+        OptionsState optionsUndo{100, 100, true, "windowed", true, 100, 2, 2, 100};
         bool pendingShadows{true};
         unsigned int pendingScrollSpeed{100};
+        unsigned int pendingSoundMode{2};
+        unsigned int pendingUnitSpeech{2};
+        unsigned int pendingGamma{100};
         std::string pendingWindowMode;
         std::string currentOptionsPage;
         std::vector<std::string> menuPlaylist;

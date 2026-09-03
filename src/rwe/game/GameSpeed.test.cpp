@@ -5,11 +5,13 @@ namespace rwe
 {
     TEST_CASE("GameSpeed default", "[speed]")
     {
-        SECTION("default-constructed is index 5 / 1.0x")
+        SECTION("default-constructed is the middle step, 1.0x")
         {
+            // The original's speed control runs -10 to +10 around normal, so
+            // the middle of twenty-one steps is 1.0x.
             GameSpeed s;
             REQUIRE(s.index() == GameSpeed::DefaultIndex);
-            REQUIRE(s.index() == 5);
+            REQUIRE(s.index() == 10);
             REQUIRE(s.perMille() == 1000);
             REQUIRE(s.isDefault());
             REQUIRE(s.displayOffset() == 0);
@@ -29,7 +31,7 @@ namespace rwe
         {
             REQUIRE(GameSpeed(99).index() == GameSpeed::MaxIndex);
             REQUIRE(GameSpeed(GameSpeed::MaxIndex + 1).index() == GameSpeed::MaxIndex);
-            REQUIRE(GameSpeed(99).perMille() == 5000);
+            REQUIRE(GameSpeed(99).perMille() == 10000);
         }
 
         SECTION("increase at max stays at max")
@@ -62,10 +64,10 @@ namespace rwe
         SECTION("default speed up moves to next step")
         {
             GameSpeed s;
-            REQUIRE(s.increased().index() == 6);
-            REQUIRE(s.increased().perMille() == 1500);
-            REQUIRE(s.decreased().index() == 4);
-            REQUIRE(s.decreased().perMille() == 700);
+            REQUIRE(s.increased().index() == 11);
+            REQUIRE(s.increased().perMille() == 1300);
+            REQUIRE(s.decreased().index() == 9);
+            REQUIRE(s.decreased().perMille() == 800);
         }
     }
 
@@ -102,16 +104,21 @@ namespace rwe
     {
         SECTION("verified TA speed steps")
         {
+            // Twenty-one steps, 1.0x in the middle, a tenth at one end and
+            // ten times at the other; the display offset is what the HUD
+            // shows, so the ends read -10 and +10.
             REQUIRE(GameSpeed(0).perMille() == 100);
-            REQUIRE(GameSpeed(1).perMille() == 200);
-            REQUIRE(GameSpeed(2).perMille() == 300);
-            REQUIRE(GameSpeed(3).perMille() == 500);
-            REQUIRE(GameSpeed(4).perMille() == 700);
-            REQUIRE(GameSpeed(5).perMille() == 1000);
-            REQUIRE(GameSpeed(6).perMille() == 1500);
-            REQUIRE(GameSpeed(7).perMille() == 2000);
-            REQUIRE(GameSpeed(8).perMille() == 3000);
-            REQUIRE(GameSpeed(9).perMille() == 5000);
+            REQUIRE(GameSpeed(0).displayOffset() == -10);
+            REQUIRE(GameSpeed(GameSpeed::DefaultIndex).perMille() == 1000);
+            REQUIRE(GameSpeed(GameSpeed::DefaultIndex).displayOffset() == 0);
+            REQUIRE(GameSpeed(GameSpeed::MaxIndex).perMille() == 10000);
+            REQUIRE(GameSpeed(GameSpeed::MaxIndex).displayOffset() == 10);
+
+            // Monotonic throughout: every step is faster than the one below.
+            for (int i = 1; i <= GameSpeed::MaxIndex; ++i)
+            {
+                REQUIRE(GameSpeed(i).perMille() > GameSpeed(i - 1).perMille());
+            }
         }
     }
 

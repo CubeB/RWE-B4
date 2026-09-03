@@ -128,7 +128,7 @@ message PlayerUnitCommand
             Maneuver = 1;
             Roam = 2;
         }
-        MovementOrders orders = 1;
+        required MovementOrders orders = 1;
     }
 
     message SetFireOrders

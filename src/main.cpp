@@ -293,6 +293,7 @@ namespace rwe
         audioService.setSoundVolume(static_cast<float>(globalConfig.soundVolume) / 100.0f);
         audioService.setMusicVolume(static_cast<float>(globalConfig.musicVolume) / 100.0f);
         audioService.setMusicEnabled(globalConfig.musicEnabled);
+        audioService.setSoundEnabled(globalConfig.soundMode != 0);
         // Allocate a pool of tracks for sound playback
         audioService.allocateTracks(256);
 
@@ -587,6 +588,9 @@ int main(int argc, char* argv[])
             config.musicEnabled = args.getString("music", "true") != "false";
             config.shadows = args.getString("shadows", "true") != "false";
             config.scrollSpeed = std::clamp(args.getUint("scroll-speed", 100), 25u, 200u);
+            config.soundMode = std::min(2u, args.getUint("sound-mode", 2));
+            config.unitSpeech = std::min(2u, args.getUint("unit-speech", 2));
+            config.gamma = std::clamp(args.getUint("gamma", 100), 50u, 200u);
             std::optional<rwe::GameParameters> gameParameters;
             if (args.contains("map"))
             {
@@ -652,14 +656,19 @@ int main(int argc, char* argv[])
             {
                 windowMode = rwe::WindowMode::Borderless;
             }
+            else if (windowModeString == "windowed")
+            {
+                windowMode = rwe::WindowMode::Bordered;
+                windowModeString = "windowed";
+            }
             else if (windowModeString == "fullscreen" || args.getBool("fullscreen"))
             {
                 windowMode = rwe::WindowMode::Fullscreen;
                 windowModeString = "fullscreen";
             }
-            if (windowModeString.empty())
+            if (windowModeString.empty() || windowModeString == "bordered")
             {
-                windowModeString = "bordered";
+                windowModeString = "windowed";
             }
             config.windowMode = windowModeString;
 

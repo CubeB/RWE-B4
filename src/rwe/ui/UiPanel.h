@@ -15,6 +15,8 @@ namespace rwe
         std::optional<UiComponent*> focusedChild{std::nullopt};
         Subject<GroupMessage> groupMessagesSubject;
 
+        bool drawSolidPlate{false};
+
     public:
         UiPanel(int posX, int posY, unsigned int sizeX, unsigned int sizeY);
         UiPanel(int posX, int posY, unsigned int sizeX, unsigned int sizeY, std::shared_ptr<Sprite> background);
@@ -52,6 +54,9 @@ namespace rwe
         void unfocus() override;
 
         void appendChild(std::unique_ptr<UiComponent>&& c);
+
+        /** Draw a solid plate behind the children; for dialogs whose gui declares no art of its own. */
+        void setDrawSolidPlate(bool draw) { drawSolidPlate = draw; }
 
         void removeChildrenWithPrefix(const std::string& prefix);
 

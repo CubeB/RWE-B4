@@ -337,6 +337,24 @@ namespace rwe
                 return scrollBarFromGuiEntry(guiName, entry);
             case GuiElementType::Surface:
                 return surfaceFromGuiEntry(guiName, entry);
+            case GuiElementType::PictureBox:
+            {
+                // The options screens carry their backgrounds as picture-box
+                // gadgets named after a GAF entry -- IGOPT for the sidebar,
+                // SOUNDSRT/MUSICRT/VISUALSRT/SPEEDSRT for the pages, OPTBG
+                // for the in-game menu. RWE dropped the whole gadget type,
+                // which is why those screens came up bare.
+                auto surface = std::make_unique<UiSurface>(
+                    entry.common.xpos,
+                    entry.common.ypos,
+                    entry.common.width,
+                    entry.common.height);
+                if (auto series = textureService->getGuiTexture(guiName, entry.common.name))
+                {
+                    surface->setBackground((*series)->sprites.at(0));
+                }
+                return surface;
+            }
             default:
                 return std::make_unique<UiComponent>(0, 0, 1, 1);
         }

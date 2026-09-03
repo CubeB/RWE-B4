@@ -20,5 +20,14 @@ namespace rwe
 
         /** Screen scroll speed percentage, 25 to 200; 100 is the old fixed rate. */
         unsigned int scrollSpeed{100};
+
+        /** 0 off, 1 mono, 2 stereo. */
+        unsigned int soundMode{2};
+
+        /** Unit voice acknowledgements: 0 off, 1 medium, 2 full. */
+        unsigned int unitSpeech{2};
+
+        /** Screen gamma percentage, 50 to 200; 100 is untouched. */
+        unsigned int gamma{100};
     };
 }

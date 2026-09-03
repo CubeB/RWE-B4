@@ -18,11 +18,14 @@ namespace rwe
     class GameSpeed
     {
     public:
-        // Per-mille speed multipliers: 0.1x, 0.2x, 0.3x, 0.5x, 0.7x,
-        // 1.0x, 1.5x, 2.0x, 3.0x, 5.0x.
-        static constexpr std::array<int, 10> SpeedSteps = {
-            100, 200, 300, 500, 700, 1000, 1500, 2000, 3000, 5000};
-        static constexpr int DefaultIndex = 5;
+        // The original's speed control runs from -10 to +10 around normal,
+        // so there are twenty-one steps with 1.0x in the middle: a geometric
+        // ramp down to a tenth and up to ten times.
+        static constexpr std::array<int, 21> SpeedSteps = {
+            100, 130, 170, 220, 280, 360, 460, 590, 750, 800,
+            1000,
+            1300, 1700, 2200, 2800, 3600, 4600, 5900, 7500, 8700, 10000};
+        static constexpr int DefaultIndex = 10;
         static constexpr int MinIndex = 0;
         static constexpr int MaxIndex = static_cast<int>(SpeedSteps.size()) - 1;
 

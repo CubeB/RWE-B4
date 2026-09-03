@@ -131,7 +131,10 @@ namespace rwe
             sceneContext.audioService->isMusicEnabled(),
             pendingWindowMode,
             pendingShadows,
-            pendingScrollSpeed};
+            pendingScrollSpeed,
+            pendingSoundMode,
+            pendingUnitSpeech,
+            pendingGamma};
     }
 
     void MainMenuScene::applyOptions(const OptionsState& state)
@@ -143,6 +146,10 @@ namespace rwe
         pendingWindowMode = state.windowMode;
         pendingShadows = state.shadows;
         pendingScrollSpeed = state.scrollSpeed;
+        pendingSoundMode = state.soundMode;
+        pendingUnitSpeech = state.unitSpeech;
+        pendingGamma = state.gamma;
+        audio->setSoundEnabled(state.soundMode != 0);
     }
 
     void MainMenuScene::saveOptions()
@@ -161,6 +168,9 @@ namespace rwe
                                          {"window-mode", state.windowMode},
                                          {"shadows", state.shadows ? "true" : "false"},
                                          {"scroll-speed", std::to_string(state.scrollSpeed)},
+                                         {"sound-mode", std::to_string(state.soundMode)},
+                                         {"unit-speech", std::to_string(state.unitSpeech)},
+                                         {"gamma", std::to_string(state.gamma)},
                                      });
     }
 
@@ -171,6 +181,9 @@ namespace rwe
             pendingWindowMode = sceneContext.globalConfig->windowMode;
             pendingShadows = sceneContext.globalConfig->shadows;
             pendingScrollSpeed = sceneContext.globalConfig->scrollSpeed;
+            pendingSoundMode = sceneContext.globalConfig->soundMode;
+            pendingUnitSpeech = sceneContext.globalConfig->unitSpeech;
+            pendingGamma = sceneContext.globalConfig->gamma;
         }
         optionsUndo = currentOptions();
         currentOptionsPage.clear();
@@ -189,7 +202,7 @@ namespace rwe
             {
                 return "Fullscreen";
             }
-            return "Window";
+            return "Windowed";
         }
     }
 
@@ -304,6 +317,26 @@ namespace rwe
             toggle->get().setStage(pendingShadows ? 1 : 0);
         }
 
+        if (auto toggle = active.find<UiStagedButton>("MODE"))
+        {
+            toggle->get().setStage(pendingSoundMode);
+        }
+
+        if (auto toggle = active.find<UiStagedButton>("SPEECH"))
+        {
+            toggle->get().setStage(pendingUnitSpeech);
+        }
+
+        if (auto bar = active.find<UiScrollBar>("GAMMA"))
+        {
+            bar->get().setScrollBarPercent(0.2f);
+            bar->get().setScrollPercent((static_cast<float>(pendingGamma) - 50.0f) / 150.0f);
+            auto sub = bar->get().scrollChanged().subscribe([this](float v) {
+                pendingGamma = 50u + static_cast<unsigned int>(v * 150.0f);
+            });
+            bar->get().addSubscription(std::move(sub));
+        }
+
         // Screen scroll: 25 to 200 percent across the slider's travel; takes
         // effect in the next game.
         if (auto bar = active.find<UiScrollBar>("SCREEN"))
@@ -318,7 +351,7 @@ namespace rwe
 
         // What RWE has no machinery behind stays visible but grey. GAME is
         // in-game speed, meaningless from the front end.
-        for (const auto* name : {"SHADING", "ANTI", "SPEECH", "MODE", "LEFTCLICK", "UNITCHAT", "GAME"})
+        for (const auto* name : {"SHADING", "ANTI", "LEFTCLICK", "UNITCHAT", "TXTSCROL", "MAXLINES", "GAME"})
         {
             if (auto button = active.find<UiStagedButton>(name))
             {
@@ -612,12 +645,21 @@ namespace rwe
             }
             else if (message == "RESTORE")
             {
-                applyOptions(OptionsState{100, 100, true, "bordered", true, 100});
+                applyOptions(OptionsState{100, 100, true, "windowed", true, 100, 2, 2, 100});
                 goToOptionsPage(currentOptionsPage);
             }
             else if (message == "BSHADOWS")
             {
                 pendingShadows = !pendingShadows;
+            }
+            else if (message == "MODE")
+            {
+                pendingSoundMode = (pendingSoundMode + 1) % 3;
+                sceneContext.audioService->setSoundEnabled(pendingSoundMode != 0);
+            }
+            else if (message == "SPEECH")
+            {
+                pendingUnitSpeech = (pendingUnitSpeech + 1) % 3;
             }
             else if (message == "UNDO")
             {

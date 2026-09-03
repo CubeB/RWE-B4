@@ -48,11 +48,12 @@ namespace rwe
         {
             graphics.drawSpriteAbs(posX, posY, **background);
         }
-        else
+        else if (drawSolidPlate)
         {
-            // A dialog whose gui declares no panel art (SAVEGAME and friends
-            // say panel=NULL) still has to be seen: a solid plate with a
-            // border rather than an invisible rectangle of floating buttons.
+            // A dialog whose gui declares no art of its own (SAVEGAME and
+            // friends say panel=NULL, and carry no picture box either) still
+            // has to be seen: a solid plate with a border rather than an
+            // invisible rectangle of floating buttons.
             graphics.fillColor(posX, posY, sizeX, sizeY, Color(28, 34, 30));
             graphics.drawBoxOutline(posX, posY, sizeX, sizeY, Color(110, 124, 110), 2.0f);
         }
