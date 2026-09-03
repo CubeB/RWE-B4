@@ -2541,7 +2541,21 @@ namespace rwe
             // ninety degrees before coming round. A dropped weapon keeps
             // `AirStrike`'s modest run-out -- a bomb's 1280 range would send
             // the aircraft clean off the map.
-            runState.strafingPass = !std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType);
+            // ...but only against something on the ground. The original
+            // sends a fighter after another aircraft on AirToAir (0x412D40)
+            // instead, which hops around its target in twenty-unit steps
+            // rather than overshooting; running three weapon ranges past a
+            // dogfight would be worse than the generic pattern, so an air
+            // target keeps that until AirToAir itself is ported.
+            bool targetIsAirborne = false;
+            if (auto targetUnitId = std::get_if<UnitId>(&target))
+            {
+                if (auto targetState = sim->tryGetUnitState(*targetUnitId))
+                {
+                    targetIsAirborne = sim->unitDefinitions.at(targetState->get().unitType).canFly;
+                }
+            }
+            runState.strafingPass = !std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType) && !targetIsAirborne;
             runState.runOutDistance = runState.strafingPass
                 ? weaponDefinition.maxRange * 3_ss
                 : defaultAttackRunOutDistance(*unitInfo.definition, weaponDefinition.maxRange);
