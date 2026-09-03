@@ -284,6 +284,7 @@ namespace rwe
         sounds.immediateOrders = lookUpSound("IMMEDIATEORDERS");
         sounds.specialOrders = lookUpSound("SPECIALORDERS");
         sounds.setFireOrders = lookUpSound("SETFIREORDERS");
+        sounds.setMoveOrders = lookUpSound("SETMOVEORDERS");
         sounds.nextBuildMenu = lookUpSound("NEXTBUILDMENU");
         sounds.buildButton = lookUpSound("BUILDBUTTON");
         sounds.ordersButton = lookUpSound("ORDERSBUTTON");

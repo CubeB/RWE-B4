@@ -2,6 +2,7 @@
 
 #include <rwe/game/SceneTime.h>
 #include <rwe/sim/UnitFireOrders.h>
+#include <rwe/sim/UnitMovementOrders.h>
 #include <rwe/sim/UnitId.h>
 #include <rwe/sim/UnitOrder.h>
 #include <variant>
@@ -46,6 +47,11 @@ namespace rwe
         {
         };
 
+        struct SetMovementOrders
+        {
+            UnitMovementOrders orders;
+        };
+
         struct SetFireOrders
         {
             UnitFireOrders orders;
@@ -76,7 +82,7 @@ namespace rwe
             SimVector position;
         };
 
-        using Command = std::variant<IssueOrder, ModifyBuildQueue, ModifyStockpile, Stop, SetFireOrders, SetOnOff, SetCloak, SelfDestruct, CancelBuildOrder>;
+        using Command = std::variant<IssueOrder, ModifyBuildQueue, ModifyStockpile, Stop, SetFireOrders, SetMovementOrders, SetOnOff, SetCloak, SelfDestruct, CancelBuildOrder>;
 
         UnitId unit;
         Command command;

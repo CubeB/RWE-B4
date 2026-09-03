@@ -685,6 +685,23 @@ namespace rwe
 
         void localPlayerSetFireOrders(UnitId unitId, UnitFireOrders orders);
 
+        void localPlayerSetMovementOrders(UnitId unitId, UnitMovementOrders orders);
+
+        /** Select every owned live unit the predicate admits; false leaves the selection alone if nothing matched. */
+        bool selectAllWhere(const std::function<bool(const UnitState&, const UnitDefinition&)>& predicate);
+
+        /** Ctrl+letter category selection, matched against the FBI Category tokens (CTRL_V and friends). */
+        void selectAllByCategoryToken(const std::string& token);
+
+        /** F5-F8 camera bookmarks; Ctrl+Fn stores, Fn recalls. */
+        std::array<std::optional<Vector3f>, 4> cameraBookmarks;
+
+        /** Where the local player last took a hit, for F3. */
+        std::optional<SimVector> lastAttackPosition;
+
+        /** The cursor for the 'n' key's walk through the player's own units. */
+        std::optional<UnitId> nextUnitCursor;
+
         void localPlayerSetOnOff(UnitId unitId, bool on);
 
         /** Ask a unit for its cloak, or drop it. */

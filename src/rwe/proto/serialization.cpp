@@ -152,6 +152,23 @@ namespace rwe
             cmd->mutable_stop();
         }
 
+        void operator()(const PlayerUnitCommand::SetMovementOrders& c)
+        {
+            auto& out = *cmd->mutable_set_movement_orders();
+            switch (c.orders)
+            {
+                case UnitMovementOrders::HoldPosition:
+                    out.set_orders(proto::PlayerUnitCommand::SetMovementOrders::HoldPosition);
+                    break;
+                case UnitMovementOrders::Maneuver:
+                    out.set_orders(proto::PlayerUnitCommand::SetMovementOrders::Maneuver);
+                    break;
+                case UnitMovementOrders::Roam:
+                    out.set_orders(proto::PlayerUnitCommand::SetMovementOrders::Roam);
+                    break;
+            }
+        }
+
         void operator()(const PlayerUnitCommand::SetFireOrders& c)
         {
             auto& out = *cmd->mutable_set_fire_orders();
@@ -316,6 +333,23 @@ namespace rwe
         if (cmd.has_stop())
         {
             return PlayerUnitCommand(UnitId(cmd.unit()), PlayerUnitCommand::Stop());
+        }
+
+        if (cmd.has_set_movement_orders())
+        {
+            auto orders = UnitMovementOrders::Roam;
+            switch (cmd.set_movement_orders().orders())
+            {
+                case proto::PlayerUnitCommand::SetMovementOrders::HoldPosition:
+                    orders = UnitMovementOrders::HoldPosition;
+                    break;
+                case proto::PlayerUnitCommand::SetMovementOrders::Maneuver:
+                    orders = UnitMovementOrders::Maneuver;
+                    break;
+                default:
+                    break;
+            }
+            return PlayerUnitCommand(UnitId(cmd.unit()), PlayerUnitCommand::SetMovementOrders{orders});
         }
 
         if (cmd.has_set_fire_orders())

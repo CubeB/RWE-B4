@@ -120,6 +120,17 @@ message PlayerUnitCommand
     {
     }
 
+    message SetMovementOrders
+    {
+        enum MovementOrders
+        {
+            HoldPosition = 0;
+            Maneuver = 1;
+            Roam = 2;
+        }
+        MovementOrders orders = 1;
+    }
+
     message SetFireOrders
     {
         enum FireOrders
@@ -168,6 +179,7 @@ message PlayerUnitCommand
         CancelBuildOrder cancel_build_order = 8;
         SetCloak set_cloak = 9;
         ModifyStockpile modify_stockpile = 10;
+        SetMovementOrders set_movement_orders = 11;
     }
 }
 

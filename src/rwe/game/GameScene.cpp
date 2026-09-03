@@ -1967,6 +1967,93 @@ namespace rwe
         {
             healthBarsVisible = !healthBarsVisible;
         }
+        else if (keysym.key == SDLK_COMMA || keysym.key == SDLK_PERIOD)
+        {
+            // ',' and '.' page the selected builder's build menu, the
+            // original's default paging keys.
+            if (auto selectedUnit = getSingleSelectedUnit())
+            {
+                auto pages = getBuildPageCount(builderGuisDatabase, getUnit(*selectedUnit).unitType);
+                if (pages > 1)
+                {
+                    auto& guiInfo = getGuiInfo(*selectedUnit);
+                    auto step = keysym.key == SDLK_PERIOD ? 1u : pages - 1u;
+                    guiInfo.currentBuildPage = (guiInfo.currentBuildPage + step) % pages;
+                    guiInfo.section = UnitGuiInfo::Section::Build;
+                    const auto& unit = getUnit(*selectedUnit);
+                    if (auto buildPanelDefinition = getBuilderGui(builderGuisDatabase, unit.unitType, guiInfo.currentBuildPage))
+                    {
+                        setNextPanel(createBuildPanel(unit.unitType + std::to_string(guiInfo.currentBuildPage + 1), *buildPanelDefinition, unit.getBuildQueueTotals()));
+                    }
+                }
+            }
+        }
+        else if (keysym.key >= SDLK_F5 && keysym.key <= SDLK_F8)
+        {
+            // F5-F8 recall the camera bookmarks; with Ctrl held they store
+            // the current view instead, as the original does.
+            auto slot = static_cast<std::size_t>(keysym.key - SDLK_F5);
+            if (isCtrlDown())
+            {
+                cameraBookmarks[slot] = worldCameraState.position;
+            }
+            else if (cameraBookmarks[slot])
+            {
+                setCameraPosition(*cameraBookmarks[slot]);
+            }
+        }
+        else if (keysym.key == SDLK_F3)
+        {
+            // Jump to the last place one of our units took a hit.
+            if (lastAttackPosition)
+            {
+                setCameraPosition(Vector3f(simScalarToFloat(lastAttackPosition->x), 0.0f, simScalarToFloat(lastAttackPosition->z)));
+            }
+        }
+        else if (keysym.key == SDLK_F12)
+        {
+            consoleMessages.clear();
+        }
+        else if (keysym.key == SDLK_N && !isCtrlDown())
+        {
+            // Walk the player's own units one keypress at a time, selecting
+            // and centering each in turn.
+            std::optional<UnitId> first;
+            std::optional<UnitId> next;
+            bool passedCursor = !nextUnitCursor.has_value();
+            for (const auto& [unitId, unit] : simulation.units)
+            {
+                if (!unit.isAlive() || !unit.isOwnedBy(localPlayerId))
+                {
+                    continue;
+                }
+                if (!first)
+                {
+                    first = unitId;
+                }
+                if (passedCursor)
+                {
+                    next = unitId;
+                    break;
+                }
+                if (unitId == *nextUnitCursor)
+                {
+                    passedCursor = true;
+                }
+            }
+            if (!next)
+            {
+                next = first;
+            }
+            if (next)
+            {
+                nextUnitCursor = next;
+                clearUnitSelection();
+                selectAdditionalUnit(*next);
+                const auto& unit = getUnit(*next);
+                setCameraPosition(Vector3f(simScalarToFloat(unit.position.x), 0.0f, simScalarToFloat(unit.position.z)));
+            }
+        }
         else if (keysym.key == SDLK_T)
         {
             startTrack();
@@ -2031,19 +2118,15 @@ namespace rwe
         }
         else if (keysym.key == SDLK_A && isCtrlDown() && !isShiftDown())
         {
-            // Ctrl+A: select all own units visible on screen.
-            selectAllOnScreen();
+            // Ctrl+A selects every unit the player owns, anywhere on the map
+            // -- the original's special case, not merely what is on screen.
+            selectAllWhere([](const UnitState&, const UnitDefinition& d) { return d.canMove; });
         }
         else if (keysym.key == SDLK_S && isCtrlDown() && !isShiftDown())
         {
-            // Ctrl+S: stop all selected units.
-            // Routes through the deterministic command queue so MP peers
-            // see the same stop in the same tick.
-            cursorMode.next(NormalCursorMode());
-            for (const auto& unitId : selectedUnits)
-            {
-                localPlayerStopUnit(unitId);
-            }
+            // Ctrl+S is select-on-screen in the original; stop lives on the
+            // plain S quickkey through the orders panel.
+            selectAllOnScreen();
         }
         else if (keysym.key == SDLK_D && isCtrlDown() && !isShiftDown())
         {
@@ -2064,76 +2147,31 @@ namespace rwe
         }
         else if (keysym.key == SDLK_Z && isCtrlDown() && !isShiftDown())
         {
-            // Ctrl+Z: enter attack-ground cursor mode.
-            // The next left-click on the terrain issues an AttackOrder targeting
-            // the ground coordinate (handled by the AttackCursorMode mouse handler).
-            if (sounds.specialOrders)
+            // Ctrl+Z selects every owned unit of the same type as anything
+            // already selected. Attack-ground stays on the A quickkey.
+            std::unordered_set<std::string> types;
+            for (const auto& unitId : selectedUnits)
             {
-                playUiSound(*sounds.specialOrders);
+                if (auto unit = tryGetUnit(unitId))
+                {
+                    types.insert(unit->get().unitType);
+                }
             }
-            if (std::holds_alternative<AttackCursorMode>(cursorMode.getValue()))
+            if (!types.empty())
             {
-                cursorMode.next(NormalCursorMode());
-            }
-            else
-            {
-                cursorMode.next(AttackCursorMode());
-            }
-        }
-        else if (keysym.key == SDLK_W && isCtrlDown() && !isShiftDown())
-        {
-            // Ctrl+W: guard/defend cursor mode.
-            // TA's "wait" order is not a separate sim order type in RWE;
-            // the closest equivalent is the guard/defend mode.
-            if (sounds.specialOrders)
-            {
-                playUiSound(*sounds.specialOrders);
-            }
-            if (std::holds_alternative<GuardCursorMode>(cursorMode.getValue()))
-            {
-                cursorMode.next(NormalCursorMode());
-            }
-            else
-            {
-                cursorMode.next(GuardCursorMode());
+                selectAllWhere([&types](const UnitState& u, const UnitDefinition&) { return types.find(u.unitType) != types.end(); });
             }
         }
-        else if (keysym.key == SDLK_F && isCtrlDown() && !isShiftDown())
+        else if (isCtrlDown() && !isShiftDown()
+            && (keysym.key == SDLK_W || keysym.key == SDLK_F || keysym.key == SDLK_P
+                || keysym.key == SDLK_V || keysym.key == SDLK_B || keysym.key == SDLK_R))
         {
-            // Ctrl+F: fight (move-attack) cursor mode.
-            // RWE does not have a dedicated FightOrder type yet; the attack
-            // cursor mode is the closest available analogue.
-            if (sounds.specialOrders)
-            {
-                playUiSound(*sounds.specialOrders);
-            }
-            if (std::holds_alternative<AttackCursorMode>(cursorMode.getValue()))
-            {
-                cursorMode.next(NormalCursorMode());
-            }
-            else
-            {
-                cursorMode.next(AttackCursorMode());
-            }
-        }
-        else if (keysym.key == SDLK_P && isCtrlDown() && !isShiftDown())
-        {
-            // Ctrl+P: patrol cursor mode.
-            // RWE does not have a dedicated PatrolOrder type yet; the move
-            // cursor mode is the closest available analogue (issues a MoveOrder
-            // when the destination is clicked).
-            if (sounds.specialOrders)
-            {
-                playUiSound(*sounds.specialOrders);
-            }
-            if (std::holds_alternative<MoveCursorMode>(cursorMode.getValue()))
-            {
-                cursorMode.next(NormalCursorMode());
-            }
-            else
-            {
-                cursorMode.next(MoveCursorMode());
-            }
+            // The original's Ctrl+letter selections are data-driven: it
+            // formats "CTRL_%c" and matches the FBI Category tokens, and the
+            // shipped data defines CTRL_W (weapons), CTRL_V (vtols), CTRL_F
+            // (factories), CTRL_B (builders), CTRL_R (radars) and CTRL_P.
+            char letter = static_cast<char>(std::toupper(keysym.key));
+            selectAllByCategoryToken(std::string("CTRL_") + letter);
         }
         else
         {
@@ -4511,6 +4549,44 @@ namespace rwe
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SetFireOrders{orders}));
     }
 
+    void GameScene::localPlayerSetMovementOrders(UnitId unitId, UnitMovementOrders orders)
+    {
+        localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SetMovementOrders{orders}));
+    }
+
+    bool GameScene::selectAllWhere(const std::function<bool(const UnitState&, const UnitDefinition&)>& predicate)
+    {
+        std::vector<UnitId> matches;
+        for (const auto& [unitId, unit] : simulation.units)
+        {
+            if (!unit.isAlive() || !unit.isOwnedBy(localPlayerId))
+            {
+                continue;
+            }
+            if (predicate(unit, simulation.unitDefinitions.at(unit.unitType)))
+            {
+                matches.push_back(unitId);
+            }
+        }
+        if (matches.empty())
+        {
+            return false;
+        }
+        clearUnitSelection();
+        for (auto unitId : matches)
+        {
+            selectAdditionalUnit(unitId);
+        }
+        return true;
+    }
+
+    void GameScene::selectAllByCategoryToken(const std::string& token)
+    {
+        selectAllWhere([&token](const UnitState&, const UnitDefinition& d) {
+            return categoryListContains(d.category, token);
+        });
+    }
+
     void GameScene::localPlayerSetOnOff(UnitId unitId, bool on)
     {
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SetOnOff{on}));
@@ -5930,6 +6006,13 @@ namespace rwe
                     {
                         addBattlePoints(1);
                     }
+                    if (e.victimOwner == localPlayerId)
+                    {
+                        if (auto victim = tryGetUnit(e.unitId))
+                        {
+                            lastAttackPosition = victim->get().position;
+                        }
+                    }
                 },
                 [&](const UnitDiedEvent& e) {
                     const auto& unitDefinition = simulation.unitDefinitions.at(e.unitType);
@@ -6518,6 +6601,31 @@ namespace rwe
                 localPlayerSetFireOrders(selectedUnit, newFireOrders);
             }
         }
+        else if (matchesWithSidePrefix("MOVEORD", message))
+        {
+            if (sounds.setMoveOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.setMoveOrders);
+            }
+
+            for (const auto& selectedUnit : selectedUnits)
+            {
+                auto& u = getUnit(selectedUnit);
+
+                // Gathered from MobileStandOrders the way FIREORD comes from
+                // FireStandOrders: a unit that does not name it keeps its own
+                // order instead of being dragged round the cycle.
+                if (!simulation.unitDefinitions.at(u.unitType).mobileStandOrders)
+                {
+                    continue;
+                }
+
+                auto next = u.moveOrders == UnitMovementOrders::HoldPosition
+                    ? UnitMovementOrders::Maneuver
+                    : (u.moveOrders == UnitMovementOrders::Maneuver ? UnitMovementOrders::Roam : UnitMovementOrders::HoldPosition);
+                localPlayerSetMovementOrders(selectedUnit, next);
+            }
+        }
         else if (matchesWithSidePrefix("ONOFF", message))
         {
             if (sounds.immediateOrders)
@@ -7099,6 +7207,12 @@ namespace rwe
             },
             [&](const PlayerUnitCommand::SetFireOrders& c) {
                 setFireOrders(unitCommand.unit, c.orders);
+            },
+            [&](const PlayerUnitCommand::SetMovementOrders& c) {
+                if (auto unit = tryGetUnit(unitCommand.unit))
+                {
+                    unit->get().moveOrders = c.orders;
+                }
             },
             [&](const PlayerUnitCommand::SetOnOff& c) {
                 if (c.on)
