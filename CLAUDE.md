@@ -103,6 +103,13 @@ read out of `TotalA.exe` instead of guessed at.
   ones to read first if you are about to change something — where RWE
   **deliberately** differs, so those do not get "corrected" back, and what is
   decoded but not ported.
+- `docs/TOTALA-EXE-SHADING.md` — the shaded unit rasterizer in full: the
+  16-byte vertex record, the per-vertex shade level and its `& 0x1F`, the
+  averaged (and deliberately unnormalised) vertex normals, and the Gouraud
+  interpolation of the integer row. Read this before touching the unit
+  shaders. Two things in it overturn earlier readings: the level belongs at
+  the vertex, not the pixel, and the sun vector is not normalised, which sets
+  the ramp's width at thirteen rows rather than thirty-two.
 - `docs/TOTALA-EXE-MISSIONS.md` — how aircraft decide *where to go* when
   attacking: the mission name table and its handlers, the bomber attack run,
   the gunship standoff ring, and what `hoverattack` and `maneuverleashlength`

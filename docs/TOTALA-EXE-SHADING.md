@@ -1,0 +1,999 @@
+# The SHADED unit rasterizer, part one: geometry and the per-vertex shade level
+
+A second, independent read of `0x459C70` and everything it calls, down to but
+not including the span fillers. Same binary as `docs/TOTALA-EXE.md`: GOG
+release, 1,178,624 bytes, MD5 `8e74a1dffa1f5988624c52048f5b20cd`, image base
+`0x400000`.
+
+The headline, up front, because it inverts the previous pass's advice:
+
+**The arithmetic in `FINDINGS-VISUALOPTIONS.md` section 05 is correct. Every
+constant, the truncation, the mask, the un-renormalised average -- all of it
+byte-verified again here, and it reproduces ARMSOLAR's black right panel
+exactly. What is wrong is everything around it.** The exe computes the level
+**once per vertex**, from a **smoothed** normal that it deliberately leaves
+short, against a light vector it deliberately leaves **un-normalised**, and then
+**Gouraud-interpolates the integer row number** across the polygon. RWE does
+none of those three things: it flat-shades each triangle from a per-triangle
+face normal, normalises both the normal and the light, and models the table as
+a straight `0.06875 * k`. Section 15 lists the corrections one by one, with the
+numbers each produces on ARMSOLAR.
+
+---
+
+## 01. Method, and what is VERIFIED versus INFERRED
+
+Every instruction quoted below was read out of the flat `.text` listing and the
+load-bearing sequences were then checked against the raw file bytes (section 07
+prints them). Floats were read out of `.rdata`/`.data` and printed, not assumed.
+The whole per-piece pipeline was then transcribed into a standalone Python
+program and replayed against the real `armsolar.3do` and the real
+`palettes\PALETTE.SHD`; the numbers in sections 09, 13 and 14 come from that
+replay, not from arithmetic done in my head.
+
+Labels used throughout:
+
+- **VERIFIED** -- read off the instructions (and, where it matters, the bytes).
+- **INFERRED** -- a name or purpose attached to something whose mechanism is
+  verified but whose meaning is not directly evidenced.
+- **NOT FOUND** -- looked for, not present. Stated as such rather than guessed.
+
+Pivot addresses for redoing this:
+
+| Address | What |
+|---|---|
+| `0x4586A0` | draw one model instance; the SHADING branch at `0x458744` |
+| `0x459C70` | the shaded model driver -- this document |
+| `0x459830` | the unshaded twin, same structure, 12-byte points |
+| `0x4B6F00` | vector subtract, integer in, float out |
+| `0x4B6F70` | cross product |
+| `0x4B6FF0` | normalize, **no zero-length guard** |
+| `0x4E43A0` | `_ftol`, truncate toward zero |
+| `0x5065F8` / `FC` / `0x506600` | the light vector components |
+| `0x4FD4CC` | the 5.0 multiplier |
+| `0x4C8BB0` | shaded textured-quad rasterizer -- the gradient setup |
+| `0x4C0C70` | shaded flat-colour n-gon -- same treatment of the shade field |
+| `0x480DF0` / `0x480E70` | COB `SHADE`/`DONT_SHADE` setter and getter |
+| `0x480DB0` | COB `CACHE`/`DONT_CACHE` setter |
+| `0x45AEC0` | the piece-list builder, where the default flags are set |
+| `0x4B1288` / `0x4B128E` | the COB opcode dispatch for `SHADE` / `DONT_SHADE` |
+
+---
+
+## 02. The call, and its four arguments
+
+VERIFIED. `0x4586A0` picks the rasterizer and passes four arguments plus `this`:
+
+```
+458736:  mov  ecx,[ebp+0x110]              ; ebp = the unit
+45873c:  test ecx,0x20000000               ; "this drawable has a unit record"
+458742:  je   0x458779
+458744:  mov  edx,ds:0x511de8
+45874a:  test byte [edx+0x37f06],0x20      ; the SHADING option
+458751:  je   0x458779
+458753:  mov  ecx,[esp+0x28]               ; arg3 of 0x4586A0
+458757:  xor  edx,edx
+458759:  mov  dl,[ebp+0xff]                ; the owning player index
+45875f:  push ecx
+458760:  push edx
+458761:  push edi                          ; the drawable
+458762:  push eax                          ; the destination surface
+458763:  mov  ecx,esi
+458765:  call 0x459C70
+```
+
+so, inside `0x459C70`:
+
+| Slot | Contents |
+|---|---|
+| `[esp+0x159E8]` | arg1, the destination surface |
+| `[esp+0x159EC]` | arg2, the drawable |
+| `[esp+0x159F0]` | arg3, `[unit+0xFF]`, the owning player index |
+| `[esp+0x159F4]` | arg4, the *pass selector*: `-1`, `0` or `1` (section 12) |
+
+All four callers of `0x4586A0` were checked: `0x45890C`, `0x45936E` and
+`0x4595FC` pass arg3 = **1**; `0x459670` passes **-1**. There is no caller
+passing 0 into the shaded path. VERIFIED.
+
+Surface layout as this routine uses it, VERIFIED: `+0x00` width (word),
+`+0x02` height (word), `+0x04` originX (word), `+0x06` originY (word),
+`+0x10` the 8-bit pixel plane, `+0x14` the 8-bit height plane.
+
+---
+
+## 03. The frame: four arrays of exactly 2000
+
+VERIFIED. `mov eax,0x159d4 / call 0x4e4b20` is the stack probe; the frame is
+88,532 bytes and holds four per-piece arrays:
+
+| Base | Stride | Count | What |
+|---|---|---|---|
+| `esp+0x224` | 12 | 2000 | `vertexNormal[]`, three float32 |
+| `esp+0x5FE4` | 12 | 2000 | `faceNormal[]`, three float32, indexed by **primitive** |
+| `esp+0xBDA4` | 4 | 2000 | `count[]`, int32, faces touching each vertex |
+| `esp+0xDCE4` | 16 | 2000 | `point[]`, the projected vertex records |
+
+The point array ends exactly at the first saved register, so 2000 is the real
+capacity of all four. A piece with more than 2000 vertices or 2000 primitives
+smashes this frame; the exe does not check.
+
+A fifth, small array at `esp+0x94` (0x190 bytes, 25 records of 16) is the
+scratch the current primitive's corners are copied into before the rasterizer
+call.
+
+Piece iteration runs **backwards**, last piece first (`sub ecx,0x36` at
+`0x45A3ED`), stride `0x36` = 54 bytes, first piece at `drawable+0x22`.
+
+Piece record, VERIFIED from this routine plus the COB accessors at
+`0x480C30`-`0x480E70`:
+
+| Offset | What |
+|---|---|
+| `+0x00` | pointer to the 3DO object |
+| `+0x04`/`+0x08`/`+0x0C` | COB `MOVE` offsets, x/y/z, 16.16 |
+| `+0x10`/`+0x12`/`+0x14` | COB `TURN` angles, words |
+| `+0x16`...`+0x21` | accumulated transform offsets |
+| `+0x22` | the working (transformed) vertex buffer |
+| `+0x26` | word, "already transformed" |
+| `+0x28` | **flags byte** -- bit 0 show, bit 1 cache, bit 2 shade |
+| `+0x2A` | sibling piece |
+| `+0x2E` | child piece |
+
+3DO object record, as the exe uses it: `+0x04` vertex count (`0x459DDD`),
+`+0x08` primitive count (`0x459F59`), `+0x0C` selection primitive
+(`0x459F42`), `+0x24` vertex array (`0x45AEFF`), `+0x28` primitive array
+(`0x459F48`), `+0x2C` sibling, `+0x30` child.
+
+Primitive record, stride `0x20`, VERIFIED: `+0x00` colour index (pushed to the
+flat filler at `0x45A3A3`), `+0x04` vertex count, `+0x0C` pointer to the
+`uint16` vertex-index array, `+0x10` texture (or a word frame index),
+`+0x18` GAF animation for team/animated textures, `+0x1C` flags.
+
+**The vertex buffer is 16.16 fixed point.** VERIFIED two ways: every consumer
+shifts right by 16 (`sar eax,0x10` at `0x459E37`, `0x458242`, `0x45837B`), and
+the 3DO file itself stores 16.16 -- `armsolar.3do` vertex 24 is `2375680`
+= 36.25. `0x45AEC0` copies the file's vertex array into the piece buffer with a
+plain `rep movs`, and `0x45B030` resets it the same way; `0x45B0A0`/`0x45B150`
+then rotate it in place (`0x4B6CC0` -> `0x4B7173`, `fsincos` and `fistp` back
+to int32), adding **the drawable's own rotation `[drawable+0x18/0x1A/0x1C]` for
+the root piece only** (`0x45B0DB`) and composing down the hierarchy.
+
+So the normals are computed in a space that already carries the unit's heading.
+A building facing north and the same building facing south shade differently.
+VERIFIED.
+
+---
+
+## 04. Pass 1 -- projection, and the 16-byte vertex record
+
+`0x459E27`-`0x459F38`. The unshaded twin `0x459830` writes 12 bytes per vertex
+(`0x459A01`, `0x459A09`, `0x459A41` -- three stores and no fourth); this one
+writes 16.
+
+| Offset | Type | Contents | Written at |
+|---|---|---|---|
+| `+0x00` | int32 | screen x, **plus the surface origin x** | `0x459E7D`, origin added `0x459F05` |
+| `+0x04` | int32 | screen y, **plus the surface origin y** | `0x459E89`, origin added `0x459F1C` |
+| `+0x08` | int32 | height-buffer value | `0x459EC2` / `0x459EEF` |
+| `+0x0C` | int32 | **shade level** | `0x459EF6` (placeholder), `0x45A2EF` (real) |
+
+VERIFIED, with the projection being:
+
+```
+X = (x >> 16) sign-extended from 16 bits
+Y = (y >> 16) sign-extended
+Z = ((-z) >> 16) sign-extended
+
+1x:  pt.x = X            pt.y = Z - (Y >> 1)        pt.height = Y + K
+2x:  pt.x = 2X           pt.y = 2Z - Y              pt.height = Y + K
+K = (unitdef[0x241] & 0x40000000) ? 0x7D (125) : 0x32 (50)
+```
+
+Note the 2x form: `pt.y = 2Z - Y` is `2*(Z - Y/2)` with the halving done
+exactly rather than truncated, and the height is divided back down
+(`cdq / sub eax,edx / sar eax,1` at `0x459E95`) so it stays in model units.
+
+**The shade field's format.** VERIFIED: it is a **plain 32-bit integer holding a
+row number 0..31**. Not 8.8, not 16.16, not a fraction. Two independent proofs:
+
+1. Pass 1 seeds it with a *placeholder* `and edi,0x1F` where `edi` counts `+3`
+   per vertex (`0x459E8E`, `0x459F1F`) -- i.e. `(3*i) & 31`, a rainbow. That is
+   only meaningful as a row index. (The placeholder is dead: pass 3 overwrites
+   `+0x0C` for every vertex of every drawn primitive. It survives in the binary
+   as evidence of intent.)
+2. `0x4C8BB0` shifts it left by 16 to make a 16.16 interpolant
+   (`0x4C8D8A`: `mov ebp,[ebp+0xc] / shl ebp,0x10`). If it were already
+   fixed-point that shift would be nonsense.
+
+**Clamped, wrapped or saturated at write time?** VERIFIED: **wrapped**, by
+`and eax,0x1F` on the truncated integer (`0x45A2EC`). There is no `cmp`, no
+`cmov`, no clamp, and no second table lookup anywhere between the `_ftol` and
+the store. Section 07 has the bytes.
+
+---
+
+## 05. Pass 2a -- the face normal, `0x459F79`-`0x45A133`
+
+VERIFIED. The loop starts at primitive index 1 whenever the object declares a
+selection primitive, and at 0 otherwise:
+
+```
+459f42:  mov  eax,[ebx+0xc]        ; obj->selectionPrimitive
+459f45:  cmp  eax,0xffffffff
+459f48:  mov  eax,[ebx+0x28]       ; obj->primitives
+459f4b:  je   0x459f57
+459f4d:  add  eax,0x20             ; skip primitive 0
+459f50:  mov  edi,0x1
+459f55:  jmp  0x459f59
+459f57:  xor  edi,edi
+```
+
+Worth being exact about: the exe does **not** use the value of
+`selectionPrimitive` as an index. It tests it against -1 and, if it is anything
+else, skips primitive **0**. All stock models put the selection plate first
+(ARMSOLAR declares `sel = 0`), so the distinction never shows, but a mod that
+put it elsewhere would have primitive 0 dropped and the selection plate drawn.
+VERIFIED; the same construction appears again at `0x45A133` and `0x45A22C`.
+
+The selection primitive therefore contributes **no face normal and no
+accumulation**, and its exclusive vertices keep `count == 0`. VERIFIED.
+
+Three indices are read from every primitive regardless of its declared vertex
+count:
+
+```
+459f79:  mov  edx,[esp+0x14]       ; &prim[0x0C]
+459f7d:  mov  edx,[edx]            ; the uint16 index array
+459f7f:  mov  cx,[edx]             ; i0
+459f82:  mov  ax,[edx+0x2]         ; i1
+459f86:  cmp  cx,ax
+459f89:  je   0x45a101             ; i0 == i1 -> degenerate
+459f8f:  mov  dx,[edx+0x4]         ; i2
+459f93:  cmp  ax,dx
+459f96:  je   0x45a0fd             ; i1 == i2 -> degenerate
+459f9c:  cmp  dx,cx
+459f9f:  je   0x45a0fd             ; i2 == i0 -> degenerate
+```
+
+Degenerate case, VERIFIED at `0x45A101`: the face normal is set to the literal
+`(0.0, +1.0, 0.0)` -- a **unit** vector, model-space up. Because the exe's
+normals point inward (below), that reads as a face pointing straight *down*,
+and gives `5*dot = +5.0` -> level 5, a dark row. A primitive that repeats an
+index is shaded dark, not skipped.
+
+The non-degenerate case, with the argument order established by reading
+`0x4B6F00` (`ret 0x1c`; it computes **b - a**, `fild`-ing integer differences
+into floats):
+
+```
+45a027:  call 0x4B6F00   (ret, a = V[i1], b = V[i0])   ->  A = V[i0] - V[i1]
+45a072:  call 0x4B6F00   (ret, a = V[i1], b = V[i2])   ->  B = V[i2] - V[i1]
+45a0a9:  call 0x4B6F70   (ret, a = A,     b = B)       ->  N = A x B
+45a0b5:  faceNormal[prim] = N                          ; the RAW cross
+45a0dc:  call 0x4B6FF0   (ret, N)                      ->  normalize
+45a0ed:  faceNormal[prim] = normalize(N)               ; overwrites it
+```
+
+`0x4B6F70` was decoded instruction by instruction from the `fxch` dance and is
+the ordinary right-handed `a x b`. `0x4B6FF0` is an ordinary normalize --
+`fsqrt` of the sum of squares, three `fdiv` -- **with no guard against zero
+length**. A face whose indices are all distinct but whose points are collinear
+yields `0/0`; with the CRT's masked exceptions that is the x87 indefinite NaN,
+which propagates through the average and the dot, and `_ftol` of a NaN returns
+`0x80000000`, so `& 0x1F` gives **0** -- pure black. VERIFIED as a mechanism; I
+did **not** find such a face in stock data, so whether it ever fires is NOT
+ESTABLISHED.
+
+`A x B` with `A = V[i0]-V[i1]`, `B = V[i2]-V[i1]` is the **negative** of the
+right-hand normal for the winding i0->i1->i2. Confirmed against real geometry:
+`armsolar.3do` piece `base`, primitive 3 is the flat top plate of the skirt
+(indices 18,17,21,22, all at y = 4.04, the outward face pointing up) and the
+routine yields `(0, -1, 0)`. **The exe's normals point into the model.**
+VERIFIED. Everything below is stated in those terms.
+
+---
+
+## 06. Pass 2b -- the average, `0x45A133`-`0x45A22C`
+
+VERIFIED, and byte-verified in section 07. For every primitive from the start
+index, for every one of its `[prim+0x04]` indices:
+
+```
+45a195:  fld  [esp+ecx+0x224]      ; vertexNormal[idx].x
+45a19c:  fadd [edx-0x4]            ; + faceNormal[prim].x
+45a19f:  fstp [esp+ecx+0x224]
+45a1a6:  fld  [edx]                ; ... .y
+45a1a8:  fadd [esp+ecx+0x228]
+45a1af:  fstp [esp+ecx+0x228]
+45a1b6:  fld  [esp+ecx+0x22c]      ; ... .z
+45a1bd:  fadd [edx+0x4]
+45a1c7:  fstp [ecx]
+45a1c9:  mov  ecx,[eax]            ; count[idx]++
+45a1cb:  inc  ecx
+45a1cd:  mov  [eax],ecx
+```
+
+then, once per vertex of the piece:
+
+```
+45a1fd:  mov  edx,[ecx]            ; count[i]
+45a1ff:  test edx,edx
+45a205:  je   0x45a223             ; count == 0 -> leave the normal at (0,0,0)
+45a207:  fild [esp+0x18]
+45a20b:  fld  [eax-0x4] / fdiv st,st(1) / fstp [eax-0x4]
+45a213:  fld  [eax]     / fdiv st,st(1) / fstp [eax]
+45a219:  fld  [eax+0x4] / fdiv st,st(1) / fstp [eax+0x4]
+45a221:  fstp st(0)
+```
+
+Three things that matter and that the previous write-up understated:
+
+1. **There is no re-normalisation, and that is not a rounding detail -- it is
+   most of the shading.** The stored value is the *mean* of unit face normals,
+   so its length collapses toward 0 wherever adjacent faces disagree. On
+   ARMSOLAR's `base` piece every vertex normal has length **0.727 to 0.760**
+   (measured; section 14). The whole model's `5*dot` is therefore scaled by
+   about three quarters relative to a unit normal.
+2. **The accumulation and the divide are done in float32** -- each `fadd` is
+   followed by an `fstp DWORD`, and the quotient is stored as `DWORD`. To match
+   bit-for-bit, accumulate in `float`, round to `float` after each add and after
+   the divide, and do the final dot in `double`.
+3. **Zero-count vertices keep `(0,0,0)`**, which dots to 0 and lands on row 0,
+   black. In stock data that only affects the selection plate's own vertices,
+   which are never drawn.
+
+The averaging is **per piece**. The arrays are reset per piece: `count[]` by the
+`rep stos` at `0x459E25`, `vertexNormal[]` by the three stores inside the
+projection loop (`0x459F0A`-`0x459F15`). A vertex at the same position in two
+different pieces is shaded independently. VERIFIED.
+
+---
+
+## 07. Pass 3 -- the level, byte for byte
+
+`0x45A256`-`0x45A305`. For each primitive, for each of its declared vertices,
+the 16-byte point record is copied into the scratch quad and then `+0x0C` is
+overwritten:
+
+```
+45a266:  lea  esi,[esp+0xa0]              ; &scratch[0].shade
+45a26f:  lea  ecx,[esi-0xc]               ; &scratch[0]
+45a272:  mov  dx,[ebp+0x0]                ; the vertex index
+45a276:  shl  edx,0x4
+45a279:  lea  eax,[esp+edx+0xdce4]        ; &point[idx]
+45a280..45a298:  copy all 16 bytes
+45a29b:  mov  ecx,[esp+0x1c]              ; the PIECE record
+45a29f:  mov  dl,[ecx+0x28]               ; piece flags
+45a2a2:  shr  dl,0x2
+45a2a5:  test dl,0x1                      ; bit 2 -- the COB SHADE state
+45a2a8:  je   0x45a2f3
+45a2aa:  xor  eax,eax
+45a2ac:  mov  ax,[ebp+0x0]
+45a2b0:  lea  eax,[eax+eax*2]
+45a2b3:  shl  eax,0x2                     ; idx * 12
+45a2b6:  fld  [esp+eax+0x224]             ; n.x
+45a2bd:  fmul ds:0x5065F8
+45a2c3:  fld  [esp+eax+0x228]             ; n.y
+45a2ca:  fmul ds:0x5065FC
+45a2d0:  faddp st(1),st
+45a2d2:  fld  [esp+eax+0x22c]             ; n.z
+45a2d9:  fmul ds:0x506600
+45a2df:  faddp st(1),st
+45a2e1:  fmul ds:0x4FD4CC
+45a2e7:  call 0x4E43A0                    ; _ftol
+45a2ec:  and  eax,0x1F
+45a2ef:  mov  [esi],eax
+45a2f1:  jmp  0x45a2f9
+45a2f3:  mov  dword [esi],0xF             ; DONT_SHADE -> row 15
+45a2f9:  mov  eax,[edi+0x4]
+45a2fc:  inc  ebx
+45a2fd:  add  esi,0x10
+45a300:  add  ebp,0x2
+45a303:  cmp  ebx,eax
+45a305:  jl   0x45a26d
+```
+
+The raw bytes, so there can be no argument about a missing term:
+
+```
+0045A29B  8b 4c 24 1c 8a 51 28 c0 ea 02 f6 c2 01 74 49 33
+0045A2AB  c0 66 8b 45 00 8d 04 40 c1 e0 02 d9 84 04 24 02
+0045A2BB  00 00 d8 0d f8 65 50 00 d9 84 04 28 02 00 00 d8
+0045A2CB  0d fc 65 50 00 de c1 d9 84 04 2c 02 00 00 d8 0d
+0045A2DB  00 66 50 00 de c1 d8 0d cc d4 4f 00 e8 b4 a0 08
+0045A2EB  00 83 e0 1f 89 06 eb 06 c7 06 0f 00 00 00 8b 47
+```
+
+Between `d8 0d cc d4 4f 00` (`fmul [0x4FD4CC]`) and `83 e0 1f` (`and eax,0x1F`)
+there is exactly one instruction, the call to `_ftol`. **No `fadd` of a bias, no
+`fsub`, no ambient term, no second `fmul`, no `cmp`/`jcc` clamp, no table
+lookup.** VERIFIED at the byte level.
+
+**The constants**, read out of the image and printed:
+
+| Address | Bytes | Value |
+|---|---|---|
+| `0x5065F8` | `cd cc 4c bf` | `-0.800000011920929f` |
+| `0x5065FC` | `00 00 80 3f` | `1.0f` |
+| `0x506600` | `00 00 80 3e` | `0.25f` |
+| `0x4FD4CC` | `00 00 a0 40` | `5.0f` |
+
+The 5.0 is CONFIRMED. The light vector is CONFIRMED as `(-0.8, 1.0, 0.25)` and
+has exactly **two** references in the whole image: the reader above, and the
+setter `0x459816`-`0x459824`, which multiplies three integer arguments by
+`0.01f` (`[0x4FD4C8]`) and whose only caller is the console command handler
+`0x4166C0`. Nothing normalises it, at startup or ever. Its length is
+`sqrt(0.64 + 1 + 0.0625) = 1.304799...`. VERIFIED.
+
+`0x4E43A0` is the MSVC `_ftol`:
+
+```
+4e43a6:  fstcw [ebp-0x2]
+4e43af:  or    ah,0xc            ; RC = 11, round toward zero
+4e43b6:  fldcw [ebp-0x4]
+4e43b9:  fistp qword [ebp-0xc]
+4e43bf:  mov   eax,[ebp-0xc]     ; low dword
+```
+
+**Truncates toward zero.** CONFIRMED, and the mask acts on the low 32 bits of
+the 64-bit result, so a negative value wraps as two's complement.
+
+So, exactly and finally:
+
+```
+level = ( (int32)( 5.0 * ( n.x*(-0.8) + n.y*1.0 + n.z*0.25 ) ) ) & 0x1F
+```
+
+with `n` the **un-normalised** mean of the piece's unit inward face normals, the
+light vector **un-normalised**, C truncation toward zero, and 15 for a piece
+whose flag bit 2 is clear.
+
+---
+
+## 08. What the level can actually be: thirteen rows out of thirty-two
+
+VERIFIED by construction. `|n| <= 1` (the mean of unit vectors, by the triangle
+inequality) and `|L| = 1.30480`, so
+
+```
+|5 * dot(n, L)|  <=  5 * 1.30480  =  6.5240
+```
+
+Truncation therefore lands in `[-6, +6]`, and the mask maps that to
+
+| trunc | -6 | -5 | -4 | -3 | -2 | -1 | 0..6 |
+|---|---|---|---|---|---|---|---|
+| row | 26 | 27 | 28 | 29 | 30 | 31 | 0..6 |
+
+**Only rows 0-6 and 26-31 are ever produced at a vertex -- thirteen of the
+thirty-two.** Plus row 15 for a `DONT_SHADE` piece. The middle of the table
+(rows 7-14 and 16-25) is unreachable at a vertex and exists *only* because the
+level is interpolated across the polygon (section 10). That is a strong
+internal argument that the interpolation is meant to be there and that the wrap
+is not an accident: an implementation that quantises per pixel instead of per
+vertex would never touch two thirds of the table the game ships.
+
+---
+
+## 09. The table those rows index -- measured, not assumed
+
+The level is a row of `palettes\PALETTE.SHD`, an 8,192-byte table used as
+`SHD[level*256 + texel]`. The previous pass established the plumbing
+(`0x42E1D0` builds the path, `0x4BAB00` installs `0x800` dwords into
+`[disp+0xC4]`, allocated under the name `SHADE TABLE`) and I have no correction
+to make to any of that.
+
+I **do** have a correction to make to the arithmetic. The previous pass read the
+*fallback generator* `0x4BADF0` (`scale += 0.06875` per row) and reported the
+table as "row k multiplies by 0.06875k". That is what the generator would
+produce **before** its own `min(255, ...)` clamp and before the nearest-palette
+snap, and it is not what the shipped file does. Measured directly from
+`totala1\palettes\PALETTE.SHD` against `PALETTE.PAL` -- mean output/input
+luminance over every palette entry brighter than 4:
+
+| row | measured | `0.06875k` | | row | measured | `0.06875k` |
+|---|---|---|---|---|---|---|
+| 0 | **0.0000** | 0.000 | | 15 | **1.0009** | 1.031 |
+| 1 | **0.0455** | 0.069 | | 26 | **1.6127** | 1.788 |
+| 2 | **0.1180** | 0.138 | | 27 | **1.6711** | 1.856 |
+| 3 | **0.1939** | 0.206 | | 28 | **1.6957** | 1.925 |
+| 4 | **0.2676** | 0.275 | | 29 | **1.7392** | 1.994 |
+| 5 | **0.3438** | 0.344 | | 30 | **1.7793** | 2.063 |
+| 6 | **0.4085** | 0.413 | | 31 | **1.8070** | 2.131 |
+| 14 | **0.9948** | 0.963 | | | | |
+
+Two things fall out:
+
+- **Identity is rows 14 *and* 15**, exactly -- probes at palette indices 100,
+  180, 214 and 250 all come back unchanged through both rows. That is why
+  `DONT_SHADE` hard-codes 15: it is the "x1.00" row. This independently
+  confirms that `TOTALA-EXE.md` section 54's "identity at row 16" is wrong.
+- **The bright end is compressed, hard.** Row 31 is 1.807x, not 2.131x, and for
+  an already-saturated colour it is 1.000x -- palette index 250 (`0,255,0`)
+  comes back as itself at every row from 14 to 31. A model painted in bright
+  primaries barely brightens at all; a mid-grey one brightens by 80%. There is
+  no linear multiplier that reproduces this. **Use the file.**
+
+`PALETTE.LHT` (`[disp+0xC8]`, `LIGHT TABLE`) is a different 32x256 ramp and is
+NOT used by this path. `PALETTE.ALP` (`[disp+0xC0]`) is the anti-alias blend
+table. Both re-confirmed.
+
+---
+
+## 10. Interpolation: Gouraud, and it is the ROW that is interpolated
+
+VERIFIED in `0x4C8BB0`, the shaded quad rasterizer. Its edge walk builds a span
+table of `0x28`-byte rows carrying five interpolants a side:
+
+| Offset | Left | Right |
+|---|---|---|
+| `+0x00` / `+0x04` | x (integer) | x (integer) |
+| `+0x08` / `+0x10` | u 16.16 | u 16.16 |
+| `+0x0C` / `+0x14` | v 16.16 | v 16.16 |
+| `+0x18` / `+0x1C` | height 16.16 | height 16.16 |
+| `+0x20` / `+0x24` | **shade 16.16** | **shade 16.16** |
+
+The shade setup, for the left edge (the right edge at `0x4C8F40`-`0x4C8F98` is
+identical):
+
+```
+4c8d87:  mov  ebp,[ebp+0xc]        ; point[i].shade, an integer 0..31
+4c8d8a:  shl  ebp,0x10             ; -> 16.16
+...
+4c8dd2:  mov  eax,[esp+0x10]
+4c8dd6:  mov  eax,[eax+0xc]        ; point[i-1].shade
+4c8dd9:  shl  eax,0x10
+4c8ddc:  sub  eax,ebp              ; delta
+4c8dde:  cdq
+4c8ddf:  idiv ecx                  ; / (y1 - y0)  -> per-scanline gradient
+...
+4c8e2e:  (per scanline)  mov [ecx+0x20],ebp ; store  /  add ebp,edx ; step
+```
+
+VERIFIED details:
+
+- The shade interpolant is **16.16**, obtained by `shl 16` of the integer row.
+- The gradient is `((row1 - row0) << 16) / dy`, `idiv`, truncating toward zero.
+- There is **no** half-scanline rounding bias on shade. There *is* one on x
+  (`add esi,0xffff` at `0x4C8D6A`), and only on x.
+- When the top vertex is above the surface (`y0 < 0`) the interpolant is
+  prestepped to scanline 0 by `start -= grad * y0` (`0x4C8DE1`-`0x4C8E2C`).
+  Shade is prestepped along with everything else.
+- **No mask, no clamp, no `and 0x1F`** anywhere in `0x4C8BB0`. The only `and`
+  in the whole routine is `and esi,0x3` on a vertex index. Because both
+  endpoints are in 0..31 and the interpolation is linear and truncating, the
+  value cannot leave the range, so none is needed.
+
+The flat-colour n-gon filler `0x4C0C70` treats `+0x0C` identically
+(`0x4C0DD7`: `mov esi,[esi+0xc] / shl esi,0x10`), so a flat-coloured face is
+Gouraud-shaded too.
+
+**Consequence, and this is the visual point.** A quad whose corners came out at
+rows 29 and 0 is drawn as a smooth ramp from 1.74x down to black, sweeping
+through rows 28, 27, ... 2, 1 -- the "unreachable" middle of the table. It does
+**not** wrap the short way round. That gradient is the original's look. Compute
+the level per *pixel* from an interpolated normal instead and the same face
+becomes a flat bright field with an abrupt black edge where the dot crosses
+zero -- the same rows at the two corners, a completely different picture in
+between.
+
+Whether the span filler re-derives the row as `shade >> 16` per pixel, and how
+it indexes the table, is `0x4C8020`'s business and belongs to the second half.
+
+---
+
+## 11. Per-piece and per-unit modifiers
+
+**Piece flags bit 2 is the COB `SHADE` / `DONT_SHADE` state.** This is the
+correction that matters most in this section -- the previous pass reported bit 2
+as "set unconditionally, no writer that clears it found, dead code". There is a
+writer, and it is a COB opcode.
+
+VERIFIED chain:
+
+```
+; the COB interpreter, 0x4B1272
+4b1272:  cmp  edx,0x1000e000       ; DONT_SHADE
+4b1278:  ja   0x4b12a7
+4b127a:  je   0x4b128e
+4b127c:  cmp  edx,0x1000d000       ; SHADE
+4b1282:  jne  0x4b1b60
+4b1288:  mov  edx,[edi]  / push 0x1
+4b128e:  mov  edx,[edi]  / push 0x0
+4b1292:  mov  eax,[eax+ecx*4+0x4]  ; the piece index
+4b1299:  call [edx+0x10]           ; -> 0x480DF0
+```
+
+```
+480df0:  mov  eax,[esp+0x4]        ; pieceIndex
+480df4:  mov  edx,[ecx+0x540]      ; the drawable
+480dfb:  mov  bl,[esp+0xc]         ; the boolean
+480dff:  lea  eax,[eax+eax*2]
+480e02:  and  ebx,0x1
+480e05:  shl  ebx,0x2              ; -> bit 2
+480e08:  lea  eax,[eax+eax*8]      ; 27 * pieceIndex
+480e0b:  lea  eax,[edx+eax*2+0x4a] ; &piece[i].flags
+480e0f:  mov  dx,[eax]
+480e12:  and  edx,0xfffb           ; clear bit 2
+480e18:  or   edx,ebx
+480e1b:  mov  [eax],dx
+480e1e:  mov  eax,[ecx+0x540]
+480e24:  mov  dword [eax+0x10],0x0 ; invalidate the cached bitmap
+```
+
+The vtable is at `0x4FD698`: `+0x08` = `0x480D50` (`SHOW`/`HIDE`, bit 0),
+`+0x0C` = `0x480DB0` (`CACHE`/`DONT_CACHE`, bit 1), `+0x10` = `0x480DF0`
+(`SHADE`/`DONT_SHADE`, bit 2). Getters at `+0x1C`/`+0x20`/`+0x24`
+(`0x480E30`/`0x480E50`/`0x480E70`), reading the same three bits. The opcode
+values match RWE's own `CobOpCode.h` (`SHADE = 0x1000D000`,
+`DONT_SHADE = 0x1000E000`), so the naming is CONFIRMED, not guessed.
+
+Defaults, set by the piece-list builder `0x45AEC0`, VERIFIED:
+
+```
+45aed4:  or   byte [ebx+eax*2+0x4a],0x2   ; CACHE on, always
+45af1b:  cmp  dword [ebp+0x4],0x3
+45af1f:  jl   0x45af27
+45af21:  or   byte [ebx+0x28],0x1         ; SHOW, if the object has >= 3 vertices
+45af27:  and  word [ebx+0x28],0xfffe      ; otherwise HIDE
+45af31:  or   byte [ebx+0x28],0x4         ; SHADE on, always
+```
+
+So every piece of every model starts shaded, and a script has to say
+`DONT_SHADE` to turn it off. When it does, that piece's vertices are pinned to
+row 15 -- measured x1.0009, i.e. the texture drawn exactly as authored. This is
+a real feature, not dead code; whether any stock script uses it was NOT
+CHECKED here (a `.cob` question, not an exe question).
+
+**`[unitdef+0x241]`.** Read twice in this routine, both times the same bit and
+both times for the same purpose:
+
+```
+459eaa:  mov  edx,[edx+0x241]
+459eb0:  shr  edx,0x1e            ; bit 30
+459eb3:  and  dl,0x1
+459eb6:  neg  dl
+459eb8:  sbb  edx,edx
+459eba:  and  edx,0x4b            ; 75
+459ebd:  add  edx,0x32            ; + 50  ->  125 or 50
+459ec0:  add  eax,edx             ; the HEIGHT field, +0x08
+```
+
+**It changes the height-buffer bias and nothing else.** It does not touch the
+shade. VERIFIED -- those are the only two reads of `+0x241` in `0x459C70`, and
+the unshaded twin does the identical thing at `0x459A29`/`0x459A56`.
+
+**Buildings versus mobile units: no separate path.** NOT FOUND. `0x459C70`
+never reads a "is a building" flag, never branches on footprint or on
+`unitdef`, and never reads the unit's world position, terrain height, or
+current build fraction. Every unit and every feature with the `0x20000000`
+drawable bit goes down the same code.
+
+**Under construction: no separate path here either.** NOT FOUND in `0x459C70`.
+The construction look comes from the height plane (`+0x14`), which this routine
+writes but does not read.
+
+**A global shade bias, a per-unit brightness, a damage or cloak modifier**:
+NOT FOUND. The only writes to a point's `+0x0C` in the entire routine are the
+two at `0x45A2EF` and `0x45A2F3`.
+
+---
+
+## 12. Everything else conditional in the routine
+
+**(a) The pass selector, arg4, and the CACHE bit.** VERIFIED:
+
+```
+459d96:  test byte [ecx+0x28],0x1          ; SHOW; else skip the piece
+459d9a:  je   0x45a3e9
+459da0:  mov  eax,[esp+0x159f4]            ; arg4
+459da7:  cmp  eax,0xffffffff
+459daa:  je   0x459dd2                     ; -1: draw every piece
+459dac:  mov  dl,[ecx+0x28]
+459daf:  shr  edx,1
+459db1:  and  edx,0x1                      ; the CACHE bit
+459db4:  cmp  eax,edx
+459db6:  je   0x459dd2                     ; matches this pass: draw
+459db8:  mov  eax,[edi+0xc]                ; the unit
+459dbb:  fld  dword [eax+0x104]
+459dc1:  fcomp dword ds:0x4fd4c0           ; 0.0
+459dc9:  test ah,0x40
+459dcc:  jne  0x45a3e9                     ; == 0.0 -> skip the piece
+```
+
+The identical gate exists in the unshaded twin at `0x459958`-`0x459985`. Since
+the shaded path is only ever called with arg4 = 1 or -1 (section 02), a piece
+marked `DONT_CACHE` is skipped by the shaded renderer unless `[unit+0x104]` is
+non-zero.
+
+Those pieces are then drawn by a second, separate pass:
+
+```
+45960d:  mov  ecx,[ebp+0xc]                ; the unit
+459610:  test dword [ecx+0x110],0x20000000
+45961a:  je   0x45962f
+45961c:  fld  dword [ecx+0x104]
+459622:  fcomp dword ds:0x4fd4c0
+45962d:  je   0x459646
+45962f:  xor  eax,eax
+459631:  push 0x0                          ; arg4 = 0 -> the DONT_CACHE pieces
+459633:  mov  al,[ecx+0xff]
+459639:  mov  ecx,[edi+0x10]               ; the SCREEN surface
+45963e:  push ebp / push ecx
+459641:  call 0x459830                     ; the UNSHADED rasterizer
+```
+
+**A `DONT_CACHE` piece is drawn unshaded, straight to the screen, every frame,
+regardless of the SHADING option.** VERIFIED as control flow. The *reason* --
+that the shaded path renders into a per-unit cached bitmap and a piece that
+changes every frame cannot live in it -- is INFERRED but strongly supported:
+`0x4586A0` only runs at all on a cache miss (`[drawable+0x10] == 0`), and both
+COB setters that touch the piece flags null that pointer.
+
+What `[unit+0x104]` is was NOT ESTABLISHED. It is a float, compared against 0.0
+both here and in `0x4586A0` where it selects the non-caching variant `0x437BE0`
+over `0x437B50`; there are far too many `+0x104` references across unrelated
+structures to pin down by grep. Not guessed.
+
+Because the shading is baked into a cached bitmap shared by every instance of
+the same model in the same pose, **the shade level provably cannot depend on
+world position, distance, terrain, or fog.** That is a structural proof, not an
+absence of evidence.
+
+**(b) The draw dispatch and the team-colour case.** VERIFIED as control flow at
+`0x45A30B`-`0x45A3A1`:
+
+```
+45a30b:  mov  eax,[edi+0x1c]               ; primitive flags
+45a30e:  test al,0x1
+45a310:  jne  0x45a3a3                     ; bit 0 -> flat colour, 0x4C0C70
+45a316:  cmp  dword [edi+0x4],0x4
+45a31a:  jne  0x45a3bf                     ; textured non-quad -> NOT DRAWN
+45a322:  shr  ecx,1  / test cl,0x1
+45a327:  je   0x45a386                     ; bit 1 clear -> texture = [prim+0x10]
+45a329:  shr  eax,0x2 / test al,0x1
+45a32e:  je   0x45a363
+45a330:  ... eax = game + 331*player + 0x1b8a ; the player record
+45a354:  mov  cl,[eax+0x96]                ; the player colour index
+45a35a:  push ecx / push [edi+0x18] / call 0x4B7F30    ; frame = colour index
+45a363:  mov  eax,[esp+0x159f4]            ; arg4
+45a36c:  je   0x45a37b
+45a36e:  push 0 / push [edi+0x18] / call 0x4B7F30      ; frame 0
+45a37b:  lea  ecx,[edi+0x10] / call 0x4B7EE0           ; the animation own frame
+45a389:  push 0 / push scratch / push texture / push surface / call 0x4C8BB0
+```
+
+`0x4B7F30(anim, frame)` returns `[anim->frames + frame*8 + 0x28]`; `0x4B7EE0`
+does the same with the animation current frame word. So the team-colour case
+selects a **frame of a GAF animation**, and does nothing to the shade level --
+a team-coloured face is shaded exactly like any other. VERIFIED. That bit 1
+means "animated texture" and bit 2 "team colour" is INFERRED from the control
+flow; the mechanism is verified either way. Note also that in the cached pass
+(arg4 != 0) an animated non-team texture is frozen at frame 0.
+
+`cmp dword [edi+0x4],0x4 / jne` confirms `TOTALA-EXE.md` section 58 item 4:
+a textured primitive that is not a quad is not drawn at all.
+
+**(c) ANTI.** `0x459C82` doubles the surface and sets a local 2x flag;
+`0x45A3FF`-`0x45A462` box-filters back down through `0x4B95A0` and then
+point-samples the height plane (`mov al,[ecx] / add ecx,0x2`). It affects the
+*projection* (section 04) and nothing about the level. VERIFIED.
+
+**(d) A second light, a distance term, fog.** NOT FOUND. `0x5065F8` has exactly
+two references in the image; there is no second dot product, no attenuation, and
+no reference to any fog global anywhere between `0x459C70` and `0x45A46C`.
+
+---
+
+## 13. ARMSOLAR, with numbers
+
+The reference case: `armsolar.3do`, piece `base` (28 vertices, 15 primitives,
+`selectionPrimitive = 0`). The four `CorSol1a` panels are primitives 11-14. In
+model space +x is screen right, so:
+
+- **primitive 13** (indices 7,5,1,3) is the **LEFT** panel;
+- **primitive 12** (indices 6,4,0,2) is the **RIGHT** panel.
+
+Replaying the decode -- face normals `normalize((V[i0]-V[i1]) x (V[i2]-V[i1]))`,
+averaged over primitives 1-14 with no re-normalisation, dotted against the raw
+`(-0.8, 1.0, 0.25)`, x5, truncated, `& 0x1F`:
+
+| | vertex | len(n) | `5*dot` | trunc | **row** | PALETTE.SHD |
+|---|---|---|---|---|---|---|
+| **LEFT** (prim 13) | 7 | 0.7571 | -4.338 | -4 | **28** | x1.696 |
+| | 5 | 0.7571 | -4.338 | -4 | **28** | x1.696 |
+| | 1 | 0.7548 | -3.134 | -3 | **29** | x1.739 |
+| | 3 | 0.7548 | -3.134 | -3 | **29** | x1.739 |
+| **RIGHT** (prim 12) | 6 | 0.7548 | -0.583 | 0 | **0** | x0.000 |
+| | 4 | 0.7548 | -0.583 | 0 | **0** | x0.000 |
+| | 0 | 0.7526 | +0.621 | 0 | **0** | x0.000 |
+| | 2 | 0.7526 | +0.621 | 0 | **0** | x0.000 |
+
+**The left panel is drawn at x1.70-1.74 across its whole face. The right panel
+is row 0 at all four corners, so the interpolant is 0 everywhere and every
+texel maps to `SHD[0*256 + t]` -- pure black, uniformly.** That is exactly the
+reference behaviour, and it falls out of the decode with no adjustment.
+
+The rest of the piece, for completeness -- and this is where the current RWE
+implementation parts company (section 15):
+
+| prim | texture | exe rows at the four corners | RWE today (flat triangle) |
+|---|---|---|---|
+| 1 | stone2 | 28, 28, 29, 29 -> 1.70...1.74 | row 28 -> 1.925 |
+| 2 | stone2 | 29, 29, 31, **0** -> bright, one black corner | row **0** -> 0.000, whole face |
+| 3 | stone2 | 29, 28, 30, 31 | row 29 -> 1.994 |
+| 4 | stone2 | **0**, 30, 28, 28 | row 30 -> 2.062 |
+| 5 | stone2 | **0**, 31, 30, **0** | row 1 -> 0.069 |
+| 6 | 32XGouraud | 28, 28, 29, 29 | row 28 -> 1.925 |
+| 7 | 32XGouraud | 29, 29, 31, **0** | row **0** -> 0.000, whole face |
+| 8 | 32XGouraud | 31, 29, 28, 30 | row 29 -> 1.994 |
+| 9 | 32XGouraud | **0**, 30, 28, 28 | row 30 -> 2.062 |
+| 10 | 32XGouraud | **0**, 31, 30, **0** | row 1 -> 0.069 |
+| 11 | CorSol1a (front) | **0**, **0**, 29, 29 -- half-black gradient | row **0** -> 0.000, whole face |
+| 12 | CorSol1a (right) | **0**, **0**, **0**, **0** -- solid black | row 1 -> 0.069 |
+| 13 | CorSol1a (left) | 28, 28, 29, 29 | row 28 -> 1.925 |
+| 14 | CorSol1a (back) | **0**, **0**, 28, 28 -- half-black gradient | row 30 -> **2.062** |
+
+Read the two right-hand columns against each other. On prims 2, 7 and 11 RWE
+paints black where the exe paints a bright face with one dark corner or a
+gradient. On prim 14 RWE paints its brightest possible value where the exe
+paints half the face black. On prims 3, 4, 8, 9 RWE exceeds 1.99x, a
+brightness `PALETTE.SHD` cannot reach at all. Nothing about the left and right
+panels is wrong; nearly everything between them is.
+
+---
+
+## 14. Why the normals are short, and why RWE two errors nearly cancel
+
+Measured on `base`: every vertex normal has length between **0.727 and 0.760**,
+because each vertex of this model is shared by two or three faces meeting at
+roughly a right angle:
+
+```
+count 2 -> len(n) = 0.7526, 0.7543, 0.7548, 0.7571, 0.7600
+count 3 -> len(n) = 0.7274, 0.7368
+```
+
+Now compare the two formulas:
+
+```
+exe:   5 * ( n . L )                       len(n) ~ 0.75,  len(L) = 1.3048
+RWE:   5 * ( n/len(n) . L/len(L) )  =  exe / ( len(n) * 1.3048 )
+```
+
+For `len(n) = 0.7526` the correction factor is `0.7526 * 1.3048 = 0.982`.
+**RWE two normalisations cancel to within 2% on this model**, which is precisely
+why ARMSOLAR left and right panels came out looking right and everything else
+did not. The cancellation is a coincidence of ARMSOLAR geometry. On a vertex
+where the adjacent faces are nearly coplanar, `len(n) -> 1` and the exe value is
+**1.30x** RWE -- a difference of one or two rows everywhere, and the difference
+between black and bright at the wrap. On a vertex on the rim of a thin plate
+where opposing faces meet, `len(n) -> 0` and the exe collapses to row 0 while
+RWE does not.
+
+Do not "fix" one of the two normalisations and leave the other. Remove both.
+
+---
+
+## 15. What the previous decode got wrong or missed
+
+Each item is a concrete correction, in rough order of visible impact.
+
+**1. Its implementation advice inverted its own finding, and RWE followed the
+advice.** `FINDINGS-VISUALOPTIONS.md` section 16.1 says "**Do not** port the
+`& 0x1F` wrap literally" and proposes a centred monotone ramp
+`row = clamp(14.55 + 16*t, 0, 31)`. Section 08 of that document called its own
+correct decode "harsher than the original is remembered to look". It is not
+harsher. ARMSOLAR right panel really is solid black, and the wrap is the only
+thing that produces that. The current `unitTexture.frag` has since restored the
+wrap, so this one is already half-fixed; the note is here so it does not get
+re-argued.
+
+**2. It did not notice that the level is computed per VERTEX and the ROW is
+what gets interpolated.** Section 07 of that document described the span table
+correctly but drew the wrong conclusion -- "the level is Gouraud-interpolated
+across the face and applied per pixel" is true, and RWE implemented it as
+"compute the level per pixel from an interpolated normal", which is a different
+thing. The exe quantises to an integer row **at the vertex** (`0x45A2EC`),
+`shl 16` (`0x4C8D8A`), and interpolates linearly. Across a wrap boundary that
+produces a smooth ramp through the middle of the table; per-pixel quantisation
+produces a hard edge. This is the largest structural error.
+
+**3. RWE does not average normals at all.** `src/rwe/mesh_util.cpp`:
+
+```cpp
+Vector3f getNormal(const Mesh::Triangle& t)
+{
+    auto v1 = t.b.position - t.a.position;
+    auto v2 = t.c.position - t.a.position;
+    return v1.cross(v2).normalizedOr(Vector3f(1.0f, 0.0f, 0.0f));
+}
+...
+auto normal = getNormal(t);
+texturedVerticesBuffer.emplace_back(t.a.position, t.a.textureCoord, normal);
+texturedVerticesBuffer.emplace_back(t.b.position, t.b.textureCoord, normal);
+texturedVerticesBuffer.emplace_back(t.c.position, t.c.textureCoord, normal);
+```
+
+One flat normal per triangle, assigned to all three vertices. The exe averages
+the piece unit face normals per vertex index (`0x45A166`-`0x45A22A`). This is
+what turns prims 2, 7, 11 and 14 of ARMSOLAR from gradients into flat fields
+(section 13). It also means each quad two triangles can disagree when the quad
+is not planar, adding a shade seam on the diagonal on top of the texture seam
+already recorded in `TOTALA-EXE.md` section 57.
+
+**4. The smoothed normal must NOT be normalised.** The previous document did
+say the exe leaves it un-renormalised, but then listed normalising it as
+"deliberate divergence #2" and RWE does `normalize(normal)`. Measured lengths
+are 0.727-0.760 on ARMSOLAR (section 14); the shortening is 25% of the whole
+signal.
+
+**5. The light vector must NOT be normalised either.** This one is not in the
+previous document at all. `(-0.8, 1.0, 0.25)` has length **1.30480** and the exe
+uses it raw -- verified by the only two references to `0x5065F8` in the image.
+RWE writes `normalize(vec3(-0.8, 1.0, -0.25))`, which divides every dot product
+by 1.3048. On ARMSOLAR this happens to cancel error #4; on other geometry it
+does not.
+
+**6. `0.06875 * k` is not the table.** The previous document read the *fallback
+generator* `0x4BADF0` and reported its pre-clamp constant. The shipped
+`PALETTE.SHD` measures 1.807x at row 31, not 2.131x, and 1.696x at row 28, not
+1.925x -- and for saturated colours it does not brighten at all (section 09).
+RWE currently applies `0.06875 * level` with no table, so every lit surface is
+10-18% too bright and bright textures brighten where the original leaves them
+alone. Build the 32x256 remap from the real `PALETTE.SHD` and `PALETTE.PAL`
+(RWE already loads both) and use it as a lookup.
+
+**7. Identity is rows 14 AND 15, exactly, and 15 is not dead code.** The
+previous document put identity "at row 14-15" but called the level-15 branch
+"dead code on stock data" because it could not find a writer that clears piece
+flag bit 2. There is one: `0x480DF0`, reached from the COB `SHADE`
+(`0x1000D000`) and `DONT_SHADE` (`0x1000E000`) opcodes through vtable slot
+`+0x10` (section 11). Bit 1 is likewise `CACHE`/`DONT_CACHE` via `0x480DB0`,
+which resolves the mystery gate at `0x459DAC` that the previous pass left
+unexplained.
+
+**8. A `DONT_CACHE` piece is drawn by the UNSHADED rasterizer.** `0x45962F`
+calls `0x459830` with arg4 = 0 into `[disp+0x10]`, the screen surface, with no
+SHADING check. Not mentioned previously.
+
+**9. The selection primitive is skipped by INDEX 0, not by its declared
+index.** `0x459F4D` / `0x45A231` add `0x20` to the primitive pointer; neither
+uses the value of `[obj+0x0C]` as an offset. Stock data is unaffected; mods
+would be.
+
+**10. A degenerate primitive gets the unit vector `(0, +1, 0)`, not zero.**
+`0x45A101`. It shades as though facing straight down: `5*dot = +5.0` -> row 5,
+x0.344. And `0x4B6FF0` has no zero-length guard, so a collinear-but-distinct
+face produces a NaN whose `_ftol` is `0x80000000` and whose masked row is 0.
+
+**11. Vertices with `count == 0` keep `(0,0,0)` and land on row 0.** The divide
+is guarded (`0x45A1FF`), the dot is not. Only the selection plate exclusive
+vertices are affected in stock data.
+
+**12. Two minor slips.** `[prim+0x0C]`, not `+0x08`, is the vertex-index array
+(`0x459F7D`, `0x45A179`, `0x45A259`). And the vector helper `0x4B6F00` returns
+**b - a**, so the calls are `A = V[i0] - V[i1]`, `B = V[i2] - V[i1]` -- which is
+what the previous document wrote, but by luck: the sign cancels in the cross
+product, so both readings give the same normal. Recorded so nobody "fixes" it
+in the wrong direction.
+
+**13. Precision.** The exe accumulates and divides in float32 with a round to
+float32 after every step, then does the dot at x87 precision. Truncation of a
+value sitting exactly on an integer boundary changes the row. Accumulate in
+`float`, dot in `double`.
+
+---
+
+## 16. Still unknown
+
+- What `[unit+0x104]` is. It gates the render cache in `0x4586A0` and the piece
+  pass in `0x459DAC`. NOT ESTABLISHED; deliberately not guessed.
+- Whether any stock `.cob` actually issues `DONT_SHADE`. A data question, not
+  an exe question, and not checked.
+- Whether the missing zero-length guard in `0x4B6FF0` ever fires on stock
+  geometry.
+- Everything from `0x4C8020` inward: the per-pixel row derivation, the height
+  test, and the exact table index. That is the second half job. The only thing
+  this half needs from it is confirmation that no further mask or clamp is
+  applied to the interpolated value -- there is none in `0x4C8BB0`.
