@@ -126,6 +126,21 @@ namespace rwe
             return SDL_SetWindowSize(window, width, height);
         }
 
+        bool setWindowFullscreen(SDL_Window* window, bool fullscreen)
+        {
+            return SDL_SetWindowFullscreen(window, fullscreen);
+        }
+
+        bool setWindowBordered(SDL_Window* window, bool bordered)
+        {
+            return SDL_SetWindowBordered(window, bordered);
+        }
+
+        bool setWindowResizable(SDL_Window* window, bool resizable)
+        {
+            return SDL_SetWindowResizable(window, resizable);
+        }
+
         void setWindowGrab(SDL_Window* window, bool grabbed)
         {
             SDL_SetWindowMouseGrab(window, grabbed);

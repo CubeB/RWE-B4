@@ -5315,8 +5315,10 @@ namespace rwe
             }
             else if (control == "PREV")
             {
-                // The button says OK: keep the settings and go back.
+                // The button says OK: keep the settings, apply the ones
+                // that are not already live, and go back.
                 saveInGameOptions();
+                sceneContext.sceneManager->setWindowMode(pendingWindowMode);
                 openGameMenuRoot();
             }
             else if (control == "CANCEL")

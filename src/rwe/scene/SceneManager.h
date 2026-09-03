@@ -43,6 +43,13 @@ namespace rwe
 
         void requestExit();
 
+        /**
+         * Switches the live window between windowed, borderless and
+         * fullscreen, so the options screen's choice takes effect where the
+         * player made it rather than at the next launch.
+         */
+        void setWindowMode(const std::string& mode);
+
     private:
         void renderDebugWindow();
     };

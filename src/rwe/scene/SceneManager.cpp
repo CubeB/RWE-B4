@@ -184,6 +184,30 @@ namespace rwe
         }
     }
 
+    void SceneManager::setWindowMode(const std::string& mode)
+    {
+        if (mode == "fullscreen" || mode == "borderless")
+        {
+            // Borderless is a fullscreen window with no exclusive display
+            // mode; fullscreen keeps whatever mode was set at startup.
+            if (mode == "borderless")
+            {
+                sdl->setWindowDisplayMode(window, nullptr);
+            }
+            sdl->setWindowFullscreen(window, true);
+            sdl->setWindowGrab(window, true);
+        }
+        else
+        {
+            sdl->setWindowFullscreen(window, false);
+            sdl->setWindowBordered(window, true);
+            sdl->setWindowResizable(window, true);
+            // A bordered window must not trap the cursor: the title bar has
+            // to stay reachable.
+            sdl->setWindowGrab(window, false);
+        }
+    }
+
     void SceneManager::requestExit()
     {
         requestedExit = true;
