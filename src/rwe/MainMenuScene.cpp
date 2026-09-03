@@ -1,5 +1,7 @@
 #include "MainMenuScene.h"
 #include <rwe/MovieScene.h>
+#include <rwe/game/SaveFile.h>
+#include <rwe/ui/UiTextBox.h>
 #include <rwe/util.h>
 #include <rwe/util/SimpleLogger.h>
 #include <algorithm>
@@ -354,6 +356,53 @@ namespace rwe
         sceneContext.sceneManager->setNextScene(scene);
     }
 
+    void MainMenuScene::goToLoadGameMenu()
+    {
+        auto panel = uiFactory.panelFromGuiFile("LOADGAME");
+        if (auto games = panel->find<UiListBox>("GAMES"))
+        {
+            for (const auto& name : listSaveGames())
+            {
+                games->get().appendItem(name);
+            }
+            auto* rawPanel = panel.get();
+            auto sub = games->get().selectedIndex().subscribe([rawPanel](const std::optional<unsigned int>& index) {
+                if (!index)
+                {
+                    return;
+                }
+                auto games = rawPanel->find<UiListBox>("GAMES");
+                auto box = rawPanel->find<UiTextBox>("GAMENAME");
+                if (games && box && *index < games->get().getItems().size())
+                {
+                    box->get().setText(games->get().getItems()[*index]);
+                }
+            });
+            games->get().addSubscription(std::move(sub));
+        }
+        goToMenu(std::move(panel));
+    }
+
+    void MainMenuScene::startLoadedGame(const std::string& name)
+    {
+        auto path = savePathForName(name);
+        auto save = readSaveFile(path);
+        if (!save)
+        {
+            return;
+        }
+
+        auto parameters = save->parameters;
+        parameters.loadFromSaveFile = path.string();
+        sceneContext.audioService->stopMusic();
+        auto scene = std::make_unique<LoadingScene>(
+            sceneContext,
+            soundLookup,
+            std::move(bgm),
+            parameters);
+        sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+    }
+
     void MainMenuScene::goToPreviousMenu()
     {
         if (!dialogStack.empty())
@@ -496,6 +545,24 @@ namespace rwe
             else if (message == "Options")
             {
                 goToOptionsMenu();
+            }
+            else if (message == "LoadGame")
+            {
+                goToLoadGameMenu();
+            }
+        }
+        else if (topic == "LOADGAME")
+        {
+            if (message == "CANCEL")
+            {
+                goToPreviousMenu();
+            }
+            else if (message == "LOAD")
+            {
+                if (auto box = panelStack.back()->find<UiTextBox>("GAMENAME"); box && !box->get().getText().empty())
+                {
+                    startLoadedGame(box->get().getText());
+                }
             }
         }
         else if (topic == "STARTOPT")

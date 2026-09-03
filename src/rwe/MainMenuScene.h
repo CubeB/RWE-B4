@@ -94,6 +94,10 @@ namespace rwe
 
         void goToOptionsMenu();
 
+        void goToLoadGameMenu();
+
+        void startLoadedGame(const std::string& name);
+
         /** Swaps which options page shares the screen with the hub buttons; empty means the hub alone. */
         void goToOptionsPage(const std::string& page);
 

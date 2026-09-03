@@ -374,6 +374,10 @@ set(SOURCE_FILES
     src/rwe/io/smk/SmkDecoder.h
     src/rwe/MovieScene.cpp
     src/rwe/MovieScene.h
+    src/rwe/ui/UiTextBox.cpp
+    src/rwe/ui/UiTextBox.h
+    src/rwe/game/SaveFile.cpp
+    src/rwe/game/SaveFile.h
     src/rwe/io/lostdf/io.cpp
     src/rwe/io/lostdf/io.h
     src/rwe/io/moveinfotdf/MovementClassTdf.h

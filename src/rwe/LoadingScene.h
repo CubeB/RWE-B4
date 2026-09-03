@@ -87,6 +87,9 @@ namespace rwe
         /** Tuning profile given to every computer player in this game. */
         AiDifficulty aiDifficulty{AiDifficulty::Standard};
 
+        /** Set when this game is a saved game being resumed rather than a fresh start. */
+        std::optional<std::string> loadFromSaveFile;
+
         GameParameters(const std::string& mapName, unsigned int schemaIndex);
     };
 

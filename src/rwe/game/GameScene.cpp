@@ -3,7 +3,11 @@
 #include <fstream>
 #include <functional>
 #include <rwe/CroppedViewport.h>
+#include <rwe/LoadingScene.h>
 #include <rwe/MainMenuScene.h>
+#include <rwe/game/SaveFile.h>
+#include <rwe/game/save_util.h>
+#include <rwe/ui/UiTextBox.h>
 #include <rwe/util.h>
 #include <rwe/MainMenuScene.h>
 #include <rwe/ai/AiPlayerController.h>
@@ -241,6 +245,7 @@ namespace rwe
         InGameSoundsInfo sounds,
         const std::shared_ptr<SpriteSeries>& guiFont,
         const std::shared_ptr<SpriteSeries>& speechFont,
+        const GameParameters& gameParameters,
         PlayerId localPlayerId,
         TdfBlock* audioLookup,
         std::optional<std::ofstream>&& stateLogStream)
@@ -266,6 +271,7 @@ namespace rwe
           speechFont(speechFont),
           shadowsEnabled(sceneContext.globalConfig->shadows),
           scrollSpeedSetting(sceneContext.globalConfig->scrollSpeed),
+          gameParameters(gameParameters),
           localPlayerId(localPlayerId),
           uiFactory(sceneContext.textureService, sceneContext.audioService, audioLookup, sceneContext.vfs, sceneContext.pathMapping, sceneContext.viewport->width(), sceneContext.viewport->height()),
           audioLookup(audioLookup),
@@ -4682,6 +4688,93 @@ namespace rwe
         return leftShiftDown || rightShiftDown;
     }
 
+    namespace
+    {
+        /** Fills the GAMES listbox and mirrors clicks into the name box. */
+        void wireSaveList(UiPanel& panel)
+        {
+            auto games = panel.find<UiListBox>("GAMES");
+            if (!games)
+            {
+                return;
+            }
+            for (const auto& name : listSaveGames())
+            {
+                games->get().appendItem(name);
+            }
+            auto sub = games->get().selectedIndex().subscribe([&panel](const std::optional<unsigned int>& index) {
+                if (!index)
+                {
+                    return;
+                }
+                auto games = panel.find<UiListBox>("GAMES");
+                auto box = panel.find<UiTextBox>("GAMENAME");
+                if (games && box && *index < games->get().getItems().size())
+                {
+                    box->get().setText(games->get().getItems()[*index]);
+                }
+            });
+            games->get().addSubscription(std::move(sub));
+        }
+    }
+
+    void GameScene::openSaveDialog()
+    {
+        auto panel = uiFactory.panelFromGuiFile("SAVEGAME");
+        wireSaveList(*panel);
+        if (auto box = panel->find<UiTextBox>("GAMENAME"))
+        {
+            box->get().setText("savegame");
+        }
+        setGameMenuPanel(std::move(panel));
+    }
+
+    void GameScene::openLoadDialog()
+    {
+        auto panel = uiFactory.panelFromGuiFile("LOADGAME");
+        wireSaveList(*panel);
+        setGameMenuPanel(std::move(panel));
+    }
+
+    void GameScene::saveCurrentGame(const std::string& name)
+    {
+        SaveFile save(gameParameters);
+        save.cameraPosition = worldCameraState.position;
+        save.simulation = saveSimulationToJson(simulation);
+        writeSaveFile(savePathForName(name), save);
+        printConsole("Game saved: " + name);
+    }
+
+    void GameScene::loadSavedGame(const std::string& name)
+    {
+        auto path = savePathForName(name);
+        auto save = readSaveFile(path);
+        if (!save)
+        {
+            printConsole("Could not read save: " + name);
+            return;
+        }
+
+        // Rerun the whole loading pipeline for the saved game's map and
+        // players; the loading scene applies the saved state instead of
+        // spawning the starting commanders.
+        auto parameters = save->parameters;
+        parameters.loadFromSaveFile = path.string();
+        sceneContext.audioService->stopMusic();
+        auto scene = std::make_shared<LoadingScene>(
+            sceneContext,
+            audioLookup,
+            AudioService::LoopToken(),
+            parameters);
+        sceneContext.sceneManager->setNextScene(scene);
+    }
+
+    void GameScene::applyLoadedGame(const SaveFile& save)
+    {
+        loadSimulationFromJson(save.simulation, simulation);
+        setCameraPosition(save.cameraPosition);
+    }
+
     void GameScene::setMenuPause(bool wantPaused)
     {
         // The original pauses when the game menu opens in single player and
@@ -4736,9 +4829,9 @@ namespace rwe
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
         auto panel = uiFactory.panelFromGuiFile(sidePrefix + "OPT");
 
-        // Save, load, the briefing and help do not exist in RWE yet; the
-        // original greys what does not apply rather than hiding it.
-        for (const auto* name : {"SAVEGAME", "LOADGAME", "MISSION", "HELP"})
+        // The briefing and help do not exist in RWE yet; the original greys
+        // what does not apply rather than hiding it.
+        for (const auto* name : {"MISSION", "HELP"})
         {
             if (auto button = panel->find<UiStagedButton>(name))
             {
@@ -4931,6 +5024,14 @@ namespace rwe
             {
                 closeGameMenu();
             }
+            else if (control == "SAVEGAME")
+            {
+                openSaveDialog();
+            }
+            else if (control == "LOADGAME")
+            {
+                openLoadDialog();
+            }
             else if (control == "PREFS")
             {
                 if (pendingWindowMode.empty())
@@ -4943,6 +5044,43 @@ namespace rwe
             else if (control == "EXIT")
             {
                 openGameExitMenu();
+            }
+        }
+        else if (topic == "SAVEGAME")
+        {
+            if (control == "CANCEL")
+            {
+                openGameMenuRoot();
+            }
+            else if (control == "SAVE")
+            {
+                std::string name = "savegame";
+                if (!gameMenuPanels.empty())
+                {
+                    if (auto box = gameMenuPanels.front()->find<UiTextBox>("GAMENAME"); box && !box->get().getText().empty())
+                    {
+                        name = box->get().getText();
+                    }
+                }
+                saveCurrentGame(name);
+                openGameMenuRoot();
+            }
+        }
+        else if (topic == "LOADGAME")
+        {
+            if (control == "CANCEL")
+            {
+                openGameMenuRoot();
+            }
+            else if (control == "LOAD")
+            {
+                if (!gameMenuPanels.empty())
+                {
+                    if (auto box = gameMenuPanels.front()->find<UiTextBox>("GAMENAME"); box && !box->get().getText().empty())
+                    {
+                        loadSavedGame(box->get().getText());
+                    }
+                }
             }
         }
         else if (topic == "EXITMENU")

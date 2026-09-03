@@ -20,6 +20,7 @@
 #include <rwe/game/GameNetworkService.h>
 #include <rwe/game/GameScene_util.h>
 #include <rwe/game/GameSpeed.h>
+#include <rwe/game/SaveFile.h>
 #include <rwe/game/InGameSoundsInfo.h>
 #include <random>
 #include <rwe/game/Particle.h>
@@ -387,6 +388,9 @@ namespace rwe
         bool shadowsEnabled{true};
         unsigned int scrollSpeedSetting{100};
 
+        /** What this game was started with, kept for the save-game header. */
+        GameParameters gameParameters;
+
         /** Sound lookup table, kept so a main menu scene can be built on the way out. */
         TdfBlock* audioLookup;
 
@@ -544,6 +548,7 @@ namespace rwe
             InGameSoundsInfo sounds,
             const std::shared_ptr<SpriteSeries>& guiFont,
             const std::shared_ptr<SpriteSeries>& speechFont,
+            const GameParameters& gameParameters,
             PlayerId localPlayerId,
             TdfBlock* audioLookup,
             std::optional<std::ofstream>&& stateLogStream);
@@ -787,6 +792,14 @@ namespace rwe
         InGameOptionsState currentInGameOptions() const;
         void applyInGameOptions(const InGameOptionsState& state);
         void saveInGameOptions();
+
+        /** Applies a saved game's state onto the freshly built simulation. */
+        void applyLoadedGame(const SaveFile& save);
+
+        void openSaveDialog();
+        void openLoadDialog();
+        void saveCurrentGame(const std::string& name);
+        void loadSavedGame(const std::string& name);
         /** Pause the sim for the menu, through the same command path the Pause key uses. */
         void setMenuPause(bool wantPaused);
 

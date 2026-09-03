@@ -1,4 +1,5 @@
 #include "LoadingScene.h"
+#include <rwe/game/SaveFile.h>
 #include <algorithm>
 #include <rwe/util/SpanStream.h>
 #include <rwe/LoadingScene_util.h>
@@ -321,9 +322,24 @@ namespace rwe
             std::move(sounds),
             consoleFont,
             speechFont,
+            gameParameters,
             *localPlayerId,
             audioLookup,
             std::move(stateLogStream));
+
+        if (gameParameters.loadFromSaveFile)
+        {
+            // A resumed game: the world state comes off disk instead of the
+            // starting commanders. The simulation was built above with the
+            // map's features and no units, which is what the loader expects.
+            auto save = readSaveFile(*gameParameters.loadFromSaveFile);
+            if (!save)
+            {
+                throw std::runtime_error("Could not read save file: " + *gameParameters.loadFromSaveFile);
+            }
+            gameScene->applyLoadedGame(*save);
+            return gameScene;
+        }
 
         const auto& schema = ota.schemas.at(schemaIndex);
 

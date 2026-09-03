@@ -1,4 +1,5 @@
 #include "UiFactory.h"
+#include <rwe/ui/UiTextBox.h>
 #include <algorithm>
 #include <rwe/ui/UiSurface.h>
 #include <rwe/util/Index.h>
@@ -298,6 +299,17 @@ namespace rwe
             }
             case GuiElementType::ListBox:
                 return listBoxFromGuiEntry(guiName, entry);
+            case GuiElementType::TextBox:
+            {
+                auto font = textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+                return std::make_unique<UiTextBox>(
+                    entry.common.xpos,
+                    entry.common.ypos,
+                    entry.common.width,
+                    entry.common.height,
+                    std::string(),
+                    font);
+            }
             case GuiElementType::Label:
                 return labelFromGuiEntry(guiName, entry);
             case GuiElementType::ScrollBar:
