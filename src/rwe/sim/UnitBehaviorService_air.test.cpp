@@ -216,6 +216,74 @@ namespace rwe
         }
     }
 
+    TEST_CASE("the strafing pass overshoots and breaks away", "[aircraft]")
+    {
+        // The original's `AirToGround` (0x412710) is not the bomber's run.
+        // A gun-armed aircraft takes the target, overshoots to three weapon
+        // ranges on the far side, breaks ninety degrees for one weapon range,
+        // and comes round again -- holding its aim throughout, because the
+        // handler never clears the weapon between states.
+
+        SECTION("a gun holds its aim through the run-out, a bomber does not")
+        {
+            auto strafer = makeAttackRunState(SimVector(50_ss, 50_ss, 0_ss));
+            strafer.phase = AirMovementStateAttackRun::Phase::Departing;
+            strafer.runOutDirection = SimVector(1_ss, 0_ss, 0_ss);
+            strafer.runOutDistance = 200_ss;
+            strafer.strafingPass = true;
+            SimVector unitPos(100_ss, 50_ss, 0_ss);
+            SimVector targetPos(50_ss, 0_ss, 0_ss);
+            REQUIRE(stepAttackRunPhase(unitPos, headingTowards(unitPos, targetPos), targetPos, makeGeometry(100_ss), strafer));
+
+            auto bomber = makeAttackRunState(SimVector(50_ss, 50_ss, 0_ss));
+            bomber.phase = AirMovementStateAttackRun::Phase::Departing;
+            bomber.runOutDirection = SimVector(1_ss, 0_ss, 0_ss);
+            bomber.runOutDistance = 200_ss;
+            bomber.strafingPass = false;
+            REQUIRE_FALSE(stepAttackRunPhase(unitPos, headingTowards(unitPos, targetPos), targetPos, makeGeometry(100_ss), bomber));
+        }
+
+        SECTION("the break flies to its waypoint and only then comes round")
+        {
+            auto state = makeAttackRunState(SimVector(50_ss, 50_ss, 0_ss));
+            state.phase = AirMovementStateAttackRun::Phase::Breaking;
+            state.strafingPass = true;
+            state.breakWaypoint = SimVector(1000_ss, 50_ss, 0_ss);
+            SimVector targetPos(50_ss, 0_ss, 0_ss);
+
+            // Still a long way from the waypoint: keep breaking, guns live.
+            SimVector farOff(300_ss, 50_ss, 0_ss);
+            REQUIRE(stepAttackRunPhase(farOff, headingTowards(farOff, state.breakWaypoint), targetPos, makeGeometry(100_ss), state));
+            REQUIRE(state.phase == AirMovementStateAttackRun::Phase::Breaking);
+
+            // Inside the original's arrival tolerance of 128: take the target again.
+            SimVector arrived(1050_ss, 50_ss, 0_ss);
+            stepAttackRunPhase(arrived, headingTowards(arrived, state.breakWaypoint), targetPos, makeGeometry(100_ss), state);
+            REQUIRE(state.phase == AirMovementStateAttackRun::Phase::Approaching);
+        }
+
+        SECTION("the break steers at its waypoint rather than the target")
+        {
+            UnitDefinition d{};
+            d.maxVelocity = 5_ss;
+            d.turnRate = 1000_ss;
+            d.cruiseAltitude = 100_ss;
+
+            UnitState unit({}, std::unique_ptr<CobEnvironment>{});
+            unit.position = SimVector(0_ss, 100_ss, 0_ss);
+
+            AirMovementStateAttackRun state(SimVector(500_ss, 0_ss, 0_ss));
+            state.phase = AirMovementStateAttackRun::Phase::Breaking;
+            state.strafingPass = true;
+            state.lastKnownTargetPos = SimVector(500_ss, 100_ss, 0_ss);
+            state.breakWaypoint = SimVector(0_ss, 100_ss, 700_ss);
+
+            auto point = computeAttackRunTargetPoint(unit, d, state);
+            REQUIRE(point.x == state.breakWaypoint.x);
+            REQUIRE(point.z == state.breakWaypoint.z);
+        }
+    }
+
     TEST_CASE("an attack run manoeuvres instead of stalling", "[aircraft]")
     {
         UnitState unit({}, std::unique_ptr<CobEnvironment>{});

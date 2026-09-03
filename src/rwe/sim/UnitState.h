@@ -227,6 +227,12 @@ namespace rwe
             Approaching,
             Engaging,
             Departing,
+            /**
+             * The strafing pass's 90-degree break: after running out past the
+             * target, a gun-armed aircraft turns hard left or right for one
+             * weapon range before coming back round. `AirToGround` state 4.
+             */
+            Breaking,
         };
 
         /** Target unit or ground location. Mirrors AttackOrder::target. */
@@ -245,6 +251,17 @@ namespace rwe
 
         /** Bombs let go on the current pass; a run drops a stick of three once the sight opens. */
         unsigned int bombsDroppedThisPass{0};
+
+        /**
+         * True for the original's `AirToGround` strafing pass -- a gun-armed
+         * aircraft that overshoots to three weapon ranges and breaks ninety
+         * degrees. False for the bomber's `AirStrike`, which runs out only far
+         * enough to turn round.
+         */
+        bool strafingPass{false};
+
+        /** Where the break is flying to, while phase is Breaking. */
+        SimVector breakWaypoint{0_ss, 0_ss, 0_ss};
 
         /** Current air velocity in game units/tick. */
         SimVector currentVelocity{0_ss, 0_ss, 0_ss};

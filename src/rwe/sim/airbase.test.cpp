@@ -331,4 +331,51 @@ namespace rwe
         REQUIRE(moved < 100_ss);
         REQUIRE(moved > -100_ss);
     }
+
+    TEST_CASE("a repair pad mends the aircraft parked on it", "[airbase]")
+    {
+        // Flying to a pad was only ever half the behaviour: the pad is a
+        // builder and mends what sits on it. Without this an aircraft flew to
+        // a pad, landed, and stayed damaged for ever.
+        AirBaseFixture f;
+        auto padPosition = SimVector(500_ss, 0_ss, 0_ss);
+        auto padId = f.addPad(f.us, padPosition);
+
+        SECTION("a landed, damaged aircraft on the pad is its patient")
+        {
+            f.damageFighterTo(100);
+            auto& fighterState = f.sim.getUnitState(f.fighter);
+            fighterState.position = padPosition;
+            fighterState.physics = UnitPhysicsInfoGround();
+            f.sim.flyingUnitsSet.erase(f.fighter);
+
+            const auto& padState = f.sim.getUnitState(padId);
+            ConstUnitInfo padInfo(padId, &padState, &f.sim.unitDefinitions.at(padState.unitType));
+            auto patient = findAircraftToRepairOnPad(f.sim, padInfo);
+            REQUIRE(patient.has_value());
+            REQUIRE(*patient == f.fighter);
+        }
+
+        SECTION("an aircraft still in the air is not worked on")
+        {
+            f.damageFighterTo(100);
+            f.sim.getUnitState(f.fighter).position = padPosition;
+
+            const auto& padState = f.sim.getUnitState(padId);
+            ConstUnitInfo padInfo(padId, &padState, &f.sim.unitDefinitions.at(padState.unitType));
+            REQUIRE_FALSE(findAircraftToRepairOnPad(f.sim, padInfo).has_value());
+        }
+
+        SECTION("an undamaged aircraft is left alone")
+        {
+            auto& fighterState = f.sim.getUnitState(f.fighter);
+            fighterState.position = padPosition;
+            fighterState.physics = UnitPhysicsInfoGround();
+            f.sim.flyingUnitsSet.erase(f.fighter);
+
+            const auto& padState = f.sim.getUnitState(padId);
+            ConstUnitInfo padInfo(padId, &padState, &f.sim.unitDefinitions.at(padState.unitType));
+            REQUIRE_FALSE(findAircraftToRepairOnPad(f.sim, padInfo).has_value());
+        }
+    }
 }

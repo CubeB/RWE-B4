@@ -242,6 +242,19 @@ namespace rwe
                 clearBuild(unitInfo);
             }
 
+            // An air repair pad mends whatever is sitting on it. The pad is
+            // a builder, and this is the work it does when it has nothing
+            // else, so a damaged aircraft that flies to a pad is actually
+            // repaired rather than merely parked. Ordered work comes first: a
+            // pad told to assist a factory does that instead.
+            if (unitInfo.state->orders.empty() && unitIsAnUsableAirBase(*unitInfo.state, *unitInfo.definition))
+            {
+                if (auto patient = findAircraftToRepairOnPad(*sim, unitInfo))
+                {
+                    repairExistingUnit(unitInfo, *patient);
+                }
+            }
+
             // check our orders
             if (!unitInfo.state->orders.empty())
             {
@@ -2521,7 +2534,17 @@ namespace rwe
             auto altitude = getTargetAltitude(sim->terrain, targetPosition->x, targetPosition->z, *unitInfo.definition);
             runState.lastKnownTargetPos = SimVector(targetPosition->x, altitude, targetPosition->z);
             runState.runOutDirection = UnitState::toDirection(unitInfo.state->rotation);
-            runState.runOutDistance = defaultAttackRunOutDistance(*unitInfo.definition, weaponDefinition.maxRange);
+
+            // A gun-armed aircraft flies the original's strafing pass
+            // (`AirToGround`, 0x412710) rather than the bomber's run: it
+            // overshoots to three weapon ranges past the target and breaks
+            // ninety degrees before coming round. A dropped weapon keeps
+            // `AirStrike`'s modest run-out -- a bomb's 1280 range would send
+            // the aircraft clean off the map.
+            runState.strafingPass = !std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType);
+            runState.runOutDistance = runState.strafingPass
+                ? weaponDefinition.maxRange * 3_ss
+                : defaultAttackRunOutDistance(*unitInfo.definition, weaponDefinition.maxRange);
             runState.phase = AirMovementStateAttackRun::Phase::Approaching;
             // Carry the speed it already had: an aircraft that turns to attack
             // does not come to a halt first.
@@ -2570,6 +2593,33 @@ namespace rwe
             {
                 attackRun->phase = AirMovementStateAttackRun::Phase::Approaching;
             }
+        }
+
+        // The strafing pass's ninety-degree break. The phase machine has no
+        // dice of its own, so the side is drawn here: the original takes
+        // `rand(2)` and turns the heading by a quarter turn either way, then
+        // flies one weapon range. Drawn straight off the simulation's rng so
+        // every peer breaks the same way.
+        if (attackRun->strafingPass
+            && previousPhase == AirMovementStateAttackRun::Phase::Departing
+            && attackRun->phase == AirMovementStateAttackRun::Phase::Approaching)
+        {
+            SimVector breakHeading = attackRun->currentVelocity;
+            breakHeading.y = 0_ss;
+            if (breakHeading.lengthSquared() == 0_ss)
+            {
+                breakHeading = UnitState::toDirection(unitInfo.state->rotation);
+            }
+            auto quarterTurn = SimAngle(16384);
+            auto heading = UnitState::toRotation(breakHeading);
+            auto side = (sim->rng() % 2u) == 0u;
+            auto breakDirection = UnitState::toDirection(side ? heading + quarterTurn : heading - quarterTurn);
+            auto reach = rweMax(weaponDefinition.maxRange, 1_ss);
+            attackRun->breakWaypoint = SimVector(
+                unitInfo.state->position.x + (breakDirection.x * reach),
+                unitInfo.state->position.y,
+                unitInfo.state->position.z + (breakDirection.z * reach));
+            attackRun->phase = AirMovementStateAttackRun::Phase::Breaking;
         }
 
         if (previousPhase == AirMovementStateAttackRun::Phase::Approaching

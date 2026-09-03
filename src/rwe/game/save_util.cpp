@@ -1266,6 +1266,8 @@ namespace rwe
                         {"runOutDistance", saveSimScalar(a.runOutDistance)},
                         {"phase", saveEnum(a.phase)},
                         {"bombsDroppedThisPass", a.bombsDroppedThisPass},
+                        {"strafingPass", a.strafingPass},
+                        {"breakWaypoint", saveSimVector(a.breakWaypoint)},
                         {"currentVelocity", saveSimVector(a.currentVelocity)}};
                 },
                 [&](const AirMovementStateHoverAttack& h) {
@@ -1314,6 +1316,8 @@ namespace rwe
                 a.runOutDistance = loadSimScalar(j.at("runOutDistance"));
                 a.phase = loadEnum<AirMovementStateAttackRun::Phase>(j.at("phase"));
                 a.bombsDroppedThisPass = j.at("bombsDroppedThisPass").get<unsigned int>();
+                a.strafingPass = j.at("strafingPass").get<bool>();
+                a.breakWaypoint = loadSimVector(j.at("breakWaypoint"));
                 a.currentVelocity = loadSimVector(j.at("currentVelocity"));
                 return a;
             }

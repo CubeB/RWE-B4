@@ -80,6 +80,12 @@ namespace rwe
     std::optional<UnitId> findAirBaseToLandOn(GameSimulation& sim, ConstUnitInfo unitInfo);
 
     /**
+     * The damaged aircraft parked on this pad, if any: the nearest one within
+     * the pad's own build reach that has actually landed and is not yet whole.
+     */
+    std::optional<UnitId> findAircraftToRepairOnPad(GameSimulation& sim, ConstUnitInfo unitInfo);
+
+    /**
      * True when the gun is bolted to the hull, so the unit has to be pointing
      * roughly at what it wants to shoot before it can shoot it.
      *

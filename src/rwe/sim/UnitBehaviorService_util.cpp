@@ -221,6 +221,48 @@ namespace rwe
         return definition.builder && definition.isAirBase && state.activated && state.isAlive();
     }
 
+    std::optional<UnitId> findAircraftToRepairOnPad(GameSimulation& sim, ConstUnitInfo unitInfo)
+    {
+        // Whatever is sitting on the pad: an aircraft of the pad's own owner,
+        // on the ground rather than in the air, damaged, and inside the pad's
+        // build reach. The nearest wins, so a pad with two aircraft crowded
+        // onto it works on the closer one.
+        auto reachSquared = unitInfo.definition->buildDistance * unitInfo.definition->buildDistance;
+        std::optional<UnitId> best;
+        auto bestDistanceSquared = reachSquared;
+
+        for (const auto& [unitId, unit] : sim.units)
+        {
+            if (unitId == unitInfo.id || unit.isDead() || unit.owner != unitInfo.state->owner)
+            {
+                continue;
+            }
+            const auto& definition = sim.unitDefinitions.at(unit.unitType);
+            if (!definition.canFly || unit.isBeingBuilt(definition))
+            {
+                continue;
+            }
+            if (unit.hitPoints >= definition.maxHitPoints)
+            {
+                continue;
+            }
+            // Only what has actually landed: an aircraft hovering over the
+            // pad is still flying and is not worked on.
+            if (isFlying(unit.physics))
+            {
+                continue;
+            }
+            auto distanceSquared = unitInfo.state->position.distanceSquared(unit.position);
+            if (distanceSquared <= bestDistanceSquared)
+            {
+                bestDistanceSquared = distanceSquared;
+                best = unitId;
+            }
+        }
+
+        return best;
+    }
+
     std::optional<UnitId> findAirBaseToLandOn(GameSimulation& sim, ConstUnitInfo unitInfo)
     {
         if (!unitInfo.definition->canFly)
@@ -624,6 +666,12 @@ namespace rwe
 
     SimVector computeAttackRunTargetPoint(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateAttackRun& physics)
     {
+        if (physics.phase == AirMovementStateAttackRun::Phase::Breaking)
+        {
+            // The break waypoint was fixed when the break began; fly at it.
+            return physics.breakWaypoint;
+        }
+
         if (physics.phase == AirMovementStateAttackRun::Phase::Departing)
         {
             // Steer toward the far side of the run-out vector.
@@ -857,6 +905,24 @@ namespace rwe
                 }
                 return true;
             }
+            case AirMovementStateAttackRun::Phase::Breaking:
+            {
+                // The original's state 4 completes on an arrival tolerance of
+                // 128 against the break waypoint, then goes back to taking
+                // the target. The weapon is never let go of on the way: the
+                // aim set on the run in is held through the break, so a
+                // fighter still fires at whatever comes into its arc.
+                SimVector toWaypoint(
+                    runState.breakWaypoint.x - unitPosition.x,
+                    0_ss,
+                    runState.breakWaypoint.z - unitPosition.z);
+                if (toWaypoint.lengthSquared() <= 128_ss * 128_ss)
+                {
+                    runState.phase = AirMovementStateAttackRun::Phase::Approaching;
+                    runState.bombsDroppedThisPass = 0;
+                }
+                return true;
+            }
             case AirMovementStateAttackRun::Phase::Departing:
             {
                 SimVector toUnitFromTarget(unitPosition.x - targetPosition.x, 0_ss, unitPosition.z - targetPosition.z);
@@ -864,10 +930,15 @@ namespace rwe
                 auto runOutSquared = runOut * runOut;
                 if (toUnitFromTarget.lengthSquared() >= runOutSquared)
                 {
+                    // A strafing pass breaks ninety degrees here rather than
+                    // turning straight back; the caller picks the side,
+                    // because only it has the simulation's own dice.
                     runState.phase = AirMovementStateAttackRun::Phase::Approaching;
                     runState.bombsDroppedThisPass = 0;
                 }
-                return false;
+                // A gun holds its aim through the run-out: the original's
+                // handler never clears the weapon target between states.
+                return runState.strafingPass;
             }
         }
         return false;

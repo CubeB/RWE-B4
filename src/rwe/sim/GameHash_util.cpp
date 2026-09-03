@@ -171,7 +171,9 @@ namespace rwe
             p.runOutDirection,
             p.runOutDistance,
             static_cast<uint32_t>(p.phase),
-            p.bombsDroppedThisPass);
+            p.bombsDroppedThisPass,
+            p.strafingPass,
+            p.breakWaypoint);
     }
 
     GameHash computeHashOf(const AirMovementStateHoverAttack& p)
