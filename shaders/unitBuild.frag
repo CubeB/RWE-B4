@@ -36,7 +36,11 @@ const vec3 normalTint = vec3(1.0, 1.0, 1.0);
 // The shaded chain's lighting; see unitTexture.frag, which this must match.
 const vec3 lightDirection = normalize(vec3(-0.8, 1.0, 0.25));
 const float shadeIdentityRow = 14.5455;
-const float shadeRowsPerUnitDot = 5.0;
+// The exe's own slope is 5 rows per unit of the dot, but with its wrap a
+// lit face lands on rows ~21-22 (1.45-1.55x) and an away face far darker;
+// centred and clamped, 5 was too flat. 8 reaches the measured lit and dark
+// levels without the wrap's black band at perpendicular.
+const float shadeRowsPerUnitDot = 8.0;
 const float shadeRowMultiplier = 0.06875;
 
 float shadeIntensity(vec3 normal)

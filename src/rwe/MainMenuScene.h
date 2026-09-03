@@ -29,18 +29,25 @@ namespace rwe
             unsigned int soundMode;
             unsigned int unitSpeech;
             unsigned int gamma;
+            bool shading;
+            bool antiAlias;
         };
 
     private:
         SceneContext sceneContext;
         TdfBlock* soundLookup;
 
-        OptionsState optionsUndo{100, 100, true, "windowed", true, 100, 2, 2, 100};
+        OptionsState optionsUndo{100, 100, true, "windowed", true, 100, 2, 2, 100, true, true};
         bool pendingShadows{true};
         unsigned int pendingScrollSpeed{100};
         unsigned int pendingSoundMode{2};
         unsigned int pendingUnitSpeech{2};
         unsigned int pendingGamma{100};
+        bool pendingShading{true};
+        bool pendingAntiAlias{true};
+
+        /** Pushes the current settings back into the menu widgets: a staged button does not advance its own display. */
+        void refreshOptionControls();
         std::string pendingWindowMode;
         std::string currentOptionsPage;
         std::vector<std::string> menuPlaylist;

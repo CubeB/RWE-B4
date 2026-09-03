@@ -37,8 +37,11 @@ namespace rwe
         {
             return;
         }
-        auto percent = (static_cast<float>(mouseX - posX) - (knobWidth / 2.0f)) / usable;
-        notifyScrollChanged(std::clamp(percent, 0.0f, 1.0f));
+        auto percent = std::clamp((static_cast<float>(mouseX - posX) - (knobWidth / 2.0f)) / usable, 0.0f, 1.0f);
+        // The knob is this component's own state: without this it sat still
+        // until the page was rebuilt, even though the subscribers heard.
+        setScrollPercent(percent);
+        notifyScrollChanged(percent);
     }
 
     void UiSlider::mouseDown(MouseButtonEvent event)

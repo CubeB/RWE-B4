@@ -171,6 +171,22 @@ namespace rwe
                     break;
                 }
             }
+
+            // The dialogs ship their art as full 640x480 bitmaps named for
+            // them -- DLoadgame2, DSaveList, DLoadList -- with the plate
+            // painted at the bitmap's origin and panel-relative gadget
+            // geometry, however the gui positions the panel on screen.
+            if (!backgroundSprite)
+            {
+                for (const auto& bitmapName : {"D" + titled + "2", "D" + titled})
+                {
+                    if (vfs->readFile("bitmaps/" + bitmapName + ".pcx"))
+                    {
+                        backgroundSprite = textureService->getBitmapRegion(bitmapName, 0, 0, width, height);
+                        break;
+                    }
+                }
+            }
         }
 
         // Adjust x and y pos such that the bottom and right edges of the panel
@@ -352,6 +368,7 @@ namespace rwe
                 if (auto series = textureService->getGuiTexture(guiName, entry.common.name))
                 {
                     surface->setBackground((*series)->sprites.at(0));
+                    surface->setAbsolutePlacement(true);
                 }
                 return surface;
             }
@@ -454,9 +471,11 @@ namespace rwe
 
     std::shared_ptr<SpriteSeries> UiFactory::getDefaultStagedButtonGraphics(const std::string& guiName, unsigned int stages)
     {
-        assert(stages >= 1 && stages <= 4);
+        // The shipped data goes to five (MUSICRT's TRACKMODE); the art
+        // only goes to four, so a taller cycle borrows the four-stage face.
+        assert(stages >= 1);
         std::string entryName("stagebuttn");
-        entryName.append(std::to_string(stages));
+        entryName.append(std::to_string(stages > 4u ? 4u : stages));
 
         auto sprites = textureService->getGuiTexture(guiName, entryName);
         if (sprites)

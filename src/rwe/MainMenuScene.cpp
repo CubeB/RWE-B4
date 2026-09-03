@@ -134,7 +134,9 @@ namespace rwe
             pendingScrollSpeed,
             pendingSoundMode,
             pendingUnitSpeech,
-            pendingGamma};
+            pendingGamma,
+            pendingShading,
+            pendingAntiAlias};
     }
 
     void MainMenuScene::applyOptions(const OptionsState& state)
@@ -149,6 +151,8 @@ namespace rwe
         pendingSoundMode = state.soundMode;
         pendingUnitSpeech = state.unitSpeech;
         pendingGamma = state.gamma;
+        pendingShading = state.shading;
+        pendingAntiAlias = state.antiAlias;
         audio->setSoundEnabled(state.soundMode != 0);
     }
 
@@ -171,6 +175,8 @@ namespace rwe
                                          {"sound-mode", std::to_string(state.soundMode)},
                                          {"unit-speech", std::to_string(state.unitSpeech)},
                                          {"gamma", std::to_string(state.gamma)},
+                                         {"shading", state.shading ? "true" : "false"},
+                                         {"anti-alias", state.antiAlias ? "true" : "false"},
                                      });
     }
 
@@ -184,6 +190,8 @@ namespace rwe
             pendingSoundMode = sceneContext.globalConfig->soundMode;
             pendingUnitSpeech = sceneContext.globalConfig->unitSpeech;
             pendingGamma = sceneContext.globalConfig->gamma;
+            pendingShading = sceneContext.globalConfig->shading;
+            pendingAntiAlias = sceneContext.globalConfig->antiAlias;
         }
         optionsUndo = currentOptions();
         currentOptionsPage.clear();
@@ -330,9 +338,10 @@ namespace rwe
         if (auto bar = active.find<UiScrollBar>("GAMMA"))
         {
             bar->get().setScrollBarPercent(0.2f);
-            bar->get().setScrollPercent((static_cast<float>(pendingGamma) - 50.0f) / 150.0f);
+            bar->get().setScrollPercent((static_cast<float>(pendingGamma) - 50.0f) / 83.0f);
             auto sub = bar->get().scrollChanged().subscribe([this](float v) {
-                pendingGamma = 50u + static_cast<unsigned int>(v * 150.0f);
+                // The original's twenty steps of 0.5 + v/24: 0.5x to 1.333x.
+                pendingGamma = 50u + static_cast<unsigned int>(v * 83.0f);
             });
             bar->get().addSubscription(std::move(sub));
         }
@@ -351,7 +360,16 @@ namespace rwe
 
         // What RWE has no machinery behind stays visible but grey. GAME is
         // in-game speed, meaningless from the front end.
-        for (const auto* name : {"SHADING", "ANTI", "LEFTCLICK", "UNITCHAT", "TXTSCROL", "MAXLINES", "GAME"})
+        if (auto toggle = active.find<UiStagedButton>("SHADING"))
+        {
+            toggle->get().setStage(pendingShading ? 1 : 0);
+        }
+        if (auto toggle = active.find<UiStagedButton>("ANTI"))
+        {
+            toggle->get().setStage(pendingAntiAlias ? 1 : 0);
+        }
+
+        for (const auto* name : {"LEFTCLICK", "UNITCHAT", "TXTSCROL", "MAXLINES", "GAME"})
         {
             if (auto button = active.find<UiStagedButton>(name))
             {
@@ -392,6 +410,13 @@ namespace rwe
     void MainMenuScene::goToLoadGameMenu()
     {
         auto panel = uiFactory.panelFromGuiFile("LOADGAME");
+        for (const auto* labelName : {"GAMETYPE", "SIDE", "MISSION", "DIFF", "TIME"})
+        {
+            if (auto label = panel->find<UiLabel>(labelName))
+            {
+                label->get().setText(std::string());
+            }
+        }
         if (auto games = panel->find<UiListBox>("GAMES"))
         {
             for (const auto& name : listSaveGames())
@@ -602,6 +627,16 @@ namespace rwe
             {
                 goToPreviousMenu();
             }
+            else if (message == "DELETE")
+            {
+                if (auto box = panelStack.back()->find<UiTextBox>("GAMENAME"); box && !box->get().getText().empty())
+                {
+                    std::error_code ec;
+                    std::filesystem::remove(savePathForName(box->get().getText()), ec);
+                }
+                goToPreviousMenu();
+                goToLoadGameMenu();
+            }
             else if (message == "LOAD")
             {
                 if (auto box = panelStack.back()->find<UiTextBox>("GAMENAME"); box && !box->get().getText().empty())
@@ -645,7 +680,7 @@ namespace rwe
             }
             else if (message == "RESTORE")
             {
-                applyOptions(OptionsState{100, 100, true, "windowed", true, 100, 2, 2, 100});
+                applyOptions(OptionsState{100, 100, true, "windowed", true, 100, 2, 2, 100, true, true});
                 goToOptionsPage(currentOptionsPage);
             }
             else if (message == "BSHADOWS")
@@ -660,6 +695,14 @@ namespace rwe
             else if (message == "SPEECH")
             {
                 pendingUnitSpeech = (pendingUnitSpeech + 1) % 3;
+            }
+            else if (message == "SHADING")
+            {
+                pendingShading = !pendingShading;
+            }
+            else if (message == "ANTI")
+            {
+                pendingAntiAlias = !pendingAntiAlias;
             }
             else if (message == "UNDO")
             {
@@ -775,6 +818,67 @@ namespace rwe
                 commitSelectedMap();
                 goToPreviousMenu();
             }
+        }
+
+        // Whatever just happened, the widgets show the state as it now is.
+        refreshOptionControls();
+    }
+
+    void MainMenuScene::refreshOptionControls()
+    {
+        if (panelStack.empty())
+        {
+            return;
+        }
+        auto& active = *panelStack.back();
+        auto* audio = sceneContext.audioService;
+        if (auto toggle = active.find<UiStagedButton>("NOTRAK"))
+        {
+            toggle->get().setStage(audio->isMusicEnabled() ? 1 : 0);
+        }
+        if (auto toggle = active.find<UiStagedButton>("MODE"))
+        {
+            toggle->get().setStage(pendingSoundMode);
+        }
+        if (auto toggle = active.find<UiStagedButton>("SPEECH"))
+        {
+            toggle->get().setStage(pendingUnitSpeech);
+        }
+        if (auto toggle = active.find<UiStagedButton>("BSHADOWS"))
+        {
+            toggle->get().setStage(pendingShadows ? 1 : 0);
+        }
+        if (auto toggle = active.find<UiStagedButton>("SHADING"))
+        {
+            toggle->get().setStage(pendingShading ? 1 : 0);
+        }
+        if (auto toggle = active.find<UiStagedButton>("ANTI"))
+        {
+            toggle->get().setStage(pendingAntiAlias ? 1 : 0);
+        }
+        if (auto bar = active.find<UiScrollBar>("FXVOL"))
+        {
+            bar->get().setScrollPercent(audio->getSoundVolume());
+        }
+        if (auto bar = active.find<UiScrollBar>("MUSICVOL"))
+        {
+            bar->get().setScrollPercent(audio->getMusicVolume());
+        }
+        if (auto bar = active.find<UiScrollBar>("GAMMA"))
+        {
+            bar->get().setScrollPercent((static_cast<float>(pendingGamma) - 50.0f) / 83.0f);
+        }
+        if (auto bar = active.find<UiScrollBar>("SCREEN"))
+        {
+            bar->get().setScrollPercent((static_cast<float>(pendingScrollSpeed) - 25.0f) / 175.0f);
+        }
+        if (auto bar = active.find<UiScrollBar>("VIDSLDR"))
+        {
+            bar->get().setScrollPercent(pendingWindowMode == "fullscreen" ? 1.0f : (pendingWindowMode == "borderless" ? 0.5f : 0.0f));
+        }
+        if (auto label = active.find<UiLabel>("VIDVAL"))
+        {
+            label->get().setText(windowModeDisplayName(pendingWindowMode));
         }
     }
 

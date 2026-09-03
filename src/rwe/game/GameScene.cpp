@@ -6,6 +6,7 @@
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuScene.h>
 #include <rwe/game/SaveFile.h>
+#include <rwe/io/gui/gui.h>
 #include <rwe/game/save_util.h>
 #include <rwe/ui/UiTextBox.h>
 #include <rwe/util.h>
@@ -4820,6 +4821,17 @@ namespace rwe
         /** Fills the GAMES listbox and mirrors clicks into the name box. */
         void wireSaveList(UiPanel& panel)
         {
+            // The metadata gadgets default to their caption text, doubling
+            // the captions the art already paints; they stay empty until a
+            // selected save can fill them in.
+            for (const auto* name : {"GAMETYPE", "SIDE", "MISSION", "DIFF", "TIME"})
+            {
+                if (auto label = panel.find<UiLabel>(name))
+                {
+                    label->get().setText(std::string());
+                }
+            }
+
             auto games = panel.find<UiListBox>("GAMES");
             if (!games)
             {
@@ -4847,7 +4859,15 @@ namespace rwe
 
     void GameScene::openSaveDialog()
     {
-        auto panel = uiFactory.panelFromGuiFile("SAVEGAME");
+        // LOADGAME.GUI is the save/load dialog both ways in the original --
+        // list, name field, metadata labels, radar frame -- and only the
+        // painted background differs: DSavegame2 titles it SAVE GAME.
+        // (SAVEGAME.GUI is a smaller, matching nothing that ships; unused.)
+        auto guiRaw = sceneContext.vfs->readFile("guis/LOADGAME.GUI");
+        auto entries = guiRaw ? parseGuiFromBytes(*guiRaw) : std::nullopt;
+        auto panel = entries
+            ? uiFactory.panelFromGuiFile("SAVEGAME", "DSavegame2", *entries)
+            : uiFactory.panelFromGuiFile("SAVEGAME");
         wireSaveList(*panel);
         if (auto box = panel->find<UiTextBox>("GAMENAME"))
         {
@@ -5273,7 +5293,21 @@ namespace rwe
             {
                 openGameMenuRoot();
             }
-            else if (control == "SAVE")
+            else if (control == "DELETE")
+            {
+                if (!gameMenuPanels.empty())
+                {
+                    if (auto box = gameMenuPanels.front()->find<UiTextBox>("GAMENAME"); box && !box->get().getText().empty())
+                    {
+                        std::error_code ec;
+                        std::filesystem::remove(savePathForName(box->get().getText()), ec);
+                    }
+                }
+                openSaveDialog();
+            }
+            // The gadget is named LOAD in the shared dialog gui; its label
+            // is what says OK.
+            else if (control == "SAVE" || control == "LOAD")
             {
                 std::string name = "savegame";
                 if (!gameMenuPanels.empty())
@@ -5292,6 +5326,18 @@ namespace rwe
             if (control == "CANCEL")
             {
                 openGameMenuRoot();
+            }
+            else if (control == "DELETE")
+            {
+                if (!gameMenuPanels.empty())
+                {
+                    if (auto box = gameMenuPanels.front()->find<UiTextBox>("GAMENAME"); box && !box->get().getText().empty())
+                    {
+                        std::error_code ec;
+                        std::filesystem::remove(savePathForName(box->get().getText()), ec);
+                    }
+                }
+                openLoadDialog();
             }
             else if (control == "LOAD")
             {
@@ -5417,6 +5463,66 @@ namespace rwe
                     sceneContext.audioService->playSound(*sound);
                 }
             }
+        }
+
+        // Whatever just happened, the widgets show the state as it now is.
+        refreshInGameOptionControls();
+    }
+
+    void GameScene::refreshInGameOptionControls()
+    {
+        auto* audio = sceneContext.audioService;
+        if (auto toggle = findInGameMenu<UiStagedButton>("NOTRAK"))
+        {
+            toggle->setStage(audio->isMusicEnabled() ? 1 : 0);
+        }
+        if (auto toggle = findInGameMenu<UiStagedButton>("MODE"))
+        {
+            toggle->setStage(static_cast<unsigned int>(soundModeSetting));
+        }
+        if (auto toggle = findInGameMenu<UiStagedButton>("SPEECH"))
+        {
+            toggle->setStage(static_cast<unsigned int>(unitSpeechSetting));
+        }
+        if (auto toggle = findInGameMenu<UiStagedButton>("BSHADOWS"))
+        {
+            toggle->setStage(shadowsEnabled ? 1 : 0);
+        }
+        if (auto toggle = findInGameMenu<UiStagedButton>("SHADING"))
+        {
+            toggle->setStage(shadingEnabled ? 1 : 0);
+        }
+        if (auto toggle = findInGameMenu<UiStagedButton>("ANTI"))
+        {
+            toggle->setStage(antiAliasEnabled ? 1 : 0);
+        }
+        if (auto bar = findInGameMenu<UiScrollBar>("FXVOL"))
+        {
+            bar->setScrollPercent(audio->getSoundVolume());
+        }
+        if (auto bar = findInGameMenu<UiScrollBar>("MUSICVOL"))
+        {
+            bar->setScrollPercent(audio->getMusicVolume());
+        }
+        if (auto bar = findInGameMenu<UiScrollBar>("GAMMA"))
+        {
+            bar->setScrollPercent((static_cast<float>(gammaSetting) - 50.0f) / 83.0f);
+        }
+        if (auto bar = findInGameMenu<UiScrollBar>("SCREEN"))
+        {
+            bar->setScrollPercent((static_cast<float>(scrollSpeedSetting) - 25.0f) / 175.0f);
+        }
+        if (auto bar = findInGameMenu<UiScrollBar>("GAME"))
+        {
+            bar->setScrollPercent(static_cast<float>(gameSpeed.index()) / static_cast<float>(GameSpeed::MaxIndex));
+        }
+        if (auto bar = findInGameMenu<UiScrollBar>("VIDSLDR"))
+        {
+            bar->setScrollPercent(pendingWindowMode == "fullscreen" ? 1.0f : (pendingWindowMode == "borderless" ? 0.5f : 0.0f));
+        }
+        if (auto label = findInGameMenu<UiLabel>("VIDVAL"))
+        {
+            label->setText(windowModeDisplayName(pendingWindowMode));
         }
     }
 

@@ -416,6 +416,9 @@ namespace rwe
 
         void wireInGameOptionControls();
 
+        /** Pushes the current settings back into the menu widgets: a staged button does not advance its own display. */
+        void refreshInGameOptionControls();
+
         /** Finds a control by name across every open menu panel. */
         template <typename T>
         T* findInGameMenu(const std::string& name)

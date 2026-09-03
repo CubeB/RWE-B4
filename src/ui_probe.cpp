@@ -169,6 +169,12 @@ int main(int argc, char* argv[])
         clickAll(*prefs, "PREFS");
         clickAll(*page, "SOUNDSRT");
 
+        // lookup probe
+        std::cout << "IGOPT=" << (textureService.getGuiTexture("X", "IGOPT").has_value() ? "HIT" : "MISS") << std::endl;
+        std::cout << "SOUNDSRT=" << (textureService.getGuiTexture("X", "SOUNDSRT").has_value() ? "HIT" : "MISS") << std::endl;
+        std::cout << "MUSICRT=" << (textureService.getGuiTexture("X", "MUSICRT").has_value() ? "HIT" : "MISS") << std::endl;
+        std::cout << "VISUALSRT=" << (textureService.getGuiTexture("X", "VISUALSRT").has_value() ? "HIT" : "MISS") << std::endl;
+        std::cout << "SPEEDSRT=" << (textureService.getGuiTexture("X", "SPEEDSRT").has_value() ? "HIT" : "MISS") << std::endl;
         // ---- render what the player actually sees ----
         ShaderService shaders = ShaderService::createShaderService(graphics);
         Viewport uiViewport(0, 0, 640, 480);
@@ -194,6 +200,30 @@ int main(int argc, char* argv[])
         page->render(ui);
         glFinish();
         screenshot("probe_ingame.ppm");
+
+        // every in-game page, plus the save/load dialogs
+        graphics.clearColor();
+        for (const char* pageName : {"VISUALRT"})
+        {
+            auto p2 = factory.panelFromGuiFile(pageName);
+            std::cout << pageName << " panel pos=(" << p2->getX() << "," << p2->getY() << ")" << std::endl;
+            dumpPanel(*p2, pageName);
+            p2->render(ui);
+        }
+        glFinish();
+        screenshot("probe_pages.ppm");
+
+        graphics.clearColor();
+        auto dlgEntries = parseGuiFromBytes(*vfs.readFile("guis/LOADGAME.GUI"));
+        auto saveDlg = factory.panelFromGuiFile("SAVEGAME", "DSavegame2", *dlgEntries);
+        auto loadDlg = factory.panelFromGuiFile("LOADGAME");
+        saveDlg->render(ui);
+        glFinish();
+        screenshot("probe_save.ppm");
+        graphics.clearColor();
+        loadDlg->render(ui);
+        glFinish();
+        screenshot("probe_load.ppm");
 
         std::cout << "probe done\n";
         return 0;

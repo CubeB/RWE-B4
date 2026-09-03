@@ -11,8 +11,11 @@ namespace rwe
 
     void UiTextBox::render(UiRenderService& context) const
     {
-        // A single line with a plain underscore caret, in the panel font.
-        context.drawText(posX, posY + 12.0f, text + "_", *font);
+        // A visible field to type into -- sunken plate and outline -- then
+        // the line with a plain underscore caret, in the panel font.
+        context.fillColor(posX, posY, sizeX, sizeY, Color(8, 10, 8, 170));
+        context.drawBoxOutline(posX, posY, sizeX, sizeY, Color(150, 162, 150, 255), 1.0f);
+        context.drawText(posX + 4, posY + 12.0f, text + "_", *font);
     }
 
     void UiTextBox::keyDown(KeyEvent event)

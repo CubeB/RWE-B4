@@ -10,6 +10,7 @@ namespace rwe
     {
     private:
         std::optional<std::shared_ptr<Sprite>> background;
+        bool absolutePlacement{false};
 
     public:
         UiSurface(int posX, int posY, unsigned int sizeX, unsigned int sizeY);
@@ -29,5 +30,13 @@ namespace rwe
 
         void setBackground(std::shared_ptr<Sprite> newBackground);
         void clearBackground();
+
+        /**
+         * Draw the background pinned to the gadget's own rectangle instead
+         * of scaled-to-fit at the sprite's declared bounds. GAF frames carry
+         * anchor offsets, and honouring them here put a picture box's art
+         * anywhere but the panel.
+         */
+        void setAbsolutePlacement(bool absolute) { absolutePlacement = absolute; }
     };
 }

@@ -15,6 +15,14 @@ namespace rwe
 
     void UiSurface::render(UiRenderService& context) const
     {
+        if (background && absolutePlacement)
+        {
+            // The picture-box path: the art fills the gadget rectangle, the
+            // sprite's own anchor offsets neutralised.
+            context.drawSpriteAbs(static_cast<float>(posX), static_cast<float>(posY), static_cast<float>(sizeX), static_cast<float>(sizeY), **background);
+            return;
+        }
+
         if (background)
         {
             const auto& bg = **background;
