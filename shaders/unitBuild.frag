@@ -34,26 +34,28 @@ const float heightBias = 50.0;
 const vec3 waterTint = vec3(0.5, 0.5, 1.0);
 const vec3 normalTint = vec3(1.0, 1.0, 1.0);
 // The shaded chain's lighting; see unitTexture.frag, which this must match.
-const vec3 lightDirection = normalize(vec3(-0.8, 1.0, 0.25));
-const float shadeIdentityRow = 14.5455;
-// The exe's own slope is 5 rows per unit of the dot, but with its wrap a
-// lit face lands on rows ~21-22 (1.45-1.55x) and an away face far darker;
-// centred and clamped, 5 was too flat. 8 reaches the measured lit and dark
-// levels without the wrap's black band at perpendicular.
-const float shadeRowsPerUnitDot = 8.0;
+// The exe's sun is (-0.8, 1, +0.25); the z is negated here because RWE's
+// world z runs south where the original's runs north.
+const vec3 lightDirection = normalize(vec3(-0.8, 1.0, -0.25));
+// PALETTE.SHD row k multiplies the palette by 0.06875k, so row ~14.55 is
+// identity. Sixteen rows per unit of the dot walks the whole table between
+// full sun and full shade, which is the range the original covers.
+const float shadeIdentityRow = 14.55;
+const float shadeRowsPerUnitDot = 16.0;
 const float shadeRowMultiplier = 0.06875;
 
 float shadeIntensity(vec3 normal)
 {
-    float row = shadeIdentityRow + (shadeRowsPerUnitDot * dot(normalize(normal), lightDirection));
-    return shadeRowMultiplier * clamp(row, 0.0, 31.0);
+    float t = clamp(dot(normalize(normal), lightDirection), -1.0, 1.0);
+    float row = clamp(shadeIdentityRow + (shadeRowsPerUnitDot * t), 0.0, 31.0);
+    return shadeRowMultiplier * row;
 }
 
 vec3 shadeNormal()
 {
     vec3 baseColor = vec3(texture(textureSampler, fragTexCoord));
     float intensity = shade ? shadeIntensity(worldNormal) : 1.0;
-    return baseColor * intensity * (height > seaLevel ? normalTint : waterTint);
+    return min(baseColor * intensity * (height > seaLevel ? normalTint : waterTint), vec3(1.0));
 }
 
 void main(void)

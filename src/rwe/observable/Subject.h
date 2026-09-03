@@ -53,7 +53,11 @@ namespace rwe
     public:
         void next(const T& newValue)
         {
-            for (const Subscriber& s : subscribers)
+            // Over a copy: a callback is allowed to subscribe or unsubscribe
+            // (a menu button that swaps the panel does exactly that), and
+            // walking the live vector while it is edited is undefined.
+            auto snapshot = subscribers;
+            for (const Subscriber& s : snapshot)
             {
                 s.callback(newValue);
             }

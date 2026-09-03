@@ -285,6 +285,16 @@ namespace rwe
     {
     }
 
+    GameScene::~GameScene()
+    {
+        // The audio service outlives us and holds a callback into this
+        // object; without handing it back, the mixer reports a finished
+        // channel into freed memory the moment the NEXT game renders its
+        // first frame. Destroying the handle is not enough -- see
+        // Subscription, whose destructor deliberately does nothing.
+        audioSub->unsubscribe();
+    }
+
     void GameScene::init()
     {
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;

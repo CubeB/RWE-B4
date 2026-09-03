@@ -929,3 +929,6 @@ include(CPack)
 
 add_executable(ui_probe src/ui_probe.cpp)
 target_link_libraries(ui_probe librwe)
+
+add_executable(scene_lifetime_probe src/scene_lifetime_probe.cpp)
+target_link_libraries(scene_lifetime_probe librwe)

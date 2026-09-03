@@ -8,6 +8,7 @@
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuScene.h>
 #include <rwe/PathMapping.h>
+#include <rwe/game/SaveFile.h>
 #include <rwe/SceneContext.h>
 #include <rwe/ShaderService.h>
 #include <rwe/Viewport.h>
@@ -594,7 +595,21 @@ int main(int argc, char* argv[])
             config.shading = args.getString("shading", "true") != "false";
             config.antiAlias = args.getString("anti-alias", "true") != "false";
             std::optional<rwe::GameParameters> gameParameters;
-            if (args.contains("map"))
+            if (args.contains("load"))
+            {
+                // Resume a saved game straight from the command line, the same
+                // way the front end does it: the save header carries the map
+                // and players.
+                auto savePath = rwe::savePathForName(args.getString("load"));
+                auto save = rwe::readSaveFile(savePath);
+                if (!save)
+                {
+                    throw std::runtime_error("Could not read save file: " + savePath.string());
+                }
+                gameParameters = save->parameters;
+                gameParameters->loadFromSaveFile = savePath.string();
+            }
+            else if (args.contains("map"))
             {
                 const auto& mapName = args.getString("map");
                 const auto& players = args.getMulti("player");

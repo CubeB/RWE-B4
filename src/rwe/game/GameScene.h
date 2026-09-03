@@ -222,6 +222,10 @@ namespace rwe
 
         SceneContext sceneContext;
 
+        /**
+          * The audio service outlives every scene, so this subscription has
+          * to be given back by hand in the destructor: see Subscription.
+          */
         std::unique_ptr<Subscription> audioSub = sceneContext.audioService->getChannelFinished().subscribe([this](int channel) { onChannelFinished(channel); });
 
         CroppedViewport worldViewport;
@@ -605,6 +609,8 @@ namespace rwe
             PlayerId localPlayerId,
             TdfBlock* audioLookup,
             std::optional<std::ofstream>&& stateLogStream);
+
+        ~GameScene() override;
 
         void init() override;
 
