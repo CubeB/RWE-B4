@@ -3,7 +3,8 @@
 #include <filesystem>
 #include <nlohmann/json.hpp>
 #include <optional>
-#include <rwe/LoadingScene.h>
+#include <rwe/game/GameParameters.h>
+#include <rwe/math/Vector3f.h>
 #include <string>
 #include <vector>
 

@@ -575,6 +575,9 @@ namespace rwe
 
         std::optional<std::reference_wrapper<UnitState>> spawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position);
 
+        /** Applies a saved game's state onto the freshly built simulation. */
+        void applyLoadedGame(const SaveFile& save);
+
         void setCameraPosition(const Vector3f& newPosition);
 
         const MapTerrain& getTerrain() const;
@@ -792,9 +795,6 @@ namespace rwe
         InGameOptionsState currentInGameOptions() const;
         void applyInGameOptions(const InGameOptionsState& state);
         void saveInGameOptions();
-
-        /** Applies a saved game's state onto the freshly built simulation. */
-        void applyLoadedGame(const SaveFile& save);
 
         void openSaveDialog();
         void openLoadDialog();
