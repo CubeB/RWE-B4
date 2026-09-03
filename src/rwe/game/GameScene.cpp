@@ -4931,7 +4931,7 @@ namespace rwe
         // The loader adds the players itself from the save -- economy state
         // and all -- so the loading pipeline's freshly added ones step
         // aside. Same parameters, same slots, same ids.
-        simulation.players.clear();
+        simulation.clearPlayers();
         loadSimulationFromJson(save.simulation, simulation);
         setCameraPosition(save.cameraPosition);
     }

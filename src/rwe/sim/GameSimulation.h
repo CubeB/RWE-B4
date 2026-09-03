@@ -614,6 +614,14 @@ namespace rwe
         bool arePlayersAllied(PlayerId a, PlayerId b) const;
 
         /**
+         * Forgets every player and the visibility that belongs to them. The
+         * two lists are index-parallel and must be emptied together: clearing
+         * players alone leaves a longer visibility list behind, and the next
+         * pass that walks one while indexing the other runs off the end.
+         */
+        void clearPlayers();
+
+        /**
          * True when a world position lies inside the reach of one of the
          * player's active radar or sonar units.
          *

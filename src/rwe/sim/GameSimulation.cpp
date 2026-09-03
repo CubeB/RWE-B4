@@ -1176,6 +1176,12 @@ namespace rwe
         return playerVisibility.at(player.value).isExplored(visionCellAt(position));
     }
 
+    void GameSimulation::clearPlayers()
+    {
+        players.clear();
+        playerVisibility.clear();
+    }
+
     bool GameSimulation::arePlayersAllied(PlayerId a, PlayerId b) const
     {
         if (a == b)
@@ -1404,12 +1410,15 @@ namespace rwe
                 static_cast<int>(unitDefinition.sightDistance) / cellWorldUnits,
                 losTables.maxRadius());
 
-            // Allies share what they can see: the unit reveals into every
-            // player on its own team, itself included, so a teammate's map is
-            // lit by your scouts and yours by theirs.
-            for (std::size_t i = 0; i < playerVisibility.size(); ++i)
+            // The owner always sees through its own units; allies see too,
+            // so a teammate's map is lit by your scouts and yours by theirs.
+            // The owner's own reveal is written plainly rather than left to
+            // fall out of the alliance test -- a unit's own player seeing its
+            // own surroundings is not a thing to make conditional.
+            playerVisibility.at(unit.owner.value).revealWithLineOfSight(visionCellAt(unit.position), radius, visionHeights, eyeHeight, losTables);
+            for (std::size_t i = 0; i < playerVisibility.size() && i < players.size(); ++i)
             {
-                if (!arePlayersAllied(unit.owner, PlayerId(i)))
+                if (i == unit.owner.value || !arePlayersAllied(unit.owner, PlayerId(static_cast<unsigned int>(i))))
                 {
                     continue;
                 }
@@ -1425,9 +1434,9 @@ namespace rwe
             }
 
             auto altitude = rweMax(unit.position.y, 0_ss);
-            for (std::size_t i = 0; i < playerVisibility.size(); ++i)
+            for (std::size_t i = 0; i < playerVisibility.size() && i < players.size(); ++i)
             {
-                if (!arePlayersAllied(unit.owner, PlayerId(i)))
+                if (!arePlayersAllied(unit.owner, PlayerId(static_cast<unsigned int>(i))))
                 {
                     continue;
                 }

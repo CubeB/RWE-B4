@@ -284,8 +284,78 @@ namespace rwe
         return graphics.createColoredMesh(buffer, GL_STATIC_DRAW);
     }
 
+    namespace
+    {
+        /**
+         * The original's vertex normals: every face adds its own unit normal
+         * to each of its vertices, and the vertex takes the mean
+         * (0x45A195-0x45A21E). Two details matter and both are deliberate.
+         *
+         * It is NOT renormalised. The mean of unit normals is shorter than
+         * one wherever the faces meeting at a vertex disagree -- 0.73 to 0.76
+         * on ARMSOLAR's panels -- and that shortening is part of the shading:
+         * together with the light vector's own length of 1.3048 it sets the
+         * width of the ramp at about thirteen of the table's thirty-two rows.
+         * Normalising it widens the ramp and blows the contrast out.
+         *
+         * Vertices are shared by exact position, which is what the 3DO's own
+         * shared vertex indices amount to once expanded into triangles.
+         */
+        class VertexNormalAccumulator
+        {
+        private:
+            std::map<std::tuple<float, float, float>, std::pair<Vector3f, int>> sums;
+
+            static std::tuple<float, float, float> key(const Vector3f& p)
+            {
+                return {p.x, p.y, p.z};
+            }
+
+        public:
+            void add(const Mesh::Triangle& t)
+            {
+                auto normal = getNormal(t);
+                for (const auto& v : {t.a, t.b, t.c})
+                {
+                    auto it = sums.find(key(v.position));
+                    if (it == sums.end())
+                    {
+                        sums.emplace(key(v.position), std::make_pair(normal, 1));
+                    }
+                    else
+                    {
+                        it->second.first = it->second.first + normal;
+                        ++it->second.second;
+                    }
+                }
+            }
+
+            Vector3f get(const Vector3f& position, const Vector3f& fallback) const
+            {
+                auto it = sums.find(key(position));
+                if (it == sums.end() || it->second.second == 0)
+                {
+                    return fallback;
+                }
+                return it->second.first / static_cast<float>(it->second.second);
+            }
+        };
+    }
+
     ShaderMesh convertMesh(GraphicsContext& graphics, const Mesh& mesh)
     {
+        // Accumulated across both face lists, which belong to the same piece
+        // and share vertices.
+        VertexNormalAccumulator normals;
+        for (const auto& t : mesh.faces)
+        {
+            normals.add(t);
+        }
+        for (const auto& t : mesh.teamFaces)
+        {
+            normals.add(t);
+        }
+
         std::optional<GlMesh> texturedMesh;
         if (!mesh.faces.empty())
         {
@@ -294,10 +364,10 @@ namespace rwe
 
             for (const auto& t : mesh.faces)
             {
-                auto normal = getNormal(t);
-                texturedVerticesBuffer.emplace_back(t.a.position, t.a.textureCoord, normal);
-                texturedVerticesBuffer.emplace_back(t.b.position, t.b.textureCoord, normal);
-                texturedVerticesBuffer.emplace_back(t.c.position, t.c.textureCoord, normal);
+                auto faceNormal = getNormal(t);
+                texturedVerticesBuffer.emplace_back(t.a.position, t.a.textureCoord, normals.get(t.a.position, faceNormal));
+                texturedVerticesBuffer.emplace_back(t.b.position, t.b.textureCoord, normals.get(t.b.position, faceNormal));
+                texturedVerticesBuffer.emplace_back(t.c.position, t.c.textureCoord, normals.get(t.c.position, faceNormal));
             }
 
             texturedMesh = graphics.createTexturedNormalMesh(texturedVerticesBuffer, GL_STATIC_DRAW);
@@ -311,10 +381,10 @@ namespace rwe
             teamTexturedVerticesBuffer.reserve(mesh.teamFaces.size() * 3);
             for (const auto& t : mesh.teamFaces)
             {
-                auto normal = getNormal(t);
-                teamTexturedVerticesBuffer.emplace_back(t.a.position, t.a.textureCoord, normal);
-                teamTexturedVerticesBuffer.emplace_back(t.b.position, t.b.textureCoord, normal);
-                teamTexturedVerticesBuffer.emplace_back(t.c.position, t.c.textureCoord, normal);
+                auto faceNormal = getNormal(t);
+                teamTexturedVerticesBuffer.emplace_back(t.a.position, t.a.textureCoord, normals.get(t.a.position, faceNormal));
+                teamTexturedVerticesBuffer.emplace_back(t.b.position, t.b.textureCoord, normals.get(t.b.position, faceNormal));
+                teamTexturedVerticesBuffer.emplace_back(t.c.position, t.c.textureCoord, normals.get(t.c.position, faceNormal));
             }
 
             teamTexturedMesh = graphics.createTexturedNormalMesh(teamTexturedVerticesBuffer, GL_STATIC_DRAW);
