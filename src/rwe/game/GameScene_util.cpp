@@ -690,6 +690,22 @@ namespace rwe
 
         Vector3f snappedPosition(std::round(position.x), truncateToInterval(position.y, 2.0f), std::round(position.z));
 
+        if (featureDefinition.isStanding())
+        {
+            // A standing sprite is a vertical wall whose every pixel occludes
+            // at the wall's own z. Anchored at the footprint centre, a wide
+            // crystal's artwork cut through buildings standing beside it --
+            // the whole north half of an adjacent structure vanished under
+            // the crystal's skirt. Anchor the wall just inside the footprint's
+            // north edge instead: shifting (y, z) by (-2d, -d) leaves every
+            // pixel's screen position unchanged (screenY = z - y/2) while
+            // moving only the depth plane, since depth under this camera is
+            // world y alone.
+            float depthShift = (static_cast<float>(featureDefinition.footprintZ) * 8.0f) - 0.5f;
+            snappedPosition.z -= depthShift;
+            snappedPosition.y -= 2.0f * depthShift;
+        }
+
         // Convert to a model position that makes sense in the game world.
         // For standing (blocking) features we stretch y-dimension values by 2x
         // to correct for TA camera distortion.
@@ -728,6 +744,22 @@ namespace rwe
         const auto& sprite = *(*spriteInfo->shadowAnimation)->sprites[0];
 
         Vector3f snappedPosition(std::round(position.x), truncateToInterval(position.y, 2.0f), std::round(position.z));
+
+        if (featureDefinition.isStanding())
+        {
+            // A standing sprite is a vertical wall whose every pixel occludes
+            // at the wall's own z. Anchored at the footprint centre, a wide
+            // crystal's artwork cut through buildings standing beside it --
+            // the whole north half of an adjacent structure vanished under
+            // the crystal's skirt. Anchor the wall just inside the footprint's
+            // north edge instead: shifting (y, z) by (-2d, -d) leaves every
+            // pixel's screen position unchanged (screenY = z - y/2) while
+            // moving only the depth plane, since depth under this camera is
+            // world y alone.
+            float depthShift = (static_cast<float>(featureDefinition.footprintZ) * 8.0f) - 0.5f;
+            snappedPosition.z -= depthShift;
+            snappedPosition.y -= 2.0f * depthShift;
+        }
 
         // Convert to a model position that makes sense in the game world.
         // For standing (blocking) features we stretch y-dimension values by 2x

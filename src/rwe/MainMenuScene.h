@@ -92,6 +92,9 @@ namespace rwe
          */
         void playMovie(const std::string& vfsPath);
 
+        /** Menu actions deferred out of the emitting panel's dispatch; see GameScene::pendingMenuActions. */
+        std::vector<std::function<void()>> pendingMenuActions;
+
         void goToOptionsMenu();
 
         void goToLoadGameMenu();
@@ -122,6 +125,8 @@ namespace rwe
         void exit();
 
         void message(const std::string& topic, const std::string& message, const ActivateMessage& details);
+
+        void messageNow(const std::string& topic, const std::string& message, const ActivateMessage& details);
 
         void setCandidateSelectedMap(const std::string& mapName);
 

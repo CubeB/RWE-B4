@@ -48,6 +48,14 @@ namespace rwe
         {
             graphics.drawSpriteAbs(posX, posY, **background);
         }
+        else
+        {
+            // A dialog whose gui declares no panel art (SAVEGAME and friends
+            // say panel=NULL) still has to be seen: a solid plate with a
+            // border rather than an invisible rectangle of floating buttons.
+            graphics.fillColor(posX, posY, sizeX, sizeY, Color(28, 34, 30));
+            graphics.drawBoxOutline(posX, posY, sizeX, sizeY, Color(110, 124, 110), 2.0f);
+        }
 
         graphics.pushMatrix();
         graphics.multiplyMatrix(Matrix4f::translation(Vector3f(posX, posY, 0.0f)));

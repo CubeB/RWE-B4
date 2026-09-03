@@ -680,6 +680,9 @@ namespace rwe
         /** The ORDERS panel with the buttons a unit cannot use taken out. */
         std::unique_ptr<UiPanel> createOrdersPanel();
 
+        /** Greys or hides the order-strip buttons the selection cannot use, on any panel carrying the strip. */
+        void applyOrderButtonGating(UiPanel& panel);
+
         void localPlayerSetFireOrders(UnitId unitId, UnitFireOrders orders);
 
         void localPlayerSetOnOff(UnitId unitId, bool on);
@@ -791,6 +794,16 @@ namespace rwe
         void closeGameMenu();
         void setGameMenuPanel(std::unique_ptr<UiPanel>&& panel);
         void gameMenuMessage(const std::string& topic, const std::string& control);
+
+        void gameMenuMessageNow(const std::string& topic, const std::string& control);
+
+        /**
+         * Menu actions queued out of the emitting panel's own dispatch: a
+         * button handler that destroys the panel it lives on frees the object
+         * whose callback is still on the stack. Everything a menu button does
+         * lands here and runs at the top of the next update.
+         */
+        std::vector<std::function<void()>> pendingMenuActions;
         void exitToMainMenu();
         InGameOptionsState currentInGameOptions() const;
         void applyInGameOptions(const InGameOptionsState& state);

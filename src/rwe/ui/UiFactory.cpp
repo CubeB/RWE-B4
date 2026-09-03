@@ -1,4 +1,6 @@
 #include "UiFactory.h"
+#include <cctype>
+#include <rwe/ui/UiSlider.h>
 #include <rwe/ui/UiTextBox.h>
 #include <algorithm>
 #include <rwe/ui/UiSurface.h>
@@ -144,11 +146,30 @@ namespace rwe
     std::unique_ptr<UiPanel> UiFactory::createPanel(int x, int y, int width, int height, const std::string& name, const std::optional<std::string>& background)
     {
         std::optional<std::shared_ptr<Sprite>> backgroundSprite;
-        if (background)
+        if (background && *background != "NULL")
         {
             if (auto backgroundSpriteSeries = textureService->getGuiTexture(name, *background))
             {
                 backgroundSprite = (*backgroundSpriteSeries)->sprites.at(0);
+            }
+        }
+        if (!backgroundSprite)
+        {
+            // Some dialogs carry their art as a gaf entry named after the
+            // gui itself (LOADGAME.GAF holds "LoadGame"); try the obvious
+            // spellings before falling back to the panel's solid plate.
+            auto titled = name;
+            for (std::size_t i = 1; i < titled.size(); ++i)
+            {
+                titled[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(titled[i])));
+            }
+            for (const auto& candidate : {name, titled})
+            {
+                if (auto series = textureService->getGuiTexture(name, candidate))
+                {
+                    backgroundSprite = (*series)->sprites.at(0);
+                    break;
+                }
             }
         }
 
@@ -489,7 +510,27 @@ namespace rwe
         auto sprites = textureService->getGuiTexture(guiName, "SLIDERS");
         if (!sprites)
         {
+            // The options pages' sliders live in guis whose own GAF has no
+            // SLIDERS entry; the common set stands in, and a horizontal
+            // slider draws itself anyway.
+            sprites = textureService->getGuiTexture("COMMONGUI", "SLIDERS");
+        }
+        if (!sprites)
+        {
             throw std::runtime_error("Missing SLIDERS gaf entry");
+        }
+
+        // The gui declares which way the gadget runs. The vertical ones are
+        // the list scrollbars; the horizontal ones are the options sliders,
+        // which UiScrollBar's vertical geometry made unclickable.
+        if (entry.common.attribs & GuiScrollHorizontalAttrib)
+        {
+            return std::make_unique<UiSlider>(
+                entry.common.xpos,
+                entry.common.ypos,
+                entry.common.width,
+                entry.common.height,
+                *sprites);
         }
 
         auto scrollBar = std::make_unique<UiScrollBar>(

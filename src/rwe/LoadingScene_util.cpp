@@ -151,6 +151,10 @@ namespace rwe
         WeaponDefinition weaponDefinition;
 
         weaponDefinition.maxRange = SimScalar(tdf.range);
+
+        // Beams pass through wreckage; everything else can blast it apart.
+        // Render types 0 and 7 are the two laser draws, 5 the lightning gun.
+        weaponDefinition.damagesFeatures = tdf.renderType != 0 && tdf.renderType != 5 && tdf.renderType != 7;
         weaponDefinition.reloadTime = SimScalar(tdf.reloadTime);
         weaponDefinition.tolerance = SimAngle(tdf.tolerance);
         weaponDefinition.pitchTolerance = SimAngle(tdf.pitchTolerance);

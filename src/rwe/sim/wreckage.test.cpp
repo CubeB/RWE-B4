@@ -85,26 +85,48 @@ namespace rwe
             REQUIRE(sim.getFeature(rockId).hitPoints == 2000u);
         }
 
-        SECTION("gunfire does not touch a feature")
+        SECTION("a blast chips a feature, and enough of them break it apart")
         {
-            // Weapons damage units only. A wreck or a rock sitting under a barrage
-            // keeps every hit point and stays exactly where it is: the only ways a
-            // feature leaves the map are reclaim and fire.
+            // Force-attacking a wreck field to clear a lane is a standing
+            // part of play. A feature's `damage` key is its hit points; a
+            // blast pays the same falloff-scaled damage a unit would take,
+            // and at zero the feature breaks down to its featureDead form.
             auto rockId = sim.addFeature(rockDef, 8, 8).value();
             auto position = sim.getFeature(rockId).position;
 
-            // Squarely on top of it, and with far more damage than it has health.
+            sim.doProjectileImpact(makeShell(position, 500u, 64_ss), ImpactType::Normal);
+            REQUIRE(sim.tryGetFeature(rockId).has_value());
+            REQUIRE(sim.getFeature(rockId).hitPoints < 2000u);
+            REQUIRE(sim.getFeature(rockId).hitPoints > 0u);
+
+            // Far more damage than it has left: it goes, and the rubble
+            // stands in its place.
             sim.doProjectileImpact(makeShell(position, 100000u, 64_ss), ImpactType::Normal);
+            bool foundRubble = false;
+            for (const auto& [_, feature] : sim.features)
+            {
+                if (feature.featureName == rubbleDef)
+                {
+                    foundRubble = true;
+                }
+                REQUIRE(feature.featureName != rockDef);
+            }
+            REQUIRE(foundRubble);
+        }
+
+        SECTION("a beam weapon never touches a feature")
+        {
+            // Lasers do not damage wreckage -- the community's standing
+            // advice for a blocked assault is to bring anything else.
+            auto rockId = sim.addFeature(rockDef, 8, 8).value();
+            auto position = sim.getFeature(rockId).position;
+
+            auto shell = makeShell(position, 100000u, 64_ss);
+            sim.weaponDefinitions[shell.weaponType].damagesFeatures = false;
+            sim.doProjectileImpact(shell, ImpactType::Normal);
 
             REQUIRE(sim.tryGetFeature(rockId).has_value());
             REQUIRE(sim.getFeature(rockId).hitPoints == 2000u);
-            REQUIRE((sim.getFeature(rockId).position == position));
-
-            // No featureDead rubble was left behind in its place either.
-            for (const auto& [_, feature] : sim.features)
-            {
-                REQUIRE(feature.featureName != rubbleDef);
-            }
         }
     }
 

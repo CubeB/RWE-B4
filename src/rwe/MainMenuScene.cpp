@@ -454,6 +454,11 @@ namespace rwe
 
     void MainMenuScene::update(int millisecondsElapsed)
     {
+        for (auto& action : std::exchange(pendingMenuActions, {}))
+        {
+            action();
+        }
+
         topPanel().update(static_cast<float>(millisecondsElapsed) / 1000.0f);
     }
 
@@ -516,6 +521,13 @@ namespace rwe
     }
 
     void MainMenuScene::message(const std::string& topic, const std::string& message, const ActivateMessage& details)
+    {
+        // Defer: handlers that pop or replace the panel would otherwise
+        // destroy the object whose event dispatch we are standing in.
+        pendingMenuActions.push_back([this, topic, message, details]() { messageNow(topic, message, details); });
+    }
+
+    void MainMenuScene::messageNow(const std::string& topic, const std::string& message, const ActivateMessage& details)
     {
         if (message == "PrevMenu" || message == "PREVMENU")
         {

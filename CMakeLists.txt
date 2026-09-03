@@ -376,6 +376,8 @@ set(SOURCE_FILES
     src/rwe/io/smk/SmkDecoder.h
     src/rwe/MovieScene.cpp
     src/rwe/MovieScene.h
+    src/rwe/ui/UiSlider.cpp
+    src/rwe/ui/UiSlider.h
     src/rwe/ui/UiTextBox.cpp
     src/rwe/ui/UiTextBox.h
     src/rwe/game/SaveFile.cpp

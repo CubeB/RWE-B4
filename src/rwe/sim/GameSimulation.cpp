@@ -3006,10 +3006,14 @@ namespace rwe
         auto paralyzer = weaponIt != weaponDefinitions.end() && weaponIt->second.paralyzer;
 
         std::unordered_set<UnitId> seenUnits;
+        std::unordered_set<FeatureId> seenFeatures;
 
-        // Blasts hurt units only. Wreckage and scenery are not damaged by weapons:
-        // a wreck stays put until somebody reclaims it, and terrain features are
-        // only ever removed by reclaim or by fire (see updateBurningFeatures).
+        // Blasts hurt wreckage too: force-attacking a wreck field to clear a
+        // lane is a standing part of play, and controlling one is an economy
+        // in itself. A feature's own `damage` key is its hit points; a wreck
+        // blown to nothing breaks down to its featureDead form the way a
+        // burnt one does, and a beam weapon never touches them at all.
+        auto damagesFeatures = weaponIt == weaponDefinitions.end() || weaponIt->second.damagesFeatures;
 
         auto region = GridRegion::fromCoordinates(minCell, maxCell);
 
@@ -3024,6 +3028,35 @@ namespace rwe
           if (cellDistanceSquared > radiusSquared)
           {
               return;
+          }
+
+          // wreckage and scenery in the blast
+          if (damagesFeatures && !paralyzer)
+          {
+              const auto& cell = occupiedGrid.get(coords);
+              if (cell.featureId && seenFeatures.find(*cell.featureId) == seenFeatures.end())
+              {
+                  seenFeatures.insert(*cell.featureId);
+                  if (auto featureRef = tryGetFeature(*cell.featureId))
+                  {
+                      auto& feature = featureRef->get();
+                      const auto& featureDefinition = getFeatureDefinition(feature.featureName);
+                      if (featureDefinition.reclaimable || featureDefinition.blocking)
+                      {
+                          auto distance = (feature.position - position).length();
+                          auto scale = blastDamageScale(distance, radius, projectile.edgeEffectiveness);
+                          auto scaled = static_cast<int>(simScalarToUInt(SimScalar(static_cast<float>(projectile.getDamage(std::string()))) * scale));
+                          if (scaled > 0 && feature.hitPoints > 0)
+                          {
+                              feature.hitPoints = feature.hitPoints > static_cast<unsigned int>(scaled) ? feature.hitPoints - static_cast<unsigned int>(scaled) : 0;
+                              if (feature.hitPoints == 0)
+                              {
+                                  replaceFeature(*cell.featureId, featureDefinition.featureDead);
+                              }
+                          }
+                      }
+                  }
+              }
           }
 
           // check if a unit is there

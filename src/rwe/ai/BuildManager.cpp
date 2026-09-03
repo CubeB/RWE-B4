@@ -469,7 +469,37 @@ namespace rwe
             LOG_DEBUG << "AI build: no site found for " << next << " near " << builder.position.x.value << "," << builder.position.z.value;
         }
 
-        // Nothing to build (or nowhere to build it): lend a hand at the factory.
+        // Nothing to build (or nowhere to build it): harvest the battlefield.
+        // Wreck fields are a real economy -- the standing advice is to work
+        // them even deep in enemy territory -- so an idle builder reclaims
+        // the nearest metal-bearing wreck around the base before falling
+        // back to lending a hand at the factory.
+        if (builderAtBase)
+        {
+            std::optional<FeatureId> bestWreck;
+            auto bestDistanceSquared = SimScalar(1200.0f * 1200.0f);
+            for (const auto& [featureId, feature] : sim.features)
+            {
+                const auto& featureDefinition = sim.getFeatureDefinition(feature.featureName);
+                if (!featureDefinition.reclaimable || featureDefinition.metal <= 0)
+                {
+                    continue;
+                }
+                auto distanceSquared = bb.baseAnchor->distanceSquared(feature.position);
+                if (distanceSquared < bestDistanceSquared)
+                {
+                    bestDistanceSquared = distanceSquared;
+                    bestWreck = featureId;
+                }
+            }
+            if (bestWreck)
+            {
+                outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(ReclaimOrder(*bestWreck), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                return;
+            }
+        }
+
+        // Otherwise lend a hand at the factory.
         if (!bb.factories.empty() && builderAtBase)
         {
             const auto& factory = sim.getUnitState(bb.factories.front());

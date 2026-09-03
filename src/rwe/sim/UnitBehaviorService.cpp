@@ -2936,6 +2936,41 @@ namespace rwe
             }
         }
 
+        // A builder on patrol clears the battlefield as it goes: wreckage --
+        // anything reclaimable that carries metal -- inside its sight gets
+        // reclaimed before the patrol moves on. Controlling a wreck field is
+        // an economy in itself, and this is what makes a construction
+        // aircraft on patrol behind the line worth having.
+        if (unitInfo.definition->canReclamate && unitInfo.definition->builder)
+        {
+            std::optional<FeatureId> bestWreck;
+            auto bestDistanceSquared = SimScalar(256.0f * 256.0f);
+            for (const auto& [featureId, feature] : sim->features)
+            {
+                const auto& featureDefinition = sim->getFeatureDefinition(feature.featureName);
+                if (!featureDefinition.reclaimable || featureDefinition.metal <= 0)
+                {
+                    continue;
+                }
+                auto distanceSquared = unitInfo.state->position.distanceSquared(feature.position);
+                if (distanceSquared < bestDistanceSquared)
+                {
+                    bestDistanceSquared = distanceSquared;
+                    bestWreck = featureId;
+                }
+            }
+            if (bestWreck)
+            {
+                // Run the ordinary reclaim machinery against it; the wreck is
+                // re-found every tick, so when it is gone the patrol resumes
+                // by itself.
+                if (!handleReclaimOrder(unitInfo, ReclaimOrder(*bestWreck)))
+                {
+                    return false;
+                }
+            }
+        }
+
         if (navigateTo(unitInfo, patrolOrder.destination))
         {
             // Reached this waypoint: send it to the back so the route loops.

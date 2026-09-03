@@ -126,6 +126,14 @@ namespace rwe
         bool verticalLaunch{false};
 
         /**
+         * Whether this weapon's blast hurts wreckage and scenery. Lasers do
+         * not damage wreckage -- the community's standing advice for a
+         * blocked assault is to force-attack the wrecks with anything else --
+         * so this is cleared for beam render types at load.
+         */
+        bool damagesFeatures{true};
+
+        /**
          * TA interceptor, bit 30 of `wdef+0x111`. The weapon shoots at other
          * projectiles rather than at units: the auto-target scan hands it the
          * projectile search at 0x49D120 instead of the unit one, and its blast

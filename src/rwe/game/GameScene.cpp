@@ -2942,6 +2942,11 @@ namespace rwe
 
     void GameScene::update(int millisecondsElapsed)
     {
+        for (auto& action : std::exchange(pendingMenuActions, {}))
+        {
+            action();
+        }
+
         updateMusic();
 
         // Pause halts simulation tick dispatch by not advancing the
@@ -5021,6 +5026,14 @@ namespace rwe
 
     void GameScene::gameMenuMessage(const std::string& topic, const std::string& control)
     {
+        // Defer: this is called from inside the panel's own event dispatch,
+        // and most handlers replace the panel, which would destroy the object
+        // whose callback we are standing in.
+        pendingMenuActions.push_back([this, topic, control]() { gameMenuMessageNow(topic, control); });
+    }
+
+    void GameScene::gameMenuMessageNow(const std::string& topic, const std::string& control)
+    {
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
         if (topic == sidePrefix + "OPT")
         {
@@ -5274,6 +5287,13 @@ namespace rwe
     {
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
         auto panel = uiFactory.panelFromGuiFile(sidePrefix + "GEN");
+        applyOrderButtonGating(*panel);
+        return panel;
+    }
+
+    void GameScene::applyOrderButtonGating(UiPanel& panel)
+    {
+        const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
 
         // TA shows only the orders the selection can carry out, and it looks at
         // the whole selection rather than at one unit: the accumulator loop at
@@ -5281,6 +5301,11 @@ namespace rwe
         // offered when *any* selected unit names it. Picking up a transport
         // along with a squad of Peewees therefore gets you LOAD, and picking up
         // a solar collector with them does not take MOVE away.
+        //
+        // This runs over every panel that carries the order strip -- the
+        // orders page AND the build pages, which include the full strip in
+        // their own gui files. Ungated build pages were how a factory came to
+        // offer the commander's D-gun (the BLAST gadget).
         std::vector<OrderButtonUnit> selection;
         for (const auto& selectedUnitId : selectedUnits)
         {
@@ -5304,7 +5329,7 @@ namespace rwe
 
         if (selection.empty())
         {
-            return panel;
+            return;
         }
 
         // The original greys these out rather than taking them away, except
@@ -5313,7 +5338,7 @@ namespace rwe
         // else calls the "grey" one). The greyed frame is in every button's
         // own GAF, one past the pressed frame.
         std::vector<std::string> doomed;
-        for (const auto& child : panel->getChildren())
+        for (const auto& child : panel.getChildren())
         {
             const auto& name = child->getName();
             if (!startsWith(name, sidePrefix))
@@ -5337,10 +5362,8 @@ namespace rwe
 
         for (const auto& name : doomed)
         {
-            panel->removeChildrenNamed(name);
+            panel.removeChildrenNamed(name);
         }
-
-        return panel;
     }
 
     void GameScene::spawnDebris(const PieceExplodedEvent& e)
@@ -7003,6 +7026,7 @@ namespace rwe
     std::unique_ptr<UiPanel> GameScene::createBuildPanel(const std::string& guiName, const std::vector<GuiEntry>& buildPanelDefinition, const std::unordered_map<std::string, int>& totals)
     {
         auto panel = uiFactory.panelFromGuiFile(guiName, buildPanelDefinition);
+        applyOrderButtonGating(*panel);
         for (const auto& e : totals)
         {
             auto button = panel->find<UiStagedButton>(e.first);
@@ -7196,6 +7220,11 @@ namespace rwe
 
         for (const auto& point : findGeoVentSteamPoints(simulation))
         {
+            // A vent under the fog of war keeps its steam to itself.
+            if (!positionIsVisibleToLocalPlayer(SimVector(SimScalar(point.x), SimScalar(point.y), SimScalar(point.z))))
+            {
+                continue;
+            }
             spawnSmokePuff(point, "smoke 1", geoVentSteamRiseRate);
         }
     }

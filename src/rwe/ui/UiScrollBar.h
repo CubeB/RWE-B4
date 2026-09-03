@@ -48,6 +48,16 @@ namespace rwe
         Subject<bool> scrollDownSubject;
         Subject<float> scrollChangedSubject;
 
+    protected:
+        float getScrollPercent() const { return scrollPercent; }
+
+        /** Emits the change; the subscription in the constructor forwards it as a message. */
+        void notifyScrollChanged(float percent) { scrollChangedSubject.next(percent); }
+
+        void grabForDrag() { barGrabbed = true; }
+        void releaseDrag() { barGrabbed = false; }
+        bool isDragging() const { return barGrabbed; }
+
     public:
         UiScrollBar(
             int posX,
