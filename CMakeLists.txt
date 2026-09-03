@@ -318,6 +318,8 @@ set(SOURCE_FILES
     src/rwe/game/WeaponMediaInfo.h
     src/rwe/game/dump_util.cpp
     src/rwe/game/dump_util.h
+    src/rwe/game/save_util.cpp
+    src/rwe/game/save_util.h
     src/rwe/game/matrix_util.cpp
     src/rwe/game/matrix_util.h
     src/rwe/geometry/BoundingBox3f.h
@@ -876,6 +878,7 @@ set(TEST_FILES
     src/rwe/sim/standingorders.test.cpp
     src/rwe/sim/targeting.test.cpp
     src/rwe/sim/turret.test.cpp
+    src/rwe/sim/saveload.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp
     src/rwe/util/Result.test.cpp
     src/rwe/util/SimpleLogger.test.cpp
