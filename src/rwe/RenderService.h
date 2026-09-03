@@ -142,6 +142,18 @@ namespace rwe
 
     class RenderService
     {
+    public:
+        /**
+         * The VISUALS page's Shading switch. The original picks between two
+         * whole rasterizer chains on it; here it gates the lighting term,
+         * and it ANDs with each piece's own COB shade flag.
+         */
+        void setShadingEnabled(bool enabled) { shadingEnabled = enabled; }
+
+    private:
+        bool shadingEnabled{true};
+
+    public:
     private:
         GraphicsContext* graphics;
         ShaderService* shaders;

@@ -5,9 +5,11 @@ out vec4 outColor;
 
 uniform sampler2D screenTexture;
 uniform sampler2D dodgeMask;
-// The options screen's gamma, as a plain exponent: 1.0 leaves the view
-// untouched, higher lifts the midtones. The whole world passes through this
-// blit, so this is the one place that catches everything the camera sees.
+// The options screen's gamma. The original is not a gamma curve at all: it
+// rewrites the palette as min(255, c * m) with m = 0.5 + v/24 over a slider
+// of 20 steps, so it runs 0.5x to 1.333x and 1.0 is untouched. A straight
+// multiply is therefore the faithful thing, and this blit is the one place
+// the whole world view passes through.
 uniform float gamma;
 
 void main(void)
@@ -15,5 +17,5 @@ void main(void)
     vec4 screenValue = texture(screenTexture, fragTexCoord);
     vec4 dodgeMaskValue = texture(dodgeMask, fragTexCoord);
     vec3 dodged = screenValue.rgb / (vec3(1.0, 1.0, 1.0) - dodgeMaskValue.rgb);
-    outColor = vec4(pow(clamp(dodged, 0.0, 1.0), vec3(1.0 / gamma)), 1.0);
+    outColor = vec4(clamp(dodged * gamma, 0.0, 1.0), 1.0);
 }

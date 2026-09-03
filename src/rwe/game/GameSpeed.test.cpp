@@ -11,7 +11,7 @@ namespace rwe
             // the middle of twenty-one steps is 1.0x.
             GameSpeed s;
             REQUIRE(s.index() == GameSpeed::DefaultIndex);
-            REQUIRE(s.index() == 10);
+            REQUIRE(s.index() == 9);
             REQUIRE(s.perMille() == 1000);
             REQUIRE(s.isDefault());
             REQUIRE(s.displayOffset() == 0);
@@ -31,7 +31,7 @@ namespace rwe
         {
             REQUIRE(GameSpeed(99).index() == GameSpeed::MaxIndex);
             REQUIRE(GameSpeed(GameSpeed::MaxIndex + 1).index() == GameSpeed::MaxIndex);
-            REQUIRE(GameSpeed(99).perMille() == 10000);
+            REQUIRE(GameSpeed(99).perMille() == 2000);
         }
 
         SECTION("increase at max stays at max")
@@ -64,10 +64,10 @@ namespace rwe
         SECTION("default speed up moves to next step")
         {
             GameSpeed s;
-            REQUIRE(s.increased().index() == 11);
-            REQUIRE(s.increased().perMille() == 1300);
-            REQUIRE(s.decreased().index() == 9);
-            REQUIRE(s.decreased().perMille() == 800);
+            REQUIRE(s.increased().index() == 10);
+            REQUIRE(s.increased().perMille() == 1100);
+            REQUIRE(s.decreased().index() == 8);
+            REQUIRE(s.decreased().perMille() == 900);
         }
     }
 
@@ -104,14 +104,14 @@ namespace rwe
     {
         SECTION("verified TA speed steps")
         {
-            // Twenty-one steps, 1.0x in the middle, a tenth at one end and
-            // ten times at the other; the display offset is what the HUD
-            // shows, so the ends read -10 and +10.
+            // The original keeps speed as 1..20 and shows value - 10, so
+            // the HUD reads -9 to +10 with 0 at normal, and step n is n
+            // tenths of normal speed -- a linear ramp, not a geometric one.
             REQUIRE(GameSpeed(0).perMille() == 100);
-            REQUIRE(GameSpeed(0).displayOffset() == -10);
+            REQUIRE(GameSpeed(0).displayOffset() == -9);
             REQUIRE(GameSpeed(GameSpeed::DefaultIndex).perMille() == 1000);
             REQUIRE(GameSpeed(GameSpeed::DefaultIndex).displayOffset() == 0);
-            REQUIRE(GameSpeed(GameSpeed::MaxIndex).perMille() == 10000);
+            REQUIRE(GameSpeed(GameSpeed::MaxIndex).perMille() == 2000);
             REQUIRE(GameSpeed(GameSpeed::MaxIndex).displayOffset() == 10);
 
             // Monotonic throughout: every step is faster than the one below.

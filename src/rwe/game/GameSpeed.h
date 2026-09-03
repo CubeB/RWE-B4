@@ -18,14 +18,14 @@ namespace rwe
     class GameSpeed
     {
     public:
-        // The original's speed control runs from -10 to +10 around normal,
-        // so there are twenty-one steps with 1.0x in the middle: a geometric
-        // ramp down to a tenth and up to ten times.
-        static constexpr std::array<int, 21> SpeedSteps = {
-            100, 130, 170, 220, 280, 360, 460, 590, 750, 800,
+        // The original keeps speed as 1..20 and displays it as value - 10,
+        // so the HUD reads -9 to +10 with 0 at normal, and the multiplier is
+        // linear on the tick budget: step n is n tenths of normal speed.
+        static constexpr std::array<int, 20> SpeedSteps = {
+            100, 200, 300, 400, 500, 600, 700, 800, 900,
             1000,
-            1300, 1700, 2200, 2800, 3600, 4600, 5900, 7500, 8700, 10000};
-        static constexpr int DefaultIndex = 10;
+            1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000};
+        static constexpr int DefaultIndex = 9;
         static constexpr int MinIndex = 0;
         static constexpr int MaxIndex = static_cast<int>(SpeedSteps.size()) - 1;
 

@@ -15,14 +15,33 @@ uniform float alpha;
 
 const vec3 waterTint = vec3(0.5, 0.5, 1.0);
 const vec3 normalTint = vec3(1.0, 1.0, 1.0);
-// The original has no model lighting at all. The full unit draw chain was
-// decoded and no normal is ever computed, no sun vector exists, and the
-// span fillers copy texels untouched: every unit texel draws at 1.0. The
-// shading players remember is painted by the artists -- a solar collector
-// binds bright and dark variants of the same metal texture per face
-// orientation, and one texture is literally named 32XGouraud. Earlier
-// guesses at a sun direction here made mirrored faces of one building come
-// out at different brightnesses; the truth is simpler.
+// TA lights its models after all. The renderer decoded earlier -- no normals,
+// no sun, texels copied unmodified -- is the one that runs with SHADING
+// switched OFF; the option defaults ON, and 0x458744 picks between two
+// complete rasterizer chains on that one bit. The shaded chain computes
+// per-face normals, averages them per vertex, and takes
+//
+//     level = (int)(5.0 * dot(n, (-0.8, 1.0, 0.25))) & 0x1F
+//
+// as a row of PALETTE.SHD, whose row k multiplies the palette by 0.06875k --
+// so row ~14.55 is identity and five rows separate each unit of the dot.
+//
+// Where RWE departs: the original's `& 0x1F` WRAPS. A surface perpendicular
+// to the sun lands on row 0, pure black, and a replay against the stock
+// models puts 8% of visible pixels there with 46% of quads straddling the
+// wrap. That is the original being wrong rather than subtle, so the same sun
+// and the same per-row step are centred on the identity row instead of
+// wrapped, and clamped to the table's ends.
+const vec3 lightDirection = normalize(vec3(-0.8, 1.0, 0.25));
+const float shadeIdentityRow = 14.5455;
+const float shadeRowsPerUnitDot = 5.0;
+const float shadeRowMultiplier = 0.06875;
+
+float shadeIntensity(vec3 normal)
+{
+    float row = shadeIdentityRow + (shadeRowsPerUnitDot * dot(normalize(normal), lightDirection));
+    return shadeRowMultiplier * clamp(row, 0.0, 31.0);
+}
 
 void main(void)
 {
@@ -32,5 +51,6 @@ void main(void)
         discard;
     }
 
-    outColor = vec4(vec3(baseColor) * (height > seaLevel ? normalTint : waterTint), alpha);
+    float intensity = shade ? shadeIntensity(worldNormal) : 1.0;
+    outColor = vec4(vec3(baseColor) * intensity * (height > seaLevel ? normalTint : waterTint), alpha);
 }

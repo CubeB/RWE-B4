@@ -274,6 +274,8 @@ namespace rwe
           soundModeSetting(static_cast<SoundMode>(sceneContext.globalConfig->soundMode)),
           unitSpeechSetting(static_cast<UnitSpeechLevel>(sceneContext.globalConfig->unitSpeech)),
           gammaSetting(sceneContext.globalConfig->gamma),
+          shadingEnabled(sceneContext.globalConfig->shading),
+          antiAliasEnabled(sceneContext.globalConfig->antiAlias),
           gameParameters(gameParameters),
           localPlayerId(localPlayerId),
           uiFactory(sceneContext.textureService, sceneContext.audioService, audioLookup, sceneContext.vfs, sceneContext.pathMapping, sceneContext.viewport->width(), sceneContext.viewport->height()),
@@ -1196,13 +1198,14 @@ namespace rwe
         sceneContext.graphics->setViewport(
             0,
             0,
-            worldViewport.width(),
-            worldViewport.height());
+            worldViewport.width() * worldRenderTextureScale,
+            worldViewport.height() * worldRenderTextureScale);
 
         sceneContext.graphics->clear();
 
         const auto& viewProjectionMatrix = computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
         RenderService worldRenderService(sceneContext.graphics, sceneContext.shaders, &viewProjectionMatrix);
+        worldRenderService.setShadingEnabled(shadingEnabled);
 
         sceneContext.graphics->disableDepthBuffer();
 
@@ -5061,9 +5064,10 @@ namespace rwe
         if (auto bar = findInGameMenu<UiScrollBar>("GAMMA"))
         {
             bar->setScrollBarPercent(0.2f);
-            bar->setScrollPercent((static_cast<float>(state.gamma) - 50.0f) / 150.0f);
+            bar->setScrollPercent((static_cast<float>(state.gamma) - 50.0f) / 83.0f);
             auto sub = bar->scrollChanged().subscribe([this](float v) {
-                gammaSetting = 50u + static_cast<unsigned int>(v * 150.0f);
+                // The original's twenty steps of 0.5 + v/24: 0.5x to 1.333x.
+                gammaSetting = 50u + static_cast<unsigned int>(v * 83.0f);
                 applyGamma();
             });
             bar->addSubscription(std::move(sub));
@@ -5119,7 +5123,17 @@ namespace rwe
 
         // Still no machinery behind these; the original greys what does not
         // apply rather than letting it lie.
-        for (const auto* name : {"SHADING", "ANTI", "LEFTCLICK", "UNITCHAT", "TXTSCROL", "MAXLINES"})
+        if (auto toggle = findInGameMenu<UiStagedButton>("SHADING"))
+        {
+            toggle->setStage(shadingEnabled ? 1 : 0);
+        }
+
+        if (auto toggle = findInGameMenu<UiStagedButton>("ANTI"))
+        {
+            toggle->setStage(antiAliasEnabled ? 1 : 0);
+        }
+
+        for (const auto* name : {"LEFTCLICK", "UNITCHAT", "TXTSCROL", "MAXLINES"})
         {
             if (auto button = findInGameMenu<UiStagedButton>(name))
             {
@@ -5146,7 +5160,9 @@ namespace rwe
             scrollSpeedSetting,
             soundModeSetting,
             unitSpeechSetting,
-            gammaSetting};
+            gammaSetting,
+            shadingEnabled,
+            antiAliasEnabled};
     }
 
     void GameScene::applyInGameOptions(const InGameOptionsState& state)
@@ -5163,6 +5179,12 @@ namespace rwe
         audio->setSoundEnabled(state.soundMode != SoundMode::Off);
         gammaSetting = state.gamma;
         applyGamma();
+        shadingEnabled = state.shading;
+        if (antiAliasEnabled != state.antiAlias)
+        {
+            antiAliasEnabled = state.antiAlias;
+            recreateWorldRenderTextures();
+        }
     }
 
     void GameScene::applyGamma()
@@ -5190,6 +5212,8 @@ namespace rwe
                                                          {"sound-mode", std::to_string(static_cast<unsigned int>(state.soundMode))},
                                                          {"unit-speech", std::to_string(static_cast<unsigned int>(state.unitSpeech))},
                                                          {"gamma", std::to_string(state.gamma)},
+                                                         {"shading", state.shading ? "true" : "false"},
+                                                         {"anti-alias", state.antiAlias ? "true" : "false"},
                                                      });
     }
 
@@ -5328,7 +5352,7 @@ namespace rwe
             }
             else if (control == "RESTORE")
             {
-                applyInGameOptions(InGameOptionsState{100, 100, true, "windowed", true, 100, SoundMode::Stereo, UnitSpeechLevel::Full, 100});
+                applyInGameOptions(InGameOptionsState{100, 100, true, "windowed", true, 100, SoundMode::Stereo, UnitSpeechLevel::Full, 100, true, true});
                 openInGameOptions(inGameOptionsPage);
             }
             else if (control == "UNDO")
@@ -5344,6 +5368,15 @@ namespace rwe
             else if (control == "BSHADOWS")
             {
                 shadowsEnabled = !shadowsEnabled;
+            }
+            else if (control == "SHADING")
+            {
+                shadingEnabled = !shadingEnabled;
+            }
+            else if (control == "ANTI")
+            {
+                antiAliasEnabled = !antiAliasEnabled;
+                recreateWorldRenderTextures();
             }
             else if (control == "MODE")
             {
@@ -7701,8 +7734,16 @@ namespace rwe
 
     void GameScene::recreateWorldRenderTextures()
     {
-        worldFrameBuffer = sceneContext.graphics->createFrameBuffer(worldViewport.width(), worldViewport.height());
-        dodgeMask = sceneContext.graphics->createEmptyTexture(worldViewport.width(), worldViewport.height());
+        // Anti-aliasing: the original renders each unit into a double-size
+        // bitmap and box-filters it down through the alpha table. Here the
+        // whole world buffer is doubled and the blit's linear filter does the
+        // averaging, which costs one draw and catches every edge rather than
+        // only unit silhouettes.
+        worldRenderTextureScale = antiAliasEnabled ? 2u : 1u;
+        auto width = worldViewport.width() * worldRenderTextureScale;
+        auto height = worldViewport.height() * worldRenderTextureScale;
+        worldFrameBuffer = sceneContext.graphics->createFrameBuffer(width, height);
+        dodgeMask = sceneContext.graphics->createEmptyTexture(width, height);
         worldRenderTextureSize = {worldViewport.width(), worldViewport.height()};
     }
 

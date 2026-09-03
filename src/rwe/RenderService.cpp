@@ -186,7 +186,7 @@ namespace rwe
             {
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
-                graphics->setUniformBool(textureShader.shade, m.shaded);
+                graphics->setUniformBool(textureShader.shade, m.shaded && shadingEnabled);
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -203,7 +203,7 @@ namespace rwe
                 graphics->setUniformMatrix(buildShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformFloat(buildShader.unitY, m.unitY);
                 graphics->setUniformFloat(buildShader.unitHeight, m.unitHeight);
-                graphics->setUniformBool(buildShader.shade, m.shaded);
+                graphics->setUniformBool(buildShader.shade, m.shaded && shadingEnabled);
                 graphics->setUniformFloat(buildShader.buildRatio, m.buildRatio);
                 graphics->setUniformInt(buildShader.aboveMode, static_cast<int>(m.aboveMode));
                 graphics->setUniformInt(buildShader.bandMode, static_cast<int>(m.bandMode));
@@ -236,7 +236,7 @@ namespace rwe
             {
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
-                graphics->setUniformBool(textureShader.shade, m.shaded);
+                graphics->setUniformBool(textureShader.shade, m.shaded && shadingEnabled);
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -249,7 +249,7 @@ namespace rwe
             {
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
-                graphics->setUniformBool(textureShader.shade, m.shaded);
+                graphics->setUniformBool(textureShader.shade, m.shaded && shadingEnabled);
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }

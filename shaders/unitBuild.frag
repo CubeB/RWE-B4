@@ -33,13 +33,23 @@ const float heightBias = 50.0;
 
 const vec3 waterTint = vec3(0.5, 0.5, 1.0);
 const vec3 normalTint = vec3(1.0, 1.0, 1.0);
-// The original has no model lighting at all -- see unitTexture.frag, which
-// this must match.
+// The shaded chain's lighting; see unitTexture.frag, which this must match.
+const vec3 lightDirection = normalize(vec3(-0.8, 1.0, 0.25));
+const float shadeIdentityRow = 14.5455;
+const float shadeRowsPerUnitDot = 5.0;
+const float shadeRowMultiplier = 0.06875;
+
+float shadeIntensity(vec3 normal)
+{
+    float row = shadeIdentityRow + (shadeRowsPerUnitDot * dot(normalize(normal), lightDirection));
+    return shadeRowMultiplier * clamp(row, 0.0, 31.0);
+}
 
 vec3 shadeNormal()
 {
     vec3 baseColor = vec3(texture(textureSampler, fragTexCoord));
-    return baseColor * (height > seaLevel ? normalTint : waterTint);
+    float intensity = shade ? shadeIntensity(worldNormal) : 1.0;
+    return baseColor * intensity * (height > seaLevel ? normalTint : waterTint);
 }
 
 void main(void)

@@ -399,12 +399,16 @@ namespace rwe
             SoundMode soundMode;
             UnitSpeechLevel unitSpeech;
             unsigned int gamma;
+            bool shading;
+            bool antiAlias;
         };
-        InGameOptionsState gameOptionsUndo{100, 100, true, "windowed", true, 100, SoundMode::Stereo, UnitSpeechLevel::Full, 100};
+        InGameOptionsState gameOptionsUndo{100, 100, true, "windowed", true, 100, SoundMode::Stereo, UnitSpeechLevel::Full, 100, true, true};
 
         SoundMode soundModeSetting{SoundMode::Stereo};
         UnitSpeechLevel unitSpeechSetting{UnitSpeechLevel::Full};
         unsigned int gammaSetting{100};
+        bool shadingEnabled{true};
+        bool antiAliasEnabled{true};
 
         void applyGamma();
 
@@ -541,6 +545,9 @@ namespace rwe
 
         /** What size the world render textures were made at, so a window resize remakes them. */
         std::pair<unsigned int, unsigned int> worldRenderTextureSize{0, 0};
+
+        /** 2 while anti-aliasing supersamples the world buffer, 1 otherwise. */
+        unsigned int worldRenderTextureScale{1};
 
         ScreenShakeState screenShake;
 

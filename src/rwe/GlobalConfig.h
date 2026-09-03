@@ -27,7 +27,13 @@ namespace rwe
         /** Unit voice acknowledgements: 0 off, 1 medium, 2 full. */
         unsigned int unitSpeech{2};
 
-        /** Screen gamma percentage, 50 to 200; 100 is untouched. */
+        /** Screen gamma percentage, 50 to 133 (the original's own range); 100 is untouched. */
         unsigned int gamma{100};
+
+        /** Model lighting, the VISUALS page's Shading switch; on in the original. */
+        bool shading{true};
+
+        /** Edge anti-aliasing: the original supersamples the unit and box-filters it down. */
+        bool antiAlias{true};
     };
 }
