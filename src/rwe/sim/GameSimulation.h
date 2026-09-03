@@ -108,6 +108,14 @@ namespace rwe
         Metal startingMetal;
         Energy startingEnergy;
 
+        /**
+         * Team from the lobby; players sharing one share sight and radar.
+         * Nothing means the player has no allies but itself. Last of the
+         * positional members so the existing aggregate initialisers, which
+         * stop at startingEnergy, keep working.
+         */
+        std::optional<int> teamId;
+
         bool metalStalled{false};
         bool energyStalled{false};
 
@@ -598,6 +606,12 @@ namespace rwe
 
         bool isExploredBy(PlayerId player, const SimVector& position) const;
         bool isVisibleTo(PlayerId player, const SimVector& position) const;
+
+        /**
+         * True when the two players are on the same lobby team, or are the
+         * same player. A player with no team has no allies but itself.
+         */
+        bool arePlayersAllied(PlayerId a, PlayerId b) const;
 
         /**
          * True when a world position lies inside the reach of one of the

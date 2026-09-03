@@ -35,18 +35,28 @@ const vec3 normalTint = vec3(1.0, 1.0, 1.0);
 // The exe's sun is (-0.8, 1, +0.25); the z is negated here because RWE's
 // world z runs south where the original's runs north.
 const vec3 lightDirection = normalize(vec3(-0.8, 1.0, -0.25));
-// PALETTE.SHD row k multiplies the palette by 0.06875k, so row ~14.55 is
-// identity. Sixteen rows per unit of the dot walks the whole table between
-// full sun and full shade, which is the range the original covers.
-const float shadeIdentityRow = 14.55;
-const float shadeRowsPerUnitDot = 16.0;
 const float shadeRowMultiplier = 0.06875;
 
+// The original's arithmetic, wrap and all (0x459C70):
+//
+//     level = (int)(5.0 * dot(nInward, L)) & 0x1F
+//
+// picking a row of PALETTE.SHD, where row k multiplies the palette by
+// 0.06875k. The exe's cross product yields the INWARD normal, so RWE's
+// outward one is negated before the dot.
+//
+// The `& 0x1F` was read as a bug once and replaced here with a centred,
+// monotone ramp -- on the grounds that a face perpendicular to the sun wraps
+// to row 0 and comes out pure black. A screenshot of the original settled
+// it: that black is the look. On ARMSOLAR the wrap gives the left panel row
+// 28 (1.93x, washed out) and the right panel row 1 (0.069x, black), which is
+// exactly what the original draws -- one lit panel and one solid black one.
+// The centred ramp gave 1.94x and 0.68x, two panels that read the same. The
+// wrap is not the original being crude; it is the original's contrast.
 float shadeIntensity(vec3 normal)
 {
-    float t = clamp(dot(normalize(normal), lightDirection), -1.0, 1.0);
-    float row = clamp(shadeIdentityRow + (shadeRowsPerUnitDot * t), 0.0, 31.0);
-    return shadeRowMultiplier * row;
+    int level = int(5.0 * dot(-normalize(normal), lightDirection)) & 31;
+    return shadeRowMultiplier * float(level);
 }
 
 void main(void)

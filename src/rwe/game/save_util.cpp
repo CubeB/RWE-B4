@@ -257,6 +257,7 @@ namespace rwe
                 {"color", p.color.value},
                 {"status", saveEnum(p.status)},
                 {"side", p.side},
+                {"teamId", saveOptional(p.teamId, [](int v) { return json(v); })},
                 {"metal", saveMetal(p.metal)},
                 {"energy", saveEnergy(p.energy)},
                 {"maxMetal", saveMetal(p.maxMetal)},
@@ -294,7 +295,8 @@ namespace rwe
                 loadMetal(j.at("maxMetal")),
                 loadEnergy(j.at("maxEnergy")),
                 loadMetal(j.at("startingMetal")),
-                loadEnergy(j.at("startingEnergy"))};
+                loadEnergy(j.at("startingEnergy")),
+                j.contains("teamId") ? loadOptional(j.at("teamId"), [](const json& v) { return v.get<int>(); }) : std::optional<int>()};
             p.metalStalled = j.at("metalStalled").get<bool>();
             p.energyStalled = j.at("energyStalled").get<bool>();
             p.unitsKilled = j.at("unitsKilled").get<unsigned int>();

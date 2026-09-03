@@ -59,6 +59,12 @@ namespace rwe
 
         Metal metal;
         Energy energy;
+
+        /**
+         * The lobby's team letter, or nothing for a player who fights alone.
+         * Players sharing a team share sight and radar.
+         */
+        std::optional<int> teamId;
     };
 
     struct GameParameters

@@ -1376,7 +1376,7 @@ namespace rwe
 
             auto controller = playerSettingsTypeToPlayerControllerType(playerSlot.type.getValue());
 
-            PlayerInfo playerInfo{std::nullopt, controller, getSideName(playerSlot.side.getValue()), playerSlot.colorIndex.getValue(), playerSlot.metal.getValue(), playerSlot.energy.getValue()};
+            PlayerInfo playerInfo{std::nullopt, controller, getSideName(playerSlot.side.getValue()), playerSlot.colorIndex.getValue(), playerSlot.metal.getValue(), playerSlot.energy.getValue(), playerSlot.teamIndex.getValue()};
             params.players[i] = std::move(playerInfo);
         }
 

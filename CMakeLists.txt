@@ -873,6 +873,7 @@ set(TEST_FILES
     src/rwe/pathfinding/pathing.test.cpp
     src/rwe/sim/economy.test.cpp
     src/rwe/sim/visibility.test.cpp
+    src/rwe/sim/alliance.test.cpp
     src/rwe/sim/concealment.test.cpp
     src/rwe/sim/UnitState_util.test.cpp
     src/rwe/sim/util.test.cpp
@@ -932,3 +933,6 @@ target_link_libraries(ui_probe librwe)
 
 add_executable(scene_lifetime_probe src/scene_lifetime_probe.cpp)
 target_link_libraries(scene_lifetime_probe librwe)
+
+add_executable(solar_probe src/solar_probe.cpp)
+target_link_libraries(solar_probe librwe)

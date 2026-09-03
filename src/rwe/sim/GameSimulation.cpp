@@ -1176,6 +1176,17 @@ namespace rwe
         return playerVisibility.at(player.value).isExplored(visionCellAt(position));
     }
 
+    bool GameSimulation::arePlayersAllied(PlayerId a, PlayerId b) const
+    {
+        if (a == b)
+        {
+            return true;
+        }
+        const auto& first = players.at(a.value).teamId;
+        const auto& second = players.at(b.value).teamId;
+        return first.has_value() && second.has_value() && *first == *second;
+    }
+
     bool GameSimulation::isVisibleTo(PlayerId player, const SimVector& position) const
     {
         return playerVisibility.at(player.value).isVisible(visionCellAt(position));
@@ -1378,7 +1389,6 @@ namespace rwe
                 continue;
             }
             const auto& unitDefinition = unitDefinitions.at(unit.unitType);
-            auto& vis = playerVisibility.at(unit.owner.value);
 
             // The eye sits at the top of the unit's model, never below the
             // water's surface, and the whole thing lives in the heightmap's
@@ -1394,7 +1404,17 @@ namespace rwe
                 static_cast<int>(unitDefinition.sightDistance) / cellWorldUnits,
                 losTables.maxRadius());
 
-            vis.revealWithLineOfSight(visionCellAt(unit.position), radius, visionHeights, eyeHeight, losTables);
+            // Allies share what they can see: the unit reveals into every
+            // player on its own team, itself included, so a teammate's map is
+            // lit by your scouts and yours by theirs.
+            for (std::size_t i = 0; i < playerVisibility.size(); ++i)
+            {
+                if (!arePlayersAllied(unit.owner, PlayerId(i)))
+                {
+                    continue;
+                }
+                playerVisibility[i].revealWithLineOfSight(visionCellAt(unit.position), radius, visionHeights, eyeHeight, losTables);
+            }
 
             // Radar, sonar and jamming all need the unit switched on if it can
             // be switched at all. Altitude extends radar; sonar is flat.
@@ -1405,15 +1425,23 @@ namespace rwe
             }
 
             auto altitude = rweMax(unit.position.y, 0_ss);
-            if (unitDefinition.radarDistance > 0)
+            for (std::size_t i = 0; i < playerVisibility.size(); ++i)
             {
-                auto range = intToSimScalar(static_cast<int>(unitDefinition.radarDistance)) + (2_ss * altitude);
-                vis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, false});
-            }
-            if (unitDefinition.sonarDistance > 0)
-            {
-                auto range = intToSimScalar(static_cast<int>(unitDefinition.sonarDistance));
-                vis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, true});
+                if (!arePlayersAllied(unit.owner, PlayerId(i)))
+                {
+                    continue;
+                }
+                auto& alliedVis = playerVisibility[i];
+                if (unitDefinition.radarDistance > 0)
+                {
+                    auto range = intToSimScalar(static_cast<int>(unitDefinition.radarDistance)) + (2_ss * altitude);
+                    alliedVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, false});
+                }
+                if (unitDefinition.sonarDistance > 0)
+                {
+                    auto range = intToSimScalar(static_cast<int>(unitDefinition.sonarDistance));
+                    alliedVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, true});
+                }
             }
 
             // A jammer works against everyone but its own owner. The original
