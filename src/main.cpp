@@ -585,6 +585,8 @@ int main(int argc, char* argv[])
             config.soundVolume = std::min(100u, args.getUint("sound-volume", 100));
             config.musicVolume = std::min(100u, args.getUint("music-volume", 100));
             config.musicEnabled = args.getString("music", "true") != "false";
+            config.shadows = args.getString("shadows", "true") != "false";
+            config.scrollSpeed = std::clamp(args.getUint("scroll-speed", 100), 25u, 200u);
             std::optional<rwe::GameParameters> gameParameters;
             if (args.contains("map"))
             {

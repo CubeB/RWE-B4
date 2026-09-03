@@ -264,6 +264,8 @@ namespace rwe
           sounds(std::move(sounds)),
           guiFont(guiFont),
           speechFont(speechFont),
+          shadowsEnabled(sceneContext.globalConfig->shadows),
+          scrollSpeedSetting(sceneContext.globalConfig->scrollSpeed),
           localPlayerId(localPlayerId),
           uiFactory(sceneContext.textureService, sceneContext.audioService, audioLookup, sceneContext.vfs, sceneContext.pathMapping, sceneContext.viewport->width(), sceneContext.viewport->height()),
           audioLookup(audioLookup),
@@ -1276,7 +1278,7 @@ namespace rwe
                 continue;
             }
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
-            if (!unitCastsShadow(unitDefinition))
+            if (!shadowsEnabled || !unitCastsShadow(unitDefinition))
             {
                 continue;
             }
@@ -4819,6 +4821,45 @@ namespace rwe
             label->get().setText(pendingWindowMode == "borderless" ? "Borderless" : (pendingWindowMode == "fullscreen" ? "Fullscreen" : "Window"));
         }
 
+        if (auto toggle = panel->find<UiStagedButton>("BSHADOWS"))
+        {
+            toggle->get().setStage(shadowsEnabled ? 1 : 0);
+        }
+
+        // Screen scroll: 25 to 200 percent across the slider's travel.
+        if (auto bar = panel->find<UiScrollBar>("SCREEN"))
+        {
+            bar->get().setScrollBarPercent(0.2f);
+            bar->get().setScrollPercent((static_cast<float>(scrollSpeedSetting) - 25.0f) / 175.0f);
+            auto sub = bar->get().scrollChanged().subscribe([this](float v) {
+                scrollSpeedSetting = 25u + static_cast<unsigned int>(v * 175.0f);
+            });
+            bar->get().addSubscription(std::move(sub));
+        }
+
+        // Game speed maps the slider across the discrete speed steps, applied
+        // through the same command path as the +/- keys.
+        if (auto bar = panel->find<UiScrollBar>("GAME"))
+        {
+            bar->get().setScrollBarPercent(0.2f);
+            bar->get().setScrollPercent(static_cast<float>(gameSpeed.index()) / static_cast<float>(GameSpeed::MaxIndex));
+            auto sub = bar->get().scrollChanged().subscribe([this](float v) {
+                auto index = static_cast<int>((v * static_cast<float>(GameSpeed::MaxIndex)) + 0.5f);
+                localPlayerCommandBuffer.push_back(PlayerSetGameSpeedCommand{GameSpeed(index).index()});
+            });
+            bar->get().addSubscription(std::move(sub));
+        }
+
+        // What RWE has no machinery behind stays visible but grey, the way
+        // the original greys what does not apply.
+        for (const auto* name : {"SHADING", "ANTI", "SPEECH", "MODE", "LEFTCLICK", "UNITCHAT"})
+        {
+            if (auto button = panel->find<UiStagedButton>(name))
+            {
+                button->get().setEnabled(false);
+            }
+        }
+
         setGameMenuPanel(std::move(panel));
         inGameOptionsPage = page;
     }
@@ -4836,7 +4877,9 @@ namespace rwe
             static_cast<unsigned int>(sceneContext.audioService->getSoundVolume() * 100.0f),
             static_cast<unsigned int>(sceneContext.audioService->getMusicVolume() * 100.0f),
             sceneContext.audioService->isMusicEnabled(),
-            pendingWindowMode};
+            pendingWindowMode,
+            shadowsEnabled,
+            scrollSpeedSetting};
     }
 
     void GameScene::applyInGameOptions(const InGameOptionsState& state)
@@ -4846,6 +4889,8 @@ namespace rwe
         audio->setMusicVolume(static_cast<float>(state.musicVolume) / 100.0f);
         audio->setMusicEnabled(state.musicEnabled);
         pendingWindowMode = state.windowMode;
+        shadowsEnabled = state.shadows;
+        scrollSpeedSetting = state.scrollSpeed;
     }
 
     void GameScene::saveInGameOptions()
@@ -4861,6 +4906,8 @@ namespace rwe
                                                          {"music-volume", std::to_string(state.musicVolume)},
                                                          {"music", state.musicEnabled ? "true" : "false"},
                                                          {"window-mode", state.windowMode},
+                                                         {"shadows", state.shadows ? "true" : "false"},
+                                                         {"scroll-speed", std::to_string(state.scrollSpeed)},
                                                      });
     }
 
@@ -4944,7 +4991,7 @@ namespace rwe
             }
             else if (control == "RESTORE")
             {
-                applyInGameOptions(InGameOptionsState{100, 100, true, "bordered"});
+                applyInGameOptions(InGameOptionsState{100, 100, true, "bordered", true, 100});
                 openInGameOptions(inGameOptionsPage);
             }
             else if (control == "UNDO")
@@ -4956,6 +5003,17 @@ namespace rwe
             {
                 auto* audio = sceneContext.audioService;
                 audio->setMusicEnabled(!audio->isMusicEnabled());
+            }
+            else if (control == "BSHADOWS")
+            {
+                shadowsEnabled = !shadowsEnabled;
+            }
+            else if (control == "TEST")
+            {
+                if (auto sound = sceneContext.audioService->loadSound("BUTTON10"))
+                {
+                    sceneContext.audioService->playSound(*sound);
+                }
             }
         }
     }
@@ -7252,7 +7310,7 @@ namespace rwe
         match(
             cameraControlState,
             [&](const CameraControlStateFree&) {
-                const float speed = CameraPanSpeed * millisecondsElapsed / 1000.0f;
+                const float speed = CameraPanSpeed * (static_cast<float>(scrollSpeedSetting) / 100.0f) * millisecondsElapsed / 1000.0f;
 
                 auto dx = directionX * speed;
                 auto dz = directionZ * speed;

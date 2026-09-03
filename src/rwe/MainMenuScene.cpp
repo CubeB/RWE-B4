@@ -127,7 +127,9 @@ namespace rwe
             static_cast<unsigned int>(sceneContext.audioService->getSoundVolume() * 100.0f),
             static_cast<unsigned int>(sceneContext.audioService->getMusicVolume() * 100.0f),
             sceneContext.audioService->isMusicEnabled(),
-            pendingWindowMode};
+            pendingWindowMode,
+            pendingShadows,
+            pendingScrollSpeed};
     }
 
     void MainMenuScene::applyOptions(const OptionsState& state)
@@ -137,6 +139,8 @@ namespace rwe
         audio->setMusicVolume(static_cast<float>(state.musicVolume) / 100.0f);
         audio->setMusicEnabled(state.musicEnabled);
         pendingWindowMode = state.windowMode;
+        pendingShadows = state.shadows;
+        pendingScrollSpeed = state.scrollSpeed;
     }
 
     void MainMenuScene::saveOptions()
@@ -153,6 +157,8 @@ namespace rwe
                                          {"music-volume", std::to_string(state.musicVolume)},
                                          {"music", state.musicEnabled ? "true" : "false"},
                                          {"window-mode", state.windowMode},
+                                         {"shadows", state.shadows ? "true" : "false"},
+                                         {"scroll-speed", std::to_string(state.scrollSpeed)},
                                      });
     }
 
@@ -161,6 +167,8 @@ namespace rwe
         if (pendingWindowMode.empty())
         {
             pendingWindowMode = sceneContext.globalConfig->windowMode;
+            pendingShadows = sceneContext.globalConfig->shadows;
+            pendingScrollSpeed = sceneContext.globalConfig->scrollSpeed;
         }
         optionsUndo = currentOptions();
         currentOptionsPage.clear();
@@ -287,6 +295,33 @@ namespace rwe
         if (auto label = active.find<UiLabel>("VIDVAL"))
         {
             label->get().setText(windowModeDisplayName(pendingWindowMode));
+        }
+
+        if (auto toggle = active.find<UiStagedButton>("BSHADOWS"))
+        {
+            toggle->get().setStage(pendingShadows ? 1 : 0);
+        }
+
+        // Screen scroll: 25 to 200 percent across the slider's travel; takes
+        // effect in the next game.
+        if (auto bar = active.find<UiScrollBar>("SCREEN"))
+        {
+            bar->get().setScrollBarPercent(0.2f);
+            bar->get().setScrollPercent((static_cast<float>(pendingScrollSpeed) - 25.0f) / 175.0f);
+            auto sub = bar->get().scrollChanged().subscribe([this](float v) {
+                pendingScrollSpeed = 25u + static_cast<unsigned int>(v * 175.0f);
+            });
+            bar->get().addSubscription(std::move(sub));
+        }
+
+        // What RWE has no machinery behind stays visible but grey. GAME is
+        // in-game speed, meaningless from the front end.
+        for (const auto* name : {"SHADING", "ANTI", "SPEECH", "MODE", "LEFTCLICK", "UNITCHAT", "GAME"})
+        {
+            if (auto button = active.find<UiStagedButton>(name))
+            {
+                button->get().setEnabled(false);
+            }
         }
     }
 
@@ -498,8 +533,12 @@ namespace rwe
             }
             else if (message == "RESTORE")
             {
-                applyOptions(OptionsState{100, 100, true, "bordered"});
+                applyOptions(OptionsState{100, 100, true, "bordered", true, 100});
                 goToOptionsPage(currentOptionsPage);
+            }
+            else if (message == "BSHADOWS")
+            {
+                pendingShadows = !pendingShadows;
             }
             else if (message == "UNDO")
             {

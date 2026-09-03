@@ -377,9 +377,15 @@ namespace rwe
             unsigned int musicVolume;
             bool musicEnabled;
             std::string windowMode;
+            bool shadows;
+            unsigned int scrollSpeed;
         };
-        InGameOptionsState gameOptionsUndo{100, 100, true, "bordered"};
+        InGameOptionsState gameOptionsUndo{100, 100, true, "bordered", true, 100};
         std::string pendingWindowMode;
+
+        /** Live copies of the display settings the options pages edit. */
+        bool shadowsEnabled{true};
+        unsigned int scrollSpeedSetting{100};
 
         /** Sound lookup table, kept so a main menu scene can be built on the way out. */
         TdfBlock* audioLookup;

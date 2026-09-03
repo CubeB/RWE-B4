@@ -14,5 +14,11 @@ namespace rwe
         unsigned int soundVolume{100};
         unsigned int musicVolume{100};
         bool musicEnabled{true};
+
+        /** Unit shadows on or off -- the VISUALS page's Shadows toggle. */
+        bool shadows{true};
+
+        /** Screen scroll speed percentage, 25 to 200; 100 is the old fixed rate. */
+        unsigned int scrollSpeed{100};
     };
 }
