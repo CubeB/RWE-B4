@@ -2926,7 +2926,22 @@ namespace rwe
         killUnit(unitId, std::nullopt);
     }
 
+    int computeKilledSeverity(unsigned int overkill, unsigned int maxHitPoints)
+    {
+        auto scaled = maxHitPoints == 0 ? 0u : (100u * overkill) / maxHitPoints;
+        return static_cast<int>(std::clamp(scaled / 2u, 1u, 100u));
+    }
+
     void GameSimulation::killUnit(UnitId unitId, std::optional<UnitId> attacker)
+    {
+        // Nothing measured the blow: a scuttling, a transport going down with
+        // its cargo, a script asking to die. The original's own severity
+        // arithmetic degenerates to its floor for these, and the shipped
+        // ladders read that as the intact wreck.
+        killUnit(unitId, attacker, 0u);
+    }
+
+    void GameSimulation::killUnit(UnitId unitId, std::optional<UnitId> attacker, unsigned int overkill)
     {
         auto& unit = getUnitState(unitId);
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
@@ -2960,7 +2975,19 @@ namespace rwe
         // is removed at the end of the tick.
         if (unit.cobEnvironment)
         {
-            const int severity = 50;
+            // The severity is `clamp(1, 100, (100*overkill/maxdamage + X) / 2)`,
+            // where X is `unit+0xF7` -- the one term in this formula with no
+            // known writer anywhere in the binary, so it is taken as zero.
+            // What the script does with the number is its own business: a
+            // shipped `Killed` is a three-band ladder that picks a corpse
+            // level from it and throws a different amount of the unit about
+            // on the way.
+            //
+            // The ladder's answer is still discarded here. Acting on it means
+            // reading a local back out of a COB thread that may be suspended
+            // mid-script, and then walking the corpse feature's `featuredead`
+            // chain one step per level; that is written up as still to do.
+            const int severity = computeKilledSeverity(overkill, unitDefinition.maxHitPoints);
             unit.cobEnvironment->createThread("Killed", {severity, 0});
             runUnitCobScripts(*this, unitId);
         }
@@ -3096,7 +3123,10 @@ namespace rwe
             }
             else
             {
-                killUnit(unitId, attacker);
+                // What the blow had left over once the unit's remaining hit
+                // points were paid for. The original works the severity out
+                // of exactly this.
+                killUnit(unitId, attacker, damagePoints - unit.hitPoints);
             }
         }
         else

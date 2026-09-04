@@ -3621,8 +3621,40 @@ namespace rwe
 
         if (!movingState || movingState->movementGoal != goal)
         {
-            // request a path to follow
-            unitInfo.state->navigationState.state = NavigationStateMoving{goal, resolvePathDestination(*unitInfo.state, goal), std::nullopt, true};
+            // Walk at it in a straight line for now, and ask for a route.
+            //
+            // The original does exactly this and it matters more than
+            // anything else about its pathfinder: 0x44F3F2 stores a two-point
+            // path -- where the unit is standing, then the goal -- sets the
+            // "I have a path" flag alongside the "I want a path" one, and the
+            // unit is moving on the tick the order was given. The real route
+            // overwrites it whenever the search gets round to that unit.
+            //
+            // Without it a unit does nothing at all until its search
+            // completes, and with four hundred a side that is seconds of an
+            // army standing still. It also makes a truncated or slow path a
+            // matter of walking an inelegant line rather than not walking.
+            auto destination = resolvePathDestination(*unitInfo.state, goal);
+            UnitPath straightLine;
+            straightLine.waypoints.push_back(match(
+                destination,
+                [&](const SimVector& v) { return v; },
+                [&](const DiscreteRect& r) {
+                    // The same centre PathFindingService aims at for a rect
+                    // destination, so the stand-in heads where the route will.
+                    auto corner = sim->terrain.heightmapIndexToWorldCorner(r.x, r.y);
+                    auto halfWidth = (SimScalar(r.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss;
+                    auto halfHeight = (SimScalar(r.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss;
+                    auto center = corner + SimVector(halfWidth, 0_ss, halfHeight);
+                    center.y = sim->terrain.getHeightAt(center.x, center.z);
+                    return center;
+                }));
+
+            unitInfo.state->navigationState.state = NavigationStateMoving{
+                goal,
+                destination,
+                PathFollowingInfo(std::move(straightLine), sim->gameTime),
+                true};
             sim->requestPath(unitInfo.id);
             return;
         }

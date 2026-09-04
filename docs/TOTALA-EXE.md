@@ -8228,7 +8228,124 @@ waypoint with a 336 tolerance (`0x410EC4`–`0x410F21`), which is a 16-unit
 arrival radius and a deliberate fly-through; and it carries no altitude
 instruction, only the state-0 take-off climb to `cruisealt/2`.
 
-## 87. Where RWE deliberately differs
+## 87. Pathfinding: one scheduler, a bug-walk, and a unit that never waits
+
+There is one pathfinder in the game -- a singleton at `gm+0x14207`, built by
+`0x40E9E0` -- and it is driven from `0x40EB70` as the **first** statement of
+the per-tick unit update, before any unit's own update. The pivot that finds
+it is the tagged allocation name `"AISearch touched mapentries"` at
+`0x50192C`.
+
+### The budget
+
+**1333 work units a tick** (`this+0x48`, set at `0x40EAD3`), divided evenly
+among the live players, each banking its share as credit and the scheduler
+spending until the pool is empty. The tariff, all read directly:
+
+| Action | Cost |
+|---|---|
+| Look at one unit slot, whether or not it wants a path | 1 (`0x40ECA2`) |
+| Start a search | +100 (`0x40ED6D`) |
+| Phase 1, the cheap walk | 1 per cell stepped, **uncapped** |
+| Phase 2, the A\* | 1 per node expanded, sliced at 100 (`0x40EEAF`) |
+
+Both numbers are confirmed by a debug console command: `"Search"` at
+`0x416780` writes its first argument into `+0x48` and `atof(arg2) * 65536`
+into the heuristic weight at `+0x54`.
+
+Because merely *scanning* a slot costs 1, the budget is always fully spent --
+a quiet tick sweeps about 1333 unit slots looking for someone who wants a
+route.
+
+### It degrades quality, not throughput
+
+Every 150 ticks (`0x40EBA5`) the scheduler counts how many full sweeps of a
+player's unit slots it managed and sets the A\* heuristic weight accordingly:
+fewer than one sweep gives **9.0**, fewer than two **4.5**, otherwise **1.5**
+(`0x18000` in 16.16). Loaded, the search is essentially greedy best-first;
+idle, it is weighted A\* at about 1.7 once the already-inadmissible heuristic
+(`18*max + 7*min` against step costs of 16 and 22) is counted.
+
+### Two phases
+
+**Phase 1 (`0x40E160`) is not a search.** It is a greedy axis-walk with wall
+following -- a bug algorithm -- with no iteration cap at all, run to
+completion on the tick the search starts. Its direction tables are at
+`0x4FD670`/`0x4FD678`. It produces three things: the best heuristic value it
+reached (`this+0x40`), a mark on every cell it stepped on, and an immediate
+notification to the mission of whether the destination is reachable
+(`0x100`/`0x200`, delivered before any route exists). If it got no closer than
+it started, the search is abandoned there and no A\* runs at all
+(`0x40E979`).
+
+**Phase 2 is a weighted A\*** over path cells one heightmap square across,
+with a 5-direction successor fan after the first node (`0x40EEA8`, so it can
+never turn more than 90 degrees in a step and never reverses), step costs
+16/22, turn costs `0/40/60/80/100` from `0x4FCA10`, a further 75 for turning
+within five cells of the last turn, and +30 for a cell whose passability class
+is "tight". Passability is a 2-bit-per-cell table per movement class, kept
+current by units stamping themselves in (`0x440830`) rather than by the search
+asking. **Unexplored ground reads as passable and free** (`0x40D831`), which
+is why the original walks confidently into the fog.
+
+**Nothing is ever truncated.** What is relaxed is the goal: any cell at least
+as close as phase 1 managed is marked as a destination (`0x40DCA8`), so a
+search for an unreachable place costs one bug-walk rather than an exhausted
+open list, and phase 2 always completes at something. The path is emitted as
+corners only (`0x40E050`) and the navigator keeps at most **20** of them
+(`0x44F0BC`), so a long route is deliberately re-requested part of the way
+along.
+
+### The part that matters most: a unit never waits
+
+`Navigator::SetGoal`, `0x44F2A0`, installs a **two-point path** -- where the
+unit is standing, then the goal -- and raises "I have a path" alongside "I
+want a path" (`0x44F3F2`-`0x44F41B`). The unit is moving on the tick it was
+ordered, and the real route overwrites the straight line whenever the
+scheduler reaches it. There is a ladder before that: keep the old path if its
+tail already satisfies the new goal, or if its endpoint is less than half as
+far from the goal as the unit is.
+
+RWE installed nothing and stood still until the search came back, which at
+four hundred a side was seconds of an army not moving. That is now fixed, and
+it is most of what looked like a budget problem: with the straight line in
+place the budget is a quality knob rather than a correctness one.
+
+### Requests
+
+There is **no queue and no coalescing**. The scheduler walks a round robin
+over player slots and unit slots, one slot per work unit, asking each unit's
+navigator `WantsPath` (`0x44F260`) -- which is rate limited to **once every 60
+ticks** per unit. A hundred units given one order produce a hundred separate
+searches to a hundred separate points, picked up in slot order. Fairness comes
+from the rotation, so a saturated original produces worse paths rather than a
+growing backlog.
+
+Repathing has exactly three triggers (`0x44F239`): a new or changed goal, the
+path running down to fewer than two waypoints, and the mover's "blocked" bit.
+
+**Aircraft never touch the pathfinder at all** -- `0x438943` tests `canfly`
+and installs no goal.
+
+### What RWE cannot copy
+
+`0x43DC4E` gives units belonging to a player of type 3 a stub navigator
+holding **three** waypoints, and `0x44F4A0` bit-serialises exactly three plus
+the blocked flag. That reads as network replication of paths, which would mean
+the original computes routes locally and sends them. RWE is lockstep and
+cannot: its budget, its cursor and any adaptive weight would all have to be
+hashed simulation state.
+
+### Decoded here and not ported
+
+The relaxed goal (the largest remaining one -- it would convert every
+truncated path into a completed one), the bug-walk first pass, the adaptive
+heuristic weight, the restricted successor fan, the turn and straight-run
+costs, unexplored ground being free, the 60-tick per-unit cooldown, and the
+20-waypoint clamp. RWE keeps an admissible octile heuristic, an eight-way fan
+and a 1000-expansion cap that truncates.
+
+## 88. Where RWE deliberately differs
 
 Recorded so these do not get "fixed" back later by someone comparing against the
 original:
@@ -8308,7 +8425,7 @@ original:
 
 ---
 
-## 88. Still unknown or unported
+## 89. Still unknown or unported
 
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not

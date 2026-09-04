@@ -414,6 +414,20 @@ namespace rwe
         Water
     };
 
+    /**
+     * What the COB `Killed` script is told about how hard the unit was hit.
+     *
+     * `clamp(1, 100, (100 * overkill / maxdamage + X) / 2)`, where `overkill`
+     * is the damage the killing blow had left over once the unit's remaining
+     * hit points were paid for, and `X` is `unit+0xF7` -- the one term in the
+     * formula with no known writer anywhere in the binary, taken as zero here
+     * and recorded as a gap in TOTALA-EXE.md section 88.
+     *
+     * A shipped `Killed` reads it as a three-band ladder: a gentle kill picks
+     * the intact wreck, a heavy one picks rubble.
+     */
+    int computeKilledSeverity(unsigned int overkill, unsigned int maxHitPoints);
+
     struct GameSimulation
     {
         std::minstd_rand rng;
@@ -973,6 +987,15 @@ namespace rwe
          * The attacker must be a living unit; dead/missing attackers are not credited.
          */
         void killUnit(UnitId unitId, std::optional<UnitId> attacker);
+
+        /**
+         * As above, but for a death caused by a blow whose size is known.
+         *
+         * `overkill` is the damage left over once the unit's remaining hit
+         * points were paid for, and it decides the severity the COB `Killed`
+         * script is given -- see the note at the call site.
+         */
+        void killUnit(UnitId unitId, std::optional<UnitId> attacker, unsigned int overkill);
 
         void applyDamage(UnitId unitId, unsigned int damagePoints);
 
