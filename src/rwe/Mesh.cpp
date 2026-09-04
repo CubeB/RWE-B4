@@ -13,4 +13,11 @@ namespace rwe
           textureCoord(textureCoord)
     {
     }
+
+    Mesh::Vertex::Vertex(const Vector3f& position, const Vector2f& textureCoord, const Vector3f& normal)
+        : position(position),
+          textureCoord(textureCoord),
+          normal(normal)
+    {
+    }
 }

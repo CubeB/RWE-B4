@@ -147,6 +147,67 @@ namespace rwe
     {
         Mesh m;
 
+        // The original's vertex normals (0x45A195-0x45A21E): every POLYGON
+        // adds its own unit normal to each of the vertices it names, and the
+        // vertex takes the mean, divided by the count and never renormalised.
+        //
+        // Both halves of that matter. It is per polygon, so a quad
+        // contributes once to each of its four corners -- averaging over
+        // this function's output instead would count a quad twice at the two
+        // corners its diagonal happens to touch, and on ARMSOLAR that alone
+        // was enough to push a corner of the right-hand panel across the
+        // truncation boundary from row 0 to row 31: one bright corner
+        // bleeding across a panel the original draws solid black. And it is
+        // not renormalised, because the shortening of the mean where faces
+        // disagree is part of what sets the shading's range.
+        std::vector<Vector3f> vertexNormals(o.vertices.size(), Vector3f(0.0f, 0.0f, 0.0f));
+        std::vector<int> vertexNormalCounts(o.vertices.size(), 0);
+        for (Index primitiveIndex = 0; primitiveIndex < getSize(o.primitives); ++primitiveIndex)
+        {
+            const auto& p = o.primitives[primitiveIndex];
+            if (o.selectionPrimitiveIndex && static_cast<Index>(*o.selectionPrimitiveIndex) == primitiveIndex)
+            {
+                continue;
+            }
+            if (p.vertices.size() < 3)
+            {
+                continue;
+            }
+            bool valid = true;
+            for (auto index : p.vertices)
+            {
+                valid = valid && index < o.vertices.size();
+            }
+            if (!valid)
+            {
+                continue;
+            }
+
+            // The same winding the triangles below use, so the normal points
+            // the way the rest of the pipeline expects.
+            auto first = vertexToVector(o.vertices[p.vertices.front()]);
+            auto second = vertexToVector(o.vertices[p.vertices[2]]);
+            auto third = vertexToVector(o.vertices[p.vertices[1]]);
+            auto faceNormal = (second - first).cross(third - first).normalizedOr(Vector3f(0.0f, 1.0f, 0.0f));
+
+            for (auto index : p.vertices)
+            {
+                vertexNormals[index] = vertexNormals[index] + faceNormal;
+                ++vertexNormalCounts[index];
+            }
+        }
+        for (std::size_t i = 0; i < vertexNormals.size(); ++i)
+        {
+            if (vertexNormalCounts[i] > 0)
+            {
+                vertexNormals[i] = vertexNormals[i] / static_cast<float>(vertexNormalCounts[i]);
+            }
+            else
+            {
+                vertexNormals[i] = Vector3f(0.0f, 1.0f, 0.0f);
+            }
+        }
+
         for (Index primitiveIndex = 0; primitiveIndex < getSize(o.primitives); ++primitiveIndex)
         {
             const auto& p = o.primitives[primitiveIndex];
@@ -196,6 +257,19 @@ namespace rwe
                     return (uv0 * ((1.0f - s) * (1.0f - t))) + (uv1 * (s * (1.0f - t))) + (uv2 * (s * t)) + (uv3 * ((1.0f - s) * t));
                 };
 
+                // The patch's interior vertices are not the original's, so
+                // they take a blend of the quad's four corner normals -- the
+                // same bilinear the position and the texture coordinate use.
+                // The quad's own corners keep their values exactly, which is
+                // what the original interpolates between.
+                const auto& n0 = vertexNormals[p.vertices[0]];
+                const auto& n1 = vertexNormals[p.vertices[1]];
+                const auto& n2 = vertexNormals[p.vertices[2]];
+                const auto& n3 = vertexNormals[p.vertices[3]];
+                auto bilinearNormal = [&](float s, float t) {
+                    return (n0 * ((1.0f - s) * (1.0f - t))) + (n1 * (s * (1.0f - t))) + (n2 * (s * t)) + (n3 * ((1.0f - s) * t));
+                };
+
                 auto& target = textureBounds.isTeamColor ? m.teamFaces : m.faces;
                 for (int row = 0; row < subdivisions; ++row)
                 {
@@ -206,10 +280,10 @@ namespace rwe
                         auto t0 = static_cast<float>(row) / static_cast<float>(subdivisions);
                         auto t1 = static_cast<float>(row + 1) / static_cast<float>(subdivisions);
 
-                        Mesh::Vertex c00(bilinearPosition(s0, t0), bilinearUv(s0, t0));
-                        Mesh::Vertex c10(bilinearPosition(s1, t0), bilinearUv(s1, t0));
-                        Mesh::Vertex c11(bilinearPosition(s1, t1), bilinearUv(s1, t1));
-                        Mesh::Vertex c01(bilinearPosition(s0, t1), bilinearUv(s0, t1));
+                        Mesh::Vertex c00(bilinearPosition(s0, t0), bilinearUv(s0, t0), bilinearNormal(s0, t0));
+                        Mesh::Vertex c10(bilinearPosition(s1, t0), bilinearUv(s1, t0), bilinearNormal(s1, t0));
+                        Mesh::Vertex c11(bilinearPosition(s1, t1), bilinearUv(s1, t1), bilinearNormal(s1, t1));
+                        Mesh::Vertex c01(bilinearPosition(s0, t1), bilinearUv(s0, t1), bilinearNormal(s0, t1));
 
                         target.emplace_back(c11, c10, c00);
                         target.emplace_back(c01, c11, c00);
@@ -237,9 +311,9 @@ namespace rwe
                     const auto& second = vertexToVector(o.vertices[p.vertices[i]]);
                     const auto& third = vertexToVector(o.vertices[p.vertices[i - 1]]);
                     Mesh::Triangle t(
-                        Mesh::Vertex(first, texturePosition),
-                        Mesh::Vertex(second, texturePosition),
-                        Mesh::Vertex(third, texturePosition));
+                        Mesh::Vertex(first, texturePosition, vertexNormals[p.vertices.front()]),
+                        Mesh::Vertex(second, texturePosition, vertexNormals[p.vertices[i]]),
+                        Mesh::Vertex(third, texturePosition, vertexNormals[p.vertices[i - 1]]));
                     m.faces.push_back(t);
                 }
 
@@ -284,77 +358,11 @@ namespace rwe
         return graphics.createColoredMesh(buffer, GL_STATIC_DRAW);
     }
 
-    namespace
-    {
-        /**
-         * The original's vertex normals: every face adds its own unit normal
-         * to each of its vertices, and the vertex takes the mean
-         * (0x45A195-0x45A21E). Two details matter and both are deliberate.
-         *
-         * It is NOT renormalised. The mean of unit normals is shorter than
-         * one wherever the faces meeting at a vertex disagree -- 0.73 to 0.76
-         * on ARMSOLAR's panels -- and that shortening is part of the shading:
-         * together with the light vector's own length of 1.3048 it sets the
-         * width of the ramp at about thirteen of the table's thirty-two rows.
-         * Normalising it widens the ramp and blows the contrast out.
-         *
-         * Vertices are shared by exact position, which is what the 3DO's own
-         * shared vertex indices amount to once expanded into triangles.
-         */
-        class VertexNormalAccumulator
-        {
-        private:
-            std::map<std::tuple<float, float, float>, std::pair<Vector3f, int>> sums;
-
-            static std::tuple<float, float, float> key(const Vector3f& p)
-            {
-                return {p.x, p.y, p.z};
-            }
-
-        public:
-            void add(const Mesh::Triangle& t)
-            {
-                auto normal = getNormal(t);
-                for (const auto& v : {t.a, t.b, t.c})
-                {
-                    auto it = sums.find(key(v.position));
-                    if (it == sums.end())
-                    {
-                        sums.emplace(key(v.position), std::make_pair(normal, 1));
-                    }
-                    else
-                    {
-                        it->second.first = it->second.first + normal;
-                        ++it->second.second;
-                    }
-                }
-            }
-
-            Vector3f get(const Vector3f& position, const Vector3f& fallback) const
-            {
-                auto it = sums.find(key(position));
-                if (it == sums.end() || it->second.second == 0)
-                {
-                    return fallback;
-                }
-                return it->second.first / static_cast<float>(it->second.second);
-            }
-        };
-    }
-
     ShaderMesh convertMesh(GraphicsContext& graphics, const Mesh& mesh)
     {
-        // Accumulated across both face lists, which belong to the same piece
-        // and share vertices.
-        VertexNormalAccumulator normals;
-        for (const auto& t : mesh.faces)
-        {
-            normals.add(t);
-        }
-        for (const auto& t : mesh.teamFaces)
-        {
-            normals.add(t);
-        }
+        // The normals come in on the vertices, worked out per polygon by
+        // meshFrom3do before anything was cut into triangles. Deriving them
+        // here instead would weight each polygon by its triangle count.
 
         std::optional<GlMesh> texturedMesh;
         if (!mesh.faces.empty())
@@ -364,10 +372,9 @@ namespace rwe
 
             for (const auto& t : mesh.faces)
             {
-                auto faceNormal = getNormal(t);
-                texturedVerticesBuffer.emplace_back(t.a.position, t.a.textureCoord, normals.get(t.a.position, faceNormal));
-                texturedVerticesBuffer.emplace_back(t.b.position, t.b.textureCoord, normals.get(t.b.position, faceNormal));
-                texturedVerticesBuffer.emplace_back(t.c.position, t.c.textureCoord, normals.get(t.c.position, faceNormal));
+                texturedVerticesBuffer.emplace_back(t.a.position, t.a.textureCoord, t.a.normal);
+                texturedVerticesBuffer.emplace_back(t.b.position, t.b.textureCoord, t.b.normal);
+                texturedVerticesBuffer.emplace_back(t.c.position, t.c.textureCoord, t.c.normal);
             }
 
             texturedMesh = graphics.createTexturedNormalMesh(texturedVerticesBuffer, GL_STATIC_DRAW);
@@ -381,10 +388,9 @@ namespace rwe
             teamTexturedVerticesBuffer.reserve(mesh.teamFaces.size() * 3);
             for (const auto& t : mesh.teamFaces)
             {
-                auto faceNormal = getNormal(t);
-                teamTexturedVerticesBuffer.emplace_back(t.a.position, t.a.textureCoord, normals.get(t.a.position, faceNormal));
-                teamTexturedVerticesBuffer.emplace_back(t.b.position, t.b.textureCoord, normals.get(t.b.position, faceNormal));
-                teamTexturedVerticesBuffer.emplace_back(t.c.position, t.c.textureCoord, normals.get(t.c.position, faceNormal));
+                teamTexturedVerticesBuffer.emplace_back(t.a.position, t.a.textureCoord, t.a.normal);
+                teamTexturedVerticesBuffer.emplace_back(t.b.position, t.b.textureCoord, t.b.normal);
+                teamTexturedVerticesBuffer.emplace_back(t.c.position, t.c.textureCoord, t.c.normal);
             }
 
             teamTexturedMesh = graphics.createTexturedNormalMesh(teamTexturedVerticesBuffer, GL_STATIC_DRAW);
