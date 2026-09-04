@@ -397,11 +397,14 @@ namespace rwe
             gameScene->spawnCompletedUnit(sideData.commander, *gamePlayers[i], worldStartPos);
         }
 
-        if (gameParameters.battleTestUnitsPerSide && battlePlayers.size() >= 2)
+        // No `battlePlayers.size() >= 2` guard here on purpose: a one-player
+        // battle test used to fall through this silently and leave an empty
+        // map with nothing to explain it. enableBattleTest says so instead.
+        if (gameParameters.battleTestUnitsPerSide)
         {
             gameScene->enableBattleTest(
                 *gameParameters.battleTestUnitsPerSide,
-                gameParameters.battleTestUnitType,
+                gameParameters.battleTestUnitTypes,
                 battlePlayers,
                 battleSpawns);
         }

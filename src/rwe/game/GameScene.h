@@ -39,6 +39,7 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/OccupiedGrid.h>
 #include <rwe/sim/PlayerId.h>
+#include <rwe/sim/PlayerVisibility.h>
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/UnitId.h>
 #include <rwe/sim/UnitState.h>
@@ -328,6 +329,17 @@ namespace rwe
 
         /** Fog of war: hide what the local player cannot see. Off reveals the whole map. */
         bool fogOfWarEnabled{true};
+
+        /**
+         * Stands in for the local player's vision while the fog is switched
+         * off: every cell explored and in sight. Switching the fog off means
+         * the map is permanently seen and mapped, not that the fog machinery
+         * is stepped around -- everything that draws or picks still asks the
+         * same questions of the same kind of grid, and simply gets "yes" for
+         * an answer. Built the first time it is wanted, and rebuilt if the
+         * simulation's grids are ever a different size.
+         */
+        mutable std::optional<PlayerVisibility> revealedVisibility;
 
         /** F1: the hotkey reference overlay. */
         bool helpVisible{false};
@@ -619,7 +631,7 @@ namespace rwe
          * each player named, spawned at that player's own start position and
          * ordered at the next player's, replaced as they die.
          */
-        void enableBattleTest(unsigned int unitsPerSide, const std::string& unitType, const std::vector<PlayerId>& players, const std::vector<SimVector>& spawns);
+        void enableBattleTest(unsigned int unitsPerSide, const std::vector<std::string>& unitTypes, const std::vector<PlayerId>& players, const std::vector<SimVector>& spawns);
 
         void render() override;
 
@@ -779,7 +791,25 @@ namespace rwe
 
         /** Ever-climbing per-player slot counter, so a blocked cell moves the next spawn along. */
         std::vector<unsigned int> battleTestSpawnCounter;
-        std::string battleTestUnitType{"ARMPW"};
+        std::vector<std::string> battleTestUnitTypes;
+
+        /**
+         * How many tiles across each player's unit is. The spacing of the
+         * spawn block is worked out from it: laid out any tighter than the
+         * unit's own width and the block is one nothing can walk out of.
+         */
+        std::vector<int> battleTestFootprint;
+
+        /** What each side had standing on the last pass, for the debug panel. */
+        std::vector<int> battleTestAlive;
+
+        /** Running totals for the log, so a killed run still leaves evidence. */
+        unsigned int battleTestSpawned{0};
+        unsigned int battleTestSpawnsBlocked{0};
+        unsigned int battleTestCulled{0};
+        unsigned int battleTestReordered{0};
+        unsigned int battleTestFramesSinceLog{0};
+        unsigned int battleTestLastLogTime{0};
 
         /** Tops every player back up to the wanted count and points the new arrivals at the enemy. */
         void runBattleTest();
@@ -819,6 +849,13 @@ namespace rwe
         void renderHelpOverlay();
 
         void updateFogSprite();
+
+        /**
+         * What the local player can see, which with the fog switched off is
+         * the whole map. Everything that consults the fog goes through here,
+         * so there is only one render path rather than one per setting.
+         */
+        const PlayerVisibility& localPlayerVisibility() const;
 
         bool unitIsVisibleToLocalPlayer(const UnitState& unit) const;
 

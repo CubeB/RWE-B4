@@ -9,6 +9,7 @@
 #include <string>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace rwe
 {
@@ -89,8 +90,13 @@ namespace rwe
          */
         std::optional<unsigned int> battleTestUnitsPerSide;
 
-        /** What the battle test spawns. Peewees by default. */
-        std::string battleTestUnitType{"ARMPW"};
+        /**
+         * What the battle test spawns, one per player slot. Hover tanks by
+         * default, since they can cross water and most of the stock maps
+         * have some: a ground unit on a sea map never reaches the enemy and
+         * the fight never happens.
+         */
+        std::vector<std::string> battleTestUnitTypes{"ARMAH", "CORAH"};
 
         GameParameters(const std::string& mapName, unsigned int schemaIndex);
     };

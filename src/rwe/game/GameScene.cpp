@@ -295,13 +295,73 @@ namespace rwe
         audioSub->unsubscribe();
     }
 
-    void GameScene::enableBattleTest(unsigned int unitsPerSide, const std::string& unitType, const std::vector<PlayerId>& players, const std::vector<SimVector>& spawns)
+    void GameScene::enableBattleTest(unsigned int unitsPerSide, const std::vector<std::string>& unitTypes, const std::vector<PlayerId>& players, const std::vector<SimVector>& spawns)
     {
+        // Every one of the checks below is otherwise a way to end up staring
+        // at an empty field with nothing on screen to say why, so each of
+        // them says what is wrong while there is still someone to read it.
+        // The harness throws rather than carrying on: the caller turns an
+        // exception into a message box and a line on stderr.
+        if (players.size() < 2 || spawns.size() != players.size())
+        {
+            throw std::runtime_error("Battle test needs two sides with start positions, but this map and player list gave " + std::to_string(players.size()) + ". Pick a map with at least two start positions.");
+        }
+        if (unitTypes.empty())
+        {
+            throw std::runtime_error("Battle test was given no unit type to spawn");
+        }
+
         battleTestUnitsPerSide = static_cast<int>(unitsPerSide);
-        battleTestUnitType = unitType;
+        battleTestUnitTypes.clear();
         battleTestPlayers = players;
         battleTestSpawns = spawns;
         battleTestSpawnCounter.assign(players.size(), 0u);
+        battleTestFootprint.clear();
+        battleTestAlive.assign(players.size(), 0);
+
+        for (std::size_t i = 0; i < players.size(); ++i)
+        {
+            // The definitions are keyed by the FBI's UnitName in upper case,
+            // so accept --unit-type armah as readily as ARMAH.
+            auto unitType = toUpper(unitTypes.at(i % unitTypes.size()));
+
+            // A name the data does not define -- or one whose model or script
+            // failed to load -- takes the game down on the first spawn, deep
+            // inside a map::at, with nothing to say which name was wrong.
+            auto definitionIt = simulation.unitDefinitions.find(unitType);
+            if (definitionIt == simulation.unitDefinitions.end())
+            {
+                throw std::runtime_error("Battle test: the data defines no unit called '" + unitType + "'. Run with --list-units to see what it does define.");
+            }
+            if (simulation.unitModelDefinitions.find(definitionIt->second.objectName) == simulation.unitModelDefinitions.end())
+            {
+                throw std::runtime_error("Battle test: unit '" + unitType + "' names a model, " + definitionIt->second.objectName + ", that did not load");
+            }
+            if (simulation.unitScriptDefinitions.find(unitType) == simulation.unitScriptDefinitions.end())
+            {
+                throw std::runtime_error("Battle test: unit '" + unitType + "' has no script loaded");
+            }
+
+            // How big the unit is decides how far apart the spawn slots go;
+            // runBattleTest works the spacing out per frame, since it also
+            // depends on how many the slider is asking for.
+            auto [footprintX, footprintZ] = simulation.getFootprintXZ(definitionIt->second.movementCollisionInfo);
+            auto footprint = static_cast<int>(std::max(footprintX, footprintZ));
+            battleTestFootprint.push_back(footprint);
+
+            battleTestUnitTypes.push_back(unitType);
+
+            LOG_INFO << "Battle test: player " << i << " fields " << unitType
+                     << " (" << footprint << " tiles square)"
+                     << " from " << simScalarToFloat(spawns[i].x) << ", " << simScalarToFloat(spawns[i].z);
+        }
+
+        LOG_INFO << "Battle test: " << battleTestUnitsPerSide << " units a side across " << players.size() << " players";
+
+        // Start the heartbeat's clock here, or the first line reports every
+        // millisecond since the process started as one frame.
+        battleTestLastLogTime = sceneContext.timeService->getTicks();
+        battleTestFramesSinceLog = 0;
 
         // The whole point is watching the fight, so the map is open from the
         // start rather than lit a unit at a time.
@@ -315,8 +375,21 @@ namespace rwe
             return;
         }
 
-        // Count what each player still has standing.
-        std::vector<int> alive(battleTestPlayers.size(), 0);
+        auto wanted = battleTestUnitsPerSide;
+
+        // Every few seconds the harness looks again at anything that has come
+        // to a stop, so this is also where the heartbeat lands.
+        ++battleTestFramesSinceLog;
+        auto now = sceneContext.timeService->getTicks();
+        auto sweepDue = now - battleTestLastLogTime >= 5000;
+
+        // Count what each player still has standing, keeping the ids as well
+        // as the tally: the slider has to be able to take units away again,
+        // not only put them there. The ones with nothing left to do are worth
+        // knowing about separately -- see the sweep below.
+        battleTestAlive.assign(battleTestPlayers.size(), 0);
+        std::vector<std::vector<UnitId>> living(battleTestPlayers.size());
+        std::vector<std::vector<UnitId>> idle(battleTestPlayers.size());
         for (const auto& [unitId, unit] : simulation.units)
         {
             if (unit.isDead())
@@ -327,50 +400,208 @@ namespace rwe
             {
                 if (unit.owner == battleTestPlayers[i])
                 {
-                    ++alive[i];
+                    ++battleTestAlive[i];
+                    living[i].push_back(unitId);
+                    if (sweepDue && unit.orders.empty())
+                    {
+                        idle[i].push_back(unitId);
+                    }
                 }
             }
         }
 
         for (std::size_t i = 0; i < battleTestPlayers.size(); ++i)
         {
-            // A few at a time: putting two hundred units on the field in one
-            // tick stalls the frame and tells you nothing about the fight.
+            // A few at a time, in either direction: putting two hundred units
+            // on the field in one tick stalls the frame and tells you nothing
+            // about the fight, and deleting two hundred in one tick floods
+            // the event queue for no better reason.
             auto budget = 8;
+
+            // Dragging the slider down takes the newest away first. Those are
+            // the ones still standing in the spawn block rather than fighting,
+            // so the battle in the middle of the map is left alone. They go
+            // quietly -- no wreck, no explosion -- because this is the harness
+            // removing them, not the enemy killing them.
+            while (battleTestAlive[i] > wanted && budget > 0 && !living[i].empty())
+            {
+                --budget;
+                simulation.quietlyKillUnit(living[i].back());
+                living[i].pop_back();
+                --battleTestAlive[i];
+                ++battleTestCulled;
+            }
+
             const auto& home = battleTestSpawns[i];
             const auto& enemy = battleTestSpawns[(i + 1) % battleTestSpawns.size()];
+            const auto& unitType = battleTestUnitTypes.at(i);
+            const auto& definition = simulation.unitDefinitions.at(unitType);
+            auto movementClass = simulation.getAdHocMovementClass(definition.movementCollisionInfo);
+            auto footprint = battleTestFootprint.at(i);
 
-            while (alive[i] < battleTestUnitsPerSide && budget > 0)
+            // Twice as many slots as units asked for, laid out square. The
+            // slack matters: a slot blocked by a tree, or by a unit that has
+            // not moved off yet, then costs a turn in the queue rather than a
+            // place on the field. A block sized exactly to the count can
+            // never fill.
+            auto slots = std::max(4, wanted * 2);
+            auto columns = 1;
+            while (columns * columns < slots)
+            {
+                ++columns;
+            }
+            auto rows = (slots + columns - 1) / columns;
+
+            const auto& terrain = simulation.terrain;
+            auto tile = static_cast<int>(MapTerrain::HeightTileWidthInWorldUnits.value);
+            auto mapWidth = static_cast<int>(simScalarToFloat(terrain.rightCutoffInWorldUnits() - terrain.leftInWorldUnits()));
+            auto mapDepth = static_cast<int>(simScalarToFloat(terrain.bottomCutoffInWorldUnits() - terrain.topInWorldUnits()));
+
+            // Lanes as wide as the unit itself wherever the map has room for
+            // them, which means slots two footprints apart. Anything tighter
+            // is a block nothing can leave: a three-tile Swatter cannot walk
+            // down a one-tile lane, so the pathfinder finds no route off an
+            // interior slot, gives up, and the middle of the block stands
+            // there for the length of the run while only its edge feeds the
+            // fight. Watched at a hundred a side, that was two thirds of the
+            // army.
+            //
+            // Where the map has not got the room -- five hundred Swatters a
+            // side want more ground than Coast To Coast has, twice over --
+            // the block closes up rather than hanging off the edge, down to a
+            // floor of one tile of clearance. That trades a mobile fight for
+            // a full field, which at least is the count that was asked for,
+            // and the heartbeat's alive figures say which of the two you got.
+            auto pitch = std::min({footprint * 2 * tile, mapWidth / columns, mapDepth / rows});
+            pitch = std::max(pitch, (footprint + 1) * tile);
+
+            // Send the stopped ones off again. A unit whose route was blocked
+            // when it was asked -- by the crowd it spawned in, or by ground
+            // its movement class will not take -- drops the order and stands
+            // there for the rest of the run, and a battle test with a growing
+            // pool of statues in the corner is measuring the wrong thing. The
+            // crowd is different a few seconds later, so asking again is
+            // usually enough. Only for units still a long way from the enemy:
+            // one that has arrived has honestly finished its order, and
+            // re-issuing there would just churn.
+            if (sweepDue)
+            {
+                auto farEnough = intToSimScalar(pitch * 4);
+                for (auto unitId : idle[i])
+                {
+                    auto unit = tryGetUnit(unitId);
+                    if (!unit)
+                    {
+                        continue;
+                    }
+                    if (unit->get().position.distanceSquared(enemy) < farEnough * farEnough)
+                    {
+                        continue;
+                    }
+                    unit->get().addOrder(MoveOrder(enemy));
+                    ++battleTestReordered;
+                }
+            }
+
+            // Keep the block on the map. Start positions sit near an edge as
+            // often as not -- Coast To Coast puts one of its two within a
+            // third of the map's width of the corner -- and a block centred
+            // blindly on such a spawn hangs half of itself over the side,
+            // where no unit can ever be placed. At five hundred a side that
+            // alone left one player a quarter short for the whole run, every
+            // attempt failing on a slot that was never on the map.
+            auto halfWidth = intToSimScalar(columns * pitch) / 2_ss;
+            auto halfDepth = intToSimScalar(rows * pitch) / 2_ss;
+            auto centre = home;
+            auto lowX = terrain.leftInWorldUnits() + halfWidth;
+            auto highX = terrain.rightCutoffInWorldUnits() - halfWidth;
+            centre.x = lowX < highX ? rweMax(lowX, rweMin(highX, home.x)) : (terrain.leftInWorldUnits() + terrain.rightCutoffInWorldUnits()) / 2_ss;
+            auto lowZ = terrain.topInWorldUnits() + halfDepth;
+            auto highZ = terrain.bottomCutoffInWorldUnits() - halfDepth;
+            centre.z = lowZ < highZ ? rweMax(lowZ, rweMin(highZ, home.z)) : (terrain.topInWorldUnits() + terrain.bottomCutoffInWorldUnits()) / 2_ss;
+
+            while (battleTestAlive[i] < wanted && budget > 0)
             {
                 --budget;
 
-                // A block of ranks around the spawn. The counter keeps
-                // climbing whether or not the last attempt found room, so a
-                // blocked cell moves the next one along instead of trying the
-                // same spot for ever -- which is what a straight retry does,
-                // and it looks exactly like everything spawning in one place.
-                auto slot = battleTestSpawnCounter[i]++;
-                auto column = static_cast<int>(slot % 20u) - 10;
-                auto rank = static_cast<int>((slot / 20u) % 10u) - 5;
+                // The counter keeps climbing whether or not the last attempt
+                // found room, so a blocked cell moves the next one along
+                // instead of trying the same spot for ever -- which is what a
+                // straight retry does, and it looks exactly like everything
+                // spawning in one place.
+                auto slot = static_cast<int>(battleTestSpawnCounter[i]++ % static_cast<unsigned int>(columns * rows));
+                auto column = (slot % columns) - (columns / 2);
+                auto rank = (slot / columns) - (rows / 2);
                 auto position = SimVector(
-                    home.x + (24_ss * intToSimScalar(column)),
-                    home.y,
-                    home.z + (24_ss * intToSimScalar(rank)));
+                    centre.x + (intToSimScalar(pitch) * intToSimScalar(column)),
+                    centre.y,
+                    centre.z + (intToSimScalar(pitch) * intToSimScalar(rank)));
                 position.y = simulation.terrain.getHeightAt(position.x, position.z);
+
+                // The occupancy test inside trySpawnUnit never asks whether
+                // the unit could move off the spot again. A crater wall is
+                // empty ground as far as that is concerned, so slots on one
+                // took units quite happily and then kept them: fourteen
+                // Swatters a side sat out an entire run on the same rock,
+                // too steep to leave, counted all the while towards the
+                // hundred the harness thought it had in the fight. Ask the
+                // movement class first -- the same question the game asks
+                // before it puts a building down.
+                auto footprintRect = simulation.computeFootprintRegion(position, definition.movementCollisionInfo);
+                if (footprintRect.x < 0 || footprintRect.y < 0 || !simulation.canBeBuiltAt(movementClass, std::nullopt, false, static_cast<unsigned int>(footprintRect.x), static_cast<unsigned int>(footprintRect.y)))
+                {
+                    ++battleTestSpawnsBlocked;
+                    continue;
+                }
 
                 // Completed, not a nanoframe: spawnUnit leaves a unit under
                 // construction, and an unbuilt Peewee cannot walk, so they
                 // simply piled up on the spawn.
-                auto unit = spawnCompletedUnit(battleTestUnitType, battleTestPlayers[i], position);
+                auto unit = spawnCompletedUnit(unitType, battleTestPlayers[i], position);
                 if (!unit)
                 {
+                    ++battleTestSpawnsBlocked;
                     continue;
                 }
 
                 unit->get().fireOrders = UnitFireOrders::FireAtWill;
                 unit->get().addOrder(MoveOrder(enemy));
-                ++alive[i];
+                ++battleTestAlive[i];
+                ++battleTestSpawned;
             }
+        }
+
+        // A heartbeat in the log every few seconds. A run of this thing
+        // normally ends under taskkill /F, which lets nothing flush, so the
+        // only evidence that survives is what was already on disk --
+        // SimpleLogger writes and flushes a line at a time, so this does.
+        //
+        // On the wall clock rather than a frame count, because the frame rate
+        // is the thing being pushed: counting frames went quiet for minutes
+        // at a time at five hundred a side, which is exactly the run whose
+        // log matters. The frames since the last line are worth having for
+        // the same reason -- that ratio is the answer to "does it behave at
+        // five hundred".
+        if (sweepDue)
+        {
+            auto elapsed = now - battleTestLastLogTime;
+            battleTestLastLogTime = now;
+            std::string aliveText;
+            for (std::size_t i = 0; i < battleTestAlive.size(); ++i)
+            {
+                if (i != 0)
+                {
+                    aliveText += " v ";
+                }
+                aliveText += std::to_string(battleTestAlive[i]);
+            }
+            LOG_INFO << "Battle test: wanted " << wanted << " a side, alive " << aliveText
+                     << ", spawned " << battleTestSpawned
+                     << ", blocked " << battleTestSpawnsBlocked
+                     << ", culled " << battleTestCulled
+                     << ", re-ordered " << battleTestReordered
+                     << ", " << battleTestFramesSinceLog << " frames in " << elapsed << "ms";
+            battleTestFramesSinceLog = 0;
         }
     }
 
@@ -771,7 +1002,7 @@ namespace rwe
     {
         // draw minimap
         chromeUiRenderService.drawSpriteAbs(minimapRect, *minimap);
-        if (fogOfWarEnabled && fogSprite)
+        if (fogSprite)
         {
             chromeUiRenderService.drawSpriteAbs(minimapRect, *fogSprite);
         }
@@ -1302,9 +1533,11 @@ namespace rwe
         // Fog of war is applied by the terrain shader: remembered ground goes
         // grey, unknown ground black, along the ragged boundary that TA's own
         // fog tiles have been rasterised into fogOverlayTexture. That texture
-        // covers a window around the camera, not the whole map.
+        // covers a window around the camera, not the whole map. With the fog
+        // switched off it is rasterised from a fully revealed grid and comes
+        // out empty, so the same path draws the plain terrain.
         std::optional<FogOverlay> fogOverlay;
-        if (fogOfWarEnabled && fogOverlayTexture.isValid())
+        if (fogOverlayTexture.isValid())
         {
             fogOverlay = FogOverlay{fogOverlayTexture.get(), fogOverlayBounds.left(), fogOverlayBounds.top(), fogOverlayBounds.width(), fogOverlayBounds.height()};
         }
@@ -1906,7 +2139,7 @@ namespace rwe
         ImGui::Checkbox("Health bars", &healthBarsVisible);
         ImGui::Checkbox("Fog of war", &fogOfWarEnabled);
 
-        if (battleTestUnitsPerSide > 0 || !battleTestPlayers.empty())
+        if (!battleTestPlayers.empty())
         {
             ImGui::Separator();
             ImGui::Text("Battle test");
@@ -1919,7 +2152,20 @@ namespace rwe
                     ++total;
                 }
             }
-            ImGui::Text("alive: %d", total);
+
+            // Per side as well as the total: the two numbers drifting apart
+            // is how you see that one side cannot get out of its own spawn.
+            std::string aliveText;
+            for (std::size_t i = 0; i < battleTestAlive.size(); ++i)
+            {
+                if (i != 0)
+                {
+                    aliveText += " v ";
+                }
+                aliveText += std::to_string(battleTestAlive[i]);
+            }
+            ImGui::Text("alive: %s (%d in the world)", aliveText.c_str(), total);
+            ImGui::Text("spawned %u, blocked %u, culled %u, re-ordered %u", battleTestSpawned, battleTestSpawnsBlocked, battleTestCulled, battleTestReordered);
         }
 
         if (!simulation.aiControllers.empty() && ImGui::CollapsingHeader("AI players"))
@@ -3098,8 +3344,11 @@ namespace rwe
     void GameScene::update(int millisecondsElapsed)
     {
         // The battle harness, if one was asked for: keep both sides at
-        // strength and send every replacement at the enemy.
-        if (battleTestUnitsPerSide > 0)
+        // strength and send every replacement at the enemy. Gated on the
+        // harness being enabled rather than on the count, since a count of
+        // zero is the slider being dragged to the bottom and still has work
+        // to do -- clearing the field.
+        if (!battleTestPlayers.empty())
         {
             runBattleTest();
         }
@@ -4473,8 +4722,10 @@ namespace rwe
             for (const auto& [unitId, unit] : simulation.units)
             {
                 // Only what the minimap actually shows can be picked: your own
-                // units and enemies you can see or have on radar.
-                if (fogOfWarEnabled && !unit.isOwnedBy(localPlayerId) && !simulation.canDetectUnit(localPlayerId, unitId))
+                // units and enemies you can see or have on radar. Asking the
+                // same predicate the dots are drawn with, rather than the
+                // simulation's own detection test, is what makes that true.
+                if (!unitIsDetectableByLocalPlayer(unit))
                 {
                     continue;
                 }
@@ -5679,6 +5930,33 @@ namespace rwe
         sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(std::move(scene)));
     }
 
+    const PlayerVisibility& GameScene::localPlayerVisibility() const
+    {
+        const auto& vis = simulation.playerVisibility.at(localPlayerId.value);
+        if (fogOfWarEnabled)
+        {
+            return vis;
+        }
+
+        // Fog off is a fully lit map rather than a second way of drawing one:
+        // the same grids, with every cell already seen and remembered. The
+        // simulation's own copy is left alone, since what this client chooses
+        // to look at must not reach the simulation.
+        auto width = vis.explored.getWidth();
+        auto height = vis.explored.getHeight();
+        if (!revealedVisibility || revealedVisibility->explored.getWidth() != width || revealedVisibility->explored.getHeight() != height)
+        {
+            PlayerVisibility revealed(width, height);
+            auto& explored = revealed.explored.getVector();
+            std::fill(explored.begin(), explored.end(), static_cast<unsigned char>(1));
+            auto& visible = revealed.visible.getVector();
+            std::fill(visible.begin(), visible.end(), static_cast<unsigned char>(1));
+            revealedVisibility = std::move(revealed);
+        }
+
+        return *revealedVisibility;
+    }
+
     bool GameScene::unitIsVisibleToLocalPlayer(const UnitState& unit) const
     {
         // Stowed inside a ship's hold (attached to no piece): out of sight until unloaded.
@@ -5689,17 +5967,13 @@ namespace rwe
                 return false;
             }
         }
-        if (!fogOfWarEnabled)
-        {
-            return true;
-        }
 
         // Same three questions the original's draw predicate asks, in the same
         // order: whose it is, whether it is cloaked, and only then whether the
         // ground under it is lit. It has to agree with the simulation's
         // canSeeUnit or a cloaked unit would be drawn to an enemy who cannot
         // target it.
-        auto style = computeUnitDrawStyle(unit.isOwnedBy(localPlayerId), unit.cloaked, simulation.isVisibleTo(localPlayerId, unit.position));
+        auto style = computeUnitDrawStyle(unit.isOwnedBy(localPlayerId), unit.cloaked, positionIsVisibleToLocalPlayer(unit.position));
         return style != UnitDrawStyle::Hidden;
     }
 
@@ -5710,12 +5984,12 @@ namespace rwe
 
     bool GameScene::positionIsExploredByLocalPlayer(const SimVector& position) const
     {
-        return !fogOfWarEnabled || simulation.isExploredBy(localPlayerId, position);
+        return localPlayerVisibility().isExplored(simulation.visionCellAt(position));
     }
 
     bool GameScene::positionIsVisibleToLocalPlayer(const SimVector& position) const
     {
-        return !fogOfWarEnabled || simulation.isVisibleTo(localPlayerId, position);
+        return localPlayerVisibility().isVisible(simulation.visionCellAt(position));
     }
 
     std::optional<SimVector> GameScene::plannedBuildOrderAt(UnitId unitId, const SimVector& position) const
@@ -5951,11 +6225,6 @@ namespace rwe
 
     void GameScene::updateFogSprite()
     {
-        if (!fogOfWarEnabled)
-        {
-            return;
-        }
-
         if (!fogTiles)
         {
             // TA's own fog artwork. Without it we fall back to square-edged
@@ -5963,7 +6232,7 @@ namespace rwe
             fogTiles = loadFogTileSet(*sceneContext.vfs, "anims/fog.gaf").value_or(makeSquareFogTileSet());
         }
 
-        const auto& vis = simulation.playerVisibility.at(localPlayerId.value);
+        const auto& vis = localPlayerVisibility();
 
         auto cellsWide = vis.explored.getWidth();
         auto cellsHigh = vis.explored.getHeight();

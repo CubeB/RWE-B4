@@ -31,15 +31,27 @@ namespace rwe
         graphics->bindShader(shader.handle.get());
         graphics->setUniformMatrix(shader.mvpMatrix, *viewProjectionMatrix);
 
+        // The fog sampler is pointed at slot 1 whether or not there is fog to
+        // draw. A sampler uniform that is never set reads zero, which would
+        // leave this sampler2D on the same texture image unit as the tile
+        // array's sampler2DArray; a program with two samplers of different
+        // types on one unit fails GL's draw-time validation, and every
+        // terrain draw is then dropped without a word. That is what turned
+        // the ground solid black whenever there was no fog texture to bind,
+        // while units, features and the minimap -- drawn by other programs --
+        // came out perfectly well.
+        graphics->setUniformInt(shader.fogSampler, 1);
+
         graphics->setUniformBool(shader.fogEnabled, fog.has_value());
         if (fog)
         {
-            graphics->setUniformInt(shader.fogSampler, 1);
             graphics->setUniformVec4(shader.fogTransform, fog->originX, fog->originZ, 1.0f / fog->width, 1.0f / fog->height);
             graphics->setActiveTextureSlot1();
             graphics->bindTexture(fog->texture);
-            graphics->setActiveTextureSlot0();
         }
+
+        // The tile array goes to slot 0, which its sampler reads by default.
+        graphics->setActiveTextureSlot0();
 
         for (const auto& batch : batches)
         {
