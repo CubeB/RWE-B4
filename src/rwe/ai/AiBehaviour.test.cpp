@@ -11,6 +11,7 @@
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/WeaponDefinition.h>
 #include <memory>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -38,13 +39,6 @@ namespace rwe
                 Energy(1000.0f),
             };
             return sim.addPlayer(p);
-        }
-
-        std::shared_ptr<CobScript> makeEmptyCobScript()
-        {
-            auto script = std::make_shared<CobScript>();
-            script->staticVariableCount = 0;
-            return script;
         }
 
         UnitDefinition makeDef(bool commander, bool builder, bool mobile, const std::string& weapon, unsigned int sight)

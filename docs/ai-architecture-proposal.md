@@ -1,10 +1,24 @@
-# RWE Skirmish AI Architecture — Design Proposal
+# RWE Skirmish AI Architecture
 
-Status: design proposal, not implementation. Author: rts-ai-architect agent. Date: 2026-04-26.
+**Status: built. This was a design proposal (rts-ai-architect agent, 2026-04-26); it is kept because the architecture it describes is the architecture that exists.** The AI lives in `src/rwe/ai/` and plays a skirmish game. Read the header below for what was built and where it diverged, then the body for *why* each decision was made — that reasoning is not written down anywhere else, and §12's answered questions in particular are the record of decisions that would otherwise have to be re-argued.
 
-This document proposes a layered, deterministic, Sorian-style skirmish AI for the Robot War Engine (RWE). It is intended to be readable end-to-end in roughly twenty minutes and concrete enough that follow-up implementation tasks can act on it directly.
+The text from §1 onwards is the proposal as written, in the future tense it was written in, annotated where reality departed from it. Its RWE `file:line` citations are as of April 2026 and most have moved; the file paths are still right, and the architectural claims still hold. The paragraph this header replaces asserted that there was no computer player at all, citing a `// TODO: implement computer AI logic` in `GameScene` that no longer exists.
 
-The current state: there is no computer player. `src/rwe/game/GameScene.cpp:2071-2084` enumerates `GamePlayerType::Computer` players and pushes empty command vectors with the comment `// TODO: implement computer AI logic to decide commands here`. Players themselves can already be marked Computer through the launcher (`LoadingScene.cpp:207`) and per-map resource overrides exist in OTA (`computerMetal`, `computerEnergy`, `aiProfile`). Everything else is greenfield.
+## What was built
+
+The shape is as proposed. `GameSimulation` owns `aiControllers` (a `PlayerId` → `AiPlayerController` map) and `aiPendingCommands`; the controller runs inside `GameSimulation::tick`, writes ordinary `PlayerCommand`s into the pending buffer, and `GameScene` drains them through `takeAiCommandsForPlayer` into `playerCommandService` exactly as it pushes a human's input. That is §4's placement B with the delayed-emit indirection, unchanged. The managers are there too: `StrategicManager`, `EconomyManager`, `BuildManager`, `ArmyManager`, `ThreatMap`, `AiBlackboard`, `AiTuningProfile`.
+
+Four managers the proposal did not anticipate were added as the work went on: `PerceptionManager` (what the AI knows through fog, since fog of war landed after this was written), `ScoutManager`, `TransportManager` and `ReachabilityMap`. Each has an entry in `docs/ROADMAP.md` Phase 2.
+
+Three things were designed and not built:
+
+- **Platoons.** There is one army, not a set of platoons with composition templates. `AiIds.h` held `PlatoonId` as a declared-but-unused tag, and was deleted in the September 2026 cleanup along with `AiTaskId` and `BuildJobId`, none of which anything included. §7 is therefore a design that has not been tested against reality.
+- **Data-driven profiles.** §6 and Q3 call for build orders and tuning in TDF. `AiTuningProfile` is hard-coded C++ with a profile per difficulty tier. Nothing loads from `data/ai/profiles/`.
+- **A separate `TacticalLayer`.** Target selection and retreat live inside `ArmyManager` rather than in a layer of their own.
+
+And one difficulty tier was renamed: the proposal's **Normal** is **Standard** in `AiDifficulty`. Selected with `--ai-difficulty`.
+
+The known gap the proposal did not foresee is **multiplayer**: each peer generates its AI's commands locally and never sends them, so an AI player in a network game desyncs. Single-player is unaffected. Fixing it means either running the AI on one host and transmitting its commands, or making AI command timing deterministic across peers.
 
 ---
 
@@ -37,6 +51,8 @@ Four tiers, picked at lobby time. All tiers run the same code; they differ only 
 | Normal | Medium           | Regular       | None     | The reference experience.                            |
 | Hard   | High             | Aggressive    | None     | Tighter build orders, earlier raids.                 |
 | Brutal | High             | Aggressive    | Resource bonus (×1.25 metal/energy income, off by default) | Optional, opt-in cheat. |
+
+*As built:* the tiers are `AiDifficulty::Easy / Standard / Hard / Brutal` — **Standard**, not Normal — selected with `--ai-difficulty`. Brutal is omniscient and takes the ×1.25 income, applied in the simulation; it is on at that tier rather than off by default, which is what Q2 decided. The profiles are hard-coded rather than loaded from a file.
 
 ---
 
@@ -543,6 +559,8 @@ We deliberately put the cheat toggle on the perception layer (not as a parallel 
 
 Concrete file:line references. The AI plugs in cleanly because the project already separated player input from simulation behaviour.
 
+> *As built: every hook in this section was taken, and the line numbers in it are all stale — the files have grown a great deal since April 2026. The names are what to search for. The one substantive difference is the drain call, which is `simulation.takeAiCommandsForPlayer(id)` rather than `takeAiCommands(id)`; and the read-only sim queries listed further down are all still there, plus the visibility ones the last bullet anticipated, which arrived with fog of war.*
+
 **Primary hook — replaces the current TODO:**
 - `src/rwe/game/GameScene.cpp:2071-2084` (the `for (Index i = 0; i < getSize(simulation.players); ++i)` loop). The empty `pushCommands` here becomes `pushCommands(id, simulation.takeAiCommands(id))`.
 
@@ -599,6 +617,8 @@ This is greenfield. RWE itself currently has no AI at all, so there is no backwa
 ---
 
 ## 11. Phased delivery plan
+
+*As built: all four phases shipped, and `docs/ROADMAP.md` Phase 2 is now the live tracker for what is left. Phase 1 landed upstream of this branch (tgunnoe, April 2026); Phases 2, 3 and 4 landed on `revival` in August 2026, Phase 3 in a single-army form rather than with platoons. Two Phase-2 items did not land as written — `AiTuningProfile` is hard-coded rather than parsed from a TDF, and there is no `data/ai/profiles/` — and Phase 4's per-run JSON state dump became a 30-second status line in `rwe.log` plus an F10 debug window instead. Phase 4's `RWE_AI_PROFILE=1` timing harness was added later and is not in this plan at all; it is what found the ferry planner rescanning the whole map three times a second.*
 
 Each phase is an independently shippable agent task with a working AI at the end of it. Phases are additive — no phase requires throwing away prior work.
 
@@ -660,11 +680,13 @@ Future (out of scope for this proposal):
 
 ## 12. Open questions / decisions for the user
 
-These have a recommended default, but we want sign-off because they affect the public surface or the schedule.
+These had a recommended default and wanted sign-off because they affect the public surface or the schedule. **All seven are settled now; the answer as built is recorded under each.** They are the reason to keep this document.
 
 ### Q1. Do we honour OTA `computerMetal` / `computerEnergy` for the AI?
 
 Recommendation: **yes**, route them through `LoadingScene.cpp:208` so map authors can dial AI starting resources per scenario (this matches TA behaviour and is virtually free). Alternative: ignore the OTA fields and rely solely on `AiTuningProfile`, simpler but loses authoring intent.
+
+**As built: no, not yet.** `computerMetal`, `computerEnergy` and `aiProfile` are still parsed in `src/rwe/io/ota/ota.cpp` and read nowhere else, so both human and computer players take their starting resources from the launcher parameters. The authoring intent is still on the floor; nothing depends on it, and picking it up is a small job.
 
 ### Q2. AI cheating: config flag, or difficulty axis?
 
@@ -678,15 +700,21 @@ The proposal makes it a difficulty axis (Brutal tier flips both `cheatModeOmnisc
 
 Recommendation: ship (a) as a label, internally implement (b) so we have the flexibility — UI exposes (a), config exposes (b).
 
+**As built: (a) with (b) underneath, as decided.** Brutal flips omniscient perception and a ×1.25 income bonus, both applied in the simulation, and both are independent fields on `AiTuningProfile`. The tier is chosen with `--ai-difficulty`; there is no per-slot difficulty in the lobby yet.
+
 ### Q3. Build orders: TDF or JSON?
 
 Recommendation: **TDF**, because the project already has a TDF reader (`src/rwe/io/tdf/`) and TA modders are familiar with it. Alternative: JSON via the existing `nlohmann/json` dep — easier to validate and version. We can support both if asked but starting with TDF is consistent.
+
+**As built: neither.** Build orders and tuning are hard-coded C++ in `AiTuningProfile.cpp` and `BuildManager.cpp`. Nothing reads a profile from disk. This is the largest departure from the proposal and it is deliberate only in the sense that it was never got to — it is still on the roadmap under "TDF-loaded profiles and build orders", and the recommendation above still stands when someone takes it.
 
 ### Q4. Where does `AiPlayerController` live — `sim/` or scene-level?
 
 **DECIDED (2026-04-26): inside `GameSimulation` (placement B in §4).** AI state participates in the desync detector's JSON dump and replays just work; Phase 1 implementation must respect determinism rules in §4.
 
 Proposal recommends `sim/` (placement B in §4). Alternative is keeping it in `ai/` but instantiated from `GameScene` only. The sim placement is the right answer if we want replay/dump fidelity (which we get for free with the desync detector's existing JSON dump path), but it tightens the layering between `sim/` and `ai/`. Sign-off needed because once committed it's load-bearing.
+
+**As built: placement B, and it is load-bearing exactly as warned.** The code sits in `src/rwe/ai/` and the controllers are owned by `GameSimulation` through `unique_ptr` behind a forward declaration — which is why `GameSimulation` needs an out-of-line destructor. `LoadingScene` instantiates one per computer player and hands it to `addAiController`. One consequence the proposal did not call: AI blackboard state is *not* serialized, so a saved game reloads with the AI re-planning from scratch. That is a documented divergence rather than a bug, but it is the price of the AI being sim state that the save path does not carry.
 
 ### Q5. Should we extend the FBI parser now, or live with what we have?
 
@@ -698,6 +726,8 @@ Proposal recommends `sim/` (placement B in §4). Alternative is keeping it in `a
 - (b) **Defer**, derive categories from existing fields (`canFly`, `floater`, weapon properties). Phase 2 ships sooner, classifier is uglier.
 - Recommendation: (a) — extending the parser is mechanical and benefits non-AI code too.
 
+**As built: (a), and the prediction that it would benefit non-AI code proved right several times over.** `src/rwe/io/fbi/io.cpp` now reads `Category`, `SightDistance`, `RadarDistance`, the three `w*_badTargetCategory` keys, `NoChaseCategory` and a great deal more. Target selection, the order-panel gating, the keyboard's data-driven `Ctrl`+letter selections and the transport rules all key off fields added for this.
+
 ### Q6. Do we want a per-AI sub-RNG, or share `simulation.rng`?
 
 Sharing is simpler but couples AI command order to sim consumption order; if the sim ever calls `rng()` more or less in unrelated code paths, the AI's choices shift. Sub-seeding gives stability:
@@ -707,6 +737,8 @@ ai.rng.seed(simulation.rng()); // pulls one value at construction time, then ind
 ```
 
 Recommendation: **sub-seed once**, keep AI's RNG private.
+
+**As built: sub-seeded once, verbatim.** `LoadingScene` pulls a single value from `simulation.rng()` at construction and hands it to `AiPlayerController`, which keeps a private `std::minstd_rand`. Note the determinism hazard the AI still carries: two of its draws (`BuildManager.cpp`, breaking ties between candidate build sites) go through `std::uniform_int_distribution`, whose bias correction is implementation-defined. That cannot desync a single-player game, and an AI in a network game already desyncs for the reason in the header, but it is the first thing to fix when that is taken on.
 
 ### Q7. Scope check: are we sure naval is non-goal?
 
@@ -718,6 +750,8 @@ Some TA stock maps are mostly water (e.g. *Greenhaven*, *Arctic Plains*). On a h
 
 Recommendation: (a) for v1, (b) added in a 4.5 if a tester complains. Sign-off needed because it caps the playable map pool until naval lands.
 
+**As built: neither (a) nor (b), and the question turned out to be the wrong one.** The AI plays water maps without a navy, by air. `ReachabilityMap` floods the heightmap from the base for the constructor's movement class, so the AI knows what it cannot walk to; `TransportManager` then builds an Atlas or Valkyrie and ferries a constructor to the richest patch across the water — where it builds an outpost of extractors and solars around itself — and in the Attack phase carries the army to a landing near an enemy it cannot reach on foot. No warning, no refusal, no boatyard. Naval doctrine proper is still deferred, and sea transports for the AI are still on the roadmap.
+
 ---
 
-End of proposal. Total: 12 sections, ~3,400 words.
+End of the 2026-04-26 proposal. Total: 12 sections, ~3,400 words. Annotated 2026-09-04 against the code as built.

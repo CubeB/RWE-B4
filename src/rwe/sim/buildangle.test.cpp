@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -39,14 +40,6 @@ namespace rwe
                 Energy(1000.0f),
             };
             return sim.addPlayer(p);
-        }
-
-        std::shared_ptr<CobScript> makeEmptyCobScript()
-        {
-            auto script = std::make_shared<CobScript>();
-            script->staticVariableCount = 0;
-            script->pieces.push_back("base");
-            return script;
         }
 
         void registerModel(GameSimulation& sim)
@@ -167,7 +160,7 @@ namespace rwe
 
     TEST_CASE("a building settles inside the arc its own FBI names", "[buildangle]")
     {
-        auto script = makeEmptyCobScript();
+        auto script = makeEmptyCobScript({"base"});
         GameSimulation sim(makeBuildAngleTerrain(), 0u, 0, 0);
         auto player = addBuildAnglePlayer(sim);
         sim.unitDefinitions["builder"] = makeBuilderDef();
@@ -247,7 +240,7 @@ namespace rwe
         // verbatim rather than randomising it, but RWE takes a unit's facing
         // from the pad it rolls off instead, so the arc must not reach it.
         // Only the ten capital ships name one at all, every one at 16384.
-        auto script = makeEmptyCobScript();
+        auto script = makeEmptyCobScript({"base"});
         GameSimulation sim(makeBuildAngleTerrain(), 0u, 0, 0);
         auto player = addBuildAnglePlayer(sim);
         sim.unitDefinitions["builder"] = makeBuilderDef();

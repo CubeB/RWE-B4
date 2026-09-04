@@ -11,6 +11,7 @@
 #include <rwe/sim/cob.h>
 #include <limits>
 #include <memory>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -21,13 +22,6 @@ namespace rwe
             // 2x2 zeroed heightmap; GameSimulation requires width/height of at least 2.
             Grid<unsigned char> heights(2, 2, static_cast<unsigned char>(0));
             return MapTerrain(std::move(heights), 0_ss);
-        }
-
-        std::shared_ptr<CobScript> makeEmptyCobScript()
-        {
-            auto script = std::make_shared<CobScript>();
-            script->staticVariableCount = 0;
-            return script;
         }
 
         UnitId addBareUnit(GameSimulation& sim, const std::shared_ptr<CobScript>& script)

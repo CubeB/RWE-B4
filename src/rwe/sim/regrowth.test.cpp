@@ -3,6 +3,7 @@
 #include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -35,14 +36,6 @@ namespace rwe
             d.reproduceArea = 6;
             d.damage = 1;
             return d;
-        }
-
-        void tick(GameSimulation& sim, int ticks)
-        {
-            for (int i = 0; i < ticks; ++i)
-            {
-                sim.tick();
-            }
         }
 
         std::size_t countFeatures(const GameSimulation& sim)

@@ -388,37 +388,8 @@ namespace rwe
         bool menuPausedGame{false};
         std::string inGameOptionsPage;
 
-        /** SOUNDS.GUI's Sound Mode: Off | Mono | 3D. */
-        enum class SoundMode
-        {
-            Off = 0,
-            Mono = 1,
-            Stereo = 2,
-        };
 
-        /** SOUNDS.GUI's Unit Sounds: Off | Medium | Full. */
-        enum class UnitSpeechLevel
-        {
-            Off = 0,
-            Medium = 1,
-            Full = 2,
-        };
-
-        struct InGameOptionsState
-        {
-            unsigned int soundVolume;
-            unsigned int musicVolume;
-            bool musicEnabled;
-            std::string windowMode;
-            bool shadows;
-            unsigned int scrollSpeed;
-            SoundMode soundMode;
-            UnitSpeechLevel unitSpeech;
-            unsigned int gamma;
-            bool shading;
-            bool antiAlias;
-        };
-        InGameOptionsState gameOptionsUndo{100, 100, true, "windowed", true, 100, SoundMode::Stereo, UnitSpeechLevel::Full, 100, true, true};
+        GameOptions gameOptionsUndo;
 
         SoundMode soundModeSetting{SoundMode::Stereo};
         UnitSpeechLevel unitSpeechSetting{UnitSpeechLevel::Full};
@@ -592,12 +563,6 @@ namespace rwe
 
         TextureHandle dodgeMask;
 
-        struct ProjectileRenderInfo
-        {
-            GameTime lastSmoke{GameTime(0)};
-        };
-
-        std::unordered_map<ProjectileId, ProjectileRenderInfo> projectileRenderInfos;
 
     public:
         GameScene(
@@ -941,8 +906,8 @@ namespace rwe
          */
         std::vector<std::function<void()>> pendingMenuActions;
         void exitToMainMenu();
-        InGameOptionsState currentInGameOptions() const;
-        void applyInGameOptions(const InGameOptionsState& state);
+        GameOptions currentInGameOptions() const;
+        void applyInGameOptions(const GameOptions& state);
         void saveInGameOptions();
 
         void openSaveDialog();

@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <vector>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -122,36 +123,6 @@ namespace rwe
             sim.getUnitState(id).weapons[0] = weapon;
         }
 
-        bool anyProjectiles(const GameSimulation& sim)
-        {
-            for ([[maybe_unused]] const auto& p : sim.projectiles)
-            {
-                return true;
-            }
-            return false;
-        }
-
-        /**
-         * Runs the simulation and says whether a shot was ever in the air.
-         * Watching every tick rather than counting at the end matters because
-         * a round covers the hundred and twenty-eight units to the target in
-         * about nine ticks and is gone again by the tenth.
-         *
-         * Visibility settles at the end of a tick, so a unit spawned this tick
-         * cannot be seen until the next and acquisition lands on the second.
-         */
-        bool everFires(GameSimulation& sim, int ticks)
-        {
-            for (int i = 0; i < ticks; ++i)
-            {
-                sim.tick();
-                if (anyProjectiles(sim))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
     }
 
     TEST_CASE("a weapon bolted to the hull waits for the hull to come round", "[turret]")

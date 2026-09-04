@@ -7,6 +7,7 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
 #include <memory>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -16,31 +17,6 @@ namespace rwe
         {
             Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
             return MapTerrain(std::move(heights), 0_ss);
-        }
-
-        PlayerId addPlayer(GameSimulation& sim)
-        {
-            GamePlayerInfo p{
-                std::optional<std::string>("player"),
-                GamePlayerType::Human,
-                PlayerColorIndex(0),
-                GamePlayerStatus::Alive,
-                std::string("ARM"),
-                Metal(1000.0f),
-                Energy(1000.0f),
-                Metal(1000.0f),
-                Energy(1000.0f),
-                Metal(1000.0f),
-                Energy(1000.0f),
-            };
-            return sim.addPlayer(p);
-        }
-
-        std::shared_ptr<CobScript> makeEmptyCobScript()
-        {
-            auto script = std::make_shared<CobScript>();
-            script->staticVariableCount = 0;
-            return script;
         }
 
         UnitId addSolar(GameSimulation& sim, PlayerId owner, const std::shared_ptr<CobScript>& script)

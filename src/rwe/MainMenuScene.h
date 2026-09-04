@@ -16,32 +16,15 @@ namespace rwe
 {
     class MainMenuScene : public Scene
     {
-    public:
-        /** What the options screen edits, for undo, cancel and restore. */
-        struct OptionsState
-        {
-            unsigned int soundVolume;
-            unsigned int musicVolume;
-            bool musicEnabled;
-            std::string windowMode;
-            bool shadows;
-            unsigned int scrollSpeed;
-            unsigned int soundMode;
-            unsigned int unitSpeech;
-            unsigned int gamma;
-            bool shading;
-            bool antiAlias;
-        };
-
     private:
         SceneContext sceneContext;
         TdfBlock* soundLookup;
 
-        OptionsState optionsUndo{100, 100, true, "windowed", true, 100, 2, 2, 100, true, true};
+        GameOptions optionsUndo;
         bool pendingShadows{true};
         unsigned int pendingScrollSpeed{100};
-        unsigned int pendingSoundMode{2};
-        unsigned int pendingUnitSpeech{2};
+        SoundMode pendingSoundMode{SoundMode::Stereo};
+        UnitSpeechLevel pendingUnitSpeech{UnitSpeechLevel::Full};
         unsigned int pendingGamma{100};
         bool pendingShading{true};
         bool pendingAntiAlias{true};
@@ -120,9 +103,9 @@ namespace rwe
         /** Swaps which options page shares the screen with the hub buttons; empty means the hub alone. */
         void goToOptionsPage(const std::string& page);
 
-        void applyOptions(const OptionsState& state);
+        void applyOptions(const GameOptions& state);
 
-        OptionsState currentOptions() const;
+        GameOptions currentOptions() const;
 
         void saveOptions();
 

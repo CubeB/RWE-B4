@@ -14,6 +14,7 @@
 #include <set>
 #include <vector>
 #include <memory>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -23,32 +24,6 @@ namespace rwe
         {
             Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
             return MapTerrain(std::move(heights), 0_ss);
-        }
-
-        PlayerId addPlayer(GameSimulation& sim, const std::string& name)
-        {
-            GamePlayerInfo p{
-                std::optional<std::string>(name),
-                GamePlayerType::Human,
-                PlayerColorIndex(0),
-                GamePlayerStatus::Alive,
-                std::string("ARM"),
-                Metal(1000.0f),
-                Energy(1000.0f),
-                Metal(1000.0f),
-                Energy(1000.0f),
-                Metal(1000.0f),
-                Energy(1000.0f),
-            };
-            return sim.addPlayer(p);
-        }
-
-        std::shared_ptr<CobScript> makeEmptyCobScript()
-        {
-            auto script = std::make_shared<CobScript>();
-            script->staticVariableCount = 0;
-            script->pieces.push_back("base");
-            return script;
         }
 
         void registerModel(GameSimulation& sim, const std::string& objectName)
@@ -133,7 +108,7 @@ namespace rwe
 
     TEST_CASE("a bomber releases its bomb on the approach and it lands on the target", "[bomber]")
     {
-        auto script = makeEmptyCobScript();
+        auto script = makeEmptyCobScript({"base"});
         // 128 tiles = 2048 world units, so there is room for a long approach.
         GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
@@ -224,7 +199,7 @@ namespace rwe
         // The failure this guards against: after the first run the aircraft
         // settles into a circle, going round and round without ever lining up
         // again, and every later pass misses.
-        auto script = makeEmptyCobScript();
+        auto script = makeEmptyCobScript({"base"});
         GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
         auto them = addPlayer(sim, "them");
@@ -313,7 +288,7 @@ namespace rwe
         // line through the target, it flies a track parallel to the one it
         // wanted, the bombsight never opens, and it crosses over, loops and
         // tries again for as long as you let it.
-        auto script = makeEmptyCobScript();
+        auto script = makeEmptyCobScript({"base"});
         GameSimulation sim(makeFlatTerrain(256, 256), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
         auto them = addPlayer(sim, "them");

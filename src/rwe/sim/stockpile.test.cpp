@@ -11,6 +11,7 @@
 #include <rwe/sim/WeaponDefinition.h>
 #include <memory>
 #include <vector>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -121,36 +122,6 @@ namespace rwe
         const UnitWeapon& weaponOf(const GameSimulation& sim, UnitId id)
         {
             return *sim.getUnitState(id).weapons[0];
-        }
-
-        void tick(GameSimulation& sim, int ticks)
-        {
-            for (int i = 0; i < ticks; ++i)
-            {
-                sim.tick();
-            }
-        }
-
-        bool anyProjectiles(const GameSimulation& sim)
-        {
-            for ([[maybe_unused]] const auto& p : sim.projectiles)
-            {
-                return true;
-            }
-            return false;
-        }
-
-        bool everFires(GameSimulation& sim, int ticks)
-        {
-            for (int i = 0; i < ticks; ++i)
-            {
-                sim.tick();
-                if (anyProjectiles(sim))
-                {
-                    return true;
-                }
-            }
-            return false;
         }
 
         /** What the whole build of one round costs, stepped exactly as the sim steps it. */

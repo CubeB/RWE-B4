@@ -324,11 +324,6 @@ namespace rwe
         std::string pieceName;
     };
 
-    struct ProjectileSpawnedEvent
-    {
-        ProjectileId projectileId;
-    };
-
     struct ProjectileDiedEvent
     {
         ProjectileId projectileId;
@@ -386,7 +381,6 @@ namespace rwe
         UnitDiedEvent,
         UnitDamagedEvent,
         UnitStartedBuildingEvent,
-        ProjectileSpawnedEvent,
         ProjectileDiedEvent,
         UnitCapturedEvent>;
 

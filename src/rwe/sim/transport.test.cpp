@@ -8,6 +8,7 @@
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <memory>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -17,32 +18,6 @@ namespace rwe
         {
             Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
             return MapTerrain(std::move(heights), 0_ss);
-        }
-
-        PlayerId addPlayer(GameSimulation& sim, const std::string& name)
-        {
-            GamePlayerInfo p{
-                std::optional<std::string>(name),
-                GamePlayerType::Human,
-                PlayerColorIndex(0),
-                GamePlayerStatus::Alive,
-                std::string("ARM"),
-                Metal(1000.0f),
-                Energy(1000.0f),
-                Metal(1000.0f),
-                Energy(1000.0f),
-                Metal(1000.0f),
-                Energy(1000.0f),
-            };
-            return sim.addPlayer(p);
-        }
-
-        std::shared_ptr<CobScript> makeEmptyCobScript()
-        {
-            auto script = std::make_shared<CobScript>();
-            script->staticVariableCount = 0;
-            script->pieces.push_back("base");
-            return script;
         }
 
         void registerModel(GameSimulation& sim, const std::string& objectName)
@@ -114,7 +89,7 @@ namespace rwe
 
     TEST_CASE("transports load, carry and unload units", "[transport]")
     {
-        auto script = makeEmptyCobScript();
+        auto script = makeEmptyCobScript({"base"});
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
         auto player = addPlayer(sim, "hauler");
         sim.unitDefinitions["transport"] = makeTransportDef();
@@ -247,7 +222,7 @@ namespace rwe
         // A ship cannot come ashore, so the unit walks down to meet it. The
         // bug this guards against had the unit setting off in the opposite
         // direction, then further away again each time it arrived.
-        auto script = makeEmptyCobScript();
+        auto script = makeEmptyCobScript({"base"});
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
         auto player = addPlayer(sim, "hauler");
         auto shipDef = makeTransportDef();
@@ -277,7 +252,7 @@ namespace rwe
 
     TEST_CASE("one unload order sets down one unit", "[transport]")
     {
-        auto script = makeEmptyCobScript();
+        auto script = makeEmptyCobScript({"base"});
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
         auto player = addPlayer(sim, "hauler");
         auto transportDef = makeTransportDef();
@@ -313,7 +288,7 @@ namespace rwe
         // 0x489A90, rule by rule. The terrain floor is at zero with the sea
         // at twenty, so a unit at y=15 with the ten-unit test model pokes
         // its top above the water and one at y=5 is fully under.
-        auto script = makeEmptyCobScript();
+        auto script = makeEmptyCobScript({"base"});
         Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
         GameSimulation sim(MapTerrain(std::move(heights), 20_ss), 0u, 0, 0);
         auto player = addPlayer(sim, "us");

@@ -10,6 +10,7 @@
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <memory>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -36,7 +37,8 @@ namespace rwe
             return d;
         }
 
-        PlayerId addPlayer(GameSimulation& sim)
+        /** Starts with empty stores, so anything gained came from reclaiming. */
+        PlayerId addPlayerWithNothing(GameSimulation& sim)
         {
             GamePlayerInfo p{
                 std::optional<std::string>("reclaimer"),
@@ -54,13 +56,6 @@ namespace rwe
             return sim.addPlayer(p);
         }
 
-        std::shared_ptr<CobScript> makeEmptyCobScript()
-        {
-            auto script = std::make_shared<CobScript>();
-            script->staticVariableCount = 0;
-            return script;
-        }
-
         UnitDefinition makeBuilderDef(unsigned int workerTimePerTick)
         {
             UnitDefinition d{};
@@ -75,21 +70,6 @@ namespace rwe
             d.buildDistance = 100_ss;
             d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
             return d;
-        }
-
-        UnitId addUnitOfType(GameSimulation& sim, const std::string& unitType, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
-        {
-            auto env = std::make_unique<CobEnvironment>(script.get());
-            std::vector<UnitMesh> pieces;
-            const UnitId unitId(sim.units.emplace(pieces, std::move(env)));
-            auto& unit = sim.getUnitState(unitId);
-            unit.unitType = unitType;
-            unit.owner = owner;
-            unit.position = pos;
-            unit.previousPosition = pos;
-            unit.hitPoints = 100;
-            unit.buildTimeCompleted = sim.unitDefinitions.at(unitType).buildTime;
-            return unitId;
         }
 
         UnitId addBuilderUnit(GameSimulation& sim, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
@@ -118,7 +98,7 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addPlayerWithNothing(sim);
         sim.unitDefinitions["solar"] = makeSolarDef();
         auto solarId = addUnitOfType(sim, "solar", player, SimVector(100_ss, 0_ss, 100_ss), script);
         const auto& info = sim.getPlayer(player);
@@ -163,8 +143,8 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
-        auto enemy = addPlayer(sim);
+        auto player = addPlayerWithNothing(sim);
+        auto enemy = addPlayerWithNothing(sim);
 
         sim.unitDefinitions["solar"] = makeSolarDef();
         auto solarPosition = SimVector(200_ss, 0_ss, 200_ss);
@@ -191,7 +171,7 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addPlayerWithNothing(sim);
         auto builderId = addBuilderUnit(sim, player, SimVector(100_ss, 0_ss, 100_ss), script);
         sim.getUnitState(builderId).orders.push_back(ReclaimOrder(builderId));
 
@@ -224,7 +204,7 @@ namespace rwe
     TEST_CASE("GameSimulation::reclaimFeature", "[reclaim]")
     {
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addPlayerWithNothing(sim);
         auto rockDef = sim.featureDefinitions.insert(makeFeatureDef("rock", 100u, 50u, true));
         auto rockId = sim.addFeature(rockDef, 4, 4).value();
         auto footprint = sim.computeFootprintRegion(sim.getFeature(rockId).position, 2u, 2u);
@@ -304,7 +284,7 @@ namespace rwe
         // CORSOLAR.
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addPlayerWithNothing(sim);
 
         auto rockDef = sim.featureDefinitions.insert(makeFeatureDef("rock", 100u, 50u, true));
         auto rockId = sim.addFeature(rockDef, 4, 4).value();
@@ -335,7 +315,7 @@ namespace rwe
         // a Commander is the one unit you may not recycle.
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addPlayerWithNothing(sim);
 
         auto commanderDef = makeBuilderDef(30u);
         commanderDef.canCapture = true;
@@ -359,7 +339,7 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addPlayerWithNothing(sim);
 
         auto rockDef = sim.featureDefinitions.insert(makeFeatureDef("rock", 100u, 50u, true));
         auto rockId = sim.addFeature(rockDef, 4, 4).value();

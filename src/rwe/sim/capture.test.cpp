@@ -8,6 +8,7 @@
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <memory>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -17,31 +18,6 @@ namespace rwe
         {
             Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
             return MapTerrain(std::move(heights), 0_ss);
-        }
-
-        PlayerId addPlayer(GameSimulation& sim, const std::string& name)
-        {
-            GamePlayerInfo p{
-                std::optional<std::string>(name),
-                GamePlayerType::Human,
-                PlayerColorIndex(0),
-                GamePlayerStatus::Alive,
-                std::string("ARM"),
-                Metal(1000.0f),
-                Energy(1000.0f),
-                Metal(1000.0f),
-                Energy(1000.0f),
-                Metal(1000.0f),
-                Energy(1000.0f),
-            };
-            return sim.addPlayer(p);
-        }
-
-        std::shared_ptr<CobScript> makeEmptyCobScript()
-        {
-            auto script = std::make_shared<CobScript>();
-            script->staticVariableCount = 0;
-            return script;
         }
 
         UnitDefinition makeCaptorDef(bool canCapture)
@@ -64,21 +40,6 @@ namespace rwe
             d.buildTime = 150u;
             d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
             return d;
-        }
-
-        UnitId addUnitOfType(GameSimulation& sim, const std::string& unitType, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
-        {
-            auto env = std::make_unique<CobEnvironment>(script.get());
-            std::vector<UnitMesh> pieces;
-            const UnitId unitId(sim.units.emplace(pieces, std::move(env)));
-            auto& unit = sim.getUnitState(unitId);
-            unit.unitType = unitType;
-            unit.owner = owner;
-            unit.position = pos;
-            unit.previousPosition = pos;
-            unit.hitPoints = 100;
-            unit.buildTimeCompleted = sim.unitDefinitions.at(unitType).buildTime;
-            return unitId;
         }
 
         UnitId addCaptor(GameSimulation& sim, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script, bool canCapture = true)

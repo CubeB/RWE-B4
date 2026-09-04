@@ -1,29 +1,95 @@
 # What is most worth reverse-engineering next
 
 Started as a research note on 2026-08-31; kept up to date since as the work was
-done. **Entries 1 to 22 and 24 are now implemented or refuted** — each one below
-says which, and several say what the entry originally got wrong. The ranking it
-opens with is the ranking as first written, deliberately left alone so that the
+done. **Entries 1 to 24 are now implemented or refuted** — each one below says
+which, and several say what the entry originally got wrong. The ranking it opens
+with is the ranking as first written, deliberately left alone so that the
 corrections stay legible next to the guesses that prompted them.
 
-Last revised 2026-09-02. **What is left is now shorter than what is done**, so
-it is worth stating plainly rather than leaving to be inferred from twenty-seven
-entries: the strafing pass for fighters, the maneuver leash, `digger`, `upright`
-and `norestrict` (all three of which need machinery RWE does not have), the
-`antiweapons` flag (which has no reader anywhere in the binary), the veterancy
-reload term, TA's Permanent and Circular sight modes, and what a repair pad does
-once an aircraft has landed on it. Everything else in Tiers 1 to 3 is either
-implemented or refuted.
+Last revised 2026-09-04. Three of the items this file listed as outstanding have
+since landed: **the strafing pass for fighters** (`AirToGround` at `0x412710`,
+`TOTALA-EXE-MISSIONS.md` §5 — ported and gated to ground targets, since a
+dogfight is a different mission), **what a repair pad does once an aircraft has
+landed on it** (entry 22 below), and **TA's Permanent and Circular sight modes**
+(entry 23, now selectable from the skirmish screen). Two more subjects grew
+their own documents in the meantime: the shaded unit rasterizer in
+`TOTALA-EXE-SHADING.md` and wrecks in `TOTALA-EXE-WRECKS.md`.
 
-Ranked by (player-visible impact) × (confidence it can be recovered) / (effort).
-Everything below is backed either by a count over the real game data, a
-`file:line` in RWE, or an address in `TotalA.exe` (GOG build, MD5
-`8e74a1dffa1f5988624c52048f5b20cd`, the one `docs/TOTALA-EXE.md` is written
-against).
+## What is left, ranked
 
-Two things are excluded because work is already under way on them: tank recoil
-direction, and bomber attack runs / gunship hover-attack. §A at the end records
-the few adjacent findings that work might otherwise miss.
+Almost nothing here is now "go and read the binary". The list has changed shape:
+what remains is mostly **decoded and unported**, where the reading is done and
+the cost is implementation and play-testing. Ranked by player-visible impact
+over effort, as before.
+
+1. **The corpse level, and `unit+0xF7` with it.** The largest visible gap of the
+   lot, and the only entry that still contains something genuinely *unknown*.
+   RWE runs `Killed` with a hard-coded severity of 50 and discards the
+   `corpsetype` the script writes back, so it always spawns the level-one wreck;
+   the original derives the severity from the overkill and then walks the
+   `featuredead` chain (`0x486379`–`0x4863AC`). Done properly, a ship or a
+   hovercraft blown apart hard leaves **nothing** and a land unit leaves its
+   `_heap` — a difference in every game, and a bigger one than the sink that
+   prompted the decode. The severity formula is `TOTALA-EXE-WRECKS.md` §22; its
+   second term, `unit+0xF7`, is still unidentified, and that is the piece to go
+   and find.
+2. **Aircraft leave no wreck at all.** Every one of the thirty aircraft FBIs
+   omits `Corpse`, so in the original a shot-down aircraft leaves nothing over
+   land or water at any severity. RWE spawns one anyway. Decoded, trivial to
+   port, and it is only ranked below the severity because it falls out of the
+   same change.
+3. **The exact `PALETTE.SHD` lookup.** Decoded in full and specified in
+   `TOTALA-EXE-SHADING.md`, with `tools/exe/shading/shdgen.py` regenerating the
+   shipped table byte-for-byte from the palette, which is what pins its layout.
+   The table stores palette *indices* from a nearest-neighbour search, so
+   brightening saturates toward white at the top of each ramp rather than
+   scaling and output luminance is not even monotone in the row; RWE's fitted
+   two-segment curve follows the measured mean to about 0.03 but cannot
+   reproduce per-texel behaviour. Reproducing it means carrying each texel's
+   palette index in a second single-channel atlas and sampling a 32×256 lookup.
+   No further reading required — this is an implementation job.
+4. **`AirToAir`, `0x412D40`.** Decoded for completeness in
+   `TOTALA-EXE-MISSIONS.md` §7 and unported: a fighter chasing another aircraft
+   should hop around it in twenty-unit steps and push `VTOL_EVADE` to break off.
+   Air targets currently keep the generic pattern, which is closer than the
+   strafing overshoot would be, so this is a refinement rather than a fault.
+5. **`maneuverleashlength`.** Parsed but not enforced. `WORD def+0x214`, read at
+   `0x4393A9`, `0x43B311`, `0x43B60F`; 106 units set it, at 640 or 1280. It is
+   the distance from where the unit was *standing when ordered* at which any
+   mission aborts — not a radius, a plausible reading the decode disproves. See
+   §A.
+6. **The veterancy reload term** at `0x49E468`, which scales `reloadtime` by
+   both the firer's veterancy and its damage. Decoded, not ported; it belongs
+   with whatever picks up the rest of veterancy. (Entry 11.)
+7. **The `"SELFREPAIR"` mission** pushed at `0x411ECE`. RWE's repair pads mend a
+   landed damaged aircraft now, but by nanolathing it with the pad's own build
+   rate rather than by whatever that mission does. Worth reading before anyone
+   claims the pads match.
+8. **Death causes 4, 5, 7 and 9** are decoded as a set and not named
+   individually. Cause 7 both forces a wreck and suppresses the burning plume,
+   so naming it would settle what "a wreck that does not burn on land" actually
+   is. (`TOTALA-EXE-WRECKS.md` loose ends.)
+
+Not on the list, and deliberately: `digger`, `upright` and `norestrict` are
+decoded and left, because all three select between routines or screens RWE does
+not have (entry 22); `antiweapons` has no reader anywhere in the binary and
+porting interception without it confirmed nothing needs it (entry 11); and
+`hitDensity` and `sortbias` are refuted outright (entries 17 and 26).
+
+## The original ranking, and the entries
+
+Everything from here down is the file as first written on 2026-08-31, with each
+entry annotated where it was answered. It was ranked by (player-visible impact) ×
+(confidence it can be recovered) / (effort), and everything in it is backed
+either by a count over the real game data, a `file:line` in RWE, or an address in
+`TotalA.exe` (GOG build, MD5 `8e74a1dffa1f5988624c52048f5b20cd`, the one
+`docs/TOTALA-EXE.md` is written against). RWE `file:line` citations in the
+entries are as of that date and several have since moved; the addresses have not.
+
+Two things were excluded at the time because work was already under way on them:
+tank recoil direction, and bomber attack runs / gunship hover-attack — both since
+done. §A at the end records the few adjacent findings that work might otherwise
+have missed.
 
 ---
 
@@ -680,10 +746,12 @@ read together with §NN.
       random, not nearest, by a helper that skips the generator when there is
       only one. RWE now sends a damaged idle aircraft to a pad on exactly those
       terms. Left out: the `VTOL_LANDING` cursor at `0x43EA9A` (no such cursor
-      in RWE), the right-click that issues the same mission by hand, and what
-      the pad does once the aircraft is on it — the `"SELFREPAIR"` mission
-      pushed at `0x411ECE` was not followed further, so RWE's pads still mend
-      nothing.
+      in RWE), and the right-click that issues the same mission by hand.
+      **Since answered in part:** the pads do mend now — a pad with no orders
+      of its own nanolathes the nearest landed, damaged aircraft of its owner
+      inside its build reach. That is RWE's own construction machinery rather
+      than the original's; the `"SELFREPAIR"` mission pushed at `0x411ECE` still
+      has not been followed, so nobody should claim the two match until it is.
     - **`noshadow`** (bit 25, 10 units) — **done.** Both shadow passes skip the
       draw on it (`0x4592A6`/`0x4592AC`, `0x4594BA`/`0x4594C0`), under a global
       shadows option RWE has no equivalent of.
@@ -712,10 +780,20 @@ read together with §NN.
     `onoffable` ambiguity §B flags is `mobilestandorders` bit 0 (`0x42C8DB`),
     `firestandorders` bit 1 (`0x42C8FF`), `onoffable` bit 2 (`0x42C8BE`). And
     the unit definition stride is `0x249`, the instance stride `0x118`.
-23. **TA's Permanent and Circular LOS modes.** Already in `TOTALA-EXE.md` §27.
-    Circular is fully understood (a `vismasks.gaf` stamp, radius
-    `clamp(SightDistance/32, 5, 14)`); Permanent has not been looked at. Only
-    reachable once there is a skirmish option to select them, so low urgency.
+23. **TA's Permanent and Circular LOS modes — done.** Already in `TOTALA-EXE.md`
+    §27. Circular was fully understood (a `vismasks.gaf` stamp, radius
+    `clamp(SightDistance/32, 5, 14)`); Permanent had not been looked at. The
+    entry called this low urgency because it was only reachable once a skirmish
+    option could select them, and that option now exists: Line of Sight
+    Permanent / True / Circular on the skirmish screen reaches the simulation.
+    Circular stamps a flat disc; Permanent promotes the explored grid into the
+    visible grid, and that single promotion is the whole option, since the fog
+    renderer, `canSeeUnit`, `canDetectUnit` and the AI's threat map all read the
+    visible grid. Two divergences recorded rather than hidden: Circular keeps
+    the ceiling of fourteen cells but drops the floor of five, so a blind unit
+    sees one cell rather than five; and Permanent still reveals with the ray
+    cast each tick, because the decode specifies only the persistence and not
+    which shape the original uses. `src/rwe/sim/gameoptions.test.cpp`.
 24. **`selfdestructcountdown` — checked; nothing to change.** The parser's
     *absent* case at `0x42CC07` sets the field to **5**, so five seconds is
     the original's own default and RWE's hardcoded five is already right.
@@ -780,6 +858,14 @@ would otherwise have to rediscover:
 Those three keys have just landed in `src/rwe/io/fbi/io.cpp` and
 `src/rwe/sim/UnitDefinition.h`, so the parse side is done; the read sites above
 are what says how the original *uses* them.
+
+**Since:** `attackrunlength` and `hoverattack` are both read and implemented —
+the bomber run and the gunship standoff ring, written up in
+`TOTALA-EXE-MISSIONS.md`. `maneuverleashlength` is still parsed and not
+enforced, and it is item 5 in the ranking at the top of this file. Note the
+trap the decode already sprang once: it is **not** a radius around the target,
+it is the distance from where the unit was standing when the order came at
+which any mission aborts.
 
 Also adjacent: the `>= 30000` damage cut-out found in §5 sits in the same
 routine any weapon-damage change goes through, and `turret` (§7) shares code

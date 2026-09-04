@@ -8,6 +8,7 @@
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <memory>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -19,7 +20,8 @@ namespace rwe
             return MapTerrain(std::move(heights), 0_ss);
         }
 
-        PlayerId addPlayer(GameSimulation& sim)
+        /** Never short of metal, so a repair can only be limited by worker time. */
+        PlayerId addWellStockedPlayer(GameSimulation& sim)
         {
             GamePlayerInfo p{
                 std::optional<std::string>("repairer"),
@@ -35,13 +37,6 @@ namespace rwe
                 Energy(10000.0f),
             };
             return sim.addPlayer(p);
-        }
-
-        std::shared_ptr<CobScript> makeEmptyCobScript()
-        {
-            auto script = std::make_shared<CobScript>();
-            script->staticVariableCount = 0;
-            return script;
         }
 
         UnitDefinition makeBuilderDef(unsigned int workerTimePerTick)
@@ -71,7 +66,8 @@ namespace rwe
             return d;
         }
 
-        UnitId addUnitOfType(GameSimulation& sim, const std::string& unitType, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
+        /** At full health, ready to be damaged on purpose. */
+        UnitId addUndamagedUnitOfType(GameSimulation& sim, const std::string& unitType, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
         {
             auto env = std::make_unique<CobEnvironment>(script.get());
             std::vector<UnitMesh> pieces;
@@ -89,7 +85,7 @@ namespace rwe
         UnitId addBuilderUnit(GameSimulation& sim, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
         {
             sim.unitDefinitions["builder"] = makeBuilderDef(30u);
-            auto unitId = addUnitOfType(sim, "builder", owner, pos, script);
+            auto unitId = addUndamagedUnitOfType(sim, "builder", owner, pos, script);
             // Normally set by the COB script's StartBuilding thread; the
             // empty test script has none, so pretend the arm is deployed.
             sim.getUnitState(unitId).inBuildStance = true;
@@ -109,11 +105,11 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addWellStockedPlayer(sim);
         sim.unitDefinitions["solar"] = makeSolarDef();
 
         auto solarPosition = SimVector(200_ss, 0_ss, 200_ss);
-        auto solarId = addUnitOfType(sim, "solar", player, solarPosition, script);
+        auto solarId = addUndamagedUnitOfType(sim, "solar", player, solarPosition, script);
         sim.getUnitState(solarId).hitPoints = 10;
 
         auto builderId = addBuilderUnit(sim, player, solarPosition + SimVector(40_ss, 0_ss, 0_ss), script);
@@ -142,11 +138,11 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addWellStockedPlayer(sim);
         sim.unitDefinitions["solar"] = makeSolarDef();
 
         auto solarPosition = SimVector(200_ss, 0_ss, 200_ss);
-        auto solarId = addUnitOfType(sim, "solar", player, solarPosition, script);
+        auto solarId = addUndamagedUnitOfType(sim, "solar", player, solarPosition, script);
         sim.getUnitState(solarId).buildTimeCompleted = 60u;
         sim.getUnitState(solarId).hitPoints = 1;
 
@@ -164,10 +160,10 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addWellStockedPlayer(sim);
         sim.unitDefinitions["solar"] = makeSolarDef();
 
-        auto solarId = addUnitOfType(sim, "solar", player, SimVector(200_ss, 0_ss, 200_ss), script);
+        auto solarId = addUndamagedUnitOfType(sim, "solar", player, SimVector(200_ss, 0_ss, 200_ss), script);
         auto builderId = addBuilderUnit(sim, player, SimVector(240_ss, 0_ss, 200_ss), script);
         sim.getUnitState(builderId).orders.push_back(RepairOrder(solarId));
 
@@ -181,7 +177,7 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addWellStockedPlayer(sim);
         auto builderId = addBuilderUnit(sim, player, SimVector(100_ss, 0_ss, 100_ss), script);
         sim.getUnitState(builderId).hitPoints = 5;
         sim.getUnitState(builderId).orders.push_back(RepairOrder(builderId));
@@ -200,16 +196,16 @@ namespace rwe
         // worker time only so that it can build.
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addWellStockedPlayer(sim);
 
         sim.unitDefinitions["solar"] = makeSolarDef();
-        auto solarId = addUnitOfType(sim, "solar", player, SimVector(200_ss, 0_ss, 200_ss), script);
+        auto solarId = addUndamagedUnitOfType(sim, "solar", player, SimVector(200_ss, 0_ss, 200_ss), script);
         sim.getUnitState(solarId).hitPoints = 10u;
 
         auto factoryDef = makeBuilderDef(30u);
         factoryDef.canReclamate = false;
         sim.unitDefinitions["factory"] = factoryDef;
-        auto factoryId = addUnitOfType(sim, "factory", player, SimVector(240_ss, 0_ss, 200_ss), script);
+        auto factoryId = addUndamagedUnitOfType(sim, "factory", player, SimVector(240_ss, 0_ss, 200_ss), script);
         sim.getUnitState(factoryId).inBuildStance = true;
         sim.getUnitState(factoryId).orders.push_back(RepairOrder(solarId));
 
@@ -229,13 +225,13 @@ namespace rwe
         // 7 points a step, 26.25 a second.
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addWellStockedPlayer(sim);
 
         auto commanderDef = makeSolarDef();
         commanderDef.healTime = 27u;
         commanderDef.maxHitPoints = 100u;
         sim.unitDefinitions["commander"] = commanderDef;
-        auto commanderId = addUnitOfType(sim, "commander", player, SimVector(200_ss, 0_ss, 200_ss), script);
+        auto commanderId = addUndamagedUnitOfType(sim, "commander", player, SimVector(200_ss, 0_ss, 200_ss), script);
         sim.getUnitState(commanderId).hitPoints = 10u;
 
         // Eight ticks buys exactly one step of seven.
@@ -263,10 +259,10 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addWellStockedPlayer(sim);
 
         sim.unitDefinitions["solar"] = makeSolarDef();
-        auto solarId = addUnitOfType(sim, "solar", player, SimVector(200_ss, 0_ss, 200_ss), script);
+        auto solarId = addUndamagedUnitOfType(sim, "solar", player, SimVector(200_ss, 0_ss, 200_ss), script);
         sim.getUnitState(solarId).hitPoints = 10u;
 
         for (int i = 0; i < 100; ++i)

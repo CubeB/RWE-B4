@@ -5,3 +5,6 @@
 /.idea/
 /.vs/
 crash.txt
+
+# Screenshots taken while testing; they belong in the scratchpad, not the repo.
+/*.png

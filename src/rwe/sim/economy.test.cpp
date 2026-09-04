@@ -8,6 +8,7 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
 #include <memory>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -19,7 +20,8 @@ namespace rwe
             return MapTerrain(std::move(heights), 0_ss);
         }
 
-        PlayerId addPlayer(GameSimulation& sim, float metal = 0.0f, float energy = 0.0f, float storage = 10000.0f)
+        /** The economy tests set their own starting stores; that is what they measure. */
+        PlayerId addPlayerWithResources(GameSimulation& sim, float metal = 0.0f, float energy = 0.0f, float storage = 10000.0f)
         {
             GamePlayerInfo p{
                 std::optional<std::string>("player"),
@@ -35,28 +37,6 @@ namespace rwe
                 Energy(storage),
             };
             return sim.addPlayer(p);
-        }
-
-        std::shared_ptr<CobScript> makeEmptyCobScript()
-        {
-            auto script = std::make_shared<CobScript>();
-            script->staticVariableCount = 0;
-            return script;
-        }
-
-        UnitId addUnitOfType(GameSimulation& sim, const std::string& unitType, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
-        {
-            auto env = std::make_unique<CobEnvironment>(script.get());
-            std::vector<UnitMesh> pieces;
-            const UnitId unitId(sim.units.emplace(pieces, std::move(env)));
-            auto& unit = sim.getUnitState(unitId);
-            unit.unitType = unitType;
-            unit.owner = owner;
-            unit.position = pos;
-            unit.previousPosition = pos;
-            unit.hitPoints = 100;
-            unit.buildTimeCompleted = sim.unitDefinitions.at(unitType).buildTime;
-            return unitId;
         }
 
         // The settle recomputes each player's storage caps from its units, so a
@@ -131,7 +111,7 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim, 10.0f, 10.0f);
+        auto player = addPlayerWithResources(sim, 10.0f, 10.0f);
         sim.unitDefinitions["inert"] = makeInertDef();
         auto unitId = addUnitOfType(sim, "inert", player, SimVector(100_ss, 0_ss, 100_ss), script);
 
@@ -160,7 +140,7 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addPlayerWithResources(sim);
         auto def = makeInertDef();
         def.energyMake = Energy(100.0f);
         sim.unitDefinitions["gen"] = def;
@@ -184,7 +164,7 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim, 30.0f, 30.0f);
+        auto player = addPlayerWithResources(sim, 30.0f, 30.0f);
         sim.unitDefinitions["inert"] = makeInertDef();
 
         auto heavyId = addUnitOfType(sim, "inert", player, SimVector(100_ss, 0_ss, 100_ss), script);
@@ -207,7 +187,7 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        auto player = addPlayerWithResources(sim);
         sim.unitDefinitions["inert"] = makeInertDef(100.0f);
         auto unitId = addUnitOfType(sim, "inert", player, SimVector(100_ss, 0_ss, 100_ss), script);
 
@@ -223,7 +203,7 @@ namespace rwe
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
         sim.tidalStrength = 20;
-        auto player = addPlayer(sim);
+        auto player = addPlayerWithResources(sim);
 
         SECTION("a tidal generator makes its rating times the map's tidal strength")
         {

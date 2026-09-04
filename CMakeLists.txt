@@ -174,7 +174,6 @@ set(SOURCE_FILES
     src/rwe/AbstractViewport.h
     src/rwe/ai/AiBlackboard.cpp
     src/rwe/ai/AiBlackboard.h
-    src/rwe/ai/AiIds.h
     src/rwe/ai/AiPlayerController.cpp
     src/rwe/ai/AiPlayerController.h
     src/rwe/ai/AiTuningProfile.cpp
@@ -768,8 +767,6 @@ target_link_libraries(cob_test librwe)
 add_executable(smk_test src/smk_test.cpp)
 target_link_libraries(smk_test librwe)
 
-add_executable(music_probe src/music_probe.cpp)
-target_link_libraries(music_probe librwe)
 
 add_executable(fnt_test src/fnt_test.cpp)
 target_link_libraries(fnt_test librwe)
@@ -803,6 +800,7 @@ set(TEST_FILES
     src/rwe/Viewport.test.cpp
     src/rwe/cob/cob_util.test.cpp
     src/rwe/collections/MinHeap.test.cpp
+    src/rwe/observable/Subject.test.cpp
     src/rwe/collections/VectorMap.test.cpp
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/cloakdisplay.test.cpp
@@ -892,6 +890,7 @@ set(TEST_FILES
     src/rwe/util/OpaqueArgs.test.cpp
     src/rwe/util/Result.test.cpp
     src/rwe/util/SimpleLogger.test.cpp
+    src/rwe/util/SpanStream.test.cpp
     src/rwe/util/rwe_string.test.cpp
     )
 
@@ -937,8 +936,6 @@ include(CPack)
 add_executable(ui_probe src/ui_probe.cpp)
 target_link_libraries(ui_probe librwe)
 
-add_executable(scene_lifetime_probe src/scene_lifetime_probe.cpp)
-target_link_libraries(scene_lifetime_probe librwe)
 
 add_executable(solar_probe src/solar_probe.cpp)
 target_link_libraries(solar_probe librwe)

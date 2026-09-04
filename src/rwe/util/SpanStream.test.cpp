@@ -61,7 +61,7 @@ namespace rwe
         SECTION("seekg relative to end")
         {
             SpanStream stream(data, size);
-            stream.seekg(-6, std::ios_base::end);
+            stream.seekg(-5, std::ios_base::end);
             REQUIRE(!stream.fail());
             char buf[5];
             stream.read(buf, 5);

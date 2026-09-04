@@ -270,16 +270,16 @@ namespace rwe
           sounds(std::move(sounds)),
           guiFont(guiFont),
           speechFont(speechFont),
-          shadowsEnabled(sceneContext.globalConfig->shadows),
-          scrollSpeedSetting(sceneContext.globalConfig->scrollSpeed),
+          localPlayerId(localPlayerId),
+          uiFactory(sceneContext.textureService, sceneContext.audioService, audioLookup, sceneContext.vfs, sceneContext.pathMapping, sceneContext.viewport->width(), sceneContext.viewport->height()),
           soundModeSetting(static_cast<SoundMode>(sceneContext.globalConfig->soundMode)),
           unitSpeechSetting(static_cast<UnitSpeechLevel>(sceneContext.globalConfig->unitSpeech)),
           gammaSetting(sceneContext.globalConfig->gamma),
           shadingEnabled(sceneContext.globalConfig->shading),
           antiAliasEnabled(sceneContext.globalConfig->antiAlias),
+          shadowsEnabled(sceneContext.globalConfig->shadows),
+          scrollSpeedSetting(sceneContext.globalConfig->scrollSpeed),
           gameParameters(gameParameters),
-          localPlayerId(localPlayerId),
-          uiFactory(sceneContext.textureService, sceneContext.audioService, audioLookup, sceneContext.vfs, sceneContext.pathMapping, sceneContext.viewport->width(), sceneContext.viewport->height()),
           audioLookup(audioLookup),
           stateLogStream(std::move(stateLogStream))
     {
@@ -2425,7 +2425,6 @@ namespace rwe
         {
             if (isCtrlDown())
             {
-                const auto& localSideData = sceneContext.sideData->at(getPlayer(localPlayerId).side);
                 if (!isShiftDown())
                 {
                     clearUnitSelection();
@@ -5168,19 +5167,6 @@ namespace rwe
 
     namespace
     {
-        const char* windowModeDisplayName(const std::string& mode)
-        {
-            if (mode == "borderless")
-            {
-                return "Borderless";
-            }
-            if (mode == "fullscreen")
-            {
-                return "Fullscreen";
-            }
-            return "Windowed";
-        }
-
         /** Fills the GAMES listbox and mirrors clicks into the name box. */
         void wireSaveList(UiPanel& panel)
         {
@@ -5532,9 +5518,9 @@ namespace rwe
         setMenuPause(false);
     }
 
-    GameScene::InGameOptionsState GameScene::currentInGameOptions() const
+    GameOptions GameScene::currentInGameOptions() const
     {
-        return InGameOptionsState{
+        return GameOptions{
             static_cast<unsigned int>(sceneContext.audioService->getSoundVolume() * 100.0f),
             static_cast<unsigned int>(sceneContext.audioService->getMusicVolume() * 100.0f),
             sceneContext.audioService->isMusicEnabled(),
@@ -5548,7 +5534,7 @@ namespace rwe
             antiAliasEnabled};
     }
 
-    void GameScene::applyInGameOptions(const InGameOptionsState& state)
+    void GameScene::applyInGameOptions(const GameOptions& state)
     {
         auto* audio = sceneContext.audioService;
         audio->setSoundVolume(static_cast<float>(state.soundVolume) / 100.0f);
@@ -5584,20 +5570,7 @@ namespace rwe
         {
             return;
         }
-        auto state = currentInGameOptions();
-        updateConfigFile(*localDataPath / "rwe.cfg", {
-                                                         {"sound-volume", std::to_string(state.soundVolume)},
-                                                         {"music-volume", std::to_string(state.musicVolume)},
-                                                         {"music", state.musicEnabled ? "true" : "false"},
-                                                         {"window-mode", state.windowMode},
-                                                         {"shadows", state.shadows ? "true" : "false"},
-                                                         {"scroll-speed", std::to_string(state.scrollSpeed)},
-                                                         {"sound-mode", std::to_string(static_cast<unsigned int>(state.soundMode))},
-                                                         {"unit-speech", std::to_string(static_cast<unsigned int>(state.unitSpeech))},
-                                                         {"gamma", std::to_string(state.gamma)},
-                                                         {"shading", state.shading ? "true" : "false"},
-                                                         {"anti-alias", state.antiAlias ? "true" : "false"},
-                                                     });
+        writeGameOptions(*localDataPath / "rwe.cfg", currentInGameOptions());
     }
 
     void GameScene::exitToMainMenu()
@@ -5764,7 +5737,7 @@ namespace rwe
             }
             else if (control == "RESTORE")
             {
-                applyInGameOptions(InGameOptionsState{100, 100, true, "windowed", true, 100, SoundMode::Stereo, UnitSpeechLevel::Full, 100, true, true});
+                applyInGameOptions(GameOptions{});
                 openInGameOptions(inGameOptionsPage);
             }
             else if (control == "UNDO")
@@ -5793,17 +5766,13 @@ namespace rwe
             else if (control == "MODE")
             {
                 // Off | Mono | 3D, cycled by the button itself.
-                soundModeSetting = soundModeSetting == SoundMode::Off
-                    ? SoundMode::Mono
-                    : (soundModeSetting == SoundMode::Mono ? SoundMode::Stereo : SoundMode::Off);
+                soundModeSetting = nextStage(soundModeSetting);
                 sceneContext.audioService->setSoundEnabled(soundModeSetting != SoundMode::Off);
             }
             else if (control == "SPEECH")
             {
                 // Off | Medium | Full: how much of the unit chatter plays.
-                unitSpeechSetting = unitSpeechSetting == UnitSpeechLevel::Off
-                    ? UnitSpeechLevel::Medium
-                    : (unitSpeechSetting == UnitSpeechLevel::Medium ? UnitSpeechLevel::Full : UnitSpeechLevel::Off);
+                unitSpeechSetting = nextStage(unitSpeechSetting);
             }
             else if (control == "CDPLAY")
             {
@@ -6519,7 +6488,6 @@ namespace rwe
         for (auto& [projectileId, projectile] : simulation.projectiles)
         {
             const auto& weaponMediaInfo = gameMediaDatabase.getWeapon(projectile.weaponType);
-            auto& renderInfo = projectileRenderInfos[projectileId];
 
             // emit smoke trail
             if (weaponMediaInfo.smokeTrail)
@@ -6742,17 +6710,12 @@ namespace rwe
                         deselectUnit(e.unitId);
                     }
                 },
-                [&](const ProjectileSpawnedEvent& e) {
-                    projectileRenderInfos.insert({e.projectileId, ProjectileRenderInfo{getGameTime()}});
-                },
                 [&](const ProjectileDiedEvent& e) {
                     const auto& weaponMediaInfo = gameMediaDatabase.getWeapon(e.weaponType);
                     if (weaponMediaInfo.endSmoke)
                     {
                         createLightSmoke(simVectorToFloat(e.position));
                     }
-
-                    projectileRenderInfos.erase(e.projectileId);
 
                     switch (e.deathType)
                     {

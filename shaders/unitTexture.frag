@@ -18,29 +18,26 @@ const vec3 normalTint = vec3(1.0, 1.0, 1.0);
 // TA lights its models after all. The renderer decoded earlier -- no normals,
 // no sun, texels copied unmodified -- is the one that runs with SHADING
 // switched OFF; the option defaults ON, and 0x458744 picks between two
-// complete rasterizer chains on that one bit. The shaded chain computes
-// per-face normals, averages them per vertex, and takes
+// complete rasterizer chains on that one bit. The shaded chain averages the
+// unit normals of the polygons meeting at a vertex and takes
 //
 //     level = (int)(5.0 * dot(n, (-0.8, 1.0, 0.25))) & 0x1F
 //
-// as a row of PALETTE.SHD, whose row k multiplies the palette by 0.06875k --
-// so row ~14.55 is identity and five rows separate each unit of the dot.
+// as a row of PALETTE.SHD. Three things about that line matter here. The mask
+// WRAPS, and reproducing the wrap rather than clamping to the table's ends is
+// what finally matched the original's contrast -- a screenshot comparison
+// settled it against the earlier reading, which is why nothing below clamps
+// to an end. The level is computed and masked per VERTEX, not per pixel, so
+// unitTexture.vert does that arithmetic and only the resulting row arrives
+// here interpolated. And the sun vector is not normalised: its length of
+// 1.3048 sets the ramp's width at about thirteen rows rather than thirty-two.
 //
-// Where RWE departs: the original's `& 0x1F` WRAPS. A surface perpendicular
-// to the sun lands on row 0, pure black, and a replay against the stock
-// models puts 8% of visible pixels there with 46% of quads straddling the
-// wrap. That is the original being wrong rather than subtle, so the same sun
-// and the same per-row step are centred on the identity row instead of
-// wrapped, and clamped to the table's ends.
 // PALETTE.SHD's row k remaps each texel to the nearest palette entry to
 // `colour * 0.06875k`, and row 15 is the identity -- the constant the exe
-// hard-codes for a piece the COB has told not to shade. A plain multiply with
-// a per-channel clamp reproduces that table to within about 5-7 of 255 over
-// the real texel population of the stock unit textures; the clamp is not
-// optional, since it is where all the bright-end behaviour comes from. The
-// exact table is a nearest-neighbour remap in a 256-entry palette, which would
-// need each texel's palette index carried through the atlas to reproduce
-// faithfully; that is written up as still to do.
+// hard-codes for a piece the COB has told not to shade. The exact table is a
+// nearest-neighbour remap in a 256-entry palette, which would need each
+// texel's palette index carried through the atlas to reproduce faithfully;
+// that is written up as still to do.
 // The row is the original's, exactly -- see the probe in section 13 of
 // TOTALA-EXE-SHADING.md, which this reproduces primitive for primitive. What
 // a row MEANS is where RWE departs, in three measured steps.

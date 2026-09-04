@@ -271,8 +271,6 @@ namespace rwe
 
         auto featureId = FeatureId(features.emplace(std::move(newFeature)));
 
-        auto& f = features.tryGet(featureId)->get();
-
         occupiedGrid.forEach(occupiedGrid.clipRegion(footprintRegion), [&](auto& cell) {
             cell.featureId = featureId;
         });
@@ -4117,6 +4115,7 @@ namespace rwe
         }
     }
 
+#ifdef RWE_ENABLE_SIMPROF
     namespace
     {
         // Temporary: per-phase tick timing, reported every two seconds.
@@ -4125,12 +4124,6 @@ namespace rwe
         // erased so a reference held at a call site stays good.
         std::chrono::steady_clock::time_point profLastReport = std::chrono::steady_clock::now();
         int profTicks = 0;
-
-        void profAccum(const char* name, std::chrono::steady_clock::time_point start)
-        {
-            auto end = std::chrono::steady_clock::now();
-            simProfTotals[name] += std::chrono::duration<double, std::milli>(end - start).count();
-        }
 
         void profReport()
         {
@@ -4152,6 +4145,7 @@ namespace rwe
             profLastReport = now;
         }
     }
+#endif
 
     void GameSimulation::tick()
     {
@@ -4163,9 +4157,8 @@ namespace rwe
         // PlayerCommandService at the *start* of tryTickGame, and AI
         // commands take the same channel.
         {
-            auto profStart = std::chrono::steady_clock::now();
+            RWE_SIMPROF("ai");
             runAiControllers();
-            profAccum("ai", profStart);
         }
 
         updateWind();
@@ -4173,58 +4166,54 @@ namespace rwe
         updateResources();
 
         {
-            auto profStart = std::chrono::steady_clock::now();
+            RWE_SIMPROF("path");
             pathFindingService.update(*this);
-            profAccum("path", profStart);
         }
 
-        // run unit scripts
+        // The three unit passes are timed separately -- each is its own
+        // scope because RWE_SIMPROF names its variables, one to a scope.
         {
-            auto profBehaviourStart = std::chrono::steady_clock::now();
+            RWE_SIMPROF("behaviour");
             for (auto& entry : units)
             {
-                auto unitId = entry.first;
-                UnitBehaviorService(this).update(unitId);
+                UnitBehaviorService(this).update(entry.first);
             }
-            profAccum("behaviour", profBehaviourStart);
+        }
 
-            auto profPiecesStart = std::chrono::steady_clock::now();
+        {
+            RWE_SIMPROF("pieces");
             for (auto& entry : units)
             {
-                auto& unit = entry.second;
-                for (auto& piece : unit.pieces)
+                for (auto& piece : entry.second.pieces)
                 {
                     piece.update(SimScalar(SimMillisecondsPerTick) / 1000_ss);
                 }
             }
-            profAccum("pieces", profPiecesStart);
+        }
 
-            auto profCobStart = std::chrono::steady_clock::now();
+        {
+            RWE_SIMPROF("cob");
             for (auto& entry : units)
             {
                 runUnitCobScripts(*this, entry.first);
             }
-            profAccum("cob", profCobStart);
         }
 
         {
-            auto profStart = std::chrono::steady_clock::now();
+            RWE_SIMPROF("carried");
             updateCarriedUnits();
-            profAccum("carried", profStart);
         }
 
         {
-            auto profStart = std::chrono::steady_clock::now();
+            RWE_SIMPROF("selfrepair");
             updateSelfRepair();
-            profAccum("selfrepair", profStart);
         }
 
         updateSelfDestructs();
 
         {
-            auto profStart = std::chrono::steady_clock::now();
+            RWE_SIMPROF("projectiles");
             updateProjectiles();
-            profAccum("projectiles", profStart);
         }
 
         updateBurningFeatures();
@@ -4242,9 +4231,8 @@ namespace rwe
         processVictoryCondition();
 
         {
-            auto profStart = std::chrono::steady_clock::now();
+            RWE_SIMPROF("deletedead");
             deleteDeadUnits();
-            profAccum("deletedead", profStart);
         }
 
         deleteDeadProjectiles();
@@ -4254,9 +4242,8 @@ namespace rwe
         updateCloakSuppression();
 
         {
-            auto profStart = std::chrono::steady_clock::now();
+            RWE_SIMPROF("visibility");
             updateVisibility();
-            profAccum("visibility", profStart);
         }
     }
 

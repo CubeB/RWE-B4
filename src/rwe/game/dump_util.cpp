@@ -149,7 +149,8 @@ namespace rwe
         {
             case AirMovementStateAttackRun::Phase::Approaching: phaseName = "Approaching"; break;
             case AirMovementStateAttackRun::Phase::Engaging:    phaseName = "Engaging";    break;
-            case AirMovementStateAttackRun::Phase::Departing:   phaseName = "Departing";   break;
+            case AirMovementStateAttackRun::Phase::Departing:   phaseName = "Departing";   break;
+            case AirMovementStateAttackRun::Phase::Breaking:    phaseName = "Breaking";    break;
         }
         return nlohmann::json{
             {"phase", phaseName},

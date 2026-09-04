@@ -123,9 +123,9 @@ namespace rwe
         }
     }
 
-    MainMenuScene::OptionsState MainMenuScene::currentOptions() const
+    GameOptions MainMenuScene::currentOptions() const
     {
-        return OptionsState{
+        return GameOptions{
             static_cast<unsigned int>(sceneContext.audioService->getSoundVolume() * 100.0f),
             static_cast<unsigned int>(sceneContext.audioService->getMusicVolume() * 100.0f),
             sceneContext.audioService->isMusicEnabled(),
@@ -139,7 +139,7 @@ namespace rwe
             pendingAntiAlias};
     }
 
-    void MainMenuScene::applyOptions(const OptionsState& state)
+    void MainMenuScene::applyOptions(const GameOptions& state)
     {
         auto* audio = sceneContext.audioService;
         audio->setSoundVolume(static_cast<float>(state.soundVolume) / 100.0f);
@@ -153,7 +153,7 @@ namespace rwe
         pendingGamma = state.gamma;
         pendingShading = state.shading;
         pendingAntiAlias = state.antiAlias;
-        audio->setSoundEnabled(state.soundMode != 0);
+        audio->setSoundEnabled(state.soundMode != SoundMode::Off);
     }
 
     void MainMenuScene::saveOptions()
@@ -163,21 +163,7 @@ namespace rwe
         {
             return;
         }
-        auto configPath = *localDataPath / "rwe.cfg";
-        auto state = currentOptions();
-        updateConfigFile(configPath, {
-                                         {"sound-volume", std::to_string(state.soundVolume)},
-                                         {"music-volume", std::to_string(state.musicVolume)},
-                                         {"music", state.musicEnabled ? "true" : "false"},
-                                         {"window-mode", state.windowMode},
-                                         {"shadows", state.shadows ? "true" : "false"},
-                                         {"scroll-speed", std::to_string(state.scrollSpeed)},
-                                         {"sound-mode", std::to_string(state.soundMode)},
-                                         {"unit-speech", std::to_string(state.unitSpeech)},
-                                         {"gamma", std::to_string(state.gamma)},
-                                         {"shading", state.shading ? "true" : "false"},
-                                         {"anti-alias", state.antiAlias ? "true" : "false"},
-                                     });
+        writeGameOptions(*localDataPath / "rwe.cfg", currentOptions());
     }
 
     void MainMenuScene::goToOptionsMenu()
@@ -187,8 +173,8 @@ namespace rwe
             pendingWindowMode = sceneContext.globalConfig->windowMode;
             pendingShadows = sceneContext.globalConfig->shadows;
             pendingScrollSpeed = sceneContext.globalConfig->scrollSpeed;
-            pendingSoundMode = sceneContext.globalConfig->soundMode;
-            pendingUnitSpeech = sceneContext.globalConfig->unitSpeech;
+            pendingSoundMode = static_cast<SoundMode>(sceneContext.globalConfig->soundMode);
+            pendingUnitSpeech = static_cast<UnitSpeechLevel>(sceneContext.globalConfig->unitSpeech);
             pendingGamma = sceneContext.globalConfig->gamma;
             pendingShading = sceneContext.globalConfig->shading;
             pendingAntiAlias = sceneContext.globalConfig->antiAlias;
@@ -196,22 +182,6 @@ namespace rwe
         optionsUndo = currentOptions();
         currentOptionsPage.clear();
         goToOptionsPage(std::string());
-    }
-
-    namespace
-    {
-        const char* windowModeDisplayName(const std::string& mode)
-        {
-            if (mode == "borderless")
-            {
-                return "Borderless";
-            }
-            if (mode == "fullscreen")
-            {
-                return "Fullscreen";
-            }
-            return "Windowed";
-        }
     }
 
     void MainMenuScene::goToOptionsPage(const std::string& page)
@@ -327,12 +297,12 @@ namespace rwe
 
         if (auto toggle = active.find<UiStagedButton>("MODE"))
         {
-            toggle->get().setStage(pendingSoundMode);
+            toggle->get().setStage(static_cast<unsigned int>(pendingSoundMode));
         }
 
         if (auto toggle = active.find<UiStagedButton>("SPEECH"))
         {
-            toggle->get().setStage(pendingUnitSpeech);
+            toggle->get().setStage(static_cast<unsigned int>(pendingUnitSpeech));
         }
 
         if (auto bar = active.find<UiScrollBar>("GAMMA"))
@@ -717,7 +687,7 @@ namespace rwe
             }
             else if (message == "RESTORE")
             {
-                applyOptions(OptionsState{100, 100, true, "windowed", true, 100, 2, 2, 100, true, true});
+                applyOptions(GameOptions{});
                 goToOptionsPage(currentOptionsPage);
             }
             else if (message == "BSHADOWS")
@@ -726,12 +696,12 @@ namespace rwe
             }
             else if (message == "MODE")
             {
-                pendingSoundMode = (pendingSoundMode + 1) % 3;
-                sceneContext.audioService->setSoundEnabled(pendingSoundMode != 0);
+                pendingSoundMode = nextStage(pendingSoundMode);
+                sceneContext.audioService->setSoundEnabled(pendingSoundMode != SoundMode::Off);
             }
             else if (message == "SPEECH")
             {
-                pendingUnitSpeech = (pendingUnitSpeech + 1) % 3;
+                pendingUnitSpeech = nextStage(pendingUnitSpeech);
             }
             else if (message == "SHADING")
             {
@@ -875,11 +845,11 @@ namespace rwe
         }
         if (auto toggle = active.find<UiStagedButton>("MODE"))
         {
-            toggle->get().setStage(pendingSoundMode);
+            toggle->get().setStage(static_cast<unsigned int>(pendingSoundMode));
         }
         if (auto toggle = active.find<UiStagedButton>("SPEECH"))
         {
-            toggle->get().setStage(pendingUnitSpeech);
+            toggle->get().setStage(static_cast<unsigned int>(pendingUnitSpeech));
         }
         if (auto toggle = active.find<UiStagedButton>("BSHADOWS"))
         {

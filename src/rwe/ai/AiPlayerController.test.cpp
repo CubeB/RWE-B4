@@ -10,6 +10,7 @@
 #include <rwe/sim/UnitState.h>
 #include <memory>
 #include <string>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -23,13 +24,6 @@ namespace rwe
         {
             Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
             return MapTerrain(std::move(heights), 0_ss);
-        }
-
-        std::shared_ptr<CobScript> makeEmptyCobScript()
-        {
-            auto script = std::make_shared<CobScript>();
-            script->staticVariableCount = 0;
-            return script;
         }
 
         // Add a barebones UnitDefinition for `unitType`. Only the fields

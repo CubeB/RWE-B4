@@ -36,13 +36,10 @@ const vec3 normalTint = vec3(1.0, 1.0, 1.0);
 // The shaded chain's lighting; see unitTexture.frag, which this must match.
 // PALETTE.SHD's row k remaps each texel to the nearest palette entry to
 // `colour * 0.06875k`, and row 15 is the identity -- the constant the exe
-// hard-codes for a piece the COB has told not to shade. A plain multiply with
-// a per-channel clamp reproduces that table to within about 5-7 of 255 over
-// the real texel population of the stock unit textures; the clamp is not
-// optional, since it is where all the bright-end behaviour comes from. The
-// exact table is a nearest-neighbour remap in a 256-entry palette, which would
-// need each texel's palette index carried through the atlas to reproduce
-// faithfully; that is written up as still to do.
+// hard-codes for a piece the COB has told not to shade. The exact table is a
+// nearest-neighbour remap in a 256-entry palette, which would need each
+// texel's palette index carried through the atlas to reproduce faithfully;
+// that is written up as still to do.
 // The row is the original's, exactly -- see the probe in section 13 of
 // TOTALA-EXE-SHADING.md, which this reproduces primitive for primitive. What
 // a row MEANS is where RWE departs, in three measured steps.

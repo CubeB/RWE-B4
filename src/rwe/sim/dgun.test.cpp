@@ -9,6 +9,7 @@
 #include <rwe/sim/WeaponDefinition.h>
 #include <memory>
 #include <vector>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
@@ -121,36 +122,6 @@ namespace rwe
             UnitWeapon weapon;
             weapon.weaponType = weaponType;
             sim.getUnitState(id).weapons[0] = weapon;
-        }
-
-        bool anyProjectiles(const GameSimulation& sim)
-        {
-            for ([[maybe_unused]] const auto& p : sim.projectiles)
-            {
-                return true;
-            }
-            return false;
-        }
-
-        bool everFires(GameSimulation& sim, int ticks)
-        {
-            for (int i = 0; i < ticks; ++i)
-            {
-                sim.tick();
-                if (anyProjectiles(sim))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        void tick(GameSimulation& sim, int ticks)
-        {
-            for (int i = 0; i < ticks; ++i)
-            {
-                sim.tick();
-            }
         }
 
         /**
