@@ -978,7 +978,10 @@ namespace rwe
 
         void updateResources();
 
-        void trySpawnFeature(const std::string& featureType, const SimVector& position, SimAngle rotation);
+        void trySpawnFeature(const std::string& featureType, const SimVector& position, SimAngle rotation, bool isFeature = false);
+
+        /** Sinks wreckage that went into the water; see MapFeature::velocity. */
+        void updateFallingFeatures();
 
         void deleteDeadUnits();
 

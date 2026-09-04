@@ -324,6 +324,7 @@ namespace rwe
                 {"featureName", f.featureName.value},
                 {"position", saveSimVector(f.position)},
                 {"rotation", saveSimAngle(f.rotation)},
+                {"velocity", saveSimVector(f.velocity)},
                 {"reclaimProgress", f.reclaimProgress},
                 {"hitPoints", f.hitPoints},
                 {"burningUntil", saveOptional(f.burningUntil, [](GameTime t) { return saveGameTime(t); })},
@@ -1883,6 +1884,8 @@ namespace rwe
                 throw std::runtime_error("could not place a loaded feature");
             }
             auto& placed = sim.features.tryGet(*id)->get();
+            // Older saves predate sinking wreckage; theirs simply sit still.
+            placed.velocity = fj.contains("velocity") ? loadSimVector(fj.at("velocity")) : SimVector(0_ss, 0_ss, 0_ss);
             placed.reclaimProgress = fj.at("reclaimProgress").get<unsigned int>();
             placed.hitPoints = fj.at("hitPoints").get<unsigned int>();
             placed.burningUntil = loadOptional(fj.at("burningUntil"), loadGameTime);

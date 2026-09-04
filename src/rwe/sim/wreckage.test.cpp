@@ -69,6 +69,92 @@ namespace rwe
         }
     }
 
+
+    TEST_CASE("wreckage dropped in water sinks to the sea bed", "[wreckage]")
+    {
+        // The original spawns a corpse at the height its unit died at, then
+        // gives it a fixed downward velocity when the ground beneath is at or
+        // below sea level (0x486416), spending it a tick at a time until the
+        // wreck reaches the bottom. Nothing floats: a play-test remembered a
+        // hovercraft wreck sitting on the surface, but that was RWE's own
+        // behaviour -- it had no feature physics at all -- rather than the
+        // original's.
+        auto makeSeaTerrain = [](unsigned char groundHeight, SimScalar seaLevel) {
+            Grid<unsigned char> heights(32, 32, groundHeight);
+            return MapTerrain(std::move(heights), seaLevel);
+        };
+
+        SECTION("a wreck over water is given a sink speed and reaches the bottom")
+        {
+            // Ground at 0, sea level at 60: sixty units of water to fall through.
+            GameSimulation sim(makeSeaTerrain(0, 60_ss), 0u, 0, 0);
+            sim.featureDefinitions.insert(makeWreckDef("HULK", 100, 1000));
+            sim.featureNameIndex.insert_or_assign("HULK", FeatureDefinitionId(0));
+
+            auto surface = SimVector(200_ss, 60_ss, 200_ss);
+            sim.trySpawnFeature("HULK", surface, SimAngle(0), false);
+            REQUIRE(sim.features.begin() != sim.features.end());
+
+            auto featureId = sim.features.begin()->first;
+            REQUIRE(sim.features.tryGet(featureId)->get().velocity.y < 0_ss);
+
+            // 0.175 a tick through sixty units is about 343 ticks; give it room.
+            for (int i = 0; i < 600; ++i)
+            {
+                sim.updateFallingFeatures();
+            }
+
+            const auto& landed = sim.features.tryGet(featureId)->get();
+            REQUIRE(landed.velocity.y == 0_ss);
+            REQUIRE(landed.position.y == sim.terrain.getHeightAt(landed.position.x, landed.position.z));
+        }
+
+        SECTION("a wreck on dry ground never moves")
+        {
+            // Ground well above the water: the corpse spawner leaves the
+            // velocity alone, and the sweep skips it for ever after.
+            GameSimulation sim(makeSeaTerrain(200, 0_ss), 0u, 0, 0);
+            sim.featureDefinitions.insert(makeWreckDef("HULK", 100, 1000));
+            sim.featureNameIndex.insert_or_assign("HULK", FeatureDefinitionId(0));
+
+            auto ground = sim.terrain.getHeightAt(200_ss, 200_ss);
+            sim.trySpawnFeature("HULK", SimVector(200_ss, ground, 200_ss), SimAngle(0), false);
+
+            auto featureId = sim.features.begin()->first;
+            auto before = sim.features.tryGet(featureId)->get().position;
+            REQUIRE(sim.features.tryGet(featureId)->get().velocity.y == 0_ss);
+
+            for (int i = 0; i < 60; ++i)
+            {
+                sim.updateFallingFeatures();
+            }
+
+            REQUIRE(sim.features.tryGet(featureId)->get().position.y == before.y);
+        }
+
+        SECTION("a unit flagged isfeature leaves its wreck on the surface")
+        {
+            // The floating dragon's teeth. The original skips them by that
+            // flag, which is the clearest evidence the sink rule is deliberate.
+            GameSimulation sim(makeSeaTerrain(0, 60_ss), 0u, 0, 0);
+            sim.featureDefinitions.insert(makeWreckDef("FLOATINGTEETH", 100, 1000));
+            sim.featureNameIndex.insert_or_assign("FLOATINGTEETH", FeatureDefinitionId(0));
+
+            auto surface = SimVector(200_ss, 60_ss, 200_ss);
+            sim.trySpawnFeature("FLOATINGTEETH", surface, SimAngle(0), true);
+
+            auto featureId = sim.features.begin()->first;
+            REQUIRE(sim.features.tryGet(featureId)->get().velocity.y == 0_ss);
+
+            for (int i = 0; i < 120; ++i)
+            {
+                sim.updateFallingFeatures();
+            }
+
+            REQUIRE(sim.features.tryGet(featureId)->get().position.y == surface.y);
+        }
+    }
+
     TEST_CASE("feature hit points", "[wreckage]")
     {
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);

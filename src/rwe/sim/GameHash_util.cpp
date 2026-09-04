@@ -322,6 +322,7 @@ namespace rwe
             f.featureName,
             f.position,
             f.rotation,
+            f.velocity,
             f.reclaimProgress,
             f.hitPoints,
             f.burningUntil,

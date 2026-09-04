@@ -163,6 +163,13 @@ namespace rwe
         bool isMobile;
 
         bool floater;
+
+        /**
+         * The FBI's . Six units set it, and the two that matter are
+         * the floating dragon's teeth: their wreck is meant to stay on the
+         * surface, and the original's sink branch skips them by this flag.
+         */
+        bool isFeature{false};
         bool canHover;
 
         /**

@@ -45,6 +45,7 @@ namespace rwe
          * opens fire on a solar collector.
          */
         bool shootMe{false};
+        bool isFeature{false};
 
         /**
          * A crawling bomb: an attack order sends it at the target and it blows

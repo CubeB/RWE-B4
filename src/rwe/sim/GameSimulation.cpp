@@ -3782,9 +3782,22 @@ namespace rwe
         std::string featureName;
         SimVector position;
         SimAngle rotation;
+        /** The dead unit's `isfeature`: its wreck stays where it fell. */
+        bool isFeature;
     };
 
-    void GameSimulation::trySpawnFeature(const std::string& featureType, const SimVector& position, SimAngle rotation)
+    /**
+     * A wreck sinks at a fixed 0.175 world units a tick -- 5.25 a second --
+     * rather than accelerating: 0x486416 writes the constant -11468 in 16.16
+     * straight into the feature's velocity, and 0x42428C re-asserts it every
+     * tick the wreck is under the surface. Deep water on the shipped naval
+     * maps is 55 to 85 units, so an open-ocean wreck takes ten to sixteen
+     * seconds to reach the bottom; in shallows it is down in under half a
+     * second.
+     */
+    static const SimScalar WreckSinkSpeed(0.174988f);
+
+    void GameSimulation::trySpawnFeature(const std::string& featureType, const SimVector& position, SimAngle rotation, bool isFeature)
     {
         auto featureId = tryGetFeatureDefinitionId(featureType);
         if (!featureId)
@@ -3795,7 +3808,61 @@ namespace rwe
         }
         auto feature = MapFeature{*featureId, position, rotation};
 
+        // The wreck is placed at the height the unit died at, on land and at
+        // sea alike -- there is no clamp anywhere in the original's corpse
+        // spawner. What decides whether it sinks is the ground BENEATH it,
+        // not its own height, and the test is against the terrain rather than
+        // the water's surface, so ground exactly at sea level counts as wet
+        // (0x4863E9 jumps on greater-than only).
+        //
+        // A unit flagged `isfeature` is exempt. Six units set it; the two that
+        // matter are the floating dragon's teeth, whose wreck is meant to stay
+        // on the surface -- the original carving out exactly the one thing
+        // built to float is the clearest evidence the sink rule is real.
+        auto ground = terrain.getHeightAt(position.x, position.z);
+        if (ground <= terrain.getSeaLevel() && !isFeature)
+        {
+            feature.velocity = SimVector(0_ss, -WreckSinkSpeed, 0_ss);
+        }
+
         addFeature(std::move(feature));
+    }
+
+    void GameSimulation::updateFallingFeatures()
+    {
+        // Only wreckage dropped into water is ever moving, so the common case
+        // is one comparison per feature. The original retires a feature from
+        // its active list the moment the velocity reaches zero and never looks
+        // at it again (0x42421A); this is the same, without the list.
+        for (auto& [featureId, feature] : features)
+        {
+            if (feature.velocity == SimVector(0_ss, 0_ss, 0_ss))
+            {
+                continue;
+            }
+
+            feature.position += feature.velocity;
+
+            auto ground = terrain.getHeightAt(feature.position.x, feature.position.z);
+            if (feature.position.y <= ground)
+            {
+                // Landed. 0x424262.
+                feature.position.y = ground;
+                feature.velocity = SimVector(0_ss, 0_ss, 0_ss);
+            }
+            else if (feature.position.y < terrain.getSeaLevel())
+            {
+                // Under the surface: a terminal speed re-asserted every tick,
+                // with any sideways drift killed. 0x42428C-0x424299.
+                feature.velocity = SimVector(0_ss, -WreckSinkSpeed, 0_ss);
+            }
+            else
+            {
+                // Still in the air above the water: the map's gravity.
+                // 0x4242A5.
+                feature.velocity.y -= 112_ss / (30_ss * 30_ss);
+            }
+        }
     }
 
     void GameSimulation::deleteDeadUnits()
@@ -3818,7 +3885,8 @@ namespace rwe
                 corpsesToSpawn.push_back(CorpseSpawnInfo{
                     unitDefinition.corpse,
                     unit.position,
-                    unit.rotation});
+                    unit.rotation,
+                    unitDefinition.isFeature});
             }
 
             auto footprintRect = computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
@@ -3853,7 +3921,7 @@ namespace rwe
 
         for (const auto& spawnInfo : corpsesToSpawn)
         {
-            trySpawnFeature(spawnInfo.featureName, spawnInfo.position, spawnInfo.rotation);
+            trySpawnFeature(spawnInfo.featureName, spawnInfo.position, spawnInfo.rotation, spawnInfo.isFeature);
         }
     }
 
@@ -4023,6 +4091,10 @@ namespace rwe
         updateProjectiles();
 
         updateBurningFeatures();
+
+        // Before the dead are cleared, so a wreck spawned this tick first
+        // moves on the next one, as the original does.
+        updateFallingFeatures();
 
         updateFeatureRegrowth();
 

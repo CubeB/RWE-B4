@@ -105,6 +105,7 @@ namespace rwe
         tdf.readOrDefault("BMCode", u.bmCode);
 
         tdf.readOrDefault("Floater", u.floater);
+        tdf.readOrDefault("isfeature", u.isFeature);
         tdf.readOrDefault("CanHover", u.canHover);
         tdf.readOrDefault("WaterLine", u.waterLine);
         tdf.readOrDefault("HealTime", u.healTime);
