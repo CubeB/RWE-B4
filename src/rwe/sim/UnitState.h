@@ -627,6 +627,18 @@ namespace rwe
         bool isOwnedBy(PlayerId playerId) const;
 
         bool isAlive() const;
+        /**
+         * A commandfire weapon fired on the last tick.
+         *
+         * The original keeps this as bit 11 of the unit's event word:
+         * 0x49E4F2 sets 0x800 for a commandfire shot where an ordinary one
+         * sets 0x400, and the attack handlers open by testing it and deleting
+         * their own mission (0x4034AF, 0x4038A7). It is what makes a D-gun
+         * order a single shot -- and, by the same path and for the same
+         * reason, a nuke or a bomb order too.
+         */
+        bool commandFireShotFired{false};
+
         bool isDead() const;
 
         void markAsDead();

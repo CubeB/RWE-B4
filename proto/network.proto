@@ -83,6 +83,17 @@ message UnloadOrder
     required SimVector destination = 1;
 }
 
+// The D-gun, and anything else with commandfire: a unit or a point on the
+// ground, exactly as an attack order carries it.
+message DgunOrder
+{
+    oneof target
+    {
+        int32 unit = 1;
+        SimVector ground = 2;
+    }
+}
+
 message PlayerUnitCommand
 {
     message IssueOrder
@@ -107,6 +118,7 @@ message PlayerUnitCommand
             CaptureOrder capture = 10;
             LoadOrder load = 11;
             UnloadOrder unload = 12;
+            DgunOrder dgun = 13;
         }
     }
 

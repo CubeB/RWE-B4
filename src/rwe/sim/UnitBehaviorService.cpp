@@ -1136,6 +1136,13 @@ namespace rwe
 
         sim->events.push_back(FireWeaponEvent{weapon->weaponType, fireInfo->burstsFired, firingPoint});
 
+        if (weaponDefinition.commandFire)
+        {
+            // Tell whatever ordered this that the shot went off; the order
+            // ends on it. See UnitState::commandFireShotFired.
+            unit.commandFireShotFired = true;
+        }
+
         if (weaponDefinition.stockpile)
         {
             --weapon->stockedRounds;
@@ -1559,23 +1566,40 @@ namespace rwe
         return getSweetSpot(id);
     }
 
+    void UnitBehaviorService::dropAirAttackRun(UnitInfo unitInfo)
+    {
+        auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
+        if (airPhysics == nullptr || !std::holds_alternative<AirMovementStateAttackRun>(airPhysics->movementState))
+        {
+            return;
+        }
+
+        // Carry the speed over. An aircraft handed a new order in the middle
+        // of a run does not stop in the air to take it.
+        AirMovementStateFlying flying;
+        flying.currentVelocity = std::get<AirMovementStateAttackRun>(airPhysics->movementState).currentVelocity;
+        airPhysics->movementState = flying;
+        unitInfo.state->clearWeaponTargets();
+    }
+
     bool UnitBehaviorService::handleOrder(UnitInfo unitInfo, const UnitOrder& order)
     {
-        // If a non-attack order arrives while the aircraft is mid-AttackRun
-        // (e.g. the player issued Move or the previous attack got replaced),
-        // drop the AttackRun state so the new order can drive Flying-mode
-        // steering. Otherwise the aircraft freezes — the order dispatchers for
-        // non-attack orders don't know how to drive an AttackRun-state unit.
-        if (!std::holds_alternative<AttackOrder>(order))
+        // If an order that steers the aircraft itself arrives while it is
+        // mid-AttackRun (e.g. the player issued Move, or the attack was
+        // replaced), drop the run so the new order can drive Flying-mode
+        // steering. Otherwise the aircraft freezes — the dispatchers for those
+        // orders do not know how to drive a unit in AttackRun state.
+        //
+        // Patrol is the exception, because patrol engages: it calls
+        // attackTarget itself the moment something hostile comes into sight,
+        // and wiping the run here undid that every tick. The bomber rebuilt
+        // its run from a standing start each tick and crawled forward at one
+        // tick of acceleration, never reaching a release point. Patrol drops
+        // the run in handlePatrolOrder instead, on the ticks it is really
+        // flying the route.
+        if (!std::holds_alternative<AttackOrder>(order) && !std::holds_alternative<PatrolOrder>(order))
         {
-            if (auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics))
-            {
-                if (std::holds_alternative<AirMovementStateAttackRun>(airPhysics->movementState))
-                {
-                    airPhysics->movementState = AirMovementStateFlying();
-                    unitInfo.state->clearWeaponTargets();
-                }
-            }
+            dropAirAttackRun(unitInfo);
         }
 
         // Any order at all ends an idle circuit, so that when this one is done
@@ -1623,6 +1647,9 @@ namespace rwe
             },
             [&](const UnloadOrder& o) {
                 return handleUnloadOrder(unitInfo, o);
+            },
+            [&](const DgunOrder& o) {
+                return handleDgunOrder(unitInfo, o);
             });
     }
 
@@ -2172,6 +2199,24 @@ namespace rwe
 
     bool UnitBehaviorService::handleAttackOrder(UnitInfo unitInfo, const AttackOrder& attackOrder)
     {
+        // A unit that picked this target for itself gives up once it is
+        // maneuverleashlength from the spot where it first saw it. Every
+        // attack handler in the original opens with this test -- 0x4034D2 for
+        // ground, 0x412084 in AirStrike, 0x41284E in AirToGround, 0x413675 in
+        // the gunship's -- against an anchor written at 0x43B330. The
+        // distance is flat and in whole world units.
+        if (attackOrder.leash && attackOrder.leash->distance > 0_ss)
+        {
+            auto dx = unitInfo.state->position.x - attackOrder.leash->anchor.x;
+            auto dz = unitInfo.state->position.z - attackOrder.leash->anchor.z;
+            if ((dx * dx) + (dz * dz) >= attackOrder.leash->distance * attackOrder.leash->distance)
+            {
+                unitInfo.state->clearWeaponTargets();
+                dropAirAttackRun(unitInfo);
+                return true;
+            }
+        }
+
         return attackTarget(unitInfo, attackOrder.target);
     }
 
@@ -2206,8 +2251,15 @@ namespace rwe
         // question is whether to abandon its post and go hunting. For most
         // units the second is much the larger, but not for all -- a Freedom
         // Fighter sees 350 and shoots 510.
+        // ...but the sight-range question is bounded by the gun as well.
+        // 0x40B7B0's mode-0 branch gathers candidates in a circle of
+        // SightDistance (0x40B848), and then every candidate has to survive
+        // 0x49ABB0 at 0x40B914 -- the weapon eligibility test, which ends in
+        // its own range check. So the radius a unit will actually leave its
+        // post for is the smaller of the two, and for many units that is the
+        // gun: a Peewee sees 280 and breaks off at 180.
         auto searchRadius = mode == TargetSearchMode::SightDistance
-            ? SimScalar(static_cast<float>(unitDefinition.sightDistance))
+            ? rweMin(SimScalar(static_cast<float>(unitDefinition.sightDistance)), weaponDefinition.maxRange)
             : weaponDefinition.maxRange;
 
         // The original scores each candidate with a random number drawn
@@ -3032,6 +3084,74 @@ namespace rwe
         return chooseTarget(unitInfo.id, 0, TargetSearchMode::SightDistance);
     }
 
+    bool UnitBehaviorService::handleDgunOrder(UnitInfo unitInfo, const DgunOrder& order)
+    {
+        // Slot 2 -- Weapon3 in the FBI -- by index, because that is what the
+        // original does: 0x403190 writes the literal 2 into the mission's
+        // weapon-slot word and everything downstream indexes with it. It
+        // never goes looking for the commandfire bit. The shipped commanders
+        // agree: ARMCOM declares Weapon1 and Weapon3 and no Weapon2 at all,
+        // and its COB has AimTertiary and FireTertiary to match.
+        const unsigned int weaponIndex = 2;
+        if (!unitInfo.state->weapons[weaponIndex])
+        {
+            return true;
+        }
+
+        // One shot ends it, and that is the commandfire rule rather than a
+        // D-gun one.
+        if (unitInfo.state->commandFireShotFired)
+        {
+            unitInfo.state->commandFireShotFired = false;
+            unitInfo.state->clearWeaponTarget(weaponIndex);
+            return true;
+        }
+
+        auto targetPosition = getTargetPosition(order.target);
+        if (!targetPosition)
+        {
+            // The target died. The original's weak reference nulls the
+            // mission's target pointer (0x489789) and the handler's own guard
+            // deletes the mission on the next pass (0x4034C0).
+            unitInfo.state->clearWeaponTarget(weaponIndex);
+            return true;
+        }
+
+        const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[weaponIndex]->weaponType);
+
+        // The approach closes to the weapon's full range -- 0x403623 asks
+        // 0x49ADF0 for it, which is just wdef+0xDC -- and the range test is
+        // flat: 0x49AD7E squares dx and dz and never looks at y.
+        auto dx = unitInfo.state->position.x - targetPosition->x;
+        auto dz = unitInfo.state->position.z - targetPosition->z;
+        auto flatDistanceSquared = (dx * dx) + (dz * dz);
+        if (flatDistanceSquared > weaponDefinition.maxRange * weaponDefinition.maxRange)
+        {
+            // The disintegrator reaches 240, which is nothing: walking into
+            // range is most of what this order does.
+            unitInfo.state->clearWeaponTarget(weaponIndex);
+            navigateTo(unitInfo, attackTargetToNavigationGoal(order.target));
+            return false;
+        }
+
+        // In range: point it. Everything after this is the ordinary weapon
+        // machinery -- it is an ordinary weapon, and the tests in
+        // sim/dgun.test.cpp pin what makes it unusual: it will not fire
+        // without energypershot in the bank, and it is never given a target
+        // by anything except an order like this one.
+        // Clear any stale shot flag as the target goes on, the way the
+        // original's aim call clears the event bits (0x48A060 ends with
+        // `unit+0xBA &= 0x83FF`). Without it, a nuke fired a moment ago would
+        // end this order before it had fired anything of its own.
+        unitInfo.state->commandFireShotFired = false;
+        match(
+            order.target,
+            [&](const UnitId& u) { unitInfo.state->setWeaponTarget(weaponIndex, u); },
+            [&](const SimVector& v) { unitInfo.state->setWeaponTarget(weaponIndex, v); });
+
+        return false;
+    }
+
     bool UnitBehaviorService::handlePatrolOrder(UnitInfo unitInfo, const PatrolOrder& patrolOrder)
     {
         if (!unitInfo.definition->isMobile)
@@ -3040,12 +3160,33 @@ namespace rwe
             return true;
         }
 
-        // Engage anything hostile in weapon range before carrying on.
-        if (unitInfo.state->fireOrders != UnitFireOrders::HoldFire)
+        // Break off for anything hostile close enough to be worth it.
+        //
+        // Fire At Will exactly: 0x43B700 is `cmp ecx,0x200000 / jne`, so a
+        // unit on Return Fire shoots back at whatever shoots first but never
+        // leaves its route for a target it merely saw.
+        if (unitInfo.state->fireOrders == UnitFireOrders::FireAtWill)
         {
             if (auto enemy = findEnemyToEngage(unitInfo))
             {
-                attackTarget(unitInfo, AttackTarget(*enemy));
+                // A sighting becomes a real order, not a steer for one tick.
+                // 0x43B1F0 prepends an attack mission and lets it own the
+                // unit until it deletes itself; the patrol mission behind it
+                // is untouched, so the route resumes at the same waypoint it
+                // was already heading for. Doing it per tick instead meant
+                // re-picking a target every tick -- and the chooser is
+                // deliberately random -- which an attack run cannot survive.
+                if (unitInfo.definition->standingMoveOrder == UnitMovementOrders::Maneuver)
+                {
+                    // Maneuver walks back to where it was standing when it
+                    // saw the target, before carrying on with the route
+                    // (0x43B285-0x43B2B1). Pushed first so it ends up behind
+                    // the attack.
+                    unitInfo.state->orders.push_front(MoveOrder(unitInfo.state->position));
+                }
+
+                auto leash = AttackLeash(unitInfo.state->position, unitInfo.definition->maneuverLeashLength);
+                unitInfo.state->orders.push_front(AttackOrder(*enemy, leash));
                 return false;
             }
         }
@@ -3084,6 +3225,11 @@ namespace rwe
                 }
             }
         }
+
+        // Nothing to fight: this order is steering again, so an aircraft
+        // still holding a run from a target that has died or moved out of
+        // reach hands it back before navigating.
+        dropAirAttackRun(unitInfo);
 
         if (navigateTo(unitInfo, patrolOrder.destination))
         {

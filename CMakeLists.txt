@@ -861,6 +861,7 @@ set(TEST_FILES
     src/rwe/sim/moverate.test.cpp
     src/rwe/sim/transport.test.cpp
     src/rwe/sim/bomber.test.cpp
+    src/rwe/sim/bomberpatrol.test.cpp
     src/rwe/sim/gunship.test.cpp
     src/rwe/sim/aircraftidle.test.cpp
     src/rwe/sim/airbase.test.cpp
@@ -872,6 +873,7 @@ set(TEST_FILES
     src/rwe/sim/stockpile.test.cpp
     src/rwe/sim/interception.test.cpp
     src/rwe/sim/dgun.test.cpp
+    src/rwe/sim/dgunorder.test.cpp
     src/rwe/pathfinding/pathing.test.cpp
     src/rwe/sim/economy.test.cpp
     src/rwe/sim/visibility.test.cpp

@@ -818,7 +818,15 @@ namespace rwe
             return match(
                 o,
                 [](const MoveOrder& m) { return json{{"kind", "move"}, {"destination", saveSimVector(m.destination)}}; },
-                [&](const AttackOrder& a) { return json{{"kind", "attack"}, {"target", saveAttackTarget(a.target, ctx)}}; },
+                [&](const AttackOrder& a) {
+                    auto j = json{{"kind", "attack"}, {"target", saveAttackTarget(a.target, ctx)}};
+                    if (a.leash)
+                    {
+                        j["leashAnchor"] = saveSimVector(a.leash->anchor);
+                        j["leashDistance"] = saveSimScalar(a.leash->distance);
+                    }
+                    return j;
+                },
                 [](const BuildOrder& b) { return json{{"kind", "build"}, {"unitType", b.unitType}, {"position", saveSimVector(b.position)}}; },
                 [](const BuggerOffOrder& b) { return json{{"kind", "buggerOff"}, {"rect", saveDiscreteRect(b.rect)}}; },
                 [&](const CompleteBuildOrder& c) { return json{{"kind", "completeBuild"}, {"target", saveUnitIdRef(c.target, ctx)}}; },
@@ -828,7 +836,8 @@ namespace rwe
                 [](const PatrolOrder& p) { return json{{"kind", "patrol"}, {"destination", saveSimVector(p.destination)}}; },
                 [&](const CaptureOrder& c) { return json{{"kind", "capture"}, {"target", saveUnitIdRef(c.target, ctx)}}; },
                 [&](const LoadOrder& l) { return json{{"kind", "load"}, {"target", saveUnitIdRef(l.target, ctx)}}; },
-                [](const UnloadOrder& u) { return json{{"kind", "unload"}, {"destination", saveSimVector(u.destination)}}; });
+                [](const UnloadOrder& u) { return json{{"kind", "unload"}, {"destination", saveSimVector(u.destination)}}; },
+                [&](const DgunOrder& d) { return json{{"kind", "dgun"}, {"target", saveAttackTarget(d.target, ctx)}}; });
         }
 
         UnitOrder loadUnitOrder(const json& j, const LoadContext& ctx)
@@ -840,10 +849,15 @@ namespace rwe
             }
             if (kind == "attack")
             {
-                return match(
+                auto order = match(
                     loadAttackTarget(j.at("target"), ctx),
                     [](const UnitId& id) { return AttackOrder(id); },
                     [](const SimVector& v) { return AttackOrder(v); });
+                if (j.contains("leashAnchor"))
+                {
+                    order.leash = AttackLeash(loadSimVector(j.at("leashAnchor")), loadSimScalar(j.at("leashDistance")));
+                }
+                return order;
             }
             if (kind == "build")
             {
@@ -875,6 +889,13 @@ namespace rwe
             if (kind == "patrol")
             {
                 return PatrolOrder(loadSimVector(j.at("destination")));
+            }
+            if (kind == "dgun")
+            {
+                return match(
+                    loadAttackTarget(j.at("target"), ctx),
+                    [](const UnitId& id) { return DgunOrder(id); },
+                    [](const SimVector& v) { return DgunOrder(v); });
             }
             if (kind == "capture")
             {
@@ -1483,6 +1504,7 @@ namespace rwe
                 {"navigationState", saveNavigationStateInfo(u.navigationState, ctx)},
                 {"buildOrderUnitId", saveOptional(u.buildOrderUnitId, [&](UnitId id) { return saveUnitIdRef(id, ctx); })},
                 {"inBuildStance", u.inBuildStance},
+                {"commandFireShotFired", u.commandFireShotFired},
                 {"yardOpen", u.yardOpen},
                 {"inCollision", u.inCollision},
                 {"weapons", weapons},
@@ -1556,6 +1578,7 @@ namespace rwe
             u.navigationState = loadNavigationStateInfo(j.at("navigationState"), ctx);
             u.buildOrderUnitId = loadOptional(j.at("buildOrderUnitId"), [&](const json& v) { return loadUnitIdRef(v, ctx); });
             u.inBuildStance = j.at("inBuildStance").get<bool>();
+            u.commandFireShotFired = j.value("commandFireShotFired", false);
             u.yardOpen = j.at("yardOpen").get<bool>();
             u.inCollision = j.at("inCollision").get<bool>();
             const auto& weaponsJson = j.at("weapons");

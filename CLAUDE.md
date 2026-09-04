@@ -135,14 +135,16 @@ Much of the current work is making RWE behave like the original rather than
 merely look similar. Where a behaviour is meant to match TA, it has usually been
 read out of `TotalA.exe` instead of guessed at.
 
-- `docs/TOTALA-EXE.md` — the findings, now eighty-four sections: the flight
+- `docs/TOTALA-EXE.md` — the findings, now eighty-eight sections: the flight
   model, fog of war and line of sight, the damage pipeline, missile flight,
   target selection and eligibility, the economy, the nanolathe and construction
   display, effects and render order, the interface (the minimap detection
   rings, the marching waypoint trail, the building placement box and its
   sweep), transports, the situational music system, the renderer and its quad
   scan-conversion, the interface colours, the in-game menus, the keyboard, and
-  the FBI and weapon field offsets. §83 and §84 are the ones to read first if
+  the FBI and weapon field offsets, the D-gun and what commandfire costs an
+  order (§85), and what makes a patrolling unit leave its route (§86).
+  §87 and §88 are the ones to read first if
   you are about to change something — where RWE **deliberately** differs, so
   those do not get "corrected" back, and what is decoded but not ported.
 - `docs/TOTALA-EXE-SHADING.md` — the shaded unit rasterizer in full: the

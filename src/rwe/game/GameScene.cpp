@@ -1425,6 +1425,19 @@ namespace rwe
                     return unitOption->get().position;
                 },
                 [&](const UnloadOrder& o) { return o.destination; },
+                [&](const DgunOrder& o) {
+                    return match(
+                        o.target,
+                        [&](const UnitId& u) {
+                            auto unitOption = tryGetUnit(u);
+                            if (!unitOption)
+                            {
+                                return pos;
+                            }
+                            return unitOption->get().position;
+                        },
+                        [&](const SimVector& v) { return v; });
+                },
                 [&](const ReclaimOrder& o) {
                     return match(
                         o.target,
@@ -1459,7 +1472,10 @@ namespace rwe
                 [&](const PatrolOrder&) { return std::optional<CursorType>(CursorType::Patrol); },
                 [&](const CaptureOrder&) { return std::optional<CursorType>(CursorType::Capture); },
                 [&](const LoadOrder&) { return std::optional<CursorType>(CursorType::Load); },
-                [&](const UnloadOrder&) { return std::optional<CursorType>(CursorType::Unload); });
+                [&](const UnloadOrder&) { return std::optional<CursorType>(CursorType::Unload); },
+                // The original has no cursor of its own for the D-gun; the
+                // attack cursor is what CURSORS.GAF offers and what it uses.
+                [&](const DgunOrder&) { return std::optional<CursorType>(CursorType::Attack); });
 
             // draw waypoint icons
             if (waypointIcon)
@@ -1490,7 +1506,9 @@ namespace rwe
                     [&](const PatrolOrder&) { return true; },
                     [&](const CaptureOrder&) { return true; },
                     [&](const LoadOrder&) { return true; },
-                    [&](const UnloadOrder&) { return true; });
+                    [&](const UnloadOrder&) { return true; },
+                    // No line, for the same reason an attack draws none.
+                    [&](const DgunOrder&) { return false; });
 
                 if (drawLine)
                 {
@@ -2706,6 +2724,38 @@ namespace rwe
                         }
                     }
                 },
+                [&](const DgunCursorMode&) {
+                    for (const auto& selectedUnit : selectedUnits)
+                    {
+                        // A D-gun order takes a unit or bare ground, the same
+                        // pair an attack order takes: the disintegrator is
+                        // happy to be fired at a patch of dirt.
+                        std::optional<UnitOrder> order;
+                        if (hoveredUnit)
+                        {
+                            order = DgunOrder(*hoveredUnit);
+                        }
+                        else if (auto coord = getMouseTerrainCoordinate())
+                        {
+                            order = DgunOrder(*coord);
+                        }
+
+                        if (!order)
+                        {
+                            continue;
+                        }
+
+                        if (isShiftDown())
+                        {
+                            localPlayerEnqueueUnitOrder(selectedUnit, *order);
+                        }
+                        else
+                        {
+                            localPlayerIssueUnitOrder(selectedUnit, *order);
+                            cursorMode.next(NormalCursorMode());
+                        }
+                    }
+                },
                 [&](const MoveCursorMode&) {
                     for (const auto& selectedUnit : selectedUnits)
                     {
@@ -2991,6 +3041,9 @@ namespace rwe
             match(
                 cursorMode.getValue(),
                 [&](const AttackCursorMode&) {
+                    cursorMode.next(NormalCursorMode());
+                },
+                [&](const DgunCursorMode&) {
                     cursorMode.next(NormalCursorMode());
                 },
                 [&](const MoveCursorMode&) {
@@ -3514,6 +3567,10 @@ namespace rwe
             match(
                 cursorMode.getValue(),
                 [&](const AttackCursorMode&) {
+                    sceneContext.cursor->useCursor(CursorType::Attack);
+                },
+                [&](const DgunCursorMode&) {
+                    // CURSORS.GAF has no D-gun cursor of its own.
                     sceneContext.cursor->useCursor(CursorType::Attack);
                 },
                 [&](const MoveCursorMode&) {
@@ -6326,7 +6383,8 @@ namespace rwe
             {"Esc", "Cancel cursor mode / deselect"},
             {"A", "Attack"},
             {"M", "Move"},
-            {"D", "Guard"},
+            {"G", "Guard"},
+            {"D", "D-gun (hold to pick a target)"},
             {"P", "Patrol"},
             {"R", "Repair"},
             {"E", "Reclaim"},
@@ -7054,6 +7112,22 @@ namespace rwe
             else
             {
                 cursorMode.next(AttackCursorMode());
+            }
+        }
+        else if (matchesWithSidePrefix("BLAST", message))
+        {
+            if (sounds.specialOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.specialOrders);
+            }
+
+            if (std::holds_alternative<DgunCursorMode>(cursorMode.getValue()))
+            {
+                cursorMode.next(NormalCursorMode());
+            }
+            else
+            {
+                cursorMode.next(DgunCursorMode());
             }
         }
         else if (matchesWithSidePrefix("MOVE", message))

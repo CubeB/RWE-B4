@@ -164,9 +164,21 @@ namespace rwe
 
         sim.tick();
 
-        // The waypoint was under our feet, but the enemy takes priority: the
-        // order is neither completed nor rotated, and the weapon is aimed.
-        REQUIRE(tank.orders.size() == 1);
+        // The waypoint was under our feet, but the enemy takes priority. The
+        // break-off is an order, not a nudge: an attack goes in front of the
+        // patrol, which is left alone so the route resumes at the same
+        // waypoint when the attack is over.
+        REQUIRE(tank.orders.size() == 2);
+        const auto* attack = std::get_if<AttackOrder>(&tank.orders.front());
+        REQUIRE(attack != nullptr);
+        REQUIRE((std::get<UnitId>(attack->target) == enemyId));
+        REQUIRE(std::holds_alternative<PatrolOrder>(tank.orders.back()));
+
+        // It is a chase the unit started itself, so it carries a leash.
+        REQUIRE(attack->leash.has_value());
+
+        // And the tick after, that order is doing what an attack order does.
+        sim.tick();
         auto attacking = std::get_if<UnitWeaponStateAttacking>(&tank.weapons[0]->state);
         REQUIRE(attacking != nullptr);
         REQUIRE((std::get<UnitId>(attacking->target) == enemyId));

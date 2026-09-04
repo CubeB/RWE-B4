@@ -565,7 +565,11 @@ namespace rwe
 
             sim.tick();
 
-            REQUIRE((std::get<PatrolOrder>(sim.getUnitState(tankId).orders.front()).destination == here));
+            // Breaking off puts an attack in front of the patrol; the patrol
+            // itself is untouched behind it.
+            const auto& orders = sim.getUnitState(tankId).orders;
+            REQUIRE(std::holds_alternative<AttackOrder>(orders.front()));
+            REQUIRE((std::get<PatrolOrder>(orders.at(1)).destination == here));
         }
 
         SECTION("naming the aircraft's category carries the patrol on")
@@ -815,7 +819,9 @@ namespace rwe
 
             sim.tick();
 
-            REQUIRE((std::get<PatrolOrder>(sim.getUnitState(tankId).orders.front()).destination == here));
+            const auto& orders = sim.getUnitState(tankId).orders;
+            REQUIRE(std::holds_alternative<AttackOrder>(orders.front()));
+            REQUIRE((std::get<PatrolOrder>(orders.at(1)).destination == here));
         }
     }
 }

@@ -8103,7 +8103,132 @@ Palette ranges that turned up:
 
 ---
 
-## 83. Where RWE deliberately differs
+## 85. The D-gun: `ATTACKSPECIAL`, and what `commandfire` really costs you
+
+`candgun` is capability bit 14, and `0x43F7E8` turns a click in D-gun mode into
+the `ATTACKSPECIAL` mission. That test is the whole eligibility rule: it does
+not look at the target or the position, so a D-gun order is produced for an
+enemy unit, a friendly unit, a feature or bare ground alike.
+
+**The mission has almost no logic of its own.** Its handler, `0x403190`, is six
+instructions: it asks `0x43F0E0` for the ordinary ATTACK mission for this unit
+and target, rewrites its own mission id to that, and writes the literal `2`
+into the mission's weapon-slot word at `0x4031BB`. The service loop re-reads
+the id and runs the new handler on the same tick, so the order's name changes
+from "Annihilating" to "Attacking" immediately.
+
+What it becomes depends on the target:
+
+| target | mission | handler |
+|---|---|---|
+| a live enemy unit, mover present | `Attack_Chase` | `0x4034A0` |
+| bare ground, or a friendly unit, or the target already gone | `Suppress` | `0x4038A0` |
+| no `canattack` | nothing; the order evaporates |
+
+**The weapon is slot 2 by index — `Weapon3` in the FBI — not by scanning for
+the `commandfire` bit.** Every call downstream indexes with that word:
+`0x49ABB0` for the range test, `0x48A060`/`0x48A0A0` to aim, `0x49ADF0` for the
+approach tolerance. The shipped data agrees: `ARMCOM` declares `Weapon1` and
+`Weapon3` and no `Weapon2` at all, and `ARMCOM.COB` has `AimTertiary` and
+`FireTertiary` with no Secondary anywhere.
+
+**It fires once and the order is over, and that is a `commandfire` rule rather
+than a D-gun one.** `0x49E4F2` sets bit 11 (`0x800`) of the unit's event word
+for a `commandfire` shot where an ordinary weapon sets bit 10 (`0x400`), and
+both `Attack_Chase` (`0x4034AF`) and `Suppress` (`0x4038A7`) open by testing
+that bit and returning 5 — delete the mission. The nukes and the bombs end
+their orders by exactly the same path.
+
+Other things the decode settles:
+
+- **The approach closes to the weapon's full range**, 240 for
+  `ARM_DISINTEGRATOR` — `0x403623` asks `0x49ADF0`, which is just `wdef+0xDC`.
+  It is halved and then reduced only after repeated failures (`Attack_Chase`
+  sub-states 5–8).
+- **The range test is flat.** `0x49AD7E` squares dx and dz in whole world units
+  and never looks at y. It also refuses if either party is at or below sea
+  level (`0x49ACC3`, `0x49ACEA`).
+- **Short of `energypershot`, nothing happens at all.** The cost check's
+  failure branch at `0x49E420` jumps to the per-weapon loop tail and raises no
+  event, so the unit stands there holding its target and fires on the first
+  tick the stores can pay. The order is not lost.
+- **The target dying ends it.** `mission+0x16` is the `+0x4` field of a weak
+  reference rooted at `mission+0x12` and linked into `target+0xA2`; `0x489740`
+  nulls it, and the handler's guard at `0x4034C0` deletes the mission.
+- **Nothing turns the unit.** Neither handler writes a heading; the
+  disintegrator has `turret=1`, so the arm swings and the body does not.
+- **The button is a latching cursor mode**, not an order: `0x419D84` matches
+  `"BLAST"` and sets `world+0x2CC3` to 4, and clicking again un-latches it.
+  Shift keeps the mode armed (`0x49908C`) and appends rather than replacing
+  (`0x43ADC0`). `ARMGEN.GUI` gives `ARMBLAST` `quickkey=100`, so `d` toggles
+  it — and `ARMDEFEND` is `g`, which is worth knowing because RWE had `d` on
+  guard.
+- **No formation offset.** `AttackSpecial`'s record flag word is `0x680`, bit 1
+  clear, so every selected commander is sent at the same point rather than
+  spread (`0x48D126`).
+- **No leash.** `0x43ADC0` passes zero as the sixth argument of `0x43A0C0`, so
+  `maneuverleashlength` never applies to an order the player gave.
+
+## 86. Patrol: what makes a unit leave its route
+
+A patrol route is **N separate missions**, one waypoint each, strung on the
+unit's mission list. Reaching a waypoint returns 6, and the service loop's
+return-6 arm at `0x43B975` unlinks that mission and appends it at the tail —
+that is the whole cycling mechanism. `0x43A020` closes the loop by appending
+one more waypoint at the unit's *current* position, once, the first time a
+patrol mission runs its state 0.
+
+A builder or repairer given a patrol order gets `RepairPatrol` instead
+(`0x43F3E6`), and **neither RepairPatrol handler ever calls the acquisition
+search** — a repair patrol does not engage.
+
+**The engagement rule is not route-relative at all.** The handlers poll
+`0x43B700`, which
+
+1. requires the fire order to be **exactly Fire At Will** — `cmp ecx,0x200000 /
+   jne`, so Return Fire shoots back but never leaves the route; then
+2. hands over to `0x40B7B0` in mode 0, which gathers candidates in a **flat
+   circle of `SightDistance` around the unit's own current position**
+   (`0x40B845`, `0x40B848`, and `0x40AD80` where `dy` never enters); and
+3. rejects every candidate that fails `0x49ABB0` at `0x40B914` — the weapon
+   eligibility test, **which ends in weapon slot 0's own range check**.
+
+So the radius a unit will break off within is **`min(SightDistance, weapon-0
+range)`, measured from the unit**. A Thunder breaks off at 350 because its bomb
+reaches 1280; a Peewee breaks off at 180 because its EMG is shorter than its
+eyes. Nothing reads `maneuverleashlength`, the leg, or the waypoint.
+
+**A sighting becomes a real mission.** `0x43B1F0` prepends an attack mission
+and, on `StandingMoveOrder = Maneuver`, a move back to the exact spot where
+contact was made behind it, so the list becomes `[Attack] -> [Move home] ->
+[Patrol_k] -> ...`. The patrol mission is never touched, so the route resumes
+at **the waypoint it was already heading for**. The attack ends when the target
+dies, when health drops below three quarters with a repair pad within 3840, or
+when the leash trips — `maneuverleashlength` from the contact point, anchored
+at `0x43B330` and tested at `0x4034D2` and in every air attack prologue.
+
+For aircraft the mission is the ordinary one: a patrolling bomber that acquires
+a ground unit gets a full `AirStrike` (`0x411F50`), handed the target exactly
+as an ordered attack would be. Two traps come with that. A patrolling bomber
+**ignores enemy aircraft entirely** — `0x43F2AA` skips `AIRSTRIKE` for an air
+target and the fall-through produces no mission at all — and **a bomb never
+auto-acquires**, because `0x408A7F` excludes `dropped` weapons from the
+per-tick scan. The break-off is the only way a bomber ever drops anything.
+
+**Two of the shipped bombers patrol without ever attacking, correctly.**
+`ARMTHUND` and `CORSHAD` carry `StandingFireOrder=0`, so `0x43B700` fails on
+every poll. `ARMPNIX` and `CORHURC` carry 2 and do engage. This is the same
+thirteen units that ship on Hold Fire — the artillery, the nuke silos, the
+mines — and it is deliberate.
+
+Cadence: `VTOL_Patrol` polls every 30 ticks, ground `Patrol` every 45–74
+(`rand(30)+30` then 15), and never on the tick a waypoint is reached, because
+return 6 comes first. The air leg's goal is aimed **320 world units past** the
+waypoint with a 336 tolerance (`0x410EC4`–`0x410F21`), which is a 16-unit
+arrival radius and a deliberate fly-through; and it carries no altitude
+instruction, only the state-0 take-off climb to `cruisealt/2`.
+
+## 87. Where RWE deliberately differs
 
 Recorded so these do not get "fixed" back later by someone comparing against the
 original:
@@ -8183,7 +8308,7 @@ original:
 
 ---
 
-## 84. Still unknown or unported
+## 88. Still unknown or unported
 
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
@@ -8219,17 +8344,16 @@ original:
   original recognises at all, so there is nothing there to find.
 - **`DefaultMissionType`** is decoded (§9) but not ported. RWE seeds a new
   unit's standing orders from the definition and lets its ordinary idle
-  targeting stand in for `Standby`; what it has no equivalent of is the
-  sight-range search `0x43B700`, which is the only thing that makes `Standby`
-  and `Guard_NoMove` behave differently. Until a unit can decide to walk off
-  and find a fight, the key has nothing to change.
-- **The movement mode is stored but not acted on.** RWE now builds a unit on
-  the Hold Position, Maneuver or Roam its FBI names and reports it to the COB
-  scripts, but nothing reads it back: there is no leash on a unit that breaks
-  off to attack, so Maneuver and Roam come to the same thing and Hold Position
-  is honoured only in that such a unit is never given an attack order to begin
-  with. The original's version is the `0x43B1F0` gate and the anchor order it
-  plants at `unit+0x6a`.
+  targeting stand in for `Standby`. The sight-range search `0x43B700` behind it
+  *is* ported now, as `findEnemyToEngage` — see §86 — so what is left here is
+  only the mission the key names.
+- **The movement mode is acted on for a break-off, and nowhere else.** A unit
+  that leaves its post now carries the leash `0x43B1F0` gives it —
+  `maneuverleashlength` from the spot where it saw the target — and Maneuver
+  walks back to that spot afterwards, so Maneuver and Roam are no longer the
+  same thing. Hold Position is still honoured only in that such a unit is never
+  given an attack order to begin with, and the mode is still not consulted
+  anywhere else the original consults it.
 - **Smoke does not drift downwind.** The vector and the ×8 scaling are decoded
   (§4, §7) but RWE has no map wind, so every puff goes straight up. The lift
   itself is right: RWE's half a unit a tick is the original's gravity × 4 on the

@@ -69,6 +69,11 @@ namespace rwe
 
         bool handlePatrolOrder(UnitInfo unitInfo, const PatrolOrder& patrolOrder);
 
+        bool handleDgunOrder(UnitInfo unitInfo, const DgunOrder& order);
+
+        /** Hands steering back from an attack run to ordinary flight, keeping the speed. */
+        void dropAirAttackRun(UnitInfo unitInfo);
+
         bool handleCaptureOrder(UnitInfo unitInfo, const CaptureOrder& captureOrder);
 
         bool handleLoadOrder(UnitInfo unitInfo, const LoadOrder& loadOrder);

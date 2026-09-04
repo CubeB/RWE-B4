@@ -73,6 +73,13 @@ namespace rwe
         bool operator!=(const AttackCursorMode& /*rhs*/) const { return false; }
     };
 
+    /** Picking what to fire a commandfire weapon at -- the BLAST button. */
+    struct DgunCursorMode
+    {
+        bool operator==(const DgunCursorMode& /*rhs*/) const { return true; }
+        bool operator!=(const DgunCursorMode& /*rhs*/) const { return false; }
+    };
+
     struct MoveCursorMode
     {
         bool operator==(const MoveCursorMode& /*rhs*/) const { return true; }
@@ -178,7 +185,7 @@ namespace rwe
         }
     };
 
-    using CursorMode = std::variant<AttackCursorMode, MoveCursorMode, GuardCursorMode, ReclaimCursorMode, RepairCursorMode, PatrolCursorMode, CaptureCursorMode, LoadCursorMode, UnloadCursorMode, BuildCursorMode, NormalCursorMode>;
+    using CursorMode = std::variant<AttackCursorMode, DgunCursorMode, MoveCursorMode, GuardCursorMode, ReclaimCursorMode, RepairCursorMode, PatrolCursorMode, CaptureCursorMode, LoadCursorMode, UnloadCursorMode, BuildCursorMode, NormalCursorMode>;
 
     struct UnitGuiInfo
     {

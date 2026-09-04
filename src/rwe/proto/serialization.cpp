@@ -103,6 +103,15 @@ namespace rwe
             serializeVector(o.destination, dest);
         }
 
+        void operator()(const DgunOrder& o)
+        {
+            auto& out = *cmd->mutable_dgun();
+            match(
+                o.target,
+                [&](const UnitId& u) { out.set_unit(u.value); },
+                [&](const SimVector& v) { serializeVector(v, *out.mutable_ground()); });
+        }
+
         void operator()(const ReclaimOrder& o)
         {
             auto& out = *cmd->mutable_reclaim();
@@ -436,6 +445,22 @@ namespace rwe
             }
 
             throw std::runtime_error("Failed to deserialize attack order");
+        }
+
+        if (cmd.has_dgun())
+        {
+            const auto& dgun = cmd.dgun();
+            if (dgun.has_unit())
+            {
+                return DgunOrder(UnitId(dgun.unit()));
+            }
+
+            if (dgun.has_ground())
+            {
+                return DgunOrder(deserializeVector(dgun.ground()));
+            }
+
+            throw std::runtime_error("Failed to deserialize dgun order");
         }
 
         if (cmd.has_build())
