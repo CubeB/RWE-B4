@@ -29,6 +29,7 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitId.h>
 #include <rwe/sim/UnitModelDefinition.h>
+#include <rwe/sim/UnitSpatialIndex.h>
 #include <rwe/sim/UnitState.h>
 #include <set>
 #include <unordered_map>
@@ -486,6 +487,17 @@ namespace rwe
 
         VectorMap<UnitState, UnitIdTag> units;
 
+        /**
+         * Where the units are, for the target scan. Derived state: rebuilt
+         * from `units` once a tick, not saved and not hashed. See
+         * getUnitSpatialIndex.
+         */
+        UnitSpatialIndex unitSpatialIndex;
+        std::optional<GameTime> unitSpatialIndexStamp;
+
+        /** The fastest thing the loaded data defines, in world units a tick. Worked out once. */
+        std::optional<float> maxUnitSpeedPerTick;
+
         VectorMap<Projectile, ProjectileIdTag> projectiles;
 
         std::deque<PathRequest> pathRequests;
@@ -692,6 +704,29 @@ namespace rwe
          * itself out of the water.
          */
         bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const;
+
+        /**
+         * The spatial index over the units, rebuilt if what is there was not
+         * built this tick. Callers use it to narrow a search and must still
+         * make the real test against live unit state: see UnitSpatialIndex.
+         *
+         * Rebuilding is keyed on gameTime rather than done from tick() so
+         * that anything driving UnitBehaviorService directly -- the test
+         * suite does -- gets a good index without having to know it exists.
+         * The unit list changing within a tick invalidates it: see
+         * invalidateUnitSpatialIndex. Loading a save fills the unit list
+         * without going through tryAddUnit, but it fills a simulation that
+         * has never built an index and the first tick after it rebuilds
+         * anyway, so nothing there needs to know about this.
+         */
+        const UnitSpatialIndex& getUnitSpatialIndex();
+
+        /**
+         * Marks the index as needing a rebuild before the next query. Called
+         * wherever a unit joins or leaves the unit list, since an index that
+         * has never heard of a unit would hide it from every search.
+         */
+        void invalidateUnitSpatialIndex();
 
         /**
          * Everything a unit does about having just been shot: it points any

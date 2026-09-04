@@ -1015,9 +1015,14 @@ Return Fire from `GameSimulation::applyDamage`.
 Deliberately not ported:
 
 - **The once-a-second cadence.** RWE acquires on the tick a weapon falls idle.
-  The original's cursor exists to spread the cost over a frame budget; RWE's
-  check already costs nothing by comparison, and the delay would only make
-  units slow on the draw.
+  The original's cursor exists to spread the cost over a frame budget, and the
+  delay would make units slow on the draw, so the cadence stays unported.
+  The reason once given for it here -- that RWE's check costs nothing by
+  comparison -- was true at small unit counts and measurably false at large
+  ones: at eight hundred units the acquisition scan was ten milliseconds a
+  tick, the single most expensive thing in the simulation. It is cheap again
+  because the candidate gather now goes through the same kind of cell grid
+  the original uses (section 34), not because the check was ever free.
 - **The fifty-candidate cap and the sampling without replacement.** Below fifty
   candidates the two are identical; above it the original is simply sampling,
   where RWE scores them all.

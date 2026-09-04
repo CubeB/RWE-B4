@@ -9,14 +9,16 @@ namespace rwe
         std::optional<MovementClassId> movementClass,
         unsigned int footprintX,
         unsigned int footprintZ,
-        const Point& goal)
+        const Point& goal,
+        AStarScratch* scratch)
         : AbstractUnitPathFinder(
             simulation,
             collisionService,
             self,
             movementClass,
             footprintX,
-            footprintZ),
+            footprintZ,
+            scratch),
           goal(goal)
     {
     }

@@ -5,6 +5,7 @@
 #include <rwe/cob/CobExecutionContext.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
+#include <rwe/sim/sim_prof.h>
 #include <rwe/cob/cob_util.h>
 #include <rwe/sim/cob.h>
 #include <rwe/sim/movement.h>
@@ -258,6 +259,7 @@ namespace rwe
             // check our orders
             if (!unitInfo.state->orders.empty())
             {
+                RWE_SIMPROF("b.orders");
                 const auto& order = unitInfo.state->orders.front();
 
                 // process move orders
@@ -385,15 +387,28 @@ namespace rwe
                 },
                 [&](const auto&) {});
 
-            for (Index i = 0; i < getSize(unitInfo.state->weapons); ++i)
             {
-                updateWeaponStockpile(unitId, i);
-                updateWeapon(unitId, i);
+                RWE_SIMPROF("b.weapons");
+                for (Index i = 0; i < getSize(unitInfo.state->weapons); ++i)
+                {
+                    // Nearly every unit in the game leaves two of its three
+                    // slots empty, and both of the calls below open by
+                    // looking the unit up again only to find nothing there.
+                    // Skipping here does what they would have done.
+                    if (!unitInfo.state->weapons[i])
+                    {
+                        continue;
+                    }
+
+                    updateWeaponStockpile(unitId, i);
+                    updateWeapon(unitId, i);
+                }
             }
         }
 
         if (unitInfo.definition->isMobile)
         {
+            RWE_SIMPROF("b.move");
             updateNavigation(unitInfo);
 
             applyUnitSteering(unitInfo);
@@ -2179,6 +2194,7 @@ namespace rwe
 
     std::optional<UnitId> UnitBehaviorService::chooseTarget(UnitId id, unsigned int weaponIndex, TargetSearchMode mode)
     {
+        RWE_SIMPROF("b.choose");
         const auto& unit = sim->getUnitState(id);
         const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
         const auto& weaponDefinition = sim->weaponDefinitions.at(unit.weapons[weaponIndex]->weaponType);
@@ -2212,12 +2228,52 @@ namespace rwe
         // would walk past.
         auto ignoresShootMe = sim->getPlayer(unit.owner).type == GamePlayerType::Computer;
 
-        for (const auto& entry : sim->units)
-        {
-            auto otherUnitId = entry.first;
-            const auto& otherUnit = entry.second;
+        // The pool comes out of the spatial index rather than out of a walk
+        // of every unit in the game. That walk was the engine's single
+        // largest cost in a real fight: at 800 units on Painted Desert it was
+        // 10.0ms of the 11.8ms the behaviour pass spent per tick, over the
+        // ~694 searches a tick, which is the O(n^2) the profile shows.
+        //
+        // The index hands back candidates in ascending unit id, which is the
+        // order iterating the unit list visits them in, so the draws from the
+        // random generator below fall on the same units in the same sequence
+        // as they did before. What comes back is a superset of what is really
+        // in range -- positions in the index are as of the start of the tick
+        // and the reach is widened to cover a tick of movement -- so every
+        // test the whole-list walk made is still made here, against the live
+        // unit, and only the candidates that could not possibly matter are
+        // skipped.
+        auto searchRadiusSquared = searchRadius * searchRadius;
+        const auto& candidates = sim->getUnitSpatialIndex().collectEnemiesNear(
+            simScalarToFloat(unit.position.x),
+            simScalarToFloat(unit.position.z),
+            simScalarToFloat(searchRadius),
+            unit.owner);
 
-            if (otherUnit.isDead() || otherUnit.isOwnedBy(unit.owner))
+        for (auto otherUnitId : candidates)
+        {
+            auto otherUnitRef = sim->units.tryGet(otherUnitId);
+            if (!otherUnitRef)
+            {
+                continue;
+            }
+            const auto& otherUnit = otherUnitRef->get();
+
+            // The index has already dropped the searcher's own side; a unit
+            // it does not know is dead has still to be checked for here.
+            if (otherUnit.isDead())
+            {
+                continue;
+            }
+
+            // Range before the definition lookup, which the whole-list
+            // version did the other way round. None of these rejections
+            // draws from the random generator, so which order they are
+            // applied in is not observable -- and the lookup is of a unit
+            // type name in a hash map, many times the cost of a squared
+            // distance.
+            auto distanceSquared = unit.position.distanceSquared(otherUnit.position);
+            if (distanceSquared > searchRadiusSquared)
             {
                 continue;
             }
@@ -2239,12 +2295,6 @@ namespace rwe
             // off after an aircraft, but they still shoot at one in passing.
             if (mode == TargetSearchMode::SightDistance
                 && categoryListContains(otherUnitDefinition.category, unitDefinition.noChaseCategory))
-            {
-                continue;
-            }
-
-            auto distanceSquared = unit.position.distanceSquared(otherUnit.position);
-            if (distanceSquared > searchRadius * searchRadius)
             {
                 continue;
             }

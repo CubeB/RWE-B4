@@ -553,6 +553,7 @@ set(SOURCE_FILES
     src/rwe/sim/UnitPieceDefinition.cpp
     src/rwe/sim/UnitPieceDefinition.h
     src/rwe/sim/UnitState.cpp
+    src/rwe/sim/UnitSpatialIndex.h
     src/rwe/sim/UnitState.h
     src/rwe/sim/UnitState_util.cpp
     src/rwe/sim/UnitState_util.h
@@ -564,6 +565,7 @@ set(SOURCE_FILES
     src/rwe/sim/movement.cpp
     src/rwe/sim/movement.h
     src/rwe/sim/util.cpp
+    src/rwe/sim/sim_prof.h
     src/rwe/sim/util.h
     src/rwe/ui/UiComponent.cpp
     src/rwe/ui/UiComponent.h
@@ -884,6 +886,7 @@ set(TEST_FILES
     src/rwe/sim/geovent.test.cpp
     src/rwe/sim/standingorders.test.cpp
     src/rwe/sim/targeting.test.cpp
+    src/rwe/sim/targetsearch.test.cpp
     src/rwe/sim/turret.test.cpp
     src/rwe/sim/saveload.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp

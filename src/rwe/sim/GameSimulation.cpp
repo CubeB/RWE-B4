@@ -6,10 +6,12 @@
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService.h>
+#include <chrono>
 #include <rwe/util/SimpleLogger.h>
 #include <rwe/sim/cob.h>
 #include <rwe/sim/movement.h>
 #include <rwe/sim/util.h>
+#include <rwe/sim/sim_prof.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/collection_util.h>
 #include <rwe/util/match.h>
@@ -1049,6 +1051,11 @@ namespace rwe
         unit.owner = captor;
         unit.captureProgress = 0;
 
+        // The spatial index carries owners so a target search can drop its
+        // own side cheaply, and this is the only thing in the game that
+        // rewrites one.
+        invalidateUnitSpatialIndex();
+
         // The unit changes hands with a clean slate: whatever it was doing
         // for its old owner stops, and it must not keep shooting at its new
         // friends.
@@ -1258,6 +1265,58 @@ namespace rwe
 
         const auto& contacts = playerVisibility.at(viewer.value).radarContacts;
         return contacts.find(unitId) != contacts.end();
+    }
+
+    const UnitSpatialIndex& GameSimulation::getUnitSpatialIndex()
+    {
+        if (unitSpatialIndexStamp == gameTime)
+        {
+            return unitSpatialIndex;
+        }
+
+        // The positions recorded here are read again later in the same tick,
+        // by which time the units carrying them have moved. Every query is
+        // therefore widened by what a unit could have covered in the meantime
+        // -- the fastest thing in the data, four times over, and never less
+        // than a whole cell. The margin only costs a slightly wider sweep of
+        // a packed array; getting it wrong would cost a missed target, which
+        // is a behaviour change, so it is deliberately generous.
+        //
+        // The maximum is taken over every definition rather than over the
+        // units in play because the definitions do not change after loading,
+        // so it is worked out once and the per-tick rebuild just uses it.
+        if (!maxUnitSpeedPerTick)
+        {
+            auto fastest = 0.0f;
+            for (const auto& [name, definition] : unitDefinitions)
+            {
+                fastest = std::max(fastest, simScalarToFloat(definition.maxVelocity));
+            }
+            maxUnitSpeedPerTick = fastest;
+        }
+
+        auto margin = std::max(UnitSpatialIndex::CellSize, *maxUnitSpeedPerTick * 4.0f);
+
+        unitSpatialIndex.reset(
+            simScalarToFloat(terrain.leftInWorldUnits()),
+            simScalarToFloat(terrain.topInWorldUnits()),
+            simScalarToFloat(terrain.getWidthInWorldUnits()),
+            simScalarToFloat(terrain.getHeightInWorldUnits()),
+            margin);
+
+        for (const auto& [unitId, unit] : units)
+        {
+            unitSpatialIndex.insert(unitId, unit.owner, simScalarToFloat(unit.position.x), simScalarToFloat(unit.position.z));
+        }
+
+        unitSpatialIndex.build();
+        unitSpatialIndexStamp = gameTime;
+        return unitSpatialIndex;
+    }
+
+    void GameSimulation::invalidateUnitSpatialIndex()
+    {
+        unitSpatialIndexStamp = std::nullopt;
     }
 
     bool GameSimulation::weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const
@@ -1748,6 +1807,10 @@ namespace rwe
 
         auto unitId = units.emplace(std::move(unit));
         const auto& insertedUnit = units.tryGet(unitId)->get();
+
+        // The spatial index has never heard of this one, and a search that
+        // consulted it would not find the unit at all.
+        invalidateUnitSpatialIndex();
 
         auto footprintRegion = occupiedGrid.tryToRegion(footprintRect);
         assert(!!footprintRegion);
@@ -3916,6 +3979,11 @@ namespace rwe
                   } });
             }
 
+            // Removing a unit frees its slot for the next one to be built,
+            // so an index that still names it could hand a search an id that
+            // now belongs to somebody else.
+            invalidateUnitSpatialIndex();
+
             it = units.erase(it);
         }
 
@@ -4049,6 +4117,42 @@ namespace rwe
         }
     }
 
+    namespace
+    {
+        // Temporary: per-phase tick timing, reported every two seconds.
+        // The slots live in sim_prof.h so the behaviour pass can add its own
+        // without a second reporting mechanism; they are zeroed rather than
+        // erased so a reference held at a call site stays good.
+        std::chrono::steady_clock::time_point profLastReport = std::chrono::steady_clock::now();
+        int profTicks = 0;
+
+        void profAccum(const char* name, std::chrono::steady_clock::time_point start)
+        {
+            auto end = std::chrono::steady_clock::now();
+            simProfTotals[name] += std::chrono::duration<double, std::milli>(end - start).count();
+        }
+
+        void profReport()
+        {
+            ++profTicks;
+            auto now = std::chrono::steady_clock::now();
+            auto span = std::chrono::duration<double, std::milli>(now - profLastReport).count();
+            if (span < 2000.0)
+            {
+                return;
+            }
+            std::string line;
+            for (auto& [name, total] : simProfTotals)
+            {
+                line += " " + name + "=" + std::to_string(static_cast<int>(total / (profTicks == 0 ? 1 : profTicks) * 1000.0)) + "us";
+                total = 0.0;
+            }
+            LOG_INFO << "SIMPROF ticks=" << profTicks << line;
+            profTicks = 0;
+            profLastReport = now;
+        }
+    }
+
     void GameSimulation::tick()
     {
         gameTime += GameTime(1);
@@ -4058,37 +4162,70 @@ namespace rwe
         // the human input pipeline: human commands are processed via
         // PlayerCommandService at the *start* of tryTickGame, and AI
         // commands take the same channel.
-        runAiControllers();
+        {
+            auto profStart = std::chrono::steady_clock::now();
+            runAiControllers();
+            profAccum("ai", profStart);
+        }
 
         updateWind();
 
         updateResources();
 
-        pathFindingService.update(*this);
-
-        // run unit scripts
-        for (auto& entry : units)
         {
-            auto unitId = entry.first;
-            auto& unit = entry.second;
-
-            UnitBehaviorService(this).update(unitId);
-
-            for (auto& piece : unit.pieces)
-            {
-                piece.update(SimScalar(SimMillisecondsPerTick) / 1000_ss);
-            }
-
-            runUnitCobScripts(*this, unitId);
+            auto profStart = std::chrono::steady_clock::now();
+            pathFindingService.update(*this);
+            profAccum("path", profStart);
         }
 
-        updateCarriedUnits();
+        // run unit scripts
+        {
+            auto profBehaviourStart = std::chrono::steady_clock::now();
+            for (auto& entry : units)
+            {
+                auto unitId = entry.first;
+                UnitBehaviorService(this).update(unitId);
+            }
+            profAccum("behaviour", profBehaviourStart);
 
-        updateSelfRepair();
+            auto profPiecesStart = std::chrono::steady_clock::now();
+            for (auto& entry : units)
+            {
+                auto& unit = entry.second;
+                for (auto& piece : unit.pieces)
+                {
+                    piece.update(SimScalar(SimMillisecondsPerTick) / 1000_ss);
+                }
+            }
+            profAccum("pieces", profPiecesStart);
+
+            auto profCobStart = std::chrono::steady_clock::now();
+            for (auto& entry : units)
+            {
+                runUnitCobScripts(*this, entry.first);
+            }
+            profAccum("cob", profCobStart);
+        }
+
+        {
+            auto profStart = std::chrono::steady_clock::now();
+            updateCarriedUnits();
+            profAccum("carried", profStart);
+        }
+
+        {
+            auto profStart = std::chrono::steady_clock::now();
+            updateSelfRepair();
+            profAccum("selfrepair", profStart);
+        }
 
         updateSelfDestructs();
 
-        updateProjectiles();
+        {
+            auto profStart = std::chrono::steady_clock::now();
+            updateProjectiles();
+            profAccum("projectiles", profStart);
+        }
 
         updateBurningFeatures();
 
@@ -4096,11 +4233,19 @@ namespace rwe
         // moves on the next one, as the original does.
         updateFallingFeatures();
 
+#ifdef RWE_ENABLE_SIMPROF
+        profReport();
+#endif
+
         updateFeatureRegrowth();
 
         processVictoryCondition();
 
-        deleteDeadUnits();
+        {
+            auto profStart = std::chrono::steady_clock::now();
+            deleteDeadUnits();
+            profAccum("deletedead", profStart);
+        }
 
         deleteDeadProjectiles();
 
@@ -4108,7 +4253,11 @@ namespace rwe
 
         updateCloakSuppression();
 
-        updateVisibility();
+        {
+            auto profStart = std::chrono::steady_clock::now();
+            updateVisibility();
+            profAccum("visibility", profStart);
+        }
     }
 
     std::optional<FeatureDefinitionId> GameSimulation::tryGetFeatureDefinitionId(const std::string& featureName) const

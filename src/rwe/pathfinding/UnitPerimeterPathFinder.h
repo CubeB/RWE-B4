@@ -23,7 +23,8 @@ namespace rwe
             const std::optional<MovementClassId>& movementClass,
             unsigned int footprintX,
             unsigned int footprintZ,
-            const DiscreteRect& goalRect);
+            const DiscreteRect& goalRect,
+            AStarScratch* scratch = nullptr);
 
     protected:
         bool isGoal(const Point& vertex) override;

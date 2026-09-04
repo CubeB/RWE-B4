@@ -262,6 +262,113 @@ namespace rwe
         }
     }
 
+    /**
+     * The routes below are not the only sensible ones: on open ground a great
+     * many eight-way routes are the same length, and which one comes out is
+     * decided by how the open list breaks a tie between two vertices of equal
+     * estimated cost. That makes them the right thing to pin. The other tests
+     * in this file check properties -- around the obstacle, off the slope --
+     * and a rewrite of the search that reordered the open list could satisfy
+     * every one of them while sending every unit in the game down a different
+     * road. These cases fail if the answer changes at all.
+     *
+     * If one of them fails after a deliberate change to the search, work out
+     * the new route by hand before believing it, and say in the commit message
+     * why the route moved.
+     */
+    TEST_CASE("the pathfinder returns the same route it always has", "[pathing]")
+    {
+        auto script = makeEmptyCobScript();
+
+        SECTION("across open ground, where many routes are the same length")
+        {
+            GameSimulation sim(makeFlatTerrain(24, 18), 0u, 0, 0);
+            auto player = addPlayer(sim);
+            auto tankId = addTank(sim, player, 2, 2, script);
+
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, tankId, std::nullopt, 1u, 1u, Point(20, 15));
+            auto result = pathFinder.findPath(Point(2, 2));
+
+            REQUIRE(result.type == AStarPathType::Complete);
+            REQUIRE(describePath(result.path) == "(2,2) (3,2) (4,2) (5,2) (6,2) (7,2) (8,3) (9,4) (10,5) (11,6) (12,7) (13,8) (14,9) (15,10) (16,11) (17,12) (18,13) (19,14) (20,15) ");
+        }
+
+        SECTION("around a wall with a gap in it")
+        {
+            GameSimulation sim(makeFlatTerrain(24, 18), 0u, 0, 0);
+            auto player = addPlayer(sim);
+            auto wall = addWallDef(sim);
+            auto tankId = addTank(sim, player, 2, 9, script);
+
+            // A wall down the middle of the map with one gap, low down.
+            for (int y = 0; y <= 12; ++y)
+            {
+                placeWall(sim, wall, 11, y);
+            }
+
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, tankId, std::nullopt, 1u, 1u, Point(20, 9));
+            auto result = pathFinder.findPath(Point(2, 9));
+
+            REQUIRE(result.type == AStarPathType::Complete);
+            REQUIRE(describePath(result.path) == "(2,9) (3,9) (4,9) (5,9) (6,10) (7,11) (8,12) (9,13) (10,14) (11,14) (12,14) (13,14) (14,14) (15,14) (16,13) (17,12) (18,11) (19,10) (20,9) ");
+        }
+
+        SECTION("over ground that is passable but rough")
+        {
+            GameSimulation sim(makeTerrain(16, 12, [](int x, int y) { return (x >= 4 && x <= 10 && y >= 4 && y <= 6) ? static_cast<unsigned char>((x % 2) * 6) : static_cast<unsigned char>(0); }), 0u, 0, 0);
+            auto player = addPlayer(sim);
+            auto tankId = addTank(sim, player, 1, 5, script, 10u);
+
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, tankId, std::nullopt, 1u, 1u, Point(12, 5));
+            auto result = pathFinder.findPath(Point(1, 5));
+
+            REQUIRE(result.type == AStarPathType::Complete);
+            REQUIRE(describePath(result.path) == "(1,5) (2,5) (3,6) (4,7) (5,7) (6,7) (7,7) (8,7) (9,7) (10,7) (11,6) (12,5) ");
+        }
+
+        SECTION("detouring around water a wading unit would rather avoid")
+        {
+            GameSimulation sim(makeShallowStripTerrain(), 0u, 0, 0);
+            auto player = addPlayer(sim);
+            auto tankId = addTank(sim, player, 3, 4, script, 10u);
+
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, tankId, std::nullopt, 1u, 1u, Point(11, 4));
+            auto result = pathFinder.findPath(Point(3, 4));
+
+            REQUIRE(result.type == AStarPathType::Complete);
+            REQUIRE(describePath(result.path) == "(3,4) (4,3) (5,2) (6,2) (7,2) (8,2) (9,2) (10,3) (11,4) ");
+        }
+
+        SECTION("stopping at the closest reachable point when the goal is walled off")
+        {
+            GameSimulation sim(makeFlatTerrain(24, 18), 0u, 0, 0);
+            auto player = addPlayer(sim);
+            auto wall = addWallDef(sim);
+            auto tankId = addTank(sim, player, 2, 9, script);
+
+            // The goal sits in a sealed box, so the search runs out of open
+            // vertices and falls back on the closest one it saw. Which vertex
+            // that is depends on the order the search closed them in.
+            for (int x = 17; x <= 21; ++x)
+            {
+                placeWall(sim, wall, x, 7);
+                placeWall(sim, wall, x, 11);
+            }
+            for (int y = 8; y <= 10; ++y)
+            {
+                placeWall(sim, wall, 17, y);
+                placeWall(sim, wall, 21, y);
+            }
+
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, tankId, std::nullopt, 1u, 1u, Point(19, 9));
+            auto result = pathFinder.findPath(Point(2, 9));
+
+            REQUIRE(result.type == AStarPathType::Partial);
+            REQUIRE(result.exhausted);
+            REQUIRE(describePath(result.path) == "(2,9) (3,9) (4,9) (5,9) (6,9) (7,9) (8,9) (9,9) (10,9) (11,9) (12,9) (13,9) (14,9) (15,9) (16,9) ");
+        }
+    }
+
     TEST_CASE("a move order to an unreachable point completes at the closest reachable point", "[pathing]")
     {
         auto script = makeEmptyCobScript();

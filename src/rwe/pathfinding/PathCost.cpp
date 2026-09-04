@@ -7,6 +7,11 @@ namespace rwe
     {
     }
 
+    PathCost::HeapKey PathCost::heapKey() const
+    {
+        return HeapKey{distance.asFloat(), turnCount};
+    }
+
     bool PathCost::operator==(const PathCost& rhs) const
     {
         return distance == rhs.distance && turnCount == rhs.turnCount;
@@ -19,12 +24,20 @@ namespace rwe
 
     bool PathCost::operator<(const PathCost& rhs) const
     {
-        if (distance < rhs.distance)
+        // The two lengths, then the tie-break on turns. Written out with the
+        // floats taken once rather than as two OctileDistance comparisons,
+        // which took them four times: this is the comparison the open heap
+        // makes on every sift step, so it is one of the hottest lines in the
+        // simulation.
+        auto a = distance.asFloat();
+        auto b = rhs.distance.asFloat();
+
+        if (a < b)
         {
             return true;
         }
 
-        if (rhs.distance < distance)
+        if (b < a)
         {
             return false;
         }
