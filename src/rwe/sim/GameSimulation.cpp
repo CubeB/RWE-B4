@@ -1138,7 +1138,16 @@ namespace rwe
 
         const auto& heights = terrain.getHeightMap();
         auto cells = PlayerVisibility::VisionCellSizeInTiles;
-        playerVisibility.emplace_back((heights.getWidth() + cells - 1) / cells, (heights.getHeight() + cells - 1) / cells);
+        auto& vis = playerVisibility.emplace_back((heights.getWidth() + cells - 1) / cells, (heights.getHeight() + cells - 1) / cells);
+
+        if (mappingMode == MappingMode::Mapped)
+        {
+            // Mapped gives the ground away before the game starts, and only
+            // the ground: the map comes up explored but unlit, so terrain is
+            // drawn in memory grey and anything standing on it stays hidden
+            // until something actually looks at it.
+            vis.exploreAll();
+        }
 
         return id;
     }
@@ -1403,26 +1412,41 @@ namespace rwe
             auto groundLevel = std::max(static_cast<int>(std::floor(unit.position.y.value)), seaLevel + 1);
             auto eyeHeight = std::clamp(groundLevel + modelHeight, 0, 255);
 
-            // Sight is capped: TA indexes its ray tables with
-            // min(SightDistance / 32, numtables - 1), so terrain-mode sight
-            // never reaches beyond 8 cells however large SightDistance is.
+            // Circular sight does not walk the ray tables at all, so their cap
+            // of 8 cells does not apply to it; it saturates at the largest of
+            // the original's mask sprites instead. Terrain-mode sight is
+            // capped because TA indexes its tables with
+            // min(SightDistance / 32, numtables - 1).
+            auto circular = lineOfSightMode == LineOfSightMode::Circular;
             auto radius = std::min(
                 static_cast<int>(unitDefinition.sightDistance) / cellWorldUnits,
-                losTables.maxRadius());
+                circular ? MaxCircularSightRadiusInCells : losTables.maxRadius());
+
+            auto cell = visionCellAt(unit.position);
+            auto revealFor = [&](PlayerVisibility& vis) {
+                if (circular)
+                {
+                    vis.revealCircle(cell, radius);
+                }
+                else
+                {
+                    vis.revealWithLineOfSight(cell, radius, visionHeights, eyeHeight, losTables);
+                }
+            };
 
             // The owner always sees through its own units; allies see too,
             // so a teammate's map is lit by your scouts and yours by theirs.
             // The owner's own reveal is written plainly rather than left to
             // fall out of the alliance test -- a unit's own player seeing its
             // own surroundings is not a thing to make conditional.
-            playerVisibility.at(unit.owner.value).revealWithLineOfSight(visionCellAt(unit.position), radius, visionHeights, eyeHeight, losTables);
+            revealFor(playerVisibility.at(unit.owner.value));
             for (std::size_t i = 0; i < playerVisibility.size() && i < players.size(); ++i)
             {
                 if (i == unit.owner.value || !arePlayersAllied(unit.owner, PlayerId(static_cast<unsigned int>(i))))
                 {
                     continue;
                 }
-                playerVisibility[i].revealWithLineOfSight(visionCellAt(unit.position), radius, visionHeights, eyeHeight, losTables);
+                revealFor(playerVisibility[i]);
             }
 
             // Radar, sonar and jamming all need the unit switched on if it can
@@ -1475,6 +1499,21 @@ namespace rwe
                     auto range = intToSimScalar(static_cast<int>(unitDefinition.sonarDistanceJam));
                     theirVis.radarJammers.push_back(PlayerVisibility::RadarJammer{unit.position, range * range, true});
                 }
+            }
+        }
+
+        // Permanent sight, once every unit has had its say: ground that has
+        // been seen never dims back to memory. Promoting the explored grid
+        // into the visible one is the whole of the option -- the units
+        // standing on remembered ground come back with the ground, because
+        // canSeeUnit asks about the ground and not about live vision. With
+        // Mapped alongside it, the explored grid was already full before the
+        // first tick, so the whole map is lit from the start.
+        if (lineOfSightMode == LineOfSightMode::Permanent)
+        {
+            for (auto& v : playerVisibility)
+            {
+                v.makeExploredVisible();
             }
         }
 
@@ -2255,6 +2294,28 @@ namespace rwe
     void GameSimulation::spawnProjectile(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition, std::optional<ProjectileId> targetProjectile)
     {
         projectiles.emplace(createProjectileFromWeapon(owner, weapon, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity, targetPosition, targetProjectile));
+    }
+
+    std::vector<int> dealStartPositions(const std::vector<int>& startPositions, StartLocationMode mode, std::minstd_rand& rng)
+    {
+        auto result = startPositions;
+
+        if (mode == StartLocationMode::Fixed)
+        {
+            return result;
+        }
+
+        // Fisher-Yates, drawing each index straight out of the simulation's
+        // own generator. It is walked from the back so that the very first
+        // draw can still place any element anywhere, which an unshuffled
+        // forward pass cannot.
+        for (std::size_t i = result.size(); i > 1; --i)
+        {
+            auto j = static_cast<std::size_t>(rng() % static_cast<std::minstd_rand::result_type>(i));
+            std::swap(result[i - 1], result[j]);
+        }
+
+        return result;
     }
 
     WinStatus GameSimulation::computeWinStatus() const
@@ -3426,13 +3487,63 @@ namespace rwe
 
     void GameSimulation::processVictoryCondition()
     {
-        // if a commander died this frame, kill the player that owns it
+        if (commanderDeathMode == CommanderDeathMode::GameEnds)
+        {
+            // if a commander died this frame, kill the player that owns it
+            for (const auto& p : units)
+            {
+                const auto& unitDefinition = unitDefinitions.at(p.second.unitType);
+                if (unitDefinition.commander && p.second.isDead())
+                {
+                    killPlayer(p.second.owner);
+                }
+            }
+
+            return;
+        }
+
+        // Commander Dies: Game Continues. The commander is an ordinary unit --
+        // it still dies and still explodes, it simply no longer takes the
+        // player with it -- so a player is out only once nothing of theirs is
+        // left standing at all. Buildings are units here, so "no live units"
+        // already means "no units and no buildings".
+        //
+        // The test is "had one, has none" rather than plainly "has none",
+        // and that is deliberate. This runs before deleteDeadUnits, so a unit
+        // killed this tick is still in the map and still owned; requiring one
+        // means a player who has not been given a unit yet cannot be
+        // eliminated before it arrives, which is otherwise exactly what
+        // happens on the battle harness's first tick.
+        std::vector<bool> hasLiving(players.size(), false);
+        std::vector<bool> lostOneThisTick(players.size(), false);
         for (const auto& p : units)
         {
-            const auto& unitDefinition = unitDefinitions.at(p.second.unitType);
-            if (unitDefinition.commander && p.second.isDead())
+            auto owner = p.second.owner.value;
+            if (owner >= players.size())
             {
-                killPlayer(p.second.owner);
+                continue;
+            }
+
+            if (p.second.isDead())
+            {
+                lostOneThisTick[owner] = true;
+            }
+            else
+            {
+                hasLiving[owner] = true;
+            }
+        }
+
+        for (Index i = 0; i < getSize(players); ++i)
+        {
+            if (players[i].status != GamePlayerStatus::Alive)
+            {
+                continue;
+            }
+
+            if (!hasLiving[i] && lostOneThisTick[i])
+            {
+                killPlayer(PlayerId(i));
             }
         }
     }

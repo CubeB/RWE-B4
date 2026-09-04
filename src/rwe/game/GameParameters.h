@@ -68,6 +68,44 @@ namespace rwe
         std::optional<int> teamId;
     };
 
+    /** SKIRMISH.GUI's Line of Sight button. */
+    enum class LineOfSightMode
+    {
+        /** Everything the map has shown stays visible; nothing fades back to memory. */
+        Permanent = 0,
+        /** Ground gets in the way: a hill blocks what is behind it. */
+        True = 1,
+        /** A plain radius, blind to elevation. */
+        Circular = 2,
+    };
+
+    /** SKIRMISH.GUI's Mapping button. */
+    enum class MappingMode
+    {
+        /** The map starts black and is uncovered by going to look. */
+        Unmapped = 0,
+        /** The ground is known from the first frame; units still have to be seen. */
+        Mapped = 1,
+    };
+
+    /** SKIRMISH.GUI's Start Location button. */
+    enum class StartLocationMode
+    {
+        /** Player n takes the map's StartPos n. */
+        Fixed = 0,
+        /** The start positions are dealt out at random. */
+        Random = 1,
+    };
+
+    /** SKIRMISH.GUI's Commander button. */
+    enum class CommanderDeathMode
+    {
+        /** Losing the commander loses the game. */
+        GameEnds = 0,
+        /** The commander is just another unit; the game runs on. */
+        GameContinues = 1,
+    };
+
     struct GameParameters
     {
         std::string mapName;
@@ -80,6 +118,12 @@ namespace rwe
 
         /** Set when this game is a saved game being resumed rather than a fresh start. */
         std::optional<std::string> loadFromSaveFile;
+
+        /** The skirmish screen's own options, as chosen in the lobby. */
+        LineOfSightMode lineOfSight{LineOfSightMode::True};
+        MappingMode mapping{MappingMode::Unmapped};
+        StartLocationMode startLocation{StartLocationMode::Fixed};
+        CommanderDeathMode commanderDeath{CommanderDeathMode::GameEnds};
 
         /**
          * The battle test: instead of a commander each, every player is kept

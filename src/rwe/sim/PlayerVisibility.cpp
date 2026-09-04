@@ -183,6 +183,62 @@ namespace rwe
         }
     }
 
+    void PlayerVisibility::revealCircle(const Point& center, int radius)
+    {
+        beginReveal();
+
+        if (!contains(center))
+        {
+            return;
+        }
+
+        // Even a blind unit knows where it is standing.
+        revealCell(center.x, center.y);
+
+        if (radius <= 0)
+        {
+            return;
+        }
+
+        auto radiusSquared = radius * radius;
+        auto firstY = std::max(0, center.y - radius);
+        auto lastY = std::min(visible.getHeight() - 1, center.y + radius);
+        auto firstX = std::max(0, center.x - radius);
+        auto lastX = std::min(visible.getWidth() - 1, center.x + radius);
+
+        for (int y = firstY; y <= lastY; ++y)
+        {
+            auto dy = y - center.y;
+            for (int x = firstX; x <= lastX; ++x)
+            {
+                auto dx = x - center.x;
+                if (((dx * dx) + (dy * dy)) <= radiusSquared)
+                {
+                    revealCell(x, y);
+                }
+            }
+        }
+    }
+
+    void PlayerVisibility::makeExploredVisible()
+    {
+        auto& visibleCells = visible.getVector();
+        const auto& exploredCells = explored.getVector();
+        for (std::size_t i = 0; i < visibleCells.size(); ++i)
+        {
+            if (exploredCells[i] != 0 && visibleCells[i] == 0)
+            {
+                visibleCells[i] = 1;
+            }
+        }
+    }
+
+    void PlayerVisibility::exploreAll()
+    {
+        auto& cells = explored.getVector();
+        std::fill(cells.begin(), cells.end(), static_cast<unsigned char>(1));
+    }
+
     VisionHeightGrid computeVisionHeights(const Grid<unsigned char>& heightmap, unsigned char seaLevel)
     {
         auto cells = PlayerVisibility::VisionCellSizeInTiles;

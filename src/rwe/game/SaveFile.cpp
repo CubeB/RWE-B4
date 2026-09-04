@@ -1,9 +1,11 @@
 #include "SaveFile.h"
 
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <rwe/util.h>
 #include <rwe/util/match.h>
+#include <utility>
 
 namespace rwe
 {
@@ -82,6 +84,63 @@ namespace rwe
             }
             return AiDifficulty::Standard;
         }
+
+        /**
+         * The skirmish options, by name. They have to survive a save because
+         * they are rules and not preferences: a game saved with Commander
+         * Dies: Game Continues that came back as Game Ends would end on the
+         * next commander lost.
+         *
+         * Read with a default, so a save written before these were stored
+         * still loads and resumes on the settings that were in force when it
+         * was made -- which were, necessarily, the defaults.
+         */
+        template <typename T, std::size_t N>
+        const char* enumToName(T value, const std::array<std::pair<T, const char*>, N>& names, const char* fallback)
+        {
+            for (const auto& [v, name] : names)
+            {
+                if (v == value)
+                {
+                    return name;
+                }
+            }
+            return fallback;
+        }
+
+        template <typename T, std::size_t N>
+        T enumFromName(const std::string& s, const std::array<std::pair<T, const char*>, N>& names, T fallback)
+        {
+            for (const auto& [v, name] : names)
+            {
+                if (s == name)
+                {
+                    return v;
+                }
+            }
+            return fallback;
+        }
+
+        constexpr std::array<std::pair<LineOfSightMode, const char*>, 3> LineOfSightNames{{
+            {LineOfSightMode::Permanent, "permanent"},
+            {LineOfSightMode::True, "true"},
+            {LineOfSightMode::Circular, "circular"},
+        }};
+
+        constexpr std::array<std::pair<MappingMode, const char*>, 2> MappingNames{{
+            {MappingMode::Unmapped, "unmapped"},
+            {MappingMode::Mapped, "mapped"},
+        }};
+
+        constexpr std::array<std::pair<StartLocationMode, const char*>, 2> StartLocationNames{{
+            {StartLocationMode::Fixed, "fixed"},
+            {StartLocationMode::Random, "random"},
+        }};
+
+        constexpr std::array<std::pair<CommanderDeathMode, const char*>, 2> CommanderDeathNames{{
+            {CommanderDeathMode::GameEnds, "gameends"},
+            {CommanderDeathMode::GameContinues, "gamecontinues"},
+        }};
     }
 
     fs::path getSaveDirectory()
@@ -130,6 +189,10 @@ namespace rwe
         header["mapName"] = save.parameters.mapName;
         header["schemaIndex"] = save.parameters.schemaIndex;
         header["aiDifficulty"] = aiDifficultyToString(save.parameters.aiDifficulty);
+        header["lineOfSight"] = enumToName(save.parameters.lineOfSight, LineOfSightNames, "true");
+        header["mapping"] = enumToName(save.parameters.mapping, MappingNames, "unmapped");
+        header["startLocation"] = enumToName(save.parameters.startLocation, StartLocationNames, "fixed");
+        header["commanderDeath"] = enumToName(save.parameters.commanderDeath, CommanderDeathNames, "gameends");
         auto& players = header["players"];
         players = nlohmann::json::array();
         for (const auto& p : save.parameters.players)
@@ -159,6 +222,10 @@ namespace rwe
         const auto& header = j.at("header");
         GameParameters parameters(header.at("mapName").get<std::string>(), header.at("schemaIndex").get<unsigned int>());
         parameters.aiDifficulty = aiDifficultyFromString(header.value("aiDifficulty", "standard"));
+        parameters.lineOfSight = enumFromName(header.value("lineOfSight", "true"), LineOfSightNames, LineOfSightMode::True);
+        parameters.mapping = enumFromName(header.value("mapping", "unmapped"), MappingNames, MappingMode::Unmapped);
+        parameters.startLocation = enumFromName(header.value("startLocation", "fixed"), StartLocationNames, StartLocationMode::Fixed);
+        parameters.commanderDeath = enumFromName(header.value("commanderDeath", "gameends"), CommanderDeathNames, CommanderDeathMode::GameEnds);
         const auto& players = header.at("players");
         for (std::size_t i = 0; i < parameters.players.size() && i < players.size(); ++i)
         {

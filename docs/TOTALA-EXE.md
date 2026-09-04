@@ -8167,6 +8167,14 @@ original:
   wearing the same name rather than the original's. The heading half is the one
   that stops a unit shooting sideways and backwards, and it is the half that is
   implemented.
+- **Circular sight is a computed disc, and it has no floor.** The original's
+  Circular mode blits one of ten hand-drawn masks from `anims/vismasks.gaf`,
+  radius 5 to 14 cells, so its effective sight is `clamp(SightDistance/32, 5,
+  14)` (§2). RWE has no reader for those masks and stamps the disc
+  `dx² + dy² ≤ r²` instead, which differs only around the rim. It keeps the
+  ceiling of 14 cells and drops the floor of 5: a unit with no `SightDistance`
+  sees only the ground it stands on, in every mode. Restoring the floor would
+  give blind units 160 world units of sight the moment the option is switched.
 
 ---
 

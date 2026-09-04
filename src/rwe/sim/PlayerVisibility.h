@@ -129,6 +129,44 @@ namespace rwe
             int eyeHeight,
             const LosTables& tables);
 
+        /**
+         * Reveals a flat disc of radius cells around the centre, paying no
+         * attention at all to what the ground in between is doing.
+         *
+         * This is the Circular sight option. The original does not ray-trace
+         * in that mode either: it blits one of ten hand-drawn mask sprites
+         * from anims/vismasks.gaf over the grid. RWE has no reader for those
+         * masks, so the disc dx^2 + dy^2 <= radius^2 stands in for the
+         * artwork; the shapes differ only around the rim.
+         *
+         * As with the line-of-sight march, the centre cell is always revealed
+         * and every revealed cell counts once towards the reference count.
+         */
+        void revealCircle(const Point& center, int radius);
+
+        /**
+         * Lights every cell that has ever been explored.
+         *
+         * This is the whole of the Permanent sight option. Everything
+         * downstream -- the fog renderer, canSeeUnit, the target scan -- reads
+         * the visible grid, so promoting remembered ground into it brings the
+         * units standing on that ground back with it, which is exactly what
+         * the option is for.
+         *
+         * A cell already lit by a live unit keeps its reference count; a
+         * merely remembered one is given a count of one. Nothing ever
+         * subtracts from these counts -- the grid is rebuilt from nothing
+         * every tick -- so handing out a count here costs nothing later.
+         */
+        void makeExploredVisible();
+
+        /**
+         * Marks the whole map explored, which is what the Mapped option does
+         * before the game starts. Explored, not visible: mapping hands over
+         * the ground and never the units standing on it.
+         */
+        void exploreAll();
+
     private:
         /**
          * Which pass of revealWithLineOfSight last touched each cell, so that

@@ -998,17 +998,72 @@ namespace rwe
         commitSelectedMap();
     }
 
+    std::string describeSkirmishOption(const std::string& optionName, unsigned int stage)
+    {
+        // These are the original's own sentences, not a paraphrase of them:
+        // they sit in one run in TotalA.exe from 0x1067bc, in the same part
+        // of the string table as the skirmish screen's other help lines, and
+        // are listed for translation in gamedata/Translate.tdf. Difficulty is
+        // the exception -- it has no per-stage line, only the help= field
+        // SKIRMISH.GUI hangs on the button itself, so that is what it gets.
+        if (optionName == "CommanderDeath")
+        {
+            return stage == 0
+                ? "Game ends when commander is destroyed."
+                : "Game continues after Commander is destroyed.";
+        }
+        if (optionName == "StartLocation")
+        {
+            return stage == 0
+                ? "Commanders are placed at pre-determined locations."
+                : "Commanders are randomly placed on the battle field.";
+        }
+        if (optionName == "Mapping")
+        {
+            return stage == 0
+                ? "Terrain is blacked out until explored."
+                : "Terrain is visible.";
+        }
+        if (optionName == "LineOfSight")
+        {
+            switch (stage)
+            {
+                case 0:
+                    return "All mapped terrain is visible.";
+                case 1:
+                    return "Terrain elevations affect a unit's view.";
+                default:
+                    return "Terrain elevations do not affect a unit's view.";
+            }
+        }
+        if (optionName == "Difficulty")
+        {
+            return "Adjust skirmish difficulty.";
+        }
+
+        return "";
+    }
+
     void MainMenuScene::attachSkirmishOptionComponents(UiPanel& panel)
     {
-        auto attach = [&panel](const std::string& name, BehaviorSubject<unsigned int>& option) {
+        // SKIRMISH.GUI's HELPTEXT field, the wide empty strip under the setup
+        // box. Nothing else writes to it, so the option buttons can have it.
+        auto helpText = panel.find<UiLabel>("HELPTEXT");
+        auto* helpLabel = helpText ? &helpText->get() : nullptr;
+
+        auto attach = [&panel, helpLabel](const std::string& name, BehaviorSubject<unsigned int>& option) {
             auto button = panel.find<UiStagedButton>(name);
             if (!button)
             {
                 return;
             }
 
-            auto sub = option.subscribe([b = &button->get()](unsigned int stage) {
+            auto sub = option.subscribe([b = &button->get(), helpLabel, name](unsigned int stage) {
                 b->setStage(stage);
+                if (helpLabel != nullptr)
+                {
+                    helpLabel->setText(describeSkirmishOption(name, stage));
+                }
             });
             button->get().addSubscription(std::move(sub));
         };
@@ -1018,6 +1073,14 @@ namespace rwe
         attach("Mapping", model.skirmishOptions.mapping);
         attach("LineOfSight", model.skirmishOptions.lineOfSight);
         attach("Difficulty", model.skirmishOptions.difficulty);
+
+        // Subscribing fires each callback once, so the field would otherwise
+        // open showing whichever option was attached last. Start it on the
+        // button at the top of the column instead.
+        if (helpLabel != nullptr)
+        {
+            helpLabel->setText(describeSkirmishOption("CommanderDeath", model.skirmishOptions.commanderDeath.getValue()));
+        }
     }
 
     void MainMenuScene::cycleSkirmishOption(const std::string& optionName)
@@ -1392,6 +1455,44 @@ namespace rwe
         }
     }
 
+    // The remaining option buttons, turned from the stage the button is
+    // showing into the mode the game runs under. The stage order is
+    // SKIRMISH.GUI's own, read off the text= field of each gadget, and the
+    // last stage is the default arm so that a button that somehow ran past
+    // its stage count still lands on a real mode.
+
+    /** SKIRMISH.GUI: text=Permanent|True|Circular. */
+    LineOfSightMode skirmishStageToLineOfSightMode(unsigned int stage)
+    {
+        switch (stage)
+        {
+            case 0:
+                return LineOfSightMode::Permanent;
+            case 1:
+                return LineOfSightMode::True;
+            default:
+                return LineOfSightMode::Circular;
+        }
+    }
+
+    /** SKIRMISH.GUI: text=Unmapped|Mapped. */
+    MappingMode skirmishStageToMappingMode(unsigned int stage)
+    {
+        return stage == 0 ? MappingMode::Unmapped : MappingMode::Mapped;
+    }
+
+    /** SKIRMISH.GUI: text=Fixed|Random. */
+    StartLocationMode skirmishStageToStartLocationMode(unsigned int stage)
+    {
+        return stage == 0 ? StartLocationMode::Fixed : StartLocationMode::Random;
+    }
+
+    /** SKIRMISH.GUI: text=Game ends|Continues. */
+    CommanderDeathMode skirmishStageToCommanderDeathMode(unsigned int stage)
+    {
+        return stage == 0 ? CommanderDeathMode::GameEnds : CommanderDeathMode::GameContinues;
+    }
+
     void MainMenuScene::startGame()
     {
         if (!model.selectedMap.getValue())
@@ -1401,6 +1502,10 @@ namespace rwe
 
         GameParameters params{model.selectedMap.getValue()->name, 0};
         params.aiDifficulty = skirmishDifficultyToAiDifficulty(model.skirmishOptions.difficulty.getValue());
+        params.lineOfSight = skirmishStageToLineOfSightMode(model.skirmishOptions.lineOfSight.getValue());
+        params.mapping = skirmishStageToMappingMode(model.skirmishOptions.mapping.getValue());
+        params.startLocation = skirmishStageToStartLocationMode(model.skirmishOptions.startLocation.getValue());
+        params.commanderDeath = skirmishStageToCommanderDeathMode(model.skirmishOptions.commanderDeath.getValue());
 
         for (Index i = 0; i < getSize(model.players); ++i)
         {

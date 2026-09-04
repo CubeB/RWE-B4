@@ -7,6 +7,7 @@
 #include <rwe/cob/CobUnitId.h>
 #include <rwe/collections/SimpleVectorMap.h>
 #include <rwe/collections/VectorMap.h>
+#include <rwe/game/GameParameters.h>
 #include <rwe/game/PlayerColorIndex.h>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/geometry/BoundingBox3x.h>
@@ -41,6 +42,36 @@ namespace rwe
 
     /** A hit of at least this much goes through armour untouched (TotalA.exe 0x489BD1). */
     constexpr int ArmourBypassDamage = 30000;
+
+    /**
+     * How far Circular sight can reach, in vision cells. The original's
+     * circular masks are ten hand-drawn frames of radius 5 to 14, so 14 cells
+     * -- 448 world units -- is where its sight saturates. The ray tables' cap
+     * of 8 does not apply, because in this mode no ray is walked.
+     *
+     * The original's *lower* bound of 5 is deliberately not reproduced: a unit
+     * with no SightDistance at all should see nothing but the ground it is
+     * standing on, whichever mode is chosen.
+     */
+    constexpr int MaxCircularSightRadiusInCells = 14;
+
+    /**
+     * Deals the map's own start positions out to the player slots that are
+     * filled, given in ascending slot order and one-based (slot 0 is the map's
+     * StartPos1). Returns one start position number per slot, in the same
+     * order.
+     *
+     * Fixed hands each slot its own number back. Random permutes the same set,
+     * so every position is used exactly once and no coordinate is invented:
+     * the map's StartPos entries are all there ever is.
+     *
+     * The permutation is drawn from the simulation's RNG, which every peer
+     * seeds identically, so every peer deals the same hand. The draw is a
+     * modulo of the generator's raw output on purpose --
+     * std::uniform_int_distribution's output is not fixed by the standard and
+     * differs between implementations, which would desync a network game.
+     */
+    std::vector<int> dealStartPositions(const std::vector<int>& startPositions, StartLocationMode mode, std::minstd_rand& rng);
 
     /** What one second's settle decided for one resource. */
     struct ResourceSettlement
@@ -393,6 +424,20 @@ namespace rwe
         std::minstd_rand rng;
 
         WinStatus gameStatus{WinStatusUndecided()};
+
+        /**
+         * The skirmish screen's rules, copied out of GameParameters before the
+         * first player is added. They are fixed for the life of a game and
+         * identical on every peer, which is what lets them change simulation
+         * behaviour -- visibility feeds target selection, so a client-side
+         * option like GameScene's fog-of-war toggle could never live here.
+         *
+         * Set them before addPlayer: Mapped hands a player its explored grid
+         * at the moment that grid is created.
+         */
+        LineOfSightMode lineOfSightMode{LineOfSightMode::True};
+        MappingMode mappingMode{MappingMode::Unmapped};
+        CommanderDeathMode commanderDeathMode{CommanderDeathMode::GameEnds};
 
         MapTerrain terrain;
 

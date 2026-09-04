@@ -180,6 +180,15 @@ namespace rwe
         GameSimulation simulation(std::move(mapInfo.terrain), mapInfo.surfaceMetal, std::max(0, mapInfo.minWindSpeed), std::max(0, mapInfo.maxWindSpeed));
         simulation.tidalStrength = std::max(0, mapInfo.tidalStrength);
 
+        // The skirmish options the simulation itself has to know about. They
+        // go in before any player is added: Mapped hands a player its explored
+        // grid at the moment that grid is created. Start Location is not among
+        // them because it is spent here, dealing out the map's start
+        // positions, and never consulted again.
+        simulation.lineOfSightMode = gameParameters.lineOfSight;
+        simulation.mappingMode = gameParameters.mapping;
+        simulation.commanderDeathMode = gameParameters.commanderDeath;
+
         simulation.unitDefinitions = std::move(dataMaps.unitDefinitions);
         simulation.weaponDefinitions = std::move(dataMaps.weaponDefinitions);
         simulation.movementClassDatabase = std::move(dataMaps.movementClassDatabase);
@@ -279,6 +288,32 @@ namespace rwe
                 std::make_unique<AiPlayerController>(aiPlayerId, std::move(profile), aiSeed));
         }
 
+        // Which of the map's start positions each filled slot takes. Fixed
+        // leaves slot n on the map's StartPos n; Random permutes that same
+        // set, so every position is still used exactly once and none is
+        // invented. The deal is drawn from the simulation's RNG, which every
+        // peer seeded identically, so everyone lays the players out the same
+        // way. It has to happen here, while the simulation is still ours --
+        // a few lines further down it is moved into the GameScene.
+        std::vector<Index> filledSlots;
+        std::vector<int> mapStartPositions;
+        for (Index i = 0; i < getSize(gameParameters.players); ++i)
+        {
+            if (gameParameters.players[i])
+            {
+                filledSlots.push_back(i);
+                mapStartPositions.push_back(static_cast<int>(i) + 1);
+            }
+        }
+
+        auto dealtStartPositions = dealStartPositions(mapStartPositions, gameParameters.startLocation, simulation.rng);
+
+        std::array<std::optional<int>, 10> startPositionForSlot;
+        for (Index k = 0; k < getSize(filledSlots); ++k)
+        {
+            startPositionForSlot[filledSlots[k]] = dealtStartPositions[k];
+        }
+
         auto gameNetworkService = std::make_unique<GameNetworkService>(*localPlayerId, std::stoi(gameParameters.localNetworkPort), endpointInfos, playerCommandService.get());
 
         auto minimapDots = sceneContext.textureService->getGafEntry("anims/FX.GAF", "radlogo");
@@ -367,7 +402,7 @@ namespace rwe
             }
 
             std::string startPosKey("StartPos");
-            startPosKey.append(std::to_string(i + 1));
+            startPosKey.append(std::to_string(*startPositionForSlot[i]));
 
             auto startPosIt = std::find_if(schema.specials.begin(), schema.specials.end(), [&startPosKey](const OtaSpecial& s) { return s.specialWhat == startPosKey; });
             if (startPosIt == schema.specials.end())
