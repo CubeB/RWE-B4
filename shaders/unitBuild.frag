@@ -43,14 +43,28 @@ const vec3 normalTint = vec3(1.0, 1.0, 1.0);
 // exact table is a nearest-neighbour remap in a 256-entry palette, which would
 // need each texel's palette index carried through the atlas to reproduce
 // faithfully; that is written up as still to do.
+// Two deliberate departures from the original here, both asked for after
+// looking at the two side by side, and both easy to put back.
+//
+// The original truncates the interpolated row to an integer per pixel, which
+// quantises every gradient into at most thirty-two bands; dropping the floor
+// keeps the interpolation continuous and the transition into shadow smooth.
+//
+// And row 0 is pure black, so a face that wraps to it goes to nothing at all.
+// A shadow that keeps a little light in it reads better on a modern display
+// and still leaves the lit end where the table puts it: the floor lifts the
+// dark end and the scale is chosen so an unlit face (row 15, x1.031) comes
+// out where it always did.
+const float shadowFloor = 0.16;
+
 float shadeIntensity()
 {
     if (!shade)
     {
         return 1.0;
     }
-    // floor, because the span filler takes the interpolant's integer part.
-    return 0.06875 * floor(clamp(shadeLevel, 0.0, 31.0));
+    float tableValue = 0.06875 * clamp(shadeLevel, 0.0, 31.0);
+    return shadowFloor + ((1.0 - shadowFloor) * tableValue);
 }
 
 vec3 shadeNormal()

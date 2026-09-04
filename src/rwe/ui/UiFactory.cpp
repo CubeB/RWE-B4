@@ -163,11 +163,25 @@ namespace rwe
             {
                 titled[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(titled[i])));
             }
+            // ...but only if it is big enough to BE a background. LOADGAME.GAF
+            // holds an entry called "LoadGame" which is just the title
+            // lettering, and taking it as the panel's background left the
+            // dialog as buttons and lines floating on black -- the frame art
+            // it should have been wearing lives in a bitmap instead, and the
+            // search moved on too early to find it.
             for (const auto& candidate : {name, titled})
             {
-                if (auto series = textureService->getGuiTexture(name, candidate))
+                auto series = textureService->getGuiTexture(name, candidate);
+                if (!series)
                 {
-                    backgroundSprite = (*series)->sprites.at(0);
+                    continue;
+                }
+                const auto& sprite = (*series)->sprites.at(0);
+                auto coversPanel = sprite->bounds.width() >= static_cast<float>(width) * 0.9f
+                    && sprite->bounds.height() >= static_cast<float>(height) * 0.9f;
+                if (coversPanel)
+                {
+                    backgroundSprite = sprite;
                     break;
                 }
             }

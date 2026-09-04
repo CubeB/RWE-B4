@@ -407,8 +407,38 @@ namespace rwe
         sceneContext.sceneManager->setNextScene(scene);
     }
 
+    void MainMenuScene::openMessageBox(const std::string& message)
+    {
+        // MSGBOX.GUI is the original's one-line message box: a 372x272 plate
+        // at (116,82) with an OK button. No art ships for it, so it wears the
+        // panel's own plate.
+        auto panel = uiFactory.panelFromGuiFile("MSGBOX");
+        panel->setDrawSolidPlate(true);
+
+        auto font = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+        auto label = std::make_unique<UiLabel>(
+            0,
+            (static_cast<int>(panel->getHeight()) / 2) - 40,
+            panel->getWidth(),
+            20,
+            message,
+            font);
+        label->setAlignment(UiLabel::Alignment::Center);
+        panel->appendChild(std::move(label));
+
+        openDialog(std::move(panel));
+    }
+
     void MainMenuScene::goToLoadGameMenu()
     {
+        // Nothing to load is worth saying out loud rather than opening an
+        // empty list and leaving the player to work it out.
+        if (listSaveGames().empty())
+        {
+            openMessageBox("There are no saved games to load from");
+            return;
+        }
+
         auto panel = uiFactory.panelFromGuiFile("LOADGAME");
         for (const auto* labelName : {"GAMETYPE", "SIDE", "MISSION", "DIFF", "TIME"})
         {
@@ -643,6 +673,13 @@ namespace rwe
                 {
                     startLoadedGame(box->get().getText());
                 }
+            }
+        }
+        else if (topic == "MSGBOX")
+        {
+            if (message == "OK")
+            {
+                goToPreviousMenu();
             }
         }
         else if (topic == "STARTOPT")

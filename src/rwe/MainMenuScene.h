@@ -112,6 +112,9 @@ namespace rwe
 
         void goToLoadGameMenu();
 
+        /** The original's MSGBOX, with one line of text and an OK button. */
+        void openMessageBox(const std::string& message);
+
         void startLoadedGame(const std::string& name);
 
         /** Swaps which options page shares the screen with the hub buttons; empty means the hub alone. */
