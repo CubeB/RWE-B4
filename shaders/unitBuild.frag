@@ -43,19 +43,32 @@ const vec3 normalTint = vec3(1.0, 1.0, 1.0);
 // exact table is a nearest-neighbour remap in a 256-entry palette, which would
 // need each texel's palette index carried through the atlas to reproduce
 // faithfully; that is written up as still to do.
-// Two deliberate departures from the original here, both asked for after
-// looking at the two side by side, and both easy to put back.
+// The row is the original's, exactly -- see the probe in section 13 of
+// TOTALA-EXE-SHADING.md, which this reproduces primitive for primitive. What
+// a row MEANS is where RWE departs, in three measured steps.
 //
-// The original truncates the interpolated row to an integer per pixel, which
-// quantises every gradient into at most thirty-two bands; dropping the floor
-// keeps the interpolation continuous and the transition into shadow smooth.
+// First, the table is not the linear `0.06875 * row` its generator suggests.
+// PALETTE.SHD stores palette INDICES from a nearest-neighbour search, so the
+// bright half runs out of palette to move to and saturates: measured over the
+// real entries, row 16 lands at 1.07 and row 31 at only 1.55, not 2.13. The
+// two-segment fit below tracks those measurements to within about 0.03 --
+// linear below the identity row, and a much shallower slope above it, which
+// is what stops lit faces blowing out.
 //
-// And row 0 is pure black, so a face that wraps to it goes to nothing at all.
-// A shadow that keeps a little light in it reads better on a modern display
-// and still leaves the lit end where the table puts it: the floor lifts the
-// dark end and the scale is chosen so an unlit face (row 15, x1.031) comes
-// out where it always did.
-const float shadowFloor = 0.16;
+// Second, the original truncates the interpolated row to an integer at every
+// pixel, quantising each gradient into at most thirty-two bands. Leaving it
+// continuous keeps the transition into shadow smooth.
+//
+// Third, its row 0 is pure black, and with the wrap a good deal of a model
+// lands there -- measured against a screenshot of the original, RWE at row 0
+// put 40% of a solar collector's pixels below luminance 8 where the original
+// had 25%, with correspondingly fewer mid-tones. The floor keeps some light
+// in a shadowed face. It is the one number here chosen by eye rather than
+// measured, and it is the one to turn if the shadows want to be deeper.
+const float shadowFloor = 0.25;
+const float identityRow = 15.0;
+const float darkSlope = 0.06875;
+const float litSlope = 0.0325;
 
 float shadeIntensity()
 {
@@ -63,7 +76,12 @@ float shadeIntensity()
     {
         return 1.0;
     }
-    float tableValue = 0.06875 * clamp(shadeLevel, 0.0, 31.0);
+
+    float row = clamp(shadeLevel, 0.0, 31.0);
+    float tableValue = row <= identityRow
+        ? darkSlope * row
+        : (darkSlope * identityRow) + ((row - identityRow) * litSlope);
+
     return shadowFloor + ((1.0 - shadowFloor) * tableValue);
 }
 
