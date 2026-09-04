@@ -8336,14 +8336,41 @@ the original computes routes locally and sends them. RWE is lockstep and
 cannot: its budget, its cursor and any adaptive weight would all have to be
 hashed simulation state.
 
-### Decoded here and not ported
+### What is ported, and how faithfully
 
-The relaxed goal (the largest remaining one -- it would convert every
-truncated path into a completed one), the bug-walk first pass, the adaptive
-heuristic weight, the restricted successor fan, the turn and straight-run
-costs, unexplored ground being free, the 60-tick per-unit cooldown, and the
-20-waypoint clamp. RWE keeps an admissible octile heuristic, an eight-way fan
-and a 1000-expansion cap that truncates.
+The straight-line stand-in is ported exactly. The first pass and the relaxed
+goal are ported in shape rather than instruction for instruction, and the
+difference is worth stating plainly.
+
+`BugWalk.cpp` is a greedy walk with wall following, as the original's is, but
+its wall trace and its leave test are written from the structure of
+`0x40E3D5`-`0x40E445` rather than transcribed: the agent that decoded it could
+not make that section byte-exact, and a reimplementation of a routine one does
+not have exactly will fail on geometries the original would have walked. Three
+consequences follow, and only the first is a real cost:
+
+  - **RWE relaxes its goal more often than the original would**, because the
+    walk gives up more often. A relaxed goal means a shorter search horizon
+    and another request later, so it trades path optimality for cost. Measured
+    on `path_bench` at 400 units the trade is currently favourable in both
+    directions: expansions fall from 149,199 to 32,292 over 600 ticks, and
+    over 3000 ticks 116 units reach their destination where 96 did before.
+  - The walk is used **only to relax, never to refuse**. The original abandons
+    a search outright when its walk gets no closer than it started
+    (`0x40E979`); doing that here would turn a walk that failed spuriously
+    into a unit that will not move, which is a far worse failure than a slow
+    search.
+  - The walk takes a **step limit** where the original has none. Running out
+    of it costs a less relaxed goal and nothing else.
+
+Still not ported: the adaptive heuristic weight (it would have to be hashed
+simulation state, since RWE is lockstep and the original is not), the
+restricted successor fan, the turn and straight-run costs, unexplored ground
+reading as free, the 60-tick per-unit cooldown, and the 20-waypoint clamp. RWE
+keeps an admissible octile heuristic, an eight-way fan, and a 1000-expansion
+cap that truncates a search rather than suspending and resuming it -- which is
+the one structural piece of the original's scheduler that RWE still has no
+equivalent for.
 
 ## 88. Where RWE deliberately differs
 

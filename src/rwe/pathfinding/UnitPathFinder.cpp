@@ -23,9 +23,24 @@ namespace rwe
     {
     }
 
+    void UnitPathFinder::setAcceptableDistance(unsigned int distance)
+    {
+        acceptableDistance = distance;
+    }
+
     bool UnitPathFinder::isGoal(const Point& vertex)
     {
-        return vertex == goal;
+        if (vertex == goal)
+        {
+            return true;
+        }
+
+        if (acceptableDistance == 0)
+        {
+            return false;
+        }
+
+        return octileDistanceScore(vertex, goal) <= acceptableDistance;
     }
 
     PathCost UnitPathFinder::estimateCostToGoal(const Point& start)

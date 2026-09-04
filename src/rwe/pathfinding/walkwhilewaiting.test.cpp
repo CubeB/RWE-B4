@@ -96,4 +96,40 @@ namespace rwe
         REQUIRE(movingState != nullptr);
         REQUIRE(movingState->pathRequested);
     }
+
+    TEST_CASE("a reachable destination is still reached exactly", "[pathfinding]")
+    {
+        // The first pass relaxes the goal when it cannot reach it, so the
+        // safety property is this one: when the goal *is* reachable, nothing
+        // is relaxed and the unit finishes where it was sent rather than near
+        // it. A walk that failed spuriously would show up here as a unit
+        // parked short of its destination with its order still in hand.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        sim.unitDefinitions["walker"] = makeWalkerDef();
+        std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+        sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
+
+        auto destination = SimVector(200_ss, 0_ss, 120_ss);
+        auto unitId = spawn(sim, player, SimVector(-200_ss, 0_ss, -120_ss), script);
+        sim.getUnitState(unitId).orders.push_back(MoveOrder(destination));
+
+        for (int tick = 0; tick < 1200; ++tick)
+        {
+            sim.tick();
+            if (sim.getUnitState(unitId).orders.empty())
+            {
+                break;
+            }
+        }
+
+        const auto& unit = sim.getUnitState(unitId);
+        REQUIRE(unit.orders.empty());
+
+        // Arrival tolerance rather than an exact cell: a unit stops when it
+        // is close enough, and the point here is that it is close to the
+        // place it was sent and not to somewhere the first pass settled for.
+        REQUIRE(unit.position.distanceSquared(destination) < (32_ss * 32_ss));
+    }
 }

@@ -1,4 +1,5 @@
 #include "PathFindingService.h"
+#include <rwe/pathfinding/BugWalk.h>
 #include <rwe/pathfinding/UnitPathFinder.h>
 #include <rwe/pathfinding/UnitPerimeterPathFinder.h>
 #include <rwe/pathfinding/pathfinding_utils.h>
@@ -130,6 +131,8 @@ namespace rwe
 
         UnitPathFinder pathFinder(&simulation, &simulation.movementClassCollisionService, unitId, movementClassId, start.width, start.height, Point(goal.x, goal.y), &scratch);
 
+        relaxGoalToWhatIsReachable(pathFinder, Point(start.x, start.y), Point(goal.x, goal.y));
+
         auto path = pathFinder.findPath(Point(start.x, start.y));
         lastPathDebugInfo = AStarPathInfo<Point, PathCost>{path.type, path.path, std::move(path.closedVertices), path.exhausted};
 
@@ -170,6 +173,44 @@ namespace rwe
         }
 
         return UnitPath{std::move(waypoints), unreachable};
+    }
+
+    void PathFindingService::relaxGoalToWhatIsReachable(UnitPathFinder& pathFinder, const Point& start, const Point& goal)
+    {
+        // A walk is cheap and the answer is worth having: if it reaches the
+        // goal there is nothing to relax, and if it does not, the search can
+        // stop at anything as close as the walk managed rather than proving
+        // the whole reachable map is not the goal.
+        if (!relaxGoalWithFirstPass)
+        {
+            return;
+        }
+
+        auto result = bugWalk(
+            start,
+            goal,
+            [&](const Point& p) { return pathFinder.isWalkableOutsideSearch(p); },
+            [&](const Point& p) { return octileDistanceScore(p, goal); },
+            BugWalkStepLimit);
+
+        counters.bugWalkSteps += result.steps;
+
+        if (result.reachedGoal)
+        {
+            return;
+        }
+
+        auto reachable = octileDistanceScore(result.closest, goal);
+        if (reachable == 0 || reachable >= octileDistanceScore(start, goal))
+        {
+            // Either it is standing on the answer already, or the walk got
+            // nowhere and has nothing to offer. Let the search do what it
+            // did before.
+            return;
+        }
+
+        pathFinder.setAcceptableDistance(reachable);
+        ++counters.searchesRelaxed;
     }
 
     SimVector PathFindingService::getWorldCenter(const GameSimulation& simulation, const DiscreteRect& rect)

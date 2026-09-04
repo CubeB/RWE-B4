@@ -435,6 +435,8 @@ set(SOURCE_FILES
     src/rwe/optional_io.h
     src/rwe/optional_util.h
     src/rwe/pathfinding/AStarPathFinder.h
+    src/rwe/pathfinding/BugWalk.cpp
+    src/rwe/pathfinding/BugWalk.h
     src/rwe/pathfinding/AbstractUnitPathFinder.cpp
     src/rwe/pathfinding/AbstractUnitPathFinder.h
     src/rwe/pathfinding/OctileDistance.cpp
@@ -876,6 +878,7 @@ set(TEST_FILES
     src/rwe/sim/dgun.test.cpp
     src/rwe/sim/dgunorder.test.cpp
     src/rwe/pathfinding/pathing.test.cpp
+    src/rwe/pathfinding/BugWalk.test.cpp
     src/rwe/pathfinding/walkwhilewaiting.test.cpp
     src/rwe/sim/economy.test.cpp
     src/rwe/sim/visibility.test.cpp

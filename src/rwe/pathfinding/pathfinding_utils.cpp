@@ -11,6 +11,12 @@ namespace rwe
         return output;
     }
 
+    unsigned int octileDistanceScore(const Point& a, const Point& b)
+    {
+        auto d = octileDistance(a, b);
+        return (14u * d.diagonal) + (10u * d.straight);
+    }
+
     OctileDistance octileDistance(const Point& start, const Point& goal)
     {
         auto deltaX = static_cast<unsigned int>(std::abs(goal.x - start.x));

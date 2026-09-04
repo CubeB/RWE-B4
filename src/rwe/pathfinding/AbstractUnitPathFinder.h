@@ -52,6 +52,17 @@ namespace rwe
 
         bool isWalkable(const Point& p) const;
 
+        /**
+         * The same answer without going through the search's scratch.
+         *
+         * The memoised version stamps what it learns with the current
+         * search's number, so asking it before a search has begun both reads
+         * and writes the previous search's answers. Anything that needs to
+         * know about a cell outside a search -- the first pass in
+         * PathFindingService, for one -- asks this instead.
+         */
+        bool isWalkableOutsideSearch(const Point& p) const;
+
     protected:
         unsigned int getSuccessors(const Point& vertex, const std::optional<Point>& predecessor, const PathCost& costToReach, Successor* out) override;
 

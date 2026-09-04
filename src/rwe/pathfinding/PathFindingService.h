@@ -13,6 +13,7 @@
 namespace rwe
 {
     struct GameSimulation;
+    class UnitPathFinder;
 
     class PathFindingService
     {
@@ -29,6 +30,14 @@ namespace rwe
         int expansionBudgetPerTick{4000};
 
         /**
+         * Whether the cheap first pass runs and relaxes the goal. On, and a
+         * constant of the build for the same reason the budget is: two peers
+         * disagreeing about it would path differently. It is a member only so
+         * that path_bench can measure with and without it.
+         */
+        bool relaxGoalWithFirstPass{true};
+
+        /**
          * Diagnostics for `path_bench`, and for nothing else: they are only
          * counted, never read by the simulation, so they cannot change an
          * outcome and are neither saved nor hashed.
@@ -43,6 +52,10 @@ namespace rwe
             long long expansions{0};
             /** Requests still queued when the tick's budget ran out. */
             long long deferredRequests{0};
+            /** Searches whose goal the first pass was able to relax. */
+            long long searchesRelaxed{0};
+            /** Cells the first pass stepped on, which is what it costs. */
+            long long bugWalkSteps{0};
         };
         Counters counters;
 
@@ -58,6 +71,8 @@ namespace rwe
         AStarScratch scratch;
 
         UnitPath findPath(const GameSimulation& simulation, UnitId unitId, const SimVector& destination);
+
+        void relaxGoalToWhatIsReachable(UnitPathFinder& pathFinder, const Point& start, const Point& goal);
         UnitPath findPath(const GameSimulation& simulation, UnitId unitId, const DiscreteRect& destination);
 
         SimVector getWorldCenter(const GameSimulation& simulation, const DiscreteRect& discreteRect);

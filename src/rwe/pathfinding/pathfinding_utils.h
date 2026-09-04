@@ -52,4 +52,20 @@ namespace rwe
     std::vector<Point> runSimplifyPath(const std::vector<Point>& input);
 
     OctileDistance octileDistance(const Point& a, const Point& b);
+
+    /**
+     * The same distance as a single number, for the places that need to
+     * compare two of them rather than add them up: ten a straight step and
+     * fourteen a diagonal one, the usual integer stand-in for root two.
+     */
+    unsigned int octileDistanceScore(const Point& a, const Point& b);
+
+    /**
+     * How far the first pass in PathFindingService will walk before giving
+     * its answer. The original has no limit at all -- its walk is bounded by
+     * the geometry and by its own loop checks -- but a map with the wrong
+     * shape of wall on it could then make one tick arbitrarily expensive, and
+     * running out here costs only a less relaxed goal.
+     */
+    const unsigned int BugWalkStepLimit = 2000;
 }

@@ -17,7 +17,18 @@ namespace rwe
     private:
         const Point goal;
 
+        /**
+         * How close counts as arrival. Zero is the exact goal and is the
+         * usual case; a larger number is the original's relaxed goal, set
+         * from how close its cheap first pass could get when the goal itself
+         * cannot be reached (0x40DCA8).
+         */
+        unsigned int acceptableDistance{0};
+
     public:
+        /** Accept any cell within this octile distance of the goal. */
+        void setAcceptableDistance(unsigned int distance);
+
         UnitPathFinder(
             const GameSimulation* simulation,
             const MovementClassCollisionService* collisionService,

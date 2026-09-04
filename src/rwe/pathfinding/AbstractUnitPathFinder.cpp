@@ -234,6 +234,11 @@ namespace rwe
         return (cell.flags & AStarScratch::WaterValue) != 0;
     }
 
+    bool AbstractUnitPathFinder::isWalkableOutsideSearch(const Point& p) const
+    {
+        return computeWalkable(p);
+    }
+
     bool AbstractUnitPathFinder::computeWalkable(const Point& p) const
     {
         DiscreteRect rect(p.x, p.y, footprintX, footprintZ);

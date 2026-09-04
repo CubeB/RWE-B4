@@ -163,6 +163,7 @@ int main(int argc, char** argv)
     const int tickCount = argInt(argc, argv, "--ticks", 300);
     const int budget = argInt(argc, argv, "--budget", 0);
     const int obstacleCount = argInt(argc, argv, "--obstacles", 90);
+    const int noRelax = argInt(argc, argv, "--no-relax", 0);
     const int spacing = argInt(argc, argv, "--spacing", 48);
 
     // 256 heightmap cells is 4096 world units across -- about the size of a
@@ -174,6 +175,10 @@ int main(int argc, char** argv)
     if (budget > 0)
     {
         sim.pathFindingService.expansionBudgetPerTick = budget;
+    }
+    if (noRelax != 0)
+    {
+        sim.pathFindingService.relaxGoalWithFirstPass = false;
     }
 
     auto script = makeEmptyScript();
@@ -297,7 +302,9 @@ int main(int argc, char** argv)
     std::cout << "searches " << c.searches
               << "  cut off by the cap " << c.searchesTruncated
               << "  exhausted " << c.searchesExhausted
-              << "  expansions " << c.expansions;
+              << "  expansions " << c.expansions
+              << "  relaxed " << c.searchesRelaxed
+              << "  walk steps " << c.bugWalkSteps;
     if (c.searches > 0)
     {
         std::cout << "  mean " << (c.expansions / c.searches) << " per search";
