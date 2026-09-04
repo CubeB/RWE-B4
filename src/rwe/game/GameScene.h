@@ -614,6 +614,13 @@ namespace rwe
 
         void init() override;
 
+        /**
+         * Turns the scene into a battle harness: `unitsPerSide` units for
+         * each player named, spawned at that player's own start position and
+         * ordered at the next player's, replaced as they die.
+         */
+        void enableBattleTest(unsigned int unitsPerSide, const std::string& unitType, const std::vector<PlayerId>& players, const std::vector<SimVector>& spawns);
+
         void render() override;
 
         void onKeyDown(const SDL_KeyboardEvent& keysym) override;
@@ -760,6 +767,22 @@ namespace rwe
 
         /** The cursor for the 'n' key's walk through the player's own units. */
         std::optional<UnitId> nextUnitCursor;
+
+        /**
+         * The battle test. Empty unless the harness asked for it: each
+         * player's start position, so the top-up knows where to put a
+         * replacement and where to send it.
+         */
+        std::vector<SimVector> battleTestSpawns;
+        std::vector<PlayerId> battleTestPlayers;
+        int battleTestUnitsPerSide{0};
+
+        /** Ever-climbing per-player slot counter, so a blocked cell moves the next spawn along. */
+        std::vector<unsigned int> battleTestSpawnCounter;
+        std::string battleTestUnitType{"ARMPW"};
+
+        /** Tops every player back up to the wanted count and points the new arrivals at the enemy. */
+        void runBattleTest();
 
         void localPlayerSetOnOff(UnitId unitId, bool on);
 

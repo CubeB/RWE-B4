@@ -209,6 +209,8 @@ set(SOURCE_FILES
     src/rwe/CroppedViewport.h
     src/rwe/CursorService.cpp
     src/rwe/CursorService.h
+    src/rwe/GameLaunch.cpp
+    src/rwe/GameLaunch.h
     src/rwe/GlobalConfig.cpp
     src/rwe/GlobalConfig.h
     src/rwe/ImGuiContext.cpp
@@ -936,3 +938,6 @@ target_link_libraries(scene_lifetime_probe librwe)
 
 add_executable(solar_probe src/solar_probe.cpp)
 target_link_libraries(solar_probe librwe)
+
+add_executable(battle_test src/battle_test.cpp)
+target_link_libraries(battle_test librwe)

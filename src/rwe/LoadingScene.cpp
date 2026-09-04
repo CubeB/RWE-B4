@@ -255,6 +255,14 @@ namespace rwe
             }
             PlayerId aiPlayerId(i);
 
+            // The battle harness drives every unit itself. An AI here
+            // would take its own side over and the fight would stop
+            // being the thing under test.
+            if (gameParameters.battleTestUnitsPerSide)
+            {
+                continue;
+            }
+
             // Every computer player in a game shares the difficulty chosen for
             // the game (--ai-difficulty, or rwe.cfg). Per-slot difficulty can
             // follow once the lobby exposes it.
@@ -346,6 +354,10 @@ namespace rwe
 
         std::optional<SimVector> humanStartPos;
 
+        // The battle harness wants every start position and no commanders.
+        std::vector<PlayerId> battlePlayers;
+        std::vector<SimVector> battleSpawns;
+
         for (Index i = 0; i < getSize(gameParameters.players); ++i)
         {
             const auto& player = gameParameters.players[i];
@@ -372,8 +384,26 @@ namespace rwe
                 humanStartPos = worldStartPos;
             }
 
+            if (gameParameters.battleTestUnitsPerSide)
+            {
+                // No commander: the harness fills the field itself, and a
+                // commander standing in it would only distort the fight.
+                battlePlayers.push_back(*gamePlayers[i]);
+                battleSpawns.push_back(worldStartPos);
+                continue;
+            }
+
             const auto& sideData = getSideData(player->side);
             gameScene->spawnCompletedUnit(sideData.commander, *gamePlayers[i], worldStartPos);
+        }
+
+        if (gameParameters.battleTestUnitsPerSide && battlePlayers.size() >= 2)
+        {
+            gameScene->enableBattleTest(
+                *gameParameters.battleTestUnitsPerSide,
+                gameParameters.battleTestUnitType,
+                battlePlayers,
+                battleSpawns);
         }
 
         if (!humanStartPos)

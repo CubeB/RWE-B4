@@ -80,6 +80,18 @@ namespace rwe
         /** Set when this game is a saved game being resumed rather than a fresh start. */
         std::optional<std::string> loadFromSaveFile;
 
+        /**
+         * The battle test: instead of a commander each, every player is kept
+         * topped up to this many units, which walk at the enemy's start
+         * position and are replaced as they die. Nothing about it belongs in
+         * a real game -- it exists so a fight can be watched for as long as
+         * it takes to see what breaks.
+         */
+        std::optional<unsigned int> battleTestUnitsPerSide;
+
+        /** What the battle test spawns. Peewees by default. */
+        std::string battleTestUnitType{"ARMPW"};
+
         GameParameters(const std::string& mapName, unsigned int schemaIndex);
     };
 }

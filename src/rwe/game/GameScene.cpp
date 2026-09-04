@@ -295,6 +295,85 @@ namespace rwe
         audioSub->unsubscribe();
     }
 
+    void GameScene::enableBattleTest(unsigned int unitsPerSide, const std::string& unitType, const std::vector<PlayerId>& players, const std::vector<SimVector>& spawns)
+    {
+        battleTestUnitsPerSide = static_cast<int>(unitsPerSide);
+        battleTestUnitType = unitType;
+        battleTestPlayers = players;
+        battleTestSpawns = spawns;
+        battleTestSpawnCounter.assign(players.size(), 0u);
+
+        // The whole point is watching the fight, so the map is open from the
+        // start rather than lit a unit at a time.
+        fogOfWarEnabled = false;
+    }
+
+    void GameScene::runBattleTest()
+    {
+        if (battleTestPlayers.size() < 2 || battleTestSpawns.size() != battleTestPlayers.size())
+        {
+            return;
+        }
+
+        // Count what each player still has standing.
+        std::vector<int> alive(battleTestPlayers.size(), 0);
+        for (const auto& [unitId, unit] : simulation.units)
+        {
+            if (unit.isDead())
+            {
+                continue;
+            }
+            for (std::size_t i = 0; i < battleTestPlayers.size(); ++i)
+            {
+                if (unit.owner == battleTestPlayers[i])
+                {
+                    ++alive[i];
+                }
+            }
+        }
+
+        for (std::size_t i = 0; i < battleTestPlayers.size(); ++i)
+        {
+            // A few at a time: putting two hundred units on the field in one
+            // tick stalls the frame and tells you nothing about the fight.
+            auto budget = 8;
+            const auto& home = battleTestSpawns[i];
+            const auto& enemy = battleTestSpawns[(i + 1) % battleTestSpawns.size()];
+
+            while (alive[i] < battleTestUnitsPerSide && budget > 0)
+            {
+                --budget;
+
+                // A block of ranks around the spawn. The counter keeps
+                // climbing whether or not the last attempt found room, so a
+                // blocked cell moves the next one along instead of trying the
+                // same spot for ever -- which is what a straight retry does,
+                // and it looks exactly like everything spawning in one place.
+                auto slot = battleTestSpawnCounter[i]++;
+                auto column = static_cast<int>(slot % 20u) - 10;
+                auto rank = static_cast<int>((slot / 20u) % 10u) - 5;
+                auto position = SimVector(
+                    home.x + (24_ss * intToSimScalar(column)),
+                    home.y,
+                    home.z + (24_ss * intToSimScalar(rank)));
+                position.y = simulation.terrain.getHeightAt(position.x, position.z);
+
+                // Completed, not a nanoframe: spawnUnit leaves a unit under
+                // construction, and an unbuilt Peewee cannot walk, so they
+                // simply piled up on the spawn.
+                auto unit = spawnCompletedUnit(battleTestUnitType, battleTestPlayers[i], position);
+                if (!unit)
+                {
+                    continue;
+                }
+
+                unit->get().fireOrders = UnitFireOrders::FireAtWill;
+                unit->get().addOrder(MoveOrder(enemy));
+                ++alive[i];
+            }
+        }
+    }
+
     void GameScene::init()
     {
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
@@ -1827,6 +1906,22 @@ namespace rwe
         ImGui::Checkbox("Health bars", &healthBarsVisible);
         ImGui::Checkbox("Fog of war", &fogOfWarEnabled);
 
+        if (battleTestUnitsPerSide > 0 || !battleTestPlayers.empty())
+        {
+            ImGui::Separator();
+            ImGui::Text("Battle test");
+            ImGui::SliderInt("Units per side", &battleTestUnitsPerSide, 0, 500);
+            int total = 0;
+            for (const auto& [unitId, unit] : simulation.units)
+            {
+                if (!unit.isDead())
+                {
+                    ++total;
+                }
+            }
+            ImGui::Text("alive: %d", total);
+        }
+
         if (!simulation.aiControllers.empty() && ImGui::CollapsingHeader("AI players"))
         {
             for (Index i = 0; i < getSize(simulation.players); ++i)
@@ -3002,6 +3097,13 @@ namespace rwe
 
     void GameScene::update(int millisecondsElapsed)
     {
+        // The battle harness, if one was asked for: keep both sides at
+        // strength and send every replacement at the enemy.
+        if (battleTestUnitsPerSide > 0)
+        {
+            runBattleTest();
+        }
+
         for (auto& action : std::exchange(pendingMenuActions, {}))
         {
             action();
