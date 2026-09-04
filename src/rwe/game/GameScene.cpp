@@ -6339,32 +6339,45 @@ namespace rwe
         fogVisibleSnapshot = vis.visible.getVector();
         fogExploredSnapshot = vis.explored.getVector();
 
-        std::vector<Color> pixels;
-        pixels.reserve(static_cast<size_t>(cellsWide) * static_cast<size_t>(cellsHigh));
+        minimapFogPixels.resize(static_cast<size_t>(cellsWide) * static_cast<size_t>(cellsHigh));
+        auto* out = minimapFogPixels.data();
         for (int y = 0; y < cellsHigh; ++y)
         {
             for (int x = 0; x < cellsWide; ++x)
             {
                 if (vis.visible.get(x, y) != 0)
                 {
-                    pixels.emplace_back(0, 0, 0, 0);
+                    *out++ = Color(0, 0, 0, 0);
                 }
                 else if (vis.explored.get(x, y))
                 {
-                    pixels.emplace_back(0, 0, 0, 120);
+                    *out++ = Color(0, 0, 0, 120);
                 }
                 else
                 {
-                    pixels.emplace_back(0, 0, 0, 255);
+                    *out++ = Color(0, 0, 0, 255);
                 }
             }
         }
 
-        SharedTextureHandle texture(sceneContext.graphics->createTexture(cellsWide, cellsHigh, pixels.data()));
+        if (!minimapFogTexture.isValid() || minimapFogWidth != cellsWide || minimapFogHeight != cellsHigh)
+        {
+            minimapFogTexture = SharedTextureHandle(sceneContext.graphics->createTexture(cellsWide, cellsHigh, minimapFogPixels.data()));
+            minimapFogWidth = cellsWide;
+            minimapFogHeight = cellsHigh;
 
-        auto bounds = Rectangle2f::fromTopLeft(corner.x, corner.z, cellsWide * cellWorldUnits, cellsHigh * cellWorldUnits);
-        auto region = Rectangle2f::fromTopLeft(0.0f, 0.0f, 1.0f, 1.0f);
-        fogSprite = sceneContext.graphics->createSprite(bounds, region, texture);
+            auto bounds = Rectangle2f::fromTopLeft(corner.x, corner.z, cellsWide * cellWorldUnits, cellsHigh * cellWorldUnits);
+            auto region = Rectangle2f::fromTopLeft(0.0f, 0.0f, 1.0f, 1.0f);
+            fogSprite = sceneContext.graphics->createSprite(bounds, region, minimapFogTexture);
+        }
+        else
+        {
+            sceneContext.graphics->updateTexture(
+                minimapFogTexture.get(),
+                static_cast<unsigned int>(cellsWide),
+                static_cast<unsigned int>(cellsHigh),
+                minimapFogPixels.data());
+        }
     }
 
     void GameScene::renderHelpOverlay()

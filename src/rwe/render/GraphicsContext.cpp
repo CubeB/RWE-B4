@@ -194,6 +194,12 @@ namespace rwe
         return handle;
     }
 
+    void GraphicsContext::updateTexture(TextureIdentifier texture, unsigned int width, unsigned int height, const Color* image)
+    {
+        glBindTexture(GL_TEXTURE_2D, texture.value);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, image);
+    }
+
     void GraphicsContext::updateSingleChannelTexture(TextureIdentifier texture, unsigned int imageWidth, unsigned int x, unsigned int y, unsigned int width, unsigned int height, const unsigned char* image)
     {
         glBindTexture(GL_TEXTURE_2D, texture.value);

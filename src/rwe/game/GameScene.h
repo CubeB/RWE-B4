@@ -352,6 +352,16 @@ namespace rwe
         bool helpVisible{false};
         /** The minimap's fog: one texel per vision cell, alpha encodes unexplored / explored / visible. */
         std::optional<Sprite> fogSprite;
+        /**
+         * The minimap's fog texture and the buffer it is filled from, both
+         * kept for the life of the game: the size never changes, so there is
+         * nothing to gain by asking the driver for a new one every time a
+         * unit moves and a cell lights up.
+         */
+        SharedTextureHandle minimapFogTexture;
+        std::vector<Color> minimapFogPixels;
+        int minimapFogWidth{0};
+        int minimapFogHeight{0};
         GameTime fogSpriteTime{0};
         std::vector<unsigned char> fogVisibleSnapshot;
         std::vector<unsigned char> fogExploredSnapshot;

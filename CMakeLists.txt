@@ -944,3 +944,6 @@ target_link_libraries(solar_probe librwe)
 
 add_executable(battle_test src/battle_test.cpp)
 target_link_libraries(battle_test librwe)
+
+add_executable(path_bench src/path_bench.cpp)
+target_link_libraries(path_bench librwe)

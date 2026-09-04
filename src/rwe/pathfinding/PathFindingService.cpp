@@ -11,7 +11,7 @@ namespace rwe
 
     void PathFindingService::update(GameSimulation& simulation)
     {
-        int remainingBudget = 4000;
+        int remainingBudget = expansionBudgetPerTick;
 
         auto& requests = simulation.pathRequests;
         while (!requests.empty() && remainingBudget > 0)
@@ -49,11 +49,28 @@ namespace rwe
 
                 // HACK: we know that lastPathDebugInfo is set by the call to findPath,
                 // so we'll exploit it here to deduct from out budget.
-                remainingBudget -= getSize(lastPathDebugInfo.closedVertices);
+                auto expansions = getSize(lastPathDebugInfo.closedVertices);
+                remainingBudget -= expansions;
+
+                ++counters.searches;
+                counters.expansions += expansions;
+                if (lastPathDebugInfo.type == AStarPathType::Partial)
+                {
+                    if (lastPathDebugInfo.exhausted)
+                    {
+                        ++counters.searchesExhausted;
+                    }
+                    else
+                    {
+                        ++counters.searchesTruncated;
+                    }
+                }
             }
 
             requests.pop_front();
         }
+
+        counters.deferredRequests += static_cast<long long>(requests.size());
     }
 
     UnitPath PathFindingService::findPath(const GameSimulation& simulation, UnitId unitId, const DiscreteRect& destination)

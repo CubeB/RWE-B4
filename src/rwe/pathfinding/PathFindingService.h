@@ -19,6 +19,33 @@ namespace rwe
     public:
         AStarPathInfo<Point, PathCost> lastPathDebugInfo;
 
+        /**
+         * Node expansions the service will spend in one tick, over all the
+         * searches it runs. It is a constant of the build rather than a
+         * setting: two peers running different numbers would path their units
+         * on different ticks and fall out of step. It lives here as a member
+         * only so that `path_bench` can sweep it.
+         */
+        int expansionBudgetPerTick{4000};
+
+        /**
+         * Diagnostics for `path_bench`, and for nothing else: they are only
+         * counted, never read by the simulation, so they cannot change an
+         * outcome and are neither saved nor hashed.
+         */
+        struct Counters
+        {
+            long long searches{0};
+            /** Cut short by the per-search cap, with the goal still reachable. */
+            long long searchesTruncated{0};
+            /** Ended because there was nowhere left to look. */
+            long long searchesExhausted{0};
+            long long expansions{0};
+            /** Requests still queued when the tick's budget ran out. */
+            long long deferredRequests{0};
+        };
+        Counters counters;
+
         void update(GameSimulation& simulation);
 
     private:

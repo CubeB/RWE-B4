@@ -150,6 +150,9 @@ namespace rwe
          */
         void updateSingleChannelTexture(TextureIdentifier texture, unsigned int imageWidth, unsigned int x, unsigned int y, unsigned int width, unsigned int height, const unsigned char* image);
 
+        /** Upload over an existing RGBA texture rather than making another one. */
+        void updateTexture(TextureIdentifier texture, unsigned int width, unsigned int height, const Color* image);
+
         TextureArrayHandle createTextureArray(unsigned int width, unsigned int height, unsigned int mipMapLevels, std::vector<Color>& images);
 
         void enableDepthBuffer();
