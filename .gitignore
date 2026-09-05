@@ -3,6 +3,9 @@
 
 /.cache/
 /.idea/
+# The gh CLI writes a device id here when HOME is not what it expects.
+# Tool state and a machine identifier: not project content.
+/.local/
 /.vs/
 crash.txt
 
