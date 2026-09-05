@@ -8452,7 +8452,29 @@ original:
 
 ---
 
-## 89. Still unknown or unported
+## 89. Keys the original parses and never uses
+
+Worth writing down, because the absence of a reader is not visible from the
+data files and each of these looks like something RWE is failing to do.
+
+**`ComputerMetal` and `ComputerEnergy`, from a map's OTA.** Read at `0x436677`
+and `0x436695` through the same integer-with-default helper (`0x4C46C0`) as
+everything else in that routine, converted with `fild` and stored as floats at
+`mapRecord+0xD84` and `mapRecord+0xD60`. Those two stores are the only
+accesses to either offset anywhere in `.text`: nothing reads them back, so a
+map that asks for a richer computer player gets nothing, and both sides take
+the resources the game was started with. RWE parses them and ignores them,
+which is the same behaviour by a different route.
+
+**`AIProfile`.** The string sits at `0x50219A` with no reference to it
+anywhere in the image, so the original does not parse the key at all.
+
+The caveat on both: an access through a computed address rather than a
+constant offset would not show up in that search. Nothing suggests one --
+every other field in that record is reached by constant offset -- but it is
+the one way this reading could be wrong.
+
+## 90. Still unknown or unported
 
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
