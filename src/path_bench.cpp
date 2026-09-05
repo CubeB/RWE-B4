@@ -247,8 +247,13 @@ int main(int argc, char** argv)
     // Warm up: the first tick issues every request at once, which is the
     // moment the queue is deepest and the one worth watching.
     std::size_t deepestQueue = 0;
-    long long totalMicros = 0;
-    long long worstMicros = 0;
+
+    // The clock's own representation, not a guess at it: microseconds::rep is
+    // `long long` on the Windows toolchains and `long` on Linux, and std::max
+    // will not deduce a single type from the two.
+    using Micros = std::chrono::microseconds::rep;
+    Micros totalMicros = 0;
+    Micros worstMicros = 0;
     int ticksWithFullQueue = 0;
 
     for (int tick = 0; tick < tickCount; ++tick)
