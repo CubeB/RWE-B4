@@ -8678,6 +8678,19 @@ there is a regression test for it now.
 - The **explosion smoke** (`0x472630` from `0x420AE1`, three puffs seven ticks
   apart) and the **30-second burning wreck plume** (`0x48644B`) are decoded but
   not ported; RWE's explosions and wreckage do not smoke afterwards.
+- **`BadSlope` and `BadWaterSlope` are not parsed.** §95 decodes them: they
+  are the movement class's *free* slope threshold, with `MaxSlope` /
+  `MaxWaterSlope` above them admitting the cell as "tight" at an extra 30 of
+  path cost, and they default to half the corresponding max. RWE reaches the
+  same default by hand (`computeRoughSlope`, `maxSlope / 2`) but ignores the
+  keys, and only the two hover classes name them in the shipped data --
+  `TANKHOVER3` and `TANKHOVER4` set `BadSlope=12` equal to their `MaxSlope`,
+  so the original charges a hovercraft nothing for ground RWE calls rough.
+  RWE's rough test also uses one threshold above and below the waterline
+  where the original picks the dry or the wet pair per cell. Path cost only:
+  neither changes what is passable. Left alone because a change to path cost
+  moves every route, and that deserves its own pass with `path_bench` and the
+  pathing tests watched.
 - **`beamweapon`'s tail point** (`0x49BBA3`) is decoded and deliberately *not*
   ported — §92. It gives a round a second, trailing point that starts moving
   `duration + 1` ticks after the shot, and it is drawn only by `rendertype 0`.
@@ -9169,3 +9182,185 @@ once and then never reconsiders, which comes to the same thing.
 
 `VTOL_Standby`'s carrying-something hop and the sight-range search `0x43B700`
 remain unported for the reasons §91 gives.
+
+## 95. What blocks a unit: the map square, the passability class, and why a hovercraft cannot cross a wreck
+
+A play-test expected a hovercraft skimming the surface to pass over a wreck
+lying on the sea bed, now that wreckage sinks (`TOTALA-EXE-WRECKS.md`). The
+original refuses it, and not narrowly. This section is the whole of what a
+feature contributes to movement, read out of the binary, because the answer
+turns out to be structural rather than a rule that could have gone either way.
+
+### The map square
+
+The map is an array of **13-byte squares** at `globals+0x14287`, `[globals+0x14233]`
+wide and `[globals+0x14237]` high — the stride shows up everywhere as
+`lea edx,[eax+eax*2] / lea ecx,[eax+edx*4]`. The fields the movement code reads:
+
+| Offset | Meaning |
+|---|---|
+| `+0x00` / `+0x02` | the two unit slots occupying the square |
+| `+0x05` | the cell's **maximum** ground height |
+| `+0x06` | the cell's **minimum** ground height |
+| `+0x08` | **the feature type index** occupying the square |
+| `+0x0A` / `+0x0B` | for a continuation cell, the y and x step back to the origin square |
+| `+0x0C` bit 1 | a terrain flag; bit 0 and the owner nibble are the feature-pool bookkeeping of `TOTALA-EXE-WRECKS.md` |
+
+`+0x08` is `0xFFFF` for an empty square, `0xFFFE` for a **continuation** cell
+whose origin is `+0x0A`/`+0x0B` squares away, and `0xFFFB`–`0xFFFD` for void
+markers that block outright. Anything else is an index into the feature
+**definition** table at `[globals+0x1426F]`, stride `0x100`, bounds-checked
+against `[globals+0x14253]`.
+
+**The square names a feature *type*, never a feature instance.** That one fact
+settles the play-test: the feature's own record — its position, and so its `y` —
+is not reachable from any collision test, because no collision test ever looks
+it up.
+
+### The blocking bit and its five readers
+
+`blocking` is bit 6 of `featdef+0xFE` (§15's feature flag table). Grepping the
+whole `.text` for reads of that byte with `shr 6 / and 1` finds exactly five,
+and they are the complete set:
+
+| Address | In | Role |
+|---|---|---|
+| `0x47E0F7` | `0x47DFC0` | the per-movement-class footprint test |
+| `0x47DEDE` | `0x47DE60` | the same for a single square |
+| `0x47DCE8` | `0x47DB70` | the footprint test for a unit *definition*, excluding one unit id (nine callers; a building, `def+0x22F`, is handed to §27's yardmap walk instead) |
+| `0x47E4AB` | `0x47E2D0` | "may *this unit* stand at this world position" |
+| `0x47D5E6` | `0x47D4B6` | the building placement yardmap walk (§27) |
+
+All five run the same seven instructions, and all five reject the square before
+a single field of the movement class or the unit definition has been consulted.
+`0x47DFC0`'s copy, in full:
+
+```
+47e081  cx = WORD[square+8]
+47e085  cmp cx,0xffff / jne 47e090
+47e08c  xor ecx,ecx / jmp 47e104          ; empty -> not blocked
+47e090  cmp cx,0xfffb / jae 47e0ae
+47e097  cmp ecx,[gm+0x14253] / jl 47e0ee  ; a real type index
+47e0a7  mov ecx,1 / jmp 47e104            ; out of range -> blocked
+47e0ae  cmp cx,0xfffe / je 47e0bc
+47e0b5  mov ecx,1 / jmp 47e104            ; 0xFFFB..0xFFFD -> blocked
+47e0bc  ... step back by square+0xA/+0xB to the origin square ...
+47e0ee  edx = [gm+0x1426f]
+47e0f4  shl ecx,0x8
+47e0f7  cl = BYTE[edx+ecx+0xfe]
+47e0fe  shr ecx,0x6 / and ecx,0x1         ; bit 6: blocking
+47e104  test ecx,ecx / jne -> refuse the cell
+```
+
+**VERIFIED**, and what is *absent* is the finding:
+
+- **No height term.** Neither the feature's `height` key nor its instance `y`
+  is read. Blocking is two-dimensional.
+- **No altitude term.** The moving unit's own `y` is not read either; the four
+  height bytes the test does read are the map's, at `square+5`/`+0x6`.
+- **No exemption.** Not for `canhover` (`def+0x241` bit 12), not for `floater`
+  (bit 19), not for `amphibious` (bit 21), not for any movement class by name.
+  A blocking feature blocks a hovercraft, a tank, a ship and a submarine
+  identically.
+
+### The movement class record, and the parser that fills it
+
+Decoded from the MOVEINFO parser at `0x440340` and the cell test at `0x47DFC0`:
+
+| Offset | Key | Default |
+|---|---|---|
+| `+0x04` | `FootprintX` (`0x505484`) | — |
+| `+0x06` | `FootprintZ` (`0x505478`) | — |
+| `+0x08` | `MaxWaterDepth` (`0x505468`) | `10000` — §30's seeded record |
+| `+0x0A` | `MinWaterDepth` (`0x505458`), **signed** | `-10000` |
+| `+0x0C` | `MaxSlope` (`0x50544C`) | `255` |
+| `+0x0D` | `BadSlope` (`0x505440`) | **`MaxSlope / 2`** (`0x4403B9 shr eax,1`), so `127` unseeded |
+| `+0x0E` | `MaxWaterSlope` (`0x505430`) | `255` |
+| `+0x0F` | `BadWaterSlope` (`0x505420`) | **`MaxWaterSlope / 2`** (`0x4403E7`) |
+| `+0x1C` | the crush threshold a standing unit's `+0x26` is tested against | — |
+
+then three clamps, `0x4403F4`–`0x440417`: `MaxSlope = min(MaxSlope,
+MaxWaterSlope)`, `BadSlope = min(BadSlope, MaxSlope)`, `BadWaterSlope =
+min(BadWaterSlope, MaxWaterSlope)`. The seeded defaults are §30's, and they are
+why `TANKHOVER3` — which names neither depth key — crosses any water at all;
+§30 also records that a hovercraft FBI's own `MaxWaterDepth=0` is ignored once
+a movement class is named.
+
+The cell test spends them, `0x47E145`–`0x47E19E`, after the feature test has
+passed:
+
+```
+square+6 >= seaLevel - MaxWaterDepth      ; deepest point of the cell
+square+5 <= seaLevel - MinWaterDepth      ; shallowest point of the cell
+spread = square+5 - square+6
+if (square+6 >= seaLevel)                 ; dry
+    spread <= BadSlope       -> free
+    spread <= MaxSlope       -> tight
+    else                     -> blocked
+else                                      ; wet
+    spread <= BadWaterSlope  -> free
+    spread <= MaxWaterSlope  -> tight
+    else                     -> blocked
+```
+
+Both depth tests are worst-case over the cell — the max-depth test reads the
+cell's *lowest* corner and the min-depth test its *highest*.
+
+### Free, tight, blocked — and where "tight" comes from
+
+§87 records that the pathfinder's passability table is two bits a cell per
+movement class and that a "tight" cell costs an extra 30. This is what fills
+it. `0x47E1F0(grid, x, y)` asks `0x47DFC0` for the footprint itself, returns
+straight away if the answer is 0 or 1, and otherwise probes the **four
+one-cell-wide strips around the footprint** (`0x47E226`, `0x47E257`,
+`0x47E28A`, `0x47E2B2`); if any of them is not free it downgrades the answer
+from 3 to 1. So **"tight" means clearance, not slope**: a cell is free only
+when the ring around the footprint standing on it is free too. `0x440830`
+packs that answer into the grid at `[grid+0x18]`, two bits a cell, sixteen
+rows of `y` to a dword, indexed `width*(y>>4) + x` with the pair at
+`2*(y & 15)`.
+
+RWE has the same idea in a different place: `AbstractUnitPathFinder::computeRoughTerrain`
+calls `isAdjacentToObstacle` and adds a cost, which is the clearance half, and
+uses `maxSlope / 2` as its rough threshold — which is exactly the original's
+default for `BadSlope`, arrived at independently and now confirmed.
+
+### The wreck, specifically
+
+A feature's footprint is stamped into the squares once, at placement
+(`0x423C50`, `0x423D5F`–`0x423D80` walking `featdef+0x94`/`+0x96` from the
+square the caller gave). The falling-feature physics that sinks a wreck,
+`0x424214`, writes only `feature+0x08..0x10` (position) and `feature+0x14..0x1C`
+(velocity) and touches no square at all. **A corpse occupies exactly the cells
+it was placed on, from the tick it appears until it is reclaimed, at whatever
+depth it has reached.**
+
+The shipped data is what makes this visible now that wreckage sinks. All
+thirteen hovercraft in `ccdata` leave a corpse written like a land unit's —
+`armah_dead`: `footprintx=3 footprintz=3 height=20 blocking=1` — while a ship's
+is a flat plate authored to be driven over — `armroy_dead`: `footprintx=5
+footprintz=5 height=4 blocking=0`. So in the original a hover battle really does
+leave the sea bed obstructed and a naval one does not, and the difference is
+the data rather than the engine.
+
+### The verdict, and what RWE does
+
+**The play-test's expectation is wrong: the original blocks hovercraft with
+sunken wrecks too, and nothing was changed.** RWE already matches, item by
+item:
+
+| | Original | RWE |
+|---|---|---|
+| What blocks | `blocking` on the feature *type* | `isCollisionAt` tests `FeatureDefinition::blocking` — same |
+| Height / depth | not consulted | not consulted — `occupiedGrid` carries no y |
+| Hover exemption | none | none |
+| A sunken wreck's cells | stamped at placement, never revised | `addFeature` stamps once; `updateFallingFeatures` moves only the position |
+| A ship's corpse | `blocking=0`, driven over | parsed, defaulting false — same |
+
+`src/rwe/sim/wreckcollision.test.cpp` pins it with the shipped numbers, so a
+later reader tempted to "fix" the play-test's complaint has to argue with the
+binary first.
+
+Two smaller things fell out and are recorded in §91 rather than acted on:
+`BadSlope`/`BadWaterSlope` are keys RWE does not parse, and the original's
+"tight" band is wet-or-dry aware where RWE's rough test is not.

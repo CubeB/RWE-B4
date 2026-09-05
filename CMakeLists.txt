@@ -860,6 +860,7 @@ set(TEST_FILES
     src/rwe/sim/capture.test.cpp
     src/rwe/sim/burning.test.cpp
     src/rwe/sim/waterbuilding.test.cpp
+    src/rwe/sim/wreckcollision.test.cpp
     src/rwe/sim/wreckage.test.cpp
     src/rwe/sim/aircraftwreck.test.cpp
     src/rwe/sim/hitdensity.test.cpp

@@ -1,29 +1,73 @@
-# Robot War Engine
+# RWE: B4
 
-An open-source real-time strategy game engine
-that is highly compatible with Total Annihilation data files.
+**Bot bot boom boom** — four B's, so B4 for short.
+
+A fork of [Robot War Engine](https://github.com/MHeasell/rwe), an open-source
+real-time strategy engine highly compatible with Total Annihilation data files.
+The engine is MHeasell's; this fork is a long pass at making it *behave* like
+the original rather than merely look like it.
+
+233 commits ahead of upstream `master`, and the suite stands at **409 cases /
+58,670 assertions**, green on Debug and Release.
+
+## What is different here
+
+Most of the work is behavioural, and most of it was **read out of `TotalA.exe`
+rather than guessed at**. `docs/TOTALA-EXE.md` is ninety-five sections of
+findings — the flight model, fog of war and line of sight, the damage pipeline,
+target selection, the economy, the nanolathe, the interface, transports, the
+music system, the renderer's own rasteriser — with the probe scripts that
+produced them in `tools/exe/`. Three companion documents cover the shaded
+rasteriser, wrecks, and how an attacking aircraft decides where to go.
+
+That method earns its keep by being checkable. Several plausible readings of
+that binary turn out to be wrong, and only replaying the arithmetic against
+real unit data catches them: the radar rule had a cap that made the altitude
+bonus dead code on every shipped unit, and the D-gun's trail turned out to be
+`noexplode` letting a round detonate without being consumed rather than
+anything to do with `beamweapon`.
+
+Beyond that:
+
+- **Full save and load.** The whole simulation round-trips — units with their
+  COB virtual machines mid-thought, projectiles mid-flight, spreading fires,
+  the economy, the RNG — proven by a hash harness rather than by inspection.
+- **A skirmish AI** that runs inside the deterministic tick and emits ordinary
+  player commands.
+- **The front end**: the movies (the GOG release ships them as `.ZRB`, which
+  are Smacker files — RWE grew its own decoder), situational music on the
+  original's own thresholds, the in-game menus, options, and window modes.
+- **Performance.** Eight hundred units went from 8 fps to 36 by measuring the
+  simulation rather than the renderer, and then from 36 to the 60 Hz vsync cap
+  by profiling the frame. Both passes are documented with the numbers, because
+  in both of them the obvious suspect was the wrong one.
+
+`docs/index.html` is the full status page and `docs/ROADMAP.md` the plan.
+`CLAUDE.md` is the working guide to the codebase and its hazards.
+
+## Credit
+
+Robot War Engine is by [Michael Heasell](https://github.com/MHeasell) and its
+contributors; the original engine, the file-format work and the architecture
+are theirs. Total Annihilation is Cavedog Entertainment's. This fork ships no
+game data — you supply your own.
 
 ## Build Status
 
-[![AppVeyor build status](https://ci.appveyor.com/api/projects/status/43armkvatrbaiur5/branch/master?svg=true)](https://ci.appveyor.com/project/MHeasell/rwe/branch/master)
-[![GitHub Build Status](https://github.com/MHeasell/rwe/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/MHeasell/rwe/actions/workflows/build.yml)
+[![GitHub Build Status](https://github.com/CubeB/RWE-B4/actions/workflows/build.yml/badge.svg?branch=revival)](https://github.com/CubeB/RWE-B4/actions/workflows/build.yml)
 
 ## Download
 
-There is currently no stable release.
-If you would like try out the latest, bleeding edge version,
-the latest zip file and/or installer is available at:
+There is no binary release. Build from source with the instructions below; the
+MSYS2/MinGW64 route is the one this fork is developed and tested against daily,
+and CI covers Linux (gcc/clang) and Windows (MSVC and MinGW64) in both Debug
+and Release.
 
-https://ci.appveyor.com/project/MHeasell/rwe/branch/master
+Source code:
 
-To find the files, click "Environment: RWE\_COMPILER=MSYS; Configuration: Release", then "Artifacts".
+https://github.com/CubeB/RWE-B4
 
-RWE is currently only available on Windows,
-however the code is also built and tested on Linux.
-Official Linux binaries will be available when the project reaches a stable version.
-MacOS should work via the devbox build below, tho it's not regularly tested.
-
-Source code is hosted on Github:
+Upstream:
 
 https://github.com/MHeasell/rwe
 
@@ -55,8 +99,11 @@ Debugging:
 
 ## Development Status
 
-Progress updates are posted to a thread on the TAUniverse forums,
-usually once a week. See:
+This fork's status page is `docs/index.html` — what has been added since the
+last upstream update, the roadmap, and what is still to do. The findings that
+drive the behavioural work are in `docs/TOTALA-EXE.md`.
+
+Upstream posts its own progress updates to a thread on the TAUniverse forums:
 
 http://www.tauniverse.com/forum/showthread.php?t=45555
 
@@ -64,8 +111,8 @@ http://www.tauniverse.com/forum/showthread.php?t=45555
 
 First fetch the source code:
 
-    git clone https://github.com/MHeasell/rwe.git
-    cd rwe
+    git clone https://github.com/CubeB/RWE-B4.git
+    cd RWE-B4
     git submodule update --init --recursive
 
 ### Windows with Visual Studio

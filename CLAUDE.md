@@ -30,7 +30,7 @@ make -j$(nproc)
 ./build/rwe_test "[tag]"
 ```
 
-The suite passes 403 cases / 58,610 assertions as of 2026-09-05. If a document quotes a different figure, run the suite rather than believing either of them.
+The suite passes 409 cases / 58,670 assertions as of 2026-09-05. If a document quotes a different figure, run the suite rather than believing either of them.
 
 This machine has two configured trees, both MSYS2/MinGW64 with `Unix Makefiles`: `build/` (Debug) and `build-release/` (Release). Play-testing uses `build-release/rwe.exe`. **Rebuild the `rwe` target, not just `rwe_test`** — a green test suite says nothing about whether the game still links, and several of the executables below share `librwe` with it.
 
@@ -139,7 +139,7 @@ Much of the current work is making RWE behave like the original rather than
 merely look similar. Where a behaviour is meant to match TA, it has usually been
 read out of `TotalA.exe` instead of guessed at.
 
-- `docs/TOTALA-EXE.md` — the findings, now ninety-four sections: the flight
+- `docs/TOTALA-EXE.md` — the findings, now ninety-five sections: the flight
   model, fog of war and line of sight, the damage pipeline, missile flight,
   target selection and eligibility, the economy, the nanolathe and construction
   display, effects and render order, the interface (the minimap detection
@@ -151,7 +151,9 @@ read out of `TotalA.exe` instead of guessed at.
   pathfinder and its scheduler (§87), what the D-gun's projectile does once it
   has left the barrel (§92), why an abandoned nanoframe rots away (§93), and
   which missions send a damaged aircraft to a repair pad and what the pad does
-  when it gets there (§94). §88 and §91 are the ones to read first if
+  when it gets there (§94), and what a feature contributes to movement — the
+  map square, the passability class, and why a hovercraft cannot cross a
+  sunken wreck (§95). §88 and §91 are the ones to read first if
   you are about to change something — where RWE **deliberately** differs, so
   those do not get "corrected" back, and what is decoded but not ported.
 - `docs/TOTALA-EXE-SHADING.md` — the shaded unit rasterizer in full: the

@@ -610,7 +610,7 @@ Item by item against the original:
 | Corpse level from `Killed` | 1/2/3, walking `featuredead` | **matched** since September 2026: the severity is computed from the overkill and the level the script writes back is read and walked |
 | No `Corpse` key | no wreck | the same — **already correct** |
 | Placement blocked by an indestructible feature | no wreck | `addFeature` refuses on `anyFeatureOccupies` (`GameSimulation.cpp:259`) — close, but it refuses on *any* standing feature rather than only on indestructible ones, and never clears a destructible one |
-| Blocking on the sea bed | the cell is occupied whatever the y | the same — **already correct**: `addFeature` stamps `occupiedGrid` regardless of height, so a wreck already blocks submarines and amphibians |
+| Blocking on the sea bed | the cell is occupied whatever the y | the same — **already correct**: `addFeature` stamps `occupiedGrid` regardless of height, so a wreck already blocks submarines and amphibians. Now confirmed out of the binary rather than assumed — see the note below and §95 |
 | Drawing a submerged wreck | drawn in full over the water | drawn, tinted by `waterTint` in `shaders/unitTexture.frag`; the terrain is drawn with `GL_DEPTH_TEST` off (`GameScene.cpp:1531`) so it writes no depth and the later feature pass wins. §59 already resolved to keep the tint |
 | Shadow of a wreck over water | clipped at the waterline | `GameScene.cpp:1646` already lifts the shadow plane to sea level for a feature at or above it; below the surface, nothing |
 
@@ -760,6 +760,25 @@ flat `blocking=0` plate lands on the bottom and nothing has to path around it.
 Kill a Peewee dropped from an Atlas over water: its `blocking=1` wreck falls the
 whole way and blocks the sea bed where it lands. Shoot down an aircraft over
 anything: nothing at all.
+
+### And it blocks hovercraft, which is the follow-up play-test
+
+Once wreckage sank, the next play-test reported that a hovercraft could not
+cross a wreck lying on the sea bed and expected that it should. It should
+not: `TOTALA-EXE.md` §95 reads the whole of what a feature contributes to
+movement, and the short of it is that a map square names a feature *type*,
+never an instance, so no collision test in the original can reach a wreck's
+`y` even in principle. All five readers of the `blocking` bit reject the
+square before any field of the movement class is consulted; there is no
+height term, no altitude term, and no exemption for `canhover`, `floater` or
+`amphibious`. The sink cannot change it either, since `0x424214` writes
+position and velocity and no square.
+
+The data is what made the rule visible. All thirteen hovercraft in `ccdata`
+leave `blocking=1` wreckage (`armah_dead`, 3x3, `height=20`) while a ship's
+corpse is the flat `blocking=0` plate above, so a hover battle obstructs the
+sea bed and a naval one does not — in the original as much as here. Nothing
+was changed; `src/rwe/sim/wreckcollision.test.cpp` pins it.
 
 ### The corpse level, done separately
 
