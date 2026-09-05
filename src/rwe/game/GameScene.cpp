@@ -18,6 +18,7 @@
 #include <rwe/game/OrderButtons.h>
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
+#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/resource_io.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService.h>
@@ -115,6 +116,37 @@ namespace rwe
         const auto& unit = sim.getUnitState(*singleSelectedUnit);
         const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
         return unitDefinition.builder;
+    }
+
+    /**
+     * Whether clicking `target` with `flyer` selected should send the
+     * aircraft down onto a repair pad rather than merely moving it there.
+     *
+     * Three arms of the original's order dispatcher -- 0x43F735, 0x43F959
+     * and 0x43FAEF -- test the same pair, the mover being `canfly` and the
+     * thing under the cursor being `isairbase`, and all three jump to the
+     * same place: 0x43FB1B, the VTOL_LANDING mission. The cursor agrees
+     * (0x43EA83 gives cursor 13 for exactly that pair), and the FAQ's
+     * account of it is the same gesture from the player's side: "Select the
+     * plane, click on Move and then click on the repair pad."
+     */
+    bool unitShouldLandOnAirBase(const GameSimulation& sim, UnitId flyer, UnitId target)
+    {
+        if (flyer == target)
+        {
+            return false;
+        }
+        const auto& flyerState = sim.getUnitState(flyer);
+        if (!sim.unitDefinitions.at(flyerState.unitType).canFly)
+        {
+            return false;
+        }
+        const auto& targetState = sim.getUnitState(target);
+        if (!targetState.isOwnedBy(flyerState.owner))
+        {
+            return false;
+        }
+        return unitIsAnUsableAirBase(targetState, sim.unitDefinitions.at(targetState.unitType));
     }
 
     bool unitIsBeingBuilt(const GameSimulation& sim, UnitId unitId)
@@ -1459,6 +1491,14 @@ namespace rwe
                     return unitOption->get().position;
                 },
                 [&](const UnloadOrder& o) { return o.destination; },
+                [&](const LandOnAirBaseOrder& o) {
+                    auto unitOption = tryGetUnit(o.target);
+                    if (!unitOption)
+                    {
+                        return pos;
+                    }
+                    return unitOption->get().position;
+                },
                 [&](const DgunOrder& o) {
                     return match(
                         o.target,
@@ -1509,7 +1549,11 @@ namespace rwe
                 [&](const UnloadOrder&) { return std::optional<CursorType>(CursorType::Unload); },
                 // The original has no cursor of its own for the D-gun; the
                 // attack cursor is what CURSORS.GAF offers and what it uses.
-                [&](const DgunOrder&) { return std::optional<CursorType>(CursorType::Attack); });
+                [&](const DgunOrder&) { return std::optional<CursorType>(CursorType::Attack); },
+                // The original has a landing cursor of its own -- 0x43EA83
+                // gives cursor 13 for an aircraft over an air base -- but RWE
+                // has no sprite loaded for it, so the move cursor stands in.
+                [&](const LandOnAirBaseOrder&) { return std::optional<CursorType>(CursorType::Move); });
 
             // draw waypoint icons
             if (waypointIcon)
@@ -1542,7 +1586,8 @@ namespace rwe
                     [&](const LoadOrder&) { return true; },
                     [&](const UnloadOrder&) { return true; },
                     // No line, for the same reason an attack draws none.
-                    [&](const DgunOrder&) { return false; });
+                    [&](const DgunOrder&) { return false; },
+                    [&](const LandOnAirBaseOrder&) { return true; });
 
                 if (drawLine)
                 {
@@ -2813,6 +2858,26 @@ namespace rwe
                 [&](const MoveCursorMode&) {
                     for (const auto& selectedUnit : selectedUnits)
                     {
+                        // A move onto one of our own repair pads is a landing,
+                        // not a move. The original's order dispatcher turns the
+                        // same click into VTOL_LANDING (0x43FB1B), and the FAQ
+                        // describes this exact gesture from the other side:
+                        // "Select the plane, click on Move and then click on
+                        // the repair pad."
+                        if (hoveredUnit && unitShouldLandOnAirBase(simulation, selectedUnit, *hoveredUnit))
+                        {
+                            if (isShiftDown())
+                            {
+                                localPlayerEnqueueUnitOrder(selectedUnit, LandOnAirBaseOrder(*hoveredUnit));
+                            }
+                            else
+                            {
+                                localPlayerIssueUnitOrder(selectedUnit, LandOnAirBaseOrder(*hoveredUnit));
+                                cursorMode.next(NormalCursorMode());
+                            }
+                            continue;
+                        }
+
                         auto coord = getMouseTerrainCoordinate();
                         if (coord)
                         {

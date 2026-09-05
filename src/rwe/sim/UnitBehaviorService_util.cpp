@@ -255,13 +255,32 @@ namespace rwe
         return definition.builder && definition.isAirBase && state.activated && state.isAlive();
     }
 
+    SimScalar airBaseRepairReach(const GameSimulation& sim, const UnitDefinition& padDefinition)
+    {
+        auto [footprintX, footprintZ] = sim.getFootprintXZ(padDefinition.movementCollisionInfo);
+        auto widest = std::max(footprintX, footprintZ);
+        auto halfFootprint = (SimScalar(static_cast<float>(widest)) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss;
+        return std::max(padDefinition.buildDistance, halfFootprint);
+    }
+
+    bool orderBreaksOffForRepair(const UnitOrder& order)
+    {
+        return match(
+            order,
+            [](const AttackOrder&) { return true; },
+            [](const PatrolOrder&) { return true; },
+            [](const GuardOrder&) { return true; },
+            [](const auto&) { return false; });
+    }
+
     std::optional<UnitId> findAircraftToRepairOnPad(GameSimulation& sim, ConstUnitInfo unitInfo)
     {
         // Whatever is sitting on the pad: an aircraft of the pad's own owner,
-        // on the ground rather than in the air, damaged, and inside the pad's
-        // build reach. The nearest wins, so a pad with two aircraft crowded
-        // onto it works on the closer one.
-        auto reachSquared = unitInfo.definition->buildDistance * unitInfo.definition->buildDistance;
+        // on the ground rather than in the air, damaged, and standing on the
+        // pad. The nearest wins, so a pad with two aircraft crowded onto it
+        // works on the closer one.
+        auto reach = airBaseRepairReach(sim, *unitInfo.definition);
+        auto reachSquared = reach * reach;
         std::optional<UnitId> best;
         auto bestDistanceSquared = reachSquared;
 

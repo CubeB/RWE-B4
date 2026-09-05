@@ -262,6 +262,9 @@ namespace rwe
                 }
             }
 
+            // A damaged aircraft breaks off what it is doing and goes home.
+            maybeBreakOffToRepairPad(unitInfo);
+
             // check our orders
             if (!unitInfo.state->orders.empty())
             {
@@ -551,21 +554,17 @@ namespace rwe
                 }
                 else
                 {
-                    // A damaged aircraft goes to a repair pad in preference to
-                    // setting down where it stands. The original does this by
-                    // swapping the standby mission for a VTOL_LANDING carrying
-                    // the pad as its target, which then holds until the
-                    // aircraft gets there; here the spot is remembered in
-                    // NavigationStateMovingToLandingSpot, which the branch
-                    // above short-circuits on, so the choice is likewise made
-                    // once and not re-rolled every tick.
-                    if (auto airBase = findAirBaseToLandOn(*sim, unitInfo))
-                    {
-                        auto spot = sim->getUnitState(*airBase).position;
-                        unitInfo.state->navigationState.state = NavigationStateMovingToLandingSpot{spot};
-                        return std::make_optional<MovingStateGoal>(spot);
-                    }
-
+                    // An aircraft with nothing to do lands where it stands,
+                    // damaged or not. This used to prefer a repair pad, on the
+                    // strength of reading 0x4105B9 as the standby mission
+                    // swapping itself for a VTOL_LANDING; 0x4105B9 is inside
+                    // VTOL_SeekAttack (0x4103E0), not VTOL_Standby (0x40F7D0),
+                    // and neither Standby nor VTOL_LandIfCan carries the health
+                    // gate at all. Going home is something an aircraft breaks
+                    // off *work* to do -- see maybeBreakOffToRepairPad -- and
+                    // an idle one does not do it, which is why the FAQ tells
+                    // you to give parked damaged planes a one-point patrol
+                    // route to make them go and get mended.
                     auto landingLocation = findLandingLocation(*sim, unitInfo);
                     if (!landingLocation)
                     {
@@ -1647,6 +1646,115 @@ namespace rwe
         unitInfo.state->clearWeaponTargets();
     }
 
+    void UnitBehaviorService::maybeBreakOffToRepairPad(UnitInfo unitInfo)
+    {
+        // Seven of the original's twenty-two VTOL mission handlers open with
+        // the same pair of instructions: the three-quarter health gate and a
+        // 3840-unit air base query (0x41055F, 0x4109B9, 0x410F95, 0x412613,
+        // 0x412B91, 0x413ADC, 0x4153E3). When the query finds something the
+        // handler pushes a VTOL_LANDING mission carrying the pad to the front
+        // of the unit's mission list (0x43ACB0) and returns, so the work it
+        // was doing is still underneath and comes back afterwards.
+        //
+        // Which seven matters as much as the gate itself. VTOL_Move and
+        // VTOL_Standby are not among them, so a plane merely sent somewhere,
+        // or one standing idle, never goes off to be mended; patrol, guard
+        // and every attack mission but one are, so a plane in a fight does.
+        if (!unitInfo.definition->canFly || unitInfo.state->orders.empty())
+        {
+            return;
+        }
+
+        if (!orderBreaksOffForRepair(unitInfo.state->orders.front()))
+        {
+            return;
+        }
+
+        auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
+        if (airPhysics == nullptr)
+        {
+            return;
+        }
+
+        // AirToAir (0x412D40) is the one attack handler with no health gate
+        // in it: a fighter already locked onto another aircraft fights on
+        // however badly hurt it is. Its three sibling handlers all break off.
+        if (std::holds_alternative<AirMovementStateDogfight>(airPhysics->movementState))
+        {
+            return;
+        }
+
+        if (!aircraftWantsRepair(*unitInfo.state, *unitInfo.definition))
+        {
+            return;
+        }
+
+        auto airBase = findAirBaseToLandOn(*sim, unitInfo);
+        if (!airBase)
+        {
+            return;
+        }
+
+        unitInfo.state->clearWeaponTargets();
+        dropAirAttackRun(unitInfo);
+        unitInfo.state->orders.push_front(LandOnAirBaseOrder(*airBase));
+    }
+
+    bool UnitBehaviorService::handleLandOnAirBaseOrder(UnitInfo unitInfo, const LandOnAirBaseOrder& order)
+    {
+        if (!unitInfo.definition->canFly)
+        {
+            return true;
+        }
+
+        // "Landing aborted": VTOL_Landing re-tests its pad before it commits
+        // (0x411DEB) and gives up if it has gone, and the pad list the query
+        // drew from only ever holds switched-on ones (0x40ABCF), so a pad
+        // turned off after the aircraft set out is no longer somewhere to
+        // land. A trip already under way is not cancelled by distance,
+        // though -- the mission holds its target, however far it has to go.
+        auto padRef = sim->tryGetUnitState(order.target);
+        if (!padRef)
+        {
+            return true;
+        }
+        const auto& pad = padRef->get();
+        const auto& padDefinition = sim->unitDefinitions.at(pad.unitType);
+        if (!pad.isOwnedBy(unitInfo.state->owner) || !unitIsAnUsableAirBase(pad, padDefinition))
+        {
+            return true;
+        }
+
+        auto reach = airBaseRepairReach(*sim, padDefinition);
+        auto parked = std::holds_alternative<UnitPhysicsInfoGround>(unitInfo.state->physics)
+            && unitInfo.state->position.distanceSquared(pad.position) <= (reach * reach);
+
+        if (parked)
+        {
+            // SELFREPAIR (0x402430) in state 1 does nothing but compare the
+            // aircraft's hit points against its maximum every tick, and only
+            // when they meet does it advance, say "Unit repaired" and return
+            // 5 -- deleting itself so the mission underneath resumes. The
+            // mending is not its work: the pad does that, in the builder
+            // path, which is why an aircraft on a switched-off pad sits there
+            // indefinitely instead of taking off again.
+            return unitInfo.state->hitPoints >= unitInfo.definition->maxHitPoints;
+        }
+
+        if (navigateTo(unitInfo, pad.position))
+        {
+            if (auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics))
+            {
+                if (auto flying = std::get_if<AirMovementStateFlying>(&airPhysics->movementState))
+                {
+                    flying->shouldLand = true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     bool UnitBehaviorService::handleOrder(UnitInfo unitInfo, const UnitOrder& order)
     {
         // If an order that steers the aircraft itself arrives while it is
@@ -1715,6 +1823,9 @@ namespace rwe
             },
             [&](const DgunOrder& o) {
                 return handleDgunOrder(unitInfo, o);
+            },
+            [&](const LandOnAirBaseOrder& o) {
+                return handleLandOnAirBaseOrder(unitInfo, o);
             });
     }
 

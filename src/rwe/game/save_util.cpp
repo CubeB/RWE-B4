@@ -837,7 +837,8 @@ namespace rwe
                 [&](const CaptureOrder& c) { return json{{"kind", "capture"}, {"target", saveUnitIdRef(c.target, ctx)}}; },
                 [&](const LoadOrder& l) { return json{{"kind", "load"}, {"target", saveUnitIdRef(l.target, ctx)}}; },
                 [](const UnloadOrder& u) { return json{{"kind", "unload"}, {"destination", saveSimVector(u.destination)}}; },
-                [&](const DgunOrder& d) { return json{{"kind", "dgun"}, {"target", saveAttackTarget(d.target, ctx)}}; });
+                [&](const DgunOrder& d) { return json{{"kind", "dgun"}, {"target", saveAttackTarget(d.target, ctx)}}; },
+                [&](const LandOnAirBaseOrder& l) { return json{{"kind", "landOnAirBase"}, {"target", saveUnitIdRef(l.target, ctx)}}; });
         }
 
         UnitOrder loadUnitOrder(const json& j, const LoadContext& ctx)
@@ -908,6 +909,10 @@ namespace rwe
             if (kind == "unload")
             {
                 return UnloadOrder(loadSimVector(j.at("destination")));
+            }
+            if (kind == "landOnAirBase")
+            {
+                return LandOnAirBaseOrder(loadUnitIdRef(j.at("target"), ctx));
             }
             throw std::runtime_error("bad UnitOrder kind: " + kind);
         }

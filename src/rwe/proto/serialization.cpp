@@ -112,6 +112,12 @@ namespace rwe
                 [&](const SimVector& v) { serializeVector(v, *out.mutable_ground()); });
         }
 
+        void operator()(const LandOnAirBaseOrder& o)
+        {
+            auto& out = *cmd->mutable_land_on_air_base();
+            out.set_unit(o.target.value);
+        }
+
         void operator()(const ReclaimOrder& o)
         {
             auto& out = *cmd->mutable_reclaim();
@@ -461,6 +467,11 @@ namespace rwe
             }
 
             throw std::runtime_error("Failed to deserialize dgun order");
+        }
+
+        if (cmd.has_land_on_air_base())
+        {
+            return LandOnAirBaseOrder(UnitId(cmd.land_on_air_base().unit()));
         }
 
         if (cmd.has_build())

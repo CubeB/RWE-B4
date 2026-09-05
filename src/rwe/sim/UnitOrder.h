@@ -124,6 +124,22 @@ namespace rwe
         explicit DgunOrder(const SimVector& target) : target(target) {}
     };
 
+    /**
+     * Fly to a friendly air repair pad, set down on it, and stay there until
+     * whole. The original makes this a mission of its own -- `VTOL_LANDING`
+     * carrying the pad as its target (0x4105B9) -- pushed to the *front* of
+     * the aircraft's mission list (0x43ACB0), so whatever it was doing is
+     * still underneath and resumes the moment the repair finishes. On arrival
+     * the landing mission swaps itself for `SELFREPAIR` (0x411ECE), which is
+     * ground mission 20 at 0x402430 and does nothing but wait for full health
+     * before returning 5 and letting the mission underneath take over again.
+     */
+    struct LandOnAirBaseOrder
+    {
+        UnitId target;
+        explicit LandOnAirBaseOrder(const UnitId& target) : target(target) {}
+    };
+
     /** A transport sets down everything it carries at a point. */
     struct UnloadOrder
     {
@@ -131,5 +147,5 @@ namespace rwe
         explicit UnloadOrder(const SimVector& destination) : destination(destination) {}
     };
 
-    using UnitOrder = std::variant<MoveOrder, AttackOrder, BuildOrder, BuggerOffOrder, CompleteBuildOrder, GuardOrder, ReclaimOrder, RepairOrder, PatrolOrder, CaptureOrder, LoadOrder, UnloadOrder, DgunOrder>;
+    using UnitOrder = std::variant<MoveOrder, AttackOrder, BuildOrder, BuggerOffOrder, CompleteBuildOrder, GuardOrder, ReclaimOrder, RepairOrder, PatrolOrder, CaptureOrder, LoadOrder, UnloadOrder, DgunOrder, LandOnAirBaseOrder>;
 }

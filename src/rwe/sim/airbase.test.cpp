@@ -54,7 +54,7 @@ namespace rwe
             sim.unitModelDefinitions[objectName] = createUnitModelDefinition(10_ss, std::move(pieces));
         }
 
-        /** The ARM Freedom Fighter: a plain fighter with nothing special about it. */
+        /** ARMFIG, the ARM Freedom Fighter, with its own shipped numbers. */
         UnitDefinition makeAirBaseFighterDef()
         {
             UnitDefinition d{};
@@ -62,15 +62,15 @@ namespace rwe
             d.isMobile = true;
             d.canMove = true;
             d.canFly = true;
-            d.cruiseAltitude = 200_ss;
+            d.cruiseAltitude = 110_ss;
             d.maxVelocity = 10_ss;
-            d.acceleration = 0.1_ssf;
-            d.brakeRate = 0.5_ssf;
-            d.turnRate = 500_ss;
+            d.acceleration = 0.35_ssf;
+            d.brakeRate = 6.0_ssf;
+            d.turnRate = 512_ss;
             d.maneuverLeashLength = 1280_ss;
             d.sightDistance = 350u;
-            d.maxHitPoints = 400;
-            d.buildTime = 0u;
+            d.maxHitPoints = 196;
+            d.buildTime = 9182u;
             d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
             return d;
         }
@@ -111,6 +111,13 @@ namespace rwe
             unit.previousPosition = pos;
             unit.hitPoints = sim.unitDefinitions.at(unitType).maxHitPoints;
             unit.fireOrders = UnitFireOrders::FireAtWill;
+
+            // Finished, not a nanoframe. These definitions carry the real
+            // shipped BuildTime -- ARMFIG's is 9182 -- and tryAddUnit does not
+            // wind the counter the way a completed build would, so without
+            // this every unit here is permanently under construction: the
+            // repair search skips it and the behaviour update never runs it.
+            unit.buildTimeCompleted = sim.unitDefinitions.at(unitType).buildTime;
             return sim.tryAddUnit(std::move(unit)).value();
         }
 
@@ -163,36 +170,42 @@ namespace rwe
     TEST_CASE("an aircraft only looks for a repair pad below three quarters health", "[airbase]")
     {
         // 0x410518: (maxHitPoints >> 2) * 3, and the jump out is jae, so the
-        // aircraft must be strictly under it. 400 max makes the threshold 300.
+        // aircraft must be strictly under it. ARMFIG's 196 makes it 147.
         AirBaseFixture f;
         f.addPad(f.us, SimVector(500_ss, 0_ss, 0_ss));
 
-        f.damageFighterTo(400);
+        f.damageFighterTo(196);
         REQUIRE_FALSE(findAirBaseToLandOn(f.sim, f.fighterInfo()).has_value());
 
-        f.damageFighterTo(300);
+        f.damageFighterTo(147);
         REQUIRE_FALSE(findAirBaseToLandOn(f.sim, f.fighterInfo()).has_value());
 
-        f.damageFighterTo(299);
+        f.damageFighterTo(146);
         REQUIRE(findAirBaseToLandOn(f.sim, f.fighterInfo()).has_value());
     }
 
     TEST_CASE("the threshold truncates the quarter, not the product", "[airbase]")
     {
         // 0x41052B-0x41052E is shr eax,2 then lea eax,[eax+eax*2]: the divide
-        // by four happens first and throws away the remainder, so a 402 hit
-        // point aircraft gets a threshold of 300 and not the 301 that
-        // multiplying first would give. Anything sitting between the two
-        // readings goes to the pad under one and not under the other.
+        // by four happens first and throws away the remainder. ARMHAWK is the
+        // shipped aircraft that shows it -- 510 hit points give a threshold of
+        // (510 >> 2) * 3 = 381, where multiplying first would give 382. With
+        // the rule being `hitPoints < threshold`, a Hawk on exactly 381 stays
+        // out under this reading and would go to the pad under the other, so
+        // 381 is the value that tells the two apart.
         UnitDefinition d{};
-        d.maxHitPoints = 402;
+        d.maxHitPoints = 510;
         std::vector<UnitMesh> noPieces;
         UnitState state(noPieces, std::unique_ptr<CobEnvironment>());
 
-        state.hitPoints = 300;
+        state.hitPoints = 382;
         REQUIRE_FALSE(aircraftWantsRepair(state, d));
 
-        state.hitPoints = 299;
+        // The discriminating case: multiplying first would send this one.
+        state.hitPoints = 381;
+        REQUIRE_FALSE(aircraftWantsRepair(state, d));
+
+        state.hitPoints = 380;
         REQUIRE(aircraftWantsRepair(state, d));
     }
 
@@ -286,13 +299,17 @@ namespace rwe
         REQUIRE(chosen == (expectedIndex == 0 ? first : second));
     }
 
-    TEST_CASE("a damaged aircraft with nothing to do flies to the pad instead of setting down", "[airbase]")
+    TEST_CASE("a damaged aircraft with nothing to do lands where it stands", "[airbase]")
     {
-        // The whole point of the flag: the original swaps the standby mission
-        // for a VTOL_LANDING carrying the pad (0x4105B9), so the aircraft
-        // crosses the map to the pad rather than landing on the spot.
+        // An aircraft only breaks off for a pad from a mission that tests for
+        // one, and the idle mission is not among them. VTOL_SeekAttack is:
+        // its handler at 0x4103E0 -- the mission record at 0x4FD3DA names it,
+        // status text "Seeking to attack" -- runs the three-quarters health
+        // test at 0x410518 and swaps in a VTOL_LANDING carrying the pad at
+        // 0x4105B9. A plane merely standing about never reaches that code, so
+        // it sets down under itself however badly hurt it is.
         AirBaseFixture f;
-        auto pad = f.addPad(f.us, SimVector(2000_ss, 0_ss, 0_ss));
+        f.addPad(f.us, SimVector(2000_ss, 0_ss, 0_ss));
         f.damageFighterTo(100);
 
         auto start = f.sim.getUnitState(f.fighter).position;
@@ -301,15 +318,52 @@ namespace rwe
             f.sim.tick();
         }
 
-        auto padPosition = f.sim.getUnitState(pad).position;
-        auto flatDistance = [](const SimVector& a, const SimVector& b) {
-            auto dx = a.x - b.x;
-            auto dz = a.z - b.z;
-            return rweSqrt((dx * dx) + (dz * dz));
-        };
-        auto closed = flatDistance(start, padPosition) - flatDistance(f.sim.getUnitState(f.fighter).position, padPosition);
-        INFO("closed " << simScalarToFloat(closed) << " world units on the pad in two seconds");
-        REQUIRE(closed > 100_ss);
+        auto moved = f.sim.getUnitState(f.fighter).position.x - start.x;
+        INFO("drifted " << simScalarToFloat(moved) << " world units on x");
+        REQUIRE(moved < 100_ss);
+        REQUIRE(moved > -100_ss);
+
+        // And it never took an order to go anywhere.
+        const auto& orders = f.sim.getUnitState(f.fighter).orders;
+        REQUIRE((orders.empty() || !std::holds_alternative<LandOnAirBaseOrder>(orders.front())));
+    }
+
+    TEST_CASE("a damaged aircraft on a mission breaks off for the pad", "[airbase]")
+    {
+        // The other half of the same rule, and the one that matters: patrol,
+        // guard and the attack missions all carry the health test, so a plane
+        // with something to do abandons it and goes to be mended. The patrol
+        // order behind it is left in place, so the route resumes afterwards.
+        AirBaseFixture f;
+        auto pad = f.addPad(f.us, SimVector(500_ss, 0_ss, 0_ss));
+        f.damageFighterTo(100);
+
+        {
+            auto& fighter = f.sim.getUnitState(f.fighter);
+            fighter.orders.push_back(PatrolOrder(SimVector(-800_ss, 0_ss, 0_ss)));
+        }
+
+        std::optional<UnitId> landingTarget;
+        for (int tick = 0; tick < 60 && !landingTarget; ++tick)
+        {
+            f.sim.tick();
+            const auto& orders = f.sim.getUnitState(f.fighter).orders;
+            if (!orders.empty())
+            {
+                if (auto landing = std::get_if<LandOnAirBaseOrder>(&orders.front()))
+                {
+                    landingTarget = landing->target;
+                }
+            }
+        }
+
+        REQUIRE(landingTarget.has_value());
+        REQUIRE(*landingTarget == pad);
+
+        // The patrol is still underneath it, waiting.
+        const auto& orders = f.sim.getUnitState(f.fighter).orders;
+        REQUIRE(orders.size() >= 2);
+        REQUIRE(std::holds_alternative<PatrolOrder>(orders.back()));
     }
 
     TEST_CASE("an undamaged aircraft with nothing to do still lands where it stands", "[airbase]")

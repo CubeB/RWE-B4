@@ -71,6 +71,15 @@ namespace rwe
 
         bool handleDgunOrder(UnitInfo unitInfo, const DgunOrder& order);
 
+        bool handleLandOnAirBaseOrder(UnitInfo unitInfo, const LandOnAirBaseOrder& order);
+
+        /**
+         * A damaged aircraft part-way through work it is willing to abandon
+         * pushes a trip to a repair pad in front of that work, so the work
+         * comes back once it is whole again.
+         */
+        void maybeBreakOffToRepairPad(UnitInfo unitInfo);
+
         /** Hands steering back from an attack run to ordinary flight, keeping the speed. */
         void dropAirAttackRun(UnitInfo unitInfo);
 

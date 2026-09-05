@@ -2088,10 +2088,8 @@ Decoded here and deliberately **not** ported:
 - **The sight-range search `0x43B700`**, which is what both `VTOL_SeekAttack`
   state 1 and `VTOL_Standby` state 1 do before they fly anywhere. RWE has no
   equivalent — see §90 — and its own idle weapon acquisition stands in.
-- **The go-home-when-hurt branch.** Below 75 % health with an active repair pad
-  within 3840, both the search circuit and the strafing pass abandon what they
-  are doing and push a `VTOL_LANDING` on a pad chosen at random. RWE has no
-  air repair pads, so there is nothing to fly to.
+- **The go-home-when-hurt branch** is now ported — see §94. This bullet used to
+  say RWE had no air repair pads and nothing to fly to; it has both.
 - **`VTOL_Standby`'s carrying-something hop** (8–39 units around the idle spot,
   every 30–44 ticks). It only applies to a transport with units aboard, and RWE
   parks a loaded transport rather than fidgeting.
@@ -8964,3 +8962,77 @@ The disarm in state 0 needed nothing: RWE's behaviour pass already returns early
 for a unit that `isBeingBuilt`, so a nanoframe never runs a weapon.
 
 ---
+
+## 94. Air repair pads: who goes, when, and what the pad does about it
+
+Half of this was already recorded — §34's `isairbase` notes and the
+`findAirBaseToLandOn` predicate — and the half that was missing is the half
+that made it useful: what the pad does once the aircraft arrives.
+
+### Which missions send an aircraft home
+
+Not all of them, and the exceptions are the point. The health test is written
+out inside each mission handler rather than sitting in one place, so a mission
+whose handler does not carry it never sends its aircraft anywhere:
+
+```
+410518  mov  eax,[esi+0x92]          ; the definition
+41051e  movsx edx,WORD [esi+0x108]   ; current hit points
+410525  mov  eax,[eax+0x1fa]         ; maxdamage
+41052b  shr  eax,0x2                 ; >> 2 FIRST
+41052e  lea  ecx,[eax+eax*2]         ; ... then x3
+410531  cmp  edx,ecx
+410533  jae  0x4105fa                ; healthy -> carry on with the mission
+```
+
+The truncation is on the quarter and not on the product, which is visible on
+real data: ARMHAWK's 510 hit points give `(510 >> 2) * 3 = 381`, where
+multiplying first would give 382. The jump out is `jae`, so an aircraft at
+exactly three quarters is *not* damaged enough. A Hawk on 381 stays out.
+
+The handler above starts at `0x4103E0`, and the mission record at `0x4FD3DA`
+names it: **`VTOL_SeekAttack`**, status text "Seeking to attack". That matters,
+because it is easy to mistake this routine for the idle one. It is not.
+`VTOL_Standby` is `0x40F7D0` and carries no health test at all, so **a damaged
+aircraft with nothing to do lands where it stands rather than crossing the map
+to a pad.** Patrol, guard and the attack missions do carry it; `AirToAir` is
+the one attack handler that does not, so a fighter already locked onto another
+aircraft fights on however badly hurt it is.
+
+When the test does fire, the pad query runs and a `VTOL_LANDING` mission
+carrying the chosen pad is pushed in front of whatever the aircraft was doing:
+
+```
+41055f  call 0x40b530                ; the pad query, radius 0xf00 = 3840
+410595  call 0x4b6c30                ; rand(n) over the candidates
+4105b9  push 0x501b94                ; "VTOL_LANDING"
+4105be  call 0x438760
+```
+
+The mission underneath is left in place, so the route or the guard resumes
+once the aircraft is mended.
+
+### What the pad does
+
+A pad is a `Builder`, and mending what sits on it is the work it does when it
+has nothing else. RWE runs that from the ordinary builder path, after ordered
+work: a pad told to assist a factory does that instead, and only an idle pad
+looks for a patient.
+
+A patient is an aircraft of the pad's own owner, finished rather than still
+under construction, damaged, **on the ground rather than in the air**, and
+within reach — so an aircraft hovering over a pad is not worked on until it
+has actually come down. Reach is the larger of the pad's `BuildDistance` and
+half its own footprint, which is what keeps a four-by-four pad able to reach
+the aircraft parked in its own middle. With two aircraft crowded on, the
+nearer one is worked on.
+
+### What RWE does not do
+
+The pad choice is a `rand(n)` over the candidates in the original and a
+determinism-safe modulo draw here, remembered in the navigation state rather
+than re-rolled every tick — the original re-rolls because it swaps the mission
+once and then never reconsiders, which comes to the same thing.
+
+`VTOL_Standby`'s carrying-something hop and the sight-range search `0x43B700`
+remain unported for the reasons §91 gives.

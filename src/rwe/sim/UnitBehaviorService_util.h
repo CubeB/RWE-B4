@@ -92,6 +92,38 @@ namespace rwe
     std::optional<UnitId> findAircraftToRepairOnPad(GameSimulation& sim, ConstUnitInfo unitInfo);
 
     /**
+     * How close an aircraft has to be for a pad to count it as parked on it.
+     *
+     * The original never measures this at all: an aircraft that lands is
+     * *attached* to the pad as cargo (0x48AAC0 links it, 0x47E570 walks the
+     * link list to see which of the pad's landing slots are free), and the
+     * `SelfRepair` mission that mends it (0x402430) only ever asks whether
+     * its target still exists and is a builder. RWE has no attachment, so
+     * position is all the pad has to go on, and `Builddistance` is the wrong
+     * ruler for it: ARMASP and CORASP set it to 6, and ARMCARRY and CORCARRY
+     * -- the Colossus and the Hive, the two units a player builds *for* this
+     * -- do not set it at all, so reading the key alone left both carriers
+     * with a reach of zero and mending nothing. The pad's own footprint is
+     * what an aircraft actually stands on, so that is the measure.
+     */
+    SimScalar airBaseRepairReach(const GameSimulation& sim, const UnitDefinition& padDefinition);
+
+    /**
+     * Whether being part-way through this order is the kind of work a damaged
+     * aircraft abandons to go and find a pad.
+     *
+     * The health gate and the pad search appear in exactly seven of the
+     * original's twenty-two VTOL mission handlers -- `VTOL_Patrol`,
+     * `AirStrike`, `AirToGround`, `AirToGroundHover`, `VTOL_RepairPatrol`,
+     * `VTOL_SeekAttack` and `VTOL_SeekGuard`, at 0x410F95, 0x412613,
+     * 0x412B91, 0x413ADC, 0x4153E3, 0x41055F and 0x4109B9 -- and in none of
+     * the others. `VTOL_Move` and `VTOL_Standby` are both absent, which is
+     * why a plane merely sent somewhere never goes off to be mended and one
+     * on patrol does.
+     */
+    bool orderBreaksOffForRepair(const UnitOrder& order);
+
+    /**
      * True when the gun is bolted to the hull, so the unit has to be pointing
      * roughly at what it wants to shoot before it can shoot it.
      *

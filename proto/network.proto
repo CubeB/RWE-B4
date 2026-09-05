@@ -94,6 +94,15 @@ message DgunOrder
     }
 }
 
+// An aircraft sent to a friendly air repair pad to set down on it. The
+// original makes this its own mission rather than a move: three arms of the
+// order dispatcher (0x43F735, 0x43F959, 0x43FAEF) all turn a click on an
+// `isairbase` unit by a `canfly` unit into VTOL_LANDING.
+message LandOnAirBaseOrder
+{
+    required int32 unit = 1;
+}
+
 message PlayerUnitCommand
 {
     message IssueOrder
@@ -119,6 +128,7 @@ message PlayerUnitCommand
             LoadOrder load = 11;
             UnloadOrder unload = 12;
             DgunOrder dgun = 13;
+            LandOnAirBaseOrder land_on_air_base = 14;
         }
     }
 
