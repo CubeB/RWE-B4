@@ -2,6 +2,7 @@
 
 #include <array>
 #include <algorithm>
+#include <cmath>
 #include <rwe/util/Index.h>
 
 namespace rwe
@@ -304,57 +305,66 @@ namespace rwe
         return transform;
     }
 
-    Matrix4f getPieceTransformForRender(const std::string& pieceName, const UnitModelDefinition& modelDefinition, const std::vector<UnitMesh>& pieces, float frac)
+    ViewCullTest makeViewCullTest(const Matrix4f& viewProjectionMatrix)
+    {
+        // How far one world unit moves a point in clip space, taken along
+        // each axis in turn and added up rather than combined properly: the
+        // sum can only overstate the reach of a radius, and overstating it
+        // draws a unit that need not have been drawn, where understating it
+        // would drop one that should have been.
+        auto origin = viewProjectionMatrix * Vector3f(0.0f, 0.0f, 0.0f);
+        auto perWorldUnit = 0.0f;
+        for (const auto& axis : {Vector3f(1.0f, 0.0f, 0.0f), Vector3f(0.0f, 1.0f, 0.0f), Vector3f(0.0f, 0.0f, 1.0f)})
+        {
+            auto step = (viewProjectionMatrix * axis) - origin;
+            perWorldUnit += std::max(std::abs(step.x), std::abs(step.y));
+        }
+
+        return ViewCullTest{viewProjectionMatrix, perWorldUnit};
+    }
+
+    namespace
+    {
+        /**
+         * Where the piece transforms of the model being drawn are put. The
+         * renderer runs on one thread and every loop below fills this, reads
+         * it and is finished with it before the next model, so one buffer
+         * serves them all and no frame allocates for it after the first
+         * unit of the largest model in the game.
+         */
+        thread_local std::vector<Matrix4f> pieceTransformScratch;
+    }
+
+    const std::vector<Matrix4f>& computePieceTransformsForRender(
+        const UnitModelDefinition& modelDefinition,
+        const UnitModelRenderInfo& renderInfo,
+        const std::vector<UnitMesh>& pieces,
+        float frac)
     {
         assert(modelDefinition.pieces.size() == pieces.size());
 
-        std::optional<std::string> parentPiece = pieceName;
-        auto matrix = Matrix4f::identity();
-
-        do
+        // One pass down the hierarchy rather than a walk back up to the root
+        // for every piece: a parent's transform is already worked out by the
+        // time its children are reached, so each piece costs one matrix
+        // multiply instead of one per link above it, and none of it touches a
+        // string.
+        pieceTransformScratch.resize(pieces.size());
+        for (auto i : renderInfo.evaluationOrder)
         {
-            auto pieceIndexIt = modelDefinition.pieceIndicesByName.find(toUpper(*parentPiece));
-            if (pieceIndexIt == modelDefinition.pieceIndicesByName.end())
-            {
-                throw std::runtime_error("missing piece definition: " + *parentPiece);
-            }
-            const auto& pieceDef = modelDefinition.pieces[pieceIndexIt->second];
+            const auto& pieceDef = modelDefinition.pieces[i];
+            const auto& pieceState = pieces[i];
 
-            parentPiece = pieceDef.parent;
+            auto position = lerp(simVectorToFloat(pieceDef.origin + pieceState.previousOffset), simVectorToFloat(pieceDef.origin + pieceState.offset), frac);
+            auto rotationX = angleLerp(toRadians(pieceState.previousRotationX).value, toRadians(pieceState.rotationX).value, frac);
+            auto rotationY = angleLerp(toRadians(pieceState.previousRotationY).value, toRadians(pieceState.rotationY).value, frac);
+            auto rotationZ = angleLerp(toRadians(pieceState.previousRotationZ).value, toRadians(pieceState.rotationZ).value, frac);
 
-            auto pieceStateIt = pieces.begin() + pieceIndexIt->second;
+            auto local = Matrix4f::translation(position) * Matrix4f::rotationZXY(Vector3f(rotationX, rotationY, rotationZ));
+            auto parent = renderInfo.parentIndices[i];
+            pieceTransformScratch[i] = parent < 0 ? local : pieceTransformScratch[parent] * local;
+        }
 
-            auto position = lerp(simVectorToFloat(pieceDef.origin + pieceStateIt->previousOffset), simVectorToFloat(pieceDef.origin + pieceStateIt->offset), frac);
-            auto rotationX = angleLerp(toRadians(pieceStateIt->previousRotationX).value, toRadians(pieceStateIt->rotationX).value, frac);
-            auto rotationY = angleLerp(toRadians(pieceStateIt->previousRotationY).value, toRadians(pieceStateIt->rotationY).value, frac);
-            auto rotationZ = angleLerp(toRadians(pieceStateIt->previousRotationZ).value, toRadians(pieceStateIt->rotationZ).value, frac);
-            matrix = Matrix4f::translation(position) * Matrix4f::rotationZXY(Vector3f(rotationX, rotationY, rotationZ)) * matrix;
-        } while (parentPiece);
-
-        return matrix;
-    }
-
-    Matrix4f getPieceTransformForRender(const std::string& pieceName, const UnitModelDefinition& modelDefinition)
-    {
-        std::optional<std::string> parentPiece = pieceName;
-        auto pos = SimVector(0_ss, 0_ss, 0_ss);
-
-        do
-        {
-            auto pieceIndexIt = modelDefinition.pieceIndicesByName.find(toUpper(*parentPiece));
-            if (pieceIndexIt == modelDefinition.pieceIndicesByName.end())
-            {
-                throw std::runtime_error("missing piece definition: " + *parentPiece);
-            }
-
-            const auto& pieceDef = modelDefinition.pieces[pieceIndexIt->second];
-
-            parentPiece = pieceDef.parent;
-
-            pos += pieceDef.origin;
-        } while (parentPiece);
-
-        return Matrix4f::translation(simVectorToFloat(pos));
+        return pieceTransformScratch;
     }
 
     void drawShaderMesh(
@@ -411,21 +421,18 @@ namespace rwe
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         std::vector<UnitTextureMeshRenderInfo>& out)
     {
-        assert(modelDefinition.pieces.size() == meshes.size());
+        const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
+        const auto& transforms = computePieceTransformsForRender(modelDefinition, renderInfo, meshes, frac);
 
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
-            const auto& pieceDef = modelDefinition.pieces[i];
             const auto& mesh = meshes[i];
             if (!mesh.visible)
             {
                 continue;
             }
 
-            auto matrix = modelMatrix * getPieceTransformForRender(pieceDef.name, modelDefinition, meshes, frac);
-
-            const auto& resolvedMesh = *gameMediaDatabase.getUnitPieceMesh(objectName, pieceDef.name).value().get().mesh;
-            drawShaderMesh(viewProjectionMatrix, resolvedMesh, matrix, mesh.shaded, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, out);
+            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], mesh.shaded, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, out);
         }
     }
 
@@ -447,21 +454,18 @@ namespace rwe
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitShadowMeshBatch& batch)
     {
-        assert(modelDefinition.pieces.size() == meshes.size());
+        const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
+        const auto& transforms = computePieceTransformsForRender(modelDefinition, renderInfo, meshes, frac);
 
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
-            const auto& pieceDef = modelDefinition.pieces[i];
             const auto& mesh = meshes[i];
             if (!mesh.visible)
             {
                 continue;
             }
 
-            auto matrix = modelMatrix * getPieceTransformForRender(pieceDef.name, modelDefinition, meshes, frac);
-
-            const auto& resolvedMesh = *gameMediaDatabase.getUnitPieceMesh(objectName, pieceDef.name).value().get().mesh;
-            drawShaderMeshShadow(viewProjectionMatrix, resolvedMesh, matrix, groundHeight, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
+            drawShaderMeshShadow(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], groundHeight, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
         }
     }
 
@@ -476,14 +480,11 @@ namespace rwe
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitShadowMeshBatch& batch)
     {
+        const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
+
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
-            const auto& pieceDef = modelDefinition.pieces[i];
-
-            auto matrix = modelMatrix * getPieceTransformForRender(pieceDef.name, modelDefinition);
-
-            const auto& resolvedMesh = *gameMediaDatabase.getUnitPieceMesh(objectName, pieceDef.name).value().get().mesh;
-            drawShaderMeshShadow(viewProjectionMatrix, resolvedMesh, matrix, groundHeight, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
+            drawShaderMeshShadow(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * renderInfo.restTransforms[i], groundHeight, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
         }
     }
 
@@ -526,19 +527,18 @@ namespace rwe
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitMeshBatch& batch)
     {
+        const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
+        const auto& transforms = computePieceTransformsForRender(modelDefinition, renderInfo, meshes, frac);
+
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
-            const auto& pieceDef = modelDefinition.pieces[i];
             const auto& mesh = meshes[i];
             if (!mesh.visible)
             {
                 continue;
             }
 
-            auto matrix = modelMatrix * getPieceTransformForRender(pieceDef.name, modelDefinition, meshes, frac);
-
-            const auto& resolvedMesh = *gameMediaDatabase.getUnitPieceMesh(objectName, pieceDef.name).value().get().mesh;
-            drawBuildingShaderMesh(viewProjectionMatrix, resolvedMesh, matrix, mesh.shaded, buildPhase, unitY, simScalarToFloat(modelDefinition.height), playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.buildingMeshes);
+            drawBuildingShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], mesh.shaded, buildPhase, unitY, simScalarToFloat(modelDefinition.height), playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.buildingMeshes);
         }
     }
 
@@ -554,11 +554,11 @@ namespace rwe
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitMeshBatch& batch)
     {
-        for (const auto& pieceDef : modelDefinition.pieces)
+        const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
+
+        for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
-            auto matrix = modelMatrix * getPieceTransformForRender(pieceDef.name, modelDefinition);
-            const auto& resolvedMesh = *gameMediaDatabase.getUnitPieceMesh(objectName, pieceDef.name).value().get().mesh;
-            drawShaderMesh(viewProjectionMatrix, resolvedMesh, matrix, shaded, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
+            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * renderInfo.restTransforms[i], shaded, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
         }
     }
 
@@ -829,16 +829,18 @@ namespace rwe
         // itself hides stays hidden.
         auto bias = toCamera * 0.75f;
 
+        const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(unitDefinition.objectName, modelDefinition);
+        const auto& transforms = computePieceTransformsForRender(modelDefinition, renderInfo, unit.pieces, frac);
+
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
-            const auto& pieceDef = modelDefinition.pieces[i];
             if (!unit.pieces[i].visible)
             {
                 continue;
             }
 
-            auto matrix = transform * getPieceTransformForRender(pieceDef.name, modelDefinition, unit.pieces, frac);
-            const auto& pieceInfo = gameMediaDatabase.getUnitPieceMesh(unitDefinition.objectName, pieceDef.name).value().get();
+            auto matrix = transform * transforms[i];
+            const auto& pieceInfo = *renderInfo.pieces[i];
             if (!pieceInfo.edges)
             {
                 continue;
@@ -1082,6 +1084,21 @@ namespace rwe
             return;
         }
 
+        // Wake dots are the longest list the renderer walks: a wake lives
+        // ninety-six ticks and every hovercraft lays two a tick, so eight
+        // hundred of them keep about 130,000 dots alive between them and the
+        // camera can see a few hundred. Six vertices each is eighteen
+        // megabytes of vertex buffer a frame if all of them go in, so the
+        // ones outside the view are dropped here rather than uploaded for the
+        // GPU to clip. The projection is orthographic, so a point transforms
+        // straight to clip space with no divide, and the dot is two world
+        // units across -- far inside the margin.
+        auto clipPosition = viewProjectionMatrix * particle.position;
+        if (clipPosition.x < -1.05f || clipPosition.x > 1.05f || clipPosition.y < -1.05f || clipPosition.y > 1.05f)
+        {
+            return;
+        }
+
         const auto topLeft = particle.position + Vector3f(-1.0f, 0.0f, -1.0f);
         const auto topRight = particle.position + Vector3f(1.0f, 0.0f, -1.0f);
         const auto bottomLeft = particle.position + Vector3f(-1.0f, 0.0f, 1.0f);
@@ -1131,6 +1148,58 @@ namespace rwe
         batch.sprites.push_back(SpriteRenderInfo{&sprite, mvpMatrix, spriteRenderInfo->translucent});
     }
 
+    namespace
+    {
+        /**
+         * True when the ground under (x, z) is certainly below sea level,
+         * settled from the heightmap's corner values alone.
+         *
+         * MapTerrain::getHeightAt casts a vertical ray and intersects it with
+         * the four triangles a heightmap cell is split into -- and with those
+         * of the neighbouring cells as well, to close the cracks floating
+         * point leaves along a shared edge. That is up to sixteen ray-triangle
+         * tests. updateParticles calls it once per wake dot per tick, and a
+         * wake lives ninety-six ticks while every hovercraft lays two a tick,
+         * so eight hundred of them had it running 130,000 times a tick: ten
+         * milliseconds, the largest single cost in the frame.
+         *
+         * Every vertex of every one of those triangles is either a cell corner
+         * or a cell centre, and a cell centre is the average of its four
+         * corners, so every height the exact query can return lies between the
+         * lowest and the highest corner of the cells it looks at. When the
+         * highest of them is still under water the answer cannot be anything
+         * else and the ray need not be cast. A wake dot spends nearly all of
+         * its life over open water, where this settles it with sixteen byte
+         * comparisons; along a shore, where it does not settle it, the exact
+         * query still runs and still decides.
+         */
+        bool groundIsCertainlyBelowSeaLevel(const MapTerrain& terrain, float x, float z)
+        {
+            const auto& heights = terrain.getHeightMap();
+            auto cell = terrain.worldToHeightmapCoordinate(SimVector(SimScalar(x), 0_ss, SimScalar(z)));
+
+            // The exact query may walk into any of the eight cells around
+            // this one, whose corners span the four-by-four block below.
+            // Anywhere near the edge of the map, leave it to the query: it
+            // has an out-of-bounds answer of its own.
+            if (cell.x < 1 || cell.y < 1 || cell.x + 2 >= heights.getWidth() || cell.y + 2 >= heights.getHeight())
+            {
+                return false;
+            }
+
+            unsigned char highest = 0;
+            for (int dy = -1; dy <= 2; ++dy)
+            {
+                for (int dx = -1; dx <= 2; ++dx)
+                {
+                    highest = std::max(highest, heights.get(cell.x + dx, cell.y + dy));
+                }
+            }
+
+            return SimScalar(highest) < terrain.getSeaLevel();
+        }
+    }
+
     void updateParticles(const GameMediaDatabase& gameMediaDatabase, const MapTerrain& terrain, GameTime currentTime, std::vector<Particle>& particles)
     {
         auto end = particles.end();
@@ -1153,6 +1222,11 @@ namespace rwe
                     // under it comes up to sea level, which is what makes a
                     // wake stop cleanly at a shoreline instead of running up
                     // the beach behind the ship.
+                    if (groundIsCertainlyBelowSeaLevel(terrain, particle.position.x, particle.position.z))
+                    {
+                        return false;
+                    }
+
                     auto groundHeight = terrain.getHeightAt(
                         SimScalar(particle.position.x),
                         SimScalar(particle.position.z));

@@ -1,4 +1,5 @@
 #include "GraphicsContext.h"
+#include <rwe/render/render_prof.h>
 #include <rwe/util/rwe_string.h>
 
 #include <GL/glew.h>
@@ -461,6 +462,7 @@ namespace rwe
 
     VboHandle GraphicsContext::genBuffer()
     {
+        RWE_RENDERPROF_COUNT("n.vbo", 1);
         GLuint vbo;
         glGenBuffers(1, &vbo);
         return VboHandle(VboIdentifier(vbo));
@@ -628,6 +630,7 @@ namespace rwe
 
     void GraphicsContext::drawTriangles(const GlMesh& mesh)
     {
+        RWE_RENDERPROF_COUNT("n.draws", 1);
         glBindVertexArray(mesh.vao.get().value);
         glDrawArrays(GL_TRIANGLES, 0, mesh.vertexCount);
         glBindVertexArray(0);
@@ -635,6 +638,7 @@ namespace rwe
 
     void GraphicsContext::drawLines(const GlMesh& mesh)
     {
+        RWE_RENDERPROF_COUNT("n.draws", 1);
         glBindVertexArray(mesh.vao.get().value);
         glDrawArrays(GL_LINES, 0, mesh.vertexCount);
         glBindVertexArray(0);
@@ -642,6 +646,7 @@ namespace rwe
 
     void GraphicsContext::drawLineLoop(const GlMesh& mesh)
     {
+        RWE_RENDERPROF_COUNT("n.draws", 1);
         glBindVertexArray(mesh.vao.get().value);
         glDrawArrays(GL_LINE_LOOP, 0, mesh.vertexCount);
         glBindVertexArray(0);

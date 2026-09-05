@@ -1,4 +1,5 @@
 #include "SceneManager.h"
+#include <rwe/render/render_prof.h>
 
 namespace rwe
 {
@@ -113,6 +114,10 @@ namespace rwe
             auto timeElapsed = lastFrameStartTime == 0 ? 0 : startTime - lastFrameStartTime;
 
             SDL_Event event;
+            // The whole frame, from here to the swap: the scene's own
+            // breakdown is worth little without the number it has to add up
+            // to. Everything after this in the loop body is inside it.
+            RWE_RENDERPROF("loop");
             while (sdl->pollEvent(&event))
             {
                 if (imGuiContext->processEvent(event))
@@ -155,7 +160,10 @@ namespace rwe
                 imGuiContext->io->ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
             }
             imGuiContext->newFrame(window);
-            currentScene->update(timeElapsed);
+            {
+                RWE_RENDERPROF("update");
+                currentScene->update(timeElapsed);
+            }
             if (showDemoWindow)
             {
                 ImGui::ShowDemoWindow(&showDemoWindow);
@@ -178,9 +186,15 @@ namespace rwe
                 cursorService->render(uiRenderService);
             }
 
-            imGuiContext->renderDrawData();
+            {
+                RWE_RENDERPROF("imgui");
+                imGuiContext->renderDrawData();
+            }
 
-            sdl->glSwapWindow(window);
+            {
+                RWE_RENDERPROF("swap");
+                sdl->glSwapWindow(window);
+            }
 
             auto finishTime = timeService->getTicks();
             auto lastFrameDurationMs = finishTime - startTime;

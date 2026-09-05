@@ -9,14 +9,46 @@
 #include <rwe/game/WeaponMediaInfo.h>
 #include <rwe/geometry/CollisionMesh.h>
 #include <rwe/io/soundtdf/SoundClass.h>
+#include <rwe/math/Matrix4f.h>
 #include <rwe/render/GlMesh.h>
 #include <rwe/render/SpriteSeries.h>
 #include <rwe/sim/FeatureDefinitionId.h>
+#include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/util/rwe_string.h>
 #include <utility>
 
 namespace rwe
 {
+    /**
+     * Everything about a model that the renderer would otherwise work out
+     * again for every piece of every unit, every frame: which piece is whose
+     * parent, an order that visits a parent before its children, the piece
+     * meshes themselves, and the transforms a model has when nothing has
+     * moved.
+     *
+     * Before this existed, drawing a piece looked its parent chain up by
+     * name -- a toUpper() allocation and a hash lookup a link -- and then
+     * asked the media database for the mesh with a case-insensitive hash of
+     * two strings. Eight hundred Peewees have 10,400 visible pieces between
+     * them and the shadow pass walks all of them a second time, which put
+     * 17.7 ms a frame into name lookups alone. None of it varies over the
+     * life of a model, so it is resolved once, on first use.
+     */
+    struct UnitModelRenderInfo
+    {
+        /** Parent of each piece, or -1 for a root. */
+        std::vector<int> parentIndices;
+
+        /** Piece indices in an order that puts every parent before its children. */
+        std::vector<int> evaluationOrder;
+
+        /** The piece meshes, in piece order. */
+        std::vector<const UnitPieceMeshInfo*> pieces;
+
+        /** Each piece's transform with every offset and rotation at rest, in piece order. */
+        std::vector<Matrix4f> restTransforms;
+    };
+
     class GameMediaDatabase
     {
     private:
@@ -73,10 +105,21 @@ namespace rwe
 
         SimpleVectorMap<FeatureMediaInfo, FeatureDefinitionIdTag> featureMap;
 
+        // Resolved on first use and kept for the life of the database, keyed
+        // by the definition's address: model definitions live in the
+        // simulation's own map and are never moved or rebuilt while a game
+        // is running. Mutable because resolving is a cache fill, not a
+        // change: every caller of getUnitModelRenderInfo holds the database
+        // by const reference.
+        mutable std::unordered_map<const UnitModelDefinition*, UnitModelRenderInfo> unitModelRenderInfoCache;
+
     public:
         void addUnitPieceMesh(const std::string& unitName, const std::string& pieceName, const UnitPieceMeshInfo& pieceMesh);
 
         std::optional<std::reference_wrapper<const UnitPieceMeshInfo>> getUnitPieceMesh(const std::string& objectName, const std::string& pieceName) const;
+
+        /** The model's hierarchy and meshes, resolved once. See UnitModelRenderInfo. */
+        const UnitModelRenderInfo& getUnitModelRenderInfo(const std::string& objectName, const UnitModelDefinition& modelDefinition) const;
 
         std::optional<std::shared_ptr<GlMesh>> getSelectionMesh(const std::string& objectName) const;
 

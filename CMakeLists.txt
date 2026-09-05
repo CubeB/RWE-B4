@@ -479,6 +479,7 @@ set(SOURCE_FILES
     src/rwe/render/TextureHandle.h
     src/rwe/render/TextureRegion.cpp
     src/rwe/render/TextureRegion.h
+    src/rwe/render/render_prof.h
     src/rwe/render/UniformLocation.h
     src/rwe/render/VaoHandle.h
     src/rwe/render/VboHandle.h
@@ -845,6 +846,7 @@ set(TEST_FILES
     src/rwe/sim/waterline.test.cpp
     src/rwe/game/screenshake.test.cpp
     src/rwe/game/wake.test.cpp
+    src/rwe/game/viewcull.test.cpp
     src/rwe/sim/buildangle.test.cpp
     src/rwe/sim/bombsight.test.cpp
     src/rwe/sim/cob.test.cpp

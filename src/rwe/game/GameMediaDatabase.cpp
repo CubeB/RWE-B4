@@ -1,4 +1,7 @@
 #include "GameMediaDatabase.h"
+#include <algorithm>
+#include <rwe/sim/SimVector.h>
+#include <rwe/util/Index.h>
 
 namespace rwe
 {
@@ -30,6 +33,84 @@ namespace rwe
             return std::nullopt;
         }
         return it->second;
+    }
+
+    const UnitModelRenderInfo& GameMediaDatabase::getUnitModelRenderInfo(const std::string& objectName, const UnitModelDefinition& modelDefinition) const
+    {
+        auto cached = unitModelRenderInfoCache.find(&modelDefinition);
+        if (cached != unitModelRenderInfoCache.end())
+        {
+            return cached->second;
+        }
+
+        auto pieceCount = getSize(modelDefinition.pieces);
+
+        UnitModelRenderInfo info;
+        info.parentIndices.assign(pieceCount, -1);
+        info.pieces.assign(pieceCount, nullptr);
+
+        for (Index i = 0; i < pieceCount; ++i)
+        {
+            const auto& pieceDef = modelDefinition.pieces[i];
+
+            if (pieceDef.parent)
+            {
+                auto parentIt = modelDefinition.pieceIndicesByName.find(toUpper(*pieceDef.parent));
+                if (parentIt == modelDefinition.pieceIndicesByName.end())
+                {
+                    throw std::runtime_error("missing piece definition: " + *pieceDef.parent);
+                }
+                info.parentIndices[i] = parentIt->second;
+            }
+
+            auto mesh = getUnitPieceMesh(objectName, pieceDef.name);
+            if (!mesh)
+            {
+                throw std::runtime_error("missing piece mesh: " + objectName + "/" + pieceDef.name);
+            }
+            info.pieces[i] = &mesh->get();
+        }
+
+        // Depth first, so a parent is always visited before its children. A
+        // 3DO's pieces already come out of the loader in that order, but
+        // nothing enforces it, and a hierarchy that arrived the other way
+        // round would otherwise compose against a transform that had not been
+        // worked out yet -- a silent wrong answer rather than a crash.
+        std::vector<int> depths(pieceCount, 0);
+        for (Index i = 0; i < pieceCount; ++i)
+        {
+            int depth = 0;
+            for (auto parent = info.parentIndices[i]; parent >= 0; parent = info.parentIndices[parent])
+            {
+                if (++depth > pieceCount)
+                {
+                    throw std::runtime_error("cycle in piece hierarchy of " + objectName);
+                }
+            }
+            depths[i] = depth;
+        }
+        info.evaluationOrder.reserve(pieceCount);
+        for (Index i = 0; i < pieceCount; ++i)
+        {
+            info.evaluationOrder.push_back(static_cast<int>(i));
+        }
+        std::stable_sort(
+            info.evaluationOrder.begin(),
+            info.evaluationOrder.end(),
+            [&](int a, int b) { return depths[a] < depths[b]; });
+
+        // A model at rest: every piece where its own origin puts it, with no
+        // offset and no rotation. Features and projectile models never move a
+        // piece, so this is the whole answer for them.
+        info.restTransforms.assign(pieceCount, Matrix4f::identity());
+        for (auto i : info.evaluationOrder)
+        {
+            auto local = Matrix4f::translation(simVectorToFloat(modelDefinition.pieces[i].origin));
+            auto parent = info.parentIndices[i];
+            info.restTransforms[i] = parent < 0 ? local : info.restTransforms[parent] * local;
+        }
+
+        return unitModelRenderInfoCache.emplace(&modelDefinition, std::move(info)).first->second;
     }
 
     void GameMediaDatabase::addSpriteSeries(const std::string& gafName, const std::string& animName, std::shared_ptr<SpriteSeries> sprite)

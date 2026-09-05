@@ -18,6 +18,7 @@
 #include <rwe/game/OrderButtons.h>
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
+#include <rwe/render/render_prof.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/resource_io.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -676,22 +677,76 @@ namespace rwe
         return std::clamp(static_cast<int>(headRoom * 128) / soundCount, 1, 128);
     }
 
+#ifdef RWE_ENABLE_RENDERPROF
+    namespace
+    {
+        // Per-phase frame timing, reported every two seconds, in the same
+        // shape as the sim's SIMPROF line so the two can be read together.
+        // The slots live in render/render_prof.h so RenderService and
+        // SceneManager can add their own without a second mechanism; they are
+        // zeroed rather than erased so a reference held at a call site stays
+        // good.
+        std::chrono::steady_clock::time_point renderProfLastReport = std::chrono::steady_clock::now();
+        int renderProfFrames = 0;
+
+        void renderProfReport()
+        {
+            ++renderProfFrames;
+            auto now = std::chrono::steady_clock::now();
+            auto span = std::chrono::duration<double, std::milli>(now - renderProfLastReport).count();
+            if (span < 2000.0)
+            {
+                return;
+            }
+            auto frames = renderProfFrames == 0 ? 1 : renderProfFrames;
+            std::string line;
+            for (auto& [name, total] : renderProfTotals)
+            {
+                line += " " + name + "=" + std::to_string(static_cast<int>(total / frames * 1000.0)) + "us";
+                total = 0.0;
+            }
+            for (auto& [name, total] : renderProfCounts)
+            {
+                line += " " + name + "=" + std::to_string(static_cast<int>(total / frames));
+                total = 0.0;
+            }
+            LOG_INFO << "RENDERPROF frames=" << renderProfFrames
+                     << " fps=" << static_cast<int>(renderProfFrames * 1000.0 / span)
+                     << line;
+            renderProfFrames = 0;
+            renderProfLastReport = now;
+        }
+    }
+#endif
+
     void GameScene::render()
     {
-        if (guiVisible)
         {
-            renderUi();
+            RWE_RENDERPROF("frame");
+
+            if (guiVisible)
+            {
+                RWE_RENDERPROF("ui");
+                renderUi();
+            }
+
+            sceneContext.graphics->enableDepthBuffer();
+
+            {
+                RWE_RENDERPROF("world");
+                renderWorld();
+            }
+            sceneContext.graphics->disableDepthBuffer();
+
+            if (guiVisible)
+            {
+                RWE_RENDERPROF("overlay");
+                renderOverlay();
+            }
         }
-
-        sceneContext.graphics->enableDepthBuffer();
-
-        renderWorld();
-        sceneContext.graphics->disableDepthBuffer();
-
-        if (guiVisible)
-        {
-            renderOverlay();
-        }
+#ifdef RWE_ENABLE_RENDERPROF
+        renderProfReport();
+#endif
 
         // oh yeah also regulate sound.
         // Never call into the mixer while holding playingUnitChannelsLock:
@@ -1610,7 +1665,10 @@ namespace rwe
             recreateWorldRenderTextures();
         }
 
-        updateFogSprite();
+        {
+            RWE_RENDERPROF("w.fog");
+            updateFogSprite();
+        }
 
         sceneContext.graphics->bindFrameBuffer(worldFrameBuffer.frameBuffer.get());
         sceneContext.graphics->setViewport(
@@ -1638,33 +1696,49 @@ namespace rwe
         {
             fogOverlay = FogOverlay{fogOverlayTexture.get(), fogOverlayBounds.left(), fogOverlayBounds.top(), fogOverlayBounds.width(), fogOverlayBounds.height()};
         }
-        worldRenderService.drawMapTerrain(terrainGraphics, worldCameraState.getRoundedPosition(), worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()), fogOverlay);
+        {
+            RWE_RENDERPROF("w.terrain");
+            worldRenderService.drawMapTerrain(terrainGraphics, worldCameraState.getRoundedPosition(), worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()), fogOverlay);
+        }
 
         SpriteBatch flatFeatureBatch;
         SpriteBatch flatFeatureShadowBatch;
-        for (const auto& f : simulation.features)
         {
-            if (!positionIsExploredByLocalPlayer(f.second.position))
+            RWE_RENDERPROF("w.flatfeat.build");
+            for (const auto& f : simulation.features)
             {
-                continue;
-            }
-            const auto& featureDefinition = simulation.getFeatureDefinition(f.second.featureName);
-            if (!featureDefinition.isStanding())
-            {
-                auto fogged = !positionIsVisibleToLocalPlayer(f.second.position);
-                drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, simulation.gameTime, fogged, flatFeatureBatch);
-                drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, flatFeatureShadowBatch);
+                if (!positionIsExploredByLocalPlayer(f.second.position))
+                {
+                    continue;
+                }
+                const auto& featureDefinition = simulation.getFeatureDefinition(f.second.featureName);
+                if (!featureDefinition.isStanding())
+                {
+                    auto fogged = !positionIsVisibleToLocalPlayer(f.second.position);
+                    drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, simulation.gameTime, fogged, flatFeatureBatch);
+                    drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, flatFeatureShadowBatch);
+                }
             }
         }
-        worldRenderService.drawSpriteBatch(flatFeatureShadowBatch);
-        worldRenderService.drawSpriteBatch(flatFeatureBatch);
+        {
+            RWE_RENDERPROF("w.flatfeat.draw");
+            RWE_RENDERPROF_COUNT("n.flatfeat", flatFeatureBatch.sprites.size() + flatFeatureShadowBatch.sprites.size());
+            worldRenderService.drawSpriteBatch(flatFeatureShadowBatch);
+            worldRenderService.drawSpriteBatch(flatFeatureBatch);
+        }
 
-        ColoredMeshBatch squareParticlesBatch;
-        for (const auto& particle : particles)
         {
-            drawWakeParticle(gameMediaDatabase, simulation.gameTime, viewProjectionMatrix, particle, squareParticlesBatch);
+            RWE_RENDERPROF("w.wake");
+            wakeBatch.lines.clear();
+            wakeBatch.triangles.clear();
+            for (const auto& particle : particles)
+            {
+                drawWakeParticle(gameMediaDatabase, simulation.gameTime, viewProjectionMatrix, particle, wakeBatch);
+            }
+            RWE_RENDERPROF_COUNT("n.particles", particles.size());
+            RWE_RENDERPROF_COUNT("n.waketri", wakeBatch.triangles.size());
+            worldRenderService.drawBatch(wakeBatch, viewProjectionMatrix);
         }
-        worldRenderService.drawBatch(squareParticlesBatch, viewProjectionMatrix);
 
         ColoredMeshBatch terrainOverlayBatch;
 
@@ -1692,99 +1766,150 @@ namespace rwe
                 });
         }
 
-        worldRenderService.drawBatch(terrainOverlayBatch, viewProjectionMatrix);
+        {
+            RWE_RENDERPROF("w.terrainoverlay");
+            worldRenderService.drawBatch(terrainOverlayBatch, viewProjectionMatrix);
+        }
 
         auto interpolationFraction = static_cast<float>(millisecondsBuffer) / static_cast<float>(SimMillisecondsPerTick);
         ColoredMeshesBatch selectionRectBatch;
-        for (const auto& selectedUnitId : selectedUnits)
         {
-            const auto& unit = getUnit(selectedUnitId);
-            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
-            drawSelectionRect(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, interpolationFraction, selectionRectBatch);
+            RWE_RENDERPROF("w.selection");
+            for (const auto& selectedUnitId : selectedUnits)
+            {
+                const auto& unit = getUnit(selectedUnitId);
+                const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+                drawSelectionRect(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, interpolationFraction, selectionRectBatch);
+            }
+            worldRenderService.drawLineLoopsBatch(selectionRectBatch);
         }
-        worldRenderService.drawLineLoopsBatch(selectionRectBatch);
 
         auto seaLevel = simulation.terrain.getSeaLevel();
 
+        // What is off screen costs nothing from here on. Working out the
+        // transform of every piece of every unit on the map, and handing the
+        // driver a draw call for each, was the largest cost in the frame at
+        // eight hundred units, and a screenful is a fraction of them.
+        auto viewCull = makeViewCullTest(viewProjectionMatrix);
+
         UnitShadowMeshBatch unitShadowMeshBatch;
-        for (const auto& [_, unit] : simulation.units)
         {
-            if (!unitIsVisibleToLocalPlayer(unit))
+            RWE_RENDERPROF("w.shadow.build");
+            for (const auto& [_, unit] : simulation.units)
             {
-                continue;
-            }
-            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
-            if (!shadowsEnabled || !unitCastsShadow(unitDefinition))
-            {
-                continue;
-            }
-            const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
+                if (!unitIsVisibleToLocalPlayer(unit))
+                {
+                    continue;
+                }
+                const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+                if (!shadowsEnabled || !unitCastsShadow(unitDefinition))
+                {
+                    continue;
+                }
+                const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
 
-            auto groundHeight = simulation.terrain.getHeightAt(unit.position.x, unit.position.z);
-            if (unitDefinition.floater || unitDefinition.canHover)
-            {
-                groundHeight = rweMax(groundHeight, seaLevel);
-            }
-            drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch);
+                auto groundHeight = simulation.terrain.getHeightAt(unit.position.x, unit.position.z);
+                if (unitDefinition.floater || unitDefinition.canHover)
+                {
+                    groundHeight = rweMax(groundHeight, seaLevel);
+                }
 
-            if (unit.isBeingBuilt(unitDefinition))
+                // The cull goes on where the shadow lands rather than on where
+                // the unit is: an aircraft's shadow sits on the ground under it,
+                // which can be well inside the view while the aircraft itself is
+                // above the top of it.
+                auto shadowPosition = Vector3f(simScalarToFloat(unit.position.x), simScalarToFloat(groundHeight), simScalarToFloat(unit.position.z));
+                if (!viewCull.couldBeVisible(shadowPosition, ViewCullModelRadius))
+                {
+                    continue;
+                }
+
+                drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch);
+
+                if (unit.isBeingBuilt(unitDefinition))
+                {
+                    // The frame is see-through while it is built, so the shadow
+                    // would show through it. Keep only the part cast outside the
+                    // model's own outline.
+                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch.cutouts);
+                }
+            }
+            for (const auto& [_, feature] : simulation.features)
             {
-                // The frame is see-through while it is built, so the shadow
-                // would show through it. Keep only the part cast outside the
-                // model's own outline.
-                drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch.cutouts);
+                const auto& position = feature.position;
+                if (!positionIsExploredByLocalPlayer(position))
+                {
+                    continue;
+                }
+                auto groundHeight = simulation.terrain.getHeightAt(position.x, position.z);
+                if (position.y >= seaLevel && groundHeight < seaLevel)
+                {
+                    groundHeight = seaLevel;
+                }
+
+                auto shadowPosition = Vector3f(simScalarToFloat(position.x), simScalarToFloat(groundHeight), simScalarToFloat(position.z));
+                if (!viewCull.couldBeVisible(shadowPosition, ViewCullModelRadius))
+                {
+                    continue;
+                }
+
+                drawFeatureMeshShadow(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, simScalarToFloat(groundHeight), unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch);
             }
         }
-        for (const auto& [_, feature] : simulation.features)
         {
-            const auto& position = feature.position;
-            if (!positionIsExploredByLocalPlayer(position))
-            {
-                continue;
-            }
-            auto groundHeight = simulation.terrain.getHeightAt(position.x, position.z);
-            if (position.y >= seaLevel && groundHeight < seaLevel)
-            {
-                groundHeight = seaLevel;
-            }
-
-            drawFeatureMeshShadow(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, simScalarToFloat(groundHeight), unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch);
+            RWE_RENDERPROF("w.shadow.draw");
+            RWE_RENDERPROF_COUNT("n.shadowmesh", unitShadowMeshBatch.meshes.size() + unitShadowMeshBatch.cutouts.size());
+            worldRenderService.drawUnitShadowMeshBatch(unitShadowMeshBatch);
         }
-        worldRenderService.drawUnitShadowMeshBatch(unitShadowMeshBatch);
 
         sceneContext.graphics->enableDepthBuffer();
 
         UnitMeshBatch unitMeshBatch;
-        for (const auto& [unitId, unit] : simulation.units)
         {
-            if (!unitIsVisibleToLocalPlayer(unit))
+            RWE_RENDERPROF("w.unit.build");
+            for (const auto& [unitId, unit] : simulation.units)
             {
-                continue;
+                if (!unitIsVisibleToLocalPlayer(unit))
+                {
+                    continue;
+                }
+                if (!viewCull.couldBeVisible(simVectorToFloat(unit.position), ViewCullModelRadius))
+                {
+                    continue;
+                }
+                const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+                const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
+                drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, simulation.gameTime.value, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
             }
-            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
-            const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
-            drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, simulation.gameTime.value, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+            for (const auto& [_, feature] : simulation.features)
+            {
+                if (!positionIsExploredByLocalPlayer(feature.position))
+                {
+                    continue;
+                }
+                if (!viewCull.couldBeVisible(simVectorToFloat(feature.position), ViewCullModelRadius))
+                {
+                    continue;
+                }
+                drawMeshFeature(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+            }
+            for (const auto& d : debris)
+            {
+                if (d.shard)
+                {
+                    continue;
+                }
+                auto position = d.position + (d.velocity * interpolationFraction);
+                auto rotation = d.rotation + (d.angularVelocity * interpolationFraction);
+                auto matrix = Matrix4f::translation(position) * Matrix4f::rotationZXY(rotation);
+                drawDebrisPiece(gameMediaDatabase, viewProjectionMatrix, d.objectName, d.pieceName, matrix, d.color, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+            }
         }
-        for (const auto& [_, feature] : simulation.features)
         {
-            if (!positionIsExploredByLocalPlayer(feature.position))
-            {
-                continue;
-            }
-            drawMeshFeature(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+            RWE_RENDERPROF("w.unit.draw");
+            RWE_RENDERPROF_COUNT("n.unitmesh", unitMeshBatch.meshes.size() + unitMeshBatch.buildingMeshes.size() + unitMeshBatch.cloakedMeshes.size());
+            worldRenderService.drawUnitMeshBatch(unitMeshBatch, simScalarToFloat(seaLevel));
         }
-        for (const auto& d : debris)
-        {
-            if (d.shard)
-            {
-                continue;
-            }
-            auto position = d.position + (d.velocity * interpolationFraction);
-            auto rotation = d.rotation + (d.angularVelocity * interpolationFraction);
-            auto matrix = Matrix4f::translation(position) * Matrix4f::rotationZXY(rotation);
-            drawDebrisPiece(gameMediaDatabase, viewProjectionMatrix, d.objectName, d.pieceName, matrix, d.color, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
-        }
-        worldRenderService.drawUnitMeshBatch(unitMeshBatch, simScalarToFloat(seaLevel));
 
         // Construction wireframe: the visible polygon edges of each nanoframe,
         // drawn with the depth test on so the model hides its own back. The
@@ -1792,6 +1917,7 @@ namespace rwe
         // colour, a triangle wave down palette entries 160..175 and back that
         // comes round about every half second, offset per unit.
         {
+            RWE_RENDERPROF("w.wireframe");
             // The direction from the scene towards the camera, in world space.
             auto inverseViewProjection = computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
             auto toCamera = ((inverseViewProjection * Vector3f(0.0f, 0.0f, -1.0f)) - (inverseViewProjection * Vector3f(0.0f, 0.0f, 0.0f))).normalized();
@@ -1800,6 +1926,10 @@ namespace rwe
             for (const auto& [unitId, unit] : simulation.units)
             {
                 if (!unitIsVisibleToLocalPlayer(unit))
+                {
+                    continue;
+                }
+                if (!viewCull.couldBeVisible(simVectorToFloat(unit.position), ViewCullModelRadius))
                 {
                     continue;
                 }
@@ -1819,37 +1949,48 @@ namespace rwe
         ColoredMeshBatch lineProjectilesBatch;
         SpriteBatch spriteProjectilesBatch;
         UnitMeshBatch meshProjectilesBatch;
-        drawProjectiles(simulation, gameMediaDatabase, viewProjectionMatrix, simulation.projectiles, simulation.gameTime, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, lineProjectilesBatch, spriteProjectilesBatch, meshProjectilesBatch);
-        worldRenderService.drawBatch(lineProjectilesBatch, viewProjectionMatrix);
-        worldRenderService.drawUnitMeshBatch(meshProjectilesBatch, simScalarToFloat(seaLevel));
-        worldRenderService.drawSpriteBatch(spriteProjectilesBatch);
+        {
+            RWE_RENDERPROF("w.projectiles");
+            drawProjectiles(simulation, gameMediaDatabase, viewProjectionMatrix, simulation.projectiles, simulation.gameTime, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, lineProjectilesBatch, spriteProjectilesBatch, meshProjectilesBatch);
+            worldRenderService.drawBatch(lineProjectilesBatch, viewProjectionMatrix);
+            worldRenderService.drawUnitMeshBatch(meshProjectilesBatch, simScalarToFloat(seaLevel));
+            worldRenderService.drawSpriteBatch(spriteProjectilesBatch);
+        }
 
         sceneContext.graphics->disableDepthWrites();
 
         SpriteBatch featureBatch;
         SpriteBatch featureShadowBatch;
-        for (const auto& f : simulation.features)
         {
-            if (!positionIsExploredByLocalPlayer(f.second.position))
+            RWE_RENDERPROF("w.feature.build");
+            for (const auto& f : simulation.features)
             {
-                continue;
-            }
-            const auto& featureDefinition = simulation.getFeatureDefinition(f.second.featureName);
-            if (featureDefinition.isStanding())
-            {
-                auto fogged = !positionIsVisibleToLocalPlayer(f.second.position);
-                drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, simulation.gameTime, fogged, featureBatch);
-                drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, featureShadowBatch);
+                if (!positionIsExploredByLocalPlayer(f.second.position))
+                {
+                    continue;
+                }
+                const auto& featureDefinition = simulation.getFeatureDefinition(f.second.featureName);
+                if (featureDefinition.isStanding())
+                {
+                    auto fogged = !positionIsVisibleToLocalPlayer(f.second.position);
+                    drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, simulation.gameTime, fogged, featureBatch);
+                    drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, featureShadowBatch);
+                }
             }
         }
-        worldRenderService.drawSpriteBatch(featureShadowBatch);
-        worldRenderService.drawSpriteBatch(featureBatch);
+        {
+            RWE_RENDERPROF("w.feature.draw");
+            RWE_RENDERPROF_COUNT("n.featuresprite", featureBatch.sprites.size() + featureShadowBatch.sprites.size());
+            worldRenderService.drawSpriteBatch(featureShadowBatch);
+            worldRenderService.drawSpriteBatch(featureBatch);
+        }
 
         // Particles that belong in the world rather than over it: drawn here,
         // while the depth test is still on, so what is in front of them hides
         // them. An aircraft's exhaust comes out from under the hull, and the
         // hull should cover it.
         {
+            RWE_RENDERPROF("w.particles");
             SpriteBatch worldSpriteParticlesBatch;
             for (const auto& particle : particles)
             {
@@ -1867,25 +2008,31 @@ namespace rwe
         // without it, a construction aircraft hovering over its work has the
         // spray painted across the top of the fuselage.
         ColoredMeshBatch nanoParticlesBatch;
-        for (const auto& particle : particles)
         {
-            drawNanoParticle(simulation.gameTime, interpolationFraction, particle, nanoParticlesBatch);
-        }
-        for (const auto& d : debris)
-        {
-            if (d.shard)
+            RWE_RENDERPROF("w.nano");
+            for (const auto& particle : particles)
             {
-                drawDebrisShard(d.position + (d.velocity * interpolationFraction), nanoParticlesBatch);
+                drawNanoParticle(simulation.gameTime, interpolationFraction, particle, nanoParticlesBatch);
             }
+            for (const auto& d : debris)
+            {
+                if (d.shard)
+                {
+                    drawDebrisShard(d.position + (d.velocity * interpolationFraction), nanoParticlesBatch);
+                }
+            }
+            worldRenderService.drawBatch(nanoParticlesBatch, viewProjectionMatrix);
         }
-        worldRenderService.drawBatch(nanoParticlesBatch, viewProjectionMatrix);
 
         sceneContext.graphics->disableDepthTest();
 
-        sceneContext.graphics->bindFrameBufferColorBuffer(dodgeMask.get());
-        sceneContext.graphics->clearColor();
-        worldRenderService.drawFlashes(simulation.gameTime, flashes);
-        sceneContext.graphics->bindFrameBufferColorBuffer(worldFrameBuffer.texture.get());
+        {
+            RWE_RENDERPROF("w.flashes");
+            sceneContext.graphics->bindFrameBufferColorBuffer(dodgeMask.get());
+            sceneContext.graphics->clearColor();
+            worldRenderService.drawFlashes(simulation.gameTime, flashes);
+            sceneContext.graphics->bindFrameBufferColorBuffer(worldFrameBuffer.texture.get());
+        }
 
         sceneContext.graphics->unbindFrameBuffer();
         auto viewportPos = worldViewport.toOtherViewport(*sceneContext.viewport, 0, worldViewport.height());
@@ -1896,26 +2043,29 @@ namespace rwe
             worldViewport.height());
 
         sceneContext.graphics->disableDepthBuffer();
-        auto quadMesh = sceneContext.graphics->createUnitTexturedQuadFlipped(Rectangle2f::fromTLBR(1.0f, 0.0f, 0.0f, 1.0f));
-        sceneContext.graphics->bindShader(sceneContext.shaders->worldPost.handle.get());
-        sceneContext.graphics->setUniformInt(sceneContext.shaders->worldPost.dodgeMask, 1);
-        sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.gamma, static_cast<float>(gammaSetting) / 100.0f);
-        sceneContext.graphics->bindTexture(worldFrameBuffer.texture.get());
-        sceneContext.graphics->setActiveTextureSlot1();
-        sceneContext.graphics->bindTexture(dodgeMask.get());
-        sceneContext.graphics->setActiveTextureSlot0();
-        sceneContext.graphics->drawTriangles(quadMesh);
-
-        SpriteBatch spriteParticlesBatch;
-        for (const auto& particle : particles)
         {
-            if (particleDrawsInWorld(particle))
+            RWE_RENDERPROF("w.post");
+            auto quadMesh = sceneContext.graphics->createUnitTexturedQuadFlipped(Rectangle2f::fromTLBR(1.0f, 0.0f, 0.0f, 1.0f));
+            sceneContext.graphics->bindShader(sceneContext.shaders->worldPost.handle.get());
+            sceneContext.graphics->setUniformInt(sceneContext.shaders->worldPost.dodgeMask, 1);
+            sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.gamma, static_cast<float>(gammaSetting) / 100.0f);
+            sceneContext.graphics->bindTexture(worldFrameBuffer.texture.get());
+            sceneContext.graphics->setActiveTextureSlot1();
+            sceneContext.graphics->bindTexture(dodgeMask.get());
+            sceneContext.graphics->setActiveTextureSlot0();
+            sceneContext.graphics->drawTriangles(quadMesh);
+
+            SpriteBatch spriteParticlesBatch;
+            for (const auto& particle : particles)
             {
-                continue;
+                if (particleDrawsInWorld(particle))
+                {
+                    continue;
+                }
+                drawSpriteParticle(gameMediaDatabase, simulation.gameTime, viewProjectionMatrix, particle, spriteParticlesBatch);
             }
-            drawSpriteParticle(gameMediaDatabase, simulation.gameTime, viewProjectionMatrix, particle, spriteParticlesBatch);
+            worldRenderService.drawSpriteBatch(spriteParticlesBatch);
         }
-        worldRenderService.drawSpriteBatch(spriteParticlesBatch);
         sceneContext.graphics->enableDepthTest();
 
         sceneContext.graphics->enableDepthWrites();
@@ -1923,6 +2073,7 @@ namespace rwe
         // The sweep over a freshly placed building plays whether or not shift
         // is held: it is the acknowledgement of the click, and the original
         // shows it as soon as the order exists.
+        RWE_RENDERPROF("w.worldui");
         renderPlacementSweeps();
 
         // in-world UI/overlay rendering
@@ -3521,6 +3672,7 @@ namespace rwe
         // to do -- clearing the field.
         if (!battleTestPlayers.empty())
         {
+            RWE_RENDERPROF("u.battletest");
             runBattleTest();
         }
 
@@ -4752,9 +4904,16 @@ namespace rwe
 
         processPlayerCommands(*playerCommands);
 
-        simulation.tick();
+        {
+            RWE_RENDERPROF("u.simtick");
+            simulation.tick();
+        }
 
-        auto gameHash = simulation.computeHash();
+        GameHash gameHash{0};
+        {
+            RWE_RENDERPROF("u.hash");
+            gameHash = simulation.computeHash();
+        }
         playerCommandService->pushHash(localPlayerId, gameHash);
         gameNetworkService->submitGameHash(gameHash);
 
@@ -4763,7 +4922,10 @@ namespace rwe
             *stateLogStream << dumpJson(simulation) << std::endl;
         }
 
-        processSimEvents();
+        {
+            RWE_RENDERPROF("u.events");
+            processSimEvents();
+        }
 
         updateCloakNotifications();
 
@@ -4777,9 +4939,15 @@ namespace rwe
 
         updateScreenShake();
 
-        updateParticles(gameMediaDatabase, simulation.terrain, simulation.gameTime, particles);
+        {
+            RWE_RENDERPROF("u.particles");
+            updateParticles(gameMediaDatabase, simulation.terrain, simulation.gameTime, particles);
+        }
 
-        spawnNanoParticles();
+        {
+            RWE_RENDERPROF("u.spawnnano");
+            spawnNanoParticles();
+        }
 
         spawnGeoVentSteam();
 

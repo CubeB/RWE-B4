@@ -494,6 +494,16 @@ namespace rwe
 
         std::vector<Particle> particles;
 
+        /**
+         * Where the wake dots' geometry is built, kept between frames for its
+         * capacity alone. A wake dot is six vertices and a busy water map has
+         * tens of thousands of them on screen, so a vector that starts empty
+         * every frame spends the frame growing back to a couple of hundred
+         * thousand entries and copying what it already had each time.
+         * Cleared, not destroyed, at the top of every frame.
+         */
+        ColoredMeshBatch wakeBatch;
+
         /** A piece blown off a unit by its script, tumbling under gravity. Purely visual. */
         struct Debris
         {

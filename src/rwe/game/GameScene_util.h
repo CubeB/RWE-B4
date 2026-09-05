@@ -23,6 +23,46 @@
 
 namespace rwe
 {
+    /**
+     * Whether a model standing at a world position could reach the view.
+     *
+     * The renderer walked every unit on the map, worked out a transform for
+     * every piece of it and put the result in a batch whether or not the
+     * camera was pointing anywhere near it. On a battlefield of eight hundred
+     * units that is ten thousand piece transforms and ten thousand draw calls
+     * for the models, and as many again for their shadows, when a screenful
+     * is a few hundred.
+     *
+     * The world projection is orthographic, so a point goes straight to clip
+     * space with no divide, and a world length scales into clip space by a
+     * constant. That makes the test a transform and four comparisons, with
+     * the model's own size added to the box so nothing pops in at the edge.
+     */
+    struct ViewCullTest
+    {
+        Matrix4f viewProjectionMatrix;
+
+        /** How much clip space one world unit of model radius is worth. */
+        float clipPerWorldUnit;
+
+        bool couldBeVisible(const Vector3f& position, float worldRadius) const
+        {
+            auto clip = viewProjectionMatrix * position;
+            auto bound = 1.0f + (worldRadius * clipPerWorldUnit);
+            return clip.x >= -bound && clip.x <= bound && clip.y >= -bound && clip.y <= bound;
+        }
+    };
+
+    ViewCullTest makeViewCullTest(const Matrix4f& viewProjectionMatrix);
+
+    /**
+     * Radius, in world units, used to grow the cull box around a unit or a
+     * feature. Comfortably larger than the tallest model TA ships and than
+     * the widest footprint, so a model whose origin is off screen but whose
+     * top or side is not is still drawn.
+     */
+    constexpr float ViewCullModelRadius = 256.0f;
+
     /** What one viewer is shown of one unit. */
     enum class UnitDrawStyle
     {
