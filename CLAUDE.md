@@ -30,7 +30,7 @@ make -j$(nproc)
 ./build/rwe_test "[tag]"
 ```
 
-The suite passes 364 cases / 54,376 assertions as of 2026-09-04. If a document quotes a different figure, run the suite rather than believing either of them.
+The suite passes 403 cases / 58,610 assertions as of 2026-09-05. If a document quotes a different figure, run the suite rather than believing either of them.
 
 This machine has two configured trees, both MSYS2/MinGW64 with `Unix Makefiles`: `build/` (Debug) and `build-release/` (Release). Play-testing uses `build-release/rwe.exe`. **Rebuild the `rwe` target, not just `rwe_test`** — a green test suite says nothing about whether the game still links, and several of the executables below share `librwe` with it.
 

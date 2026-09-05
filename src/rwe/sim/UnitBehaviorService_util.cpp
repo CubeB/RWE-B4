@@ -316,6 +316,74 @@ namespace rwe
         return best;
     }
 
+    bool airBaseIsClaimedByAnother(const GameSimulation& sim, UnitId padId, UnitId claimant)
+    {
+        auto padRef = sim.tryGetUnitState(padId);
+        if (!padRef)
+        {
+            return false;
+        }
+        const auto& pad = padRef->get();
+        const auto& padDefinition = sim.unitDefinitions.at(pad.unitType);
+        auto reach = airBaseRepairReach(sim, padDefinition);
+        auto reachSquared = reach * reach;
+
+        for (const auto& [otherId, other] : sim.units)
+        {
+            if (otherId == claimant || otherId == padId || other.isDead())
+            {
+                continue;
+            }
+            if (!other.isOwnedBy(pad.owner))
+            {
+                continue;
+            }
+            const auto& otherDefinition = sim.unitDefinitions.at(other.unitType);
+            if (!otherDefinition.canFly || other.isBeingBuilt(otherDefinition))
+            {
+                continue;
+            }
+
+            // On its way: the order is the claim. Scanning the whole deque
+            // rather than just the front, because a landing order can have
+            // something pushed in front of it and the pad is still spoken
+            // for.
+            auto claimsIt = false;
+            for (const auto& order : other.orders)
+            {
+                if (auto landing = std::get_if<LandOnAirBaseOrder>(&order); landing != nullptr && landing->target == padId)
+                {
+                    claimsIt = true;
+                    break;
+                }
+            }
+
+            // Already there: occupied until it has been repaired *and* has
+            // left, so a healed aircraft still sitting on the pad keeps it.
+            // Physical occupancy is unconditional -- an aircraft standing on
+            // the pad holds it whoever else wants it.
+            if (std::holds_alternative<UnitPhysicsInfoGround>(other.physics)
+                && other.position.distanceSquared(pad.position) <= reachSquared)
+            {
+                return true;
+            }
+
+            if (!claimsIt)
+            {
+                continue;
+            }
+
+            // Two aircraft merely on their way to the same pad: the lower id
+            // keeps it and the other is told there are no pads available.
+            if (otherId.value < claimant.value)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     std::optional<UnitId> findAirBaseToLandOn(GameSimulation& sim, ConstUnitInfo unitInfo)
     {
         if (!unitInfo.definition->canFly)
@@ -352,6 +420,15 @@ namespace rwe
             {
                 continue;
             }
+
+            // Taken pads are not offered. A squadron coming home off one raid
+            // therefore spreads over the pads it has rather than piling onto
+            // one and waiting.
+            if (airBaseIsClaimedByAnother(sim, otherId, unitInfo.id))
+            {
+                continue;
+            }
+
             candidates.push_back(otherId);
         }
 

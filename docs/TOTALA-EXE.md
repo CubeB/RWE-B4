@@ -9027,6 +9027,139 @@ half its own footprint, which is what keeps a four-by-four pad able to reach
 the aircraft parked in its own middle. With two aircraft crowded on, the
 nearer one is worked on.
 
+### A pad is taken from the moment someone sets out for it
+
+`VTOL_Landing` re-tests its pad before it commits, and what it tests is
+availability rather than existence:
+
+```
+411deb  mov  ecx,[esi+0x36]          ; the pad the mission is carrying
+411dee  push ecx
+411def  push ebx
+411df0  call 0x47e570                ; is it free?
+411df5  test eax,eax
+411df7  jne  0x411e12                ; yes -> land
+411df9  push 0x501c30                ; "Landing aborted: no pads available"
+```
+
+`0x47E570` returns 0 — taken — when `pad+0x86` is set, or when a walk of the
+pad list at `pad+0x8a` (following `+0x8e`, comparing `BYTE [node+0xf9]`) finds
+a match. It never looks at the on/off bit.
+
+That split is exactly what the strategy guide reports, and the two confirm each
+other:
+
+> When a plane is making its way back to the repair pad, that pad is considered
+> to be occupied (even if the unit isn't there yet), so other damaged aircraft
+> will not use that pad until the occupying aircraft has been repaired and has
+> left.
+
+> After I tested it out, I found that turning an aircraft repair pad 'Off'
+> would stop aircraft from returning to it. However, those that were already
+> making their way towards it will continue towards it.
+
+**Switching a pad off turns away new arrivals but does not recall the aircraft
+already coming.** New arrivals stop because the query walks the owner's air
+base list, which holds only switched-on pads (`0x40ABCF`); a trip under way
+carries on because the re-test above never asks about the switch. An earlier
+reading here had that re-test as an on/off test and turned those aircraft
+back, which is wrong on the binary and on the guide alike.
+
+RWE needs no new state for the claim. The claim *is* the `LandOnAirBaseOrder`,
+which is already serialized, and an aircraft parked on a pad is already in the
+unit list. Physical occupancy is unconditional — an aircraft standing on the
+pad holds it however healthy it is and whoever else wants it, which is the
+"and has left" half. Two aircraft merely *en route* to the same pad can happen,
+since the choice is a random draw, and there the lower `UnitId` keeps it: a
+deterministic reading of "no pads available" that needs no tie-break state.
+
+### The practical consequence
+
+The guide is worth quoting on how this plays, because it is the reason the
+behaviour is worth having exactly rather than approximately:
+
+> This is both a blessing and a curse when you are making an assault using
+> aircraft [...] If you have to kill that buildings *NOW* [...] it can be
+> incredibly annoying having your planes continually break off. Even
+> retargetting them only causes the planes to fly back, attack for a very short
+> time and then go and get repaired.
+
+That loop falls out of the health test living inside each mission handler
+rather than being asked once when the order is given: retargeting starts a
+fresh attack mission, which tests the health again on its next tick.
+
+And the trick the guide ends on is the practical way a player drives all of
+this:
+
+> If you have some damaged aircraft [...] sitting on the ground and you want
+> them to repair themselves, set up a 1 point Patrol route (where they are),
+> and those planes that are heavily damaged will go off and get repaired.
+
+which works because patrol is one of the missions that carries the test, and
+standing still is not.
+
+### A pad is taken from the moment someone sets out for it
+
+VTOL_Landing re-tests its pad before it commits, and what it tests is
+availability rather than existence:
+
+
+
+ returns 0 -- taken -- when  is set, or when a walk of the
+pad list at  (following , comparing ) finds
+a match. It never looks at the on/off bit.
+
+That split is exactly what the strategy guide reports, and the two confirm each
+other:
+
+> When a plane is making its way back to the repair pad, that pad is considered
+> to be occupied (even if the unit isn't there yet), so other damaged aircraft
+> will not use that pad until the occupying aircraft has been repaired and has
+> left.
+
+> After I tested it out, I found that turning an aircraft repair pad 'Off'
+> would stop aircraft from returning to it. However, those that were already
+> making their way towards it will continue towards it.
+
+**Switching a pad off turns away new arrivals but does not recall the aircraft
+already coming.** New arrivals stop because the query walks the owner's air
+base list, which holds only switched-on pads (); a trip under way
+carries on because the re-test above never asks about the switch. An earlier
+reading here had the re-test as an on/off test and turned those aircraft back,
+which is wrong on both the binary and the guide.
+
+RWE needs no new state for the claim. The claim *is* the ,
+which is already serialized, and an aircraft parked on a pad is already in the
+unit list. Physical occupancy is unconditional -- an aircraft standing on the
+pad holds it however healthy it is and whoever else wants it, which is the
+"and has left" half. Two aircraft merely *en route* to the same pad can happen,
+since the choice is a random draw, and there the lower  keeps it: a
+deterministic reading of "no pads available" that needs no tie-break state.
+
+### The practical consequence
+
+The guide is worth quoting on what this feels like to play against, because it
+is the reason the behaviour is worth having exactly rather than approximately:
+
+> This is both a blessing and a curse when you are making an assault using
+> aircraft [...] If you have to kill that buildings *NOW* [...] it can be
+> incredibly annoying having your planes continually break off. Even
+> retargetting them only causes the planes to fly back, attack for a very short
+> time and then go and get repaired.
+
+That loop falls out of the health test running inside each mission handler
+rather than once at the point the order is given: retargeting starts a fresh
+attack mission, which tests the health again on its next tick.
+
+And the trick it ends on is the practical way a player drives all of this:
+
+> If you have some damaged aircraft [...] sitting on the ground and you want
+> them to repair themselves, set up a 1 point Patrol route (where they are),
+> and those planes that are heavily damaged will go off and get repaired.
+
+which works because patrol is one of the missions that carries the test, and
+standing still is not.
+
 ### What RWE does not do
 
 The pad choice is a `rand(n)` over the candidates in the original and a

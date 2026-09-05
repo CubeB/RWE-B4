@@ -167,6 +167,182 @@ namespace rwe
         };
     }
 
+TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
+    {
+        // "When a plane is making its way back to the repair pad, that pad is
+        // considered to be occupied (even if the unit isn't there yet), so
+        // other damaged aircraft will not use that pad until the occupying
+        // aircraft has been repaired and has left."
+        //
+        // The same rule the original prints "Landing aborted: no pads
+        // available" for (0x501C30, from the re-test at 0x411DEB).
+        AirBaseFixture f;
+        auto pad = f.addPad(f.us, SimVector(500_ss, 0_ss, 0_ss));
+        f.damageFighterTo(100);
+
+        auto second = spawnAirBaseUnit(f.sim, "fighter", f.us, SimVector(40_ss, 200_ss, 0_ss), f.script);
+        {
+            auto& s = f.sim.getUnitState(second);
+            s.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            s.hitPoints = 100;
+            f.sim.flyingUnitsSet.insert(second);
+        }
+
+        // The first aircraft claims it merely by holding the order.
+        f.sim.getUnitState(f.fighter).orders.push_front(LandOnAirBaseOrder(pad));
+
+        const auto& secondState = f.sim.getUnitState(second);
+        ConstUnitInfo secondInfo(second, &secondState, &f.sim.unitDefinitions.at(secondState.unitType));
+        REQUIRE_FALSE(findAirBaseToLandOn(f.sim, secondInfo).has_value());
+
+        // With a second pad there is somewhere else to go.
+        auto spare = f.addPad(f.us, SimVector(600_ss, 0_ss, 0_ss));
+        auto chosen = findAirBaseToLandOn(f.sim, secondInfo);
+        REQUIRE(chosen.has_value());
+        REQUIRE(*chosen == spare);
+    }
+
+    TEST_CASE("a pad is still taken by an aircraft that has finished repairing but not left", "[airbase]")
+    {
+        // "...until the occupying aircraft has been repaired AND HAS LEFT."
+        // Sitting on the pad at full health still holds it.
+        AirBaseFixture f;
+        auto padPosition = SimVector(500_ss, 0_ss, 0_ss);
+        auto pad = f.addPad(f.us, padPosition);
+
+        auto resident = spawnAirBaseUnit(f.sim, "fighter", f.us, padPosition, f.script);
+        f.sim.getUnitState(resident).physics = UnitPhysicsInfoGround();
+
+        f.damageFighterTo(100);
+        REQUIRE_FALSE(findAirBaseToLandOn(f.sim, f.fighterInfo()).has_value());
+
+        // Once it takes off again the pad is free.
+        {
+            auto& r = f.sim.getUnitState(resident);
+            r.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            r.position = SimVector(1200_ss, 200_ss, 1200_ss);
+            f.sim.flyingUnitsSet.insert(resident);
+        }
+        auto chosen = findAirBaseToLandOn(f.sim, f.fighterInfo());
+        REQUIRE(chosen.has_value());
+        REQUIRE(*chosen == pad);
+    }
+
+    TEST_CASE("switching a pad off turns away new arrivals but not one already coming", "[airbase]")
+    {
+        // "turning an aircraft repair pad 'Off' would stop aircraft from
+        // returning to it. However, those that were already making their way
+        // towards it will continue towards it."
+        //
+        // The split is in the binary: the query walks the owner's air base
+        // list, which holds only switched-on pads (0x40ABCF), while the
+        // re-test on the way in (0x411DEB -> 0x47E570) asks whether the pad
+        // is free and never asks about the switch.
+        AirBaseFixture f;
+        auto pad = f.addPad(f.us, SimVector(500_ss, 0_ss, 0_ss));
+        f.damageFighterTo(100);
+        f.sim.getUnitState(f.fighter).orders.push_front(LandOnAirBaseOrder(pad));
+
+        // Switch it off underneath the aircraft already en route.
+        f.sim.getUnitState(pad).activated = false;
+
+        for (int tick = 0; tick < 30; ++tick)
+        {
+            f.sim.tick();
+        }
+
+        // It is still going: the order was not dropped.
+        const auto& orders = f.sim.getUnitState(f.fighter).orders;
+        REQUIRE_FALSE(orders.empty());
+        REQUIRE(std::holds_alternative<LandOnAirBaseOrder>(orders.front()));
+
+        // But nothing new is sent there.
+        auto second = spawnAirBaseUnit(f.sim, "fighter", f.us, SimVector(40_ss, 200_ss, 0_ss), f.script);
+        {
+            auto& s = f.sim.getUnitState(second);
+            s.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            s.hitPoints = 100;
+            f.sim.flyingUnitsSet.insert(second);
+        }
+        const auto& secondState = f.sim.getUnitState(second);
+        ConstUnitInfo secondInfo(second, &secondState, &f.sim.unitDefinitions.at(secondState.unitType));
+        REQUIRE_FALSE(findAirBaseToLandOn(f.sim, secondInfo).has_value());
+    }
+
+    TEST_CASE("a healed aircraft goes back to what it was doing", "[airbase]")
+    {
+        // "Once they have healed themself, they will return to what they were
+        // previously doing." The landing order deletes itself when the hit
+        // points meet the maximum, and the mission underneath is untouched,
+        // so the patrol is simply next in the queue again.
+        AirBaseFixture f;
+        auto padPosition = SimVector(500_ss, 0_ss, 0_ss);
+        auto pad = f.addPad(f.us, padPosition);
+
+        {
+            auto& fighter = f.sim.getUnitState(f.fighter);
+            fighter.orders.push_back(PatrolOrder(SimVector(-800_ss, 0_ss, 0_ss)));
+            fighter.orders.push_front(LandOnAirBaseOrder(pad));
+            fighter.hitPoints = 100;
+            fighter.position = padPosition;
+            fighter.physics = UnitPhysicsInfoGround();
+            f.sim.flyingUnitsSet.erase(f.fighter);
+        }
+
+        // While it is still hurt the landing order stands.
+        f.sim.tick();
+        REQUIRE(std::holds_alternative<LandOnAirBaseOrder>(f.sim.getUnitState(f.fighter).orders.front()));
+
+        // Mended, and the patrol underneath comes back.
+        f.sim.getUnitState(f.fighter).hitPoints = f.sim.unitDefinitions.at("fighter").maxHitPoints;
+        for (int tick = 0; tick < 5; ++tick)
+        {
+            f.sim.tick();
+        }
+
+        const auto& orders = f.sim.getUnitState(f.fighter).orders;
+        REQUIRE_FALSE(orders.empty());
+        REQUIRE(std::holds_alternative<PatrolOrder>(orders.front()));
+    }
+
+    TEST_CASE("a one point patrol is enough to send a grounded damaged aircraft for repair", "[airbase]")
+    {
+        // "If you have some damaged aircraft that you have manually returned
+        // from a fight, and they are sitting on the ground and you want them
+        // to repair themselves, set up a 1 point Patrol route (where they
+        // are), and those planes that are heavily damaged will go off and get
+        // repaired."
+        //
+        // It follows from patrol being one of the missions that carries the
+        // health test, and it is worth pinning because it is the practical
+        // way a player uses all of this.
+        AirBaseFixture f;
+        auto pad = f.addPad(f.us, SimVector(500_ss, 0_ss, 0_ss));
+        f.damageFighterTo(100);
+
+        {
+            auto& fighter = f.sim.getUnitState(f.fighter);
+            fighter.orders.push_back(PatrolOrder(fighter.position));
+        }
+
+        std::optional<UnitId> target;
+        for (int tick = 0; tick < 60 && !target; ++tick)
+        {
+            f.sim.tick();
+            const auto& orders = f.sim.getUnitState(f.fighter).orders;
+            if (!orders.empty())
+            {
+                if (auto landing = std::get_if<LandOnAirBaseOrder>(&orders.front()))
+                {
+                    target = landing->target;
+                }
+            }
+        }
+
+        REQUIRE(target.has_value());
+        REQUIRE(*target == pad);
+    }
+
     TEST_CASE("an aircraft only looks for a repair pad below three quarters health", "[airbase]")
     {
         // 0x410518: (maxHitPoints >> 2) * 3, and the jump out is jae, so the

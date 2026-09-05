@@ -83,6 +83,22 @@ namespace rwe
      * enough or there is none within reach. Draws from the simulation's
      * generator when there is more than one to choose from.
      */
+    /**
+     * Whether some other aircraft has already taken this pad.
+     *
+     * A pad is occupied from the moment an aircraft sets out for it, not from
+     * the moment it arrives, and it stays occupied until that aircraft has
+     * been repaired and has left again. Two things count as a claim: an
+     * outstanding LandOnAirBaseOrder naming the pad, and an aircraft of the
+     * pad's owner parked on it.
+     *
+     * `claimant` is the aircraft asking, and its own claim never counts
+     * against it. Where two aircraft claim the same pad on the same tick the
+     * lower UnitId keeps it, which is what makes this a deterministic reading
+     * of the original's "Landing aborted: no pads available".
+     */
+    bool airBaseIsClaimedByAnother(const GameSimulation& sim, UnitId padId, UnitId claimant);
+
     std::optional<UnitId> findAirBaseToLandOn(GameSimulation& sim, ConstUnitInfo unitInfo);
 
     /**

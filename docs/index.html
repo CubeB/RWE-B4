@@ -73,7 +73,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
     <span>base <b>upstream master b2d8a31 · 25 Mar 2026</b></span>
     <span>version <b>RWE Revived v1.0</b></span>
     <span>updated <b>5 Sep 2026</b></span>
-    <span>tests <b>374 cases · 58,437 assertions</b></span>
+    <span>tests <b>403 cases · 58,610 assertions</b></span>
   </div>
 </header>
 <nav aria-label="Sections">
@@ -94,6 +94,11 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 
 <h3>Orders and unit behaviour</h3>
 <ul>
+  <li><b>Buildings stand in the water rather than on it.</b> A building whose yardmap has any land cell in it is levelled onto the lowest terrain corner under those cells; one whose yardmap is all water — every shipyard, tidal generator, sonar station, torpedo launcher and floating radar — stands at <code>seaLevel − waterline</code>. The placement box now asks the same function the building will, because in the original the two are the same number rather than merely the same rule</li>
+  <li>Submarines no longer appear at the shipyard's build‑piece height and drop on their first step: a mobile ground or sea unit is settled onto the terrain as it is created</li>
+  <li><b>Air repair pads work in both directions.</b> A damaged aircraft on patrol, guard or an attack mission breaks off for a pad and resumes the order underneath when it is mended; the pad mends whatever is parked on it as the work it does when idle. An idle damaged aircraft still lands where it stands — <code>VTOL_Standby</code> carries no health test, so only a plane with something to do goes home</li>
+  <li><b>Abandoned nanoframes rot.</b> One energy‑point of the frame's own build cost per tick, which is why a Solar melts in twenty‑five seconds and a half‑built fusion plant takes twenty minutes. The construction display runs backwards on its own, because the same value drives it. At zero the frame removes itself with no wreck and no death script — and a unit killed while still under construction leaves nothing to reclaim either</li>
+  <li>Thunders and Shadows bomb what their patrol route takes them past. A deliberate divergence: they ship <code>StandingFireOrder=0</code> where the Phoenix and Hurricane ship <code>2</code>, and the patrol engage check is Fire At Will exactly, so a Hold Fire bomber is now seeded to Fire At Will and takes the path the Phoenix already took</li>
   <li>Reclaim features and units, with progress shared between builders and resources credited as work is done</li>
   <li>Repair, patrol (engages en route, single click patrols between two points) and capture orders, each with panel button and cursor</li>
   <li>Self‑destruct countdown (Ctrl‑D, 5 s, cancellable) using the unit's <code>SelfDestructAs</code> weapon</li>
@@ -151,6 +156,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 
 <h3>Interface, media and the front end</h3>
 <ul>
+  <li>Holding <kbd>SHIFT</kbd> over a cloaked unit draws a white ring at its minimum cloaking radius — the v3.1 patch feature, projected onto the ground rather than facing the camera</li>
   <li><b>Save and load.</b> The whole simulation round-trips through a save file — units with their COB virtual machines mid-thought, projectiles mid-flight, spreading fires, the economy, the random number generator — proven by the hash harness: save, load into a fresh sim, identical hash, then a hundred further ticks of both with identical hashes after every one. The F2 menu's Save Game and Load Game use the original's own panels with a working name box, Load Game sits on the single-player menu too, and saves are <code>.rwesave</code> files in the local data directory. One documented divergence: AI players re-plan after a load</li>
   <li><b>The movies play.</b> The GOG release ships them disguised as <code>Data/*.ZRB</code> — ordinary Smacker files inside. RWE grew its own SMK2 decoder, validated byte-for-byte against FFmpeg over all five films, and the INTRO button now shows the real intro, scaled to the window, any key to skip</li>
   <li><b>Music, the original's way.</b> The soundtrack (the tagged OST, in <code>music/</code>) plays situationally as the exe dictates: peace tracks by default, war drums when a scoring ring over the last thirty seconds of combat crosses the decoded thresholds — and only past thirty owned units — standing down after a quiet minute with a 1.2&nbsp;s fade and four seconds of hush. The menu is silent bar the [BGM] ambience, as the original; Victory/Defeat track types exist in the binary and are triggered by nothing, so RWE invents no trigger</li>
@@ -165,6 +171,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 
 <h3>Visibility</h3>
 <ul>
+  <li><b>Radar no longer out‑reaches its own ring.</b> The rule has two halves and only one was implemented: the altitude bonus is the <em>detector's</em> own height, and an outer cap of <code>max(RadarDistance, SonarDistance)</code> is applied before it. No shipped unit has more sonar than radar while having any radar, so on real data radar reaches exactly <code>RadarDistance</code> — which is what the minimap draws. A Peeper had been detecting at about 1060 against a 700 ring</li>
   <li>Line of sight, fog of war and radar in the deterministic sim; unseen enemies hidden, radar contacts as blips, unexplored features hidden</li>
   <li>Sight is blocked by higher ground, so hills cast shadows</li>
   <li>Fog of war rebuilt from the original: the grid is indexed in TA's projected space, sight walks the authored ray fan from <code>los.tdf</code> with a running-horizon shadow cast and an 8-cell cap, the height grid holds a reveal/occlude pair, and the ragged edge is TA's own <code>fog.gaf</code> artwork picked by marching squares rather than procedural noise. Radar has no grid at all — it is a range query that finds units and reveals no ground</li>
@@ -184,6 +191,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 
 <h3>Effects</h3>
 <ul>
+  <li><b>The D‑gun leaves a trail.</b> Not a beam — <code>noexplode</code> means the round detonates <em>without being consumed</em>, so it keeps its velocity and blasts again on the next cell: up to thirty‑six full‑strength blasts strung along its whole 240‑unit flight, which is why it is good against a clump. It also always flies the full range regardless of where the target was. Its reload now carries the health and veterancy scaling, and the round no longer lives 120 ticks instead of 36 because <code>weapontimer</code> was consulted before the range</li>
   <li>Construction display taken from the exe: the original keeps a height per pixel and remaps the model against a moving threshold, so a bare line sweeps down twice, a solid silhouette grows up from the base, the texture follows it, and one last line sweeps back down over the finished model. Both greens are triangle waves over palette entries 160&ndash;175 at different rates, offset per unit &mdash; and the wireframe is the second of them, not the green &rarr; white &rarr; black cycle guessed at before. Shadow kept but cut out under the frame</li>
   <li>Nano spray to match: four world units a tick, each particle stepping a place along palette entries 161&ndash;167 every tick and wrapping, so the stream shimmers along its length instead of each particle being dyed one colour for life; it fans across the middle three elevenths of the target. Reclaiming a feature runs two emitters, which is why a reclaim stream reads twice as thick</li>
   <li>Burning features: fire‑starting weapons ignite trees and foliage, fires spread and leave burnt remains, using each feature's own burn sequence</li>
@@ -233,7 +241,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <li><b>No <code>std::uniform_int_distribution</code> is left in the simulation.</b> Twelve draws remained, and its bias correction is implementation‑defined — two builds given the same seeded generator can draw different numbers, and because rejection consumes draws they stay out of step afterwards. One of them, the one a COB script's own <code>rand</code> goes through, had carried a <code>FIXME: probably not consistent across platforms</code> since before this branch. They are one helper now, and its tests pin both the value and the number of raw draws it costs against a copy of the same generator</li>
   <li><b>A builder on patrol no longer goes looking for a fight.</b> A unit that can repair is not given the Patrol mission in the original at all — it gets RepairPatrol, whose handlers never call the target search — so a construction unit walking a route clears wreckage and mends things and never breaks off to chase a tank</li>
   <li>Two OTA keys turned out to be a phantom to‑do. <code>ComputerMetal</code> and <code>ComputerEnergy</code> are parsed by the original into its map record and <em>never read back</em> — those two stores are the only accesses to either field in the whole binary — and <code>AIProfile</code> is not even referenced. RWE parsing all three and using none is exactly what TA does</li>
-  <li>Headless‑safe logging for tests; the suite now stands at 374 cases and 58,437 assertions across orders, pathing, economy, visibility, alliances, skirmish options, burning, wreckage, transports, aircraft, bombing, save/load and AI</li>
+  <li>Headless‑safe logging for tests; the suite now stands at 398 cases and 58,596 assertions across orders, pathing, economy, visibility, alliances, skirmish options, burning, wreckage, transports, aircraft, bombing, save/load and AI</li>
 </ul>
 
 <h2 id="roadmap">Roadmap<small>Six phases, in order of dependence. The full plan lives in <code>docs/ROADMAP.md</code>.</small></h2>
@@ -250,6 +258,8 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 
 <h3>Needs checking in‑game</h3>
 <ul>
+  <li><b>The cloak radius ring.</b> Written and building, never seen — hold <kbd>SHIFT</kbd> with the cursor over a cloaked unit and check the white ring sits on the ground at the right size</li>
+  <li><b>Whether the D‑gun still hurts the commander.</b> The beam itself provably never touches its firer; what does is the death explosion of whatever it just killed, which is spawned with no attacker and so exempts nobody. At point‑blank that blast lands on the commander’s own bounding box at full strength. Worth confirming that is what you were seeing</li>
   <li>The shading curve and its dark floor against the original, side by side. The floor is the one number in the shader chosen by eye rather than read out of the binary or measured off the palette, and the comment beside it says which way to turn it</li>
   <li>Raising the pathfinding budget. It is now the binding constraint — four searches a tick, all of them exhausting their thousand-expansion cap, with some 230 requests backlogged at four hundred a side, so a unit waits two seconds for a path it then cannot finish. At 477 ns an expansion the headroom is there, but raising it changes <em>when</em> units get paths, which no pinning test can guard</li>
   <li>Atlas hover height, transport ship crane reach (200 units is an estimate), AI scout routes and ferry trips on island maps</li>

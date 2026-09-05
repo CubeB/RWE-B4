@@ -1707,12 +1707,22 @@ namespace rwe
             return true;
         }
 
-        // "Landing aborted": VTOL_Landing re-tests its pad before it commits
-        // (0x411DEB) and gives up if it has gone, and the pad list the query
-        // drew from only ever holds switched-on ones (0x40ABCF), so a pad
-        // turned off after the aircraft set out is no longer somewhere to
-        // land. A trip already under way is not cancelled by distance,
-        // though -- the mission holds its target, however far it has to go.
+        // "Landing aborted: no pads available" (0x501C30): VTOL_Landing
+        // re-tests its pad before it commits (0x411DEB, calling 0x47E570),
+        // and what that call tests is whether the pad is *free* -- it fails
+        // on `pad+0x86` being set or on a match while walking the pad's list
+        // at `pad+0x8a`. It is not an on/off test, which matters, because a
+        // pad switched off after the aircraft set out does not turn it back:
+        //
+        //     "turning an aircraft repair pad 'Off' would stop aircraft from
+        //     returning to it. However, those that were already making their
+        //     way towards it will continue towards it."
+        //
+        // Both halves come from the split. New arrivals stop because the
+        // query walks the owner's air base list, which holds only switched-on
+        // pads (0x40ABCF). A trip under way carries on because the re-test on
+        // the way in never asks about the switch. Distance does not cancel it
+        // either -- the mission holds its target however far it has to go.
         auto padRef = sim->tryGetUnitState(order.target);
         if (!padRef)
         {
@@ -1720,7 +1730,13 @@ namespace rwe
         }
         const auto& pad = padRef->get();
         const auto& padDefinition = sim->unitDefinitions.at(pad.unitType);
-        if (!pad.isOwnedBy(unitInfo.state->owner) || !unitIsAnUsableAirBase(pad, padDefinition))
+        if (!pad.isOwnedBy(unitInfo.state->owner) || pad.isDead())
+        {
+            return true;
+        }
+
+        // Somebody else got there first.
+        if (airBaseIsClaimedByAnother(*sim, order.target, unitInfo.id))
         {
             return true;
         }
