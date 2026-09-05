@@ -11,9 +11,11 @@ namespace rwe
 
     static const std::string ProjectNameVersion = ProjectName + " " + GitDescription + "-" + ProjectBuildType;
 
-    /** The revival's own build number, shown under the title. */
+    /** This build's own number, shown under the main-menu title. */
     static const std::string RevivalVersion("1.0");
-    static const std::string RevivalTitle = "RWE Revived v" + RevivalVersion;
+
+    /** "Bot bot boom boom" -- four B's, so B4 for short. */
+    static const std::string RevivalTitle = "Bot bot boom boom v" + RevivalVersion;
 }
 
 #endif

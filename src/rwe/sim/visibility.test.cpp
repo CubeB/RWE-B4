@@ -135,6 +135,61 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a unit off the edge of the map still sees the map", "[visibility]")
+    {
+        // A play-test found aircraft going dark the moment they crossed the
+        // map edge on an attack run. Both reveal routines began by discarding
+        // the whole stamp when the centre cell was off the grid, and that test
+        // was RWE's own: UpdateUnitLOS (0x4827B0) packs sight distance,
+        // position and the eye clamp and tail-calls 0x4825B0 with no bounds
+        // test on the position anywhere in it. Sight is a stamp -- section 2
+        // has it subtracting the old one and adding the new, and Circular mode
+        // blitting a mask sprite out of vismasks.gaf -- and a stamp falling
+        // partly outside its destination is clipped, not dropped.
+        auto script = makeEmptyCobScript();
+
+        // 64x64 tiles of 16 world units, centred on the origin, so the map
+        // runs from -512 to +512 and anything past that is off it.
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        defineUnit(sim, "scout", /*sight*/ 200u, /*radar*/ 0u, false);
+
+        auto justOffTheEdge = SimVector(600_ss, 0_ss, 0_ss);
+        auto insideTheEdge = SimVector(460_ss, 0_ss, 0_ss);
+        auto farInland = SimVector(0_ss, 0_ss, 0_ss);
+
+        SECTION("terrain sight rays walk inward from outside the grid")
+        {
+            REQUIRE(sim.lineOfSightMode == LineOfSightMode::True);
+            addUnit(sim, "scout", us, justOffTheEdge, script);
+            sim.tick();
+
+            // The ground it has just flown over is still in front of its eye.
+            REQUIRE(sim.isVisibleTo(us, insideTheEdge));
+
+            // But it does not light up the whole map.
+            REQUIRE_FALSE(sim.isVisibleTo(us, farInland));
+        }
+
+        SECTION("a circular stamp is clipped to the map")
+        {
+            sim.lineOfSightMode = LineOfSightMode::Circular;
+            addUnit(sim, "scout", us, justOffTheEdge, script);
+            sim.tick();
+
+            REQUIRE(sim.isVisibleTo(us, insideTheEdge));
+            REQUIRE_FALSE(sim.isVisibleTo(us, farInland));
+        }
+
+        SECTION("a unit far enough out to sea sees nothing, and does not crash")
+        {
+            addUnit(sim, "scout", us, SimVector(5000_ss, 0_ss, 5000_ss), script);
+            sim.tick();
+            REQUIRE_FALSE(sim.isVisibleTo(us, insideTheEdge));
+            REQUIRE_FALSE(sim.isVisibleTo(us, farInland));
+        }
+    }
+
     TEST_CASE("sight radius is capped at eight cells", "[visibility]")
     {
         auto script = makeEmptyCobScript();

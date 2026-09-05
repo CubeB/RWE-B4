@@ -122,13 +122,18 @@ namespace rwe
     {
         beginReveal();
 
-        if (!contains(center))
+        // A unit off the edge of the map still sees the map. The original
+        // has no bounds test on the unit's position at all -- UpdateUnitLOS
+        // (0x4827B0) packs sight distance, position and the eye clamp and
+        // tail-calls 0x4825B0 without one -- because sight is a stamp, and a
+        // stamp that falls partly outside its destination is clipped rather
+        // than dropped. An aircraft crossing the map edge on an attack run
+        // therefore keeps seeing the ground behind it.
+        if (contains(center))
         {
-            return;
+            // Even a blind unit knows where it is standing.
+            revealCell(center.x, center.y);
         }
-
-        // Even a blind unit knows where it is standing.
-        revealCell(center.x, center.y);
 
         radius = std::min(radius, tables.maxRadius());
         if (radius <= 0)
@@ -148,6 +153,7 @@ namespace rwe
                 int bestSlope = -1;
                 int bestStep = 0;
                 int t = 0;
+                bool entered = false;
 
                 for (const auto& offset : ray)
                 {
@@ -157,10 +163,22 @@ namespace rwe
                     auto y = center.y + step.y;
                     if (x < 0 || y < 0 || x >= visible.getWidth() || y >= visible.getHeight())
                     {
-                        // A ray's offsets never shrink, so once it has left
-                        // the grid it will not come back.
-                        break;
+                        // Once the ray has been inside the grid it will not
+                        // come back, because its offsets never shrink. Before
+                        // it has, it may still be on its way in: a unit off
+                        // the map edge casts every one of its rays from
+                        // outside, and breaking here would leave it blind.
+                        //
+                        // `t` still counts the skipped steps, which is what
+                        // the slope arithmetic wants -- it measures distance
+                        // from the eye, not cells drawn.
+                        if (entered)
+                        {
+                            break;
+                        }
+                        continue;
                     }
+                    entered = true;
 
                     auto lo = static_cast<int>(heights.reveal.get(x, y)) - eyeHeight;
                     auto hi = static_cast<int>(heights.occlude.get(x, y)) - eyeHeight;
@@ -187,13 +205,14 @@ namespace rwe
     {
         beginReveal();
 
-        if (!contains(center))
+        // Clipped, not dropped -- see revealWithLineOfSight. The loop below
+        // already clamps to the grid, so an off-map centre reveals exactly
+        // the part of its circle that lies on the map.
+        if (contains(center))
         {
-            return;
+            // Even a blind unit knows where it is standing.
+            revealCell(center.x, center.y);
         }
-
-        // Even a blind unit knows where it is standing.
-        revealCell(center.x, center.y);
 
         if (radius <= 0)
         {

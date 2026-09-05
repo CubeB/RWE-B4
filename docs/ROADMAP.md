@@ -7,7 +7,7 @@ _Last updated: 2026-09-04. Status of the codebase is as of the `revival` integra
 - **Engine:** ~93k lines of C++20 under `src/` (~49k when this branch started), deterministic sim at 30 ticks/s, OpenGL 3 renderer, COB VM, A* pathfinding, lockstep multiplayer over the internet. Loads original TA data (HPI/GAF/3DO/COB/TDF/TNT/OTA) and the GOG release's Smacker movies.
 - **Launcher:** Electron 22 / React 16 / Redux lobby + master server + `rwe_bridge` IPC.
 - **History:** Michael Heasell (2017–2023, ~1,950 commits). Kevin Hake modernised the build in March 2026 (Boost removed, C++20, SDL3, CI green). Taylor Gunnoe added hotkeys / speed / pause / Phase‑1 AI in April 2026 (unmerged upstream until now).
-- **Never had a public release.** Upstream's only tag is `v0.1.0` (2017); this branch tags `v1.0.0` ("RWE Revived v1.0", under the main-menu title), locally. The CMake version is derived from git tags.
+- **Never had a public release.** Upstream's only tag is `v0.1.0` (2017); this branch tags `v1.0.0` ("Bot bot boom boom v1.0", under the main-menu title — B4 for short, being four B’s), locally. The CMake version is derived from git tags.
 
 ## Guiding principles
 
