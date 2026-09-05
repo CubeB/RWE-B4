@@ -41,6 +41,7 @@ jobs:
           g++-14
           clang-18
           ccache
+          imagemagick
           libglew-dev
           zlib1g-dev
           libpng-dev
@@ -120,9 +121,13 @@ jobs:
           DESKTOP
           sed -i 's/^          //' AppDir/usr/share/applications/rwe.desktop
 
-          # Placeholder icon (required by linuxdeploy)
+          # Placeholder icon (required by linuxdeploy). ImageMagick 7 renamed
+          # `convert` to `magick`, and the ubuntu-24.04 image ships neither by
+          # default, so the package is installed above and both spellings are
+          # accepted here.
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-          convert -size 256x256 xc:'#2a4a6b' -fill white -gravity center \
+          if command -v magick >/dev/null 2>&1; then IM=magick; else IM=convert; fi
+          "$IM" -size 256x256 xc:'#2a4a6b' -fill white -gravity center \
             -pointsize 72 -annotate 0 'RWE' \
             AppDir/usr/share/icons/hicolor/256x256/apps/rwe.png
 
