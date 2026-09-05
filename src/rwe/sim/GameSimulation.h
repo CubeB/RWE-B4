@@ -720,6 +720,21 @@ namespace rwe
         bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const;
 
         /**
+         * The height a building stands at on a given footprint (0x47D820).
+         *
+         * A building whose yardmap has any land cell in it stands on the
+         * lowest terrain corner under those cells. One whose yardmap is all
+         * water -- every shipyard, tidal generator, sonar station, torpedo
+         * launcher and floating radar in the game -- stands at
+         * `seaLevel - waterline` instead, which is what puts it in the water
+         * rather than on top of it.
+         *
+         * The placement box is drawn at this same height, because in the
+         * original it is the same number: the two cannot disagree.
+         */
+        SimScalar computeBuildHeight(const UnitDefinition& unitDefinition, const DiscreteRect& footprint) const;
+
+        /**
          * The spatial index over the units, rebuilt if what is there was not
          * built this tick. Callers use it to narrow a search and must still
          * make the real test against live unit state: see UnitSpatialIndex.

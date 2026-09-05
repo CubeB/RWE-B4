@@ -856,6 +856,7 @@ set(TEST_FILES
     src/rwe/sim/patrol.test.cpp
     src/rwe/sim/capture.test.cpp
     src/rwe/sim/burning.test.cpp
+    src/rwe/sim/waterbuilding.test.cpp
     src/rwe/sim/wreckage.test.cpp
     src/rwe/sim/aircraftwreck.test.cpp
     src/rwe/sim/hitdensity.test.cpp
@@ -879,6 +880,7 @@ set(TEST_FILES
     src/rwe/sim/dgun.test.cpp
     src/rwe/sim/dgunorder.test.cpp
     src/rwe/sim/dogfight.test.cpp
+    src/rwe/sim/ballisticair.test.cpp
     src/rwe/pathfinding/pathing.test.cpp
     src/rwe/pathfinding/BugWalk.test.cpp
     src/rwe/pathfinding/walkwhilewaiting.test.cpp

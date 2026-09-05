@@ -195,9 +195,27 @@ blocked the horizon stops rising. Water is flat ground at its surface.
 
 ### Radar
 
-**Radar has no grid at all.** It is a per-tick unit-versus-unit range query with
-`range = RadarDistance + 2 × altitude`. Terrain never blocks it, and it flags
-units rather than revealing ground.
+**Radar has no grid at all.** It is a per-tick unit-versus-unit range query.
+Terrain never blocks it, and it flags units rather than revealing ground. Its
+reach has two halves and only one of them is the obvious one:
+
+```
+R = min(RadarDistance + 2 × floor(detector's own y), max(RadarDistance, SonarDistance))
+```
+
+The lift is the *detector's* altitude, not the contact's, and the cap is what
+the sweep will even offer the test (`0x4675A3` feeding `0x47E9E4`). **No shipped
+unit has more sonar than radar while having any radar at all**, so on the real
+data the cap always binds and radar reaches exactly `RadarDistance` — which is
+what the minimap ring draws. The two agree by arithmetic rather than by design;
+a mod shipping a sonar-heavy dish would find the ring under-drawn.
+
+Sonar is flat `SonarDistance`, and a jammer's radius is flat too: the jam
+context is a single dword, so a jammer has no per-contact test at all beyond
+the sweep's own.
+
+Getting this wrong is visible from the minimap. RWE had the lift without the
+cap, which put a Peeper's detection at about 1060 against a 700 ring.
 
 ### Drawing
 
@@ -2825,11 +2843,22 @@ the visitor. The visitor is `0x467840`, and it:
 - sets bit 9 when the unit's `y` is at or below sea level and
   `d² <= sonardistance²`;
 - sets bit 8 when `y + def+0x16E` (the model's height) is at or above sea level
-  and `d² <= (radardistance + 2 × unit+0x70)²`.
+  and `d² < (radardistance + 2 × the DETECTOR's unit+0x70)²`.
 
-That is where §2's `RadarDistance + 2 × altitude` lives, and the split explains
-what sonar is for: a submerged unit is only ever a sonar contact, a unit standing
-clear of the water only ever a radar one, and a half-submerged one can be both.
+`unit+0x70` is the high word of the 16.16 `y` at `+0x6E`, so it is `floor(y)` in
+whole world units — and it is read once per *source* at `0x467565`, before any
+contact exists. The visitor never touches a contact's `+0x70`. An earlier
+reading of §2 had this as the contact's altitude; it is not.
+
+The lift is also capped, which is easy to miss because the cap is computed in
+the caller. `0x46757F`–`0x467593` takes `max(RadarDistance, SonarDistance)`,
+shifts it into 16.16, and passes it as the sweep radius, and `0x47E9E4` refuses
+to call the visitor outside it. So the effective radius is
+`min(lift, max(radar, sonar))` — see §2.
+
+The split explains what sonar is for: a submerged unit is only ever a sonar
+contact, a unit standing clear of the water only ever a radar one, and a
+half-submerged one can be both.
 
 **Loop 2, `0x4675EC` — the jammer.** Every live unit **not owned by the viewer**
 that is switched on and names a `radardistancejam` calls the same `0x47E890` with

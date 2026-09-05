@@ -1,4 +1,5 @@
 #include "GameSimulation.h"
+#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/SimRandom.h>
 #include <algorithm>
 #include <cmath>
@@ -1369,6 +1370,24 @@ namespace rwe
             return false;
         }
 
+        // The fourth refusal, and the one that actually keeps a ship's guns
+        // off aircraft: a ballistic weapon that cannot find an arc to the
+        // target does not take it (0x49ABB0 calling the solver at 0x49A890).
+        // Nothing else would stop it -- the Crusader names no
+        // wpri_badTargetCategory, and that is a preference in the chooser
+        // rather than a rule here anyway. A 300-velocity shell simply cannot
+        // reach a cruising aircraft, and the arithmetic says so.
+        if (std::holds_alternative<ProjectilePhysicsTypeBallistic>(weaponDefinition.physicsType))
+        {
+            auto aim = target.position - attacker.position;
+            SimVector aimXZ(aim.x, 0_ss, aim.z);
+            auto gravity = 112_ss / (30_ss * 30_ss);
+            if (!computeFiringAngles(weaponDefinition.velocity, gravity, aimXZ.length(), aim.y))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -1521,7 +1540,23 @@ namespace rwe
                 auto& alliedVis = playerVisibility[i];
                 if (unitDefinition.radarDistance > 0)
                 {
-                    auto range = intToSimScalar(static_cast<int>(unitDefinition.radarDistance)) + (2_ss * altitude);
+                    // Altitude extends radar, and then an outer cap takes it
+                    // straight back off again. The visitor tests against
+                    // `RadarDistance + 2 x floor(detector Y)` (0x467932), but
+                    // the sweep only offers it units inside
+                    // `max(RadarDistance, SonarDistance)` (0x4675A3 into
+                    // 0x47E9E4), so the effective reach is the smaller.
+                    //
+                    // On the shipped data the cap always wins: no unit has
+                    // more sonar than radar while having any radar. So a
+                    // Peeper reaches exactly its RadarDistance, which is what
+                    // its minimap ring draws -- and RWE, having the bonus
+                    // without the cap, was detecting half as far again as it
+                    // drew.
+                    auto declared = intToSimScalar(static_cast<int>(unitDefinition.radarDistance));
+                    auto lifted = declared + (2_ss * altitude);
+                    auto cap = rweMax(declared, intToSimScalar(static_cast<int>(unitDefinition.sonarDistance)));
+                    auto range = rweMin(lifted, cap);
                     alliedVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, false});
                 }
                 if (unitDefinition.sonarDistance > 0)
@@ -1767,13 +1802,110 @@ namespace rwe
         return unit;
     }
 
+    SimScalar GameSimulation::computeBuildHeight(const UnitDefinition& unitDefinition, const DiscreteRect& footprint) const
+    {
+        // A cell the building stands on: the original tests yardmap bit 3,
+        // which is set for the characters o O c f y G and clear for the water
+        // ones C Y w and for a gap.
+        auto standsOn = [](YardMapCell cell) {
+            switch (cell)
+            {
+                case YardMapCell::Ground:
+                case YardMapCell::GroundPassableWhenClosed:
+                case YardMapCell::GroundGeoPassableWhenOpen:
+                case YardMapCell::GroundNoFeature:
+                case YardMapCell::GroundPassable:
+                case YardMapCell::Geo:
+                    return true;
+                default:
+                    return false;
+            }
+        };
+
+        const auto& heights = terrain.getHeightMap();
+
+        auto lowestLandCorner = std::optional<SimScalar>();
+        for (int dy = 0; dy < footprint.height; ++dy)
+        {
+            for (int dx = 0; dx < footprint.width; ++dx)
+            {
+                auto x = footprint.x + dx;
+                auto y = footprint.y + dy;
+                if (x < 0 || y < 0)
+                {
+                    continue;
+                }
+                auto ux = static_cast<unsigned int>(x);
+                auto uy = static_cast<unsigned int>(y);
+                if (ux + 1 >= heights.getWidth() || uy + 1 >= heights.getHeight())
+                {
+                    continue;
+                }
+
+                // No yardmap at all means the whole footprint is ground,
+                // which is what a unit without one occupies.
+                if (unitDefinition.yardMap)
+                {
+                    auto ux2 = static_cast<unsigned int>(dx);
+                    auto uy2 = static_cast<unsigned int>(dy);
+                    if (ux2 >= unitDefinition.yardMap->getWidth() || uy2 >= unitDefinition.yardMap->getHeight())
+                    {
+                        continue;
+                    }
+                    if (!standsOn(unitDefinition.yardMap->get(ux2, uy2)))
+                    {
+                        continue;
+                    }
+                }
+
+                // The lowest of the cell's four corners, as 0x47D8D2 takes
+                // `cell+0x6` -- the low corner the terrain record already
+                // holds.
+                auto corner = rweMin(
+                    rweMin(intToSimScalar(heights.get(ux, uy)), intToSimScalar(heights.get(ux + 1, uy))),
+                    rweMin(intToSimScalar(heights.get(ux, uy + 1)), intToSimScalar(heights.get(ux + 1, uy + 1))));
+
+                lowestLandCorner = lowestLandCorner ? rweMin(*lowestLandCorner, corner) : corner;
+            }
+        }
+
+        if (lowestLandCorner)
+        {
+            return *lowestLandCorner;
+        }
+
+        // Nothing in the footprint stands on the ground: a water building.
+        return terrain.getSeaLevel() - intToSimScalar(static_cast<int>(unitDefinition.waterLine));
+    }
+
     std::optional<UnitId> GameSimulation::trySpawnUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<SimAngle> rotation)
     {
         auto unit = createUnit(*this, unitType, owner, position, rotation);
         const auto& unitDefinition = unitDefinitions.at(unitType);
-        if (unitDefinition.floater || unitDefinition.canHover)
+
+        if (!unitDefinition.isMobile)
+        {
+            // A building is levelled onto its footprint the moment it is
+            // created (0x47DDC0 immediately before CreateUnit), and nothing
+            // moves it afterwards -- the per-tick height routine returns at
+            // once for anything without a mover.
+            auto footprint = computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
+            unit.position.y = computeBuildHeight(unitDefinition, footprint);
+            unit.previousPosition.y = unit.position.y;
+        }
+        else if (unitDefinition.floater || unitDefinition.canHover)
         {
             unit.position.y = rweMax(terrain.getSeaLevel(), unit.position.y);
+            unit.previousPosition.y = unit.position.y;
+        }
+        else if (!unitDefinition.canFly)
+        {
+            // And a mobile ground or sea unit is settled onto the terrain
+            // inside CreateUnit too (0x486109 calling 0x48A870), before it is
+            // ever drawn. Without that a submarine appears at the height of
+            // the shipyard's build piece and drops to the sea bed on its
+            // first step, which is what the play-test saw.
+            unit.position.y = terrain.getHeightAt(unit.position.x, unit.position.z);
             unit.previousPosition.y = unit.position.y;
         }
 

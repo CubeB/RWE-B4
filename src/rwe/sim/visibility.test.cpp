@@ -499,7 +499,7 @@ namespace rwe
             REQUIRE_FALSE(hilly.canSeeUnit(a, hiddenId));
         }
 
-        SECTION("altitude extends radar range")
+        SECTION("altitude does not extend radar range past its own ring")
         {
             GameSimulation air(makeFlatTerrain(), 0u, 0, 0);
             auto a = addPlayer(air, "us");
@@ -512,10 +512,22 @@ namespace rwe
             air.tick();
             REQUIRE_FALSE(air.canDetectUnit(a, targetId));
 
-            // 100 + 2 * 100 = 300 world units of reach from up there.
+            // The visitor allows RadarDistance + 2 * the detector's own
+            // height, but the sweep that feeds it only offers units inside
+            // max(RadarDistance, SonarDistance) -- so with no sonar the cap
+            // is RadarDistance and the bonus is cancelled. A flying radar
+            // reaches exactly as far as the ring drawn for it, which is why
+            // enemy dots outside that ring were a bug rather than a feature.
             auto& plane = air.getUnitState(planeId);
             plane.position = SimVector(0_ss, 100_ss, 0_ss);
             plane.previousPosition = plane.position;
+            air.tick();
+            REQUIRE_FALSE(air.canDetectUnit(a, targetId));
+
+            // And it still detects at its declared range.
+            auto& target = air.getUnitState(targetId);
+            target.position = SimVector(90_ss, 0_ss, 0_ss);
+            target.previousPosition = target.position;
             air.tick();
             REQUIRE(air.canDetectUnit(a, targetId));
         }

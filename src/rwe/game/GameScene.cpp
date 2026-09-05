@@ -1952,9 +1952,25 @@ namespace rwe
             Color color = hoverBuildInfo->isValid ? Color(83, 223, 79) : Color(171, 23, 0);
 
             auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(hoverBuildInfo->rect.x, hoverBuildInfo->rect.y);
-            topLeftWorld.y = simulation.terrain.getHeightAt(
-                topLeftWorld.x + ((SimScalar(hoverBuildInfo->rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss),
-                topLeftWorld.z + ((SimScalar(hoverBuildInfo->rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
+
+            // The same height the building will stand at, which in the
+            // original is the same number rather than merely the same rule:
+            // the box reads what the legality test cached, or calls the
+            // height routine itself. Taking the terrain under the centre
+            // instead drew the box on the sea floor while the building went
+            // to the surface, which is the gap a play-test saw under a tidal
+            // generator.
+            if (auto buildCursor = std::get_if<BuildCursorMode>(&cursorMode.getValue()); buildCursor != nullptr)
+            {
+                const auto& buildingDefinition = simulation.unitDefinitions.at(buildCursor->unitType);
+                topLeftWorld.y = simulation.computeBuildHeight(buildingDefinition, hoverBuildInfo->rect);
+            }
+            else
+            {
+                topLeftWorld.y = simulation.terrain.getHeightAt(
+                    topLeftWorld.x + ((SimScalar(hoverBuildInfo->rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss),
+                    topLeftWorld.z + ((SimScalar(hoverBuildInfo->rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
+            }
 
             auto topLeftUi = worldUiRenderService.getInverseViewProjectionMatrix()
                 * viewProjectionMatrix

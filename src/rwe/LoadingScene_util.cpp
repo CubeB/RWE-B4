@@ -303,7 +303,18 @@ namespace rwe
     Grid<YardMapCell> parseYardMap(unsigned int width, unsigned int height, const std::string& yardMap)
     {
         auto cells = parseYardMapCells(yardMap);
-        cells.resize(width * height, YardMapCell::Ground);
+
+        // A short yardmap repeats its last character rather than being padded
+        // with ground. The original's parser advances the string pointer only
+        // while the next character is not NUL (0x42D040-0x42D049), so the
+        // final character is re-read for every remaining cell.
+        //
+        // It matters for the two floating metal makers, whose whole yardmap
+        // is `w` against a three-by-three footprint: padding with ground gives
+        // them eight land cells, which puts them on the sea floor instead of
+        // in the water.
+        auto fill = cells.empty() ? YardMapCell::Ground : cells.back();
+        cells.resize(width * height, fill);
         return Grid<YardMapCell>(width, height, std::move(cells));
     }
 
