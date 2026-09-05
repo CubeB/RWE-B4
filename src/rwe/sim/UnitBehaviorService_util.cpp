@@ -789,6 +789,26 @@ namespace rwe
         return computeNewAirUnitVelocity(unit, unitDefinition, asFlying);
     }
 
+    SimVector computeNewDogfightVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateDogfight& physics)
+    {
+        // Whatever the phase is chasing -- a point running away from the
+        // fighter, or the far end of a break -- it is flown the same way as
+        // every other air goal.
+        AirMovementStateFlying asFlying;
+        asFlying.targetPosition = physics.phase == AirMovementStateDogfight::Phase::BreakingOut
+                || physics.phase == AirMovementStateDogfight::Phase::BreakingAway
+            ? physics.breakWaypoint
+            : physics.goalPosition;
+        asFlying.currentVelocity = physics.currentVelocity;
+        return computeNewAirUnitVelocity(unit, unitDefinition, asFlying);
+    }
+
+    bool targetIsAhead(const SimVector& heading, const SimVector& fromUnitToTarget)
+    {
+        auto dot = (heading.x * fromUnitToTarget.x) + (heading.z * fromUnitToTarget.z);
+        return dot > 0_ss;
+    }
+
     SimVector predictBombImpactPoint(const SimVector& bomberPosition, const SimVector& bomberVelocity, SimScalar groundY)
     {
         // The bomb's per-tick fall is governed by the ballistic gravity used

@@ -245,6 +245,9 @@ namespace rwe
          */
         bool hoverAttackTarget(UnitInfo unitInfo, const AttackTarget& target, const SimVector& targetPosition, SimScalar weaponMaxRange);
 
+        /** The original's AirToAir: a fighter against another aircraft. */
+        bool dogfightTarget(UnitInfo unitInfo, const AttackTarget& target, UnitId targetId, SimScalar weaponMaxRange);
+
         /** Where the gunship goes next, and the bookkeeping that decides it. */
         SimVector nextHoverAttackStation(UnitInfo unitInfo, AirMovementStateHoverAttack& hover, const SimVector& targetPosition, SimScalar radius, SimScalar weaponMaxRange);
 

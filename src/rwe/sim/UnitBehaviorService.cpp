@@ -1,4 +1,5 @@
 #include "UnitBehaviorService.h"
+#include <rwe/sim/SimRandom.h>
 #include <algorithm>
 #include <limits>
 #include <rwe/util/SimpleLogger.h>
@@ -62,6 +63,7 @@ namespace rwe
                 [](const AirMovementStateTakingOff& m) { return m.currentVelocity; },
                 [](const AirMovementStateAttackRun& m) { return m.currentVelocity; },
                 [](const AirMovementStateHoverAttack& m) { return m.currentVelocity; },
+                [](const AirMovementStateDogfight& m) { return m.currentVelocity; },
                 [](const AirMovementStateLanding&) { return SimVector(0_ss, 0_ss, 0_ss); });
         }
 
@@ -201,6 +203,10 @@ namespace rwe
                     },
                     [&](const AirMovementStateHoverAttack&) {
                         // As above: the gunship handler owns its own station.
+                    },
+                    [&](const AirMovementStateDogfight&) {
+                        // And the same for a fighter: dogfightTarget owns
+                        // every transition in it.
                     });
             });
 
@@ -353,6 +359,11 @@ namespace rwe
                         airPhysics->movementState = AirMovementStateFlying();
                         unitInfo.state->clearWeaponTargets();
                     },
+                    [&](const AirMovementStateDogfight&) {
+                        // A fighter whose bandit is gone has nothing to
+                        // pursue; level out and let the idle path decide.
+                        airPhysics->movementState = AirMovementStateFlying();
+                    },
                     [&](const AirMovementStateHoverAttack&) {
                         // Same again: a gunship left on station with no orders
                         // and nothing in range would otherwise shuttle back and
@@ -489,6 +500,9 @@ namespace rwe
                         },
                         [&](const AirMovementStateHoverAttack&) {
                             // Likewise the gunship: hoverAttackTarget owns the transitions.
+                        },
+                        [&](const AirMovementStateDogfight&) {
+                            // Likewise the fighter.
                         });
                 });
         }
@@ -803,6 +817,7 @@ namespace rwe
                             [&](const AirMovementStateFlying& m) { bomberVelocity = m.currentVelocity; },
                             [&](const AirMovementStateTakingOff& m) { bomberVelocity = m.currentVelocity; },
                             [&](const AirMovementStateHoverAttack& m) { bomberVelocity = m.currentVelocity; },
+                            [&](const AirMovementStateDogfight& m) { bomberVelocity = m.currentVelocity; },
                             [&](const AirMovementStateLanding&) {});
                     }
 
@@ -1123,6 +1138,7 @@ namespace rwe
                     [&](const AirMovementStateFlying& m) { bomberVelocity = m.currentVelocity; },
                     [&](const AirMovementStateTakingOff&) {},
                     [&](const AirMovementStateHoverAttack& m) { bomberVelocity = m.currentVelocity; },
+                    [&](const AirMovementStateDogfight& m) { bomberVelocity = m.currentVelocity; },
                     [&](const AirMovementStateLanding&) {});
             }
             inheritedVelocity = bomberVelocity;
@@ -1291,6 +1307,20 @@ namespace rwe
                             return;
                         }
                         unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, UnitState::toRotation(toTarget), turnRateThisFrame);
+                    },
+                    [&](const AirMovementStateDogfight& m) {
+                        // A fighter flies where it is pointing, unlike the
+                        // gunship beside it: its whole geometry -- the
+                        // forward half-plane test, the extend, the break --
+                        // is measured off the nose, so the nose follows the
+                        // flight path.
+                        SimVector heading = m.currentVelocity;
+                        heading.y = 0_ss;
+                        if (heading.lengthSquared() == 0_ss)
+                        {
+                            return;
+                        }
+                        unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, UnitState::toRotation(heading), turnRateThisFrame);
                     });
             });
     }
@@ -1334,6 +1364,19 @@ namespace rwe
                     },
                     [&](AirMovementStateHoverAttack& m) {
                         m.currentVelocity = computeNewHoverAttackVelocity(*unitInfo.state, *unitInfo.definition, m);
+                    },
+                    [&](AirMovementStateDogfight& m) {
+                        // The goal runs away from the fighter by its own
+                        // velocity every tick, in x and z only -- the
+                        // original's goal object integrates itself when it is
+                        // resolved (0x44EA60) and never touches the height.
+                        // It is what makes the extend uncatchable and the
+                        // chase lead the bandit rather than trail him.
+                        m.goalPosition = SimVector(
+                            m.goalPosition.x + m.goalVelocity.x,
+                            m.goalPosition.y,
+                            m.goalPosition.z + m.goalVelocity.z);
+                        m.currentVelocity = computeNewDogfightVelocity(*unitInfo.state, *unitInfo.definition, m);
                     });
 
                 p.roll = computeNewBankAngle(*unitInfo.state, *unitInfo.definition, p, airVelocity(p.movementState) - velocityBefore);
@@ -1434,6 +1477,21 @@ namespace rwe
                     [&](const AirMovementStateHoverAttack& m) {
                         // Same as the attack run: fly the velocity, then ease
                         // towards cruise height rather than snapping to it.
+                        auto newPosition = unitInfo.state->position + m.currentVelocity;
+                        auto targetAltitude = getTargetAltitude(sim->terrain, newPosition.x, newPosition.z, *unitInfo.definition);
+                        auto maxAltDelta = unitInfo.definition->maxVelocity;
+                        auto altDelta = targetAltitude - newPosition.y;
+                        altDelta = rweMax(-maxAltDelta, rweMin(altDelta, maxAltDelta));
+                        newPosition.y = newPosition.y + altDelta;
+                        tryApplyMovementToPosition(unitInfo, newPosition);
+                    },
+                    [&](const AirMovementStateDogfight& m) {
+                        // The same, and deliberately so. The original's
+                        // dogfight has no altitude discipline of its own --
+                        // the one call in it that looks like one, 0x44EC10,
+                        // is an empty stub that throws its argument away --
+                        // so a fighter is left to the ordinary cruise height
+                        // rather than chasing its bandit up and down.
                         auto newPosition = unitInfo.state->position + m.currentVelocity;
                         auto targetAltitude = getTargetAltitude(sim->terrain, newPosition.x, newPosition.z, *unitInfo.definition);
                         auto maxAltDelta = unitInfo.definition->maxVelocity;
@@ -2558,6 +2616,11 @@ namespace rwe
                     flying.currentVelocity = airVelocity(airPhysics->movementState);
                     airPhysics->movementState = flying;
                 }
+                // A dogfight leaves weapon 0 pointed at the bandit and never
+                // takes it off (0x412FC3 has no matching clear anywhere in
+                // the handler), so the aim has to be dropped here with the
+                // state.
+                unitInfo.state->clearWeaponTargets();
             }
             return true;
         }
@@ -2593,6 +2656,26 @@ namespace rwe
         }
 
         const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType);
+
+        // An aircraft after another aircraft is a different mission
+        // entirely: 0x43F2CB gives AIRTOAIR to anything whose weapon is not
+        // dropped when the target can fly. A bomber never reaches it -- the
+        // original produces no mission at all for a bomber sent at an
+        // aircraft, which §86 records -- so the bomb test comes first here
+        // too.
+        if (auto targetUnitId = std::get_if<UnitId>(&target))
+        {
+            if (!std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType))
+            {
+                if (auto targetState = sim->tryGetUnitState(*targetUnitId))
+                {
+                    if (sim->unitDefinitions.at(targetState->get().unitType).canFly)
+                    {
+                        return dogfightTarget(unitInfo, target, *targetUnitId, weaponDefinition.maxRange);
+                    }
+                }
+            }
+        }
 
         // Gunships get their own behaviour, but only against a unit they can
         // actually work around. The original gates it the same way: a Brawler
@@ -2643,21 +2726,9 @@ namespace rwe
             // ninety degrees before coming round. A dropped weapon keeps
             // `AirStrike`'s modest run-out -- a bomb's 1280 range would send
             // the aircraft clean off the map.
-            // ...but only against something on the ground. The original
-            // sends a fighter after another aircraft on AirToAir (0x412D40)
-            // instead, which hops around its target in twenty-unit steps
-            // rather than overshooting; running three weapon ranges past a
-            // dogfight would be worse than the generic pattern, so an air
-            // target keeps that until AirToAir itself is ported.
-            bool targetIsAirborne = false;
-            if (auto targetUnitId = std::get_if<UnitId>(&target))
-            {
-                if (auto targetState = sim->tryGetUnitState(*targetUnitId))
-                {
-                    targetIsAirborne = sim->unitDefinitions.at(targetState->get().unitType).canFly;
-                }
-            }
-            runState.strafingPass = !std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType) && !targetIsAirborne;
+            // An air target never reaches here any more -- it is sent to
+            // the dogfight above -- so this is the ground case only.
+            runState.strafingPass = !std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType);
             runState.runOutDistance = runState.strafingPass
                 ? weaponDefinition.maxRange * 3_ss
                 : defaultAttackRunOutDistance(*unitInfo.definition, weaponDefinition.maxRange);
@@ -2768,6 +2839,233 @@ namespace rwe
         {
             unitInfo.state->clearWeaponTargets();
         }
+
+        return false;
+    }
+
+    bool UnitBehaviorService::dogfightTarget(UnitInfo unitInfo, const AttackTarget& target, UnitId targetId, SimScalar weaponMaxRange)
+    {
+        auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
+        if (airPhysics == nullptr)
+        {
+            return false;
+        }
+
+        auto bandit = sim->tryGetUnitState(targetId);
+        if (!bandit)
+        {
+            return true;
+        }
+        const auto& banditState = bandit->get();
+        const auto& banditDefinition = sim->unitDefinitions.at(banditState.unitType);
+
+        // Take over from whatever it was doing. Starting again on a new
+        // target matters here: every number in the state is measured against
+        // one particular aircraft.
+        auto existing = std::get_if<AirMovementStateDogfight>(&airPhysics->movementState);
+        if (existing == nullptr || existing->target != target)
+        {
+            AirMovementStateDogfight dogfight(target);
+            dogfight.currentVelocity = airVelocity(airPhysics->movementState);
+            dogfight.goalPosition = banditState.position;
+            dogfight.nextDecision = sim->gameTime;
+            airPhysics->movementState = dogfight;
+        }
+
+        auto dogfight = std::get_if<AirMovementStateDogfight>(&airPhysics->movementState);
+        if (dogfight == nullptr)
+        {
+            return false;
+        }
+        dogfight->target = target;
+
+        // Weapon 0 is held on the bandit for the whole engagement and never
+        // let go (0x412FC3, and there is no matching clear anywhere in the
+        // handler); the other two are left free to pick their own targets.
+        // Range, aim and reload are the weapon update's business, exactly as
+        // they are for the strafing pass -- this mission has no range test of
+        // its own at all.
+        unitInfo.state->setWeaponTarget(0, targetId);
+
+        SimVector heading = dogfight->currentVelocity;
+        heading.y = 0_ss;
+        if (heading.lengthSquared() == 0_ss)
+        {
+            heading = UnitState::toDirection(unitInfo.state->rotation);
+        }
+
+        // Off the map, and nothing else matters until it is back. The
+        // original checks this before it even looks at the leash (0x412E5E),
+        // and sends the aircraft 800 units towards the middle without
+        // touching any of the state -- so the pursuit picks up where it left
+        // off. Two fighters working each other over will drift a long way
+        // otherwise: an extend runs thirty times top speed ahead and a break
+        // goes two weapon ranges out.
+        {
+            const auto& heights = sim->terrain.getHeightMap();
+            auto corner = sim->terrain.heightmapIndexToWorldCorner(0, 0);
+            auto minX = corner.x;
+            auto minZ = corner.z;
+            auto maxX = corner.x + (SimScalar(static_cast<float>(heights.getWidth())) * MapTerrain::HeightTileWidthInWorldUnits);
+            auto maxZ = corner.z + (SimScalar(static_cast<float>(heights.getHeight())) * MapTerrain::HeightTileHeightInWorldUnits);
+            const auto& p = unitInfo.state->position;
+            if (p.x < minX || p.x > maxX || p.z < minZ || p.z > maxZ)
+            {
+                SimVector centre((minX + maxX) / 2_ss, p.y, (minZ + maxZ) / 2_ss);
+                SimVector inward(centre.x - p.x, 0_ss, centre.z - p.z);
+                auto direction = inward.normalizedOr(UnitState::toDirection(unitInfo.state->rotation));
+                dogfight->goalPosition = SimVector(
+                    p.x + (direction.x * 800_ss),
+                    p.y,
+                    p.z + (direction.z * 800_ss));
+                dogfight->goalVelocity = SimVector(0_ss, 0_ss, 0_ss);
+                return false;
+            }
+        }
+
+        SimVector toBandit(
+            banditState.position.x - unitInfo.state->position.x,
+            0_ss,
+            banditState.position.z - unitInfo.state->position.z);
+
+        auto beginBreak = [&]() {
+            // Ninety degrees to a side drawn once, one weapon range out; the
+            // second leg goes twice as far the same way (0x413CB8 onwards).
+            dogfight->breakLeft = (sim->rng() % 2u) == 0u;
+            dogfight->phase = AirMovementStateDogfight::Phase::BreakingOut;
+            dogfight->offNoseCounter = 0;
+            auto quarter = SimAngle(16384);
+            auto facing = UnitState::toRotation(heading);
+            auto away = UnitState::toDirection(dogfight->breakLeft ? facing - quarter : facing + quarter);
+            dogfight->breakWaypoint = SimVector(
+                unitInfo.state->position.x + (away.x * weaponMaxRange),
+                unitInfo.state->position.y,
+                unitInfo.state->position.z + (away.z * weaponMaxRange));
+        };
+
+        // A break flies its leg and is not reconsidered until it arrives.
+        if (dogfight->phase == AirMovementStateDogfight::Phase::BreakingOut
+            || dogfight->phase == AirMovementStateDogfight::Phase::BreakingAway)
+        {
+            SimVector toWaypoint(
+                dogfight->breakWaypoint.x - unitInfo.state->position.x,
+                0_ss,
+                dogfight->breakWaypoint.z - unitInfo.state->position.z);
+
+            // The break's own goal carries a tolerance of 128 (0x413D40).
+            if (toWaypoint.lengthSquared() > (128_ss * 128_ss))
+            {
+                return false;
+            }
+
+            if (dogfight->phase == AirMovementStateDogfight::Phase::BreakingOut)
+            {
+                auto quarter = SimAngle(16384);
+                auto facing = UnitState::toRotation(heading);
+                auto away = UnitState::toDirection(dogfight->breakLeft ? facing - quarter : facing + quarter);
+                auto second = weaponMaxRange * 2_ss;
+                dogfight->breakWaypoint = SimVector(
+                    unitInfo.state->position.x + (away.x * second),
+                    unitInfo.state->position.y,
+                    unitInfo.state->position.z + (away.z * second));
+                dogfight->phase = AirMovementStateDogfight::Phase::BreakingAway;
+                return false;
+            }
+
+            // Both legs flown: the evade mission deletes itself and AirToAir
+            // starts over from its first state (0x413BF1 case 2, then 0x413397).
+            dogfight->phase = AirMovementStateDogfight::Phase::Pursuing;
+            dogfight->nextDecision = sim->gameTime;
+            dogfight->goalPosition = banditState.position;
+            dogfight->goalVelocity = SimVector(0_ss, 0_ss, 0_ss);
+            return false;
+        }
+
+        // Has the goal been reached? The original's goal is satisfied within
+        // 48 units in x and z (0x44EB60, a hard-coded float with no setter).
+        SimVector toGoal(
+            dogfight->goalPosition.x - unitInfo.state->position.x,
+            0_ss,
+            dogfight->goalPosition.z - unitInfo.state->position.z);
+        auto reachedGoal = toGoal.lengthSquared() <= (48_ss * 48_ss);
+
+        if (reachedGoal)
+        {
+            // An overshoot. With the bandit still in front, run on for a
+            // second and come back at him; with him behind, break off.
+            if (!targetIsAhead(heading, toBandit))
+            {
+                beginBreak();
+                return false;
+            }
+
+            // Thirty times top speed ahead, receding at top speed: a point
+            // that cannot be caught, which is the point -- the leg ends on
+            // its timer (0x41305A).
+            auto v = unitInfo.definition->maxVelocity;
+            auto nose = heading.normalizedOr(UnitState::toDirection(unitInfo.state->rotation));
+            dogfight->phase = AirMovementStateDogfight::Phase::Extending;
+            dogfight->goalPosition = SimVector(
+                unitInfo.state->position.x + (nose.x * (30_ss * v)),
+                unitInfo.state->position.y,
+                unitInfo.state->position.z + (nose.z * (30_ss * v)));
+            dogfight->goalVelocity = SimVector(nose.x * v, 0_ss, nose.z * v);
+            dogfight->offNoseCounter = 0;
+            dogfight->nextDecision = sim->gameTime + GameTime(60 + randomBelow(sim->rng, 30));
+            return false;
+        }
+
+        if (sim->gameTime < dogfight->nextDecision)
+        {
+            return false;
+        }
+
+        // A decision. Where is he?
+        if (targetIsAhead(heading, toBandit))
+        {
+            dogfight->offNoseCounter = 0;
+        }
+        else
+        {
+            dogfight->offNoseCounter += 45;
+        }
+
+        if (dogfight->offNoseCounter >= 90)
+        {
+            beginBreak();
+            return false;
+        }
+
+        dogfight->nextDecision = sim->gameTime + GameTime(45);
+
+        // Inside a hundred and sixty units nothing is installed at all: it
+        // holds whatever it was already flying (0x413237).
+        if (toBandit.lengthSquared() <= (160_ss * 160_ss))
+        {
+            return false;
+        }
+
+        // Otherwise lead him: a point forty-five ticks along his own
+        // velocity, which then runs on at his speed plus half his top speed.
+        // That last term is unconditional in the original, so a hovering
+        // bandit still gets a goal that slides along his heading.
+        auto banditVelocity = match(
+            banditState.physics,
+            [&](const UnitPhysicsInfoAir& a) { return airVelocity(a.movementState); },
+            [&](const UnitPhysicsInfoGround& g) { return UnitState::toDirection(banditState.rotation) * g.currentSpeed; });
+        SimVector lead(
+            banditState.position.x + (banditVelocity.x * 45_ss),
+            banditState.position.y,
+            banditState.position.z + (banditVelocity.z * 45_ss));
+
+        auto banditNose = UnitState::toDirection(banditState.rotation);
+        auto half = banditDefinition.maxVelocity / 2_ss;
+        dogfight->phase = AirMovementStateDogfight::Phase::Pursuing;
+        dogfight->goalPosition = lead;
+        dogfight->goalVelocity = SimVector(
+            banditVelocity.x + (banditNose.x * half),
+            0_ss,
+            banditVelocity.z + (banditNose.z * half));
 
         return false;
     }
@@ -4246,6 +4544,9 @@ namespace rwe
             },
             [&](const AirMovementStateHoverAttack&) {
                 // Likewise on station: the gunship handler decides where to fly.
+            },
+            [&](const AirMovementStateDogfight&) {
+                // And likewise mid-dogfight.
             });
 
         return false;

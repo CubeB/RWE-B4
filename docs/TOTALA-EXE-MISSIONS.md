@@ -619,14 +619,23 @@ And the whole thing is bounded by the maneuver leash (§8).
 
 ---
 
-## 7. `AirToAir` — `0x412D40`, for completeness
+## 7. `AirToAir` — `0x412D40`
 
 Two states, dispatched by a `cmp` chain at `0x412FA0` rather than a jump table.
 State 0 (`0x413397`) is the same take-off/announce block. State 1 (`0x412FB2`)
 sets `0x489800(unit,3)` then `0x4898B0(unit,0)` and `0x48A060(unit, target, 0)`,
-then flies short hops (`0x140000` = 20.0 units) around the target, and pushes a
-**`VTOL_EVADE`** mission (name at `0x501CAC`) when it needs to break off
-(`0x413352`). It shares the same leash and off-map handling.
+and pushes a **`VTOL_EVADE`** mission (name at `0x501CAC`) when it needs to
+break off (`0x413352`). It shares the same leash, and its own off-map handling
+is the gunship's rather than `AirToGround`'s.
+
+**Corrected, September 2026.** This section used to say the mission "flies
+short hops (`0x140000` = 20.0 units) around the target". It does not. That
+constant is the length of two probe vectors whose dot product asks whether the
+target lies in the forward half-plane, and nothing in the mission ever moves
+twenty units. What it actually does — lead the target by forty-five ticks of
+his own velocity, extend when it overshoots, break off when he ends up behind
+— is decoded in full in `TOTALA-EXE.md` §90, along with the goal object that
+advances itself and the two calls in it that turn out to be stubs.
 
 ---
 

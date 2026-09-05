@@ -878,6 +878,7 @@ set(TEST_FILES
     src/rwe/sim/interception.test.cpp
     src/rwe/sim/dgun.test.cpp
     src/rwe/sim/dgunorder.test.cpp
+    src/rwe/sim/dogfight.test.cpp
     src/rwe/pathfinding/pathing.test.cpp
     src/rwe/pathfinding/BugWalk.test.cpp
     src/rwe/pathfinding/walkwhilewaiting.test.cpp

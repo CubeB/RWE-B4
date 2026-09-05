@@ -195,6 +195,21 @@ namespace rwe
     /** Velocity update for a gunship on station, flying from one point of the ring to the next. */
     SimVector computeNewHoverAttackVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateHoverAttack& physics);
 
+    SimVector computeNewDogfightVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateDogfight& physics);
+
+    /**
+     * Whether `target` lies in the half-plane in front of a unit facing
+     * `heading`.
+     *
+     * The original asks this with a dot product of two twenty-unit vectors --
+     * one along the bearing to the target, one along the aircraft's nose --
+     * whose components it floors to whole units first (0x412FDA). That
+     * flooring puts the boundary somewhere between 87 and 92 degrees
+     * depending on the heading; this is the clean version of the same test,
+     * and the wobble is not worth reproducing.
+     */
+    bool targetIsAhead(const SimVector& heading, const SimVector& fromUnitToTarget);
+
     /**
      * Velocity update for aircraft executing an attack run. The aircraft
      * never brakes — it holds speed and banks, turning its heading at no more

@@ -1302,6 +1302,19 @@ namespace rwe
                         {"outOfRangeArrivals", h.outOfRangeArrivals},
                         {"phase", saveEnum(h.phase)},
                         {"currentVelocity", saveSimVector(h.currentVelocity)}};
+                },
+                [&](const AirMovementStateDogfight& d) {
+                    return json{
+                        {"kind", "dogfight"},
+                        {"target", saveAttackTarget(d.target, ctx)},
+                        {"phase", saveEnum(d.phase)},
+                        {"goalPosition", saveSimVector(d.goalPosition)},
+                        {"goalVelocity", saveSimVector(d.goalVelocity)},
+                        {"nextDecision", d.nextDecision.value},
+                        {"offNoseCounter", d.offNoseCounter},
+                        {"breakLeft", d.breakLeft},
+                        {"breakWaypoint", saveSimVector(d.breakWaypoint)},
+                        {"currentVelocity", saveSimVector(d.currentVelocity)}};
                 });
         }
 
@@ -1353,6 +1366,19 @@ namespace rwe
                 h.phase = loadEnum<AirMovementStateHoverAttack::Phase>(j.at("phase"));
                 h.currentVelocity = loadSimVector(j.at("currentVelocity"));
                 return h;
+            }
+            if (kind == "dogfight")
+            {
+                AirMovementStateDogfight d(loadAttackTarget(j.at("target"), ctx));
+                d.phase = loadEnum<AirMovementStateDogfight::Phase>(j.at("phase"));
+                d.goalPosition = loadSimVector(j.at("goalPosition"));
+                d.goalVelocity = loadSimVector(j.at("goalVelocity"));
+                d.nextDecision = GameTime(j.at("nextDecision").get<unsigned int>());
+                d.offNoseCounter = j.at("offNoseCounter").get<unsigned int>();
+                d.breakLeft = j.at("breakLeft").get<bool>();
+                d.breakWaypoint = loadSimVector(j.at("breakWaypoint"));
+                d.currentVelocity = loadSimVector(j.at("currentVelocity"));
+                return d;
             }
             throw std::runtime_error("bad AirMovementState kind: " + kind);
         }

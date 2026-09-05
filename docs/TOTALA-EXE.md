@@ -2018,7 +2018,8 @@ around it, twenty tiles across, moving 90° to 135° round every time it arrives
 with a 128-unit arrival tolerance so it really does fly to each point. That is
 the reported milling about, and it is a good deal larger than it looks in the
 disassembly: `0x1400000` is 320, not 20 — `0x140000` is the 20 that `AirToAir`
-uses for its short hops.
+uses, and that 20 turns out not to be a hop at all but the length of the probe
+vectors in a facing test. See §90.
 
 An armed guard — a Brawler told to guard something — works a much wider ring,
 `370 + 160 = 530`.
@@ -8474,7 +8475,104 @@ constant offset would not show up in that search. Nothing suggests one --
 every other field in that record is reached by constant offset -- but it is
 the one way this reading could be wrong.
 
-## 90. Still unknown or unported
+## 90. `AirToAir`: a pursuit, and the twenty units that are not a hop
+
+`0x412D40`, reached from `0x43F2CB` when the weapon is not `dropped` and the
+target can fly. RWE had never ported it, so a fighter sent at another fighter
+flew the bomber's attack run with the strafing overshoot switched off, which
+was the closest thing available.
+
+**First, a correction to this document and to `TOTALA-EXE-MISSIONS.md` §7.**
+Both said this mission "hops around its target in twenty-unit steps". There
+are no hops. `0x140000` is the length of two probe vectors -- one along the
+bearing to the target, one along the aircraft's nose -- whose dot product
+(`0x412FDA`, `0x41316D`) asks whether the bandit lies in the forward
+half-plane. Nothing in the mission ever moves twenty units. The components are
+floored to whole units before multiplying, which puts the boundary between 87
+and 92 degrees depending on heading; that wobble is not worth reproducing.
+
+### Two states
+
+**State 0** takes off, announces "Attacking", takes all three weapons, climbs
+to half `cruisealt` if it was on the ground, and sets a one-tick timer.
+
+**State 1** is the whole dogfight and is terminal. Every wake it frees all
+three weapons, takes weapon 0 back and points it at the bandit (`0x412FC3`) --
+and never lets go, because there is no matching clear anywhere in the handler.
+Then one of four branches:
+
+| Branch | When | What it installs | Next |
+|---|---|---|---|
+| **Extend** | the goal was reached and the bandit is *in front* | a point `30 x MaxVelocity` along the nose, receding at `MaxVelocity` | a timer of `rand(30) + 60` |
+| **Chase** | no goal event, bandit further than 160 | the bandit's position plus 45 ticks of his velocity, receding at his velocity plus half his top speed | 45 ticks |
+| **Hold** | no goal event, bandit within 160 | nothing at all -- it keeps flying what it had | 45 ticks |
+| **Break** | the goal was reached and the bandit is *behind*, or three decisions in a row with him off the nose | a separate `VTOL_EVADE` mission, pushed in front | restarts at state 0 |
+
+The off-nose counter (`mission+0x36`) goes up by 45 a decision and breaks at
+90, so it takes three consecutive decisions; any one with the bandit in front
+resets it.
+
+### The goal is an object that runs away from you
+
+`0x44E740` builds a goal class no other mission uses: a position and a
+velocity, whose resolve (`0x44EA60`) **advances the position by the velocity
+every time it is asked**, in x and z only. Its satisfaction radius is a
+hard-coded 48 with no setter, and the call that looks like an altitude
+instruction, `0x44EC10`, is an empty `ret 0x4` -- the `cruisealt` handed to it
+is thrown away.
+
+Two consequences worth stating plainly. **The extend can never be reached**:
+it starts thirty times the aircraft's top speed ahead and recedes at exactly
+that speed, so the leg always ends on its timer. And **the `V/2` term in the
+chase is unconditional**, so a hovering or landed bandit still gets a goal
+sliding along his heading -- up to 270 units for a Vampire before the 45-tick
+refresh.
+
+### The break
+
+`VTOL_EVADE`, `0x413BC0`, whose only producer in the whole binary is this
+mission. State 0 draws a side with `rand(2)` and flies ninety degrees that way
+for one weapon range; state 1 flies the same way again for **two** (`shl
+edi,0x11`); state 2 returns 5 and the mission deletes itself, after which
+`AirToAir` starts over at state 0. It is a reversal, not an S: the side is
+drawn once and only read afterwards.
+
+### What it does not have
+
+No range test, no angle test and no firing tolerance -- it never reads weapon
+0's range at all, and leaves all of that to the weapon update. No health check
+and no repair-pad break-off, which all three sibling handlers do have: **a
+damaged fighter never goes home.** No fuel. No re-acquisition. And
+`mission+0x22` is never refreshed, so the position it carries is stale for
+anything that reads it later.
+
+It does have an off-map branch, before the leash is even considered
+(`0x412E5E`): a fighter that has left the map is sent 800 units back towards
+the middle with its state untouched.
+
+### As ported
+
+`AirMovementStateDogfight` follows the above, with the goal advanced once a
+tick in the physics pass where the original advances it on resolve. Three
+deliberate departures, all small: the facing test is a clean dot product
+rather than the floored one; the break is a phase of the same state rather
+than a separate mission pushed in front, since RWE has no mission list to push
+onto; and a fighter's nose follows its flight path, where the original leaves
+heading to the mover.
+
+Porting it also turned up two things about dying off the map, which an
+aircraft can do and a dogfight breaking two weapon ranges off a corner
+actually does. `deleteDeadUnits` asserted that a dead unit's footprint lies on
+the map, which holds for anything on the ground and not for an aircraft; it
+now skips the grid work in that case and keeps the assertion where it is still
+an invariant. And leaving `flyingUnitsSet` must not be conditional on any of
+that -- the projectile pass walks that set and asks for each unit by id, so an
+entry left behind by a dead aircraft is a lookup for a unit that is gone, which
+is an assertion in Debug and a bad variant access in Release. `battle_test`
+found the second one with sixty fighters a side after the suite had passed;
+there is a regression test for it now.
+
+## 91. Still unknown or unported
 
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not

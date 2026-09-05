@@ -159,6 +159,27 @@ namespace rwe
         };
     }
 
+    nlohmann::json dumpJson(const AirMovementStateDogfight& p)
+    {
+        const char* phaseName = "Pursuing";
+        switch (p.phase)
+        {
+            case AirMovementStateDogfight::Phase::Pursuing:     phaseName = "Pursuing";     break;
+            case AirMovementStateDogfight::Phase::Extending:    phaseName = "Extending";    break;
+            case AirMovementStateDogfight::Phase::BreakingOut:  phaseName = "BreakingOut";  break;
+            case AirMovementStateDogfight::Phase::BreakingAway: phaseName = "BreakingAway"; break;
+        }
+        return nlohmann::json{
+            {"phase", phaseName},
+            {"goalPosition", dumpJson(p.goalPosition)},
+            {"goalVelocity", dumpJson(p.goalVelocity)},
+            {"nextDecision", p.nextDecision.value},
+            {"offNoseCounter", p.offNoseCounter},
+            {"breakLeft", p.breakLeft},
+            {"breakWaypoint", dumpJson(p.breakWaypoint)},
+        };
+    }
+
     nlohmann::json dumpJson(const AirMovementStateHoverAttack& p)
     {
         const char* phaseName = "Closing";

@@ -271,6 +271,74 @@ namespace rwe
     };
 
     /**
+     * A fighter against another aircraft: the original's `AirToAir`,
+     * `0x412D40`, which RWE had never ported -- an air target used to get the
+     * bomber's attack run, so a fighter flew bombing passes at another
+     * fighter.
+     *
+     * It is a pursuit, not a circuit. Weapon 0 is pointed at the bandit and
+     * held there while the other two are left to pick their own targets, and
+     * every decision either leads him or breaks off.
+     *
+     * Note for anyone reading the two findings documents alongside this: both
+     * of them said this mission "hops around its target in twenty-unit
+     * steps", and both were wrong. The twenty is the length of two probe
+     * vectors in a dot product that asks whether the bandit is in front, and
+     * nothing in the mission ever moves twenty units.
+     */
+    struct AirMovementStateDogfight
+    {
+        enum class Phase
+        {
+            /** Leading the bandit, or holding station inside 160 units. */
+            Pursuing,
+            /** Overshot: fly the current heading until the timer runs out. */
+            Extending,
+            /** The first ninety-degree break, one weapon range long. */
+            BreakingOut,
+            /** The second, twice as long, turning the same way. */
+            BreakingAway,
+        };
+
+        /** Mirrors AttackOrder::target, though only a unit ever gets here. */
+        AttackTarget target;
+
+        Phase phase{Phase::Pursuing};
+
+        /**
+         * Where the aircraft is being sent, and how fast that point is
+         * running away from it. The original keeps these as one object that
+         * advances itself by its own velocity whenever it is resolved
+         * (0x44EA60, in x and z only -- the height is frozen), and this is
+         * advanced the same way, once per tick, in the physics pass.
+         */
+        SimVector goalPosition{0_ss, 0_ss, 0_ss};
+        SimVector goalVelocity{0_ss, 0_ss, 0_ss};
+
+        /** When the current leg is reconsidered. */
+        GameTime nextDecision{0};
+
+        /**
+         * Counts decisions taken with the bandit outside the forward
+         * half-plane, forty-five at a time; at ninety the fighter breaks off.
+         * Three in a row, in other words, and any one of them with him in
+         * front puts it back to zero.
+         */
+        unsigned int offNoseCounter{0};
+
+        /** Which way the break turns. Drawn once, and both legs use it. */
+        bool breakLeft{false};
+
+        /** Where the current break leg is flying to. */
+        SimVector breakWaypoint{0_ss, 0_ss, 0_ss};
+
+        SimVector currentVelocity{0_ss, 0_ss, 0_ss};
+
+        AirMovementStateDogfight() : target(SimVector(0_ss, 0_ss, 0_ss)) {}
+        explicit AirMovementStateDogfight(const AttackTarget& t) : target(t) {}
+    };
+
+    /**
      * State for Total Annihilation's gunships. The Brawler and the Rapier are
      * the only two units in the original data with HoverAttack set, and the
      * original gives them their own mission rather than an attack run.
@@ -324,7 +392,7 @@ namespace rwe
         explicit AirMovementStateHoverAttack(const AttackTarget& t) : target(t) {}
     };
 
-    using AirMovementState = std::variant<AirMovementStateTakingOff, AirMovementStateFlying, AirMovementStateLanding, AirMovementStateAttackRun, AirMovementStateHoverAttack>;
+    using AirMovementState = std::variant<AirMovementStateTakingOff, AirMovementStateFlying, AirMovementStateLanding, AirMovementStateAttackRun, AirMovementStateHoverAttack, AirMovementStateDogfight>;
 
     struct UnitPhysicsInfoAir
     {

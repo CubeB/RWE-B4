@@ -186,6 +186,18 @@ namespace rwe
             static_cast<uint32_t>(p.phase));
     }
 
+    GameHash computeHashOf(const AirMovementStateDogfight& p)
+    {
+        return combineHashes(
+            p.goalPosition,
+            p.goalVelocity,
+            p.nextDecision.value,
+            p.offNoseCounter,
+            static_cast<uint32_t>(p.breakLeft),
+            p.breakWaypoint,
+            static_cast<uint32_t>(p.phase));
+    }
+
     GameHash computeHashOf(const SteeringInfo& s)
     {
         return combineHashes(s.targetAngle, s.targetSpeed);

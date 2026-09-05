@@ -4032,18 +4032,32 @@ namespace rwe
 
             auto footprintRect = computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
             auto footprintRegion = occupiedGrid.tryToRegion(footprintRect);
-            assert(!!footprintRegion);
-            if (unit.carriedBy)
+
+            // A unit that died off the map holds no ground to give back. That
+            // is only ever an aircraft -- nothing on the ground can leave --
+            // and it is a real case rather than a defensive one: an attack
+            // run carries an edge check for the same reason, and a dogfight
+            // breaks two weapon ranges out, which off a corner is over the
+            // edge. The assertion stands where it is still an invariant.
+            assert(!!footprintRegion || isFlying(unit.physics));
+
+            // Out of the flying set first, and whatever else is true of it:
+            // the projectile pass walks that set and asks for each unit by
+            // id, so an entry left behind by a dead aircraft is a lookup for
+            // a unit that is not there any more.
+            if (unitDefinition.isMobile && isFlying(unit.physics))
             {
-                // It died in a transport's grip: it holds no ground to give back.
+                flyingUnitsSet.erase(it->first);
+            }
+
+            if (unit.carriedBy || !footprintRegion)
+            {
+                // It died in a transport's grip, or off the map entirely:
+                // either way it is holding no ground to give back.
             }
             else if (unitDefinition.isMobile)
             {
-                if (isFlying(unit.physics))
-                {
-                    flyingUnitsSet.erase(it->first);
-                }
-                else
+                if (!isFlying(unit.physics))
                 {
                     occupiedGrid.forEach(*footprintRegion, [](auto& cell) { cell.mobileUnitId = std::nullopt; });
                 }
