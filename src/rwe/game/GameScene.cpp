@@ -6797,6 +6797,16 @@ namespace rwe
                         deselectUnit(e.unitId);
                     }
                 },
+                [&](const ProjectileDetonatedEvent& e) {
+                    // A `noexplode` round that went off and kept flying. It
+                    // gets the impact art and the shake of an ordinary hit --
+                    // the disintegrator's explode5, once per tick along its
+                    // trail -- but the projectile itself is still in the air,
+                    // so nothing here may treat it as finished.
+                    const auto& weaponMediaInfo = gameMediaDatabase.getWeapon(e.weaponType);
+                    doProjectileImpact(e.position, e.weaponType, e.inWater ? ImpactType::Water : ImpactType::Normal);
+                    addScreenShakeFromWeapon(weaponMediaInfo);
+                },
                 [&](const ProjectileDiedEvent& e) {
                     const auto& weaponMediaInfo = gameMediaDatabase.getWeapon(e.weaponType);
                     if (weaponMediaInfo.endSmoke)

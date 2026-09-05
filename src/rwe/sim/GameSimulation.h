@@ -340,6 +340,20 @@ namespace rwe
         DeathType deathType;
     };
 
+    /**
+     * A projectile went off and carried on flying: a `noexplode` round, which
+     * detonates without being consumed (0x499EDE). The projectile is still
+     * alive, so this is not a ProjectileDiedEvent -- the scene wants the
+     * explosion art and the screen shake, and must not treat the round as
+     * finished.
+     */
+    struct ProjectileDetonatedEvent
+    {
+        std::string weaponType;
+        SimVector position;
+        bool inWater;
+    };
+
     struct UnitCapturedEvent
     {
         UnitId unitId;
@@ -382,6 +396,7 @@ namespace rwe
         UnitDamagedEvent,
         UnitStartedBuildingEvent,
         ProjectileDiedEvent,
+        ProjectileDetonatedEvent,
         UnitCapturedEvent>;
 
 
@@ -631,6 +646,27 @@ namespace rwe
          * CORE unit in one hit, so the shipped nuke buys the whole minute.
          */
         static constexpr unsigned int MaxParalysisTicks = 1800;
+
+        /**
+         * How long a freshly placed nanoframe is left alone before its
+         * `GetBuilt` mission first looks for a builder: state 0 schedules
+         * +300, state 1 schedules +30 without testing anything (0x402DA0).
+         * A frame placed and never touched therefore decays first at 330.
+         */
+        static constexpr unsigned int NanoframeDecayGraceTicks = 330;
+
+        /** How often the frame looks again while a builder is still on it. */
+        static constexpr unsigned int NanoframeDecayCheckTicks = 30;
+
+        /**
+         * How often it decays once nobody is, and the `n` in TA's
+         * `buildtime * n / buildCostEnergy` (0x41BCD0). The build time cancels
+         * out of that division against the one the build routine does, which
+         * is why the rate is a flat one energy-point of the frame's cost per
+         * tick whatever else the unit is: 760 ticks for an ARMSOLAR nanoframe,
+         * twenty minutes for a full ARMFUS one.
+         */
+        static constexpr unsigned int NanoframeDecayTicks = 11;
 
         /** Starts a unit's self-destruct countdown, or cancels it if one is already running. */
         void toggleSelfDestruct(UnitId unitId);
@@ -1061,6 +1097,13 @@ namespace rwe
         void updateSelfRepair();
 
         void updateSelfDestructs();
+
+        /**
+         * Runs the `GetBuilt` timer on every nanoframe: a frame nobody has
+         * worked on for a period loses build progress, and with it hit points,
+         * until there is nothing left of it and it is removed.
+         */
+        void updateNanoframeDecay();
 
         /**
          * Gives one map square a chance to seed a copy of whatever feature stands

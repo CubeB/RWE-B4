@@ -97,6 +97,40 @@ namespace rwe
         return SimAngle(cone);
     }
 
+    GameTime computeReloadTicks(SimScalar reloadTime, unsigned int health, unsigned int maxHealth, unsigned int kills)
+    {
+        // The branch a non-stockpiled weapon takes at 0x49E468. RWE used the
+        // flat TDF number; the original scales it twice over, once by how hurt
+        // the shooter is and once by how many kills it has, and both terms are
+        // integer arithmetic on a tick count that is already whole:
+        //
+        //   reloadTicks = ((120 - 20*hp/maxdamage) * ((100 - 6*tier) * reloadTicks / 100)) / 100
+        //
+        // with tier = min(5, kills/5) as everywhere else. At full health and no
+        // kills the two terms cancel exactly -- (120-20) * (100*T/100) / 100 is
+        // T -- which is why this changes nothing at all for an undamaged
+        // rookie and is safe to apply to every weapon in the game. A veteran of
+        // twenty-five kills reloads in 70% of the time and a unit at the point
+        // of death takes 120%.
+        //
+        // The commander's disintegrator is the case worth checking by hand:
+        // reloadtime 1.2 is 36 ticks, and a healthy commander gets exactly 36
+        // back -- the 1.2 seconds the TDF asked for.
+        auto baseTicks = static_cast<int64_t>(deltaSecondsToTicks(reloadTime).value);
+
+        auto tier = std::min<int64_t>(5, kills / 5);
+        auto veteranTicks = ((100 - (6 * tier)) * baseTicks) / 100;
+
+        // maxdamage of zero is not something the shipped data does, but it is
+        // something a test fixture does; the original would divide by it.
+        auto healthTerm = maxHealth == 0
+            ? int64_t{0}
+            : (20 * static_cast<int64_t>(health)) / static_cast<int64_t>(maxHealth);
+
+        auto ticks = ((120 - healthTerm) * veteranTicks) / 100;
+        return GameTime(static_cast<unsigned int>(std::max<int64_t>(ticks, 0)));
+    }
+
     bool weaponAimScatters(const WeaponDefinition& weaponDefinition)
     {
         // The original picks a fire handler per weapon out of the flags at

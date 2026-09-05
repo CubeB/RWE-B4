@@ -135,7 +135,7 @@ Much of the current work is making RWE behave like the original rather than
 merely look similar. Where a behaviour is meant to match TA, it has usually been
 read out of `TotalA.exe` instead of guessed at.
 
-- `docs/TOTALA-EXE.md` — the findings, now ninety-one sections: the flight
+- `docs/TOTALA-EXE.md` — the findings, now ninety-three sections: the flight
   model, fog of war and line of sight, the damage pipeline, missile flight,
   target selection and eligibility, the economy, the nanolathe and construction
   display, effects and render order, the interface (the minimap detection
@@ -143,8 +143,10 @@ read out of `TotalA.exe` instead of guessed at.
   sweep), transports, the situational music system, the renderer and its quad
   scan-conversion, the interface colours, the in-game menus, the keyboard, and
   the FBI and weapon field offsets, the D-gun and what commandfire costs an
-  order (§85), what makes a patrolling unit leave its route (§86), and the
-  pathfinder and its scheduler (§87). §88 and §91 are the ones to read first if
+  order (§85), what makes a patrolling unit leave its route (§86), the
+  pathfinder and its scheduler (§87), what the D-gun's projectile does once it
+  has left the barrel (§92), and why an abandoned nanoframe rots away
+  (§93). §88 and §91 are the ones to read first if
   you are about to change something — where RWE **deliberately** differs, so
   those do not get "corrected" back, and what is decoded but not ported.
 - `docs/TOTALA-EXE-SHADING.md` — the shaded unit rasterizer in full: the
@@ -166,6 +168,13 @@ read out of `TotalA.exe` instead of guessed at.
   attacking: the mission name table and its handlers, the bomber attack run,
   the fighter strafing pass, the gunship standoff ring, and what `hoverattack`
   and `maneuverleashlength` actually gate.
+- `docs/TA-PATCHES.md` — what the official v3.1 patch and the 2013 unofficial
+  patch each changed, and what of it RWE needs. The short answer is that the
+  GOG executable is already v3.1, so every engine fix the official patch made
+  is already in the binary the findings were read out of; the unofficial patch
+  changes the simulation in exactly one place (the pathfinding budget, raised
+  fifty-fold), which RWE is already past. What is left is a handful of v3.1
+  interface features, listed there and in the roadmap.
 - `docs/REVERSE-ENGINEERING-PRIORITIES.md` — what is worth reading out of the
   binary next, ranked, with the evidence that each is a real gap and a string
   or offset to pivot on. Most of it is now done; the head of the file says

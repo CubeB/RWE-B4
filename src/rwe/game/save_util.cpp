@@ -1542,6 +1542,9 @@ namespace rwe
                 {"kills", u.kills},
                 {"sfxOccupyState", u.sfxOccupyState},
                 {"buildTimeCompleted", u.buildTimeCompleted},
+                {"nanoframeDecayTime", saveOptional(u.nanoframeDecayTime, [](GameTime t) { return saveGameTime(t); })},
+                {"nanoframeWorkedOn", u.nanoframeWorkedOn},
+                {"nanoframeDecayRemainder", u.nanoframeDecayRemainder},
                 {"reclaimProgress", u.reclaimProgress},
                 {"captureProgress", u.captureProgress},
                 {"selfDestructTime", saveOptional(u.selfDestructTime, [](GameTime t) { return saveGameTime(t); })},
@@ -1620,6 +1623,9 @@ namespace rwe
             u.kills = j.at("kills").get<unsigned int>();
             u.sfxOccupyState = j.at("sfxOccupyState").get<int>();
             u.buildTimeCompleted = j.at("buildTimeCompleted").get<unsigned int>();
+            u.nanoframeDecayTime = loadOptional(j.at("nanoframeDecayTime"), loadGameTime);
+            u.nanoframeWorkedOn = j.at("nanoframeWorkedOn").get<bool>();
+            u.nanoframeDecayRemainder = j.at("nanoframeDecayRemainder").get<unsigned int>();
             u.reclaimProgress = j.at("reclaimProgress").get<unsigned int>();
             u.captureProgress = j.at("captureProgress").get<unsigned int>();
             u.selfDestructTime = loadOptional(j.at("selfDestructTime"), loadGameTime);

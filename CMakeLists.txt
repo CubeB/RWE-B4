@@ -853,6 +853,7 @@ set(TEST_FILES
     src/rwe/sim/UnitBehaviorService_air.test.cpp
     src/rwe/sim/reclaim.test.cpp
     src/rwe/sim/repair.test.cpp
+    src/rwe/sim/nanoframedecay.test.cpp
     src/rwe/sim/patrol.test.cpp
     src/rwe/sim/capture.test.cpp
     src/rwe/sim/burning.test.cpp

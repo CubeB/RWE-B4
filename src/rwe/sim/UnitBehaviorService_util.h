@@ -32,6 +32,12 @@ namespace rwe
     SimAngle computeAccuracyCone(SimAngle accuracy, unsigned int health, unsigned int maxHealth, unsigned int kills);
 
     /**
+     * How long the weapon actually waits, once the shooter's own damage and
+     * kill count have had their say on the TDF's `reloadtime`.
+     */
+    GameTime computeReloadTicks(SimScalar reloadTime, unsigned int health, unsigned int maxHealth, unsigned int kills);
+
+    /**
      * Nudges a launch direction by an independent heading and pitch error,
      * the way the original nudges the two angles on the weapon mount.
      */

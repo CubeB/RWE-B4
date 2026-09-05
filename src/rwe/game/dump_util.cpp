@@ -75,6 +75,9 @@ namespace rwe
             {"kills", dumpJson(u.kills)},
             {"sfxOccupyState", dumpJson(u.sfxOccupyState)},
             {"buildTimeCompleted", dumpJson(u.buildTimeCompleted)},
+            {"nanoframeDecayTime", dumpJson(u.nanoframeDecayTime)},
+            {"nanoframeWorkedOn", dumpJson(u.nanoframeWorkedOn)},
+            {"nanoframeDecayRemainder", dumpJson(u.nanoframeDecayRemainder)},
             {"reclaimProgress", dumpJson(u.reclaimProgress)},
             {"captureProgress", dumpJson(u.captureProgress)},
             {"selfDestructTime", dumpJson(u.selfDestructTime)},
@@ -149,7 +152,7 @@ namespace rwe
         {
             case AirMovementStateAttackRun::Phase::Approaching: phaseName = "Approaching"; break;
             case AirMovementStateAttackRun::Phase::Engaging:    phaseName = "Engaging";    break;
-            case AirMovementStateAttackRun::Phase::Departing:   phaseName = "Departing";   break;
+            case AirMovementStateAttackRun::Phase::Departing:   phaseName = "Departing";   break;
             case AirMovementStateAttackRun::Phase::Breaking:    phaseName = "Breaking";    break;
         }
         return nlohmann::json{

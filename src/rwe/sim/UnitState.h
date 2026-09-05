@@ -511,6 +511,34 @@ namespace rwe
 
         unsigned int buildTimeCompleted{0};
 
+        /**
+         * When set, the game time at which this nanoframe next asks itself
+         * whether anyone is still working on it. The original hangs a
+         * `GetBuilt` mission (0x402DA0) off every frame the moment it is
+         * placed, and that mission is nothing but this timer: +300 ticks, then
+         * +30, and from then on +30 while a builder is on the job and +11
+         * while none is, decaying by one step each time it comes round to
+         * nobody. See GameSimulation::updateNanoframeDecay.
+         */
+        std::optional<GameTime> nanoframeDecayTime;
+
+        /**
+         * TA's event bit 15, set on the *target* at the top of the build
+         * routine (0x41BA9D) and tested and cleared by the frame's own timer.
+         * It is set before the economy is consulted, so a builder the economy
+         * refuses still holds the decay off.
+         */
+        bool nanoframeWorkedOn{false};
+
+        /**
+         * The part of a decay step that did not divide evenly, carried into
+         * the next one. The original does this arithmetic in floats and so
+         * needs nothing here; RWE's build progress is integer work units, and
+         * without the carry a frame decays a percent or two slower than its
+         * cost says it should.
+         */
+        unsigned int nanoframeDecayRemainder{0};
+
         /** Reclaim work applied to this unit so far, see GameSimulation::reclaimUnit. */
         unsigned int reclaimProgress{0};
 
@@ -684,6 +712,17 @@ namespace rwe
         BuildCostInfo getBuildCostInfo(const UnitDefinition& unitDefinition, unsigned int buildTimeContribution);
 
         bool addBuildProgress(const UnitDefinition& unitDefinition, unsigned int buildTimeContribution);
+
+        /**
+         * Takes build progress back off a nanoframe nobody is building any
+         * more. The original has no separate routine for this: 0x41BCD0 works
+         * out an amount and hands it to the ordinary build routine negated, so
+         * the hit points come back off by the same `trunc(fraction * maxdamage)`
+         * difference that put them on, floored at zero.
+         *
+         * Returns true when nothing is left of the frame.
+         */
+        bool removeBuildProgress(const UnitDefinition& unitDefinition, unsigned int buildTimeReduction);
 
         void moveObject(const std::string& pieceName, SimAxis axis, SimScalar targetPosition, SimScalar speed);
 

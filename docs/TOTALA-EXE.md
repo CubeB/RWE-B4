@@ -3638,8 +3638,14 @@ reloadTicks = ((120 - 20 * hp / maxdamage) * ((100 - 6 * tier) * reloadtime / 10
 
 with `tier = min(5, kills / 5)` as everywhere else, `hp` the word at
 `unit+0x108` and `maxdamage` the dword at `def+0x1FA`. A veteran of 25 kills
-reloads in 70% of the time; a unit at the point of death takes 120%. **Decoded,
-not ported.**
+reloads in 70% of the time; a unit at the point of death takes 120%.
+
+**Ported since**, as `computeReloadTicks` in `UnitBehaviorService_util`, and it
+is safe to apply to every weapon in the game because the two terms cancel
+exactly at full health with no kills: `(120-20) * (100*T/100) / 100` is `T`, so
+an undamaged rookie gets the flat TDF number it always got. The commander's
+disintegrator is the case with a round number behind it — `reloadtime 1.2` is 36
+ticks, and a healthy commander gets 36 back. Tests in `src/rwe/sim/dgun.test.cpp`.
 
 ### `commandfire`
 
@@ -3738,7 +3744,6 @@ cam. Nothing in the simulation reads it.
 ### Decoded but not ported
 
 - **`antiweapons`**, as above.
-- **The veterancy and damage terms on reload time** (`0x49E468`).
 - **The 300-tick wait on a full magazine** is implemented, but nothing in RWE
   can reach 200 rounds in practice.
 
@@ -3791,6 +3796,13 @@ Every part of what it does comes out of that.
   that would otherwise take most of it off. Nothing anywhere in the binary
   special-cases the weapon; the number is the mechanism. RWE already has the
   cut-out (`ArmourBypassDamage`), so this half was in place.
+
+  **30000 is the `rev31` figure.** `totala1` — the 1.0 data — says `default=5500`
+  for both disintegrators, which is *below* `0x7530` and so does **not** bypass
+  `DamageModifier`: against the 1.0 data an armoured target really does halve
+  the D-gun. The "the number is the mechanism" reading still holds; it is just
+  that the number was raised past the cut-out by a patch, and anyone replaying
+  this arithmetic against 1.0 files should expect the other answer.
 - **The cost.** 400 energy, no metal, weighed against the player's *stored*
   energy before the shot and taken as it leaves (`0x49E3ED`, `0x49E51F` — see
   the section above). A commander with a flat battery cannot D-gun.
@@ -3803,7 +3815,8 @@ Every part of what it does comes out of that.
 - **The wreck.** There is no D-gun rule here either. `0x4864B0` kills a unit with
   the *damage type* as its cause (`unit+0xF5`, set from the damage descriptor at
   `0x489DAC`); causes 4, 5 and 9 leave nothing and skip the death script
-  outright, cause 7 forces a wreck, and everything else — the D-gun included —
+  outright — **cause 9 is now named: it is a nanoframe decaying out, §92** —
+  cause 7 forces a wreck, and everything else — the D-gun included —
   asks the unit's own COB `Killed` (the name is at `0x508BE8`, called through
   `0x4B0BC0` at `0x4865C3`) and takes the corpse level from what the script
   writes back into the local it is handed, 0 meaning none. The severity handed
@@ -3823,9 +3836,11 @@ Every part of what it does comes out of that.
   the original's overkill-derived severity, so what a script chooses to leave
   behind may differ.
 - **`unit+0xF7`**, the second term in that severity, is unidentified.
-- **The damage-type death causes** 4, 5, 7 and 9 are decoded as a set but not
+- **The damage-type death causes** 4, 5 and 7 are decoded as a set but not
   individually named; nothing was traced far enough to say which weapon or
-  event produces each.
+  event produces each. **Cause 9 is settled**: the `GetBuilt` mission fires
+  `DamageUnit(self, self, 30000, 9)` at a frame that has decayed away, which is
+  why that cause leaves nothing and skips the script — see §92.
 
 ## 23. The streaming economy
 
@@ -8060,16 +8075,26 @@ put `flighttime` at `+0xFA` when it is at `+0xFC`. Float keys are stored with an
 | `holdtime` | `wdef+0xFE` | word, `×30`; no known reader — see §11 |
 | `accuracy` | `wdef+0x104` | word |
 | `tolerance` / `pitchtolerance` | `wdef+0x106` / `+0x108` | word; a zero `pitchtolerance` falls back to `tolerance` — see §11 |
-| `firestarter` / `rendertype` / `color` / `color2` | `wdef+0x10B`..`+0x10E` | byte |
+| `firestarter` | `wdef+0x10B` | byte |
+| `rendertype` | `wdef+0x10C` | byte |
+| `color` | `wdef+0x10D` | byte |
+| `color2` | `wdef+0x10E` | byte |
 | flags | `wdef+0x111` | dword, see below |
 
 The flag bits at `wdef+0x111`, read off the parser's shifts: `lineofsight` 0,
 `ballistic` 1, `shellweapon` 2, `beamweapon` 3, `vlaunch` 4, `meteor` 5,
-`dropped` 8, `soundtrigger` 11, `guidance` 12, `tracks` 13, `unitsonly` 14,
+`noradar` 6, `paralyzer` 7, `dropped` 8, `startsmoke` 9, `endsmoke` 10,
+`soundtrigger` 11, `guidance` 12, `tracks` 13, `unitsonly` 14,
 `groundbounce` 15, `waterweapon` 16, `toairweapon` 17, `smoketrail` 18,
 `turret` 19, `selfprop` 20, `propeller` 21, `noexplode` 22, `burnblow` 23,
 `twophase` 24, `cruise` 25, `commandfire` 26, `noautorange` 27, `stockpile` 28,
 `targetable` 29, `interceptor` 30.
+
+Bits 6, 7, 9 and 10 were gaps in an earlier reading of this table and are filled
+in above; the `0x10B`..`0x10E` block is likewise itemised rather than given as a
+range, because `rendertype` sitting at `0x10C` is what fixes the other three.
+What bit 3 and bit 22 actually *do* is §92 — bit 3 is dead code for this
+weapon, and bit 22 is the whole of the D-gun.
 
 Projectile instance fields, stride `0x6B`:
 
@@ -8655,6 +8680,287 @@ there is a regression test for it now.
 - The **explosion smoke** (`0x472630` from `0x420AE1`, three puffs seven ticks
   apart) and the **30-second burning wreck plume** (`0x48644B`) are decoded but
   not ported; RWE's explosions and wreckage do not smoke afterwards.
+- **`beamweapon`'s tail point** (`0x49BBA3`) is decoded and deliberately *not*
+  ported — §92. It gives a round a second, trailing point that starts moving
+  `duration + 1` ticks after the shot, and it is drawn only by `rendertype 0`.
+  No shipped weapon both sets the bit and meets those conditions: the two
+  disintegrators are `rendertype=3` and declare no `duration`, so for them the
+  original computes the tail and throws it away. Anything that wanted it would
+  have to be a mod.
+
+## 92. The D-gun's projectile: `noexplode`, the full-range flight, and who gets hurt
+
+§22 read the weapon's data and found nothing special in it. This is the other
+half: what the *projectile* does once it has left the barrel, which is where
+the three things a play-test noticed actually come from. None of them is a
+D-gun rule. All of them fall out of two flags and one arithmetic.
+
+### `beamweapon` is not what makes the beam
+
+`beamweapon` is bit 3 of `wdef+0x111`, and it has **exactly one reader in the
+whole binary**, at `0x49BBA3`, inside the `lineofsight` arm of the per-tick
+projectile update. It is not a projectile kind: neither the kind dispatch nor
+the launch dispatch ever looks at it, and `ARM_DISINTEGRATOR` is launched and
+flown as an ordinary `lineofsight=1` round.
+
+What the bit does is maintain a **second point** on the projectile — a tail that
+starts moving `duration + 1` ticks after the shot, so the thing is a line
+segment rather than a point. **But `ARM_DISINTEGRATOR` declares no `duration`**
+— checked against both `rev31` and `totala1` — and the parser default is 0.0,
+so its segment is one tick of travel long. Nothing draws it either: the
+head/tail pair is read only in the `rendertype == 0` branch of the draw, and
+the disintegrator is `rendertype=3`, which draws the model at `wdef+0x74`.
+
+**For the D-gun the beam-tail machinery is computed and thrown away.** It is
+recorded here so nobody chases it again; it is deliberately not implemented.
+
+### It always flies its full range, in a straight line
+
+`0x49C942` sets the round's life to `(range << 16) / weaponvelocity` ticks —
+the speed being the 16.16 per-tick figure the parser stored — which is simply
+*how many ticks it takes to fly the whole range*. For the disintegrator,
+`weaponvelocity=200` is 6.667 units a tick and `range=240`, so the life is
+**36 ticks and exactly 240 world units**. The direction is fixed at launch from
+the aim point minus the muzzle and never changes: no gravity, no guidance. At
+the end of its life it is retired with no explosion.
+
+Two consequences worth stating plainly:
+
+- **`weapontimer` is a fallback, not an override.** `ARM_DISINTEGRATOR` names
+  `weapontimer=4`, and it is never used: the original only reaches that branch
+  for a weapon with no `weaponvelocity` to divide the range by. RWE had the two
+  the wrong way round and gave the D-gun a four-second life.
+- **Nothing shortens the flight to suit the target.** The round is not aimed
+  *at* a distance, it is aimed *along* a direction, and it flies 240 units
+  whether the target was at 30 or at 239. That by itself is most of "the trail
+  goes beyond the target".
+
+### `noexplode` makes it detonate without being consumed
+
+Bit 22 of `wdef+0x111`. Collision is tested every tick, and on a hit the
+detonation routine runs — and its **first act, `0x499EDE`, is: if `noexplode`,
+skip marking the projectile dead.** That is the whole of the flag. The round
+keeps its position and its velocity, moves its 6.67 units on the next tick, and
+tests the next cell along.
+
+So a disintegrator ploughing into a hillside **detonates once per tick for the
+rest of its 36-tick life**, each detonation spawning `explosionart=explode5`
+and a full-strength blast.
+
+**That is the trail. It is not one blast but up to thirty-six of them, strung
+out along 240 world units** — which is why the weapon is good against a clump
+rather than against one unit, and why it goes on hurting things past whatever
+it was fired at.
+
+Out-of-bounds is not one of these: that path never reaches the detonation
+routine, so a round that leaves the map is simply gone.
+
+### The blast, and who is in it
+
+`areaofeffect=48 > 16`, so every one of those detonations takes the area branch:
+
+- **The blast radius is `areaofeffect / 2`** — `0x49A150`'s `shr eax,1`. Twenty
+  four world units for the D-gun, not forty-eight.
+- Distance is measured from the blast point to the unit's **bounding box**,
+  clamped per axis and then square-rooted, so a unit whose box contains the
+  point is at distance zero.
+- Falloff is `scale = edge + (1 - edge) * (1 - d/R)^2`, with `d == 0`
+  short-circuiting to 1.0. `ARM_DISINTEGRATOR` names no `edgeeffectiveness`, so
+  `edge` is zero and the scale is plain `(1 - d/R)^2`.
+- Up to twenty distinct units are de-duplicated per blast.
+
+**Friendly fire is unconditional.** There is no allegiance test anywhere on the
+damage path. The blast hurts every other unit in radius at full strength and
+merely books the result into two separate tallies by owner — which would be
+pointless if own-damage did not happen.
+
+**Exactly one unit is exempt: the firer** (`0x49A259`, comparing each candidate
+against the projectile's stored firing unit). That exemption is not a nicety,
+it is what makes the weapon usable at all — a round that is not consumed by
+going off starts detonating from the muzzle outwards, and the first of those
+blasts is standing on the commander.
+
+**One asymmetry that matters.** The *collision* test skips same-owner units
+(`0x49B1F4`), so the beam is neither stopped nor triggered by a friendly
+standing in the way; it flies straight through. But any detonation it *does*
+have blasts that friendly at full strength.
+
+### The cooldown
+
+There is no D-gun rule here either. It is `reloadtime` put through the general
+scaling at `0x49E468` (§21):
+
+```
+reloadTicks = ((120 - 20*hp/maxdamage) * ((100 - 6*tier) * reloadTicks / 100)) / 100
+```
+
+with `tier = min(5, kills / 5)`. A healthy commander with no kills gets
+`(120-20) * 36 / 100 = 36` ticks — **exactly the 1.2 seconds the TDF asked
+for**, because the two terms cancel at full health. Shot up, it climbs to 1.44
+seconds at the point of death; at twenty-five kills it falls to 0.84.
+
+`weapontimer` and `energypershot` add nothing to the wait. **`energypershot` is
+a gate, not a delay**: short of energy or metal the shot is not taken and *no
+reload timer is set*, so the weapon retries on the very next tick. The cost is
+taken after the shot.
+
+### On "it damages the firer"
+
+The decode says the opposite in as many words, and no path was found that
+breaks the exemption. The report was chased empirically instead, at the range
+where the question is sharpest — a commander disintegrating something in the
+adjacent map cell, close enough that the very first detonation lands on its own
+bounding box (`src/rwe/sim/dgun.test.cpp`, "what actually hurts a commander that
+D-guns something at arm's length").
+
+**The beam does not touch its firer**: thirty-six blasts of thirty thousand
+went off within a few units of the commander and it took nothing. What *does*
+hurt it is **the death explosion of the thing it just killed**. A dying unit's
+`ExplodeAs` blast is spawned with no firing unit at all, so it has nobody to
+exempt and hurts whatever is standing over the corpse. At one cell's separation
+the corpse blast is centred on the commander's own bounding box, so it lands at
+distance zero and pays out in full — the whole of `SMALL_UNITEX`'s thirty
+points for a Peewee, and rather more for anything bigger.
+
+So the play-test was right about the symptom and the binary is right about the
+cause: the firer is exempt from its own beam, and the damage it takes is the
+corpse's. `firestarter=70` was the other candidate and is not it — the fires the
+trail starts spread between features and never damage units.
+
+### Ported
+
+All of the above except the beam tail, which is dead code in the original for
+this weapon:
+
+- `noexplode` reaches `WeaponDefinition` and the projectile update, which now
+  applies the impact and lets the round fly on. A `ProjectileDetonatedEvent`
+  carries the explosion art and screen shake for a detonation that did not end
+  the round.
+- A line-of-sight round's life is `range / velocity` and `weapontimer` is the
+  fallback behind it, not in front of it.
+- The firer is exempt from its own blast; nothing else is.
+- `areaofeffect / 2`, the quadratic falloff and the same-owner collision skip
+  were already right and are now pinned by tests against the shipped weapon.
+- The reload scaling of §21 is implemented as `computeReloadTicks`.
+
+`src/rwe/sim/dgun.test.cpp` builds `ARM_DISINTEGRATOR` by parsing its actual
+`WEAPONS.TDF` block rather than transcribing the numbers.
+
+## 93. Abandoned nanoframes decay
+
+A nanoframe nobody is building falls apart. It loses health, the construction
+display runs backwards, and eventually the frame is simply gone. RWE did none
+of it: a frame placed and abandoned sat there for the rest of the game.
+
+### The field and the mission
+
+`unit+0x104` is a float holding the build fraction still **remaining**: 1.0 the
+moment the frame is placed, 0.0 when the unit is finished. Every frame carries a
+`GetBuilt` mission (handler `0x402DA0`) whose whole body is a small state
+machine on `mission+0x5`:
+
+- **state 0** — disarm the frame's weapons, schedule a timer +300 ticks, go to
+  state 1.
+- **state 1** — schedule +30 ticks, go to state 2. Nothing is tested here.
+- **state 2**, on expiry —
+  - event bit 15 set (somebody built on me this period): reschedule +30, decay
+    nothing;
+  - otherwise: reschedule +11, and decay by calling `0x41BCD0(unit, 11)`.
+
+Event bit 15 is set on the **target** by the builder, at the very top of the
+build routine (`0x41BA9D`) and *before* the economy is consulted. A builder the
+economy has just refused still holds the frame's decay off, which is what keeps
+a stalled base from eating its own construction sites.
+
+So the timing has two shapes:
+
+- **placed and never touched** — first decay at tick 330, eleven seconds after
+  the frame appears, then one every 11 ticks;
+- **built and then abandoned** — while a builder is on the job the timer runs on
+  a 30-tick cycle, so the first thing lost comes 30 ticks after the last build
+  tick, and every 11 thereafter.
+
+### The rate: one energy-point of the build cost per tick
+
+`0x41BCD0` computes `buildtime * n / buildCostEnergy` with `n = 11`, negates it,
+and hands it to the ordinary build routine — there is no separate decay routine.
+That routine does `newRemaining = remaining - amount / buildtime`, clamped to
+[0,1]. **The build time cancels exactly**, and what is left is:
+
+> A nanoframe decays at one energy-point of its own build cost per tick. From a
+> built fraction `p` it takes `p * BuildCostEnergy` ticks to vanish.
+
+Against the shipped rev31 data:
+
+| unit | BuildCostEnergy | MaxDamage | full decay | hp lost |
+|---|---|---|---|---|
+| ARMSOLAR | 760 | 326 | 760 ticks (25.3 s) | 12.9 hp/s |
+| ARMPW | 697 | 250 | 697 ticks (23.2 s) | 10.8 hp/s |
+| ARMLAB | 1130 | 2690 | 1130 ticks (37.7 s) | 71.4 hp/s |
+| ARMFUS | 36058 | 3100 | 36058 ticks (20 min) | 2.6 hp/s |
+
+That spread is the felt behaviour and is not to be smoothed out: a cheap frame
+melts in under half a minute, a half-built fusion plant effectively never goes
+away.
+
+Hit points need no separate rule. Because the decay goes through the build
+routine, the routine's own `trunc(fraction * maxdamage)` recompute takes them
+back off by the same difference that put them on, floored at zero.
+
+### The end, and death cause 9
+
+When the remaining fraction reaches 1.0 the frame kills itself with
+`DamageUnit(self, self, 30000, cause 9)`. Cause 9 is one of the three the death
+routine at `0x4864B0` short-circuits (see §22): **no wreck, no `Killed` script,
+no death animation** — the unit is taken off the board. So cause 9 can now be
+named: it is the nanoframe decaying out.
+
+### And any unit killed while under construction leaves nothing
+
+Found in the same routine and unrelated to decay: `0x4865D2` clears the corpse
+flag outright whenever the remaining build fraction is non-zero, after the
+`Killed` script has run and before the wreck would be spawned. Shoot a half-built
+factory and there is nothing to reclaim, whatever killed it and whatever its
+script asked for.
+
+### The reverse animation is not a separate thing
+
+The construction display takes the remaining fraction × 255 and dispatches on
+five bands (§3). Decay's only effect is to raise that fraction, so the five
+bands run backwards on their own: the texture sinks, the silhouette shrinks back
+to the base, the bare line sweeps back up. COB `BUILD_PERCENT_LEFT` reads the
+same field. Nothing was written for either — RWE's `computeBuildPhase` and
+`getBuildPercentLeft` are both driven off `buildTimeCompleted`, and both were
+verified to be, rather than reimplemented.
+
+### As ported
+
+`GameSimulation::updateNanoframeDecay`, run once a tick after the behaviour
+pass, with the timer and the claim flag on `UnitState`
+(`nanoframeDecayTime`, `nanoframeWorkedOn`, `nanoframeDecayRemainder`) and the
+constants `NanoframeDecayGraceTicks` / `NanoframeDecayCheckTicks` /
+`NanoframeDecayTicks` on `GameSimulation`. The timer is wound in `trySpawnUnit`,
+where the original installs the mission; the claim is staked in the two places a
+builder adds build progress, both before the economy call. `UnitState::
+removeBuildProgress` is the mirror of `addBuildProgress` and, like the original,
+is the same arithmetic run backwards rather than a second routine. Tests in
+`src/rwe/sim/nanoframedecay.test.cpp`, against the shipped FBI numbers above.
+
+Two deliberate departures, both small:
+
+- **A carried remainder.** The original does this division in floats and needs
+  no state; RWE's build progress is integer work units, so a truncated
+  `buildtime * 11 / buildCostEnergy` would run a percent or two slow (and, for
+  an extreme ratio, could stick at zero). `nanoframeDecayRemainder` carries what
+  did not divide, which makes the total exactly `p * BuildCostEnergy` again. It
+  is reset whenever a builder claims the frame, so it holds no history the
+  original does not.
+- **No metal refund.** The decode notes a refund on the decay path
+  (`0x41BBA1`), scaled by difficulty for AI players, but that half was read from
+  `fxch` ordering rather than a direct store and is the weaker claim. It is
+  deliberately left out; a frame that decays away in RWE pays nothing back.
+
+The disarm in state 0 needed nothing: RWE's behaviour pass already returns early
+for a unit that `isBeingBuilt`, so a nanoframe never runs a weapon.
 
 ---
-

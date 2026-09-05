@@ -1173,7 +1173,14 @@ namespace rwe
                 // A stockpiled weapon gets no reload timer at all: the original
                 // takes the round and jumps straight past the reload
                 // calculation (0x49E455), because the wait was the build.
-                weapon->readyTime = gameTime + deltaSecondsToTicks(weaponDefinition.reloadTime);
+                //
+                // What the rest wait is not the flat TDF number: 0x49E468
+                // scales it by how hurt the shooter is and by its kill count.
+                // See computeReloadTicks -- an undamaged unit with no kills
+                // gets exactly its `reloadtime` back, so nothing changes for
+                // the ordinary case.
+                const auto& shooterDefinition = sim->unitDefinitions.at(unit.unitType);
+                weapon->readyTime = gameTime + computeReloadTicks(weaponDefinition.reloadTime, unit.hitPoints, shooterDefinition.maxHitPoints, unit.kills);
             }
         }
 
@@ -3761,6 +3768,12 @@ namespace rwe
                 tryApplyMovementToPosition(sim->getUnitInfo(state.targetUnit->first), buildPieceInfo.position);
                 targetUnit.rotation = buildPieceInfo.rotation;
 
+                // The claim on the frame is staked before the economy is
+                // asked for anything (0x41BA9D sets event bit 15 on the
+                // target at the top of the build routine), so a factory
+                // stalled for metal still holds the frame's decay off.
+                targetUnit.nanoframeWorkedOn = true;
+
                 auto costs = targetUnit.getBuildCostInfo(targetUnitDefinition, unitInfo.definition->workerTimePerTick);
                 auto gotResources = sim->addResourceDelta(
                     unitInfo.id,
@@ -4221,6 +4234,11 @@ namespace rwe
                     // We are not in the correct stance to build the unit yet, wait.
                     return false;
                 }
+
+                // As in the factory path above: the builder claims the frame
+                // before the economy is consulted, so a builder waiting on
+                // metal still keeps the frame from decaying.
+                targetUnit.nanoframeWorkedOn = true;
 
                 auto costs = targetUnit.getBuildCostInfo(targetUnitDefinition, unitInfo.definition->workerTimePerTick);
                 auto gotResources = sim->addResourceDelta(

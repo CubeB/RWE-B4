@@ -235,6 +235,7 @@ namespace rwe
         }
 
         weaponDefinition.groundBounce = tdf.groundBounce;
+        weaponDefinition.noExplode = tdf.noExplode;
 
         weaponDefinition.fireStarter = static_cast<unsigned int>(std::clamp(tdf.fireStarter, 0.0f, 100.0f));
 

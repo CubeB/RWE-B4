@@ -190,4 +190,101 @@ namespace rwe
         auto bombed = sim.getUnitState(targetId).hitPoints < startingHitPoints;
         REQUIRE(bombed == expectBombed);
     }
+
+    TEST_CASE("a bomber that ships on Hold Fire is given Fire At Will", "[patrol][bomber]")
+    {
+        // DELIBERATE DIVERGENCE. The engine's patrol engage check is Fire At
+        // Will exactly (0x43B700), and the reason a patrolling Phoenix bombs
+        // what it passes while a patrolling Thunder does not is entirely in
+        // the shipped data: ARMTHUND and CORSHAD are StandingFireOrder=0,
+        // ARMPNIX and CORHURC are 2.
+        //
+        // Rather than teach the patrol check an exception, the seeding gives
+        // a Hold Fire bomber Fire At Will, so it reaches the same code path
+        // the Phoenix already takes -- and the button still says Fire At
+        // Will, so a player who wants the original can set it back.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        registerModel(sim);
+        defineBomb(sim);
+
+        // The real loader keys the weapon map upper-case (LoadingScene.cpp:844)
+        // and createUnit upper-cases a definition's weapon name before
+        // looking it up, so a fixture that registers a lower-case key is
+        // testing something the game never does.
+        sim.weaponDefinitions["BOMB"] = sim.weaponDefinitions.at("bomb");
+
+        auto thunder = makeBomberDef();
+        thunder.standingFireOrder = UnitFireOrders::HoldFire;
+        thunder.weapon1 = "bomb";
+        sim.unitDefinitions["THUNDER"] = thunder;
+        sim.unitScriptDefinitions["THUNDER"] = *script;
+
+        SECTION("the Thunder is lifted off Hold Fire")
+        {
+            auto id = sim.trySpawnUnit("THUNDER", us, SimVector(0_ss, 100_ss, 0_ss), std::nullopt);
+            REQUIRE(id);
+            REQUIRE(sim.getUnitState(*id).fireOrders == UnitFireOrders::FireAtWill);
+        }
+
+        SECTION("a Hold Fire aircraft with no bomb is left alone")
+        {
+            // The rule is about bombs, not about aircraft. A Peeper holds its
+            // fire because it has nothing to fire.
+            auto peeper = makeBomberDef();
+            peeper.standingFireOrder = UnitFireOrders::HoldFire;
+            peeper.weapon1 = "";
+            sim.unitDefinitions["PEEPER"] = peeper;
+            sim.unitScriptDefinitions["PEEPER"] = *script;
+
+            auto id = sim.trySpawnUnit("PEEPER", us, SimVector(0_ss, 100_ss, 0_ss), std::nullopt);
+            REQUIRE(id);
+            REQUIRE(sim.getUnitState(*id).fireOrders == UnitFireOrders::HoldFire);
+        }
+
+        SECTION("a Hold Fire ground unit with a bomb is left alone")
+        {
+            auto ground = makeBomberDef();
+            ground.standingFireOrder = UnitFireOrders::HoldFire;
+            ground.canFly = false;
+            ground.weapon1 = "bomb";
+            sim.unitDefinitions["GROUND"] = ground;
+            sim.unitScriptDefinitions["GROUND"] = *script;
+
+            auto id = sim.trySpawnUnit("GROUND", us, SimVector(0_ss, 0_ss, 0_ss), std::nullopt);
+            REQUIRE(id);
+            REQUIRE(sim.getUnitState(*id).fireOrders == UnitFireOrders::HoldFire);
+        }
+
+        SECTION("a bomber that already ships on Fire At Will is untouched")
+        {
+            // The Phoenix does not go through this branch at all, which is
+            // what keeps the divergence to the two units that need it.
+            auto phoenix = makeBomberDef();
+            phoenix.standingFireOrder = UnitFireOrders::FireAtWill;
+            phoenix.weapon1 = "bomb";
+            sim.unitDefinitions["PHOENIX"] = phoenix;
+            sim.unitScriptDefinitions["PHOENIX"] = *script;
+
+            auto id = sim.trySpawnUnit("PHOENIX", us, SimVector(0_ss, 100_ss, 0_ss), std::nullopt);
+            REQUIRE(id);
+            REQUIRE(sim.getUnitState(*id).fireOrders == UnitFireOrders::FireAtWill);
+        }
+
+        SECTION("Return Fire is not lifted either")
+        {
+            // Only Hold Fire is corrected. Return Fire is a choice the data
+            // made that still lets the unit defend itself.
+            auto rf = makeBomberDef();
+            rf.standingFireOrder = UnitFireOrders::ReturnFire;
+            rf.weapon1 = "bomb";
+            sim.unitDefinitions["RF"] = rf;
+            sim.unitScriptDefinitions["RF"] = *script;
+
+            auto id = sim.trySpawnUnit("RF", us, SimVector(0_ss, 100_ss, 0_ss), std::nullopt);
+            REQUIRE(id);
+            REQUIRE(sim.getUnitState(*id).fireOrders == UnitFireOrders::ReturnFire);
+        }
+    }
 }

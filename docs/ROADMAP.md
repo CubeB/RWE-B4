@@ -227,6 +227,35 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
 - [ ] Invalid UTF‑8 resilience (#14).
 - [ ] Compile a `docs/compatibility.md` of what TA behaviour is intentionally *not* replicated (bugs vs features).
 
+### The v3.1 interface features
+
+`docs/TA-PATCHES.md` settles what the two patches did. The GOG executable is
+already v3.1, so every engine fix the official patch made is in the binary the
+findings were read out of and RWE has been matching a patched game all along.
+The unofficial patch changes the simulation in exactly one place -- the
+pathfinding budget, `1333 -> 66650` -- and RWE is already past it.
+
+What is left is the official patch's *features*, none of which RWE has:
+
+- [ ] The three selection hotkeys: `CTRL+P` every armed aircraft, `CTRL+R`
+      every radar, sonar and jammer, `CTRL+W` every armed mobile except the
+      commander. Three predicates over the unit list; the smallest real gap.
+- [ ] Hold `SHIFT` over a cloaked unit to draw a white ring at its minimum
+      cloaking radius. The sim state is already there -- the ninety-tick
+      hold-off -- so this is only the ring.
+- [ ] Hold `SHIFT` over a construction unit to show queued build sites: green
+      for the selected builder, blue for every other one.
+- [ ] Factory squads: `CTRL+1`-`9` on a factory, and everything it builds
+      joins that squad.
+- [ ] The multiplayer sharing commands (`+shareenergy`, `+sharemetal`,
+      `+sharemapping`, `+setshareenergy X`, `+setsharemetal X`), which need
+      the chat bar to grow a command parser first.
+
+And two AI fixes from the unofficial patch worth checking `src/rwe/ai/`
+against, since both describe failure modes a per-tick chooser falls into
+naturally: an AI commander that stops building when attacked, and one that
+thrashes between targets and jams when several enemies attack at once.
+
 ## Phase 5 — Performance, renderer, platform (ongoing, low priority until Phase 1 done)
 
 The simulation half of this phase was brought forward and largely done — see "Eight hundred units at 36fps" in Phase 1, and `battle_test` and `RWE_ENABLE_SIMPROF` for how to measure the next round. What follows is what is still open.

@@ -175,6 +175,27 @@ namespace rwe
         return buildTimeCompleted == unitDefinition.buildTime;
     }
 
+    bool UnitState::removeBuildProgress(const UnitDefinition& unitDefinition, unsigned int buildTimeReduction)
+    {
+        if (buildTimeReduction > buildTimeCompleted)
+        {
+            buildTimeReduction = buildTimeCompleted;
+        }
+
+        auto oldProgressHp = (buildTimeCompleted * unitDefinition.maxHitPoints) / unitDefinition.buildTime;
+
+        buildTimeCompleted -= buildTimeReduction;
+
+        auto newProgressHp = (buildTimeCompleted * unitDefinition.maxHitPoints) / unitDefinition.buildTime;
+
+        auto deltaHp = oldProgressHp - newProgressHp;
+
+        // take HP off down to zero
+        hitPoints = deltaHp >= hitPoints ? 0 : hitPoints - deltaHp;
+
+        return buildTimeCompleted == 0;
+    }
+
     void UnitState::moveObject(const std::string& pieceName, SimAxis axis, SimScalar targetPosition, SimScalar speed)
     {
         auto piece = findPiece(pieceName);

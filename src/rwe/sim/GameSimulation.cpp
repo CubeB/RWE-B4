@@ -1134,6 +1134,86 @@ namespace rwe
         }
     }
 
+    void GameSimulation::updateNanoframeDecay()
+    {
+        std::vector<UnitId> gone;
+
+        for (auto& entry : units)
+        {
+            auto& unit = entry.second;
+            if (unit.isDead())
+            {
+                continue;
+            }
+
+            const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+
+            if (!unit.isBeingBuilt(unitDefinition))
+            {
+                // The mission ends when the frame does. A unit that was
+                // finished, or that started life finished, carries no timer.
+                unit.nanoframeDecayTime = std::nullopt;
+                unit.nanoframeWorkedOn = false;
+                unit.nanoframeDecayRemainder = 0;
+                continue;
+            }
+
+            if (!unit.nanoframeDecayTime)
+            {
+                // Ordinarily the timer is wound in trySpawnUnit, where the
+                // original installs the mission. This covers a frame that
+                // arrived some other way -- a save written before frames
+                // decayed, or a test assembling a UnitState by hand.
+                unit.nanoframeDecayTime = gameTime + GameTime(NanoframeDecayGraceTicks);
+                continue;
+            }
+
+            if (gameTime < *unit.nanoframeDecayTime)
+            {
+                continue;
+            }
+
+            if (unit.nanoframeWorkedOn)
+            {
+                // Somebody built on me this period. Look again in a second.
+                unit.nanoframeWorkedOn = false;
+                unit.nanoframeDecayRemainder = 0;
+                unit.nanoframeDecayTime = gameTime + GameTime(NanoframeDecayCheckTicks);
+                continue;
+            }
+
+            unit.nanoframeDecayTime = gameTime + GameTime(NanoframeDecayTicks);
+
+            // `buildtime * 11 / buildCostEnergy`, carrying what did not
+            // divide. A frame that costs no energy at all has nothing to
+            // divide by; in the original that is a division by zero whose
+            // result runs the remaining fraction straight back to 1, so the
+            // frame goes in one step.
+            auto energyCost = static_cast<unsigned int>(unitDefinition.buildCostEnergy.value);
+            auto step = unit.buildTimeCompleted;
+            if (energyCost > 0)
+            {
+                auto numerator = (unitDefinition.buildTime * NanoframeDecayTicks) + unit.nanoframeDecayRemainder;
+                step = numerator / energyCost;
+                unit.nanoframeDecayRemainder = numerator % energyCost;
+            }
+
+            if (unit.removeBuildProgress(unitDefinition, step))
+            {
+                gone.push_back(entry.first);
+            }
+        }
+
+        for (auto unitId : gone)
+        {
+            // TA kills the frame with `DamageUnit(self, self, 30000, cause 9)`,
+            // and cause 9 is one of the three the death routine short-circuits:
+            // no wreck, no `Killed` script, no explosion. The unit is simply
+            // taken off the board.
+            quietlyKillUnit(unitId);
+        }
+    }
+
     PlayerId GameSimulation::addPlayer(const GamePlayerInfo& info)
     {
         PlayerId id(players.size());
@@ -1768,6 +1848,40 @@ namespace rwe
         unit.moveOrders = unitDefinition.standingMoveOrder;
         unit.fireOrders = unitDefinition.standingFireOrder;
 
+        // DELIBERATE DIVERGENCE (see docs/TOTALA-EXE.md section 83).
+        //
+        // A bomber that ships on Hold Fire is given Fire At Will instead. In
+        // the shipped data ARMTHUND and CORSHAD are `StandingFireOrder=0`
+        // while ARMPNIX and CORHURC are `2`, which is the whole reason a
+        // patrolling Phoenix bombs what it passes over and a patrolling
+        // Thunder flies by: the patrol handler's engage check is Fire At Will
+        // exactly, so for the level-one bombers it never runs.
+        //
+        // Changed here rather than in the patrol check so the divergence is
+        // visible and reversible -- the fire-order button reads Fire At Will,
+        // and a player who wants the original sets Hold Fire by hand. The
+        // bombers then take the same path the Phoenix already takes instead
+        // of a second one written for them.
+        if (unit.fireOrders == UnitFireOrders::HoldFire && unitDefinition.canFly)
+        {
+            auto carriesABomb = [&](const std::string& weaponName) {
+                if (weaponName.empty())
+                {
+                    return false;
+                }
+                auto it = simulation.weaponDefinitions.find(toUpper(weaponName));
+                return it != simulation.weaponDefinitions.end()
+                    && std::holds_alternative<ProjectilePhysicsTypeBomb>(it->second.physicsType);
+            };
+
+            if (carriesABomb(unitDefinition.weapon1)
+                || carriesABomb(unitDefinition.weapon2)
+                || carriesABomb(unitDefinition.weapon3))
+            {
+                unit.fireOrders = UnitFireOrders::FireAtWill;
+            }
+        }
+
         // Init_Cloaked is seeded in the same breath by the original, out of the
         // same flags dword. It only asks for the cloak; whether the unit gets
         // one is still settled a second at a time by the energy.
@@ -1915,6 +2029,17 @@ namespace rwe
         if (unitId)
         {
             UnitBehaviorService(this).onCreate(*unitId);
+
+            // The original hangs a `GetBuilt` mission off the frame as it is
+            // placed, and that mission's first act is to set a timer. A unit
+            // that arrives already finished -- a start-position commander --
+            // never gets one.
+            auto& spawnedUnit = getUnitState(*unitId);
+            if (spawnedUnit.isBeingBuilt(unitDefinition))
+            {
+                spawnedUnit.nanoframeDecayTime = gameTime + GameTime(NanoframeDecayGraceTicks);
+            }
+
             events.push_back(UnitSpawnedEvent{*unitId});
         }
 
@@ -2382,7 +2507,7 @@ namespace rwe
         return createProjectileFromWeapon(owner, weapon.weaponType, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity, targetPosition, targetProjectile);
     }
 
-    Projectile GameSimulation::createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition, std::optional<ProjectileId> targetProjectile)
+    Projectile GameSimulation::createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, [[maybe_unused]] SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition, std::optional<ProjectileId> targetProjectile)
     {
         const auto& weaponDefinition = weaponDefinitions.at(weaponType);
 
@@ -2410,15 +2535,39 @@ namespace rwe
         projectile.damageRadius = weaponDefinition.damageRadius;
         projectile.edgeEffectiveness = weaponDefinition.edgeEffectiveness;
 
-        if (weaponDefinition.weaponTimer)
+        // How long a straight-flying round lives, and the order the original
+        // asks the questions in (0x49C942). It works the life out of the
+        // weapon's own `range` and `weaponvelocity` -- `(range << 16) /
+        // velocity` in the 16.16 the parser stored the speed as, which is
+        // simply "how many ticks to fly the full range" -- and only falls back
+        // on `weapontimer` for a weapon that declares no velocity to divide
+        // by. So `weapontimer` is a fallback rather than an override, and RWE
+        // had it the other way round: ARM_DISINTEGRATOR names both, and the
+        // four seconds it asks for are not what the original uses.
+        //
+        // The number is the *range*, not the distance to whatever was aimed
+        // at. Nothing shortens the flight to suit the target: the round is
+        // launched along a direction fixed at the muzzle and flies its whole
+        // 240 units whether the target is at 30 or at 239. For an ordinary
+        // weapon that is only visible on a miss; for the D-gun, whose blast
+        // is not consumed by going off (see noExplode), it is the whole
+        // reason the trail carries on past what it was fired at.
+        auto lineOfSight = std::holds_alternative<ProjectilePhysicsTypeLineOfSight>(weaponDefinition.physicsType);
+        if (lineOfSight && weaponDefinition.velocity > 0_ss)
+        {
+            // Done in the original's fixed point rather than in floats, so
+            // that a range that divides exactly by the speed gives the round
+            // number rather than one tick less to a rounding error.
+            auto rangeFixed = static_cast<int64_t>(simScalarToFixed(weaponDefinition.maxRange));
+            auto velocityFixed = static_cast<int64_t>(simScalarToFixed(weaponDefinition.velocity));
+            auto lifeTicks = static_cast<unsigned int>(std::max<int64_t>(rangeFixed / velocityFixed, 1));
+            projectile.dieOnFrame = gameTime + GameTime(lifeTicks);
+        }
+        else if (weaponDefinition.weaponTimer)
         {
             auto randomDecay = weaponDefinition.randomDecay.value().value;
             auto randomVal = randomBelow(rng, randomDecay + 1u);
             projectile.dieOnFrame = gameTime + *weaponDefinition.weaponTimer - GameTime(randomDecay / 2) + GameTime(randomVal);
-        }
-        else if (std::holds_alternative<ProjectilePhysicsTypeLineOfSight>(weaponDefinition.physicsType))
-        {
-            projectile.dieOnFrame = gameTime + GameTime(simScalarToUInt(distanceToTarget / weaponDefinition.velocity) + 1);
         }
 
         projectile.createdAt = gameTime;
@@ -3165,6 +3314,19 @@ namespace rwe
             }
         }
 
+        // Whatever the script asked for, a unit that was still a nanoframe
+        // leaves nothing behind: 0x4865D2 clears the corpse flag outright when
+        // the remaining build fraction is non-zero, after the `Killed` script
+        // has run and before the wreck would be spawned. Shoot a half-built
+        // factory and there is nothing to reclaim.
+        if (unit.isBeingBuilt(unitDefinition))
+        {
+            if (auto deadState = std::get_if<UnitState::LifeStateDead>(&unit.lifeState); deadState != nullptr)
+            {
+                deadState->leaveCorpse = false;
+            }
+        }
+
         if (!unitDefinition.explodeAs.empty())
         {
             auto impactType = unit.position.y < terrain.getSeaLevel() ? ImpactType::Water : ImpactType::Normal;
@@ -3367,6 +3529,25 @@ namespace rwe
         auto weaponIt = weaponDefinitions.find(projectile.weaponType);
         auto paralyzer = weaponIt != weaponDefinitions.end() && weaponIt->second.paralyzer;
 
+        // Exactly one unit walks away from a blast for free, and it is the one
+        // that fired it (0x49A259 compares each candidate against the
+        // projectile's stored firing unit and skips on a match). There is no
+        // allegiance test anywhere else on this path: the blast hurts allies
+        // and teammates at full strength, and the original merely books the
+        // result into two separate tallies by owner, which would be pointless
+        // if own-damage did not happen. So friendly fire is the rule and the
+        // firer is the single exception.
+        //
+        // It is not a nicety for the D-gun, it is what makes the weapon usable
+        // at all: a round that goes off without being consumed detonates from
+        // the muzzle outwards, and the first of those blasts is standing on the
+        // commander.
+        //
+        // A blast with no firer -- a dying unit's explodeAs, a feature going up
+        // -- exempts nobody, which is why a commander that disintegrates
+        // something at arm's length can still be hurt by what it killed.
+        auto firer = projectile.attacker;
+
         std::unordered_set<UnitId> seenUnits;
         std::unordered_set<FeatureId> seenFeatures;
 
@@ -3441,6 +3622,12 @@ namespace rwe
               return;
           }
 
+          // the firer is exempt from its own blast (0x49A259)
+          if (firer && *firer == *u)
+          {
+              return;
+          }
+
           const auto& unit = getUnitState(*u);
 
           // skip dead units
@@ -3470,6 +3657,12 @@ namespace rwe
 
             // skip units that are dying or dead
             if (!unit.isAlive())
+            {
+                continue;
+            }
+
+            // the firer is exempt from its own blast (0x49A259)
+            if (firer && *firer == flyingUnitId)
             {
                 continue;
             }
@@ -3692,6 +3885,19 @@ namespace rwe
                 }
             }
 
+            // `noexplode` does not stop the round going off; it stops the
+            // detonation consuming it. The detonation routine's first act is
+            // to mark the projectile dead (0x499EDE) and this flag skips that
+            // one line, so the round keeps its position and its velocity and
+            // is back here next tick to test the next cell along. Ploughing
+            // into a hillside it therefore goes off once a tick until its life
+            // runs out -- the trail a disintegrator leaves is up to thirty-six
+            // separate full-strength blasts, not one.
+            //
+            // Out of bounds is not one of them: that path never reaches the
+            // detonation routine, so a round that leaves the map is gone.
+            auto noExplode = weaponDefinition.noExplode;
+
             auto collisionInfo = checkProjectileCollision(*this, projectile);
             if (collisionInfo)
             {
@@ -3704,6 +3910,11 @@ namespace rwe
                     },
                     [&](const ProjectileCollisionInfoSea&) {
                         doProjectileImpact(projectile, ImpactType::Water);
+                        if (noExplode)
+                        {
+                            events.push_back(ProjectileDetonatedEvent{projectile.weaponType, projectile.position, true});
+                            return;
+                        }
                         projectile.isDead = true;
                         events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, ProjectileDiedEvent::DeathType::WaterImpact});
                     },
@@ -3716,12 +3927,22 @@ namespace rwe
                         else
                         {
                             doProjectileImpact(projectile, ImpactType::Normal);
+                            if (noExplode)
+                            {
+                                events.push_back(ProjectileDetonatedEvent{projectile.weaponType, projectile.position, false});
+                                return;
+                            }
                             projectile.isDead = true;
                             events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, ProjectileDiedEvent::DeathType::NormalImpact});
                         }
                     },
                     [&](const ProjectileCollisionInfoUnitOrFeatureOrBuilding&) {
                         doProjectileImpact(projectile, ImpactType::Normal);
+                        if (noExplode)
+                        {
+                            events.push_back(ProjectileDetonatedEvent{projectile.weaponType, projectile.position, false});
+                            return;
+                        }
                         projectile.isDead = true;
                         events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, ProjectileDiedEvent::DeathType::NormalImpact});
                     });
@@ -4434,6 +4655,10 @@ namespace rwe
             RWE_SIMPROF("selfrepair");
             updateSelfRepair();
         }
+
+        // After the behaviour pass, which is where a builder stakes its claim
+        // on the frame it is working on for this period.
+        updateNanoframeDecay();
 
         updateSelfDestructs();
 

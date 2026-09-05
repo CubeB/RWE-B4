@@ -66,6 +66,21 @@ namespace rwe
         /** If true, projectile does not explode when hitting the ground but instead continues travelling. */
         bool groundBounce;
 
+        /**
+         * TA noexplode, bit 22 of `wdef+0x111`, and the whole of what makes the
+         * D-gun look like a beam. It does not stop the projectile detonating --
+         * it stops the detonation *consuming* it. The first act of the
+         * detonation routine (0x499EDE) is to mark the round dead, and this
+         * flag skips that line and nothing else, so the round keeps its
+         * position and its velocity, moves on the next tick and tests the next
+         * cell. A disintegrator ploughing into a hillside therefore goes off
+         * once a tick for the rest of its life: not one blast but up to
+         * thirty-six of them, strung out along two hundred and forty world
+         * units. That is the trail the player sees, and it is why the thing is
+         * good against a clump rather than against one unit.
+         */
+        bool noExplode{false};
+
         Energy energyPerShot;
 
         /**
