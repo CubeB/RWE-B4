@@ -326,4 +326,61 @@ namespace rwe
             REQUIRE(computeHashOf(simA) == computeHashOf(simB));
         }
     }
+
+    TEST_CASE("the save carries state nothing hashes", "[saveload]")
+    {
+        // The round trip above compares the whole save byte for byte, which
+        // catches a field nobody serialised -- but only if the scenario gives
+        // that field a value to lose. None of the state added in September is
+        // hashed, so the replay check cannot see it either: a missing
+        // serialiser would simply reload as the default and the two
+        // simulations would agree.
+        //
+        // So this sets each of them deliberately and looks for it on the
+        // other side. CLAUDE.md calls this the discipline unhashed state
+        // needs, and it is the whole of it.
+        auto simA = makeBaseSim();
+        buildScenario(simA);
+        simA.tick();
+
+        // buildScenario has already made two players; this joins theirs.
+        auto us = PlayerId(0);
+        auto markedId = spawnUnit(simA, "TANK", us, SimVector(300_ss, 0_ss, 300_ss));
+        {
+            auto& marked = simA.getUnitState(markedId);
+
+            // A commandfire weapon that has just fired: what ends a D-gun order.
+            marked.commandFireShotFired = true;
+
+            // A chase the unit started for itself, which gives up at the leash.
+            marked.orders.push_back(AttackOrder(markedId, AttackLeash(SimVector(11_ss, 0_ss, 22_ss), 640_ss)));
+        }
+
+        auto deadId = spawnUnit(simA, "KBOT", us, SimVector(360_ss, 0_ss, 300_ss));
+        simA.getUnitState(deadId).lifeState = UnitState::LifeStateDead{true, 3};
+
+        auto saved = saveSimulationToJson(simA);
+
+        auto simB = makeBaseSim();
+        loadSimulationFromJson(saved, simB);
+
+        // Byte for byte, as above -- with something in each field to lose.
+        REQUIRE(saveSimulationToJson(simB) == saved);
+
+        // And named individually, so a failure says which one went missing
+        // rather than pointing at a diff of the whole save.
+        const auto& markedB = simB.getUnitState(markedId);
+        REQUIRE(markedB.commandFireShotFired);
+
+        REQUIRE(!markedB.orders.empty());
+        const auto* attack = std::get_if<AttackOrder>(&markedB.orders.front());
+        REQUIRE(attack != nullptr);
+        REQUIRE(attack->leash.has_value());
+        REQUIRE(attack->leash->distance == 640_ss);
+        REQUIRE(attack->leash->anchor == SimVector(11_ss, 0_ss, 22_ss));
+
+        const auto* deadB = std::get_if<UnitState::LifeStateDead>(&simB.getUnitState(deadId).lifeState);
+        REQUIRE(deadB != nullptr);
+        REQUIRE(deadB->corpseLevel == 3);
+    }
 }
