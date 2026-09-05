@@ -381,9 +381,9 @@ namespace rwe
     {
         // MSGBOX.GUI is the original's one-line message box: a 372x272 plate
         // at (116,82) with an OK button. No art ships for it, so it wears the
-        // panel's own plate.
+        // panel's own plate -- which createPanel now gives it, along with
+        // every other dialog whose art cannot be resolved.
         auto panel = uiFactory.panelFromGuiFile("MSGBOX");
-        panel->setDrawSolidPlate(true);
 
         auto font = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
         auto label = std::make_unique<UiLabel>(

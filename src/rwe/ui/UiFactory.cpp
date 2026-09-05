@@ -219,6 +219,25 @@ namespace rwe
 
         auto panel = std::make_unique<UiPanel>(x, y, width, height, backgroundSprite);
         panel->setName(name);
+
+        // Nothing resolved, so the panel draws its own plate. Fifty-three of
+        // the hundred and forty-three shipped guis declare an empty `panel=`,
+        // and for most of them art turns up under one of the names tried
+        // above -- ARMOPT.GAF for the options menu, DRESTART.PCX for the
+        // restart dialog. For the ones where it does not, EXITMENU being the
+        // one the F2 menu leads to, the alternative is a column of buttons
+        // floating over the battlefield.
+        //
+        // Default rather than opt-in because it had been opt-in, and the two
+        // call sites that remembered were not the ones that needed it most.
+        // Everything reaching here came from a gui file and is meant to be
+        // seen: the overload that takes no background at all has no callers
+        // outside this class.
+        if (!backgroundSprite)
+        {
+            panel->setDrawSolidPlate(true);
+        }
+
         return panel;
     }
 
