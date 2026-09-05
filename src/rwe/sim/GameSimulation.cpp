@@ -2926,6 +2926,36 @@ namespace rwe
         killUnit(unitId, std::nullopt);
     }
 
+    std::optional<unsigned int> readCorpseLevel(const CobThread& thread)
+    {
+        // Killed(severity, corpsetype): the level is the second parameter,
+        // which is local 1.
+        const std::vector<int>* locals = nullptr;
+        if (!thread.returnLocals.empty())
+        {
+            locals = &thread.returnLocals;
+        }
+        else if (!thread.callStack.empty())
+        {
+            locals = &thread.callStack.top().locals;
+        }
+
+        if (locals == nullptr || locals->size() < 2)
+        {
+            return std::nullopt;
+        }
+
+        // The original masks to four bits (0x486D69), so a script writing
+        // nonsense cannot walk the chain forever.
+        auto level = static_cast<unsigned int>((*locals)[1]) & 0xFu;
+        if (level == 0)
+        {
+            return std::nullopt;
+        }
+
+        return level;
+    }
+
     int computeKilledSeverity(unsigned int overkill, unsigned int maxHitPoints)
     {
         auto scaled = maxHitPoints == 0 ? 0u : (100u * overkill) / maxHitPoints;
@@ -2988,8 +3018,23 @@ namespace rwe
             // mid-script, and then walking the corpse feature's `featuredead`
             // chain one step per level; that is written up as still to do.
             const int severity = computeKilledSeverity(overkill, unitDefinition.maxHitPoints);
-            unit.cobEnvironment->createThread("Killed", {severity, 0});
+            auto killedThread = unit.cobEnvironment->createThread("Killed", {severity, 0});
             runUnitCobScripts(*this, unitId);
+
+            // What the ladder decided. A thread that ran to its return has
+            // its locals in returnLocals; one that stopped at a sleep still
+            // has them on its call stack, and either way it is still alive
+            // here -- a finished thread is not reaped until the next pass.
+            if (killedThread)
+            {
+                if (auto level = readCorpseLevel(**killedThread))
+                {
+                    if (auto deadState = std::get_if<UnitState::LifeStateDead>(&unit.lifeState))
+                    {
+                        deadState->corpseLevel = *level;
+                    }
+                }
+            }
         }
 
         if (!unitDefinition.explodeAs.empty())
@@ -3973,11 +4018,23 @@ namespace rwe
 
             if (deadState->leaveCorpse && !unitDefinition.corpse.empty())
             {
-                corpsesToSpawn.push_back(CorpseSpawnInfo{
-                    unitDefinition.corpse,
-                    unit.position,
-                    unit.rotation,
-                    unitDefinition.isFeature});
+                // Walk one step down the featuredead chain for each level
+                // above the first (0x4863A7). Running off the end is not an
+                // error: it is how a hard enough death leaves nothing.
+                auto corpse = tryGetFeatureDefinitionId(unitDefinition.corpse);
+                for (unsigned int level = 1; corpse && level < deadState->corpseLevel; ++level)
+                {
+                    corpse = getFeatureDefinition(*corpse).featureDead;
+                }
+
+                if (corpse)
+                {
+                    corpsesToSpawn.push_back(CorpseSpawnInfo{
+                        getFeatureDefinition(*corpse).name,
+                        unit.position,
+                        unit.rotation,
+                        unitDefinition.isFeature});
+                }
             }
 
             auto footprintRect = computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);

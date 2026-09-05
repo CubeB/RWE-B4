@@ -354,6 +354,15 @@ namespace rwe
         struct LifeStateDead
         {
             bool leaveCorpse;
+
+            /**
+             * Which corpse the unit's own `Killed` script asked for, counting
+             * from one. The spawner walks the corpse feature's `featuredead`
+             * chain one step for each level above the first, so 1 is the
+             * intact wreck and a higher number is what is left of it after a
+             * harder death; running off the end of the chain leaves nothing.
+             */
+            unsigned int corpseLevel{1};
         };
         using LifeState = std::variant<LifeStateAlive, LifeStateDead>;
 

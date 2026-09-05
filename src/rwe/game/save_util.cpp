@@ -1406,7 +1406,7 @@ namespace rwe
             return match(
                 s,
                 [](const UnitState::LifeStateAlive&) { return json{{"kind", "alive"}}; },
-                [](const UnitState::LifeStateDead& d) { return json{{"kind", "dead"}, {"leaveCorpse", d.leaveCorpse}}; });
+                [](const UnitState::LifeStateDead& d) { return json{{"kind", "dead"}, {"leaveCorpse", d.leaveCorpse}, {"corpseLevel", d.corpseLevel}}; });
         }
 
         UnitState::LifeState loadLifeState(const json& j)
@@ -1418,7 +1418,7 @@ namespace rwe
             }
             if (kind == "dead")
             {
-                return UnitState::LifeStateDead{j.at("leaveCorpse").get<bool>()};
+                return UnitState::LifeStateDead{j.at("leaveCorpse").get<bool>(), j.value("corpseLevel", 1u)};
             }
             throw std::runtime_error("bad LifeState kind: " + kind);
         }

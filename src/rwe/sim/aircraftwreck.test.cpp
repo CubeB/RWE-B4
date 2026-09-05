@@ -143,4 +143,56 @@ namespace rwe
             REQUIRE(computeKilledSeverity(50, 0) == 1);
         }
     }
+
+    TEST_CASE("the corpse level walks the featuredead chain", "[wreckage]")
+    {
+        // A shipped Killed script reads the severity as a three-band ladder
+        // and writes a level into its second parameter; the spawner then
+        // walks the corpse feature's featuredead chain one step for each
+        // level above the first (0x4863A7), and leaves nothing at all if the
+        // chain runs out (0x4863AC). RWE ran the ladder and discarded the
+        // answer, so every wreck in the game was the level-one wreck.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        std::vector<UnitPieceDefinition> modelPieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+        sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(modelPieces));
+
+        // HULK breaks down to RUBBLE, and RUBBLE to nothing.
+        auto hulk = sim.featureDefinitions.insert(makeWreckDef("HULK"));
+        auto rubble = sim.featureDefinitions.insert(makeWreckDef("RUBBLE"));
+        sim.featureNameIndex.insert_or_assign("HULK", hulk);
+        sim.featureNameIndex.insert_or_assign("RUBBLE", rubble);
+        sim.featureDefinitions.get(hulk).featureDead = rubble;
+
+        sim.unitDefinitions["tank"] = makeUnitDef("HULK");
+
+        auto killAtLevel = [&](unsigned int level) {
+            auto id = spawn(sim, "tank", player, SimVector(100_ss, 0_ss, 100_ss), script);
+            auto& unit = sim.getUnitState(id);
+            unit.markAsDead();
+            std::get<UnitState::LifeStateDead>(unit.lifeState).corpseLevel = level;
+            sim.tick();
+        };
+
+        SECTION("level one leaves the wreck itself")
+        {
+            killAtLevel(1);
+            REQUIRE(countFeatures(sim) == 1);
+            REQUIRE(sim.getFeatureDefinition(sim.features.begin()->second.featureName).name == "HULK");
+        }
+
+        SECTION("level two leaves what the wreck breaks down to")
+        {
+            killAtLevel(2);
+            REQUIRE(countFeatures(sim) == 1);
+            REQUIRE(sim.getFeatureDefinition(sim.features.begin()->second.featureName).name == "RUBBLE");
+        }
+
+        SECTION("a level past the end of the chain leaves nothing")
+        {
+            killAtLevel(3);
+            REQUIRE(countFeatures(sim) == 0);
+        }
+    }
 }

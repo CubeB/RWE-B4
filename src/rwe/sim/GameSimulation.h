@@ -428,6 +428,12 @@ namespace rwe
      */
     int computeKilledSeverity(unsigned int overkill, unsigned int maxHitPoints);
 
+    /**
+     * The corpse level a `Killed` script wrote into its second parameter, if
+     * it wrote one. Masked to four bits as the original masks it.
+     */
+    std::optional<unsigned int> readCorpseLevel(const CobThread& thread);
+
     struct GameSimulation
     {
         std::minstd_rand rng;

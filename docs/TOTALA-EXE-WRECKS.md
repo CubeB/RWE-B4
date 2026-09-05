@@ -607,7 +607,7 @@ Item by item against the original:
 | Resting height | the cell's `(min+max)/2` | never rests; never moves |
 | `isfeature` exemption | wreck does not sink | n/a — no sink, and `isfeature` is not parsed at all |
 | Burning wreck | 30 s plume, suppressed in water | no burning wreck at all (§84 already lists this) |
-| Corpse level from `Killed` | 1/2/3, walking `featuredead` | **ignored**: `Killed` is run with a hard-coded severity of 50 (`GameSimulation.cpp:2836`) and the script's `corpsetype` is discarded, so RWE always spawns level 1 |
+| Corpse level from `Killed` | 1/2/3, walking `featuredead` | **matched** since September 2026: the severity is computed from the overkill and the level the script writes back is read and walked |
 | No `Corpse` key | no wreck | the same — **already correct** |
 | Placement blocked by an indestructible feature | no wreck | `addFeature` refuses on `anyFeatureOccupies` (`GameSimulation.cpp:259`) — close, but it refuses on *any* standing feature rather than only on indestructible ones, and never clears a destructible one |
 | Blocking on the sea bed | the cell is occupied whatever the y | the same — **already correct**: `addFeature` stamps `occupiedGrid` regardless of height, so a wreck already blocks submarines and amphibians |
@@ -761,15 +761,23 @@ Kill a Peewee dropped from an Atlas over water: its `blocking=1` wreck falls the
 whole way and blocks the sea bed where it lands. Shoot down an aircraft over
 anything: nothing at all.
 
-### Follow-up, not in this change
+### The corpse level, done separately
 
-The corpse level. RWE runs `Killed` with a hard-coded severity of 50 and throws
-away the `corpsetype` the script writes back, so it always spawns level 1. The
-original's severity is §22's formula and the level then walks the `featuredead`
-chain (`0x486379`–`0x4863AC`). Doing it properly would mean a ship or a
-hovercraft blown apart hard leaves **nothing**, and a land unit leaves its
-`_heap` — which is a visible difference in every game, and a bigger one than
-the sink.
+Since September 2026 this is ported too, and it was the bigger visible
+difference of the two. The severity is §22's formula — with `unit+0xF7` taken
+as zero, since that term has no known writer anywhere in the binary — and the
+level the script writes into its second parameter is read back and walked
+along the `featuredead` chain (`0x486379`–`0x4863AC`), so a unit blown apart
+hard leaves rubble or nothing where a gently killed one leaves the intact
+wreck.
+
+The part that wanted care was reading the answer out of a COB thread that may
+have stopped at a sleep. It turns out not to need a mechanism: a finished
+thread goes to the environment's `finishedQueue` and is not deleted until the
+*next* pass over the scripts, and a sleeping one sits in the sleeping queue,
+so the thread is alive either way at the moment the pass returns. A finished
+thread has its locals in `returnLocals` and a suspended one has them on its
+call stack; both are read, in that order.
 
 ---
 
