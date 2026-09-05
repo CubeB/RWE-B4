@@ -520,6 +520,7 @@ set(SOURCE_FILES
     src/rwe/sim/MapTerrain.h
     src/rwe/sim/Metal.h
     src/rwe/sim/MovementClassCollisionService.cpp
+    src/rwe/sim/SimRandom.h
     src/rwe/sim/MovementClassCollisionService.h
     src/rwe/sim/MovementClassDatabase.cpp
     src/rwe/sim/MovementClassDatabase.h
@@ -893,6 +894,7 @@ set(TEST_FILES
     src/rwe/sim/targeting.test.cpp
     src/rwe/sim/targetsearch.test.cpp
     src/rwe/sim/turret.test.cpp
+    src/rwe/sim/SimRandom.test.cpp
     src/rwe/sim/saveload.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp
     src/rwe/util/Result.test.cpp

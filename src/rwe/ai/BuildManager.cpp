@@ -1,4 +1,5 @@
 #include "BuildManager.h"
+#include <rwe/sim/SimRandom.h>
 #include <algorithm>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/util/SimpleLogger.h>
@@ -112,8 +113,7 @@ namespace rwe
         {
             return std::nullopt;
         }
-        std::uniform_int_distribution<std::size_t> dist(0, tiedCandidates.size() - 1);
-        return tiedCandidates[dist(rng)];
+        return tiedCandidates[randomBelow(rng, static_cast<unsigned int>(tiedCandidates.size()))];
     }
 
     std::optional<SimVector> BuildManager::chooseMexSite(
@@ -226,8 +226,7 @@ namespace rwe
         {
             return std::nullopt;
         }
-        std::uniform_int_distribution<std::size_t> dist(0, tiedCandidates.size() - 1);
-        return tiedCandidates[dist(rng)];
+        return tiedCandidates[randomBelow(rng, static_cast<unsigned int>(tiedCandidates.size()))];
     }
 
     std::vector<std::string> BuildManager::buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase) const

@@ -1,4 +1,5 @@
 #include "GameSimulation.h"
+#include <rwe/sim/SimRandom.h>
 #include <algorithm>
 #include <cmath>
 #include <rwe/ai/AiPlayerController.h>
@@ -477,8 +478,7 @@ namespace rwe
         const auto ticksPerSecond = static_cast<unsigned int>(SimTicksPerSecond);
         auto minTicks = featureDefinition.burnMin * ticksPerSecond;
         auto maxTicks = std::max(featureDefinition.burnMax, featureDefinition.burnMin) * ticksPerSecond;
-        std::uniform_int_distribution<unsigned int> duration(minTicks, maxTicks);
-        feature.burningUntil = gameTime + GameTime(std::max(1u, duration(rng)));
+        feature.burningUntil = gameTime + GameTime(std::max(1u, randomBetween(rng, minTicks, maxTicks)));
         feature.nextSpark = gameTime + GameTime(std::max(1u, featureDefinition.sparkTime) * ticksPerSecond);
     }
 
@@ -507,7 +507,6 @@ namespace rwe
         });
 
         auto radiusSquared = radius * radius;
-        std::uniform_int_distribution<unsigned int> roll(1, 100);
         for (auto id : candidates)
         {
             auto featureRef = tryGetFeature(id);
@@ -527,7 +526,7 @@ namespace rwe
             {
                 continue;
             }
-            if (roll(rng) <= chancePercent)
+            if (randomBetween(rng, 1u, 100u) <= chancePercent)
             {
                 igniteFeature(id);
             }
@@ -623,8 +622,7 @@ namespace rwe
         {
             return;
         }
-        std::uniform_int_distribution chanceDist(0, 99);
-        if (chanceDist(rng) >= static_cast<int>(definition.reproduce))
+        if (randomBelow(rng, 100) >= definition.reproduce)
         {
             return;
         }
@@ -637,9 +635,8 @@ namespace rwe
         {
             return;
         }
-        std::uniform_int_distribution areaDist(0, area - 1);
-        auto targetX = sourceX + areaDist(rng) - (area / 2);
-        auto targetY = sourceY + areaDist(rng) - (area / 2);
+        auto targetX = sourceX + static_cast<int>(randomBelow(rng, static_cast<unsigned int>(area))) - (area / 2);
+        auto targetY = sourceY + static_cast<int>(randomBelow(rng, static_cast<unsigned int>(area))) - (area / 2);
 
         if (targetX < 0 || targetX >= width || targetY < 0 || targetY >= height)
         {
@@ -2284,8 +2281,7 @@ namespace rwe
         if (weaponDefinition.weaponTimer)
         {
             auto randomDecay = weaponDefinition.randomDecay.value().value;
-            std::uniform_int_distribution<unsigned int> dist(0, randomDecay);
-            auto randomVal = dist(rng);
+            auto randomVal = randomBelow(rng, randomDecay + 1u);
             projectile.dieOnFrame = gameTime + *weaponDefinition.weaponTimer - GameTime(randomDecay / 2) + GameTime(randomVal);
         }
         else if (std::holds_alternative<ProjectilePhysicsTypeLineOfSight>(weaponDefinition.physicsType))
@@ -3689,16 +3685,13 @@ namespace rwe
         if (gameTime >= nextWindSpeedChange)
         {
             // the wind speed will last between 5 and 14 seconds before changing
-            std::uniform_int_distribution<int> durationDist(5, 14);
-            nextWindSpeedChange = gameTime + GameTime(durationDist(rng) * SimTicksPerSecond);
+            nextWindSpeedChange = gameTime + GameTime(randomBetween(rng, 5, 14) * SimTicksPerSecond);
 
             // the new wind speed is taken from a uniform distribution between the min and max speeds
-            std::uniform_int_distribution<int> speedDist(minWindSpeed, std::max(minWindSpeed, maxWindSpeed));
-            auto currentWindSpeed = speedDist(rng);
+            auto currentWindSpeed = randomBetween(rng, minWindSpeed, std::max(minWindSpeed, maxWindSpeed));
 
             // the new wind direction is a random angle
-            std::uniform_int_distribution<int> directionDist(MinAngle.value, MaxAngle.value);
-            auto currentWindDirection = SimAngle(directionDist(rng));
+            auto currentWindDirection = SimAngle(static_cast<uint16_t>(randomBetween(rng, MinAngle.value, MaxAngle.value)));
 
             // A generator gets the wind as a fraction of the speed the game
             // considers a full gale, and no more than all of it however hard
@@ -4127,8 +4120,8 @@ namespace rwe
                 const auto& newUnitDefinition = unitDefinitions.at(s->unitType);
                 if (!newUnitDefinition.isMobile && newUnitDefinition.buildAngle.value >= 2)
                 {
-                    std::uniform_int_distribution<int> twist(0, newUnitDefinition.buildAngle.value - 1);
-                    spawnRotation = SimAngle(static_cast<uint16_t>(twist(rng))) - SimAngle(newUnitDefinition.buildAngle.value / 2);
+                    auto twist = randomBelow(rng, newUnitDefinition.buildAngle.value);
+                    spawnRotation = SimAngle(static_cast<uint16_t>(twist)) - SimAngle(newUnitDefinition.buildAngle.value / 2);
                 }
 
                 auto newUnitId = trySpawnUnit(s->unitType, s->owner, s->position, spawnRotation);

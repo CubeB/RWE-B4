@@ -1,4 +1,5 @@
 #include "cob.h"
+#include <rwe/sim/SimRandom.h>
 #include <rwe/util/SimpleLogger.h>
 #include <optional>
 #include <rwe/cob/CobAxis.h>
@@ -256,10 +257,10 @@ namespace rwe
         return match(
             result.query,
             [&](const CobEnvironment::QueryStatus::Random& q) {
-                // FIXME: probably not consistent across platforms
-                std::uniform_int_distribution<int> dist(q.low, q.high);
-                auto value = dist(sim.rng);
-                return value;
+                // A script asking for a random number is asking the
+                // simulation for one, so it has to be drawn the way every
+                // other simulation draw is -- see SimRandom.h.
+                return randomBetween(sim.rng, q.low, q.high);
             },
             [&](const CobEnvironment::QueryStatus::Activation&) {
                 const auto& unit = sim.getUnitState(unitId);
