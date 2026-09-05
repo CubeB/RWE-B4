@@ -2068,7 +2068,7 @@ Decoded here and deliberately **not** ported:
 
 - **The sight-range search `0x43B700`**, which is what both `VTOL_SeekAttack`
   state 1 and `VTOL_Standby` state 1 do before they fly anywhere. RWE has no
-  equivalent — see §84 — and its own idle weapon acquisition stands in.
+  equivalent — see §90 — and its own idle weapon acquisition stands in.
 - **The go-home-when-hurt branch.** Below 75 % health with an active repair pad
   within 3840, both the search circuit and the strafing pass abandon what they
   are doing and push a `VTOL_LANDING` on a pad chosen at random. RWE has no
@@ -2365,7 +2365,7 @@ Not ported:
   shipped data is both, so the two agree on real data, and the extra conditions
   also guard the metal grid next to it.
 - **The burning-feature smoke** above, and the `treeburn` sound with it.
-- **Downwind drift**, as §84 already records for the rest of the smoke: RWE has
+- **Downwind drift**, as §90 already records for the rest of the smoke: RWE has
   no map wind, so a vent's plume goes straight up.
 
 ---
@@ -2605,7 +2605,7 @@ parser pipelines its stores. `def+0x22A` and `def+0x22B` come from the same run
 of keys as `waterline`: the strings pushed are `0x503DC8` "waterline",
 `0x503DB8` "transportsize" and `0x503DA4` "transportcapacity", and under the
 §82 rule their values land at `0x42C259`, `0x42C26E` and `0x42C284`. That makes
-`def+0x22C` `waterline`, which §83 already had from elsewhere and which is the
+`def+0x22C` `waterline`, which §88 already had from elsewhere and which is the
 check that the pipeline is being read the right way round, `def+0x22A`
 **`transportsize`**, and `def+0x22B` **`transportcapacity`**.
 
@@ -4121,7 +4121,7 @@ same `push <keystring>` / `call 0x4C46C0` pipeline the FBI parser uses — and
 `hitdensity` is not among them. 559 features name it; the engine of this build
 ignores every one.
 
-So §84's note that it is "very likely the pass-through chance for projectiles
+So §90's note that it is "very likely the pass-through chance for projectiles
 hitting features" is **refuted**, not merely unconfirmed.
 
 What the original actually does with a shot and a feature is at `0x49B2B3`,

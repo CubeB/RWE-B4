@@ -606,7 +606,7 @@ Item by item against the original:
 | Above the waterline | free-falls at map gravity | **hangs in the air** |
 | Resting height | the cell's `(min+max)/2` | never rests; never moves |
 | `isfeature` exemption | wreck does not sink | n/a — no sink, and `isfeature` is not parsed at all |
-| Burning wreck | 30 s plume, suppressed in water | no burning wreck at all (§84 already lists this) |
+| Burning wreck | 30 s plume, suppressed in water | no burning wreck at all (§90 already lists this) |
 | Corpse level from `Killed` | 1/2/3, walking `featuredead` | **matched** since September 2026: the severity is computed from the overkill and the level the script writes back is read and walked |
 | No `Corpse` key | no wreck | the same — **already correct** |
 | Placement blocked by an indestructible feature | no wreck | `addFeature` refuses on `anyFeatureOccupies` (`GameSimulation.cpp:259`) — close, but it refuses on *any* standing feature rather than only on indestructible ones, and never clears a destructible one |
@@ -715,7 +715,7 @@ The original grounds against the cell's `(min+max)/2` (`0x485140`) rather than
 the interpolated surface (`0x485070`); RWE's `terrain.getHeightAt` is the
 interpolated one and the difference is a unit or two. Use `getHeightAt` for
 both — a second height function for that is not worth it — and add the line to
-§83 as a deliberate difference.
+§88 as a deliberate difference.
 
 Nothing else needs touching. The wreck's `occupiedGrid` cells are stamped at
 placement and are independent of its y, so it blocks submarines and amphibians
