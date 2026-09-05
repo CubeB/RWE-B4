@@ -95,6 +95,27 @@ namespace rwe
     struct CaptureOrder
     {
         UnitId target;
+
+        /**
+         * Capture work done so far, in ticks, and the number of ticks needed.
+         *
+         * Both live on the *order*, not on the target, because that is where
+         * the original keeps them: the Capture mission (0x404270) counts up in
+         * `mission+0x36` and holds its total in `mission+0x3A`, and the target
+         * unit has no capture field at all. Two consequences fall straight out
+         * of that and are the point of storing them here -- a captor that is
+         * given something else to do takes its progress with it, and two
+         * captors on one target do not pool their effort. See TOTALA-EXE.md
+         * §96.
+         *
+         * `totalWork` is empty until the order first runs, and is then a
+         * snapshot: the original computes it once in the mission's state 0 and
+         * never revisits it, so damaging the target part-way through does not
+         * shorten what is left.
+         */
+        unsigned int progress{0};
+        std::optional<unsigned int> totalWork;
+
         explicit CaptureOrder(const UnitId& target) : target(target) {}
     };
 

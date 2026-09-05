@@ -131,7 +131,12 @@ namespace rwe
 
     void UiPanel::focus()
     {
-        if (!focusedChild)
+        // The test used to be inverted, so a panel with no focused child
+        // dereferenced an empty optional and a panel that had one never
+        // passed the focus down. Nothing caught it because a panel inside a
+        // panel is rare, and the two callers that exist go through
+        // setFocus/clearFocus instead.
+        if (focusedChild)
         {
             (*focusedChild)->focus();
         }
@@ -139,7 +144,7 @@ namespace rwe
 
     void UiPanel::unfocus()
     {
-        if (!focusedChild)
+        if (focusedChild)
         {
             (*focusedChild)->unfocus();
         }

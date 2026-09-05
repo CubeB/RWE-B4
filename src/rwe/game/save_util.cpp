@@ -834,7 +834,16 @@ namespace rwe
                 [&](const ReclaimOrder& r) { return json{{"kind", "reclaim"}, {"target", saveReclaimTarget(r.target, ctx)}}; },
                 [&](const RepairOrder& r) { return json{{"kind", "repair"}, {"target", saveUnitIdRef(r.target, ctx)}}; },
                 [](const PatrolOrder& p) { return json{{"kind", "patrol"}, {"destination", saveSimVector(p.destination)}}; },
-                [&](const CaptureOrder& c) { return json{{"kind", "capture"}, {"target", saveUnitIdRef(c.target, ctx)}}; },
+                [&](const CaptureOrder& c) {
+                    // Capture progress rides on the order, not on the
+                    // target -- see CaptureOrder -- so it is saved here.
+                    auto j = json{{"kind", "capture"}, {"target", saveUnitIdRef(c.target, ctx)}, {"progress", c.progress}};
+                    if (c.totalWork)
+                    {
+                        j["totalWork"] = *c.totalWork;
+                    }
+                    return j;
+                },
                 [&](const LoadOrder& l) { return json{{"kind", "load"}, {"target", saveUnitIdRef(l.target, ctx)}}; },
                 [](const UnloadOrder& u) { return json{{"kind", "unload"}, {"destination", saveSimVector(u.destination)}}; },
                 [&](const DgunOrder& d) { return json{{"kind", "dgun"}, {"target", saveAttackTarget(d.target, ctx)}}; },
@@ -900,7 +909,13 @@ namespace rwe
             }
             if (kind == "capture")
             {
-                return CaptureOrder(loadUnitIdRef(j.at("target"), ctx));
+                auto order = CaptureOrder(loadUnitIdRef(j.at("target"), ctx));
+                order.progress = j.value("progress", 0u);
+                if (j.contains("totalWork"))
+                {
+                    order.totalWork = j.at("totalWork").get<unsigned int>();
+                }
+                return order;
             }
             if (kind == "load")
             {
@@ -1551,7 +1566,6 @@ namespace rwe
                 {"nanoframeWorkedOn", u.nanoframeWorkedOn},
                 {"nanoframeDecayRemainder", u.nanoframeDecayRemainder},
                 {"reclaimProgress", u.reclaimProgress},
-                {"captureProgress", u.captureProgress},
                 {"selfDestructTime", saveOptional(u.selfDestructTime, [](GameTime t) { return saveGameTime(t); })},
                 {"paralyzedUntil", saveOptional(u.paralyzedUntil, [](GameTime t) { return saveGameTime(t); })},
                 {"moveRateBand", u.moveRateBand},
@@ -1632,7 +1646,6 @@ namespace rwe
             u.nanoframeWorkedOn = j.at("nanoframeWorkedOn").get<bool>();
             u.nanoframeDecayRemainder = j.at("nanoframeDecayRemainder").get<unsigned int>();
             u.reclaimProgress = j.at("reclaimProgress").get<unsigned int>();
-            u.captureProgress = j.at("captureProgress").get<unsigned int>();
             u.selfDestructTime = loadOptional(j.at("selfDestructTime"), loadGameTime);
             u.paralyzedUntil = loadOptional(j.at("paralyzedUntil"), loadGameTime);
             u.moveRateBand = j.at("moveRateBand").get<unsigned int>();

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <rwe/util/Index.h>
+#include <rwe/util/match.h>
 
 namespace rwe
 {
@@ -1507,5 +1508,168 @@ namespace rwe
         }
 
         --state.ticksRemaining;
+    }
+
+    const char* missionDisplayName(UnitActivity activity)
+    {
+        switch (activity)
+        {
+            case UnitActivity::Standby:
+                return "Standby";
+            case UnitActivity::Moving:
+                return "Moving";
+            case UnitActivity::Attacking:
+                return "Attacking";
+            case UnitActivity::Annihilating:
+                return "Annihilating";
+            case UnitActivity::Nanolathing:
+                return "Nanolathing";
+            case UnitActivity::Guarding:
+                return "Guarding";
+            case UnitActivity::Reclaiming:
+                return "Reclaiming";
+            case UnitActivity::Repairing:
+                return "Repairing";
+            case UnitActivity::Patrolling:
+                return "Patrolling";
+            case UnitActivity::Capturing:
+                return "Capturing";
+            case UnitActivity::Loading:
+                return "Loading";
+            case UnitActivity::Unloading:
+                return "Unloading";
+            case UnitActivity::Landing:
+                return "Landing";
+            case UnitActivity::UnderRepair:
+                return "Under repair";
+            case UnitActivity::UnderConstruction:
+                return "Under construction";
+            case UnitActivity::BeingTransported:
+                return "Being transported";
+            case UnitActivity::Paralyzed:
+                return "Paralyzed";
+            case UnitActivity::SelfDestructing:
+                return "SELF DESTRUCT ENGAGED";
+        }
+
+        return "Standby";
+    }
+
+    UnitActivity unitActivity(const UnitState& unit, bool underConstruction, bool weaponQueued)
+    {
+        // The states that displace an order come first, because in the
+        // original they are missions in their own right and sit at the front
+        // of the unit's mission list: GetBuilt (13), BeCarried (14),
+        // Paralyze (12) and SelfDestruct (10).
+        if (unit.selfDestructTime)
+        {
+            return UnitActivity::SelfDestructing;
+        }
+
+        if (underConstruction)
+        {
+            return UnitActivity::UnderConstruction;
+        }
+
+        if (unit.carriedBy)
+        {
+            return UnitActivity::BeingTransported;
+        }
+
+        if (unit.paralyzedUntil)
+        {
+            return UnitActivity::Paralyzed;
+        }
+
+        if (unit.orders.empty())
+        {
+            // A launcher with a round on order is running BuildWeapon (ground
+            // mission 9), which shares Nanolathing with the two build
+            // missions. RWE keeps the queue on the weapon rather than in the
+            // order list, so it has to be asked about separately.
+            if (weaponQueued)
+            {
+                return UnitActivity::Nanolathing;
+            }
+
+            return UnitActivity::Standby;
+        }
+
+        return match(
+            unit.orders.front(),
+            [](const MoveOrder&) { return UnitActivity::Moving; },
+            [](const AttackOrder&) { return UnitActivity::Attacking; },
+            [](const BuildOrder&) { return UnitActivity::Nanolathing; },
+            [](const BuggerOffOrder&) { return UnitActivity::Moving; },
+            [](const CompleteBuildOrder&) { return UnitActivity::Nanolathing; },
+            [](const GuardOrder&) { return UnitActivity::Guarding; },
+            [](const ReclaimOrder&) { return UnitActivity::Reclaiming; },
+            [](const RepairOrder&) { return UnitActivity::Repairing; },
+            [](const PatrolOrder&) { return UnitActivity::Patrolling; },
+            [](const CaptureOrder&) { return UnitActivity::Capturing; },
+            [](const LoadOrder&) { return UnitActivity::Loading; },
+            [](const UnloadOrder&) { return UnitActivity::Unloading; },
+            [](const DgunOrder&) { return UnitActivity::Annihilating; },
+            [](const LandOnAirBaseOrder&) { return UnitActivity::Landing; });
+    }
+
+    std::optional<UnitId> unitOrderTargetUnit(const UnitState& unit)
+    {
+        if (unit.orders.empty())
+        {
+            return std::nullopt;
+        }
+
+        return match(
+            unit.orders.front(),
+            [](const MoveOrder&) { return std::optional<UnitId>(); },
+            [](const AttackOrder& o) {
+                if (auto target = std::get_if<UnitId>(&o.target); target != nullptr)
+                {
+                    return std::optional<UnitId>(*target);
+                }
+                return std::optional<UnitId>();
+            },
+            [&](const BuildOrder&) { return unit.buildOrderUnitId; },
+            [](const BuggerOffOrder&) { return std::optional<UnitId>(); },
+            [](const CompleteBuildOrder& o) { return std::optional<UnitId>(o.target); },
+            [](const GuardOrder& o) { return std::optional<UnitId>(o.target); },
+            [](const ReclaimOrder& o) {
+                if (auto target = std::get_if<UnitId>(&o.target); target != nullptr)
+                {
+                    return std::optional<UnitId>(*target);
+                }
+                return std::optional<UnitId>();
+            },
+            [](const RepairOrder& o) { return std::optional<UnitId>(o.target); },
+            [](const PatrolOrder&) { return std::optional<UnitId>(); },
+            [](const CaptureOrder& o) { return std::optional<UnitId>(o.target); },
+            [](const LoadOrder& o) { return std::optional<UnitId>(o.target); },
+            [](const UnloadOrder&) { return std::optional<UnitId>(); },
+            [](const DgunOrder& o) {
+                if (auto target = std::get_if<UnitId>(&o.target); target != nullptr)
+                {
+                    return std::optional<UnitId>(*target);
+                }
+                return std::optional<UnitId>();
+            },
+            [](const LandOnAirBaseOrder& o) { return std::optional<UnitId>(o.target); });
+    }
+
+    std::string killsCaption(unsigned int kills)
+    {
+        if (kills == 0)
+        {
+            return std::string();
+        }
+
+        auto noun = kills == 1 ? std::string("kill") : std::string("kills");
+        auto caption = std::to_string(kills) + " " + noun;
+        if (kills > 4)
+        {
+            caption += " - Veteran";
+        }
+
+        return caption;
     }
 }

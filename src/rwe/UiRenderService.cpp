@@ -297,6 +297,34 @@ namespace rwe
         fillColor(x + width - thickness, y + thickness, thickness, height - (thickness * 2.0f), color);
     }
 
+    void UiRenderService::drawLines(const std::vector<Vector2f>& points, const Color& color)
+    {
+        if (points.size() < 2)
+        {
+            return;
+        }
+
+        auto floatColor = Vector3f(
+            static_cast<float>(color.r) / 255.0f,
+            static_cast<float>(color.g) / 255.0f,
+            static_cast<float>(color.b) / 255.0f);
+
+        std::vector<GlColoredVertex> vertices;
+        vertices.reserve(points.size());
+        for (const auto& p : points)
+        {
+            vertices.push_back({{p.x, p.y, 0.0f}, floatColor});
+        }
+
+        auto mesh = graphics->createColoredMesh(vertices, GL_STREAM_DRAW);
+
+        const auto& shader = shaders->basicColor;
+        graphics->bindShader(shader.handle.get());
+        graphics->setUniformMatrix(shader.mvpMatrix, getViewProjectionMatrix() * matrixStack.top());
+        graphics->setUniformFloat(shader.alpha, static_cast<float>(color.a) / 255.0f);
+        graphics->drawLines(mesh);
+    }
+
     void UiRenderService::drawLineLoop(const std::vector<Vector2f>& points, const Color& color)
     {
         if (points.size() < 2)

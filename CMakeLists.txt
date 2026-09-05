@@ -817,6 +817,7 @@ set(TEST_FILES
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/cloakdisplay.test.cpp
     src/rwe/game/damagesmoke.test.cpp
+    src/rwe/game/infopanel.test.cpp
     src/rwe/game/orderbuttons.test.cpp
     src/rwe/game/PlayerCommand_hotkey.test.cpp
     src/rwe/game/PlayerCommand_speed.test.cpp
@@ -861,6 +862,7 @@ set(TEST_FILES
     src/rwe/sim/SimAngle.test.cpp
     src/rwe/sim/SimVector.test.cpp
     src/rwe/sim/UnitBehaviorService_air.test.cpp
+    src/rwe/sim/autoreclaim.test.cpp
     src/rwe/sim/reclaim.test.cpp
     src/rwe/sim/repair.test.cpp
     src/rwe/sim/nanoframedecay.test.cpp

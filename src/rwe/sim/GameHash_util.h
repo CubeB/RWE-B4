@@ -32,6 +32,32 @@ namespace rwe
      */
     GameHash computeHashOf(const UnitWeapon& w);
 
+
+    /**
+     * The orders a unit is carrying.
+     *
+     * Worth hashing for its own sake -- a peer that disagrees about what a
+     * unit is *doing* is desynced whether or not its position has drifted yet
+     * -- and necessary since section 96, which moved capture progress onto
+     * CaptureOrder to match the original and would otherwise have taken it
+     * out of the hash's sight.
+     */
+    GameHash computeHashOf(const AttackLeash& l);
+    GameHash computeHashOf(const MoveOrder& o);
+    GameHash computeHashOf(const AttackOrder& o);
+    GameHash computeHashOf(const BuildOrder& o);
+    GameHash computeHashOf(const BuggerOffOrder& o);
+    GameHash computeHashOf(const CompleteBuildOrder& o);
+    GameHash computeHashOf(const GuardOrder& o);
+    GameHash computeHashOf(const ReclaimOrder& o);
+    GameHash computeHashOf(const RepairOrder& o);
+    GameHash computeHashOf(const PatrolOrder& o);
+    GameHash computeHashOf(const CaptureOrder& o);
+    GameHash computeHashOf(const LoadOrder& o);
+    GameHash computeHashOf(const UnloadOrder& o);
+    GameHash computeHashOf(const DgunOrder& o);
+    GameHash computeHashOf(const LandOnAirBaseOrder& o);
+
     GameHash computeHashOf(const UnitPhysicsInfoGround& p);
     GameHash computeHashOf(const UnitPhysicsInfoAir& p);
     GameHash computeHashOf(const AirMovementStateTakingOff& p);
@@ -95,6 +121,30 @@ namespace rwe
     GameHash computeHashOf(const std::optional<T>& o)
     {
         return o ? computeHashOf(*o) : GameHash(0);
+    }
+
+    /**
+     * A queue, hashed by position as well as by content.
+     *
+     * The other container helpers fold with `sum +=`, which is right for a
+     * set and wrong for a queue: it cannot tell [move, attack] from
+     * [attack, move], and for an order queue that ordering is the whole
+     * meaning. The index is mixed in so a reordering changes the hash.
+     */
+    template <typename T>
+    GameHash computeHashOf(const std::deque<T>& d)
+    {
+        // Folded rather than summed. Mixing the position in additively does
+        // not work -- the sum of the indices is the same whatever order the
+        // items come in, so it cancels exactly -- which the test for this
+        // caught. Multiplying the accumulator each step is what makes the
+        // sequence matter.
+        uint32_t accumulator = 0;
+        for (const auto& x : d)
+        {
+            accumulator = (accumulator * 31u) + computeHashOf(x).value;
+        }
+        return GameHash(accumulator);
     }
 
     template <typename T>

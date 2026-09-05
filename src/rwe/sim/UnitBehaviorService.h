@@ -43,8 +43,14 @@ namespace rwe
         std::optional<SimVector> tryGetSweetSpot(UnitId id);
 
     private:
-        /** Returns true if the order has been completed. */
-        bool handleOrder(UnitInfo unitInfo, const UnitOrder& moveOrder);
+        /**
+         * Returns true if the order has been completed.
+         *
+         * The order is handed over by non-const reference because a
+         * capture order accumulates its progress in itself, the way the
+         * original's mission record does -- see CaptureOrder.
+         */
+        bool handleOrder(UnitInfo unitInfo, UnitOrder& order);
 
         /** Returns true if the order has been completed. */
         bool handleMoveOrder(UnitInfo unitInfo, const MoveOrder& moveOrder);
@@ -83,7 +89,21 @@ namespace rwe
         /** Hands steering back from an attack run to ordinary flight, keeping the speed. */
         void dropAirAttackRun(UnitInfo unitInfo);
 
-        bool handleCaptureOrder(UnitInfo unitInfo, const CaptureOrder& captureOrder);
+        /**
+         * The nearest thing a construction unit on patrol should clear away,
+         * or nothing. This is the original's only automatic reclaim and the
+         * only reader of a feature's `autoreclaimable` bit -- see
+         * TOTALA-EXE.md §97.
+         */
+        std::optional<FeatureId> findFeatureToAutoReclaim(UnitInfo unitInfo);
+
+        /**
+         * How empty a store has to be before a patrolling builder goes looking
+         * for something to reclaim into it: the 0.2 at 0x4FC950.
+         */
+        static constexpr float AutoReclaimWantedFraction = 0.2f;
+
+        bool handleCaptureOrder(UnitInfo unitInfo, CaptureOrder& captureOrder);
 
         bool handleLoadOrder(UnitInfo unitInfo, const LoadOrder& loadOrder);
 
@@ -152,9 +172,9 @@ namespace rwe
          */
         std::optional<UnitId> chooseTarget(UnitId id, unsigned int weaponIndex, TargetSearchMode mode = TargetSearchMode::WeaponRange);
 
-        bool captureExistingUnit(UnitInfo unitInfo, UnitId targetUnitId);
+        bool captureExistingUnit(UnitInfo unitInfo, CaptureOrder& captureOrder);
 
-        bool deployCaptureArm(UnitInfo unitInfo, UnitId targetUnitId);
+        bool deployCaptureArm(UnitInfo unitInfo, CaptureOrder& captureOrder);
 
         /**
          * Whether there is anything worth breaking off for: the choice the

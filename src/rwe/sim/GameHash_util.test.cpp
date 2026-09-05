@@ -101,4 +101,49 @@ namespace rwe
             REQUIRE(hash == GameHash(30));
         }
     }
+
+    TEST_CASE("the order queue is hashed, and its order matters")
+    {
+        // Capture progress lives on CaptureOrder rather than on the unit,
+        // because that is where the original keeps it (section 96) -- which
+        // put it out of the hash's sight until the queue itself was hashed.
+        // These pin the two properties that makes it worth having.
+        auto move = UnitOrder(MoveOrder(SimVector(1_ss, 2_ss, 3_ss)));
+        auto attack = UnitOrder(AttackOrder(UnitId(7)));
+
+        SECTION("an empty queue hashes to nothing")
+        {
+            std::deque<UnitOrder> empty;
+            REQUIRE(computeHashOf(empty) == GameHash(0));
+        }
+
+        SECTION("a queue differs from the empty one")
+        {
+            std::deque<UnitOrder> one{move};
+            REQUIRE(computeHashOf(one) != GameHash(0));
+        }
+
+        SECTION("reordering changes the hash")
+        {
+            // The other container helpers fold with a plain sum and could not
+            // tell these apart; an order queue's sequence is its meaning.
+            std::deque<UnitOrder> forwards{move, attack};
+            std::deque<UnitOrder> backwards{attack, move};
+            REQUIRE(computeHashOf(forwards) != computeHashOf(backwards));
+        }
+
+        SECTION("capture progress reaches the hash")
+        {
+            auto a = CaptureOrder(UnitId(3));
+            auto b = CaptureOrder(UnitId(3));
+            b.progress = 42;
+
+            REQUIRE(computeHashOf(a) != computeHashOf(b));
+
+            // And the total, which is snapshotted once and never revisited.
+            auto c = CaptureOrder(UnitId(3));
+            c.totalWork = 900;
+            REQUIRE(computeHashOf(a) != computeHashOf(c));
+        }
+    }
 }

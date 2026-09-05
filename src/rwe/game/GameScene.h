@@ -975,6 +975,8 @@ namespace rwe
          */
         void renderCloakRadius(const UnitState& unit);
 
+        void renderMinimapCoverageRings(const UnitState& unit, const UnitDefinition& unitDefinition, const Vector3f& centre, float worldUnitsToMinimapPixels);
+
         void attachOrdersMenuEventHandlers();
 
         void onMessage(const std::string& message, ActivateMessage::Type mode);
@@ -1028,6 +1030,8 @@ namespace rwe
          * when a command lands: the magazine also goes up on its own when the
          * simulation finishes a round, with no command to hang the refresh on.
          */
+        void refreshBuildGuiTotals();
+
         void refreshStockpileGuiTotal();
 
         std::unique_ptr<UiPanel> createBuildPanel(const std::string& guiname, const std::vector<GuiEntry>& panelDefinition, const std::unordered_map<std::string, int>& totals);

@@ -364,4 +364,68 @@ namespace rwe
 
     /** Counts the shake down by a frame and retires it when it runs out. */
     void advanceScreenShake(ScreenShakeState& state);
+
+    /**
+     * What the footer's MISSIONTEXT line says the unit is doing.
+     *
+     * The original does not compose this string: every mission record carries
+     * a display name at its +0x00 (the mission tables at 0x4FC490 for ground
+     * and 0x4FCA18 for air), and 0x439DF0 hands the footer the name belonging
+     * to the unit's current mission. RWE has orders rather than missions, so
+     * this enumeration is the join between the two -- one entry per distinct
+     * string in those tables that an RWE order can reach.
+     */
+    enum class UnitActivity
+    {
+        Standby,
+        Moving,
+        Attacking,
+        Annihilating,
+        Nanolathing,
+        Guarding,
+        Reclaiming,
+        Repairing,
+        Patrolling,
+        Capturing,
+        Loading,
+        Unloading,
+        Landing,
+        UnderRepair,
+        UnderConstruction,
+        BeingTransported,
+        Paralyzed,
+        SelfDestructing,
+    };
+
+    /**
+     * The original's own wording, transcribed from the two mission tables.
+     * These are the strings the shipped executable draws, so they are not
+     * open to improvement.
+     */
+    const char* missionDisplayName(UnitActivity activity);
+
+    /** Which of those the hovered unit is currently doing. */
+    UnitActivity unitActivity(const UnitState& unit, bool underConstruction, bool weaponQueued);
+
+    /**
+     * The kills line under the damage bar (0x46B2B8-0x46B3B2).
+     *
+     * Empty at zero kills, because the original tests the count against zero
+     * and skips the whole block. Singular at one. From five upward the string
+     * gains a Veteran suffix -- the comparison is jbe against 4, and there is
+     * no other veterancy display anywhere in the binary.
+     */
+    std::string killsCaption(unsigned int kills);
+
+    /**
+     * What the unit's current order is pointed at, for the footer's second
+     * name-and-bar slot.
+     *
+     * The original reads this straight off the mission (0x439DD0 returns
+     * mission+0x16, the mission's target unit), so it is not a build-only
+     * readout: a guard shows what it is guarding and an attacker what it is
+     * shooting at. A build order names a type rather than a unit until the
+     * nanoframe exists, which is what buildOrderUnitId holds.
+     */
+    std::optional<UnitId> unitOrderTargetUnit(const UnitState& unit);
 }

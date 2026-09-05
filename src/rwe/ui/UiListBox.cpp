@@ -25,15 +25,27 @@ namespace rwe
             float y = 12.0f + (i * 12.0f);
             auto itemIndex = scrollPositionSubject.getValue() + i;
 
-            const auto& selectedIndexValue = selectedIndexSubject.getValue();
-            if (selectedIndexValue && itemIndex == *selectedIndexValue)
-            {
-                context.fillColor(posX, posY + y - 11.0f, sizeX, 12.0f, Color(255, 255, 255, 31));
-            }
-
             const auto& e = items[itemIndex];
 
             context.drawText(posX, posY + y, e, *font);
+
+            // The selected row is brightened, and the pass runs after the
+            // text so the text is brightened with it (0x4A1FAE-0x4A1FC9,
+            // reached only when the row index matches the box's selected
+            // index at gadget+0xBA). The original does it by running the
+            // row's rectangle through PALETTE.LHT at level 30 of 32 -- a
+            // palette-index lookup, which RWE has no equivalent of. Measured
+            // against the shipped table that level lifts luminance by a
+            // median of 1.84x, with the lift largest on dark pixels and
+            // nothing at all on white; blending white over the row has the
+            // same shape, and this alpha reproduces the median on a
+            // mid-tone. RWE was washing the row with 12% white, which at
+            // 1.17x was barely visible.
+            const auto& selectedIndexValue = selectedIndexSubject.getValue();
+            if (selectedIndexValue && itemIndex == *selectedIndexValue)
+            {
+                context.fillColor(posX, posY + y - 11.0f, sizeX, 12.0f, Color(255, 255, 255, 115));
+            }
         }
     }
 

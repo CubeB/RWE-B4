@@ -91,6 +91,7 @@ namespace rwe
             u.inBuildStance,
             u.yardOpen,
             u.inCollision,
+            u.orders,
             u.fireOrders,
             u.moveOrders,
             u.cobBusy,
@@ -103,7 +104,6 @@ namespace rwe
             u.nanoframeWorkedOn,
             u.nanoframeDecayRemainder,
             u.reclaimProgress,
-            u.captureProgress,
             u.selfDestructTime,
             u.paralyzedUntil,
             u.moveRateBand,
@@ -132,6 +132,33 @@ namespace rwe
             u.energyDebt,
             u.metalDebt);
     }
+
+    GameHash computeHashOf(const AttackLeash& l)
+    {
+        return combineHashes(l.anchor, l.distance);
+    }
+
+    GameHash computeHashOf(const MoveOrder& o) { return computeHashOf(o.destination); }
+    GameHash computeHashOf(const AttackOrder& o) { return combineHashes(o.target, o.leash); }
+    GameHash computeHashOf(const BuildOrder& o) { return combineHashes(o.unitType, o.position); }
+    GameHash computeHashOf(const BuggerOffOrder& o) { return computeHashOf(o.rect); }
+    GameHash computeHashOf(const CompleteBuildOrder& o) { return computeHashOf(o.target); }
+    GameHash computeHashOf(const GuardOrder& o) { return computeHashOf(o.target); }
+    GameHash computeHashOf(const ReclaimOrder& o) { return computeHashOf(o.target); }
+    GameHash computeHashOf(const RepairOrder& o) { return computeHashOf(o.target); }
+    GameHash computeHashOf(const PatrolOrder& o) { return computeHashOf(o.destination); }
+
+    GameHash computeHashOf(const CaptureOrder& o)
+    {
+        // progress and totalWork are the reason this whole family exists --
+        // see section 96 and the note in the header.
+        return combineHashes(o.target, o.progress, o.totalWork);
+    }
+
+    GameHash computeHashOf(const LoadOrder& o) { return computeHashOf(o.target); }
+    GameHash computeHashOf(const UnloadOrder& o) { return computeHashOf(o.destination); }
+    GameHash computeHashOf(const DgunOrder& o) { return computeHashOf(o.target); }
+    GameHash computeHashOf(const LandOnAirBaseOrder& o) { return computeHashOf(o.target); }
 
     GameHash computeHashOf(const UnitWeapon& w)
     {

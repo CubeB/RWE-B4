@@ -8494,6 +8494,14 @@ original:
   wearing the same name rather than the original's. The heading half is the one
   that stops a unit shooting sideways and backwards, and it is the half that is
   implemented.
+- **A feature's reclaim time counts its hit points, and scales with the
+  builder.** The original is flat: `15 + (metal + energy)/2` ticks, one tick of
+  work a tick, identical for every builder and with no term for the feature's
+  own `damage` (S:97). RWE charges `metal + energy + hitPoints/4` at the
+  builder's `workerTimePerTick`, which came out of a play-test round and is why
+  a boulder takes longer than a bush and a shelled wreck clears quicker.
+  Changing it back would move every reclaim time in the game, so it is recorded
+  rather than corrected.
 - **Circular sight is a computed disc, and it has no floor.** The original's
   Circular mode blits one of ten hand-drawn masks from `anims/vismasks.gaf`,
   radius 5 to 14 cells, so its effective sight is `clamp(SightDistance/32, 5,
@@ -8502,6 +8510,23 @@ original:
   ceiling of 14 cells and drops the floor of 5: a unit with no `SightDistance`
   sees only the ground it stands on, in every mode. Restoring the floor would
   give blind units 160 world units of sight the moment the option is switched.
+- **The interface's palette remaps are alpha blends.** Three things the
+  original does by running a screen rectangle through a 32x256 palette-index
+  table -- greying a gadget, brightening the selected row of a list box, and
+  darkening a marked one -- have no equivalent in a renderer with no palette.
+  The list-box highlight reproduces the measured median of `PALETTE.LHT` row
+  30 (1.84x) by compositing white at 45%, which has the same shape (largest
+  lift on dark pixels, none on white) but not the same per-index behaviour.
+  Greying is still not drawn at all (S:19, S:99).
+- **The anti-missile coverage ring is gated on the weapon, not on
+  `antiweapons`.** The FBI flag is a display flag and RWE has never parsed it;
+  the ring is drawn for any unit carrying an `interceptor` weapon instead. The
+  two sets are identical in the shipped data -- `ARMAMD` and `CORFMD` -- so
+  only a mod could tell (S:25, S:99).
+- **A builder walking to its site already says `Nanolathing`.** The original
+  runs a move mission first and its footer says `Moving`; RWE's single
+  `BuildOrder` covers the walk and the work, so the mission line changes one
+  order earlier (S:99).
 
 ---
 
@@ -8691,6 +8716,14 @@ there is a regression test for it now.
   neither changes what is passable. Left alone because a change to path cost
   moves every route, and that deserves its own pass with `path_bench` and the
   pathing tests watched.
+- **The work sounds are decoded but not played.** Sound slot 11, `working`
+  (`reclaim1` in every construction unit's category), is played once when
+  reclaim or capture work starts, and slot 16 `capture` when a capture
+  finishes -- S:97. RWE parses both and raises no simulation event either could
+  hang off; the scene already knows how to play them.
+- **`Resurrect` is decoded and not implemented** -- S:98. No shipped FBI sets
+  `canresurrect`, so it would be a mod-only capability, and a new `UnitOrder`
+  alternative cannot be added from inside `src/rwe/sim` alone.
 - **`beamweapon`'s tail point** (`0x49BBA3`) is decoded and deliberately *not*
   ported — §92. It gives a round a second, trailing point that starts moving
   `duration + 1` ticks after the shot, and it is drawn only by `rendertype 0`.
@@ -9364,3 +9397,630 @@ binary first.
 Two smaller things fell out and are recorded in §91 rather than acted on:
 `BadSlope`/`BadWaterSlope` are keys RWE does not parse, and the original's
 "tight" band is wet-or-dry aware where RWE's rough test is not.
+
+---
+
+## 96. Capture: where the progress is kept, and what sets the clock
+
+The roadmap asked for capture progress to **decay** when the captor stops. The
+original has nothing to decay, because the progress was never on the thing
+being captured. It is on the captor's own order, and it goes when the order
+goes.
+
+Ground mission table row 41 (`0x4FC891`): name `Capture`, display `"Capturing"`
+(`0x5013B8`), handler **`0x404270`**. Six states through the jump table at
+`0x404714`: `0x4042AB`, `0x404437`, `0x40454E`, `0x404568`, `0x404585`,
+`0x4046B7`. Arguments are `(unit, mission, flags)`; `mission+0x16` is the
+target.
+
+### The three gates, in the order the handler applies them
+
+State 0, `0x4042AB`:
+
+```
+4042c9  mov  edx,[reclaimerDef+0x245] / test dh,0x10   ; the CAPTOR's cancapture (bit 12)
+4042e9  mov  ecx,[targetDef+0x245] / shr ecx,0xc / test cl,1
+                                                       ; the TARGET's cancapture -> refuse
+                                                       ; 0x501618 "That unit cannot be captured"
+404313  fld  DWORD PTR [target+0x104] / fcomp 0.0      ; remaining build fraction must be zero
+                                                       ; 0x5015E0 "That unit is a cloud of vapor
+                                                       ;           and cannot be captured"
+```
+
+The first two are §20's rule read from the other side: only the two commanders
+set `cancapture`, so a commander is the only thing that can capture and the
+only thing that cannot be captured. The third is new here and easy to miss —
+**a nanoframe cannot be taken**, and `unit+0x104` is the same remaining build
+fraction §23 and §93 use.
+
+### The clock, `0x404313`–`0x404407`
+
+Computed **once**, in state 0, and never revisited:
+
+```
+404359  fld  [targetDef+0x186]    ; BuildCostEnergy
+40435f  fmul 30.0      (0x4FC930)
+404365  fmul 0.0005    (0x4FC934)
+40436b  fld  [targetDef+0x18A]    ; BuildCostMetal
+404371  fmul 30.0
+404377  fmul -0.00714285718 (0x4FC938 = -1/140)
+40437d  fsubp                     ; A - B
+40437f  fsub -150.0    (0x4FC93C)
+404385  call 0x4E43A0             ; truncate
+40438a  cmp  eax,0x708 / jl / mov edx,0x708   ; clamp to 1800 ticks
+4043a9  movsx eax,WORD [target+0x108]         ; current hit points
+4043b0  mov  ebp,[targetDef+0x1FA]            ; MaxDamage
+4043c0  imul eax,edx / div (2*MaxDamage)      ; * (hp + max) / (2 * max)
+4043d8  mov  cx,WORD [target+0xB8]            ; the target's kill count
+4043df  imul 0x66666667 / sar edx,1           ; kills / 5
+4043e8  lea  eax,[edx+eax+0xa]                ; + 10
+4043ec  imul eax,edi
+4043ef  lea  ecx,[eax+eax*4] / shl ecx,1      ; * 10
+4043f9  imul 0x51EB851F / sar edx,5           ; / 100
+404407  mov  [mission+0x3A],edx
+```
+
+So, in one line:
+
+```
+t = trunc(BuildCostEnergy*0.015 + BuildCostMetal*3/14 + 150)
+t = min(t, 1800)
+t = t * (hitPoints + MaxDamage) / (2 * MaxDamage)
+t = t * (kills/5 + 10) / 10
+```
+
+Three things fall out of it that are worth stating on their own:
+
+- **`workertime` is not in it.** Nothing in the whole handler reads the
+  captor's definition after the `cancapture` test. A commander captures a solar
+  collector in exactly the time any other captor would.
+- **A damaged unit changes hands faster**, down to half the time at zero hit
+  points. A veteran one is slower, +10% per five kills — and unlike the damage
+  tiers of §6, which stop at five, this one has no ceiling.
+- The clamp bites for exactly **eight** of the 189 shipped units: `ARMCOM`,
+  `CORCOM`, `ARMGATE`, `CORGATE`, `ARMCKFUS`, `ARMBRTHA`, `CORINT` and
+  `CORFMD`. Everything else lands between 5.2 seconds (`ARMDRAG`, 155 ticks)
+  and 59.7 (`ARMFUS` and `CORFUS`, 1790).
+
+Replayed over all 189 shipped FBIs, the float chain above and the exact
+rational `(21E + 300M + 210000) / 1400` agree to the tick on every one, which
+is what lets RWE do it in integers.
+
+### The rate, and where the count lives
+
+State 4, `0x404585`:
+
+```
+4045b3  mov  ecx,[mission+0x36] / cmp ecx,[mission+0x3A] / jge  -> return 1 (done)
+404698  add  ecx,2 / mov [mission+0x36],ecx     ; +2
+4046a3  call 0x439E80(mission, 2)               ; ... every 2 ticks
+```
+
+One tick of progress a tick, for everyone. `mission+0x36` and `mission+0x3A`
+are the order record's general-purpose scratch dwords (§13, §26, §28 use them
+for other things on other missions), allocated by `malloc(0x56)` at `0x43A054`
+and initialised by the order constructor `0x43A0C0`, which takes `+0x36` as a
+plain argument.
+
+**That is the whole answer to the decay question.** The target unit has no
+capture field. Cancel the order and the record is freed with the count in it;
+give the order again and state 0 starts from zero. Two captors on one target
+each keep their own count, so a second builder does not halve the time — it
+just races the first. Progress does survive an interruption that leaves the
+order in place: walking out of range and back keeps it, because the record is
+still there.
+
+### The two sounds
+
+```
+404568  (state 3) 0x47F780(unit, 0x0B, 0)   ; sound slot 11 -- see S:97
+4046cc  (state 5) 0x47F780(unit, 0x10, 0)   ; sound slot 16, `capture`
+```
+
+So a capture opens with the *reclaim* sound and closes with the capture sound.
+
+### What RWE now does
+
+`CaptureOrder` carries `progress` and `totalWork`, exactly as the mission
+record does, and `GameSimulation::computeCaptureTime` is the arithmetic above
+in integer form. `captureUnit` no longer takes a work amount; it only performs
+the handover. `UnitState::captureProgress` is gone, along with its entries in
+the game hash, the save and the state dump — there is no per-target capture
+progress in the original and there is none in RWE now.
+
+The nanoframe gate is implemented. The two sounds are not: see §97.
+
+One thing is deliberately left alone. State 4 also refuses to work while
+`target+0x110 & 0xC` is set, waiting thirty ticks instead (`0x40458A`). Those
+are the two bits §91 lists as unexplained — this is one of the three sites that
+read them — so RWE does not guess at what they mean.
+
+---
+
+## 97. Automatic reclaim, `autoreclaimable`, and what `working` in SOUND.TDF is for
+
+Three of the ground missions reclaim, and they are separate handlers:
+
+| # | Row | Name | Handler | Display |
+|---|---|---|---|---|
+| 43 | `0x4FC8C3` | `Reclaim` | `0x404AD0` | Reclaiming |
+| 44 | `0x4FC8DC` | `ReclaimUnit` | `0x404730` | Reclaiming |
+| 42 | `0x4FC8AA` | `Resurrect` | `0x404DB0` | Resurrecting |
+
+### How long a feature takes, `0x404BBA`
+
+```
+404bba  fld  [featdef+0xEC]        ; energy
+404bc0  fadd [featdef+0xF0]        ; + metal
+404bc6  fmul -0.5      (0x4FC940)
+404bcc  fsubr 15.0     (0x4FC944)
+404bd2  call 0x4E43A0              ; truncate
+404bdc  mov  [mission+0x36],eax
+```
+
+`ticks = 15 + (metal + energy) / 2`, counted **down** two every two ticks
+(`0x404C7C`), so again one tick of work a tick and again no `workertime`
+anywhere. The feature's own `damage` — `featdef+0xEA` — is not in it.
+
+The key offsets come from the feature parser at `0x422A20`: `metal` →
+`featdef+0xF0`, `energy` → `featdef+0xEC`, `damage` → `featdef+0xEA`, and the
+flag word is `featdef+0xFE` with `blocking` bit 6, `reclaimable` bit 7,
+`autoreclaimable` bit 8 (default **1**, pushed at `0x422BA7`), `indestructible`
+bit 9.
+
+**RWE differs here and it is worth writing down rather than quietly
+correcting.** RWE's `computeFeatureReclaimWork` is `metal + energy +
+hitPoints/4` at `workerTimePerTick` a tick, which came out of a play-test round
+(a boulder should take longer than a bush, a shelled wreck should clear
+quicker). The original's is flat, half the resource value plus fifteen ticks,
+and identical for every builder. Changing it would move every reclaim time in
+the game and belongs in its own pass with a play-test, so it has been left as
+it is and recorded here.
+
+`ReclaimUnit` is a different mechanism again: state 4 (`0x4048D2`) applies
+`0x489BB0(reclaimer, target, mission+0x36, type 5, 0)` — ordinary damage, of a
+type all its own — once every fifteen ticks, so a unit being reclaimed is
+visibly taken apart rather than dissolved on a timer.
+
+### `autoreclaimable` has exactly one reader
+
+`0x47EA40` is an area scan over map squares. It resolves each square's feature
+type against `[globals+0x1426F]` and then:
+
+```
+47eb0b  mov  ax,WORD PTR [featdef+0xFE]
+47eb13  test al,0x80        ; reclaimable  (bit 7)  -> skip
+47eb1b  test ah,0x01        ; autoreclaimable (bit 8) -> skip
+47eb24  fld  [featdef+0xEC] / fcomp 0.0    ; non-zero energy -> the energy list
+47eb72  fld  [featdef+0xF0] / fcomp 0.0    ; non-zero metal  -> the metal list
+```
+
+It fills **two** candidate arrays, one per resource, and a feature carrying
+both goes in both. Its only two callers in the whole of `.text` are
+`0x405B93`, inside the ground `RepairPatrol` handler `0x405980`, and
+`0x41564F`, inside `VTOL_RepairPatrol` `0x4152F0`.
+
+**So automatic reclaim is a repair-patrol behaviour and nothing else.** There
+is no area-reclaim command in the binary — that is a Spring idea, not a TA one
+— and no idle-builder sweep. The roadmap's "auto-reclaim when a builder is idle
+with the area-reclaim command" describes something the original does not have.
+
+### What the patrol does with the two lists
+
+The radius is the unit's own sight: `0x405B74` reads `def+0x202`
+(`SightDistance`) and shifts it into 16.16 for the scan. The decision is four
+comparisons against the player's stores, `player+0x8C`/`+0xA4` for energy and
+`player+0x98`/`+0xA8` for metal (§23), all against the double `0.2` at
+`0x4FC950`:
+
+```
+4059EA  repair at all only while  energyStored >= 0.2 * energyCap
+405B18  scan at all only while    energyStored <  0.2 * energyCap
+405B39                       or   metalStored  <  0.2 * metalCap
+405BA0  take the metal candidate  if metalStored  < 0.2 * metalCap
+405C25  else the energy candidate if energyStored < 0.2 * energyCap
+405C79  else the metal candidate  if metalStored  + payout <= metalCap
+405CBC  else the energy candidate if energyStored + payout <= energyCap
+```
+
+A builder on patrol with both stores full therefore walks past the wreck field,
+and one that is short of energy goes for the trees rather than the wrecks. The
+same 0.2 that opens the reclaim closes the repair, which is the other half of
+what `RepairPatrol` does.
+
+### The sound slots, and `working`
+
+`SOUND.TDF`'s per-category keys are a table of 24-byte records at
+`0x5086F0`, six dwords each: the slot id at `+0x00`, the key name at `+0x0C`
+and an optional caption at `+0x10` (slot 7's is `"Cannot Comply"`). The ids
+that matter here:
+
+| Id | Key | Shipped value for a construction unit |
+|---|---|---|
+| 9 | `build` | `nanlath1` / `nanlath2` |
+| 10 | `repair` | `repair1` / `repair2` |
+| 11 | `working` | `reclaim1` |
+| 16 | `capture` | — (no shipped category sets it) |
+
+`0x47F780(unit, id, extra)` plays one. Slot **11** is played once when work
+actually starts, by all three of `Reclaim` (`0x404C69`), `ReclaimUnit`
+(`0x4048B5`) and `Capture` (`0x404568`) — so `working=reclaim1` is the reclaim
+sound, and a capture uses it too.
+
+### What RWE now does
+
+The patrol sweep is gated on `autoreclaimable`, uses the unit's own
+`SightDistance` as its radius instead of a hardcoded 256, keeps the two
+candidates the original keeps, and follows the four store comparisons above.
+`src/rwe/sim/autoreclaim.test.cpp` pins it with the shipped numbers — the
+`armsolar_dead` wreck, the `Fortification` wall (one of only two shipped
+features that say `autoreclaimable=0`), an acid plant for the energy side, and
+ARMMSTOR/ARMESTOR for the storage capacity, which the economy rebuilds from
+the player's units every second and so is not a fixture's to invent.
+
+The feature's `seqnamereclamate` swirl was already implemented (it plays on
+`FeatureReclaimedEvent`); the roadmap entry asking for it was stale.
+
+**The reclaim sound is not implemented.** It needs a scene-side change:
+`GameScene` already knows how to play `UnitSoundType::Working`, and already
+plays `UnitSoundType::Build` off `UnitStartedBuildingEvent`, but nothing in the
+simulation raises an event when reclaim or capture work begins. The shape of
+the fix is a `UnitStartedReclaimingEvent` beside `UnitStartedBuildingEvent`,
+emitted where `UnitBehaviorStateReclaiming` is first entered and where a
+capture first reaches its target, with a scene handler that calls
+`playUnitNotificationSound(..., UnitSoundType::Working)`. Adding an alternative
+to the `GameEvent` variant obliges every `match` over it to grow an arm, which
+is why it was left for whoever owns the scene.
+
+---
+
+## 98. Resurrect: a real mission, a crude corpse mapping, and nothing that can use it
+
+The original has a `Resurrect` mission. Nothing in the shipped data can issue
+it — §19's shipped-data check found `canresurrect` (`def+0x245` bit 11, key
+string `0x503A64`, parsed at `0x42CA2E`) named by not one of the 189 FBIs — but
+the mission is complete, and this is what it does.
+
+Row 42 of the ground mission table (`0x4FC8AA`): handler **`0x404DB0`**,
+display `"Resurrecting"` (`0x5013A0`), seven states through `0x4052D8`. It
+takes a *position*, not a target: `0x421DA0` resolves the map square under
+`mission+0x22` to a feature type, and a miss gives `"Ressurection failed"`
+(`0x501698`, misspelled in the binary). The feature must be `reclaimable`
+(`0x404E0F` tests `featdef+0xFE` bit 7), and the unit must have bit 11
+(`0x404E55`).
+
+### The corpse to unit-type mapping
+
+It is a string operation, not a table:
+
+```
+404f36  strncpy(buf, featdef->name, 0x40)          ; ds:0x4FC0F0
+404f44  scan the first 0x40 bytes for '_' (0x5F)
+404f56  overwrite it with NUL
+404f5b  call 0x488B10(buf)                         ; unit type id by name
+404f6a  mov [mission+0x36],eax & 0xFFFF            ; 0 -> "Ressurection failed"
+```
+
+`armsolar_dead` → `armsolar`. `armfus_dead` → `armfus`. Anything whose name
+has no underscore, or whose prefix is not a unit type, cannot be resurrected.
+The shipped corpses are all named `<unitname>_dead`, so the rule works for
+every one of them — and `armsolar_heap`, the second-stage wreck, resolves to
+`armsolar` as well, which is presumably not deliberate but is what the code
+says.
+
+### The clock, and this one *does* use worker time
+
+```
+404fb0  fild DWORD [unitdef + 0x1EA]     ; the resurrected unit's BuildTime
+404fbf  mov  cx,WORD [resurrectorDef+0x1FE]   ; WorkerTime
+404fc6..404fd0                            ; workerTime / 30, integer
+404fc8  fmul 0.3       (0x4FC948)
+404fe2  fdivp                             ; (BuildTime * 0.3) / (workerTime/30)
+404fe4  call 0x4E43A0
+404fee  mov [mission+0x3A],eax
+404feb  0x47F780(unit, 0x0B, 0)           ; the `working` sound again
+```
+
+Unit definitions are 585 bytes (`0x249`) apart — `id*65*9` at `0x404F92` —
+based at `[globals+0x1439B]`, with `BuildTime` at `+0x1EA` and `WorkerTime` at
+`+0x1FE`. State 5 (`0x405005`) counts `mission+0x3A` down one a tick.
+
+### What comes back
+
+```
+4050f2  al = BYTE [resurrector+0xFF]       ; the owner
+4050fe  dx = WORD [mission+0x36]           ; the unit type worked out above
+405104  call 0x485F50(...)                 ; create it at the corpse's position
+405119  on failure: 0x501310 "Unable to create any more units", retry in 300 ticks
+40518d  copy six bytes from featureInstance+0x20 into newUnit+0x64
+                                          ; the corpse's roll, heading and pitch
+405198  0x4246B0(...)                      ; remove the feature
+405219  newUnit+0x104 = 0.0f               ; fully built, not a nanoframe
+405226  WORD newUnit+0x108 = 1             ; ... with ONE hit point
+405247  0x47F780(unit, 8, 0x50166C)        ; "Resurrection complete"
+```
+
+So a resurrected unit arrives complete, facing the way its corpse lay, and on
+one hit point — it has to be repaired afterwards or a stiff breeze will finish
+it. Nothing is charged for it beyond the time.
+
+### Not implemented in RWE, and why
+
+Two reasons, neither of them the arithmetic:
+
+1. **Nothing in the shipped data can order it.** No FBI sets `CanResurrect`,
+   and there is no RESURRECT button among the fifteen the order panel offers
+   (§19). Implementing it would add a mod-only capability.
+2. **It cannot be done inside `src/rwe/sim` alone.** A `ResurrectOrder` is a
+   new alternative in the `UnitOrder` variant, and `GameScene.cpp` matches
+   exhaustively over that variant in six places, so the order type cannot be
+   added without editing the scene.
+
+The corpse→unit mapping above is the piece the roadmap said was missing, and
+it needs no `featureDead`/`corpse` cross-reference at all: chop the feature's
+name at the first underscore and look the rest up as a unit type.
+
+---
+
+## 99. The unit info panel, and the three things the gadget renderer does with a colour
+
+Three related reads, all of them interface: the footer that describes the unit
+under the cursor (`0x46A860`), the anti-missile ring's second state (an
+addendum to §25), and the parts of the gadget renderer that change a colour
+rather than draw something — the focus caret, the selected list row, and the
+greying §19 recorded as unported.
+
+### Which unit the footer describes
+
+**The one under the cursor, and only that.** `0x46ABA9` reads a word from
+`cfg+0x2CBA` and indexes the unit array with it; that word is written in
+exactly two places (`0x491D23` and `0x499283`), both immediately after a call
+to `0x48CD80`, which walks the unit list and returns what the mouse is over.
+There is no fallback to the selection: move the pointer off a unit and the
+footer empties, whatever is selected. When the word is zero the routine falls
+through to `cfg+0x2CBC`, the hovered *feature*, and draws its description
+instead (`0x46B78C`).
+
+RWE already keyed the footer on the hovered unit, which this confirms.
+
+### The redraw key
+
+Before it draws anything, `0x46ABA3`-`0x46ACDD` fills a 60-byte block and
+`repz cmpsb`s it against a cached copy at `cfg+0x37E60`; equal means nothing
+has changed and the whole routine is skipped. The block is worth listing
+because it is the complete set of things the footer can show:
+
+| Offset | Field |
+|---|---|
+| `+0x00` | `0x439DF0(unit)` — the current mission's display name pointer |
+| `+0x04` | the hovered unit's index |
+| `+0x06` | `unit+0x108`, hit points |
+| `+0x08` | `unit+0xB8`, kills |
+| `+0x0A`, `+0x0E`, `+0x12` | per-weapon reload counter, or `-1` |
+| `+0x16`, `+0x1A`, `+0x1E`, `+0x22` | `unit+0xD0`, `+0xCC`, `+0xE8`, `+0xE4` — the four resource rates |
+| `+0x26`, `+0x28` | the current mission's target unit and its hit points |
+| `+0x2A` | the hovered feature |
+| `+0x2C` | the build button under the cursor |
+| `+0x30`, `+0x34` | `cfg+0x37E90`, `cfg+0x37E94` |
+
+The three weapon reload counters are collected (`0x46AC4B`, skipping any
+weapon whose `reloadtime` is under thirty ticks) and then never drawn — the
+same dead end as the RELOAD1/2/3 rectangles in §29. They are in the key, so a
+reloading weapon forces a redraw of a panel that does not show it.
+
+### What it draws, rectangle by rectangle
+
+`SIDEDATA.TDF`'s footer rectangles, at the offsets the parser at `0x432310`
+gives them (the renderer addresses the same struct 0x4A higher, which is where
+§29's `DAMAGEBAR` at `side+0x152` comes from):
+
+| Key | Parser offset | What goes there |
+|---|---|---|
+| `LOGO2` | `+0xE8` | the owner's side logo, `0x467C00` |
+| `UNITNAME` | `+0xF8` | the unit's name, **centred on x1** |
+| `DAMAGEBAR` | `+0x108` | health, `hp/maxhp`, green over dark red |
+| `UNITENERGYMAKE` | `+0x118` | `"+%.0f"` |
+| `UNITENERGYUSE` | `+0x128` | `"-%.0f"` |
+| `UNITMETALMAKE` | `+0x138` | `"+%.1f"` |
+| `UNITMETALUSE` | `+0x148` | `"-%.1f"` |
+| `MISSIONTEXT` | `+0x158` | the mission's display name, centred |
+| `UNITNAME2` | `+0x168` | what the current mission is pointed at, centred |
+| `DAMAGEBAR2` | `+0x178` | that target's health, or the weapon percentage |
+| `NAME` | `+0x188` | the hovered feature or build button, `"%s %s%s"` |
+| `DESCRIPTION` | `+0x198` | the build button's description |
+| `RELOAD1..3` | `+0x1A8`, `+0x1B8`, `+0x1C8` | parsed, never read |
+
+Five details worth having:
+
+- **Metal takes one decimal place and energy none.** Not a rounding
+  convention anyone chose later: the four format strings are `"+%.1f"`
+  (`0x50788C`) and `"-%.1f"` (`0x50787C`) for metal against `"+%.0f"`
+  (`0x507884`) and `"-%.0f"` (`0x507874`) for energy.
+- **Every rate is clamped at zero first.** `fcomp` against the zero at
+  `0x4FD568` in front of each `sprintf`, so a negative figure prints as `0`
+  rather than as a negative.
+- **The name is the player's, not the unit's, for a commander in a network
+  game.** `0x46AF56` ORs `showplayername` (flags bit 17) with `commander`
+  (bit 18) and requires `0x435100` to return 3.
+- **The damage bar is skipped for someone else's `hidedamage` unit**
+  (`0x46B03F` tests bit 14 of `def+0x241`), and its colours are interface
+  slots `0x0A` over `0x04` — bright green over dark red.
+- **The four rates, the kills line and the mission line are one block behind
+  one ownership test** (`0x46B119`). An enemy unit shows you its logo, its
+  name and its health and nothing else. The second name-and-bar slot is
+  *outside* that test.
+
+### Kills, and Veteran
+
+`0x46B2B8`, gated on bit 31 of `unit+0x110` and on the kill count at
+`unit+0xB8` being non-zero:
+
+```
+"%d %s"        kills, "kill" if 1 else "kills"      when kills <= 4
+"%d %s - %s"   kills, "kills", "Veteran"            when kills >= 5
+```
+
+The comparison is `cmp cx,4 / jbe` at `0x46B30D`. Five kills is the whole of
+TA's veterancy display; there is no other reader of the count in the
+interface.
+
+It has **no rectangle of its own**. `0x46B2D6` takes `DAMAGEBAR`'s x1 and its
+y2 plus two, so the line hangs under the health bar wherever `SIDEDATA.TDF`
+put it. The colour is interface slot `0x0F`, which §50's GUIPAL nearest-match
+resolves to white.
+
+### The mission line is a table lookup
+
+`0x439DF0` reads the mission id byte at `mission+0x04` and returns
+`[table + id*25]`, the `char*` at the front of the mission record. So the
+footer never composes a string: every mission in the two tables
+(§`TOTALA-EXE-MISSIONS.md`, ground at `0x4FC490`, air at `0x4FCA18`) carries
+its own wording. The full vocabulary, both tables:
+
+`Stopping`, `Attacking`, `Activate`, `Deactivate`, `Cloaking`, `Decloaking`,
+`Acknowledged`, `Nanolathing`, `SELF DESTRUCT ENGAGED`, `Paralyzed`,
+`Under construction`, `Being transported`, `Unit is available`, `Waiting`,
+`Waiting for attack`, `Ready`, `Repairing`, `Ready with orders`, `Standby`,
+`Moving`, `Guarding`, `Suppressing fire`, `Annihilating`, `Parking`,
+`Patrolling`, `Loading`, `Unloading`, `Teleporting`, `Repair patrol`,
+`Capturing`, `Resurrecting`, `Reclaiming`, `Landing`, `Airstrike`,
+`Engaging target`, `Evading`, `Seeking to attack`, `Seeking to guard`,
+`Under repair`, `Seeking to land`.
+
+Note `AttackSpecial` is `Annihilating`, not `Attacking`, and that the three
+air-to-X missions share `Engaging target`.
+
+### §29 was wrong about the stockpile bar, and here is where it is drawn
+
+§29 concluded that the progress of the round a silo is building is shown
+**nowhere**, having read `0x46AD90`-`0x46B400`. The routine does not end at
+`0x46B400`. At `0x46B445`:
+
+```
+46b445  push esi
+46b446  call 0x439d20              ; ticksPaid * 100 / (reloadtime*30)
+46b44b  test eax,eax
+46b451  je   0x46b571              ;   nothing on order -> the target-unit slot
+46b471  jne  0x46b8ea              ;   not our unit -> nothing
+46b477  push 0x5077b0              ;   "Weapon"
+...     centred in UNITNAME2
+46b4c3  add  ebp,0x1c2             ;   DAMAGEBAR2
+46b4f6  cmp  eax,0x64              ;   clamped to 0..100
+46b536  call 0x4bf6f0              ;   filled to that percentage
+```
+
+`0x439D20` is exactly the arithmetic §29 predicted — it walks the mission list
+from `unit+0x60` for the one with the `BUILDWEAPON` flag (`mission+0x42` bit
+19), takes the ticks paid at `mission+0x3E` and divides by the weapon's own
+`wdef+0xE4` — and the answer is drawn as a percentage bar under the caption
+`Weapon`. So the silo readout RWE added as "an addition, not a restoration" is
+in fact what the original does, in the same two rectangles, and only the
+caption was RWE's invention.
+
+### The second name-and-bar slot is not build-only
+
+When there is no weapon on order, `0x46B571` uses the word the redraw key
+collected from `0x439DD0(unit)` — `mission+0x16`, the current mission's target
+unit. Whatever the current mission points at gets its name centred in
+`UNITNAME2` and its health drawn in `DAMAGEBAR2`, subject to the usual
+visibility test (`0x465AC0`) and to `hidedamage`. A builder shows what it is
+building and how far along it is; a guard shows what it is guarding; an
+attacker shows what it is shooting at.
+
+### Addendum to §25: the anti-missile ring has two states, and the magazine picks
+
+§25 recorded that the coverage ring is dashed when `[weaponSlot+0x0E]` is
+non-zero without saying what that byte is. It is the **magazine**: weapon
+records are `0x1C` apart from `unit+0x04` with the definition pointer at
+`+0x0C` and the round count at `+0x1A`, and `0x46707C` walks the slots by the
+definition pointer, so `slot+0x0E` is `record+0x1A` — the same byte
+`0x419A33` reads to caption the MAKENUKE button (§29). So:
+
+- **magazine empty → a solid ring** (`0x4C0070`);
+- **at least one round stocked → a dashed ring** (`0x4C01A0`), sixteen of the
+  thirty-two segments, with the starting parity taken from `cfg+0x142F1` bit
+  0.
+
+That blink bit flips every eight passes of the main loop: `0x466580` counts a
+word at `cfg+0x142EF` down from 7 and flips the bit when it underflows, and it
+is called once a frame from the main loop at `0x4955E5`. So the gaps chase
+round the ring about twice a second, and a loaded launcher is distinguishable
+from an empty one at a glance.
+
+The rings are also **clipped to the minimap**: `0x4C0070` clips each segment
+before handing it to the Bresenham at `0x4CC7AB`, which is what stops a
+2000-unit coverage ring painting over the rest of the screen.
+
+### The gadget renderer's three colour tricks
+
+The per-gadget draw dispatches on the type byte through a table at `0x4A962C`
+(index `type-1`, so type 1 Button → `0x4A5F40`, type 2 ListBox → `0x4A1B40`,
+type 3 TextBox → `0x4A4D70`). Three of the things it does are colour changes
+rather than draws, and all three go through the same pair of 32x256
+palette-index tables that the model shading uses: `0x4BF4D0(surface, rect,
+level)` clamps `level` to `[-32, 31]`, picks row `level+32` of the **SHADE
+TABLE** when it is negative and row `level` of the **LIGHT TABLE** when it is
+not, and remaps every pixel in the rectangle through it. The two tables are
+allocated at `0x4BA610` and `0x4BA660` under the literal tags `"SHADE TABLE"`
+and `"LIGHT TABLE"`, and they are the shipped `palettes/PALETTE.SHD` and
+`palettes/PALETTE.LHT`.
+
+1. **A greyed control is darkened, not drawn dim.** `0x4A5A9E` tests the
+   gadget's greyed flag (bit 0 of the byte at `gadget+0x148`, the flag
+   `0x4A1200` sets and §19 found the order panel using) and runs the gadget's
+   whole rectangle through level **-20** — SHADE row 12, a measured 0.82x on
+   luminance. This is the mechanism §19 recorded as "RWE has no disabled state
+   ... recorded here so it is not mistaken for the original's behaviour".
+2. **The selected row of a list box is brightened.** `0x4A1FAE`, reached when
+   the row index equals the box's selected index at `gadget+0xBA`, runs the
+   row's rectangle through level **+30** — LIGHT row 30, a measured median of
+   1.84x with the lift largest on dark pixels and none at all on white. It
+   runs *after* the row's text, so the text is brightened with the
+   background. (A row the list has separately marked — a byte array at
+   `gadget+0xD6`, or a caption beginning with the literal `&G` — is instead
+   darkened four times over, at levels -19, -20, -21 and -22.)
+3. **The focused control shows a caret, and nothing else does.** The only
+   comparison against the panel's focused-gadget index (`panel+0x64`) in the
+   whole renderer is at `0x4A4F14`, in the text-box draw. When it matches,
+   `0x4BE950` draws a one-pixel vertical line at the right-hand end of the
+   text, from the text's top to two pixels past the font's height, in
+   interface colour **9** — GUIPAL light blue, nearest-matching to palette 9,
+   `(84, 84, 252)`. Buttons and list boxes draw no focus indicator at all.
+
+Two smaller findings from the same pass, recorded because they are cheap to
+port: a button's caption is drawn twice, once at (x+1, y+3) in interface
+colour 0 as a drop shadow and then in the gadget's own `colorf`
+(`0x4A59A4`-`0x4A59E3`); and if the gadget's `quickkey` character appears in
+its caption, that character is underlined (`0x4A5B2C` onward).
+
+### What RWE does with all this
+
+Done: the hovered unit is the subject, metal at one decimal and energy at
+none, all four rates clamped at zero, the kills line under the damage bar with
+`- Veteran` from the fifth kill, the mission line from a transcription of the
+two tables, and the second name-and-bar slot showing the current order's
+target unit with its health — with `Weapon` and the percentage taking priority
+for a launcher, which is now a restoration rather than an addition. The
+minimap coverage ring is drawn, dashed while the launcher has a round, and
+both it and the four detection rings are clipped to the minimap. The text box
+draws the blue caret only when it has the focus, and a list box's selected row
+is brightened rather than washed with 12% white.
+
+Deliberately different, and recorded in §88 rather than left to be found:
+
+- **RWE has no palette, so the brightening is an alpha blend.** The 1.84x
+  median of LIGHT row 30 is reproduced on a mid-tone by compositing white at
+  45%; the original's per-index behaviour (a dark pixel lifted 3.8x, a white
+  one not at all) cannot be reproduced without carrying palette indices
+  through the UI renderer, which nothing else would use.
+- **`antiweapons` is still not parsed.** The original gates the coverage ring
+  on FBI flags bit 29; RWE gates it on the unit having an `interceptor`
+  weapon. In the shipped data the two sets are identical — `ARMAMD` and
+  `CORFMD`, `AMD_ROCKET` and `FMD_ROCKET` — so nothing shipped can tell the
+  difference, but a mod could.
+- **A builder walking to its site already says `Nanolathing`.** The original
+  would be running a move mission and saying `Moving`; RWE has one
+  `BuildOrder` covering the walk and the work.
+- **Greying, the caption shadow and the quick-key underline are still not
+  ported.** The first is §19's existing note, now with the arithmetic behind
+  it; the other two are new and small.

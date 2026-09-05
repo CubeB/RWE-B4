@@ -628,16 +628,42 @@ namespace rwe
         bool reclaimUnit(UnitId targetId, PlayerId reclaimer, unsigned int workAmount);
 
         /**
-         * Applies workAmount of capture work to an enemy unit on behalf of a player.
-         * Total work is the unit's buildTime. On completion the unit changes
-         * owner, drops its orders and weapon targets, and a UnitCapturedEvent is
-         * emitted. Returns true when the unit is captured, already owned by the
-         * captor, or no longer exists.
+         * How many ticks it takes to capture this unit, as the original works
+         * it out in the Capture mission's state 0 (0x404313-0x404407):
+         *
+         *     t  = trunc(BuildCostEnergy * 0.015 + BuildCostMetal * 3/14 + 150)
+         *     t  = min(t, 1800)
+         *     t  = t * (hitPoints + maxHitPoints) / (2 * maxHitPoints)
+         *     t  = t * (kills/5 + 10) / 10
+         *
+         * so a damaged unit changes hands faster (down to half the time at
+         * death's door) and a veteran one slower (+10% per five kills, with no
+         * ceiling -- unlike the damage tiers, which stop at five). Note what is
+         * *not* in it: the captor's `workertime`. Capture runs at one tick of
+         * progress per tick for everybody. See TOTALA-EXE.md §96.
          */
-        bool captureUnit(UnitId targetId, PlayerId captor, unsigned int workAmount);
+        unsigned int computeCaptureTime(const UnitState& target) const;
+
+        /**
+         * Hands an enemy unit to a new owner: it drops its orders and weapon
+         * targets and a UnitCapturedEvent is emitted. Returns true when the
+         * unit changed hands, was already the captor's, or no longer exists.
+         *
+         * The work of getting here is counted on the capture order, not here
+         * and not on the target -- see CaptureOrder.
+         */
+        bool captureUnit(UnitId targetId, PlayerId captor);
 
         /** Length of the self-destruct countdown, as in TA. */
         static constexpr unsigned int SelfDestructCountdownTicks = 5 * SimTicksPerSecond;
+
+        /**
+         * The longest a capture can take, however expensive the target. The
+         * original clamps the raw build-cost figure to 0x708 at 0x40438A,
+         * before the damage and veterancy scaling, so a healthy veteran can
+         * still run past a minute.
+         */
+        static constexpr unsigned int MaxCaptureTicks = 1800;
 
         /**
          * The longest a unit can be stunned for, however many EMP hits land on

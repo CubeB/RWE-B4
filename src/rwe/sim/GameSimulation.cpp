@@ -3,6 +3,7 @@
 #include <rwe/sim/SimRandom.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/SimScalar.h>
@@ -1018,7 +1019,41 @@ namespace rwe
         return true;
     }
 
-    bool GameSimulation::captureUnit(UnitId targetId, PlayerId captor, unsigned int workAmount)
+    unsigned int GameSimulation::computeCaptureTime(const UnitState& target) const
+    {
+        const auto& definition = unitDefinitions.at(target.unitType);
+
+        // 0x404313: BuildCostEnergy*30*0.0005 - BuildCostMetal*30*(-1/140) - (-150),
+        // truncated. Done here as one exact rational instead of three float
+        // multiplies, because the simulation is lockstep and a float chain is
+        // the last thing it needs: 0.015 = 3/200 and 30/140 = 3/14, so the
+        // common denominator is 1400. Checked against the float arithmetic
+        // over all 189 shipped FBIs -- every one agrees to the tick.
+        auto energy = static_cast<std::uint64_t>(definition.buildCostEnergy.value);
+        auto metal = static_cast<std::uint64_t>(definition.buildCostMetal.value);
+        auto ticks = ((21 * energy) + (300 * metal) + (150 * 1400)) / 1400;
+
+        // 0x40438A: sixty seconds is the ceiling, and eight of the 189 shipped
+        // units reach it -- ARMCOM, CORCOM, ARMGATE, CORGATE, ARMCKFUS,
+        // ARMBRTHA, CORINT and CORFMD. Everything else lands between 155
+        // ticks (ARMDRAG) and 1790 (ARMFUS, CORFUS).
+        ticks = std::min<std::uint64_t>(ticks, MaxCaptureTicks);
+
+        // 0x4043A9: scaled by how healthy the target is, half time at zero.
+        auto maxHitPoints = static_cast<std::uint64_t>(definition.maxHitPoints);
+        if (maxHitPoints > 0)
+        {
+            auto hitPoints = static_cast<std::uint64_t>(target.hitPoints);
+            ticks = ((hitPoints + maxHitPoints) * ticks) / (2 * maxHitPoints);
+        }
+
+        // 0x4043CD: and by the target's veterancy, +10% per five kills.
+        ticks = (((static_cast<std::uint64_t>(target.kills) / 5) + 10) * ticks) / 10;
+
+        return static_cast<unsigned int>(std::max<std::uint64_t>(1, ticks));
+    }
+
+    bool GameSimulation::captureUnit(UnitId targetId, PlayerId captor)
     {
         auto unitRef = tryGetUnitState(targetId);
         if (!unitRef || unitRef->get().isDead())
@@ -1030,22 +1065,9 @@ namespace rwe
         {
             return true;
         }
-        if (workAmount == 0)
-        {
-            return false;
-        }
-
-        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
-        auto totalWork = std::max(1u, unitDefinition.buildTime);
-        unit.captureProgress = std::min(totalWork, unit.captureProgress + workAmount);
-        if (unit.captureProgress < totalWork)
-        {
-            return false;
-        }
 
         auto previousOwner = unit.owner;
         unit.owner = captor;
-        unit.captureProgress = 0;
 
         // The spatial index carries owners so a target search can drop its
         // own side cheaply, and this is the only thing in the game that

@@ -269,7 +269,13 @@ namespace rwe
             if (!unitInfo.state->orders.empty())
             {
                 RWE_SIMPROF("b.orders");
-                const auto& order = unitInfo.state->orders.front();
+                // Non-const: a capture order counts its own progress, so it
+                // is written back through this reference. Taking a
+                // reference to front() and holding it across the call is
+                // safe -- the handlers that touch the deque only push at
+                // either end, and a deque insertion does not invalidate
+                // references to elements already in it.
+                auto& order = unitInfo.state->orders.front();
 
                 // process move orders
                 if (handleOrder(unitInfo, order))
@@ -1771,7 +1777,7 @@ namespace rwe
         return false;
     }
 
-    bool UnitBehaviorService::handleOrder(UnitInfo unitInfo, const UnitOrder& order)
+    bool UnitBehaviorService::handleOrder(UnitInfo unitInfo, UnitOrder& order)
     {
         // If an order that steers the aircraft itself arrives while it is
         // mid-AttackRun (e.g. the player issued Move, or the attack was
@@ -1828,7 +1834,7 @@ namespace rwe
             [&](const PatrolOrder& o) {
                 return handlePatrolOrder(unitInfo, o);
             },
-            [&](const CaptureOrder& o) {
+            [&](CaptureOrder& o) {
                 return handleCaptureOrder(unitInfo, o);
             },
             [&](const LoadOrder& o) {
@@ -3635,35 +3641,21 @@ namespace rwe
             }
         }
 
-        // A builder on patrol clears the battlefield as it goes: wreckage --
-        // anything reclaimable that carries metal -- inside its sight gets
-        // reclaimed before the patrol moves on. Controlling a wreck field is
-        // an economy in itself, and this is what makes a construction
-        // aircraft on patrol behind the line worth having.
+        // A builder on patrol clears the battlefield as it goes. This is the
+        // original's only automatic reclaim: `0x47EA40`, the area scan that
+        // reads the `autoreclaimable` bit, has exactly two callers -- the
+        // ground RepairPatrol at `0x405B93` and VTOL_RepairPatrol at
+        // `0x41564F`. There is no area-reclaim command and no idle-builder
+        // sweep anywhere in the binary, so this is where the key belongs.
+        // See TOTALA-EXE.md §97.
         if (unitInfo.definition->canReclamate && unitInfo.definition->builder)
         {
-            std::optional<FeatureId> bestWreck;
-            auto bestDistanceSquared = SimScalar(256.0f * 256.0f);
-            for (const auto& [featureId, feature] : sim->features)
-            {
-                const auto& featureDefinition = sim->getFeatureDefinition(feature.featureName);
-                if (!featureDefinition.reclaimable || featureDefinition.metal <= 0)
-                {
-                    continue;
-                }
-                auto distanceSquared = unitInfo.state->position.distanceSquared(feature.position);
-                if (distanceSquared < bestDistanceSquared)
-                {
-                    bestDistanceSquared = distanceSquared;
-                    bestWreck = featureId;
-                }
-            }
-            if (bestWreck)
+            if (auto wreck = findFeatureToAutoReclaim(unitInfo))
             {
                 // Run the ordinary reclaim machinery against it; the wreck is
                 // re-found every tick, so when it is gone the patrol resumes
                 // by itself.
-                if (!handleReclaimOrder(unitInfo, ReclaimOrder(*bestWreck)))
+                if (!handleReclaimOrder(unitInfo, ReclaimOrder(*wreck)))
                 {
                     return false;
                 }
@@ -3689,7 +3681,90 @@ namespace rwe
         return false;
     }
 
-    bool UnitBehaviorService::handleCaptureOrder(UnitInfo unitInfo, const CaptureOrder& captureOrder)
+    std::optional<FeatureId> UnitBehaviorService::findFeatureToAutoReclaim(UnitInfo unitInfo)
+    {
+        const auto& player = sim->getPlayer(unitInfo.state->owner);
+
+        // 0x405B18-0x405B54: the scan is not run at all unless one of the two
+        // stores is under a fifth of its capacity. The fifth is the double at
+        // 0x4FC950, and the same pair of comparisons decides afterwards which
+        // of the two candidates the unit actually goes for.
+        auto wantsMetal = player.metal.value < player.maxMetal.value * AutoReclaimWantedFraction;
+        auto wantsEnergy = player.energy.value < player.maxEnergy.value * AutoReclaimWantedFraction;
+        if (!wantsMetal && !wantsEnergy)
+        {
+            return std::nullopt;
+        }
+
+        // The radius is the unit's own SightDistance -- 0x405B74 reads
+        // def+0x202 and shifts it into 16.16 for the scan -- not a constant.
+        auto radius = SimScalar(static_cast<float>(unitInfo.definition->sightDistance));
+        auto limit = radius * radius;
+
+        // The scan keeps two nearest candidates rather than one: whatever
+        // carries metal and whatever carries energy (0x47EB24 and 0x47EB72
+        // test featdef+0xEC and +0xF0 for non-zero, and something carrying
+        // both goes into both lists). Both are gated on `reclaimable` *and*
+        // `autoreclaimable` -- 0x47EB13 and 0x47EB1B, the only reader of the
+        // second bit anywhere in the binary.
+        std::optional<FeatureId> nearestMetal;
+        std::optional<FeatureId> nearestEnergy;
+        auto nearestMetalDistance = limit;
+        auto nearestEnergyDistance = limit;
+        for (const auto& [featureId, feature] : sim->features)
+        {
+            const auto& featureDefinition = sim->getFeatureDefinition(feature.featureName);
+            if (!featureDefinition.reclaimable || !featureDefinition.autoreclaimable)
+            {
+                continue;
+            }
+            auto distanceSquared = unitInfo.state->position.distanceSquared(feature.position);
+            if (featureDefinition.metal > 0 && distanceSquared < nearestMetalDistance)
+            {
+                nearestMetalDistance = distanceSquared;
+                nearestMetal = featureId;
+            }
+            if (featureDefinition.energy > 0 && distanceSquared < nearestEnergyDistance)
+            {
+                nearestEnergyDistance = distanceSquared;
+                nearestEnergy = featureId;
+            }
+        }
+
+        // 0x405BA0 onwards, in the order the original tries them: the store
+        // that is actually short comes first, and only then the weaker test of
+        // whether the payout would still fit in what is left.
+        auto fits = [&](const std::optional<FeatureId>& candidate, bool metalSide) {
+            if (!candidate)
+            {
+                return false;
+            }
+            const auto& d = sim->getFeatureDefinition(sim->getFeature(*candidate).featureName);
+            return metalSide
+                ? player.metal.value + static_cast<float>(d.metal) <= player.maxMetal.value
+                : player.energy.value + static_cast<float>(d.energy) <= player.maxEnergy.value;
+        };
+
+        if (nearestMetal && wantsMetal)
+        {
+            return nearestMetal;
+        }
+        if (nearestEnergy && wantsEnergy)
+        {
+            return nearestEnergy;
+        }
+        if (fits(nearestMetal, true))
+        {
+            return nearestMetal;
+        }
+        if (fits(nearestEnergy, false))
+        {
+            return nearestEnergy;
+        }
+        return std::nullopt;
+    }
+
+    bool UnitBehaviorService::handleCaptureOrder(UnitInfo unitInfo, CaptureOrder& captureOrder)
     {
         if (!unitInfo.definition->canCapture)
         {
@@ -3702,12 +3777,29 @@ namespace rwe
             return true;
         }
 
-        return captureExistingUnit(unitInfo, captureOrder.target);
+        // A nanoframe cannot be taken. 0x404313 requires the target's
+        // remaining build fraction to be exactly zero and otherwise refuses
+        // with 0x5015E0, "That unit is a cloud of vapor and cannot be
+        // captured" -- which is also, in one string, what the original
+        // thinks an unfinished building is.
+        if (targetRef->get().isBeingBuilt(sim->unitDefinitions.at(targetRef->get().unitType)))
+        {
+            return true;
+        }
+
+        // The mission's state 0 works the total out once, off the target as it
+        // stands when the order starts, and never looks again (0x404313).
+        if (!captureOrder.totalWork)
+        {
+            captureOrder.totalWork = sim->computeCaptureTime(targetRef->get());
+        }
+
+        return captureExistingUnit(unitInfo, captureOrder);
     }
 
-    bool UnitBehaviorService::captureExistingUnit(UnitInfo unitInfo, UnitId targetUnitId)
+    bool UnitBehaviorService::captureExistingUnit(UnitInfo unitInfo, CaptureOrder& captureOrder)
     {
-        auto targetUnitRef = sim->tryGetUnitState(targetUnitId);
+        auto targetUnitRef = sim->tryGetUnitState(captureOrder.target);
         if (!targetUnitRef || targetUnitRef->get().isDead() || targetUnitRef->get().isOwnedBy(unitInfo.state->owner))
         {
             changeState(*unitInfo.state, UnitBehaviorStateIdle());
@@ -3718,15 +3810,16 @@ namespace rwe
         // Same reach as building; see the FIXME in buildExistingUnit.
         if (unitInfo.state->position.distanceSquared(targetUnit.position) > (unitInfo.definition->buildDistance * unitInfo.definition->buildDistance))
         {
-            navigateTo(unitInfo, targetUnitId);
+            navigateTo(unitInfo, captureOrder.target);
             return false;
         }
 
-        return deployCaptureArm(unitInfo, targetUnitId);
+        return deployCaptureArm(unitInfo, captureOrder);
     }
 
-    bool UnitBehaviorService::deployCaptureArm(UnitInfo unitInfo, UnitId targetUnitId)
+    bool UnitBehaviorService::deployCaptureArm(UnitInfo unitInfo, CaptureOrder& captureOrder)
     {
+        auto targetUnitId = captureOrder.target;
         auto targetUnitRef = sim->tryGetUnitState(targetUnitId);
         if (!targetUnitRef || targetUnitRef->get().isDead() || targetUnitRef->get().isOwnedBy(unitInfo.state->owner))
         {
@@ -3743,7 +3836,7 @@ namespace rwe
                 if (targetUnitId != buildingState.targetUnit)
                 {
                     changeState(*unitInfo.state, UnitBehaviorStateIdle());
-                    return captureExistingUnit(unitInfo, targetUnitId);
+                    return captureExistingUnit(unitInfo, captureOrder);
                 }
 
                 if (!unitInfo.state->inBuildStance)
@@ -3753,7 +3846,17 @@ namespace rwe
 
                 buildingState.nanoParticleOrigin = getNanoPoint(unitInfo.id);
 
-                auto finished = sim->captureUnit(targetUnitId, unitInfo.state->owner, unitInfo.definition->workerTimePerTick);
+                // One tick of progress a tick, for every captor alike: the
+                // mission adds two every two ticks (0x404698) and consults no
+                // worker time anywhere. The count lives on the order, so
+                // dropping the order drops the progress with it.
+                captureOrder.progress += 1;
+                if (captureOrder.progress < captureOrder.totalWork.value_or(0))
+                {
+                    return false;
+                }
+
+                auto finished = sim->captureUnit(targetUnitId, unitInfo.state->owner);
                 if (finished)
                 {
                     changeState(*unitInfo.state, UnitBehaviorStateIdle());

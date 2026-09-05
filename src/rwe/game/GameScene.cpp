@@ -930,70 +930,129 @@ namespace rwe
                 chromeUiRenderService.drawHealthBar2(rect.x, extraBottom + rect.y, rect.width, rect.height, static_cast<float>(unit.hitPoints) / static_cast<float>(unitDefinition.maxHitPoints));
             }
 
+            auto stockpileWeapon = simulation.tryGetStockpileWeapon(*hoveredUnit);
+
+            // The four rates, the kills line and the mission line are all
+            // behind one ownership test in the original (0x46B119 compares
+            // the unit's owner with the local player and jumps past the lot),
+            // so an enemy shows you its name and its health and nothing else.
             if (unit.isOwnedBy(localPlayerId))
             {
+                // Each rate is max(value, 0) before it is formatted: the
+                // fcomp against the zero at 0x4FD568 in front of all four
+                // sprintf calls. Metal takes one decimal place and energy
+                // none, which is not tidying on RWE's part -- the format
+                // strings really are "+%.1f"/"-%.1f" for metal (0x50788C,
+                // 0x50787C) and "+%.0f"/"-%.0f" for energy (0x507884,
+                // 0x507874).
                 {
                     const auto& rect = localSideData.unitMetalMake;
-                    auto text = "+" + formatResourceDelta(unit.getMetalMake());
+                    auto text = "+" + formatResourceDelta(std::max(Metal(0), unit.getMetalMake()));
                     chromeUiRenderService.drawText(rect.x1, extraBottom + rect.y1, text, *guiFont, Color(83, 223, 79));
                 }
                 {
                     const auto& rect = localSideData.unitMetalUse;
-                    auto text = "-" + formatResourceDelta(unit.getMetalUse());
+                    auto text = "-" + formatResourceDelta(std::max(Metal(0), unit.getMetalUse()));
                     chromeUiRenderService.drawText(rect.x1, extraBottom + rect.y1, text, *guiFont, Color(255, 71, 0));
                 }
                 {
                     const auto& rect = localSideData.unitEnergyMake;
-                    auto text = "+" + formatResourceDelta(unit.getEnergyMake());
+                    auto text = "+" + formatResourceDelta(std::max(Energy(0), unit.getEnergyMake()));
                     chromeUiRenderService.drawText(rect.x1, extraBottom + rect.y1, text, *guiFont, Color(83, 223, 79));
                 }
                 {
                     const auto& rect = localSideData.unitEnergyUse;
-                    auto text = "-" + formatResourceDelta(unit.getEnergyUse());
+                    auto text = "-" + formatResourceDelta(std::max(Energy(0), unit.getEnergyUse()));
                     chromeUiRenderService.drawText(rect.x1, extraBottom + rect.y1, text, *guiFont, Color(255, 71, 0));
                 }
+
+                // Kills, and Veteran from the fifth kill on. There is no
+                // rectangle for this in SIDEDATA.TDF: 0x46B2D6 takes the
+                // damage bar's own left edge and its bottom plus two, so the
+                // line hangs off the bar it belongs to. Colour is interface
+                // slot 0x0F, which resolves to white.
+                if (auto caption = killsCaption(unit.kills); !caption.empty())
                 {
-                    const auto& rect = localSideData.missionText;
-                    auto text = "Standby";
-                    chromeUiRenderService.drawTextCenteredX(rect.x1, extraBottom + rect.y1, text, *guiFont);
+                    const auto& bar = localSideData.damageBar.toDiscreteRect();
+                    chromeUiRenderService.drawText(
+                        static_cast<float>(bar.x),
+                        static_cast<float>(extraBottom + bar.y + bar.height + 2),
+                        caption,
+                        *guiFont,
+                        Color(255, 255, 255));
                 }
 
-                // A launcher says how full it is and how far through the next
-                // round it has got, in the footer's spare name-and-bar slot.
-                // This is an addition, not a restoration: the original shows
-                // the count only as the caption on the MAKENUKE button, and
-                // shows the missile under construction nowhere at all -- no
-                // bar, no percentage, no format string in the binary. The
-                // UNITNAME2/DAMAGEBAR2 rectangles are SIDEDATA.TDF's own, and
-                // the bar is drawn exactly as the damage bar beside it so the
-                // footer keeps one visual language.
-                if (auto stockpileWeapon = simulation.tryGetStockpileWeapon(*hoveredUnit); stockpileWeapon)
+                {
+                    // Not composed here and not composed there either: every
+                    // mission record carries its display name at +0x00 and
+                    // 0x439DF0 fetches the one belonging to the unit's
+                    // current mission.
+                    const auto& rect = localSideData.missionText;
+                    auto weaponQueued = stockpileWeapon && stockpileWeapon->get().queuedRounds > 0;
+                    auto text = missionDisplayName(unitActivity(unit, unit.isBeingBuilt(unitDefinition), weaponQueued));
+                    chromeUiRenderService.drawTextCenteredX(rect.x1, extraBottom + rect.y1, text, *guiFont);
+                }
+            }
+
+            // The second name-and-bar slot: what this unit's current order is
+            // pointed at. 0x46B445 asks 0x439D20 for a weapon build first and
+            // falls through to 0x439DD0, the current mission's target unit, so
+            // a builder shows what it is building and how far along it is, a
+            // guard shows what it is guarding, and a launcher shows the round
+            // on the way. Unlike the block above this is not owner-gated --
+            // only the weapon branch is (0x46B471) -- though the bar still
+            // honours hidedamage.
+            {
+                auto weaponPercent = 0;
+                if (stockpileWeapon && unit.isOwnedBy(localPlayerId))
                 {
                     const auto& weapon = stockpileWeapon->get();
                     const auto& weaponDefinition = simulation.weaponDefinitions.at(weapon.weaponType);
 
+                    // ticksPaid * 100 / (reloadtime * 30), the arithmetic of
+                    // 0x439D41-0x439D65 exactly: an integer percentage, and
+                    // zero means there is nothing to show.
+                    auto totalTicks = std::max(1, static_cast<int>(deltaSecondsToTicks(weaponDefinition.reloadTime).value));
+                    weaponPercent = std::clamp(weapon.stockpileProgress * 100 / totalTicks, 0, 100);
+                }
+
+                if (weaponPercent > 0)
+                {
                     {
                         const auto& rect = localSideData.unitName2;
-                        auto text = stockpileButtonLabel(weapon.stockedRounds, weapon.queuedRounds);
-                        if (text.empty())
-                        {
-                            text = "0";
-                        }
-                        chromeUiRenderService.drawTextCenteredX(rect.x1, extraBottom + rect.y1, "Stockpile " + text, *guiFont);
+                        chromeUiRenderService.drawTextCenteredX(rect.x1, extraBottom + rect.y1, "Weapon", *guiFont);
                     }
 
-                    // Progress is the ticks already paid for over the whole
-                    // build, which is the weapon's own reloadtime -- 180
-                    // seconds, 5400 ticks, for a nuclear missile. An idle
-                    // silo with nothing on order shows an empty bar rather
-                    // than a full red one.
-                    auto totalTicks = std::max(1, static_cast<int>(deltaSecondsToTicks(weaponDefinition.reloadTime).value));
-                    auto fraction = std::clamp(static_cast<float>(weapon.stockpileProgress) / static_cast<float>(totalTicks), 0.0f, 1.0f);
-
                     const auto& bar = localSideData.damageBar2.toDiscreteRect();
-                    if (weapon.queuedRounds > 0 || weapon.stockpileProgress > 0)
+                    chromeUiRenderService.drawHealthBar2(
+                        static_cast<float>(bar.x),
+                        static_cast<float>(extraBottom + bar.y),
+                        static_cast<float>(bar.width),
+                        static_cast<float>(bar.height),
+                        static_cast<float>(weaponPercent) / 100.0f);
+                }
+                else if (auto targetId = unitOrderTargetUnit(unit); targetId)
+                {
+                    if (auto target = tryGetUnit(*targetId); target && unitIsDetectableByLocalPlayer(target->get()))
                     {
-                        chromeUiRenderService.drawHealthBar2(static_cast<float>(bar.x), static_cast<float>(extraBottom + bar.y), static_cast<float>(bar.width), static_cast<float>(bar.height), fraction);
+                        const auto& targetUnit = target->get();
+                        const auto& targetDefinition = simulation.unitDefinitions.at(targetUnit.unitType);
+
+                        {
+                            const auto& rect = localSideData.unitName2;
+                            chromeUiRenderService.drawTextCenteredX(rect.x1, extraBottom + rect.y1, targetDefinition.unitName, *guiFont);
+                        }
+
+                        if (targetUnit.isOwnedBy(localPlayerId) || !targetDefinition.hideDamage)
+                        {
+                            const auto& bar = localSideData.damageBar2.toDiscreteRect();
+                            chromeUiRenderService.drawHealthBar2(
+                                static_cast<float>(bar.x),
+                                static_cast<float>(extraBottom + bar.y),
+                                static_cast<float>(bar.width),
+                                static_cast<float>(bar.height),
+                                std::clamp(static_cast<float>(targetUnit.hitPoints) / static_cast<float>(targetDefinition.maxHitPoints), 0.0f, 1.0f));
+                        }
                     }
                 }
             }
@@ -1141,6 +1200,96 @@ namespace rwe
         }
     }
 
+    namespace
+    {
+        /**
+         * Liang-Barsky. The original's circle routine clips every segment to
+         * the surface it is drawing on before it hands it to the Bresenham
+         * (0x4C00C3 onward), which is what keeps a ring bigger than the
+         * minimap inside the minimap. RWE draws its rings into the whole
+         * chrome viewport, so without this a large ring paints over the top
+         * bar and the panel.
+         */
+        bool clipSegmentToRect(Vector2f& a, Vector2f& b, const Rectangle2f& rect)
+        {
+            auto dx = b.x - a.x;
+            auto dy = b.y - a.y;
+            float t0 = 0.0f;
+            float t1 = 1.0f;
+
+            const float p[4] = {-dx, dx, -dy, dy};
+            const float q[4] = {a.x - rect.left(), rect.right() - a.x, a.y - rect.top(), rect.bottom() - a.y};
+
+            for (int i = 0; i < 4; ++i)
+            {
+                if (p[i] == 0.0f)
+                {
+                    if (q[i] < 0.0f)
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+
+                auto t = q[i] / p[i];
+                if (p[i] < 0.0f)
+                {
+                    t0 = std::max(t0, t);
+                }
+                else
+                {
+                    t1 = std::min(t1, t);
+                }
+            }
+
+            if (t0 > t1)
+            {
+                return false;
+            }
+
+            auto ax = a.x;
+            auto ay = a.y;
+            a = Vector2f(ax + (t0 * dx), ay + (t0 * dy));
+            b = Vector2f(ax + (t1 * dx), ay + (t1 * dy));
+            return true;
+        }
+
+        /**
+         * One ring as a list of clipped segments, ready for a single
+         * drawLines call. The original's circle is a closed 32-gon of
+         * one-pixel Bresenham lines with no thickness and no smoothing
+         * (0x4C0070), and its dashed twin (0x4C01A0) draws alternate
+         * segments with the starting parity taken from the minimap's blink
+         * bit.
+         */
+        std::vector<Vector2f> buildMinimapRing(const Vector2f& centre, float radius, const Rectangle2f& clip, bool dashed, int parity)
+        {
+            const int segments = 32;
+            std::vector<Vector2f> points;
+            points.reserve(segments * 2);
+
+            for (int i = 0; i < segments; ++i)
+            {
+                if (dashed && (i % 2) != parity)
+                {
+                    continue;
+                }
+
+                auto angleA = (2.0f * Pif * static_cast<float>(i)) / static_cast<float>(segments);
+                auto angleB = (2.0f * Pif * static_cast<float>(i + 1)) / static_cast<float>(segments);
+                Vector2f a(centre.x + (std::cos(angleA) * radius), centre.y + (std::sin(angleA) * radius));
+                Vector2f b(centre.x + (std::cos(angleB) * radius), centre.y + (std::sin(angleB) * radius));
+                if (clipSegmentToRect(a, b, clip))
+                {
+                    points.push_back(a);
+                    points.push_back(b);
+                }
+            }
+
+            return points;
+        }
+    }
+
     void GameScene::renderMinimapDetectionRings(const Matrix4f& worldToMinimap)
     {
         // 0x466DC0, the minimap render, per unit and gated on the selection
@@ -1155,13 +1304,11 @@ namespace rwe
         // An onoffable unit that is switched off draws nothing: turning a
         // radar off takes its ring away with it.
         //
-        // Honest gap: the colour is a byte out of a runtime table at
-        // cfg+0xDCB, and nothing in .text ever writes that table -- it is a
-        // logical-colour to palette remap installed for the blitter. The
-        // indices could not be recovered without running the game. TA's green
-        // ramp is palette 232-239; these are RWE's own greens, with the
-        // jammers dimmer than the detectors so the pair can be told apart.
-        const int segments = 32;
+        // The colours are bytes out of the interface colour table at
+        // cfg+0xDCB, which S:50 resolved: it is filled from a different base
+        // (0x4AC7D0 writes it as cfg+0x519+0x8B2) by nearest-matching
+        // GUIPAL.PAL into the screen palette, and the two slots in play here
+        // are 0x0A for the detectors and 0x0C for the jammers.
         auto mapWidth = simScalarToFloat(simulation.terrain.rightCutoffInWorldUnits() - simulation.terrain.leftInWorldUnits());
         if (mapWidth <= 0.0f)
         {
@@ -1174,12 +1321,19 @@ namespace rwe
             const auto& unit = getUnit(unitId);
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
 
+            auto centre = worldToMinimap * simVectorToFloat(unit.position);
+
+            // The anti-missile coverage rings sit outside the on/off gate:
+            // 0x466F6A jumps past the four detection rings and lands at
+            // 0x46707C, which is where the coverage block starts. So a
+            // switched-off radar loses its ring and a switched-off launcher
+            // keeps its.
+            renderMinimapCoverageRings(unit, unitDefinition, centre, worldUnitsToMinimapPixels);
+
             if (unitDefinition.onOffable && !unit.activated)
             {
                 continue;
             }
-
-            auto centre = worldToMinimap * simVectorToFloat(unit.position);
 
             // The colours are the interface map's slots 0x0A and 0x0C,
             // resolved through the runtime GUIPAL nearest-match (0x4AC7D0):
@@ -1206,16 +1360,70 @@ namespace rwe
                     continue;
                 }
 
-                std::vector<Vector2f> points;
-                points.reserve(segments);
-                for (int i = 0; i < segments; ++i)
-                {
-                    auto angle = (2.0f * Pif * static_cast<float>(i)) / static_cast<float>(segments);
-                    points.emplace_back(centre.x + (std::cos(angle) * radius), centre.y + (std::sin(angle) * radius));
-                }
-
-                chromeUiRenderService.drawLineLoop(points, color);
+                chromeUiRenderService.drawLines(
+                    buildMinimapRing(Vector2f(centre.x, centre.y), radius, minimapRect, false, 0),
+                    color);
             }
+        }
+    }
+
+    void GameScene::renderMinimapCoverageRings(const UnitState& unit, const UnitDefinition& unitDefinition, const Vector3f& centre, float worldUnitsToMinimapPixels)
+    {
+        // 0x46707C: one ring per weapon slot whose weapon carries the
+        // interceptor flag, radius coverage - 512, in interface colour 0x0F
+        // (white). The minus 512 is literal in the binary and unexplained --
+        // half a map square shaved off, so the drawn circle understates the
+        // guaranteed intercept area rather than overstating it.
+        //
+        // Where RWE differs, and it is a data question rather than a choice:
+        // the original gates the whole block on antiweapons, FBI flags bit 29,
+        // which is a pure display flag -- nothing in its simulation reads it.
+        // RWE has never parsed it, so the gate here is the interceptor weapon
+        // itself. In the shipped data the two are the same set: ARMAMD and
+        // CORFMD are the only units with antiweapons=1 and AMD_ROCKET and
+        // FMD_ROCKET the only weapons with interceptor=1.
+        for (const auto& weapon : unit.weapons)
+        {
+            if (!weapon)
+            {
+                continue;
+            }
+
+            const auto& weaponDefinition = simulation.weaponDefinitions.at(weapon->weaponType);
+            if (!weaponDefinition.interceptor)
+            {
+                continue;
+            }
+
+            auto coverage = simScalarToFloat(weaponDefinition.coverage) - 512.0f;
+            if (coverage <= 0.0f)
+            {
+                continue;
+            }
+
+            auto radius = coverage * worldUnitsToMinimapPixels;
+            if (radius < 1.0f)
+            {
+                continue;
+            }
+
+            // Dashed while the launcher has a round in the magazine, solid
+            // while it is empty: 0x4670D8 tests the magazine byte at
+            // weaponSlot+0x0E and picks the dashed circle 0x4C01A0 over the
+            // plain one 0x4C0070. Sixteen of the thirty-two segments are
+            // drawn, and the parity comes from the minimap's blink bit, so
+            // the gaps chase round the ring.
+            // Eight frames a half-cycle: the counter at cfg+0x142EF is
+            // reloaded with 7 and the bit flipped when it runs out
+            // (0x466580), once per pass of the main loop, and RWE's scene
+            // clock runs at the same thirty a second.
+            const unsigned int minimapBlinkTicks = 8;
+            auto dashed = weapon->stockedRounds > 0;
+            auto parity = dashed && ((sceneTime.value / minimapBlinkTicks) % 2 == 1) ? 1 : 0;
+
+            chromeUiRenderService.drawLines(
+                buildMinimapRing(Vector2f(centre.x, centre.y), radius, minimapRect, dashed, parity),
+                Color(255, 255, 255));
         }
     }
 
@@ -4045,6 +4253,14 @@ namespace rwe
         // readout cannot be refreshed off a command the way a build queue's is.
         refreshStockpileGuiTotal();
 
+        // Nor can a factory's queue, once it starts working through it: the
+        // count drops when a unit begins, and no command passes through the
+        // UI to hang a refresh on. The original does not try -- 0x4199B0
+        // rebuilds the caption of every gadget on the page on every refresh,
+        // counting the outstanding orders on demand through 0x439D80 -- so
+        // this does the same.
+        refreshBuildGuiTotals();
+
         renderDebugWindow();
     }
 
@@ -5566,6 +5782,14 @@ namespace rwe
         {
             box->get().setText("savegame");
         }
+
+        // LOADGAME.GUI ships an empty defaultfocus, so the original opens
+        // this dialog with no focused gadget and therefore no caret. RWE
+        // starts the name field focused instead: its keyDown is broadcast to
+        // every child rather than routed to the focused one, so typing works
+        // either way, and a field you can type into ought to look like one.
+        panel->setFocusByName("GAMENAME");
+
         setGameMenuPanel(std::move(panel));
     }
 
@@ -8101,6 +8325,42 @@ namespace rwe
         }
 
         return it2->second;
+    }
+
+    void GameScene::refreshBuildGuiTotals()
+    {
+        auto selectedUnit = getSingleSelectedUnit();
+        if (!selectedUnit)
+        {
+            return;
+        }
+
+        auto unit = tryGetUnit(*selectedUnit);
+        if (!unit)
+        {
+            return;
+        }
+
+        for (const auto& child : currentPanel->getChildren())
+        {
+            const auto& name = child->getName();
+            if (!isValidUnitType(simulation, name))
+            {
+                continue;
+            }
+
+            auto button = dynamic_cast<UiStagedButton*>(child.get());
+            if (button == nullptr)
+            {
+                continue;
+            }
+
+            // "+%d" at 0x419A1E, and the caption is cleared outright at zero
+            // (0x419A26 writes a nul into the buffer) rather than reading
+            // "+0".
+            auto total = unit->get().getBuildQueueTotal(name) + getUnconfirmedBuildQueueCount(*selectedUnit, name);
+            button->setLabel(total > 0 ? "+" + std::to_string(total) : "");
+        }
     }
 
     void GameScene::refreshStockpileGuiTotal()

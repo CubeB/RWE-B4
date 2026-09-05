@@ -83,6 +83,13 @@ namespace rwe
         /** A closed one-pixel outline through the given points. */
         void drawLineLoop(const std::vector<Vector2f>& points, const Color& color);
 
+        /**
+         * Disjoint line segments, two points each, in one draw call. The
+         * minimap rings need it: clipped to the minimap they are no longer
+         * one closed loop, and a dashed ring is not one to start with.
+         */
+        void drawLines(const std::vector<Vector2f>& points, const Color& color);
+
         Matrix4f getViewProjectionMatrix() const;
 
         Matrix4f getInverseViewProjectionMatrix() const;

@@ -79,7 +79,6 @@ namespace rwe
             {"nanoframeWorkedOn", dumpJson(u.nanoframeWorkedOn)},
             {"nanoframeDecayRemainder", dumpJson(u.nanoframeDecayRemainder)},
             {"reclaimProgress", dumpJson(u.reclaimProgress)},
-            {"captureProgress", dumpJson(u.captureProgress)},
             {"selfDestructTime", dumpJson(u.selfDestructTime)},
             {"paralyzedUntil", dumpJson(u.paralyzedUntil)},
             {"moveRateBand", dumpJson(u.moveRateBand)},

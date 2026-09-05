@@ -15,6 +15,7 @@ namespace rwe
     private:
         std::string text;
         std::shared_ptr<SpriteSeries> font;
+        bool focused{false};
         unsigned int maxLength{24};
 
     public:
@@ -23,6 +24,10 @@ namespace rwe
         void render(UiRenderService& context) const override;
 
         void keyDown(KeyEvent event) override;
+
+        void focus() override;
+
+        void unfocus() override;
 
         const std::string& getText() const { return text; }
 

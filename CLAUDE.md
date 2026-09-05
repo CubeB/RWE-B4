@@ -30,7 +30,7 @@ make -j$(nproc)
 ./build/rwe_test "[tag]"
 ```
 
-The suite passes 416 cases / 58,723 assertions as of 2026-09-05. If a document quotes a different figure, run the suite rather than believing either of them.
+The suite passes 438 cases / 58,785 assertions as of 2026-09-05. If a document quotes a different figure, run the suite rather than believing either of them.
 
 This machine has two configured trees, both MSYS2/MinGW64 with `Unix Makefiles`: `build/` (Debug) and `build-release/` (Release). Play-testing uses `build-release/rwe.exe`. **Rebuild the `rwe` target, not just `rwe_test`** — a green test suite says nothing about whether the game still links, and several of the executables below share `librwe` with it.
 
@@ -98,6 +98,12 @@ The simulation is lockstep: peers exchange commands, not state, and a `GameHash`
 
 **Keep sim state in step across four places.** New state on `UnitState`, `MapFeature`, `GamePlayerInfo` or the simulation itself needs adding to `src/rwe/game/save_util.cpp` (serialization), `src/rwe/sim/GameHash_util.cpp` (the sync hash) and `src/rwe/game/dump_util.cpp` (desync diagnostics) as well as to the struct. The save round-trip test (`src/rwe/sim/saveload.test.cpp`) fails if hashed state is missed, but unhashed state needs the discipline: nothing will tell you.
 
+A unit's **order queue is hashed**, position included, so state that lives on
+an order -- capture progress does, because that is where the original keeps it
+-- is covered like any other. It was not always: moving that progress off
+`UnitState` silently took it out of the hash until the queue was added, which
+is the failure mode this rule exists to catch.
+
 Derived state is the exception and should say so. `UnitSpatialIndex` is rebuilt from the unit list every tick, is never saved and never hashed, and returns a deliberate *superset* of each query so that the exact test still runs against live positions — which is what makes it incapable of changing an outcome.
 
 ## Other hazards
@@ -139,7 +145,7 @@ Much of the current work is matching the original's behaviour down to the
 arithmetic. Where a behaviour is meant to match TA, it has usually been read out
 of `TotalA.exe` instead of guessed at.
 
-- `docs/TOTALA-EXE.md` — the findings, now ninety-five sections: the flight
+- `docs/TOTALA-EXE.md` — the findings, now ninety-nine sections: the flight
   model, fog of war and line of sight, the damage pipeline, missile flight,
   target selection and eligibility, the economy, the nanolathe and construction
   display, effects and render order, the interface (the minimap detection
@@ -151,9 +157,12 @@ of `TotalA.exe` instead of guessed at.
   pathfinder and its scheduler (§87), what the D-gun's projectile does once it
   has left the barrel (§92), why an abandoned nanoframe rots away (§93), and
   which missions send a damaged aircraft to a repair pad and what the pad does
-  when it gets there (§94), and what a feature contributes to movement — the
+  when it gets there (§94), what a feature contributes to movement — the
   map square, the passability class, and why a hovercraft cannot cross a
-  sunken wreck (§95). §88 and §91 are the ones to read first if
+  sunken wreck (§95) — where capture progress is kept and what sets its clock
+  (§96), what `autoreclaimable` actually gates and which sound a reclaim
+  plays (§97), and the Resurrect mission nothing in the shipped data can use
+  (§98). §88 and §91 are the ones to read first if
   you are about to change something — where RWE **deliberately** differs, so
   those do not get "corrected" back, and what is decoded but not ported.
 - `docs/TOTALA-EXE-SHADING.md` — the shaded unit rasterizer in full: the
