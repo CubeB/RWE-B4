@@ -223,4 +223,41 @@ namespace rwe
 
         REQUIRE(sim.getUnitState(towerId).orders.empty());
     }
+
+    TEST_CASE("a builder on patrol does not go looking for a fight", "[patrol]")
+    {
+        // A unit that can repair is given RepairPatrol rather than Patrol
+        // (0x43F3E6), and neither RepairPatrol handler calls the acquisition
+        // search at all -- so a construction unit walking a route in the
+        // original clears wreckage and mends things and never breaks off to
+        // chase anything.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim, "builder");
+        auto enemy = addPlayer(sim, "enemy");
+
+        auto builderDef = makeTankDef();
+        builderDef.canReclamate = true;
+        builderDef.builder = true;
+        sim.unitDefinitions["builder"] = builderDef;
+        sim.unitDefinitions["tank"] = makeTankDef();
+        registerModel(sim, "tankmodel");
+
+        auto builderId = addUnitOfType(sim, "builder", player, SimVector(100_ss, 0_ss, 100_ss), script);
+        armUnit(sim, builderId, 200_ss);
+        addUnitOfType(sim, "tank", enemy, SimVector(150_ss, 0_ss, 100_ss), script);
+
+        sim.tick();
+
+        auto& builder = sim.getUnitState(builderId);
+        builder.orders.push_back(PatrolOrder(SimVector(100_ss, 0_ss, 100_ss)));
+
+        sim.tick();
+        sim.tick();
+
+        // The patrol is still the only order it has: nothing was pushed in
+        // front of it.
+        REQUIRE(builder.orders.size() == 1);
+        REQUIRE(std::holds_alternative<PatrolOrder>(builder.orders.front()));
+    }
 }

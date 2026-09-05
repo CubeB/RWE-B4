@@ -3160,12 +3160,24 @@ namespace rwe
             return true;
         }
 
+        // A unit that can repair is not on this mission at all in the
+        // original. 0x43F3E6 tests the definition's repair bit before
+        // anything else and hands out RepairPatrol instead of Patrol, and
+        // neither RepairPatrol handler is among the six callers of the
+        // acquisition search -- so a construction unit walking a route clears
+        // wreckage and mends things and never breaks off to chase anything.
+        // RWE runs both jobs from one handler, which is a fair simplification
+        // of two missions built on the same skeleton; what it must not do is
+        // offer the engage check to a unit that would never have been given
+        // it.
+        auto repairs = unitInfo.definition->canReclamate;
+
         // Break off for anything hostile close enough to be worth it.
         //
         // Fire At Will exactly: 0x43B700 is `cmp ecx,0x200000 / jne`, so a
         // unit on Return Fire shoots back at whatever shoots first but never
         // leaves its route for a target it merely saw.
-        if (unitInfo.state->fireOrders == UnitFireOrders::FireAtWill)
+        if (!repairs && unitInfo.state->fireOrders == UnitFireOrders::FireAtWill)
         {
             if (auto enemy = findEnemyToEngage(unitInfo))
             {
