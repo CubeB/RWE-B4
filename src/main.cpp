@@ -5,6 +5,7 @@
 #include <rwe/GameLaunch.h>
 #include <rwe/GlobalConfig.h>
 #include <rwe/PathMapping.h>
+#include <rwe/setup/TaInstall.h>
 #include <rwe/game/SaveFile.h>
 #include <rwe/Viewport.h>
 #include <rwe/config.h>
@@ -252,6 +253,26 @@ int main(int argc, char* argv[])
             pathMapping.unitpics = args.getString("dir-unitpics", "unitpics");
             pathMapping.units = args.getString("dir-units", "units");
             pathMapping.weapons = args.getString("dir-weapons", "weapons");
+
+            // Nothing below here copes with there being no game data: the
+            // first thing to touch the directory is a directory_iterator
+            // inside the VFS, which throws a filesystem error naming a path
+            // and nothing else. Say what is wrong and what fixes it instead.
+            if (!rwe::anyPathHasGameData(gameDataPaths))
+            {
+                std::string message = "No Total Annihilation data found in:\n";
+                for (const auto& path : gameDataPaths)
+                {
+                    message += "  " + path.string() + "\n";
+                }
+                message += "\nRun rwe_setup to copy it from your Total Annihilation\n";
+                message += "installation. It will find one by itself if it can:\n\n";
+                message += "    rwe_setup\n\n";
+                message += "or point it at one:\n\n";
+                message += "    rwe_setup --from \"C:/GOG Games/Total Annihilation\"";
+
+                throw std::runtime_error(message);
+            }
 
             return rwe::run(gameDataPaths, pathMapping, gameParameters, screenWidth, screenHeight, windowMode, imGuiIniFilePath.string(), config);
         }

@@ -489,6 +489,8 @@ set(SOURCE_FILES
     src/rwe/rwe_time.h
     src/rwe/scene/Scene.h
     src/rwe/scene/SceneManager.cpp
+    src/rwe/setup/TaInstall.cpp
+    src/rwe/setup/TaInstall.h
     src/rwe/scene/SceneManager.h
     src/rwe/scene/util.h
     src/rwe/sdl/SdlContext.h
@@ -721,6 +723,12 @@ add_custom_command(TARGET librwe PRE_BUILD
 add_executable(rwe src/main.cpp)
 target_link_libraries(rwe librwe)
 
+# Fills in the data directory from a Total Annihilation installation. Shares
+# getSearchPath() with the engine, so the two cannot disagree about where the
+# data belongs.
+add_executable(rwe_setup src/rwe_setup.cpp)
+target_link_libraries(rwe_setup librwe)
+
 if(UNIX AND NOT APPLE)
     file(WRITE "${CMAKE_BINARY_DIR}/run.sh" "#!/bin/bash
 # The devbox-built binary links against Nix's libglvnd, which can't find
@@ -860,6 +868,7 @@ set(TEST_FILES
     src/rwe/sim/capture.test.cpp
     src/rwe/sim/burning.test.cpp
     src/rwe/sim/waterbuilding.test.cpp
+    src/rwe/setup/TaInstall.test.cpp
     src/rwe/sim/wreckcollision.test.cpp
     src/rwe/sim/wreckage.test.cpp
     src/rwe/sim/aircraftwreck.test.cpp

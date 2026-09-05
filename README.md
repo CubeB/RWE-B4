@@ -2,13 +2,21 @@
 
 **Bot bot boom boom** — four B's, so B4 for short.
 
-A fork of [Robot War Engine](https://github.com/MHeasell/rwe), an open-source
-real-time strategy engine highly compatible with Total Annihilation data files.
-The engine is MHeasell's; this fork is a long pass at making it *behave* like
-the original rather than merely look like it.
+A fork of [Robot War Engine](https://github.com/MHeasell/rwe) by
+[Michael Heasell](https://github.com/MHeasell), which is a lovely bit of work.
+It reads Total Annihilation's own data as it ships — HPI archives, 3DO models,
+GAF sprites, TNT terrain, FBI and TDF definitions, and COB unit scripts running
+in a virtual machine written for them — runs a deterministic lockstep
+simulation in fixed-point maths so peers stay in sync across platforms, and
+builds its interface out of the game's own GUI files rather than by eye.
 
-233 commits ahead of upstream `master`, and the suite stands at **409 cases /
-58,670 assertions**, green on Debug and Release.
+B4 works on the layer above: taking behaviours the engine already reproduces
+and pinning them to what the original executable actually does. That is a long
+tail of small fidelity work, and it is the easy end of the problem — the
+foundation was already there.
+
+233 commits ahead of upstream `master`, and the suite stands at **416 cases /
+58,723 assertions**, green on Debug and Release.
 
 ## What is different here
 
@@ -48,9 +56,12 @@ Beyond that:
 ## Credit
 
 Robot War Engine is by [Michael Heasell](https://github.com/MHeasell) and its
-contributors; the original engine, the file-format work and the architecture
-are theirs. Total Annihilation is Cavedog Entertainment's. This fork ships no
-game data — you supply your own.
+contributors — the engine, the format parsers, the COB virtual machine and the
+deterministic simulation all come from there. Worth a look:
+<https://github.com/MHeasell/rwe>
+
+Total Annihilation is Cavedog Entertainment's. This fork ships no game data
+— you supply your own.
 
 ## Build Status
 
@@ -71,10 +82,47 @@ Upstream:
 
 https://github.com/MHeasell/rwe
 
-## How to Install 
-Windows:
-1. Create the folder `%AppData%/RWE/Data` and copy your TA data files to it (.hpi, .ufo, rev31.gp3, etc.)
-2. Run rwe.exe (if you used the installer, RWE will be in your start menu items)
+## How to Install
+
+You need your own copy of Total Annihilation. Then:
+
+    rwe_setup
+    rwe
+
+`rwe_setup` finds the installation, copies the archives, the films and the
+soundtrack into the data directory the engine reads, and tells you what it did.
+It looks in the GOG and Cavedog registry entries and the usual install
+locations; if it cannot find yours, point it at the directory holding
+`totala1.hpi`:
+
+    rwe_setup --from "C:/GOG Games/Total Annihilation"
+
+Useful flags: `--dry-run` says what it would do and changes nothing; `--link`
+hard-links instead of copying, which is instant and saves about a gigabyte when
+the data and the installation are on one volume; `--to <path>` writes somewhere
+other than the default. Running it twice is safe — it copies only what is
+missing or half-written.
+
+Start the game with `rwe`. If the data is missing it will say so and point you
+back here rather than failing with a filesystem error.
+
+<details>
+<summary>What it does, if you would rather do it by hand</summary>
+
+The engine reads one data directory — `%AppData%/RWE/Data` on Windows,
+`$HOME/.rwe/Data` elsewhere — and mounts every `.hpi`, `.ufo`, `.ccx`, `.gpf`
+and `.gp3` it finds directly inside it. Two subdirectories are read by name:
+`movies` for the films, which the GOG release ships as `.ZRB` (Smacker) files
+under its own `Data` folder, and `music` for the soundtrack. So:
+
+- every archive from the installation's root, flat in the data directory;
+- `<install>/Data/*.zrb` into `<data>/movies/`;
+- `<install>/music/*.mp3` into `<data>/music/`.
+
+The lookups are case-insensitive, so the mixed casing the GOG release ships
+(`1.ZRB` beside `2.zrb`) needs no renaming.
+
+</details>
 
 ## How to Play
 
@@ -184,16 +232,24 @@ You can build without TA game assets, but to run the game rwe will need to know 
 rwe looks in $HOME/.rwe/Data by default. 
 > After building, you can also override it at runtime, e.g. `./rwe --data-path "$HOME/src/TA/Total Annihilation"`
 
-To copy TA data files (.hpi, .ufo, .ccx, rev31.gp3, etc.) in the default dir:
+To fill in the default data directory, build `rwe_setup` alongside the engine
+and run it — it handles the films and the soundtrack as well as the archives,
+which a plain `cp` of the archives does not:
+
+```bash
+./rwe_setup --from "/path/to/totala"
+```
+
+Or do it by hand, remembering that `movies/` and `music/` are read by name:
+
 ```bash
 mkdir -p $HOME/.rwe/Data
-cp /path/to/totala/*.hpi $HOME/.rwe/Data
-cp /path/to/totala/*.ufo $HOME/.rwe/Data
-cp /path/to/totala/*.ccx $HOME/.rwe/Data
-cp /path/to/totala/*.gpf $HOME/.rwe/Data
-cp /path/to/totala/*.gp3 $HOME/.rwe/Data
+cp /path/to/totala/*.hpi /path/to/totala/*.ufo /path/to/totala/*.ccx \
+   /path/to/totala/*.gpf /path/to/totala/*.gp3 $HOME/.rwe/Data
+mkdir -p $HOME/.rwe/Data/movies $HOME/.rwe/Data/music
+cp /path/to/totala/Data/*.[zZ][rR][bB] $HOME/.rwe/Data/movies
+cp /path/to/totala/music/*.mp3 $HOME/.rwe/Data/music
 ```
-Or, symlink: `ln -s "/path/to/totala/" ~/.rwe/Data`
 
 #### Devbox
 The easiest way to get a working build environment is with [Devbox](https://www.jetify.com/devbox),

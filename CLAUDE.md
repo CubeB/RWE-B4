@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Robot War Engine (RWE) is an open-source real-time strategy game engine with high compatibility for Total Annihilation data files. It consists of a C++20 core engine and a TypeScript/Electron launcher application.
 
-Most of the current work is not new features but making the engine behave like the original rather than merely look like it. That work has its own reference documents and its own hazards — read "Matching Total Annihilation" below before changing anything TA-facing.
+Most of the current work is not new features but fidelity: taking behaviours the engine already reproduces and pinning them to exactly what the original executable does. That work has its own reference documents and its own hazards — read "Matching Total Annihilation" below before changing anything TA-facing.
 
 ## Build Commands
 
@@ -30,7 +30,7 @@ make -j$(nproc)
 ./build/rwe_test "[tag]"
 ```
 
-The suite passes 409 cases / 58,670 assertions as of 2026-09-05. If a document quotes a different figure, run the suite rather than believing either of them.
+The suite passes 416 cases / 58,723 assertions as of 2026-09-05. If a document quotes a different figure, run the suite rather than believing either of them.
 
 This machine has two configured trees, both MSYS2/MinGW64 with `Unix Makefiles`: `build/` (Debug) and `build-release/` (Release). Play-testing uses `build-release/rwe.exe`. **Rebuild the `rwe` target, not just `rwe_test`** — a green test suite says nothing about whether the game still links, and several of the executables below share `librwe` with it.
 
@@ -135,9 +135,9 @@ do survive; the header is simply thinner than the sim).
 
 ## Matching Total Annihilation
 
-Much of the current work is making RWE behave like the original rather than
-merely look similar. Where a behaviour is meant to match TA, it has usually been
-read out of `TotalA.exe` instead of guessed at.
+Much of the current work is matching the original's behaviour down to the
+arithmetic. Where a behaviour is meant to match TA, it has usually been read out
+of `TotalA.exe` instead of guessed at.
 
 - `docs/TOTALA-EXE.md` — the findings, now ninety-five sections: the flight
   model, fog of war and line of sight, the damage pipeline, missile flight,

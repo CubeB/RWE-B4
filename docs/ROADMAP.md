@@ -1,12 +1,12 @@
 # Robot War Engine — Revival Roadmap
 
-_Last updated: 2026-09-04. Status of the codebase is as of the `revival` integration branch (upstream `master` @ b2d8a31 + merged fork work, see Phase 0). The test suite stands at 364 cases / 54,376 assertions._
+_Last updated: 2026-09-05. Status of the codebase is as of the `revival` integration branch (upstream `master` @ b2d8a31 + merged fork work, see Phase 0). The test suite stands at 416 cases / 58,723 assertions._
 
 ## Where the project stands
 
 - **Engine:** ~93k lines of C++20 under `src/` (~49k when this branch started), deterministic sim at 30 ticks/s, OpenGL 3 renderer, COB VM, A* pathfinding, lockstep multiplayer over the internet. Loads original TA data (HPI/GAF/3DO/COB/TDF/TNT/OTA) and the GOG release's Smacker movies.
 - **Launcher:** Electron 22 / React 16 / Redux lobby + master server + `rwe_bridge` IPC.
-- **History:** Michael Heasell (2017–2023, ~1,950 commits). Kevin Hake modernised the build in March 2026 (Boost removed, C++20, SDL3, CI green). Taylor Gunnoe added hotkeys / speed / pause / Phase‑1 AI in April 2026 (unmerged upstream until now).
+- **History:** Michael Heasell (2017–2023, ~1,950 commits) — the engine, the format parsers, the COB VM and the deterministic simulation. Kevin Hake modernised the build in March 2026 (Boost removed, C++20, SDL3, CI green). Taylor Gunnoe added hotkeys / speed / pause / Phase‑1 AI in April 2026 (unmerged upstream until now).
 - **Never had a public release.** Upstream's only tag is `v0.1.0` (2017); this branch tags `v1.0.0` ("Bot bot boom boom v1.0", under the main-menu title — B4 for short, being four B’s), locally. The CMake version is derived from git tags.
 
 ## Guiding principles
