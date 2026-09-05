@@ -1,10 +1,11 @@
 name: Build
 on:
   push:
-    branches: [master, gh-actions]
+    branches: [master, gh-actions, revival]
     tags: ['v*']
   pull_request:
-    branches: [master]
+    branches: [master, revival]
+  workflow_dispatch:
 jobs:
   build-linux:
     strategy:

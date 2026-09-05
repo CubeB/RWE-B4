@@ -31,9 +31,10 @@ Goal: a fork with green CI, a reproducible local build, and a tagged pre-release
 - [x] Fix Windows checkout: `libs/asio/asio/include` is a git symlink that materialises as a text file without `core.symlinks`; CMake now uses the real `libs/asio/include`.
 - [x] Smoke-test with real TA data (GOG archives at `D:\RWE-Data`, junctioned to `%AppData%\RWE\Data`): main menu loads; `--map "Coast To Coast"` skirmish runs with Human + Computer players, 0 warnings.
 - [x] Release build (`build-release/`, 40 MB `rwe.exe` vs 192 MB Debug): tests pass, AI skirmish clean. Use this one to play.
-- [ ] Push `revival` to a private GitHub repo (or fork) so the CI matrix runs; confirm it is green.
+- [x] Pushed to `CubeB/RWE-B4`, a public fork of `MHeasell/rwe`, with `revival` as its default branch. The remote `b4` is the only push target; `origin` stays pointed at upstream and is never pushed to.
+- [ ] Confirm the CI matrix is green. The workflow fired on `master`/`gh-actions` only, so 233 commits had been built on exactly one compiler -- MinGW64, by hand -- while the matrix covering Linux gcc, Linux clang, MSVC and MinGW in both configurations had never run. `revival` and `workflow_dispatch` are triggers now; it needs one push to start. The release job stays gated on `refs/tags/v*`, so a branch push builds without publishing, and `fetch-msvc-libs.py` pulls from an absolute upstream release URL that works from a fork.
 - [ ] Tag `v0.2.0-pre1` and let Kevin's release job produce Windows zip/installer + Linux AppImage.
-- [ ] Update `README.md` download section — the AppVeyor badge and link at lines 8 and 17 are a dead end. (`CLAUDE.md` is current as of 2026-09-04: C++20, the CI matrix, the new reference docs, the diagnostic executables, the determinism rules.)
+- [x] `README.md` rewritten around B4: what the fork is, what has been done and how it is checked, upstream credited for the engine, the dead AppVeyor badge and download link replaced, and the install section replaced by `rwe_setup`. (`CLAUDE.md` is current: C++20, the CI matrix, the reference docs, the diagnostic executables, the determinism rules, and both profilers.)
 - [ ] Decide on `experimental/sdl-gpu` (Kevin's SDL_gpu + HLSL/SPIR‑V PoC): keep as a branch, do not merge yet.
 - [ ] Decide on upstream `update-protobuf` (protobuf 25.1; needs a CMake-based `build-protobuf.sh` since autotools is gone in 22+). Defer to Phase 5.
 
