@@ -46,10 +46,10 @@ what RWE does.
 
 | # | Item | Status in RWE |
 |---|---|---|
-| 1 | `CTRL+P` all armed aircraft, `CTRL+R` all radar/sonar/jammers, `CTRL+W` all armed mobiles except the commander | **Not implemented.** Three selection predicates over the unit list; the smallest real gap on this list. |
+| 1 | `CTRL+P` all armed aircraft, `CTRL+R` all radar/sonar/jammers, `CTRL+W` all armed mobiles except the commander | **Already implemented**, and data-driven the way the original is — `GameScene` formats `CTRL_%c` and matches the FBI `Category` token, so `CTRL+W`, `F`, `P`, `V`, `B` and `R` all work off the shipped data rather than off six hardcoded predicates. `rev31` carries every one of those tokens. |
 | 2 | `+shareenergy` / `+sharemetal` / `+sharemapping` toggles, `+setshareenergy X` / `+setsharemetal X` reserves | **Not implemented.** Needs the chat bar to parse commands. |
-| 3 | Hold `SHIFT` over a construction unit to see queued build sites — green for the selected unit, blue for every other builder | **Not implemented.** RWE already draws the placement box and the waypoint trail, so the drawing half exists. |
-| 4 | Hold `SHIFT` over a cloaked unit to see a white circle at its minimum cloaking radius | **Not implemented.** RWE has `MinCloakDistance` in the sim (the ninety-tick hold-off), so this is purely a ring to draw. |
+| 3 | Hold `SHIFT` over a construction unit to see queued build sites — green for the selected unit, blue for every other builder | **Already implemented.** `GameScene::renderBuildBoxes` under `isShiftDown()`, green `(83, 223, 79)` for the selected builder and blue `(84, 84, 252)` for every other one the player owns. |
+| 4 | Hold `SHIFT` over a cloaked unit to see a white circle at its minimum cloaking radius | **Implemented.** `GameScene::renderCloakRadius`, in the same `SHIFT` block as the build boxes, projecting a world-space circle through the same matrix so it lies on the ground. Not yet confirmed by eye. |
 | 5 | Assign a factory to a squad with `CTRL+1`–`9`; everything it builds joins that squad | **Not implemented.** |
 | 6 | Any campaign mission selectable from New Campaign | **Not applicable** — RWE has no campaign. |
 | 7 | Features vanishing from user maps across a save/load | **Not applicable** — RWE's save format is its own. Its known gaps are recorded in `CLAUDE.md`. |
@@ -101,9 +101,23 @@ AI-side:
 - AI commanders no longer thrash between targets, and jam, when several
   enemies attack at once.
 
-Both are worth checking against `src/rwe/ai/` — RWE's commander is driven by
-`BuildManager` and `ArmyManager`, and the second one describes a target-churn
-failure mode that any per-tick chooser can fall into.
+Both were checked against `src/rwe/ai/`, and **neither reproduces in RWE**:
+
+- The commander is structurally immune to the first. `EconomyManager` sorts it
+  into the builder branch, so it is never in `combatUnits` and `ArmyManager`
+  never hands it an attack order to interrupt its building with.
+- The second is a target-churn mode that any per-tick chooser can fall into,
+  and `ArmyManager` looks like a candidate — `nearestKnownEnemy` re-picks from
+  scratch every tactical pass, and `isAttackingUnit` only suppresses a reissue
+  against the *same* target. But I could not provoke it. A crowd of four
+  enemies produced the same three orders over 240 ticks whether or not a
+  stickiness guard was in place, and a nearer enemy arriving mid-approach did
+  not steal an engaged unit either.
+
+A stickiness guard was written and then reverted, because a fix for a bug that
+cannot be demonstrated is a change with no evidence behind it. If a play-test
+ever shows an AI army standing still in a melee, the guard is the first thing
+to try and this is the note that says so.
 
 ### The one simulation change
 
@@ -133,15 +147,19 @@ only lever; RWE has a better one.
 In the order I would take them, all of them from the official patch's feature
 list rather than its fixes:
 
-1. **The three selection hotkeys** (item 1). Self-contained, and the kind of
-   thing whose absence is felt every game.
-2. **The cloak radius ring** (item 4). The sim state already exists; this is a
-   ring and a `SHIFT` test.
-3. **The build-site overlay** (item 3). Green for the selected builder, blue
-   for the others.
-4. **Factory squads** (item 5).
-5. **The sharing commands** (item 2), if and when the chat bar grows a command
+Three items, in the order I would take them:
+
+1. **Factory squads** (item 5).
+2. **The sharing commands** (item 2), if and when the chat bar grows a command
    parser.
+
+The cloak radius ring (item 4) is written and builds; it wants a look with a
+cloaked unit under the cursor before it is called done.
+
+Two items came off this list on inspection rather than on implementation. The
+selection hotkeys (item 1) were already in, and so was the build-site overlay
+(item 3) — both were listed as gaps on a first pass that read the patch readme
+and not the tree. The way to find out what RWE does is to grep it.
 
 Nothing on this list is a behavioural correction. RWE is already matching a
 patched game.

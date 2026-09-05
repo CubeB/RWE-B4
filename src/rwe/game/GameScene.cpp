@@ -1171,6 +1171,40 @@ namespace rwe
         }
     }
 
+    void GameScene::renderCloakRadius(const UnitState& unit)
+    {
+        const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+        if (!unitDefinition.cloakable || !unit.cloaked)
+        {
+            return;
+        }
+
+        auto worldToUi = worldUiRenderService.getInverseViewProjectionMatrix()
+            * computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+
+        // Projected a point at a time rather than drawn as a screen-space
+        // circle, so the ring lies on the ground the way the build boxes do
+        // instead of standing up to face the camera.
+        auto radius = static_cast<float>(unitDefinition.minCloakDistance);
+        auto centre = simVectorToFloat(unit.position);
+
+        constexpr int segments = 48;
+        std::vector<Vector2f> points;
+        points.reserve(segments);
+        for (int i = 0; i < segments; ++i)
+        {
+            auto angle = (2.0f * Pif * static_cast<float>(i)) / static_cast<float>(segments);
+            auto worldPoint = Vector3f(
+                centre.x + (std::cos(angle) * radius),
+                centre.y,
+                centre.z + (std::sin(angle) * radius));
+            auto uiPoint = worldToUi * worldPoint;
+            points.emplace_back(uiPoint.x, uiPoint.y);
+        }
+
+        worldUiRenderService.drawLineLoop(points, Color(255, 255, 255));
+    }
+
     namespace
     {
         uint64_t buildBoxKey(const DiscreteRect& rect)
@@ -1867,6 +1901,10 @@ namespace rwe
             if (hoveredUnit && getUnit(*hoveredUnit).isOwnedBy(localPlayerId))
             {
                 renderUnitOrders(*hoveredUnit, true);
+
+                // v3.1 feature 4: the cloaked unit under the cursor shows the
+                // radius inside which an enemy will strip its cloak.
+                renderCloakRadius(getUnit(*hoveredUnit));
             }
 
             // draw orders for all selected units

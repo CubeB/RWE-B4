@@ -958,6 +958,13 @@ namespace rwe
 
         void renderBuildBoxes(const UnitState& unit, const Color& outerColor, const Color& innerColor);
 
+        /**
+         * The white ring the v3.1 patch draws around a cloaked unit while
+         * SHIFT is held: its MinCloakDistance, the radius inside which an
+         * enemy unit forces it back into view.
+         */
+        void renderCloakRadius(const UnitState& unit);
+
         void attachOrdersMenuEventHandlers();
 
         void onMessage(const std::string& message, ActivateMessage::Type mode);

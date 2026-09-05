@@ -237,24 +237,28 @@ pathfinding budget, `1333 -> 66650` -- and RWE is already past it.
 
 What is left is the official patch's *features*, none of which RWE has:
 
-- [ ] The three selection hotkeys: `CTRL+P` every armed aircraft, `CTRL+R`
-      every radar, sonar and jammer, `CTRL+W` every armed mobile except the
-      commander. Three predicates over the unit list; the smallest real gap.
-- [ ] Hold `SHIFT` over a cloaked unit to draw a white ring at its minimum
-      cloaking radius. The sim state is already there -- the ninety-tick
-      hold-off -- so this is only the ring.
-- [ ] Hold `SHIFT` over a construction unit to show queued build sites: green
-      for the selected builder, blue for every other one.
+- [x] The selection hotkeys were already in, and data-driven the way the
+      original does it: `GameScene` formats `CTRL_%c` and matches the FBI
+      `Category` token, so `CTRL+W`, `F`, `P`, `V`, `B` and `R` all come off
+      the shipped data.
+- [x] The build-site overlay was already in too: `renderBuildBoxes` under
+      `isShiftDown()`, green for the selected builder and blue for the others.
+      Both of these were listed as gaps on a first pass that read the patch
+      readme rather than the tree.
+- [x] Hold `SHIFT` over a cloaked unit to draw a white ring at its minimum
+      cloaking radius -- `GameScene::renderCloakRadius`. Written and building;
+      still wants confirming by eye with a cloaked unit under the cursor.
 - [ ] Factory squads: `CTRL+1`-`9` on a factory, and everything it builds
       joins that squad.
 - [ ] The multiplayer sharing commands (`+shareenergy`, `+sharemetal`,
       `+sharemapping`, `+setshareenergy X`, `+setsharemetal X`), which need
       the chat bar to grow a command parser first.
 
-And two AI fixes from the unofficial patch worth checking `src/rwe/ai/`
-against, since both describe failure modes a per-tick chooser falls into
-naturally: an AI commander that stops building when attacked, and one that
-thrashes between targets and jams when several enemies attack at once.
+The unofficial patch also names two AI bugs it fixed. Both were checked and
+**neither reproduces in RWE**: the commander is never in `combatUnits`, so
+`ArmyManager` cannot interrupt its building, and the target churn could not be
+provoked in `ArmyManager` either. See `docs/TA-PATCHES.md` for what was tried
+and what to reach for if a play-test ever does see an army jam in a melee.
 
 ## Phase 5 — Performance, renderer, platform (ongoing, low priority until Phase 1 done)
 
