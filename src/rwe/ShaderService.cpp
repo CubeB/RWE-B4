@@ -44,7 +44,7 @@ namespace rwe
         s.unitTexture.mvpMatrix = graphics.getUniformLocation(s.unitTexture.handle.get(), "mvpMatrix");
         s.unitTexture.modelMatrix = graphics.getUniformLocation(s.unitTexture.handle.get(), "modelMatrix");
         s.unitTexture.seaLevel = graphics.getUniformLocation(s.unitTexture.handle.get(), "seaLevel");
-        s.unitTexture.shade = graphics.getUniformLocation(s.unitTexture.handle.get(), "shade");
+        s.unitTexture.shadeStrength = graphics.getUniformLocation(s.unitTexture.handle.get(), "shadeStrength");
         s.unitTexture.alpha = graphics.getUniformLocation(s.unitTexture.handle.get(), "alpha");
 
         s.unitShadow.handle = loadShader(graphics, "shaders/unitShadow.vert", "shaders/unitShadow.frag", texturedVertexAttribs);
@@ -57,7 +57,7 @@ namespace rwe
         s.unitBuild.unitY = graphics.getUniformLocation(s.unitBuild.handle.get(), "unitY");
         s.unitBuild.modelMatrix = graphics.getUniformLocation(s.unitBuild.handle.get(), "modelMatrix");
         s.unitBuild.seaLevel = graphics.getUniformLocation(s.unitBuild.handle.get(), "seaLevel");
-        s.unitBuild.shade = graphics.getUniformLocation(s.unitBuild.handle.get(), "shade");
+        s.unitBuild.shadeStrength = graphics.getUniformLocation(s.unitBuild.handle.get(), "shadeStrength");
         s.unitBuild.unitHeight = graphics.getUniformLocation(s.unitBuild.handle.get(), "unitHeight");
         s.unitBuild.buildRatio = graphics.getUniformLocation(s.unitBuild.handle.get(), "buildRatio");
         s.unitBuild.aboveMode = graphics.getUniformLocation(s.unitBuild.handle.get(), "aboveMode");

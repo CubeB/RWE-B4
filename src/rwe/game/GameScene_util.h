@@ -178,6 +178,7 @@ namespace rwe
         unsigned int unitIndex,
         unsigned int gameTime,
         float frac,
+        float shadeStrength,
         TextureIdentifier unitTextureAtlas,
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitMeshBatch& batch);
@@ -187,6 +188,7 @@ namespace rwe
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,
         const MapFeature& feature,
+        float shadeStrength,
         TextureIdentifier unitTextureAtlas,
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitMeshBatch& batch);
@@ -249,6 +251,7 @@ namespace rwe
         const std::string& pieceName,
         const Matrix4f& matrix,
         PlayerColorIndex playerColorIndex,
+        float shadeStrength,
         TextureIdentifier unitTextureAtlas,
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitMeshBatch& batch);

@@ -53,6 +53,24 @@ namespace rwe
 
         std::unique_ptr<UiStagedButton> createStagedButton(int x, int y, int width, int height, const std::string& guiName, const std::string& name, const std::vector<std::string>& labels, unsigned int stages);
 
+        /**
+         * Swaps a button declared in a GUI file for one with a different
+         * number of stages, at exactly the geometry the data gave it.
+         *
+         * The GUI files are read-only game data and there is no override
+         * directory, so a control RWE has and the original does not cannot be
+         * declared in data. `artName` is the name the button art is looked up
+         * under and is deliberately separate from `name`: a gadget's own
+         * entry carries only as many faces as the original needed, so asking
+         * under a name the data does not carry falls through to the generic
+         * stagebuttnN face for the count actually wanted. The replacement is
+         * named `name` regardless, because that is what click dispatch
+         * matches on.
+         *
+         * Does nothing if the panel has no such button.
+         */
+        void replaceStagedButton(UiPanel& panel, const std::string& guiName, const std::string& name, const std::string& artName, const std::vector<std::string>& labels, unsigned int stage);
+
     private:
         std::unique_ptr<UiComponent> componentFromGuiEntry(const std::string& guiName, const GuiEntry& entry);
 

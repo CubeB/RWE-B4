@@ -167,11 +167,17 @@ of `TotalA.exe` instead of guessed at.
   (§98). §88 and §91 are the ones to read first if
   you are about to change something — where RWE **deliberately** differs, so
   those do not get "corrected" back, and what is decoded but not ported.
-- `docs/TOTALA-EXE-SHADING.md` — the shaded unit rasterizer in full: the
-  16-byte vertex record, the per-vertex shade level and its `& 0x1F`, the
-  averaged (and deliberately unnormalised) vertex normals, and the Gouraud
-  interpolation of the integer row. Read this before touching the unit
-  shaders. It overturns two earlier readings: the original *does* light its
+- `docs/TOTALA-EXE-SHADING.md` — the shaded unit rasterizer in full, in two
+  halves. Part one is the geometry: the 16-byte vertex record, the per-vertex
+  shade level and its `& 0x1F`, the averaged (and deliberately unnormalised)
+  vertex normals, and the Gouraud interpolation of the integer row. Part two
+  (sections 17-27) is the span filler: the row is truncated per pixel with
+  `sar 16` and indexes `PALETTE.SHD[row * 256 + texel]` with **no** second
+  mask, clamp, ambient, fog or blend anywhere in the loop, the height test
+  sorts by model-space Y as an unsigned byte, and a unit whose FBI says
+  `ZBuffer=0` is drawn through a path that does not shade at all (CORFAV and
+  CORTRUCK are the only two in the shipped set). Read this before touching the
+  unit shaders. It overturns two earlier readings: the original *does* light its
   models (the "no lighting" finding had read the `SHADING=off` path), and the
   sun vector is not normalised, which sets the ramp's width at thirteen rows
   rather than thirty-two. The `& 0x1F` wrap is not the original being crude;

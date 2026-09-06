@@ -404,7 +404,7 @@ namespace rwe
         const Matrix4f& viewProjectionMatrix,
         const ShaderMesh& mesh,
         const Matrix4f& matrix,
-        bool shaded,
+        float shadeStrength,
         PlayerColorIndex playerColorIndex,
         TextureIdentifier unitTextureAtlas,
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
@@ -414,11 +414,11 @@ namespace rwe
 
         if (mesh.vertices)
         {
-            batch.push_back(UnitTextureMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shaded, unitTextureAtlas});
+            batch.push_back(UnitTextureMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shadeStrength, unitTextureAtlas});
         }
         if (mesh.teamVertices)
         {
-            batch.push_back(UnitTextureMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shaded, unitTeamTextureAtlases.at(playerColorIndex.value).get()});
+            batch.push_back(UnitTextureMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shadeStrength, unitTeamTextureAtlases.at(playerColorIndex.value).get()});
         }
     }
 
@@ -450,6 +450,7 @@ namespace rwe
         const Matrix4f& modelMatrix,
         PlayerColorIndex playerColorIndex,
         float frac,
+        float shadeStrength,
         TextureIdentifier unitTextureAtlas,
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         std::vector<UnitTextureMeshRenderInfo>& out)
@@ -465,7 +466,7 @@ namespace rwe
                 continue;
             }
 
-            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], mesh.shaded, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, out);
+            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], mesh.shaded ? shadeStrength : 0.0f, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, out);
         }
     }
 
@@ -525,7 +526,7 @@ namespace rwe
         const Matrix4f& viewProjectionMatrix,
         const ShaderMesh& mesh,
         const Matrix4f& matrix,
-        bool shaded,
+        float shadeStrength,
         const BuildPhase& buildPhase,
         float unitY,
         float unitHeight,
@@ -537,11 +538,11 @@ namespace rwe
         auto mvpMatrix = viewProjectionMatrix * matrix;
         if (mesh.vertices)
         {
-            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shaded, unitTextureAtlas, unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB});
+            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shadeStrength, unitTextureAtlas, unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB});
         }
         if (mesh.teamVertices)
         {
-            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shaded, unitTeamTextureAtlases.at(playerColorIndex.value).get(), unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB});
+            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shadeStrength, unitTeamTextureAtlases.at(playerColorIndex.value).get(), unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB});
         }
     }
 
@@ -556,6 +557,7 @@ namespace rwe
         float unitY,
         PlayerColorIndex playerColorIndex,
         float frac,
+        float shadeStrength,
         TextureIdentifier unitTextureAtlas,
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitMeshBatch& batch)
@@ -571,7 +573,7 @@ namespace rwe
                 continue;
             }
 
-            drawBuildingShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], mesh.shaded, buildPhase, unitY, simScalarToFloat(modelDefinition.height), playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.buildingMeshes);
+            drawBuildingShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], mesh.shaded ? shadeStrength : 0.0f, buildPhase, unitY, simScalarToFloat(modelDefinition.height), playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.buildingMeshes);
         }
     }
 
@@ -582,7 +584,7 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         const Matrix4f& modelMatrix,
         PlayerColorIndex playerColorIndex,
-        bool shaded,
+        float shadeStrength,
         TextureIdentifier unitTextureAtlas,
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitMeshBatch& batch)
@@ -591,7 +593,7 @@ namespace rwe
 
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
-            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * renderInfo.restTransforms[i], shaded, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
+            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * renderInfo.restTransforms[i], shadeStrength, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
         }
     }
 
@@ -605,6 +607,7 @@ namespace rwe
         unsigned int unitIndex,
         unsigned int gameTime,
         float frac,
+        float shadeStrength,
         TextureIdentifier unitTextureAtlas,
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitMeshBatch& batch)
@@ -615,7 +618,7 @@ namespace rwe
         if (unit.isBeingBuilt(unitDefinition))
         {
             auto buildPhase = computeBuildPhase(unit.getPreciseCompletePercent(unitDefinition), unitIndex, gameTime);
-            drawBuildingUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, buildPhase, position.y, playerColorIndex, frac, unitTextureAtlas, unitTeamTextureAtlases, batch);
+            drawBuildingUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, buildPhase, position.y, playerColorIndex, frac, shadeStrength, unitTextureAtlas, unitTeamTextureAtlases, batch);
         }
         else
         {
@@ -624,7 +627,7 @@ namespace rwe
             // reached the batch. A nanoframe never gets here cloaked either --
             // the drain skips a unit that is still being built.
             auto& out = unit.cloaked ? batch.cloakedMeshes : batch.meshes;
-            drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, playerColorIndex, frac, unitTextureAtlas, unitTeamTextureAtlases, out);
+            drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, playerColorIndex, frac, shadeStrength, unitTextureAtlas, unitTeamTextureAtlases, out);
         }
     }
 
@@ -633,6 +636,7 @@ namespace rwe
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,
         const MapFeature& feature,
+        float shadeStrength,
         TextureIdentifier unitTextureAtlas,
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitMeshBatch& batch)
@@ -643,7 +647,7 @@ namespace rwe
         {
             const auto& modelDefinition = modelDefinitions.at(objectInfo->objectName);
             auto matrix = Matrix4f::translation(simVectorToFloat(feature.position)) * Matrix4f::rotationY(toRadians(feature.rotation).value);
-            drawProjectileUnitMesh(gameMediaDatabase, viewProjectionMatrix, objectInfo->objectName, modelDefinition, matrix, PlayerColorIndex(0), true, unitTextureAtlas, unitTeamTextureAtlases, batch);
+            drawProjectileUnitMesh(gameMediaDatabase, viewProjectionMatrix, objectInfo->objectName, modelDefinition, matrix, PlayerColorIndex(0), shadeStrength, unitTextureAtlas, unitTeamTextureAtlases, batch);
         }
     }
 
@@ -815,6 +819,7 @@ namespace rwe
         const std::string& pieceName,
         const Matrix4f& matrix,
         PlayerColorIndex playerColorIndex,
+        float shadeStrength,
         TextureIdentifier unitTextureAtlas,
         std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
         UnitMeshBatch& batch)
@@ -824,7 +829,7 @@ namespace rwe
         {
             return;
         }
-        drawShaderMesh(viewProjectionMatrix, *pieceMesh->get().mesh, matrix, true, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
+        drawShaderMesh(viewProjectionMatrix, *pieceMesh->get().mesh, matrix, shadeStrength, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
     }
 
     void drawDebrisShard(const Vector3f& position, ColoredMeshBatch& batch)
@@ -927,7 +932,7 @@ namespace rwe
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
         auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
 
-        drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, unitTextureAtlas, unitTeamTextureAtlases, out);
+        drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, 0.0f, unitTextureAtlas, unitTeamTextureAtlases, out);
     }
 
     /**
@@ -1394,7 +1399,7 @@ namespace rwe
                         * pointDirection(direction)
                         * rotationModeToMatrix(m.rotationMode);
                     const auto& modelDefinition = sim.unitModelDefinitions.at(m.objectName);
-                    drawProjectileUnitMesh(gameMediaDatabase, viewProjectionMatrix, m.objectName, modelDefinition, transform, PlayerColorIndex(0), false, unitTextureAtlas, unitTeamTextureAtlases, unitMeshBatch);
+                    drawProjectileUnitMesh(gameMediaDatabase, viewProjectionMatrix, m.objectName, modelDefinition, transform, PlayerColorIndex(0), 0.0f, unitTextureAtlas, unitTeamTextureAtlases, unitMeshBatch);
                 },
                 [&](const ProjectileRenderTypeSprite& s) {
                     Vector3f snappedPosition(

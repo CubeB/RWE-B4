@@ -813,6 +813,7 @@ set(TEST_FILES
     src/rwe/ai/AiPlayerController.test.cpp
     src/rwe/ai/AiBehaviour.test.cpp
     src/rwe/BoxTreeSplit.test.cpp
+    src/rwe/GlobalConfig.test.cpp
     src/rwe/Viewport.test.cpp
     src/rwe/cob/cob_util.test.cpp
     src/rwe/collections/MinHeap.test.cpp

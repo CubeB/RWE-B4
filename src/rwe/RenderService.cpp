@@ -198,7 +198,7 @@ namespace rwe
             {
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
-                graphics->setUniformBool(textureShader.shade, m.shaded && shadingEnabled);
+                graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -215,7 +215,7 @@ namespace rwe
                 graphics->setUniformMatrix(buildShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformFloat(buildShader.unitY, m.unitY);
                 graphics->setUniformFloat(buildShader.unitHeight, m.unitHeight);
-                graphics->setUniformBool(buildShader.shade, m.shaded && shadingEnabled);
+                graphics->setUniformFloat(buildShader.shadeStrength, m.shadeStrength);
                 graphics->setUniformFloat(buildShader.buildRatio, m.buildRatio);
                 graphics->setUniformInt(buildShader.aboveMode, static_cast<int>(m.aboveMode));
                 graphics->setUniformInt(buildShader.bandMode, static_cast<int>(m.bandMode));
@@ -248,7 +248,7 @@ namespace rwe
             {
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
-                graphics->setUniformBool(textureShader.shade, m.shaded && shadingEnabled);
+                graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -261,7 +261,7 @@ namespace rwe
             {
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
-                graphics->setUniformBool(textureShader.shade, m.shaded && shadingEnabled);
+                graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -305,7 +305,7 @@ namespace rwe
             graphics->bindShader(textureShader.handle.get());
             graphics->setUniformFloat(textureShader.seaLevel, 0.0f);
             graphics->setUniformFloat(textureShader.alpha, 1.0f);
-            graphics->setUniformBool(textureShader.shade, false);
+            graphics->setUniformFloat(textureShader.shadeStrength, 0.0f);
             for (const auto& m : batch.cutouts)
             {
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);

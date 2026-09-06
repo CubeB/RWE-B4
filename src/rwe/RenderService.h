@@ -31,7 +31,13 @@ namespace rwe
         const GlMesh* mesh;
         Matrix4f modelMatrix;
         Matrix4f mvpMatrix;
-        bool shaded;
+        /**
+         * How much of the shade table to apply: 0 leaves the texture as
+         * authored, 1 is the measured PALETTE.SHD ramp. It already has the
+         * piece's own COB shade flag and the VISUALS switch folded in, so the
+         * renderer only has to hand it to the shader.
+         */
+        float shadeStrength;
         TextureIdentifier texture;
     };
 
@@ -57,7 +63,13 @@ namespace rwe
         const GlMesh* mesh;
         Matrix4f modelMatrix;
         Matrix4f mvpMatrix;
-        bool shaded;
+        /**
+         * How much of the shade table to apply: 0 leaves the texture as
+         * authored, 1 is the measured PALETTE.SHD ramp. It already has the
+         * piece's own COB shade flag and the VISUALS switch folded in, so the
+         * renderer only has to hand it to the shader.
+         */
+        float shadeStrength;
         TextureIdentifier texture;
         float unitY;
         /** Height of the whole model, so the build fill can sweep bottom to top. */
@@ -142,18 +154,6 @@ namespace rwe
 
     class RenderService
     {
-    public:
-        /**
-         * The VISUALS page's Shading switch. The original picks between two
-         * whole rasterizer chains on it; here it gates the lighting term,
-         * and it ANDs with each piece's own COB shade flag.
-         */
-        void setShadingEnabled(bool enabled) { shadingEnabled = enabled; }
-
-    private:
-        bool shadingEnabled{true};
-
-    public:
     private:
         GraphicsContext* graphics;
         ShaderService* shaders;

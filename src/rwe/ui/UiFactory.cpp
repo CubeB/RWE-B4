@@ -311,6 +311,28 @@ namespace rwe
         return button;
     }
 
+    void UiFactory::replaceStagedButton(UiPanel& panel, const std::string& guiName, const std::string& name, const std::string& artName, const std::vector<std::string>& labels, unsigned int stage)
+    {
+        auto existing = panel.find<UiStagedButton>(name);
+        if (!existing)
+        {
+            return;
+        }
+
+        auto& button = existing->get();
+        auto x = button.getX();
+        auto y = button.getY();
+        auto width = static_cast<int>(button.getWidth());
+        auto height = static_cast<int>(button.getHeight());
+
+        panel.removeChildrenNamed(name);
+
+        auto replacement = createStagedButton(x, y, width, height, guiName, artName, labels, static_cast<unsigned int>(labels.size()));
+        replacement->setName(name);
+        replacement->setStage(stage);
+        panel.appendChild(std::move(replacement));
+    }
+
     std::unique_ptr<UiStagedButton>
     UiFactory::createStagedButton(int x, int y, int width, int height, const std::string& guiName, const std::string& name, const std::vector<std::string>& labels, unsigned int stages)
     {

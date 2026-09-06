@@ -411,7 +411,7 @@ namespace rwe
         SoundMode soundModeSetting{SoundMode::Stereo};
         UnitSpeechLevel unitSpeechSetting{UnitSpeechLevel::Full};
         unsigned int gammaSetting{100};
-        bool shadingEnabled{true};
+        ShadingMode shadingMode{ShadingMode::Both};
         bool antiAliasEnabled{true};
 
         void applyGamma();
@@ -422,6 +422,21 @@ namespace rwe
 
         /** Pushes the current settings back into the menu widgets: a staged button does not advance its own display. */
         void refreshInGameOptionControls();
+
+        /**
+         * How much of the measured PALETTE.SHD ramp a model of each kind
+         * gets: 0 for one the switch excludes, otherwise the category's own
+         * strength. See the constants in GameScene.cpp for why the two
+         * differ.
+         */
+        float shadeStrengthFor(bool isBuilding) const;
+
+        /**
+         * Rebuilds VISUALRT's two-stage SHADING gadget as a four-stage one.
+         * The GUI files are read-only game data, so a control the original
+         * does not have has to be made in code.
+         */
+        void widenShadingButton();
 
         /** Finds a control by name across every open menu panel. */
         template <typename T>

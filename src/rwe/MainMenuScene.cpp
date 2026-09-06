@@ -178,7 +178,7 @@ namespace rwe
             pendingSoundMode = static_cast<SoundMode>(sceneContext.globalConfig->soundMode);
             pendingUnitSpeech = static_cast<UnitSpeechLevel>(sceneContext.globalConfig->unitSpeech);
             pendingGamma = sceneContext.globalConfig->gamma;
-            pendingShading = sceneContext.globalConfig->shading;
+            pendingShading = static_cast<ShadingMode>(sceneContext.globalConfig->shadingMode);
             pendingAntiAlias = sceneContext.globalConfig->antiAlias;
         }
         optionsUndo = currentOptions();
@@ -245,6 +245,11 @@ namespace rwe
         goToMenu(std::move(panel));
 
         auto& active = *panelStack.back();
+
+        // The same four-state Shading switch the in-game options page has;
+        // see GameScene::widenShadingButton for why it is built in code.
+        uiFactory.replaceStagedButton(active, "STARTOPT", "SHADING", "SHADINGMODE", shadingModeLabels(), static_cast<unsigned int>(pendingShading));
+
         auto state = currentOptions();
 
         if (auto bar = active.find<UiScrollBar>("FXVOL"))
@@ -334,7 +339,7 @@ namespace rwe
         // in-game speed, meaningless from the front end.
         if (auto toggle = active.find<UiStagedButton>("SHADING"))
         {
-            toggle->get().setStage(pendingShading ? 1 : 0);
+            toggle->get().setStage(static_cast<unsigned int>(pendingShading));
         }
         if (auto toggle = active.find<UiStagedButton>("ANTI"))
         {
@@ -707,7 +712,7 @@ namespace rwe
             }
             else if (message == "SHADING")
             {
-                pendingShading = !pendingShading;
+                pendingShading = nextStage(pendingShading);
             }
             else if (message == "ANTI")
             {
@@ -859,7 +864,7 @@ namespace rwe
         }
         if (auto toggle = active.find<UiStagedButton>("SHADING"))
         {
-            toggle->get().setStage(pendingShading ? 1 : 0);
+            toggle->get().setStage(static_cast<unsigned int>(pendingShading));
         }
         if (auto toggle = active.find<UiStagedButton>("ANTI"))
         {

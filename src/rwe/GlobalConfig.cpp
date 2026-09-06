@@ -30,6 +30,55 @@ namespace rwe
         }
     }
 
+    ShadingMode nextStage(ShadingMode mode)
+    {
+        switch (mode)
+        {
+            case ShadingMode::Off:
+                return ShadingMode::UnitsOnly;
+            case ShadingMode::UnitsOnly:
+                return ShadingMode::BuildingsOnly;
+            case ShadingMode::BuildingsOnly:
+                return ShadingMode::Both;
+            default:
+                return ShadingMode::Off;
+        }
+    }
+
+    const char* shadingModeDisplayName(ShadingMode mode)
+    {
+        switch (mode)
+        {
+            case ShadingMode::Off:
+                return "Off";
+            case ShadingMode::UnitsOnly:
+                return "Units";
+            case ShadingMode::BuildingsOnly:
+                return "Buildings";
+            default:
+                return "Both";
+        }
+    }
+
+    std::vector<std::string> shadingModeLabels()
+    {
+        return {
+            shadingModeDisplayName(ShadingMode::Off),
+            shadingModeDisplayName(ShadingMode::UnitsOnly),
+            shadingModeDisplayName(ShadingMode::BuildingsOnly),
+            shadingModeDisplayName(ShadingMode::Both)};
+    }
+
+    bool shadingModeCoversUnits(ShadingMode mode)
+    {
+        return mode == ShadingMode::UnitsOnly || mode == ShadingMode::Both;
+    }
+
+    bool shadingModeCoversBuildings(ShadingMode mode)
+    {
+        return mode == ShadingMode::BuildingsOnly || mode == ShadingMode::Both;
+    }
+
     GameOptions optionsFromConfig(const GlobalConfig& config)
     {
         GameOptions options;
@@ -42,7 +91,7 @@ namespace rwe
         options.soundMode = static_cast<SoundMode>(config.soundMode);
         options.unitSpeech = static_cast<UnitSpeechLevel>(config.unitSpeech);
         options.gamma = config.gamma;
-        options.shading = config.shading;
+        options.shading = static_cast<ShadingMode>(config.shadingMode);
         options.antiAlias = config.antiAlias;
         return options;
     }
@@ -72,7 +121,7 @@ namespace rwe
                                          {"sound-mode", std::to_string(static_cast<unsigned int>(options.soundMode))},
                                          {"unit-speech", std::to_string(static_cast<unsigned int>(options.unitSpeech))},
                                          {"gamma", std::to_string(options.gamma)},
-                                         {"shading", options.shading ? "true" : "false"},
+                                         {"shading-mode", std::to_string(static_cast<unsigned int>(options.shading))},
                                          {"anti-alias", options.antiAlias ? "true" : "false"},
                                      });
     }

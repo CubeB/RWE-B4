@@ -302,7 +302,7 @@ namespace rwe
           soundModeSetting(static_cast<SoundMode>(sceneContext.globalConfig->soundMode)),
           unitSpeechSetting(static_cast<UnitSpeechLevel>(sceneContext.globalConfig->unitSpeech)),
           gammaSetting(sceneContext.globalConfig->gamma),
-          shadingEnabled(sceneContext.globalConfig->shading),
+          shadingMode(static_cast<ShadingMode>(sceneContext.globalConfig->shadingMode)),
           antiAliasEnabled(sceneContext.globalConfig->antiAlias),
           shadowsEnabled(sceneContext.globalConfig->shadows),
           scrollSpeedSetting(sceneContext.globalConfig->scrollSpeed),
@@ -1898,7 +1898,6 @@ namespace rwe
 
         const auto& viewProjectionMatrix = computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
         RenderService worldRenderService(sceneContext.graphics, sceneContext.shaders, &viewProjectionMatrix);
-        worldRenderService.setShadingEnabled(shadingEnabled);
 
         sceneContext.graphics->disableDepthBuffer();
 
@@ -2096,7 +2095,7 @@ namespace rwe
                 }
                 const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
                 const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
-                drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, simulation.gameTime.value, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+                drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, simulation.gameTime.value, interpolationFraction, shadeStrengthFor(!unitDefinition.isMobile), unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
             }
             for (const auto& [_, feature] : simulation.features)
             {
@@ -2108,7 +2107,7 @@ namespace rwe
                 {
                     continue;
                 }
-                drawMeshFeature(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+                drawMeshFeature(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, shadeStrengthFor(true), unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
             }
             for (const auto& d : debris)
             {
@@ -2119,7 +2118,7 @@ namespace rwe
                 auto position = d.position + (d.velocity * interpolationFraction);
                 auto rotation = d.rotation + (d.angularVelocity * interpolationFraction);
                 auto matrix = Matrix4f::translation(position) * Matrix4f::rotationZXY(rotation);
-                drawDebrisPiece(gameMediaDatabase, viewProjectionMatrix, d.objectName, d.pieceName, matrix, d.color, unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+                drawDebrisPiece(gameMediaDatabase, viewProjectionMatrix, d.objectName, d.pieceName, matrix, d.color, shadeStrengthFor(false), unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
             }
         }
         {
@@ -6147,8 +6146,68 @@ namespace rwe
         wireInGameOptionControls();
     }
 
+    namespace
+    {
+        /**
+         * How much of the measured PALETTE.SHD ramp each kind of model gets.
+         *
+         * The original has no such split. 0x459C70 shades every unit and
+         * every feature through one path and never reads a "is a building"
+         * flag (TOTALA-EXE-SHADING.md S:11, NOT FOUND), so this is a
+         * deliberate divergence and is recorded as one in TOTALA-EXE.md S:88.
+         *
+         * The reason to have it is that the two read differently on screen
+         * even though the arithmetic is identical. A building is a large,
+         * still, mostly flat-sided model: its faces hold one shade level
+         * across a big area, the wrap puts a whole wall near row 0, and the
+         * banding reads as deliberate. A unit is small, in motion, and
+         * shaded in world space rather than object space -- so the bands
+         * slide across it as it turns, which reads as flicker rather than
+         * form. Pulling the unit strength further down keeps the shape
+         * information and drops most of that movement.
+         *
+         * Both defaults are below 1.0, which is the fully faithful setting:
+         * at 1.0 row 0 is genuinely black, as the original's is. The two
+         * values are rwe.cfg keys (shading-strength-units,
+         * shading-strength-buildings) so the look can be tuned without a
+         * rebuild; setting both to 100 restores the original exactly.
+         */
+    }
+
+    float GameScene::shadeStrengthFor(bool isBuilding) const
+    {
+        const auto& config = *sceneContext.globalConfig;
+        if (isBuilding)
+        {
+            return shadingModeCoversBuildings(shadingMode)
+                ? static_cast<float>(config.shadingStrengthBuildings) / 100.0f
+                : 0.0f;
+        }
+        return shadingModeCoversUnits(shadingMode)
+            ? static_cast<float>(config.shadingStrengthUnits) / 100.0f
+            : 0.0f;
+    }
+
+    void GameScene::widenShadingButton()
+    {
+        // VISUALRT.GUI declares SHADING with two stages, Off|On, because the
+        // original has two whole rasterizer chains and one bit to choose
+        // between them. Splitting it by category needs four stages, and the
+        // GUI files are read-only game data with no override directory, so
+        // the gadget is rebuilt here at exactly the geometry the data gave
+        // it. openInGameOptions clears and rebuilds every panel each time it
+        // runs, so doing this unconditionally from wireInGameOptionControls
+        // is idempotent.
+        for (auto& panel : gameMenuPanels)
+        {
+            uiFactory.replaceStagedButton(*panel, "VISUALRT", "SHADING", "SHADINGMODE", shadingModeLabels(), static_cast<unsigned int>(shadingMode));
+        }
+    }
+
     void GameScene::wireInGameOptionControls()
     {
+        widenShadingButton();
+
         auto state = currentInGameOptions();
 
         if (auto bar = findInGameMenu<UiScrollBar>("FXVOL"))
@@ -6255,7 +6314,7 @@ namespace rwe
         // apply rather than letting it lie.
         if (auto toggle = findInGameMenu<UiStagedButton>("SHADING"))
         {
-            toggle->setStage(shadingEnabled ? 1 : 0);
+            toggle->setStage(static_cast<unsigned int>(shadingMode));
         }
 
         if (auto toggle = findInGameMenu<UiStagedButton>("ANTI"))
@@ -6291,7 +6350,7 @@ namespace rwe
             soundModeSetting,
             unitSpeechSetting,
             gammaSetting,
-            shadingEnabled,
+            shadingMode,
             antiAliasEnabled};
     }
 
@@ -6309,7 +6368,7 @@ namespace rwe
         audio->setSoundEnabled(state.soundMode != SoundMode::Off);
         gammaSetting = state.gamma;
         applyGamma();
-        shadingEnabled = state.shading;
+        shadingMode = state.shading;
         if (antiAliasEnabled != state.antiAlias)
         {
             antiAliasEnabled = state.antiAlias;
@@ -6517,7 +6576,7 @@ namespace rwe
             }
             else if (control == "SHADING")
             {
-                shadingEnabled = !shadingEnabled;
+                shadingMode = nextStage(shadingMode);
             }
             else if (control == "ANTI")
             {
@@ -6583,7 +6642,7 @@ namespace rwe
         }
         if (auto toggle = findInGameMenu<UiStagedButton>("SHADING"))
         {
-            toggle->setStage(shadingEnabled ? 1 : 0);
+            toggle->setStage(static_cast<unsigned int>(shadingMode));
         }
         if (auto toggle = findInGameMenu<UiStagedButton>("ANTI"))
         {

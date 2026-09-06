@@ -35,7 +35,7 @@ namespace rwe
         UniformLocation mvpMatrix;
         UniformLocation modelMatrix;
         UniformLocation seaLevel;
-        UniformLocation shade;
+        UniformLocation shadeStrength;
         UniformLocation alpha;
     };
 
@@ -54,7 +54,7 @@ namespace rwe
         UniformLocation modelMatrix;
         UniformLocation unitY;
         UniformLocation seaLevel;
-        UniformLocation shade;
+        UniformLocation shadeStrength;
         UniformLocation unitHeight;
         UniformLocation buildRatio;
         UniformLocation aboveMode;

@@ -144,7 +144,14 @@ int main(int argc, char* argv[])
             config.soundMode = std::min(2u, args.getUint("sound-mode", 2));
             config.unitSpeech = std::min(2u, args.getUint("unit-speech", 2));
             config.gamma = std::clamp(args.getUint("gamma", 100), 50u, 133u);
-            config.shading = args.getString("shading", "true") != "false";
+            // "shading" was a plain bool before the switch grew four states. An
+            // existing rwe.cfg still carries it, so it decides the default that
+            // "shading-mode" then overrides -- otherwise upgrading would silently
+            // turn shading back on for someone who had switched it off.
+            auto shadingWasOn = args.getString("shading", "true") != "false";
+            config.shadingMode = std::min(3u, args.getUint("shading-mode", shadingWasOn ? 3u : 0u));
+            config.shadingStrengthUnits = std::min(100u, args.getUint("shading-strength-units", 25));
+            config.shadingStrengthBuildings = std::min(100u, args.getUint("shading-strength-buildings", 40));
             config.antiAlias = args.getString("anti-alias", "true") != "false";
             std::optional<rwe::GameParameters> gameParameters;
             if (args.contains("load"))

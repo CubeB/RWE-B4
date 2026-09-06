@@ -26,7 +26,7 @@ namespace rwe
         SoundMode pendingSoundMode{SoundMode::Stereo};
         UnitSpeechLevel pendingUnitSpeech{UnitSpeechLevel::Full};
         unsigned int pendingGamma{100};
-        bool pendingShading{true};
+        ShadingMode pendingShading{ShadingMode::Both};
         bool pendingAntiAlias{true};
 
         /** Pushes the current settings back into the menu widgets: a staged button does not advance its own display. */
