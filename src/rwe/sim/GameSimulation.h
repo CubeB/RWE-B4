@@ -1170,6 +1170,16 @@ namespace rwe
 
         void spawnNewUnits();
 
+        /**
+         * The unit a corpse raises into, if any.
+         *
+         * The corpse's name up to its first underscore, upper-cased and
+         * looked up: ARMCK_DEAD gives ARMCK. A name with no underscore, or
+         * one whose stem names nothing, raises nothing. See
+         * TOTALA-EXE.md S:98.
+         */
+        std::optional<std::string> resurrectedUnitType(const std::string& featureName) const;
+
         void tick();
 
         std::optional<FeatureDefinitionId> tryGetFeatureDefinitionId(const std::string& featureName) const;

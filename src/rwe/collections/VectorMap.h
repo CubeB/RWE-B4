@@ -93,6 +93,12 @@ namespace rwe
         using iterator = VectorMapIter<OccupiedEntry, OccupiedEntry&, OccupiedEntry*, typename std::deque<Entry>::iterator>;
         using const_iterator = VectorMapIter<const OccupiedEntry, const OccupiedEntry&, const OccupiedEntry*, typename std::deque<Entry>::const_iterator>;
 
+        /** See growCount. Cheap enough to assert against in a hot loop. */
+        unsigned int generation() const
+        {
+            return growCount;
+        }
+
         using key_type = Id;
         using mapped_type = T;
         using value_type = OccupiedEntry;
@@ -100,6 +106,18 @@ namespace rwe
     private:
         std::deque<Entry> vec;
         std::optional<Index> firstFreeSlotIndex;
+
+        /**
+         * How many times the deque behind this map has grown.
+         *
+         * Growing is the only thing here that invalidates an iterator, and
+         * so the only thing a caller iterating the map has to care about.
+         * Filling a free slot does not, and `remove` does not erase -- it
+         * leaves a FreeEntry in place -- so neither of those disturbs a
+         * walk in progress. Derived bookkeeping: never saved, hashed or
+         * dumped, and it changes nothing about what the map contains.
+         */
+        unsigned int growCount{0};
 
     public:
         template <typename... Args>
@@ -119,6 +137,7 @@ namespace rwe
             {
                 auto id = makeId(Index(vec.size()));
                 vec.emplace_back(std::make_pair(id, T(std::forward<Args>(args)...)));
+                ++growCount;
                 return id;
             }
         }

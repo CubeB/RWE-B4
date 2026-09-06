@@ -2,6 +2,7 @@
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/SimRandom.h>
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <rwe/ai/AiPlayerController.h>
@@ -4531,6 +4532,23 @@ namespace rwe
         }
     }
 
+    std::optional<std::string> GameSimulation::resurrectedUnitType(const std::string& featureName) const
+    {
+        auto underscore = featureName.find('_');
+        if (underscore == std::string::npos || underscore == 0)
+        {
+            return std::nullopt;
+        }
+
+        auto candidate = toUpper(featureName.substr(0, underscore));
+        if (unitDefinitions.find(candidate) == unitDefinitions.end())
+        {
+            return std::nullopt;
+        }
+
+        return candidate;
+    }
+
     void GameSimulation::spawnNewUnits()
     {
         for (const auto& unitId : unitCreationRequests)
@@ -4596,6 +4614,55 @@ namespace rwe
                 }
 
                 s->status = UnitCreationStatusDone{*newUnitId};
+            }
+
+            // A resurrection asks for its unit from here for the same reason
+            // the two above do: the behaviour pass that finished the job was
+            // iterating `units`, and creating one appends to the deque behind
+            // it. Unlike those two the corpse is still standing, so the work
+            // the handler used to do inline happens here instead -- the type
+            // off the corpse's name, the position and facing off the corpse,
+            // then the corpse, then the unit. The corpse has to go first: it
+            // is `blocking`, and a unit will not be placed on an occupied
+            // footprint.
+            if (auto s = std::get_if<UnitBehaviorStateResurrecting>(&unit->get().behaviourState); s != nullptr)
+            {
+                auto featureRef = tryGetFeature(s->target);
+                if (!featureRef)
+                {
+                    continue;
+                }
+
+                const auto& feature = featureRef->get();
+                auto unitType = resurrectedUnitType(getFeatureDefinition(feature.featureName).name);
+                if (!unitType)
+                {
+                    continue;
+                }
+
+                auto position = feature.position;
+                auto rotation = feature.rotation;
+                auto owner = unit->get().owner;
+                deleteFeature(s->target);
+
+                auto newUnitId = trySpawnUnit(*unitType, owner, position, rotation);
+                if (!newUnitId)
+                {
+                    // The original prints "Unable to create any more units"
+                    // and tries again in 300 ticks, but it still has its
+                    // corpse to try with. Ours is spent, so the job ends and
+                    // the order is dropped on the next tick, when the handler
+                    // finds no feature.
+                    continue;
+                }
+
+                // 0x405219/0x405226: complete rather than a nanoframe, and on
+                // exactly one hit point -- it has to be repaired afterwards or
+                // a stiff breeze finishes it.
+                auto& newUnit = getUnitState(*newUnitId);
+                const auto& newUnitDefinition = unitDefinitions.at(newUnit.unitType);
+                newUnit.buildTimeCompleted = newUnitDefinition.buildTime;
+                newUnit.hitPoints = 1;
             }
         }
 
@@ -4698,10 +4765,27 @@ namespace rwe
         // scope because RWE_SIMPROF names its variables, one to a scope.
         {
             RWE_SIMPROF("behaviour");
+
+            // Nothing a handler does may add a unit while this walk is in
+            // progress: the map is a deque underneath, growing it invalidates
+            // the iterator the loop is holding, and the ++ that follows is
+            // undefined. Every creation path defers to spawnNewUnits for that
+            // reason and deleteDeadUnits waits its turn the same way.
+            //
+            // Nothing enforced it, which is how resurrect came to create its
+            // unit inline and stand for a day: an ordinary build survives it,
+            // and it only shows up where the standard library checks its own
+            // iterators. Worse, it hid best in the games most likely to be
+            // played -- once anything has died there is a free slot to fill,
+            // and filling one does not grow the deque or invalidate anything.
+            [[maybe_unused]] auto generationBefore = units.generation();
+
             for (auto& entry : units)
             {
                 UnitBehaviorService(this).update(entry.first);
             }
+
+            assert(units.generation() == generationBefore && "a unit was created during the behaviour pass; defer it to spawnNewUnits");
         }
 
         {

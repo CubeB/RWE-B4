@@ -3500,23 +3500,6 @@ namespace rwe
         return reclaimTarget(unitInfo, reclaimOrder.target);
     }
 
-    std::optional<std::string> UnitBehaviorService::resurrectedUnitType(const std::string& featureName) const
-    {
-        auto underscore = featureName.find('_');
-        if (underscore == std::string::npos || underscore == 0)
-        {
-            return std::nullopt;
-        }
-
-        auto candidate = toUpper(featureName.substr(0, underscore));
-        if (sim->unitDefinitions.find(candidate) == sim->unitDefinitions.end())
-        {
-            return std::nullopt;
-        }
-
-        return candidate;
-    }
-
     bool UnitBehaviorService::handleResurrectOrder(UnitInfo unitInfo, ResurrectOrder& resurrectOrder)
     {
         // 0x404E55: the capability is tested before anything else.
@@ -3541,7 +3524,7 @@ namespace rwe
             return true;
         }
 
-        auto unitType = resurrectedUnitType(featureDefinition.name);
+        auto unitType = sim->resurrectedUnitType(featureDefinition.name);
         if (!unitType)
         {
             return true;
@@ -3605,38 +3588,30 @@ namespace rwe
             return false;
         }
 
-        // 0x4050F2 onwards: the resurrector's owner, the type worked out
-        // above, the corpse's position and the orientation copied off the
-        // corpse -- then the feature goes.
-        auto position = feature.position;
-        auto rotation = feature.rotation;
-
-        // The corpse goes first, where the original creates the unit and then
-        // removes the feature (0x405104 then 0x405198). It has to: a corpse
-        // is `blocking`, and RWE refuses to place a unit on an occupied
-        // footprint, so creating first can never succeed and the order would
-        // retry for ever. Same outcome, opposite order.
-        sim->deleteFeature(resurrectOrder.target);
-
-        auto newUnitId = sim->trySpawnUnit(*unitType, unitInfo.state->owner, position, rotation);
-        if (!newUnitId)
-        {
-            // The original prints "Unable to create any more units" and tries
-            // again in 300 ticks, but it still has its corpse to try with.
-            // Ours is spent, so the order ends here.
-            return true;
-        }
-
-        // 0x405219/0x405226: complete rather than a nanoframe, and on exactly
-        // one hit point -- it has to be repaired afterwards or a stiff breeze
-        // finishes it.
-        auto& newUnit = sim->getUnitState(*newUnitId);
-        const auto& newUnitDefinition = sim->unitDefinitions.at(newUnit.unitType);
-        newUnit.buildTimeCompleted = newUnitDefinition.buildTime;
-        newUnit.hitPoints = 1;
-
-        changeState(*unitInfo.state, UnitBehaviorStateIdle());
-        return true;
+        // The work is done, but the unit is not made here. The behaviour
+        // pass is walking `units` -- a VectorMap over a std::deque -- and
+        // creating a unit appends to that deque, which invalidates the
+        // iterator the walk is holding. Every other creation in the tick
+        // already knows this: a build order and a factory roll-off both push
+        // onto unitCreationRequests and let spawnNewUnits do the work once
+        // the pass is over, and deleteDeadUnits waits its turn the same way.
+        // Resurrect was the one handler that created a unit inline.
+        //
+        // Nothing visible went wrong, which is why it stood: one append
+        // rarely moves a deque's node map, so the stale iterator usually
+        // still lands somewhere sensible. MSVC's checked iterators say so
+        // outright, and so does a _GLIBCXX_DEBUG build; an ordinary build is
+        // simply not looking.
+        //
+        // The corpse is removed over there too, and its removal is what ends
+        // this order: the next tick finds no feature and drops it. The
+        // original's own order is the other way round -- it creates the unit
+        // at 0x405104 and removes the corpse at 0x405198 -- but a corpse is
+        // `blocking` and RWE will not place a unit on an occupied footprint,
+        // so creating first could never succeed. Same outcome, opposite
+        // order.
+        sim->unitCreationRequests.push_back(unitInfo.id);
+        return false;
     }
 
     bool UnitBehaviorService::handleRepairOrder(UnitInfo unitInfo, const RepairOrder& repairOrder)

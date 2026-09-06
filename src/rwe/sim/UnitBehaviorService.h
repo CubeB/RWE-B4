@@ -85,7 +85,6 @@ namespace rwe
          * gives `armsolar`, which is what the code says whether or not it was
          * meant.
          */
-        std::optional<std::string> resurrectedUnitType(const std::string& featureName) const;
 
         bool handleRepairOrder(UnitInfo unitInfo, const RepairOrder& repairOrder);
 
