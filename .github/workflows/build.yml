@@ -5,8 +5,44 @@ on:
     tags: ['v*']
   pull_request:
     branches: [master, revival]
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
+
+# A pull request only needs its newest commit checked, and a branch push only
+# needs its newest push. Tags are exempt: a release run must not be cancelled
+# by anything, and each tag has its own ref anyway.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
+  # The launcher is platform-independent, so it is checked once here rather
+  # than three times over inside the build jobs. Those still run `npm ci` and
+  # `npm run package` where CPack needs the packaged launcher, but they no
+  # longer repeat the type check, the tests and the lint.
+  launcher:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: install node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 18
+          cache: npm
+          cache-dependency-path: launcher/package-lock.json
+      - name: install npm packages
+        working-directory: launcher
+        run: npm ci
+      - name: test launcher
+        working-directory: launcher
+        run: |
+          npm run tsc
+          npm test
+          npm run lint
+
+  # A pull request builds one configuration -- Linux gcc-14 Debug, which is
+  # the one that runs the test suite with asserts live. Everything else waits
+  # for the merge to revival, or for a `ci:full` label on the pull request.
   build-linux:
     # A job that hangs should fail in a reasonable time rather than
     # hold a runner for GitHub's six-hour default: on 2026-09-06 a
@@ -14,20 +50,9 @@ jobs:
     # hours and eighteen minutes before it was cancelled by hand.
     timeout-minutes: 60
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          - configuration: Debug
-            cc: gcc-14
-            cxx: g++-14
-          - configuration: Release
-            cc: gcc-14
-            cxx: g++-14
-          - configuration: Debug
-            cc: clang-18
-            cxx: clang++-18
-          - configuration: Release
-            cc: clang-18
-            cxx: clang++-18
+        include: ${{ fromJSON((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full')) && '[{"configuration":"Debug","cc":"gcc-14","cxx":"g++-14"},{"configuration":"Release","cc":"gcc-14","cxx":"g++-14"},{"configuration":"Debug","cc":"clang-18","cxx":"clang++-18"},{"configuration":"Release","cc":"clang-18","cxx":"clang++-18"}]' || '[{"configuration":"Debug","cc":"gcc-14","cxx":"g++-14"}]') }}
     runs-on: ubuntu-24.04
     env:
       CC: ${{ matrix.cc }}
@@ -63,35 +88,27 @@ jobs:
           path: ~/.cache/ccache
           key: ccache-${{ runner.os }}-${{ env.CC }}-${{ matrix.configuration }}-${{ github.sha }}
           restore-keys: ccache-${{ runner.os }}-${{ env.CC }}-${{ matrix.configuration }}-
-      - name: install node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 18
-          cache: npm
-          cache-dependency-path: launcher/package-lock.json
-      - name: install npm packages
-        working-directory: launcher
-        run: npm ci
-      - name: test launcher
-        working-directory: launcher
-        run: |
-          npm run tsc
-          npm test
-          npm run lint
-      - name: package launcher
-        working-directory: launcher
-        run: npm run package
+      # `git rev-parse HEAD:libs/protobuf` is the gitlink SHA the superproject
+      # records, so it names the exact protobuf the build is about to compile.
+      # It is read here rather than hashed with hashFiles, whose globs do not
+      # reliably descend into .git -- a miss there returns an empty string and
+      # collapses the key to a constant without saying so.
+      - name: identify protobuf version
+        id: protobuf-version
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD:libs/protobuf)" >> "$GITHUB_OUTPUT"
       - name: restore protobuf
         id: cache-protobuf-restore
         uses: actions/cache/restore@v5
         with:
           path: libs/_protobuf-install
-          key: ${{ runner.os }}-${{ env.CC }}-protobuf
+          key: ${{ runner.os }}-${{ env.CC }}-protobuf-${{ steps.protobuf-version.outputs.sha }}-${{ hashFiles('libs/build-protobuf.sh') }}
       - name: build protobuf
         working-directory: libs
         run: ./build-protobuf.sh
       - name: save protobuf
         id: cache-protobuf-save
+        if: steps.cache-protobuf-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: libs/_protobuf-install
@@ -154,13 +171,16 @@ jobs:
           name: RWE AppImage
           path: Robot_War_Engine-*.AppImage
           if-no-files-found: error
+
   build-windows-msvc:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full')
     # A job that hangs should fail in a reasonable time rather than
     # hold a runner for GitHub's six-hour default: on 2026-09-06 a
     # modal assertion dialog in the MSVC Debug test run sat for two
     # hours and eighteen minutes before it was cancelled by hand.
     timeout-minutes: 60
     strategy:
+      fail-fast: false
       matrix:
         configuration: [Debug, Release]
     runs-on: windows-2025-vs2026
@@ -179,12 +199,9 @@ jobs:
       - name: install npm packages
         working-directory: launcher
         run: npm ci
-      - name: test launcher
-        working-directory: launcher
-        run: |
-          npm run tsc
-          npm test
-          npm run lint
+      # CPack installs launcher/rwe-launcher-win32-x64/, so the packaged
+      # launcher is a build input here, not a check. The checks live in the
+      # `launcher` job.
       - name: package launcher
         working-directory: launcher
         run: npm run package
@@ -224,13 +241,16 @@ jobs:
           name: RWE Installer ${{ runner.os }} MSVC ${{ matrix.configuration }}
           path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}.exe
           if-no-files-found: error
+
   build-windows-mingw64:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full')
     # A job that hangs should fail in a reasonable time rather than
     # hold a runner for GitHub's six-hour default: on 2026-09-06 a
     # modal assertion dialog in the MSVC Debug test run sat for two
     # hours and eighteen minutes before it was cancelled by hand.
     timeout-minutes: 60
     strategy:
+      fail-fast: false
       matrix:
         configuration: [Debug, Release]
     runs-on: windows-2025
@@ -249,12 +269,6 @@ jobs:
       - name: install npm packages
         working-directory: launcher
         run: npm ci
-      - name: test launcher
-        working-directory: launcher
-        run: |
-          npm run tsc
-          npm test
-          npm run lint
       - name: package launcher
         working-directory: launcher
         run: npm run package
@@ -281,18 +295,28 @@ jobs:
           path: ~/.cache/ccache
           key: ccache-${{ runner.os }}-mingw64-${{ matrix.configuration }}-${{ github.sha }}
           restore-keys: ccache-${{ runner.os }}-mingw64-${{ matrix.configuration }}-
+      # `git rev-parse HEAD:libs/protobuf` is the gitlink SHA the superproject
+      # records, so it names the exact protobuf the build is about to compile.
+      # It is read here rather than hashed with hashFiles, whose globs do not
+      # reliably descend into .git -- a miss there returns an empty string and
+      # collapses the key to a constant without saying so.
+      - name: identify protobuf version
+        id: protobuf-version
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD:libs/protobuf)" >> "$GITHUB_OUTPUT"
       - name: restore protobuf
         id: cache-protobuf-restore
         uses: actions/cache/restore@v5
         with:
           path: libs/_protobuf-install
-          key: ${{ runner.os }}-mingw64-protobuf-${{ hashFiles('.git/modules/libs/protobuf/HEAD') }}
+          key: ${{ runner.os }}-mingw64-protobuf-${{ steps.protobuf-version.outputs.sha }}-${{ hashFiles('libs/build-protobuf.sh') }}
       - name: build protobuf
         working-directory: libs
         run: ./build-protobuf.sh
         shell: msys2 {0}
       - name: save protobuf
         id: cache-protobuf-save
+        if: steps.cache-protobuf-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: libs/_protobuf-install
@@ -325,9 +349,10 @@ jobs:
           name: RWE Installer ${{ runner.os }} MinGW64 ${{ matrix.configuration }}
           path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}.exe
           if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-linux, build-windows-msvc]
+    needs: [launcher, build-linux, build-windows-msvc]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
