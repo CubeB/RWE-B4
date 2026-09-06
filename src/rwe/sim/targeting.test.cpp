@@ -700,6 +700,14 @@ namespace rwe
         registerTargetingModel(sim);
         defineShooter(sim, "torpedoBoat", std::string());
         sim.unitDefinitions["torpedoBoat"].floater = true;
+
+        // A torpedo boat with no sonar cannot see a submerged submarine at
+        // all -- 0x465AC0 refuses it before any weapon rule is reached -- so
+        // without this the sub sections below would pass or fail on
+        // detection rather than on 0x49ABE3, which is what they are for.
+        // Every torpedo-armed unit in the shipped data carries sonar; this is
+        // the Shark's and both torpedo launchers'.
+        sim.unitDefinitions["torpedoBoat"].sonarDistance = 450u;
         defineTarget(sim, "enemyTank", "CORE TANK LEVEL1 NOTAIR NOTSUB", true);
         defineTarget(sim, "enemySub", "CORE UNDERWATER LEVEL1 TORP WEAPON NOTAIR", true);
         defineTarget(sim, "enemyShip", "CORE SHIP LEVEL1 NOTAIR NOTSUB", true);

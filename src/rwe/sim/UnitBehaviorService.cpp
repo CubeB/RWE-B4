@@ -123,6 +123,37 @@ namespace rwe
 
         unit.cobEnvironment->createThread("Create", std::vector<int>());
 
+        // Tell the script how long the unit takes to reload, which is what
+        // decides how long it holds an aiming pose. The original works this
+        // out while it is initialising the three weapon slots: 0x49E070 keeps
+        // the largest `reloadtime` it sees (`wdef+0xE4`, a word already
+        // multiplied by 30, so a tick count), and 0x49E14B-0x49E17A turns it
+        // into milliseconds -- `ticks * 1000`, then the magic-number divide by
+        // 30 -- before starting "SetMaxReloadTime" with it through
+        // StartScriptByName at 0x49E186. That call site is the only reference
+        // to the string anywhere in the image, and it is unconditional, so a
+        // unit with no weapons gets a zero rather than nothing.
+        //
+        // Forty-two of the 157 shipped scripts answer it, and they all do the
+        // same thing with the number: `restore_delay = time * n`, the sleep at
+        // the top of RestoreAfterDelay before the unit stows whatever aiming
+        // opened up. A script that is never told keeps the 3000 its Create()
+        // sets, and three seconds is shorter than most weapons take to
+        // reload -- CORMSHIP's rockets are 9 seconds, ARMMSHIP's 12, and both
+        // double it -- so a missile ship was shutting its hatches between
+        // shots instead of holding them open across a reload.
+        auto maxReloadTicks = 0;
+        for (const auto& weapon : unit.weapons)
+        {
+            if (!weapon)
+            {
+                continue;
+            }
+            const auto& weaponDefinition = sim->weaponDefinitions.at(weapon->weaponType);
+            maxReloadTicks = std::max(maxReloadTicks, static_cast<int>(deltaSecondsToTicks(weaponDefinition.reloadTime).value));
+        }
+        unit.cobEnvironment->createThread("SetMaxReloadTime", {(maxReloadTicks * 1000) / SimTicksPerSecond});
+
         // set speed for metal extractors
         if (unitDefinition.extractsMetal != Metal(0))
         {
@@ -305,7 +336,7 @@ namespace rwe
                     // patrol breaks off on contact and has been relied on to
                     // do that from its first tick, before visibility for the
                     // tick has been worked out.
-                    if (freeTarget && !sim->canDetectUnit(unitInfo.state->owner, *freeTarget))
+                    if (freeTarget && !sim->canSeeUnit(unitInfo.state->owner, *freeTarget))
                     {
                         freeTarget.reset();
                     }
@@ -2553,9 +2584,12 @@ namespace rwe
                 continue;
             }
 
-            // Only what the owner can see or has on radar is fair game,
-            // and a torpedo cannot reach something standing on land.
-            if (!sim->canDetectUnit(unit.owner, otherUnitId) || !weaponCanHitUnit(weaponDefinition, unit, otherUnit))
+            // Only what the owner can actually see is fair game, and a torpedo
+            // cannot reach something standing on land. Seeing it, not holding
+            // it on radar: 0x40AA40 puts every candidate through 0x465AC0
+            // before the list this scan walks is built, and that predicate
+            // never reads the radar bit.
+            if (!sim->canSeeUnit(unit.owner, otherUnitId) || !weaponCanHitUnit(weaponDefinition, unit, otherUnit))
             {
                 continue;
             }
@@ -3466,23 +3500,6 @@ namespace rwe
         return reclaimTarget(unitInfo, reclaimOrder.target);
     }
 
-    std::optional<std::string> UnitBehaviorService::resurrectedUnitType(const std::string& featureName) const
-    {
-        auto underscore = featureName.find('_');
-        if (underscore == std::string::npos || underscore == 0)
-        {
-            return std::nullopt;
-        }
-
-        auto candidate = toUpper(featureName.substr(0, underscore));
-        if (sim->unitDefinitions.find(candidate) == sim->unitDefinitions.end())
-        {
-            return std::nullopt;
-        }
-
-        return candidate;
-    }
-
     bool UnitBehaviorService::handleResurrectOrder(UnitInfo unitInfo, ResurrectOrder& resurrectOrder)
     {
         // 0x404E55: the capability is tested before anything else.
@@ -3507,7 +3524,7 @@ namespace rwe
             return true;
         }
 
-        auto unitType = resurrectedUnitType(featureDefinition.name);
+        auto unitType = sim->resurrectedUnitType(featureDefinition.name);
         if (!unitType)
         {
             return true;
@@ -3571,38 +3588,30 @@ namespace rwe
             return false;
         }
 
-        // 0x4050F2 onwards: the resurrector's owner, the type worked out
-        // above, the corpse's position and the orientation copied off the
-        // corpse -- then the feature goes.
-        auto position = feature.position;
-        auto rotation = feature.rotation;
-
-        // The corpse goes first, where the original creates the unit and then
-        // removes the feature (0x405104 then 0x405198). It has to: a corpse
-        // is `blocking`, and RWE refuses to place a unit on an occupied
-        // footprint, so creating first can never succeed and the order would
-        // retry for ever. Same outcome, opposite order.
-        sim->deleteFeature(resurrectOrder.target);
-
-        auto newUnitId = sim->trySpawnUnit(*unitType, unitInfo.state->owner, position, rotation);
-        if (!newUnitId)
-        {
-            // The original prints "Unable to create any more units" and tries
-            // again in 300 ticks, but it still has its corpse to try with.
-            // Ours is spent, so the order ends here.
-            return true;
-        }
-
-        // 0x405219/0x405226: complete rather than a nanoframe, and on exactly
-        // one hit point -- it has to be repaired afterwards or a stiff breeze
-        // finishes it.
-        auto& newUnit = sim->getUnitState(*newUnitId);
-        const auto& newUnitDefinition = sim->unitDefinitions.at(newUnit.unitType);
-        newUnit.buildTimeCompleted = newUnitDefinition.buildTime;
-        newUnit.hitPoints = 1;
-
-        changeState(*unitInfo.state, UnitBehaviorStateIdle());
-        return true;
+        // The work is done, but the unit is not made here. The behaviour
+        // pass is walking `units` -- a VectorMap over a std::deque -- and
+        // creating a unit appends to that deque, which invalidates the
+        // iterator the walk is holding. Every other creation in the tick
+        // already knows this: a build order and a factory roll-off both push
+        // onto unitCreationRequests and let spawnNewUnits do the work once
+        // the pass is over, and deleteDeadUnits waits its turn the same way.
+        // Resurrect was the one handler that created a unit inline.
+        //
+        // Nothing visible went wrong, which is why it stood: one append
+        // rarely moves a deque's node map, so the stale iterator usually
+        // still lands somewhere sensible. MSVC's checked iterators say so
+        // outright, and so does a _GLIBCXX_DEBUG build; an ordinary build is
+        // simply not looking.
+        //
+        // The corpse is removed over there too, and its removal is what ends
+        // this order: the next tick finds no feature and drops it. The
+        // original's own order is the other way round -- it creates the unit
+        // at 0x405104 and removes the corpse at 0x405198 -- but a corpse is
+        // `blocking` and RWE will not place a unit on an occupied footprint,
+        // so creating first could never succeed. Same outcome, opposite
+        // order.
+        sim->unitCreationRequests.push_back(unitInfo.id);
+        return false;
     }
 
     bool UnitBehaviorService::handleRepairOrder(UnitInfo unitInfo, const RepairOrder& repairOrder)
@@ -3793,11 +3802,45 @@ namespace rwe
         // See TOTALA-EXE.md §97.
         if (unitInfo.definition->canReclamate && unitInfo.definition->builder)
         {
-            if (auto wreck = findFeatureToAutoReclaim(unitInfo))
+            // A job, once begun, belongs to the unit until the feature is
+            // gone. The original does not leave that to a scan it runs again
+            // every tick: the patrol builds a RECLAIM mission of its own for
+            // whatever the scan picked -- 0x405CA2 allocates it, 0x405D0A
+            // names it from `0x5016C4` ("RECLAIM"), 0x405D11 initialises it
+            // and 0x405D18 pushes it in front of the patrol -- and then
+            // resets its own state (0x405D1D) and stands down. The mission
+            // owns the target from there; the scan, and the two store
+            // comparisons that gate it (S:97), are not consulted again until
+            // the job is over.
+            //
+            // RWE re-decided every tick, and a target that changes under a
+            // job in progress sends the builder through
+            // UnitBehaviorStateIdle -- which stows the nanolathe and then
+            // deploys it again for the new wreck. Anything that moved the
+            // scan's answer did it: a store creeping past the fifth that
+            // opened the scan, so the metal candidate gave way to the energy
+            // one; or simply something dying nearer than the wreck already
+            // being worked on, which in a wreck field is most of the time.
+            std::optional<FeatureId> wreck;
+            if (auto reclaimingState = std::get_if<UnitBehaviorStateReclaiming>(&unitInfo.state->behaviourState))
             {
-                // Run the ordinary reclaim machinery against it; the wreck is
-                // re-found every tick, so when it is gone the patrol resumes
-                // by itself.
+                if (auto inProgress = std::get_if<FeatureId>(&reclaimingState->target); inProgress != nullptr && sim->tryGetFeature(*inProgress))
+                {
+                    wreck = *inProgress;
+                }
+            }
+            if (!wreck)
+            {
+                wreck = findFeatureToAutoReclaim(unitInfo);
+            }
+
+            if (wreck)
+            {
+                // Run the ordinary reclaim machinery against it; when the
+                // feature is gone the job ends, the arm stows the way the
+                // original's mission teardown stows it (0x43A21E in the
+                // mission destructor, guarded on the same mission having
+                // issued StartBuilding), and the patrol resumes.
                 if (!handleReclaimOrder(unitInfo, ReclaimOrder(*wreck)))
                 {
                     return false;

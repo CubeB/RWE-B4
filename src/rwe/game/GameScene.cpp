@@ -1029,7 +1029,7 @@ namespace rwe
                 }
                 else if (auto targetId = unitOrderTargetUnit(unit); targetId)
                 {
-                    if (auto target = tryGetUnit(*targetId); target && unitIsDetectableByLocalPlayer(target->get()))
+                    if (auto target = tryGetUnit(*targetId); target && unitIsDetectableByLocalPlayer(*targetId, target->get()))
                     {
                         const auto& targetUnit = target->get();
                         const auto& targetDefinition = simulation.unitDefinitions.at(targetUnit.unitType);
@@ -1156,9 +1156,9 @@ namespace rwe
         auto worldToMinimap = worldToMinimapMatrix(simulation.terrain, minimapRect);
 
         // draw minimap dots
-        for (const auto& [_, unit] : simulation.units)
+        for (const auto& [unitId, unit] : simulation.units)
         {
-            if (!unitIsDetectableByLocalPlayer(unit) || unit.carriedBy)
+            if (!unitIsDetectableByLocalPlayer(unitId, unit) || unit.carriedBy)
             {
                 // Units riding in a transport are inside it: only the
                 // transport shows on the minimap.
@@ -2012,9 +2012,9 @@ namespace rwe
         UnitShadowMeshBatch unitShadowMeshBatch;
         {
             RWE_RENDERPROF("w.shadow.build");
-            for (const auto& [_, unit] : simulation.units)
+            for (const auto& [unitId, unit] : simulation.units)
             {
-                if (!unitIsVisibleToLocalPlayer(unit))
+                if (!unitIsVisibleToLocalPlayer(unitId, unit))
                 {
                     continue;
                 }
@@ -2086,7 +2086,7 @@ namespace rwe
             RWE_RENDERPROF("w.unit.build");
             for (const auto& [unitId, unit] : simulation.units)
             {
-                if (!unitIsVisibleToLocalPlayer(unit))
+                if (!unitIsVisibleToLocalPlayer(unitId, unit))
                 {
                     continue;
                 }
@@ -2142,7 +2142,7 @@ namespace rwe
             ColoredMeshBatch wireframeBatch;
             for (const auto& [unitId, unit] : simulation.units)
             {
-                if (!unitIsVisibleToLocalPlayer(unit))
+                if (!unitIsVisibleToLocalPlayer(unitId, unit))
                 {
                     continue;
                 }
@@ -2168,7 +2168,7 @@ namespace rwe
         UnitMeshBatch meshProjectilesBatch;
         {
             RWE_RENDERPROF("w.projectiles");
-            drawProjectiles(simulation, gameMediaDatabase, viewProjectionMatrix, simulation.projectiles, simulation.gameTime, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, lineProjectilesBatch, spriteProjectilesBatch, meshProjectilesBatch);
+            drawProjectiles(simulation, localPlayerVisibility(), gameMediaDatabase, viewProjectionMatrix, simulation.projectiles, simulation.gameTime, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, lineProjectilesBatch, spriteProjectilesBatch, meshProjectilesBatch);
             worldRenderService.drawBatch(lineProjectilesBatch, viewProjectionMatrix);
             worldRenderService.drawUnitMeshBatch(meshProjectilesBatch, simScalarToFloat(seaLevel));
             worldRenderService.drawSpriteBatch(spriteProjectilesBatch);
@@ -5204,35 +5204,23 @@ namespace rwe
         }
     }
 
-    void GameScene::spawnWeaponImpactExplosion(const Vector3f& position, const std::string& weaponType, ImpactType impactType)
+    void GameScene::spawnWeaponImpactExplosion(const Vector3f& position, const std::string& weaponType, ImpactType impactType, bool positionVisible)
     {
         const auto& weaponMediaInfo = gameMediaDatabase.getWeapon(weaponType);
+        auto effects = computeWeaponImpactEffects(weaponMediaInfo, impactType, positionVisible);
 
-        switch (impactType)
+        if (effects.explosion)
         {
-            case ImpactType::Normal:
-            {
-                if (weaponMediaInfo.explosionAnim)
-                {
-                    spawnExplosion(position, *weaponMediaInfo.explosionAnim);
-                }
-                if (weaponMediaInfo.endSmoke)
-                {
-                    createLightSmoke(position);
-                }
-                break;
-            }
-            case ImpactType::Water:
-            {
-                if (weaponMediaInfo.waterExplosionAnim)
-                {
-                    spawnExplosion(position, *weaponMediaInfo.waterExplosionAnim);
-                }
-                break;
-            }
+            spawnExplosion(position, *effects.explosion);
         }
-
-        spawnFlash(position);
+        if (effects.smoke)
+        {
+            createLightSmoke(position);
+        }
+        if (effects.flash)
+        {
+            spawnFlash(position);
+        }
     }
 
     void GameScene::onChannelFinished(int channel)
@@ -5489,7 +5477,7 @@ namespace rwe
                 // units and enemies you can see or have on radar. Asking the
                 // same predicate the dots are drawn with, rather than the
                 // simulation's own detection test, is what makes that true.
-                if (!unitIsDetectableByLocalPlayer(unit))
+                if (!unitIsDetectableByLocalPlayer(unitId, unit))
                 {
                     continue;
                 }
@@ -5566,7 +5554,7 @@ namespace rwe
 
         for (const auto& entry : simulation.units)
         {
-            if (!unitIsVisibleToLocalPlayer(entry.second))
+            if (!unitIsVisibleToLocalPlayer(entry.first, entry.second))
             {
                 // What cannot be seen cannot be clicked.
                 continue;
@@ -6699,7 +6687,7 @@ namespace rwe
         return *revealedVisibility;
     }
 
-    bool GameScene::unitIsVisibleToLocalPlayer(const UnitState& unit) const
+    bool GameScene::unitIsVisibleToLocalPlayer(UnitId unitId, const UnitState& unit) const
     {
         // Stowed inside a ship's hold (attached to no piece): out of sight until unloaded.
         if (unit.carriedBy && unit.carriedPiece.empty())
@@ -6710,18 +6698,50 @@ namespace rwe
             }
         }
 
-        // Same three questions the original's draw predicate asks, in the same
-        // order: whose it is, whether it is cloaked, and only then whether the
-        // ground under it is lit. It has to agree with the simulation's
-        // canSeeUnit or a cloaked unit would be drawn to an enemy who cannot
-        // target it.
+        // The same questions the original's draw predicate asks, in the same
+        // order: whose it is, whether it is cloaked, whether anything of it
+        // breaks the surface, and only then whether the ground under it is
+        // lit. It has to agree with the simulation's canSeeUnit or a unit
+        // would be drawn to an enemy who cannot target it.
+        //
+        // The waterline question is the sonar one. 0x465AC0 refuses a unit
+        // whose model is entirely below sea level unless the viewer holds it
+        // on sonar, so a submarine is drawn to a destroyer and not to a
+        // Peewee standing on the beach beside it.
+        // Skipped with the fog off, which is a fully lit map and not a second
+        // way of drawing one: nothing may stay hidden under it.
+        if (fogOfWarEnabled && !unit.isOwnedBy(localPlayerId))
+        {
+            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+            if (unit.position.y + simulation.modelHeightOf(unitDefinition) < simulation.terrain.getSeaLevel())
+            {
+                const auto& heard = simulation.playerVisibility.at(localPlayerId.value).sonarContacts;
+                if (heard.find(unitId) == heard.end())
+                {
+                    return false;
+                }
+            }
+        }
+
         auto style = computeUnitDrawStyle(unit.isOwnedBy(localPlayerId), unit.cloaked, positionIsVisibleToLocalPlayer(unit.position));
         return style != UnitDrawStyle::Hidden;
     }
 
-    bool GameScene::unitIsDetectableByLocalPlayer(const UnitState& unit) const
+    bool GameScene::unitIsDetectableByLocalPlayer(UnitId unitId, const UnitState& unit) const
     {
-        return unitIsVisibleToLocalPlayer(unit) || simulation.isOnRadarOf(localPlayerId, unit.position);
+        if (unitIsVisibleToLocalPlayer(unitId, unit))
+        {
+            return true;
+        }
+
+        // 0x466E6A: the minimap draws on either raw contact bit. The contact
+        // sets are used rather than a plain range test against the dishes so
+        // that the dot obeys the same stealth, jamming and waterline rules the
+        // detection pass applied -- a submarine gets a dot from sonar and not
+        // from a radar dish that cannot hear it.
+        const auto& visibility = simulation.playerVisibility.at(localPlayerId.value);
+        return visibility.radarContacts.find(unitId) != visibility.radarContacts.end()
+            || visibility.sonarContacts.find(unitId) != visibility.sonarContacts.end();
     }
 
     bool GameScene::positionIsExploredByLocalPlayer(const SimVector& position) const
@@ -6731,7 +6751,7 @@ namespace rwe
 
     bool GameScene::positionIsVisibleToLocalPlayer(const SimVector& position) const
     {
-        return localPlayerVisibility().isVisible(simulation.visionCellAt(position));
+        return effectIsVisibleToPlayer(simulation, localPlayerVisibility(), position);
     }
 
     std::optional<SimVector> GameScene::plannedBuildOrderAt(UnitId unitId, const SimVector& position) const
@@ -6849,7 +6869,11 @@ namespace rwe
 
     void GameScene::spawnDebris(const PieceExplodedEvent& e)
     {
-        if (!positionIsVisibleToLocalPlayer(e.position))
+        // Own units first, then the ground, as the death explosion beside it
+        // does: the exploding unit has already been taken off the vision grid
+        // when this is read, so a position test alone would swallow the last
+        // of your own building in the dark.
+        if (e.owner != localPlayerId && !positionIsVisibleToLocalPlayer(e.position))
         {
             return;
         }
@@ -7282,7 +7306,14 @@ namespace rwe
                 auto gameTime = getGameTime();
                 if (gameTime > projectile.lastSmoke + *weaponMediaInfo.smokeTrail)
                 {
-                    createLightSmoke(simVectorToFloat(projectile.position));
+                    // The beat is kept whether or not the puff is drawn, so
+                    // that lastSmoke -- which is simulation state, saved with
+                    // the projectile -- says the same thing on every client
+                    // however much of the map each of them can see.
+                    if (positionIsVisibleToLocalPlayer(projectile.position))
+                    {
+                        createLightSmoke(simVectorToFloat(projectile.position));
+                    }
                     projectile.lastSmoke = gameTime;
                 }
             }
@@ -7323,7 +7354,7 @@ namespace rwe
                         playWeaponStartSound(simVectorToFloat(e.firePoint), e.weaponType);
                     }
 
-                    if (e.shotNumber == 0 && weaponMediaInfo.startSmoke)
+                    if (e.shotNumber == 0 && weaponMediaInfo.startSmoke && positionIsVisibleToLocalPlayer(e.firePoint))
                     {
                         createWeaponSmoke(simVectorToFloat(e.firePoint));
                     }
@@ -7437,20 +7468,31 @@ namespace rwe
                     }
 
 
+                    // A death is asked the same question the original's draw
+                    // predicate asks of a live unit, in the same order: one of
+                    // your own passes before line of sight is consulted
+                    // (0x465AD7, S:17). It has to be asked of the owner rather
+                    // than of the ground, because the dead unit's own sight
+                    // has already been taken off the grid by the time this is
+                    // read -- deleteDeadUnits runs before updateVisibility --
+                    // so a lone scout dying in the dark would otherwise go
+                    // without so much as a flash.
+                    auto deathIsVisible = (e.owner && *e.owner == localPlayerId) || positionIsVisibleToLocalPlayer(e.position);
+
                     const auto& selfDestructExplosion = unitDefinition.selfDestructAs.empty() ? unitDefinition.explodeAs : unitDefinition.selfDestructAs;
                     switch (e.deathType)
                     {
                         case UnitDiedEvent::DeathType::NormalExploded:
                             if (!unitDefinition.explodeAs.empty())
                             {
-                                doProjectileImpact(e.position, unitDefinition.explodeAs, ImpactType::Normal);
+                                doProjectileImpact(e.position, unitDefinition.explodeAs, ImpactType::Normal, deathIsVisible);
                                 addScreenShakeFromWeapon(gameMediaDatabase.getWeapon(unitDefinition.explodeAs));
                             }
                             break;
                         case UnitDiedEvent::DeathType::WaterExploded:
                             if (!unitDefinition.explodeAs.empty())
                             {
-                                doProjectileImpact(e.position, unitDefinition.explodeAs, ImpactType::Water);
+                                doProjectileImpact(e.position, unitDefinition.explodeAs, ImpactType::Water, deathIsVisible);
                                 addScreenShakeFromWeapon(gameMediaDatabase.getWeapon(unitDefinition.explodeAs));
                             }
                             break;
@@ -7465,7 +7507,7 @@ namespace rwe
                             }
                             if (!selfDestructExplosion.empty())
                             {
-                                doProjectileImpact(e.position, selfDestructExplosion, ImpactType::Normal);
+                                doProjectileImpact(e.position, selfDestructExplosion, ImpactType::Normal, deathIsVisible);
                                 addScreenShakeFromWeapon(gameMediaDatabase.getWeapon(selfDestructExplosion));
                             }
                             break;
@@ -7504,12 +7546,12 @@ namespace rwe
                     // trail -- but the projectile itself is still in the air,
                     // so nothing here may treat it as finished.
                     const auto& weaponMediaInfo = gameMediaDatabase.getWeapon(e.weaponType);
-                    doProjectileImpact(e.position, e.weaponType, e.inWater ? ImpactType::Water : ImpactType::Normal);
+                    doProjectileImpact(e.position, e.weaponType, e.inWater ? ImpactType::Water : ImpactType::Normal, positionIsVisibleToLocalPlayer(e.position));
                     addScreenShakeFromWeapon(weaponMediaInfo);
                 },
                 [&](const ProjectileDiedEvent& e) {
                     const auto& weaponMediaInfo = gameMediaDatabase.getWeapon(e.weaponType);
-                    if (weaponMediaInfo.endSmoke)
+                    if (weaponMediaInfo.endSmoke && positionIsVisibleToLocalPlayer(e.position))
                     {
                         createLightSmoke(simVectorToFloat(e.position));
                     }
@@ -7517,11 +7559,11 @@ namespace rwe
                     switch (e.deathType)
                     {
                         case ProjectileDiedEvent::DeathType::NormalImpact:
-                            doProjectileImpact(e.position, e.weaponType, ImpactType::Normal);
+                            doProjectileImpact(e.position, e.weaponType, ImpactType::Normal, positionIsVisibleToLocalPlayer(e.position));
                             addScreenShakeFromWeapon(weaponMediaInfo);
                             break;
                         case ProjectileDiedEvent::DeathType::WaterImpact:
-                            doProjectileImpact(e.position, e.weaponType, ImpactType::Water);
+                            doProjectileImpact(e.position, e.weaponType, ImpactType::Water, positionIsVisibleToLocalPlayer(e.position));
                             addScreenShakeFromWeapon(weaponMediaInfo);
                             break;
                         case ProjectileDiedEvent::DeathType::OutOfBounds:
@@ -7596,10 +7638,14 @@ namespace rwe
             flashes.end());
     }
 
-    void GameScene::doProjectileImpact(const SimVector& position, const std::string& weaponType, ImpactType impactType)
+    void GameScene::doProjectileImpact(const SimVector& position, const std::string& weaponType, ImpactType impactType, bool visible)
     {
+        // The sound is not gated. It is played on a channel with no position
+        // in it at all (see playSoundAt), so it is already the whole map's
+        // noise rather than something the fog could hide; what a blast must
+        // not do is *light* ground the player has not seen.
         playWeaponImpactSound(simVectorToFloat(position), weaponType, impactType);
-        spawnWeaponImpactExplosion(simVectorToFloat(position), weaponType, impactType);
+        spawnWeaponImpactExplosion(simVectorToFloat(position), weaponType, impactType, visible);
     }
 
     void GameScene::createLightSmoke(const Vector3f& position)
@@ -7615,12 +7661,24 @@ namespace rwe
 
     void GameScene::emitLightSmokeFromPiece(UnitId unitId, const std::string& pieceName)
     {
+        // Same gate as the wakes and the exhaust below: the original refuses
+        // every emit-sfx for a unit the local player cannot see (0x480EEA),
+        // and the damage smoke of types 257 and 258 goes through that same
+        // dispatch. A burning enemy behind the fog gave itself away.
+        if (!positionIsVisibleToLocalPlayer(getUnit(unitId).position))
+        {
+            return;
+        }
         auto position = simulation.getUnitPiecePosition(unitId, pieceName);
         spawnSmokePuff(simVectorToFloat(position), "smoke 1", 0.5f);
     }
 
     void GameScene::emitBlackSmokeFromPiece(UnitId unitId, const std::string& pieceName)
     {
+        if (!positionIsVisibleToLocalPlayer(getUnit(unitId).position))
+        {
+            return;
+        }
         auto position = simulation.getUnitPiecePosition(unitId, pieceName);
         spawnSmokePuff(simVectorToFloat(position), "smoke 2", 0.5f);
     }
@@ -8826,10 +8884,10 @@ namespace rwe
 
     void GameScene::spawnNanoParticles()
     {
-        for (const auto& [_, unit] : simulation.units)
+        for (const auto& [unitId, unit] : simulation.units)
         {
             auto nanolatheTarget = unit.getActiveNanolatheTarget();
-            if (!nanolatheTarget || !unitIsVisibleToLocalPlayer(unit))
+            if (!nanolatheTarget || !unitIsVisibleToLocalPlayer(unitId, unit))
             {
                 continue;
             }

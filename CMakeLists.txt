@@ -821,6 +821,8 @@ set(TEST_FILES
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/cloakdisplay.test.cpp
     src/rwe/game/damagesmoke.test.cpp
+    src/rwe/game/fogeffects.test.cpp
+    src/rwe/test_announce.cpp
     src/rwe/test_crt_silence.cpp
     src/rwe/game/exploredgrid.test.cpp
     src/rwe/game/hoveredfeature.test.cpp
@@ -919,6 +921,7 @@ set(TEST_FILES
     src/rwe/sim/targeting.test.cpp
     src/rwe/sim/targetsearch.test.cpp
     src/rwe/sim/turret.test.cpp
+    src/rwe/sim/maxreloadtime.test.cpp
     src/rwe/sim/SimRandom.test.cpp
     src/rwe/sim/resurrect.test.cpp
     src/rwe/sim/saveload.test.cpp

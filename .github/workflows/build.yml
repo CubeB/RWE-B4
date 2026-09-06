@@ -2,11 +2,34 @@ name: Build
 on:
   push:
     branches: [master, gh-actions, revival]
-    tags: ['v*']
+    # A change to prose does not need eight machines to agree about it.
+    # Anything touching code, shaders, the build or the workflow itself
+    # still builds -- a commit only skips if every file in it is listed
+    # here.
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
   pull_request:
     branches: [master, revival]
+    # `labeled` is here only so that adding ci:full re-runs CI without
+    # needing an empty push behind it. Every job then asks which label it
+    # was, so no other label costs anything: the run is created and every
+    # job in it is skipped.
     types: [opened, synchronize, reopened, labeled]
+    # A change to prose does not need eight machines to agree about it.
+    # Anything touching code, shaders, the build or the workflow itself
+    # still builds -- a commit only skips if every file in it is listed
+    # here.
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
   workflow_dispatch:
+  # release.yml calls this on a tag, where no path filter applies.
+  workflow_call:
 
 # A pull request only needs its newest commit checked, and a branch push only
 # needs its newest push. Tags are exempt: a release run must not be cancelled
@@ -21,6 +44,9 @@ jobs:
   # `npm run package` where CPack needs the packaged launcher, but they no
   # longer repeat the type check, the tests and the lint.
   launcher:
+    # `labeled` is in the trigger list so that adding ci:full re-runs CI without
+    # needing an empty push behind it. Any other label should not.
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:full'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -44,6 +70,9 @@ jobs:
   # the one that runs the test suite with asserts live. Everything else waits
   # for the merge to revival, or for a `ci:full` label on the pull request.
   build-linux:
+    # `labeled` is in the trigger list so that adding ci:full re-runs CI without
+    # needing an empty push behind it. Any other label should not.
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:full'
     # A job that hangs should fail in a reasonable time rather than
     # hold a runner for GitHub's six-hour default: on 2026-09-06 a
     # modal assertion dialog in the MSVC Debug test run sat for two
@@ -121,6 +150,8 @@ jobs:
           make -j 4
           popd
       - name: test rwe
+        env:
+          RWE_TEST_ANNOUNCE: 1
         run: ./build/rwe_test --durations yes
       - name: build AppImage
         if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
@@ -173,7 +204,15 @@ jobs:
           if-no-files-found: error
 
   build-windows-msvc:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full')
+    # Two questions, and both must pass. Which label was just added, if
+    # this was a label at all -- only ci:full starts anything, so putting
+    # any other label on a pull request that already carries ci:full does
+    # not set the Windows matrix going again. And then the ordinary one:
+    # is this a push, or a pull request that asked for the full matrix.
+    if: |
+      (github.event.action != 'labeled' || github.event.label.name == 'ci:full')
+      && (github.event_name != 'pull_request'
+          || contains(github.event.pull_request.labels.*.name, 'ci:full'))
     # A job that hangs should fail in a reasonable time rather than
     # hold a runner for GitHub's six-hour default: on 2026-09-06 a
     # modal assertion dialog in the MSVC Debug test run sat for two
@@ -223,19 +262,25 @@ jobs:
           cd ..
       - name: test rwe
         working-directory: build
-        run: |
-          .\${{ matrix.configuration }}\rwe_test.exe --list-tests
-          .\${{ matrix.configuration }}\rwe_test.exe --durations yes
+        env:
+          RWE_TEST_ANNOUNCE: 1
+        run: .\${{ matrix.configuration }}\rwe_test.exe --durations yes
+      # Release only: nothing downloads a Debug installer -- the release job
+      # takes the MSVC Release pair and the AppImage -- and building one costs
+      # about four minutes a job.
       - name: package rwe
+        if: matrix.configuration == 'Release'
         working-directory: build
         run: cmake --build . --target package --config ${{ matrix.configuration }} --parallel 4
       - name: upload zip artifact
+        if: matrix.configuration == 'Release'
         uses: actions/upload-artifact@v6
         with:
           name: RWE Zip ${{ runner.os }} MSVC ${{ matrix.configuration }}
           path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}.zip
           if-no-files-found: error
       - name: upload installer artifact
+        if: matrix.configuration == 'Release'
         uses: actions/upload-artifact@v6
         with:
           name: RWE Installer ${{ runner.os }} MSVC ${{ matrix.configuration }}
@@ -243,7 +288,15 @@ jobs:
           if-no-files-found: error
 
   build-windows-mingw64:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full')
+    # Two questions, and both must pass. Which label was just added, if
+    # this was a label at all -- only ci:full starts anything, so putting
+    # any other label on a pull request that already carries ci:full does
+    # not set the Windows matrix going again. And then the ordinary one:
+    # is this a push, or a pull request that asked for the full matrix.
+    if: |
+      (github.event.action != 'labeled' || github.event.label.name == 'ci:full')
+      && (github.event_name != 'pull_request'
+          || contains(github.event.pull_request.labels.*.name, 'ci:full'))
     # A job that hangs should fail in a reasonable time rather than
     # hold a runner for GitHub's six-hour default: on 2026-09-06 a
     # modal assertion dialog in the MSVC Debug test run sat for two
@@ -331,19 +384,27 @@ jobs:
         shell: msys2 {0}
       - name: test rwe
         working-directory: build
+        env:
+          RWE_TEST_ANNOUNCE: 1
         run: ./rwe_test --durations yes
         shell: msys2 {0}
+      # Release only: nothing downloads a Debug installer -- the release job
+      # takes the MSVC Release pair and the AppImage -- and building one costs
+      # about four minutes a job.
       - name: package rwe
+        if: matrix.configuration == 'Release'
         working-directory: build
         run: make package
         shell: msys2 {0}
       - name: upload zip artifact
+        if: matrix.configuration == 'Release'
         uses: actions/upload-artifact@v6
         with:
           name: RWE Zip ${{ runner.os }} MinGW64 ${{ matrix.configuration }}
           path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}.zip
           if-no-files-found: error
       - name: upload installer artifact
+        if: matrix.configuration == 'Release'
         uses: actions/upload-artifact@v6
         with:
           name: RWE Installer ${{ runner.os }} MinGW64 ${{ matrix.configuration }}

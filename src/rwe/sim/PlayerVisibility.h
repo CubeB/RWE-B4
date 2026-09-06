@@ -90,11 +90,28 @@ namespace rwe
         std::vector<RadarJammer> radarJammers;
 
         /**
-         * Units currently inside one of those dishes' reach. Rebuilt every
-         * tick. Only ever queried by id, never iterated, so its ordering does
-         * not reach the simulation.
+         * Units currently inside one of those dishes' reach, kept apart the
+         * way the original keeps them apart: `unit+0x110` bit 8 for radar and
+         * bit 9 for sonar, set by two different arms of the same visitor at
+         * 0x467840 and erased by two different jammers.
+         *
+         * They are kept apart here because the two are read for different
+         * things. Radar feeds the picture and nothing else -- the minimap dot,
+         * and no simulation decision at all. Sonar is read by the can-see
+         * predicate at 0x465AC0, where it lifts the veto that would otherwise
+         * hide anything below the waterline.
+         *
+         * Both are rebuilt every tick and only ever queried by id, never
+         * iterated, so their ordering does not reach the simulation.
+         *
+         * Derived state, and deliberately so: they are recomputed from the
+         * unit list and the dish list at the top of every tick, so they are
+         * neither saved, nor hashed, nor dumped. Nothing here is state a load
+         * would have to restore -- the first tick after a load rebuilds it --
+         * which is what keeps them outside the four-places rule.
          */
         std::unordered_set<UnitId> radarContacts;
+        std::unordered_set<UnitId> sonarContacts;
 
         PlayerVisibility() = default;
         PlayerVisibility(int width, int height);

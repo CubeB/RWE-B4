@@ -169,10 +169,17 @@ namespace rwe
             // ticks of work. This is the one job of the three that scales
             // with the builder: capture does not, and neither does reclaim.
             //
-            // Two ticks either side of the work itself: one to take up the
-            // job and get the arms out, as reclaim and build also spend, and
-            // one on which the unit is finally placed.
-            REQUIRE(ticks == 374 + 2);
+            // Three ticks around the work itself. One to take up the job and
+            // get the arms out, as reclaim and build also spend. One on which
+            // the work finishes and the unit is asked for -- it is placed
+            // later in that same tick, after the behaviour pass, which is
+            // where every creation in the tick happens. And one more on which
+            // the order looks for its corpse, finds it gone and ends.
+            //
+            // The third is the price of not creating a unit inside the loop
+            // that is walking the units, and it is the same tick a build
+            // order spends waiting for the same machinery.
+            REQUIRE(ticks == 374 + 3);
         }
     }
 

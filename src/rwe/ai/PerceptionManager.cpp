@@ -13,7 +13,7 @@ namespace rwe
             auto unitRef = sim.tryGetUnitState(it->second.unitId);
             auto dead = !unitRef || unitRef->get().isDead();
             auto lookedAndGone = !dead
-                && !sim.canDetectUnit(aiOwner, it->second.unitId)
+                && !sim.canSeeUnit(aiOwner, it->second.unitId)
                 && sim.isVisibleTo(aiOwner, it->second.lastKnownPosition);
             if (dead || lookedAndGone)
             {
@@ -25,14 +25,18 @@ namespace rwe
             }
         }
 
-        // Record everything we can currently detect.
+        // Record everything we can currently see. The computer player and the
+        // weapon scan read the same list in the original -- 0x40AA40 builds
+        // it once per player and both walk it -- so the AI is held to the same
+        // predicate, 0x465AC0, and does not get to act on radar contacts a
+        // turret would not shoot at.
         for (const auto& [unitId, unit] : sim.units)
         {
             if (unit.isDead() || unit.isOwnedBy(aiOwner))
             {
                 continue;
             }
-            if (!profile.cheatModeOmniscient && !sim.canDetectUnit(aiOwner, unitId))
+            if (!profile.cheatModeOmniscient && !sim.canSeeUnit(aiOwner, unitId))
             {
                 continue;
             }

@@ -1,0 +1,18 @@
+name: Release
+
+# Tags live here rather than in build.yml so that no path filter can ever
+# stand between a tag and its release build. GitHub's documentation does not
+# say whether `paths-ignore` is evaluated for a tag push, and a release that
+# silently never builds is not a thing to discover at release time.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: write

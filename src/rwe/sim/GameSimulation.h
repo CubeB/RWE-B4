@@ -765,10 +765,25 @@ namespace rwe
          */
         bool isOnRadarOf(PlayerId player, const SimVector& position) const;
 
-        /** True for the viewer's own units, and for other units standing in the viewer's line of sight. */
+        /**
+         * The original's one can-see predicate, 0x465AC0: true for the
+         * viewer's own units, and for another player's unit that is not
+         * cloaked, is either breaking the surface or held on the viewer's
+         * sonar, and stands in the viewer's line of sight.
+         *
+         * This is the predicate every simulation decision about who can be
+         * engaged goes through, because in the original both the weapon scan
+         * and the computer player pick out of a list built with it.
+         */
         bool canSeeUnit(PlayerId viewer, UnitId unitId) const;
 
-        /** True when the unit can be seen, or is a radar or sonar contact. */
+        /**
+         * True when the unit can be seen, or is a bare radar or sonar contact.
+         *
+         * This is the player's picture -- what the minimap draws -- and not
+         * something the simulation may act on: a radar contact is a blip, not
+         * a target. Use canSeeUnit for anything that decides an outcome.
+         */
         bool canDetectUnit(PlayerId viewer, UnitId unitId) const;
 
         /**
@@ -1154,6 +1169,16 @@ namespace rwe
         void deleteDeadProjectiles();
 
         void spawnNewUnits();
+
+        /**
+         * The unit a corpse raises into, if any.
+         *
+         * The corpse's name up to its first underscore, upper-cased and
+         * looked up: ARMCK_DEAD gives ARMCK. A name with no underscore, or
+         * one whose stem names nothing, raises nothing. See
+         * TOTALA-EXE.md S:98.
+         */
+        std::optional<std::string> resurrectedUnitType(const std::string& featureName) const;
 
         void tick();
 

@@ -2,6 +2,7 @@
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/SimRandom.h>
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <rwe/ai/AiPlayerController.h>
@@ -1125,7 +1126,10 @@ namespace rwe
         unit.selfDestructTime = std::nullopt;
         getPlayer(unit.owner).unitsLost += 1;
 
-        events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::SelfDestructed});
+        // The owner is filled in like any other death: the scene needs it to
+        // decide whether the blast is one the local player is entitled to
+        // see, and by the time it reads the event the unit is gone.
+        events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::SelfDestructed, unit.owner});
 
         const auto& explosion = unitDefinition.selfDestructAs.empty() ? unitDefinition.explodeAs : unitDefinition.selfDestructAs;
         if (!explosion.empty())
@@ -1331,38 +1335,79 @@ namespace rwe
 
     bool GameSimulation::canSeeUnit(PlayerId viewer, UnitId unitId) const
     {
+        // 0x465AC0 in full, in its own order. It is the original's only
+        // "can this player see that unit" question: the world render's draw
+        // list is built through it, and so is the enemy list the weapon scan
+        // and the computer player both choose their targets out of.
         const auto& unit = getUnitState(unitId);
+
+        // 0x465ACE: own units pass before anything else is looked at.
         if (unit.isOwnedBy(viewer))
         {
             return true;
         }
 
-        // A cloaked unit is out of sight however well lit the ground under it
-        // is. The original asks this in the same order, own units first, in the
-        // predicate that decides whether to draw a unit at all.
-        return !unit.cloaked && isVisibleTo(viewer, unit.position);
-    }
-
-    bool GameSimulation::canDetectUnit(PlayerId viewer, UnitId unitId) const
-    {
-        const auto& unit = getUnitState(unitId);
-        if (unit.isOwnedBy(viewer))
-        {
-            return true;
-        }
-
+        // 0x465AE8: cloak is rejected next, however well lit the ground under
+        // the unit is.
         if (unit.cloaked)
         {
             return false;
         }
 
-        if (isVisibleTo(viewer, unit.position))
+        // 0x465B38. Sonar is a veto lifted, not a contact granted. With the
+        // sonar bit clear, a unit whose model does not break the surface is
+        // refused at 0x465B50 without the fog grid being consulted at all;
+        // with it set, the unit simply carries on to the same line-of-sight
+        // test everything else faces. That is why every sub-hunter in the
+        // shipped data carries sonar reaching at least as far as it can shoot,
+        // and why a sonar station's 1180 buys a picture rather than a target.
+        //
+        // "Below the surface" is measured to the top of the model, the same
+        // y + def+0x16E the detection visitor uses to decide that a unit is a
+        // radar contact rather than a sonar one, so the two can never disagree
+        // about which side of the waterline a unit is on.
+        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        if (unit.position.y + modelHeightOf(unitDefinition) < terrain.getSeaLevel())
+        {
+            const auto& heard = playerVisibility.at(viewer.value).sonarContacts;
+            if (heard.find(unitId) == heard.end())
+            {
+                return false;
+            }
+        }
+
+        // 0x465B6A onwards: the fog grid, asked of each corner of the unit's
+        // footprint in turn. RWE asks it once, of the unit's position.
+        return isVisibleTo(viewer, unit.position);
+    }
+
+    bool GameSimulation::canDetectUnit(PlayerId viewer, UnitId unitId) const
+    {
+        // Everything the player's picture shows, which is a wider thing than
+        // anything the simulation is allowed to act on: what can be seen, plus
+        // the raw radar and sonar contacts that put a dot on the minimap at
+        // 0x466DC0 and nowhere else.
+        //
+        // Nothing in the simulation may ask this. The original's weapon scan
+        // and computer player both consult a list built through 0x465AC0,
+        // which is canSeeUnit above; a radar contact is a blip and not a
+        // target, and the radar picture is recomputed for one player a tick in
+        // any case (section 18), so it could not feed a deterministic decision
+        // even if the original wanted it to.
+        if (canSeeUnit(viewer, unitId))
         {
             return true;
         }
 
-        const auto& contacts = playerVisibility.at(viewer.value).radarContacts;
-        return contacts.find(unitId) != contacts.end();
+        const auto& unit = getUnitState(unitId);
+        if (unit.cloaked)
+        {
+            return false;
+        }
+
+        const auto& visibility = playerVisibility.at(viewer.value);
+        return visibility.radarContacts.find(unitId) != visibility.radarContacts.end()
+            || visibility.sonarContacts.find(unitId) != visibility.sonarContacts.end();
     }
 
     const UnitSpatialIndex& GameSimulation::getUnitSpatialIndex()
@@ -1756,9 +1801,17 @@ namespace rwe
                     bySonar = false;
                 }
 
-                if (byRadar || bySonar)
+                // Kept apart rather than merged. The original sets two bits
+                // and reads them in two places for two purposes: bit 8 is the
+                // picture, bit 9 is what 0x465AC0 consults before it will
+                // admit anything below the waterline.
+                if (byRadar)
                 {
                     vis.radarContacts.insert(unitId);
+                }
+                if (bySonar)
+                {
+                    vis.sonarContacts.insert(unitId);
                 }
             }
         }
@@ -4479,6 +4532,23 @@ namespace rwe
         }
     }
 
+    std::optional<std::string> GameSimulation::resurrectedUnitType(const std::string& featureName) const
+    {
+        auto underscore = featureName.find('_');
+        if (underscore == std::string::npos || underscore == 0)
+        {
+            return std::nullopt;
+        }
+
+        auto candidate = toUpper(featureName.substr(0, underscore));
+        if (unitDefinitions.find(candidate) == unitDefinitions.end())
+        {
+            return std::nullopt;
+        }
+
+        return candidate;
+    }
+
     void GameSimulation::spawnNewUnits()
     {
         for (const auto& unitId : unitCreationRequests)
@@ -4544,6 +4614,55 @@ namespace rwe
                 }
 
                 s->status = UnitCreationStatusDone{*newUnitId};
+            }
+
+            // A resurrection asks for its unit from here for the same reason
+            // the two above do: the behaviour pass that finished the job was
+            // iterating `units`, and creating one appends to the deque behind
+            // it. Unlike those two the corpse is still standing, so the work
+            // the handler used to do inline happens here instead -- the type
+            // off the corpse's name, the position and facing off the corpse,
+            // then the corpse, then the unit. The corpse has to go first: it
+            // is `blocking`, and a unit will not be placed on an occupied
+            // footprint.
+            if (auto s = std::get_if<UnitBehaviorStateResurrecting>(&unit->get().behaviourState); s != nullptr)
+            {
+                auto featureRef = tryGetFeature(s->target);
+                if (!featureRef)
+                {
+                    continue;
+                }
+
+                const auto& feature = featureRef->get();
+                auto unitType = resurrectedUnitType(getFeatureDefinition(feature.featureName).name);
+                if (!unitType)
+                {
+                    continue;
+                }
+
+                auto position = feature.position;
+                auto rotation = feature.rotation;
+                auto owner = unit->get().owner;
+                deleteFeature(s->target);
+
+                auto newUnitId = trySpawnUnit(*unitType, owner, position, rotation);
+                if (!newUnitId)
+                {
+                    // The original prints "Unable to create any more units"
+                    // and tries again in 300 ticks, but it still has its
+                    // corpse to try with. Ours is spent, so the job ends and
+                    // the order is dropped on the next tick, when the handler
+                    // finds no feature.
+                    continue;
+                }
+
+                // 0x405219/0x405226: complete rather than a nanoframe, and on
+                // exactly one hit point -- it has to be repaired afterwards or
+                // a stiff breeze finishes it.
+                auto& newUnit = getUnitState(*newUnitId);
+                const auto& newUnitDefinition = unitDefinitions.at(newUnit.unitType);
+                newUnit.buildTimeCompleted = newUnitDefinition.buildTime;
+                newUnit.hitPoints = 1;
             }
         }
 
@@ -4646,10 +4765,27 @@ namespace rwe
         // scope because RWE_SIMPROF names its variables, one to a scope.
         {
             RWE_SIMPROF("behaviour");
+
+            // Nothing a handler does may add a unit while this walk is in
+            // progress: the map is a deque underneath, growing it invalidates
+            // the iterator the loop is holding, and the ++ that follows is
+            // undefined. Every creation path defers to spawnNewUnits for that
+            // reason and deleteDeadUnits waits its turn the same way.
+            //
+            // Nothing enforced it, which is how resurrect came to create its
+            // unit inline and stand for a day: an ordinary build survives it,
+            // and it only shows up where the standard library checks its own
+            // iterators. Worse, it hid best in the games most likely to be
+            // played -- once anything has died there is a free slot to fill,
+            // and filling one does not grow the deque or invalidate anything.
+            [[maybe_unused]] auto generationBefore = units.generation();
+
             for (auto& entry : units)
             {
                 UnitBehaviorService(this).update(entry.first);
             }
+
+            assert(units.generation() == generationBefore && "a unit was created during the behaviour pass; defer it to spawnNewUnits");
         }
 
         {
