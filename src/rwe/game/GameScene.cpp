@@ -43,13 +43,6 @@ namespace rwe
         return simulation.unitDefinitions.find(unitType) != simulation.unitDefinitions.end();
     }
 
-    bool featureCanBeReclaimed(const GameSimulation& sim, FeatureId featureId)
-    {
-        const auto& featureState = sim.getFeature(featureId);
-        const auto& def = sim.getFeatureDefinition(featureState.featureName);
-        return def.reclaimable;
-    }
-
     std::optional<std::reference_wrapper<const std::vector<GuiEntry>>> getBuilderGui(const BuilderGuisDatabase& db, const std::string& unitType, unsigned int page)
     {
         const auto& pages = db.tryGetBuilderGui(unitType);
@@ -1057,9 +1050,12 @@ namespace rwe
                 }
             }
         }
-        else if (hoveredFeature)
+        // Resolved rather than dereferenced: the id is picked during update
+        // and read again here, so the feature can be reclaimed in between --
+        // which used to assert inside getFeature and take the game down.
+        else if (auto hoveredFeatureState = tryGetHoveredFeature(simulation, hoveredFeature); hoveredFeatureState)
         {
-            const auto& feature = simulation.getFeature(*hoveredFeature);
+            const auto& feature = hoveredFeatureState->get();
             const auto& featureDefinition = simulation.getFeatureDefinition(feature.featureName);
             const auto& featureMediaInfo = gameMediaDatabase.getFeature(feature.featureName);
 
