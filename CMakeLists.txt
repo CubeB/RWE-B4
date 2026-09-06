@@ -594,6 +594,8 @@ set(SOURCE_FILES
     src/rwe/ui/events.h
     src/rwe/util.cpp
     src/rwe/util.h
+    src/rwe/util/CrashHandler.cpp
+    src/rwe/util/CrashHandler.h
     src/rwe/util/Index.h
     src/rwe/util/OpaqueField.h
     src/rwe/util/OpaqueId.h
@@ -641,6 +643,8 @@ add_definitions(-DASIO_STANDALONE)
 if(WIN32)
     # winsock needed for asio on windows
     target_link_libraries(librwe ws2_32)
+    # dbghelp resolves the crash handler's stack frames
+    target_link_libraries(librwe dbghelp)
 endif()
 
 target_include_directories(librwe PUBLIC "libs/utfcpp/source")
@@ -921,6 +925,7 @@ set(TEST_FILES
     src/rwe/sim/SimRandom.test.cpp
     src/rwe/sim/resurrect.test.cpp
     src/rwe/sim/saveload.test.cpp
+    src/rwe/util/CrashHandler.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp
     src/rwe/util/Result.test.cpp
     src/rwe/util/SimpleLogger.test.cpp
@@ -934,6 +939,10 @@ target_link_libraries(rwe_test rapidcheck_catch)
 target_link_libraries(rwe_test librwe)
 target_precompile_headers(rwe_test REUSE_FROM librwe)
 add_test(NAME rwe_test COMMAND rwe_test)
+
+# The crash tests run the probe as a subprocess; tell them where it landed.
+add_dependencies(rwe_test crash_probe)
+target_compile_definitions(rwe_test PRIVATE RWE_CRASH_PROBE_PATH="$<TARGET_FILE:crash_probe>")
 
 install(TARGETS rwe rwe_bridge
     RUNTIME DESTINATION .
@@ -979,3 +988,15 @@ target_link_libraries(battle_test librwe)
 
 add_executable(path_bench src/path_bench.cpp)
 target_link_libraries(path_bench librwe)
+
+# Crashes on purpose, so the crash handler has something to be tested against.
+# rwe_test runs it as a subprocess: nothing else exercises a real fault.
+add_executable(crash_probe src/crash_probe.cpp)
+target_link_libraries(crash_probe librwe)
+
+# backtrace_symbols_fd() can only name a frame whose symbol is in the dynamic
+# symbol table, which for an executable means linking with -rdynamic. Without
+# this the crash reports on Linux are addresses and nothing else.
+if(NOT WIN32)
+    set_target_properties(rwe battle_test crash_probe PROPERTIES ENABLE_EXPORTS ON)
+endif()

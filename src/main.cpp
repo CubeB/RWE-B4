@@ -14,6 +14,7 @@
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/Metal.h>
 #include <rwe/util.h>
+#include <rwe/util/CrashHandler.h>
 #include <rwe/util/OpaqueArgs.h>
 #include <rwe/util/Result.h>
 #include <rwe/util/SimpleLogger.h>
@@ -125,6 +126,11 @@ int main(int argc, char* argv[])
 
         auto logger = args.contains("log") ? createLogger(fs::path(args.getString("log"))) : createLoggerInDir(*localDataPath);
         rwe::setGlobalLogger(logger);
+
+        // As early as the local data path is known: everything after this
+        // point is covered, and the catch below only ever sees thrown
+        // exceptions -- a segfault walks straight past it.
+        rwe::installCrashHandler(*localDataPath);
 
         try
         {

@@ -1,6 +1,7 @@
 #include "LoadingScene.h"
 #include <rwe/game/SaveFile.h>
 #include <algorithm>
+#include <rwe/util/CrashHandler.h>
 #include <rwe/util/SpanStream.h>
 #include <rwe/LoadingScene_util.h>
 #include <rwe/ai/AiPlayerController.h>
@@ -81,6 +82,7 @@ namespace rwe
 
     void LoadingScene::init()
     {
+        setCrashScene("LoadingScene");
         auto backgroundSprite = sceneContext.textureService->getBitmapRegion(
             "Loadgame2bg",
             0,

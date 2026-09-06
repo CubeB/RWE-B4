@@ -24,6 +24,7 @@
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService.h>
 #include <rwe/ui/UiStagedButton.h>
+#include <rwe/util/CrashHandler.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/match.h>
 #include <rwe/util/SimpleLogger.h>
@@ -633,6 +634,8 @@ namespace rwe
 
     void GameScene::init()
     {
+        setCrashScene("GameScene");
+        setCrashMap(gameParameters.mapName.c_str());
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
         currentPanel = uiFactory.panelFromGuiFile(sidePrefix + "MAIN2");
 
@@ -5296,6 +5299,15 @@ namespace rwe
         }
 
         sceneTime += SceneTime(1);
+
+        // Four relaxed stores a tick, so that a crash anywhere below can say
+        // when it happened rather than only where.
+        setCrashPhase(CrashPhase::SimTick);
+        setCrashTick(
+            sceneTime.value,
+            simulation.gameTime.value,
+            static_cast<uint32_t>(simulation.units.slotCount()),
+            static_cast<uint32_t>(simulation.players.size()));
 
         processActions();
 

@@ -3,6 +3,7 @@
 #include <rwe/game/SaveFile.h>
 #include <rwe/ui/UiTextBox.h>
 #include <rwe/util.h>
+#include <rwe/util/CrashHandler.h>
 #include <rwe/util/SimpleLogger.h>
 #include <algorithm>
 #include <rwe/LoadingScene.h>
@@ -42,6 +43,7 @@ namespace rwe
 
     void MainMenuScene::init()
     {
+        setCrashScene("MainMenuScene");
         // The menu has no music: the original plays only the [BGM] ambience
         // (the drone from ALLSOUND.TDF) over its front end, and so does RWE.
         // The playlist is still gathered so the options music page's CD

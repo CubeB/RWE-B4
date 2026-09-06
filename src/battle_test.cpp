@@ -29,6 +29,7 @@
 #include <rwe/io/ota/ota.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/util.h>
+#include <rwe/util/CrashHandler.h>
 #include <rwe/util/OpaqueArgs.h>
 #include <rwe/util/SimpleLogger.h>
 #include <rwe/util/rwe_string.h>
@@ -187,6 +188,10 @@ int main(int argc, char* argv[])
 
         auto logger = createLogger(*localDataPath);
         rwe::setGlobalLogger(logger);
+
+        // This is where crashes get reproduced, so it is where a report is
+        // worth most.
+        rwe::installCrashHandler(*localDataPath);
 
         auto dataPaths = resolveDataPaths(args, *localDataPath);
 

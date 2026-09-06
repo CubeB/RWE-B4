@@ -1,6 +1,7 @@
 #include "MovieScene.h"
 
 #include <cstring>
+#include <rwe/util/CrashHandler.h>
 
 namespace rwe
 {
@@ -55,6 +56,7 @@ namespace rwe
 
     void MovieScene::init()
     {
+        setCrashScene("MovieScene");
         // First pass: pull all the audio out. The audio chunks sit before the
         // video data in every frame and decode independently of it, so the
         // pass can skip the expensive half entirely.
