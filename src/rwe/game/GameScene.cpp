@@ -2495,6 +2495,9 @@ namespace rwe
             [&](const UnitBehaviorStateReclaiming&) {
                 return "reclaiming";
             },
+            [&](const UnitBehaviorStateResurrecting&) {
+                return "resurrecting";
+            },
             [&](const UnitBehaviorStateCreatingUnit&) {
                 return "creating unit";
             });

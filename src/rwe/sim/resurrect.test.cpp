@@ -101,6 +101,11 @@ namespace rwe
                 sim.unitScriptDefinitions["ARMCK"] = *script;
 
                 builder = addUnitOfType(sim, "ARMCK", owner, SimVector(0_ss, 0_ss, 0_ss), script);
+
+                // An empty COB script never fires SetBuildStance, and the
+                // handler waits for the arms as reclaim's does, so the
+                // fixture asserts what the script would have.
+                sim.getUnitState(builder).inBuildStance = true;
             }
 
             /** Runs until the order clears, or gives up. Returns ticks taken. */
@@ -163,7 +168,11 @@ namespace rwe
             // ARMSOLAR 2495 * 0.3 = 748 (integer), ARMCK 80/30 = 2, so 374
             // ticks of work. This is the one job of the three that scales
             // with the builder: capture does not, and neither does reclaim.
-            REQUIRE(ticks == 374 + 1);
+            //
+            // Two ticks either side of the work itself: one to take up the
+            // job and get the arms out, as reclaim and build also spend, and
+            // one on which the unit is finally placed.
+            REQUIRE(ticks == 374 + 2);
         }
     }
 

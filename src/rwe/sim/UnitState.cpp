@@ -731,6 +731,16 @@ namespace rwe
             return std::make_tuple(reclaimingState->target, *reclaimingState->nanoParticleOrigin, NanolatheDirection::Reverse);
         }
 
+        // Forward, unlike reclaim: this one is putting a unit back together.
+        auto resurrectingState = std::get_if<UnitBehaviorStateResurrecting>(&behaviourState);
+        if (resurrectingState && resurrectingState->nanoParticleOrigin)
+        {
+            return std::make_tuple(
+                std::variant<UnitId, FeatureId>(resurrectingState->target),
+                *resurrectingState->nanoParticleOrigin,
+                NanolatheDirection::Forward);
+        }
+
         return std::nullopt;
     }
 

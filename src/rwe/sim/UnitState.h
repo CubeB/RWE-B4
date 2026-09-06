@@ -83,11 +83,26 @@ namespace rwe
         std::optional<SimVector> nanoParticleOrigin;
     };
 
+    /**
+     * Raising a unit out of a corpse.
+     *
+     * Its own state rather than a borrowed reclaiming one because the beam
+     * runs the other way: reclaim draws target-to-builder, which is right for
+     * consuming and wrong for a job that hands a unit back. See
+     * TOTALA-EXE.md S:98.
+     */
+    struct UnitBehaviorStateResurrecting
+    {
+        FeatureId target;
+        std::optional<SimVector> nanoParticleOrigin;
+    };
+
     using UnitBehaviorState = std::variant<
         UnitBehaviorStateIdle,
         UnitBehaviorStateCreatingUnit,
         UnitBehaviorStateBuilding,
-        UnitBehaviorStateReclaiming>;
+        UnitBehaviorStateReclaiming,
+        UnitBehaviorStateResurrecting>;
 
     struct NavigationStateIdle
     {

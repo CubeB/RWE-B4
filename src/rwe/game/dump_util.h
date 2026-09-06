@@ -61,6 +61,7 @@ namespace rwe
     nlohmann::json dumpJson(const UnitBehaviorStateBuilding&);
 
     nlohmann::json dumpJson(const UnitBehaviorStateReclaiming&);
+    nlohmann::json dumpJson(const UnitBehaviorStateResurrecting&);
 
     nlohmann::json dumpJson(const UnitBehaviorStateCreatingUnit&);
 

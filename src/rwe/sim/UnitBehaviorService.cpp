@@ -3520,6 +3520,31 @@ namespace rwe
             return false;
         }
 
+        // The original draws a nanolathe every tick it works -- 0x40509D
+        // calls the same beam routine build, repair, reclaim and capture do.
+        // Getting the arms out is what makes it appear, and a construction
+        // aircraft has to be flying first.
+        if (!prepareBuilderForWork(unitInfo, feature.position))
+        {
+            return false;
+        }
+
+        if (auto state = std::get_if<UnitBehaviorStateResurrecting>(&unitInfo.state->behaviourState);
+            state == nullptr || state->target != resurrectOrder.target)
+        {
+            changeState(*unitInfo.state, UnitBehaviorStateResurrecting{resurrectOrder.target, std::nullopt});
+            return false;
+        }
+
+        if (!unitInfo.state->inBuildStance)
+        {
+            // Not in the stance yet; the script is still swinging the arms out.
+            return false;
+        }
+
+        std::get<UnitBehaviorStateResurrecting>(unitInfo.state->behaviourState).nanoParticleOrigin
+            = getNanoPoint(unitInfo.id);
+
         if (!resurrectOrder.remainingTicks)
         {
             // (BuildTime * 0.3) / (WorkerTime / 30), and this is the one job
@@ -3576,6 +3601,7 @@ namespace rwe
         newUnit.buildTimeCompleted = newUnitDefinition.buildTime;
         newUnit.hitPoints = 1;
 
+        changeState(*unitInfo.state, UnitBehaviorStateIdle());
         return true;
     }
 

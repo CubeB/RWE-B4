@@ -1004,6 +1004,12 @@ namespace rwe
                         {"kind", "reclaiming"},
                         {"target", saveReclaimTarget(r.target, ctx)},
                         {"nanoParticleOrigin", saveOptional(r.nanoParticleOrigin, saveSimVector)}};
+                },
+                [&](const UnitBehaviorStateResurrecting& r) {
+                    return json{
+                        {"kind", "resurrecting"},
+                        {"target", saveFeatureIdRef(r.target, ctx)},
+                        {"nanoParticleOrigin", saveOptional(r.nanoParticleOrigin, saveSimVector)}};
                 });
         }
 
@@ -1032,6 +1038,12 @@ namespace rwe
             {
                 return UnitBehaviorStateReclaiming{
                     loadReclaimTarget(j.at("target"), ctx),
+                    loadOptional(j.at("nanoParticleOrigin"), loadSimVector)};
+            }
+            if (kind == "resurrecting")
+            {
+                return UnitBehaviorStateResurrecting{
+                    loadFeatureIdRef(j.at("target"), ctx),
                     loadOptional(j.at("nanoParticleOrigin"), loadSimVector)};
             }
             throw std::runtime_error("bad UnitBehaviorState kind: " + kind);

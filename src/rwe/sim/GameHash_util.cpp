@@ -273,6 +273,11 @@ namespace rwe
         return combineHashes(s.targetUnit, s.nanoParticleOrigin);
     }
 
+    GameHash computeHashOf(const UnitBehaviorStateResurrecting& s)
+    {
+        return combineHashes(s.target, s.nanoParticleOrigin);
+    }
+
     GameHash computeHashOf(const UnitBehaviorStateReclaiming& s)
     {
         return combineHashes(s.target, s.nanoParticleOrigin);
