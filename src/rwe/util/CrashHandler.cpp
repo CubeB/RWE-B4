@@ -719,8 +719,12 @@ namespace rwe
 // Defining these here overrides the C library's own, because the linker
 // resolves from our objects before it reaches libc.
 
+// No [[noreturn]] on these: the C library's own header already declares them
+// __attribute__((noreturn)), and clang rejects the C++ attribute when it is not
+// on the first declaration. The attribute carries over from that declaration,
+// and both end in abort() regardless.
 #if defined(__GLIBC__)
-extern "C" [[noreturn]] void __assert_fail(
+extern "C" void __assert_fail(
     const char* assertion, const char* file, unsigned int line, const char* function) noexcept
 {
     rwe::setCrashAssertion(assertion, file, line, function);
@@ -729,7 +733,7 @@ extern "C" [[noreturn]] void __assert_fail(
     std::abort();
 }
 #elif defined(__MINGW32__)
-extern "C" [[noreturn]] void _assert(const char* message, const char* file, unsigned line)
+extern "C" void _assert(const char* message, const char* file, unsigned line)
 {
     rwe::setCrashAssertion(message, file, line, "");
     std::fprintf(stderr, "Assertion failed: %s, file %s, line %u\n", message, file, line);
