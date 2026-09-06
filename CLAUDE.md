@@ -30,7 +30,7 @@ make -j$(nproc)
 ./build/rwe_test "[tag]"
 ```
 
-The suite passes 442 cases / 58,812 assertions as of 2026-09-06. If a document quotes a different figure, run the suite rather than believing either of them.
+The suite passes 444 cases / 59,847 assertions as of 2026-09-06. If a document quotes a different figure, run the suite rather than believing either of them.
 
 This machine has two configured trees, both MSYS2/MinGW64 with `Unix Makefiles`: `build/` (Debug) and `build-release/` (Release). Play-testing uses `build-release/rwe.exe`. **Rebuild the `rwe` target, not just `rwe_test`** — a green test suite says nothing about whether the game still links, and several of the executables below share `librwe` with it.
 
@@ -132,10 +132,7 @@ serialization, hash-validated round trip — see `sim/saveload.test.cpp`) and
 `src/rwe/game/SaveFile.*` (the on-disk container with the map/players header
 and the skirmish options). Saves are `<name>.rwesave` under the local data
 path. See the determinism section above for what a new piece of sim state
-obliges you to touch. Two known gaps: the `explored` grid is not serialized —
-`loadSimulationFromJson` ends in `updateVisibility()`, so a resumed game
-rebuilds visibility from where the units are standing and forgets the rest of
-the map — and the `SaveFile` header's `PlayerInfo` carries no `teamId` (the
+obliges you to touch. One known gap: the `SaveFile` header's `PlayerInfo` carries no `teamId` (the
 simulation's own player table does, and is what a load restores, so alliances
 do survive; the header is simply thinner than the sim).
 
