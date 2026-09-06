@@ -1678,4 +1678,26 @@ namespace rwe
 
         return caption;
     }
+
+    std::optional<std::reference_wrapper<const MapFeature>> tryGetHoveredFeature(
+        const GameSimulation& simulation, const std::optional<FeatureId>& hoveredFeature)
+    {
+        if (!hoveredFeature)
+        {
+            return std::nullopt;
+        }
+
+        return simulation.tryGetFeature(*hoveredFeature);
+    }
+
+    bool featureCanBeReclaimed(const GameSimulation& sim, FeatureId featureId)
+    {
+        auto feature = sim.tryGetFeature(featureId);
+        if (!feature)
+        {
+            return false;
+        }
+
+        return sim.getFeatureDefinition(feature->get().featureName).reclaimable;
+    }
 }
