@@ -114,6 +114,50 @@ namespace rwe
      */
     Vector3f blendCloakedColor(const Vector3f& unitColor, const Vector3f& backgroundColor);
 
+    /**
+     * Whether something happening at a world position is shown to the viewer
+     * at all.
+     *
+     * The original asks this of every `emit-sfx` before it works out anything
+     * else about the effect: `0x480EB0` calls the can-see predicate at
+     * `0x480EEA` and returns doing nothing if it fails (S:16), which is what
+     * makes the whole effects system client-side and no part of it simulation
+     * state.
+     *
+     * The question is live sight and not memory. Remembered ground keeps its
+     * terrain and the features that stood on it, drawn grey; what is going on
+     * there now belongs to whoever can currently see it. A radar contact does
+     * not qualify either -- radar reveals no ground at all (S:2), and the
+     * original's own render list is built from the sight predicate with the
+     * radar bits never read (S:18).
+     */
+    bool effectIsVisibleToPlayer(const GameSimulation& sim, const PlayerVisibility& visibility, const SimVector& position);
+
+    /** What a weapon impact puts on the screen. */
+    struct WeaponImpactEffects
+    {
+        /** The explosion sprite, if the weapon names one for the surface it hit. */
+        std::optional<AnimLocation> explosion;
+
+        /** A puff of smoke where it landed, from `endSmoke`. */
+        bool smoke{false};
+
+        /** The white flash. */
+        bool flash{false};
+    };
+
+    /**
+     * The art an impact leaves behind: the explosion sprite for the surface
+     * it hit, the smoke an `endSmoke` weapon leaves, and the flash.
+     *
+     * Nothing at all when the viewer cannot see where the round landed. The
+     * blast itself still happens -- the damage, the wreckage and the shake
+     * are the simulation's business and are decided elsewhere -- but a
+     * detonation under the fog of war used to light up unexplored ground,
+     * which is the one thing the fog exists to prevent.
+     */
+    WeaponImpactEffects computeWeaponImpactEffects(const WeaponMediaInfo& weapon, ImpactType impactType, bool positionVisible);
+
     void
     drawPathfindingVisualisation(const MapTerrain& terrain, const AStarPathInfo<Point, PathCost>& pathInfo, ColoredMeshBatch& batch);
 
@@ -311,8 +355,17 @@ namespace rwe
      */
     std::vector<Vector3f> findGeoVentSteamPoints(const GameSimulation& simulation);
 
+    /**
+     * Draws every round in the air that the viewer is allowed to see.
+     *
+     * A projectile is gated on live sight of the ground it is over, the same
+     * question effectIsVisibleToPlayer asks of an explosion, because it is
+     * the same leak: a missile flying over unexplored ground announced both
+     * the shooter and the target through a fog that was hiding them.
+     */
     void drawProjectiles(
         const GameSimulation& sim,
+        const PlayerVisibility& visibility,
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,
         const VectorMap<Projectile, ProjectileIdTag>& projectiles,

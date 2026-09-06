@@ -709,9 +709,14 @@ namespace rwe
 
         void playWeaponImpactSound(const Vector3f& position, const std::string& weaponType, ImpactType impactType);
 
-        void spawnWeaponImpactExplosion(const Vector3f& position, const std::string& weaponType, ImpactType impactType);
+        void spawnWeaponImpactExplosion(const Vector3f& position, const std::string& weaponType, ImpactType impactType, bool positionVisible);
 
-        void doProjectileImpact(const SimVector& position, const std::string& weaponType, ImpactType impactType);
+        /**
+         * The art, the smoke and the sound of a detonation. `visible` says
+         * whether the local player is entitled to see it: everything but the
+         * sound is withheld when they are not.
+         */
+        void doProjectileImpact(const SimVector& position, const std::string& weaponType, ImpactType impactType, bool visible);
 
         void createLightSmoke(const Vector3f& position);
 

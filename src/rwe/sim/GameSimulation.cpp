@@ -1125,7 +1125,10 @@ namespace rwe
         unit.selfDestructTime = std::nullopt;
         getPlayer(unit.owner).unitsLost += 1;
 
-        events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::SelfDestructed});
+        // The owner is filled in like any other death: the scene needs it to
+        // decide whether the blast is one the local player is entitled to
+        // see, and by the time it reads the event the unit is gone.
+        events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::SelfDestructed, unit.owner});
 
         const auto& explosion = unitDefinition.selfDestructAs.empty() ? unitDefinition.explodeAs : unitDefinition.selfDestructAs;
         if (!explosion.empty())

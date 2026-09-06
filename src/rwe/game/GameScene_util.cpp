@@ -28,6 +28,38 @@ namespace rwe
         return (unitColor * CloakBlendFactor) + (backgroundColor * (1.0f - CloakBlendFactor));
     }
 
+    bool effectIsVisibleToPlayer(const GameSimulation& sim, const PlayerVisibility& visibility, const SimVector& position)
+    {
+        return visibility.isVisible(sim.visionCellAt(position));
+    }
+
+    WeaponImpactEffects computeWeaponImpactEffects(const WeaponMediaInfo& weapon, ImpactType impactType, bool positionVisible)
+    {
+        if (!positionVisible)
+        {
+            return WeaponImpactEffects{};
+        }
+
+        WeaponImpactEffects effects;
+        effects.flash = true;
+
+        switch (impactType)
+        {
+            case ImpactType::Normal:
+                effects.explosion = weapon.explosionAnim;
+                effects.smoke = weapon.endSmoke;
+                break;
+            case ImpactType::Water:
+                // No smoke off a splash: the original's smoke emitters check
+                // the point against the sea level byte first and emit nothing
+                // underwater (S:4).
+                effects.explosion = weapon.waterExplosionAnim;
+                break;
+        }
+
+        return effects;
+    }
+
     Vector3f colorToVector3f(const Color& color)
     {
         return Vector3f(static_cast<float>(color.r) / 255.0f, static_cast<float>(color.g) / 255.0f, static_cast<float>(color.b) / 255.0f);
@@ -1299,6 +1331,7 @@ namespace rwe
 
     void drawProjectiles(
         const GameSimulation& sim,
+        const PlayerVisibility& visibility,
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,
         const VectorMap<Projectile, ProjectileIdTag>& projectiles,
@@ -1313,6 +1346,15 @@ namespace rwe
         for (const auto& e : projectiles)
         {
             const auto& projectile = e.second;
+
+            // Where it is now, not where it is drawn: the interpolated
+            // position is a fraction of a tick's travel away and would put a
+            // round on the wrong side of a cell boundary for a frame.
+            if (!effectIsVisibleToPlayer(sim, visibility, projectile.position))
+            {
+                continue;
+            }
+
             auto position = lerp(simVectorToFloat(projectile.previousPosition), simVectorToFloat(projectile.position), frac);
 
             const auto& weaponMediaInfo = gameMediaDatabase.getWeapon(projectile.weaponType);
