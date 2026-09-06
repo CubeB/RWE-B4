@@ -600,12 +600,47 @@ namespace rwe
         // MSVC has no __assert_fail to replace, but the debug CRT offers a
         // report hook, which is the supported way in. Returning FALSE leaves
         // the CRT to carry on and abort as it would have.
+        //
+        // There are two hooks, and assert() uses the one you would not guess.
+        // A failed assert() in C++ goes through _wassert, which reports with
+        // _CrtDbgReportW -- and the wide path only calls hooks installed by
+        // _CrtSetReportHookW2. A hook registered with the narrow
+        // _CrtSetReportHook is never asked, so the report came out with a
+        // backtrace naming wassert and no note saying which assertion it was.
+        // Both are installed below; the narrow one still catches _CrtDbgReport
+        // calls made directly.
         int crtReportHook(int reportType, char* message, int* /*returnValue*/)
         {
             if (reportType == _CRT_ASSERT && message != nullptr)
             {
                 setCrashNote(message);
             }
+            return FALSE;
+        }
+
+        int __cdecl crtReportHookW(int reportType, wchar_t* message, int* /*returnValue*/)
+        {
+            if (reportType != _CRT_ASSERT || message == nullptr)
+            {
+                return FALSE;
+            }
+
+            // Narrowed by hand rather than through a conversion function: this
+            // runs on the way to an abort, where the rules are the same as in
+            // a signal handler and a locale-aware call is not something to
+            // reach for. An assertion message is the stringified expression
+            // plus a path, so anything outside ASCII is a filename oddity and
+            // '?' is a better answer than nothing.
+            char narrowed[CrashContext::NoteSize];
+            size_t i = 0;
+            for (; i + 1 < CrashContext::NoteSize && message[i] != L'\0'; ++i)
+            {
+                auto c = message[i];
+                narrowed[i] = (c > 0 && c < 128) ? static_cast<char>(c) : '?';
+            }
+            narrowed[i] = '\0';
+
+            setCrashNote(narrowed);
             return FALSE;
         }
 #endif
@@ -681,6 +716,7 @@ namespace rwe
         SetUnhandledExceptionFilter(exceptionFilter);
 #if defined(_MSC_VER) && defined(_DEBUG)
         _CrtSetReportHook(crtReportHook);
+        _CrtSetReportHookW2(_CRT_RPTHOOK_INSTALL, crtReportHookW);
 #endif
         // abort() does not go through the unhandled exception filter, and a
         // failed assert() is an abort.
