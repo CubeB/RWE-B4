@@ -5,11 +5,16 @@
 //   crash_probe <output-dir> [segv|abort|terminate|assert|none]
 //
 // The output directory stands in for the local data path, so a test can point
-// it at a temporary directory. RWE_CRASH_NO_DIALOG is set for us here rather
-// than by the caller: nothing is watching to dismiss a message box.
+// it at a temporary directory. Nothing is watching to dismiss a dialog, so
+// the probe silences both things that could raise one: RWE_CRASH_NO_DIALOG
+// for the handler's own message box, and the debug CRT's report mode for the
+// one the runtime would open before the handler ever runs.
 
 #include <cassert>
 #include <cstdlib>
+#if defined(_MSC_VER) && defined(_DEBUG)
+#include <crtdbg.h>
+#endif
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -30,6 +35,31 @@ int main(int argc, char* argv[])
     _putenv_s("RWE_CRASH_NO_DIALOG", "1");
 #else
     setenv("RWE_CRASH_NO_DIALOG", "1", 1);
+#endif
+
+    // A failed assert() in a Debug build does not reach the handler below.
+    // It goes through _CrtDbgReport, whose default report mode is a modal
+    // message box, and only raises SIGABRT afterwards -- so on a runner the
+    // probe stops dead at a dialog nobody can close and the caller's
+    // std::system waits for it for ever. The MSVC Debug job spent forty-five
+    // minutes there before the timeout killed it.
+    //
+    // The other three modes get away with it by entering the runtime
+    // somewhere else: segv, abort and terminate all reach the handler, which
+    // _exit()s before anything can be drawn.
+    //
+    // rwe_test solves this for itself in src/rwe/test_crt_silence.cpp. The
+    // probe is a separate binary and carries its own copy rather than
+    // borrowing a file whose name says it belongs to the tests.
+#if defined(_MSC_VER) && defined(_DEBUG)
+    for (auto report : {_CRT_WARN, _CRT_ERROR, _CRT_ASSERT})
+    {
+        _CrtSetReportMode(report, _CRTDBG_MODE_FILE);
+        _CrtSetReportFile(report, _CRTDBG_FILE_STDERR);
+    }
+
+    // abort() otherwise raises its own dialog on the way out.
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #endif
 
     fs::create_directories(argv[1]);
