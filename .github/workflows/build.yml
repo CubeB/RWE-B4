@@ -5,6 +5,10 @@ on:
     tags: ['v*']
   pull_request:
     branches: [master, revival]
+    # `labeled` is here only so that adding ci:full re-runs CI without
+    # needing an empty push behind it. Every job then asks which label it
+    # was, so no other label costs anything: the run is created and every
+    # job in it is skipped.
     types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
@@ -181,7 +185,15 @@ jobs:
           if-no-files-found: error
 
   build-windows-msvc:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full')
+    # Two questions, and both must pass. Which label was just added, if
+    # this was a label at all -- only ci:full starts anything, so putting
+    # any other label on a pull request that already carries ci:full does
+    # not set the Windows matrix going again. And then the ordinary one:
+    # is this a push, or a pull request that asked for the full matrix.
+    if: |
+      (github.event.action != 'labeled' || github.event.label.name == 'ci:full')
+      && (github.event_name != 'pull_request'
+          || contains(github.event.pull_request.labels.*.name, 'ci:full'))
     # A job that hangs should fail in a reasonable time rather than
     # hold a runner for GitHub's six-hour default: on 2026-09-06 a
     # modal assertion dialog in the MSVC Debug test run sat for two
@@ -257,7 +269,15 @@ jobs:
           if-no-files-found: error
 
   build-windows-mingw64:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full')
+    # Two questions, and both must pass. Which label was just added, if
+    # this was a label at all -- only ci:full starts anything, so putting
+    # any other label on a pull request that already carries ci:full does
+    # not set the Windows matrix going again. And then the ordinary one:
+    # is this a push, or a pull request that asked for the full matrix.
+    if: |
+      (github.event.action != 'labeled' || github.event.label.name == 'ci:full')
+      && (github.event_name != 'pull_request'
+          || contains(github.event.pull_request.labels.*.name, 'ci:full'))
     # A job that hangs should fail in a reasonable time rather than
     # hold a runner for GitHub's six-hour default: on 2026-09-06 a
     # modal assertion dialog in the MSVC Debug test run sat for two
