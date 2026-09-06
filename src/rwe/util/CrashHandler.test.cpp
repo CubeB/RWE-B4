@@ -213,6 +213,33 @@ namespace rwe
         fs::remove_all(dir);
     }
 
+#ifndef NDEBUG
+    // Only meaningful where assert() still does something; a Release build
+    // compiles both the probe's assertion and this case away.
+    TEST_CASE("a failed assertion reaches the report", "[crash]")
+    {
+        auto dir = uniqueTempDir();
+        fs::remove_all(dir);
+
+        runProbe(dir, "assert");
+
+        auto crashFile = findCrashFile(dir);
+        REQUIRE(crashFile.has_value());
+
+        auto report = readAll(*crashFile);
+        using Catch::Matchers::ContainsSubstring;
+
+        // The whole point: the C library writes this text to stderr and
+        // nothing else captures it, so without the interceptor the report
+        // could say SIGABRT and never say which assertion.
+        REQUIRE_THAT(report, ContainsSubstring("crash_probe deliberate assertion"));
+        REQUIRE_THAT(report, ContainsSubstring("crash_probe.cpp"));
+        REQUIRE_THAT(report, ContainsSubstring("SIGABRT"));
+
+        fs::remove_all(dir);
+    }
+#endif
+
     TEST_CASE("a clean exit leaves no crash file", "[crash]")
     {
         auto dir = uniqueTempDir();

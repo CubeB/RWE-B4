@@ -1,5 +1,6 @@
 #include <rwe/util/CrashHandler.h>
 
+#include <cstdio>
 #include <cstring>
 #include <iterator>
 #include <rwe/config.h>
@@ -9,6 +10,9 @@
 #include <windows.h>
 // dbghelp.h must follow windows.h.
 #include <dbghelp.h>
+#if defined(_MSC_VER) && defined(_DEBUG)
+#include <crtdbg.h>
+#endif
 #include <csignal>
 #include <cstdlib>
 #include <exception>
@@ -186,6 +190,26 @@ namespace rwe
         copyName(ctx.map, CrashContext::NameSize, name);
     }
 
+    void setCrashNote(const char* text)
+    {
+        auto& ctx = crashContext();
+        copyName(ctx.note, CrashContext::NoteSize, text);
+    }
+
+    void setCrashAssertion(const char* assertion, const char* file, unsigned int line, const char* function)
+    {
+        auto& ctx = crashContext();
+        Appender a(ctx.note, CrashContext::NoteSize);
+        a.str(file);
+        a.ch(':');
+        a.uint(line);
+        a.str(": ");
+        a.str(function);
+        a.str(": Assertion `");
+        a.str(assertion);
+        a.str("' failed.");
+    }
+
     void setCrashTick(uint32_t sceneTime, uint32_t gameTime, uint32_t unitCount, uint32_t playerCount)
     {
         auto& ctx = crashContext();
@@ -248,6 +272,13 @@ namespace rwe
         a.field("players");
         a.uint(ctx.playerCount.load(std::memory_order_relaxed));
         a.ch('\n');
+
+        if (ctx.note[0] != '\0')
+        {
+            a.field("note");
+            a.str(ctx.note);
+            a.ch('\n');
+        }
 
         a.ch('\n');
         a.str("backtrace:\n");
@@ -565,6 +596,20 @@ namespace rwe
             reportAndDie("SIGABRT (abort)", nullptr);
         }
 
+#if defined(_MSC_VER) && defined(_DEBUG)
+        // MSVC has no __assert_fail to replace, but the debug CRT offers a
+        // report hook, which is the supported way in. Returning FALSE leaves
+        // the CRT to carry on and abort as it would have.
+        int crtReportHook(int reportType, char* message, int* /*returnValue*/)
+        {
+            if (reportType == _CRT_ASSERT && message != nullptr)
+            {
+                setCrashNote(message);
+            }
+            return FALSE;
+        }
+#endif
+
         LONG WINAPI exceptionFilter(EXCEPTION_POINTERS* info)
         {
             const char* name = "unknown exception";
@@ -634,6 +679,9 @@ namespace rwe
 
 #ifdef RWE_PLATFORM_WINDOWS
         SetUnhandledExceptionFilter(exceptionFilter);
+#if defined(_MSC_VER) && defined(_DEBUG)
+        _CrtSetReportHook(crtReportHook);
+#endif
         // abort() does not go through the unhandled exception filter, and a
         // failed assert() is an abort.
         std::signal(SIGABRT, abortHandler);
@@ -660,3 +708,32 @@ namespace rwe
         LOG_INFO << "Crash handler installed; a fault would be reported to " << crashPath;
     }
 }
+
+// Replacements for the C library's assertion failure routine. The library
+// writes its message to stderr and then aborts; nothing captured that text, so
+// a failed assertion produced a report that said SIGABRT and left you to work
+// out which assertion from the backtrace alone. These record the message first
+// and then do exactly what the library would have: print the same line to
+// stderr, and abort, so the console output and the signal are unchanged.
+//
+// Defining these here overrides the C library's own, because the linker
+// resolves from our objects before it reaches libc.
+
+#if defined(__GLIBC__)
+extern "C" [[noreturn]] void __assert_fail(
+    const char* assertion, const char* file, unsigned int line, const char* function) noexcept
+{
+    rwe::setCrashAssertion(assertion, file, line, function);
+    std::fprintf(stderr, "%s:%u: %s: Assertion `%s' failed.\n", file, line, function, assertion);
+    std::fflush(stderr);
+    std::abort();
+}
+#elif defined(__MINGW32__)
+extern "C" [[noreturn]] void _assert(const char* message, const char* file, unsigned line)
+{
+    rwe::setCrashAssertion(message, file, line, "");
+    std::fprintf(stderr, "Assertion failed: %s, file %s, line %u\n", message, file, line);
+    std::fflush(stderr);
+    std::abort();
+}
+#endif

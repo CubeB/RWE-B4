@@ -65,6 +65,13 @@ namespace rwe
         // the alternative of chasing a pointer that may already be freed.
         char scene[NameSize]{"none"};
         char map[NameSize]{"none"};
+
+        // The last thing the program had to say for itself. A failed
+        // assertion lands here: glibc prints its message to stderr and
+        // nothing else captures it, so without this the report could say
+        // SIGABRT but never which assertion.
+        static constexpr size_t NoteSize = 512;
+        char note[NoteSize]{""};
     };
 
     CrashContext& crashContext();
@@ -72,6 +79,12 @@ namespace rwe
     void setCrashPhase(CrashPhase p);
     void setCrashScene(const char* name);
     void setCrashMap(const char* name);
+
+    /** Free text carried into the report; empty means the field is omitted. */
+    void setCrashNote(const char* text);
+
+    /** Formats a failed assertion into the note. Called by the interceptors. */
+    void setCrashAssertion(const char* assertion, const char* file, unsigned int line, const char* function);
     /** unitCount is VectorMap::slotCount: an upper bound, not a live count. */
     void setCrashTick(uint32_t sceneTime, uint32_t gameTime, uint32_t unitCount, uint32_t playerCount);
 

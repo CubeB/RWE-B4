@@ -2,12 +2,13 @@
 // alternate stack and the platform backtrace, so the crash handler is tested
 // by running this as a subprocess and reading what it leaves behind.
 //
-//   crash_probe <output-dir> [segv|abort|terminate|none]
+//   crash_probe <output-dir> [segv|abort|terminate|assert|none]
 //
 // The output directory stands in for the local data path, so a test can point
 // it at a temporary directory. RWE_CRASH_NO_DIALOG is set for us here rather
 // than by the caller: nothing is watching to dismiss a message box.
 
+#include <cassert>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -21,7 +22,7 @@ int main(int argc, char* argv[])
 {
     if (argc < 2)
     {
-        std::cerr << "usage: crash_probe <output-dir> [segv|abort|terminate|none]\n";
+        std::cerr << "usage: crash_probe <output-dir> [segv|abort|terminate|assert|none]\n";
         return 2;
     }
 
@@ -51,6 +52,14 @@ int main(int argc, char* argv[])
     {
         // Installs the handler and exits normally, so a test can require that
         // the quiet path leaves no crash file behind.
+        return 0;
+    }
+
+    if (std::strcmp(mode, "assert") == 0)
+    {
+        // A no-op under NDEBUG, so the test that drives this is compiled out
+        // of a Release build too.
+        assert(mode == nullptr && "crash_probe deliberate assertion");
         return 0;
     }
 
