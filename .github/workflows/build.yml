@@ -104,7 +104,7 @@ jobs:
           make -j 4
           popd
       - name: test rwe
-        run: ./build/rwe_test
+        run: ./build/rwe_test --durations yes
       - name: build AppImage
         if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
         run: |
@@ -206,7 +206,7 @@ jobs:
           cd ..
       - name: test rwe
         working-directory: build
-        run: .\${{ matrix.configuration }}\rwe_test.exe
+        run: .\${{ matrix.configuration }}\rwe_test.exe --durations yes
       - name: package rwe
         working-directory: build
         run: cmake --build . --target package --config ${{ matrix.configuration }} --parallel 4
@@ -305,7 +305,7 @@ jobs:
         shell: msys2 {0}
       - name: test rwe
         working-directory: build
-        run: ./rwe_test
+        run: ./rwe_test --durations yes
         shell: msys2 {0}
       - name: package rwe
         working-directory: build
