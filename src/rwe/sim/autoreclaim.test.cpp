@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
+#include <rwe/cob/CobOpCode.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/FeatureDefinition.h>
@@ -157,6 +158,37 @@ namespace rwe
                 Energy(EnergyCapacity),
             };
             return sim.addPlayer(p);
+        }
+
+        /**
+         * A script with nothing in it but a `StopBuilding` that counts how
+         * many times it has been run. Stowing the nanolathe is the whole of
+         * what the engine asks a construction unit's script to do when a job
+         * ends -- ARMCK's is `start-script RequestState( INACTIVE )` and
+         * nothing else -- so the count is the reported symptom, measured.
+         */
+        std::shared_ptr<CobScript> makeStowCountingScript()
+        {
+            auto script = std::make_shared<CobScript>();
+            script->staticVariableCount = 1;
+            script->functions.push_back(CobFunctionInfo{"StopBuilding", 0u});
+            script->instructions = {
+                static_cast<uint32_t>(OpCode::PUSH_STATIC),
+                0u,
+                static_cast<uint32_t>(OpCode::PUSH_CONSTANT),
+                1u,
+                static_cast<uint32_t>(OpCode::ADD),
+                static_cast<uint32_t>(OpCode::POP_STATIC),
+                0u,
+                static_cast<uint32_t>(OpCode::PUSH_CONSTANT),
+                0u,
+                static_cast<uint32_t>(OpCode::RETURN)};
+            return script;
+        }
+
+        int stowCount(GameSimulation& sim, UnitId id)
+        {
+            return sim.getUnitState(id).cobEnvironment->_statics.at(0);
         }
 
         UnitId addPatrollingKbot(GameSimulation& sim, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
@@ -321,5 +353,62 @@ namespace rwe
             REQUIRE_FALSE(sim.tryGetFeature(plantId).has_value());
             REQUIRE(sim.tryGetFeature(wreckId).has_value());
         }
+    }
+
+    TEST_CASE("a job a patrolling builder has begun is not given up half way", "[reclaim][autoreclaim]")
+    {
+        // The original does not leave the choice to a scan that runs again
+        // every tick. `RepairPatrol` picks a candidate once and then builds a
+        // RECLAIM mission for it -- 0x405CA2 allocates the 0x56 bytes,
+        // 0x405D0A names it from `0x5016C4` ("RECLAIM"), 0x405D11 initialises
+        // it and 0x405D18 pushes it in front of the patrol -- before resetting
+        // its own state at 0x405D1D and standing down. That mission owns the
+        // unit until the feature is gone, so neither the scan nor the two
+        // store comparisons that gate it are consulted again while the job
+        // runs.
+        //
+        // RWE re-decided every tick, and a target that changes under a job in
+        // progress takes the builder through UnitBehaviorStateIdle, which
+        // runs StopBuilding: the nanolathe goes away and comes back out for
+        // the new target. Reclaiming metal is enough on its own to trigger it,
+        // because the payout is credited as the work is done and the fifth of
+        // capacity that opened the scan (S:97) is crossed part-way through
+        // the very wreck being reclaimed -- at which point the metal
+        // candidate gives way to the energy one.
+        auto script = makeStowCountingScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+
+        // A fifth of 1050 is 210. Starting at 150 with the wreck worth 116,
+        // the store crosses the line about half way through the job.
+        auto player = addPlayerHolding(sim, 150.0f, 0.0f);
+        addStorageBuildings(sim, player, script);
+
+        auto wreckDef = sim.featureDefinitions.insert(makeWreckDef());
+        auto plantDef = sim.featureDefinitions.insert(makePlantDef());
+        auto wreckId = sim.addFeature(wreckDef, 20, 20).value();
+        auto plantId = sim.addFeature(plantDef, 20, 25).value();
+        auto wreckPosition = sim.getFeature(wreckId).position;
+
+        auto kbotId = addPatrollingKbot(sim, player, wreckPosition + SimVector(30_ss, 0_ss, 0_ss), script);
+
+        // Sampled at the top of each pass, so the stow that ends the job
+        // itself is never counted -- only one that happens while there is
+        // still wreckage in front of the builder.
+        int stowsMidJob = 0;
+        for (int i = 0; i < 600; ++i)
+        {
+            if (!sim.tryGetFeature(wreckId))
+            {
+                break;
+            }
+            stowsMidJob = stowCount(sim, kbotId);
+            sim.tick();
+        }
+
+        REQUIRE_FALSE(sim.tryGetFeature(wreckId).has_value());
+        // It never put the arm away in the middle of the job...
+        REQUIRE(stowsMidJob == 0);
+        // ...and it finished what it started before going on to the plant.
+        REQUIRE(sim.tryGetFeature(plantId).has_value());
     }
 }

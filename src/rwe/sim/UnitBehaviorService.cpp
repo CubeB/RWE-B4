@@ -123,6 +123,37 @@ namespace rwe
 
         unit.cobEnvironment->createThread("Create", std::vector<int>());
 
+        // Tell the script how long the unit takes to reload, which is what
+        // decides how long it holds an aiming pose. The original works this
+        // out while it is initialising the three weapon slots: 0x49E070 keeps
+        // the largest `reloadtime` it sees (`wdef+0xE4`, a word already
+        // multiplied by 30, so a tick count), and 0x49E14B-0x49E17A turns it
+        // into milliseconds -- `ticks * 1000`, then the magic-number divide by
+        // 30 -- before starting "SetMaxReloadTime" with it through
+        // StartScriptByName at 0x49E186. That call site is the only reference
+        // to the string anywhere in the image, and it is unconditional, so a
+        // unit with no weapons gets a zero rather than nothing.
+        //
+        // Forty-two of the 157 shipped scripts answer it, and they all do the
+        // same thing with the number: `restore_delay = time * n`, the sleep at
+        // the top of RestoreAfterDelay before the unit stows whatever aiming
+        // opened up. A script that is never told keeps the 3000 its Create()
+        // sets, and three seconds is shorter than most weapons take to
+        // reload -- CORMSHIP's rockets are 9 seconds, ARMMSHIP's 12, and both
+        // double it -- so a missile ship was shutting its hatches between
+        // shots instead of holding them open across a reload.
+        auto maxReloadTicks = 0;
+        for (const auto& weapon : unit.weapons)
+        {
+            if (!weapon)
+            {
+                continue;
+            }
+            const auto& weaponDefinition = sim->weaponDefinitions.at(weapon->weaponType);
+            maxReloadTicks = std::max(maxReloadTicks, static_cast<int>(deltaSecondsToTicks(weaponDefinition.reloadTime).value));
+        }
+        unit.cobEnvironment->createThread("SetMaxReloadTime", {(maxReloadTicks * 1000) / SimTicksPerSecond});
+
         // set speed for metal extractors
         if (unitDefinition.extractsMetal != Metal(0))
         {
@@ -3793,11 +3824,45 @@ namespace rwe
         // See TOTALA-EXE.md §97.
         if (unitInfo.definition->canReclamate && unitInfo.definition->builder)
         {
-            if (auto wreck = findFeatureToAutoReclaim(unitInfo))
+            // A job, once begun, belongs to the unit until the feature is
+            // gone. The original does not leave that to a scan it runs again
+            // every tick: the patrol builds a RECLAIM mission of its own for
+            // whatever the scan picked -- 0x405CA2 allocates it, 0x405D0A
+            // names it from `0x5016C4` ("RECLAIM"), 0x405D11 initialises it
+            // and 0x405D18 pushes it in front of the patrol -- and then
+            // resets its own state (0x405D1D) and stands down. The mission
+            // owns the target from there; the scan, and the two store
+            // comparisons that gate it (S:97), are not consulted again until
+            // the job is over.
+            //
+            // RWE re-decided every tick, and a target that changes under a
+            // job in progress sends the builder through
+            // UnitBehaviorStateIdle -- which stows the nanolathe and then
+            // deploys it again for the new wreck. Anything that moved the
+            // scan's answer did it: a store creeping past the fifth that
+            // opened the scan, so the metal candidate gave way to the energy
+            // one; or simply something dying nearer than the wreck already
+            // being worked on, which in a wreck field is most of the time.
+            std::optional<FeatureId> wreck;
+            if (auto reclaimingState = std::get_if<UnitBehaviorStateReclaiming>(&unitInfo.state->behaviourState))
             {
-                // Run the ordinary reclaim machinery against it; the wreck is
-                // re-found every tick, so when it is gone the patrol resumes
-                // by itself.
+                if (auto inProgress = std::get_if<FeatureId>(&reclaimingState->target); inProgress != nullptr && sim->tryGetFeature(*inProgress))
+                {
+                    wreck = *inProgress;
+                }
+            }
+            if (!wreck)
+            {
+                wreck = findFeatureToAutoReclaim(unitInfo);
+            }
+
+            if (wreck)
+            {
+                // Run the ordinary reclaim machinery against it; when the
+                // feature is gone the job ends, the arm stows the way the
+                // original's mission teardown stows it (0x43A21E in the
+                // mission destructor, guarded on the same mission having
+                // issued StartBuilding), and the patrol resumes.
                 if (!handleReclaimOrder(unitInfo, ReclaimOrder(*wreck)))
                 {
                     return false;
