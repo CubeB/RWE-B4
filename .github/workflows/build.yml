@@ -88,17 +88,27 @@ jobs:
           path: ~/.cache/ccache
           key: ccache-${{ runner.os }}-${{ env.CC }}-${{ matrix.configuration }}-${{ github.sha }}
           restore-keys: ccache-${{ runner.os }}-${{ env.CC }}-${{ matrix.configuration }}-
+      # `git rev-parse HEAD:libs/protobuf` is the gitlink SHA the superproject
+      # records, so it names the exact protobuf the build is about to compile.
+      # It is read here rather than hashed with hashFiles, whose globs do not
+      # reliably descend into .git -- a miss there returns an empty string and
+      # collapses the key to a constant without saying so.
+      - name: identify protobuf version
+        id: protobuf-version
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD:libs/protobuf)" >> "$GITHUB_OUTPUT"
       - name: restore protobuf
         id: cache-protobuf-restore
         uses: actions/cache/restore@v5
         with:
           path: libs/_protobuf-install
-          key: ${{ runner.os }}-${{ env.CC }}-protobuf
+          key: ${{ runner.os }}-${{ env.CC }}-protobuf-${{ steps.protobuf-version.outputs.sha }}-${{ hashFiles('libs/build-protobuf.sh') }}
       - name: build protobuf
         working-directory: libs
         run: ./build-protobuf.sh
       - name: save protobuf
         id: cache-protobuf-save
+        if: steps.cache-protobuf-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: libs/_protobuf-install
@@ -285,18 +295,28 @@ jobs:
           path: ~/.cache/ccache
           key: ccache-${{ runner.os }}-mingw64-${{ matrix.configuration }}-${{ github.sha }}
           restore-keys: ccache-${{ runner.os }}-mingw64-${{ matrix.configuration }}-
+      # `git rev-parse HEAD:libs/protobuf` is the gitlink SHA the superproject
+      # records, so it names the exact protobuf the build is about to compile.
+      # It is read here rather than hashed with hashFiles, whose globs do not
+      # reliably descend into .git -- a miss there returns an empty string and
+      # collapses the key to a constant without saying so.
+      - name: identify protobuf version
+        id: protobuf-version
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD:libs/protobuf)" >> "$GITHUB_OUTPUT"
       - name: restore protobuf
         id: cache-protobuf-restore
         uses: actions/cache/restore@v5
         with:
           path: libs/_protobuf-install
-          key: ${{ runner.os }}-mingw64-protobuf-${{ hashFiles('.git/modules/libs/protobuf/HEAD') }}
+          key: ${{ runner.os }}-mingw64-protobuf-${{ steps.protobuf-version.outputs.sha }}-${{ hashFiles('libs/build-protobuf.sh') }}
       - name: build protobuf
         working-directory: libs
         run: ./build-protobuf.sh
         shell: msys2 {0}
       - name: save protobuf
         id: cache-protobuf-save
+        if: steps.cache-protobuf-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: libs/_protobuf-install
