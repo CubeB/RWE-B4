@@ -1831,6 +1831,74 @@ namespace rwe
         }
     }
 
+    nlohmann::json saveExploredGrid(const Grid<unsigned char>& grid)
+    {
+        std::vector<std::uint32_t> runs;
+        unsigned char current = 0;
+        std::uint32_t count = 0;
+
+        for (auto cell : grid.getVector())
+        {
+            unsigned char bit = cell != 0 ? 1 : 0;
+            if (bit == current)
+            {
+                ++count;
+            }
+            else
+            {
+                runs.push_back(count);
+                current = bit;
+                count = 1;
+            }
+        }
+        runs.push_back(count);
+
+        return json{
+            {"width", grid.getWidth()},
+            {"height", grid.getHeight()},
+            {"runs", runs}};
+    }
+
+    void loadExploredGrid(const nlohmann::json& j, Grid<unsigned char>& grid)
+    {
+        // A save from a different map, or a different vision cell size,
+        // cannot be laid over this grid. Leaving it unexplored is the safe
+        // answer: the player loses their map memory rather than the load
+        // failing outright.
+        auto width = j.at("width").get<std::size_t>();
+        auto height = j.at("height").get<std::size_t>();
+        if (width != grid.getWidth() || height != grid.getHeight())
+        {
+            return;
+        }
+
+        auto& cells = grid.getVector();
+        std::fill(cells.begin(), cells.end(), static_cast<unsigned char>(0));
+
+        std::size_t index = 0;
+        unsigned char current = 0;
+        for (const auto& runJson : j.at("runs"))
+        {
+            auto run = runJson.get<std::uint32_t>();
+            if (current != 0)
+            {
+                // The bound is on the cell being written, not on the
+                // start of the run: guarding `index` alone lets a run that
+                // begins in range finish past the end of the vector.
+                for (std::uint32_t i = 0; i < run && index + i < cells.size(); ++i)
+                {
+                    cells[index + i] = 1;
+                }
+            }
+            index += run;
+            current = current != 0 ? 0 : 1;
+            if (index >= cells.size())
+            {
+                break;
+            }
+        }
+    }
+
     nlohmann::json saveSimulationToJson(const GameSimulation& sim)
     {
         SaveContext ctx;
@@ -1884,6 +1952,18 @@ namespace rwe
             players.push_back(saveGamePlayerInfo(p));
         }
         j["players"] = players;
+
+        // What each player has explored. Saved beside the players and in the
+        // same order, because it belongs to them; the visible grid is not
+        // saved at all, since the load recomputes it from where the units are.
+        {
+            auto exploredJson = json::array();
+            for (const auto& vis : sim.playerVisibility)
+            {
+                exploredJson.push_back(saveExploredGrid(vis.explored));
+            }
+            j["explored"] = exploredJson;
+        }
 
         json features = json::array();
         for (const auto& [_, f] : sim.features)
@@ -2064,5 +2144,25 @@ namespace rwe
         sim.events.clear();
 
         sim.updateVisibility();
+
+        // Explored last, and overwriting rather than adding to what the pass
+        // above just revealed. The grid is meant to be exactly what the player
+        // had: anything a unit can currently see was already explored when the
+        // save was written, in any state the engine actually produces, so the
+        // pass can only ever agree with the file or disagree with it -- and
+        // where they disagree the file is the one that knows where the player
+        // has been. Doing it this way also makes save -> load -> save
+        // byte-identical, which is what the round-trip test can check.
+        //
+        // Older saves carry no such key and simply start unexplored, as they
+        // did before any of this was written.
+        if (j.contains("explored"))
+        {
+            const auto& exploredJson = j.at("explored");
+            for (std::size_t i = 0; i < exploredJson.size() && i < sim.playerVisibility.size(); ++i)
+            {
+                loadExploredGrid(exploredJson[i], sim.playerVisibility[i].explored);
+            }
+        }
     }
 }

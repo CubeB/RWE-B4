@@ -1847,14 +1847,17 @@ namespace rwe
         auto meshes = createUnitMeshes(simulation, unitDefinition.objectName);
         auto modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
 
-        if (unitDefinition.isMobile)
-        {
-            // don't shade mobile units
-            for (auto& m : meshes)
-            {
-                m.shaded = false;
-            }
-        }
+        // Every piece of every model starts shaded, mobile or not: the
+        // piece-list builder does `or byte [ebx+0x28],0x4` unconditionally
+        // (0x45AF31, TOTALA-EXE-SHADING.md S:11), and a script has to say
+        // DONT_SHADE to turn it off. RWE used to clear the flag for anything
+        // mobile, which meant the whole of the shading work reached buildings
+        // and nothing else.
+        //
+        // The opt-out is not theoretical: 290 of the 714 shipped scripts call
+        // DONT_SHADE and not one calls SHADE, so the data already says where
+        // shading is unwanted -- canopies, glass, the pieces authored to be
+        // read flat -- and it can only say so if the default is on.
 
         const auto& script = simulation.unitScriptDefinitions.at(unitType);
         auto cobEnv = std::make_unique<CobEnvironment>(&script);

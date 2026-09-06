@@ -642,8 +642,15 @@ Defaults, set by the piece-list builder `0x45AEC0`, VERIFIED:
 So every piece of every model starts shaded, and a script has to say
 `DONT_SHADE` to turn it off. When it does, that piece's vertices are pinned to
 row 15 -- measured x1.0009, i.e. the texture drawn exactly as authored. This is
-a real feature, not dead code; whether any stock script uses it was NOT
-CHECKED here (a `.cob` question, not an exe question).
+a real feature, not dead code.
+
+**Whether any stock script uses it, answered 2026-09-06:** heavily. Scanning
+the 714 shipped `.cob` files for the two opcodes, **290 call `DONT_SHADE` and
+not one calls `SHADE`**. The data is written on the assumption that shading is
+on and that a script turns it off where it is unwanted, which is exactly what
+`0x45AF31` sets up. RWE cleared the flag for every mobile unit until
+2026-09-06, so the whole of this document reached buildings and nothing
+else.
 
 **`[unitdef+0x241]`.** Read twice in this routine, both times the same bit and
 both times for the same purpose:

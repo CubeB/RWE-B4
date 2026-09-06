@@ -44,6 +44,11 @@ jobs:
   # the one that runs the test suite with asserts live. Everything else waits
   # for the merge to revival, or for a `ci:full` label on the pull request.
   build-linux:
+    # A job that hangs should fail in a reasonable time rather than
+    # hold a runner for GitHub's six-hour default: on 2026-09-06 a
+    # modal assertion dialog in the MSVC Debug test run sat for two
+    # hours and eighteen minutes before it was cancelled by hand.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -106,7 +111,7 @@ jobs:
           make -j 4
           popd
       - name: test rwe
-        run: ./build/rwe_test
+        run: ./build/rwe_test --durations yes
       - name: build AppImage
         if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
         run: |
@@ -159,6 +164,11 @@ jobs:
 
   build-windows-msvc:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full')
+    # A job that hangs should fail in a reasonable time rather than
+    # hold a runner for GitHub's six-hour default: on 2026-09-06 a
+    # modal assertion dialog in the MSVC Debug test run sat for two
+    # hours and eighteen minutes before it was cancelled by hand.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -203,7 +213,9 @@ jobs:
           cd ..
       - name: test rwe
         working-directory: build
-        run: .\${{ matrix.configuration }}\rwe_test.exe
+        run: |
+          .\${{ matrix.configuration }}\rwe_test.exe --list-tests
+          .\${{ matrix.configuration }}\rwe_test.exe --durations yes
       - name: package rwe
         working-directory: build
         run: cmake --build . --target package --config ${{ matrix.configuration }} --parallel 4
@@ -222,6 +234,11 @@ jobs:
 
   build-windows-mingw64:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full')
+    # A job that hangs should fail in a reasonable time rather than
+    # hold a runner for GitHub's six-hour default: on 2026-09-06 a
+    # modal assertion dialog in the MSVC Debug test run sat for two
+    # hours and eighteen minutes before it was cancelled by hand.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -294,7 +311,7 @@ jobs:
         shell: msys2 {0}
       - name: test rwe
         working-directory: build
-        run: ./rwe_test
+        run: ./rwe_test --durations yes
         shell: msys2 {0}
       - name: package rwe
         working-directory: build
