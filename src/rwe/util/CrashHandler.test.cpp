@@ -216,9 +216,30 @@ namespace rwe
         fs::remove_all(dir);
     }
 
-#ifndef NDEBUG
-    // Only meaningful where assert() still does something; a Release build
-    // compiles both the probe's assertion and this case away.
+#if !defined(NDEBUG) && !defined(_MSC_VER)
+    // Only meaningful where assert() still does something -- a Release build
+    // compiles both the probe's assertion and this case away -- and only
+    // where the message can be got at in the first place, which is not MSVC.
+    //
+    // The glibc and MinGW builds replace the C library's own failure routine
+    // (__assert_fail and _assert), so they see the expression, the file and
+    // the line directly. MSVC has no such routine to replace: assert() calls
+    // _wassert inside the UCRT, and two CI runs say that _wassert does not go
+    // through _CrtDbgReport at all. A report hook installed with
+    // _CrtSetReportHook was never called; nor was a wide one installed with
+    // _CrtSetReportHookW2; but _CrtSetReportMode did take effect and stopped
+    // the dialog. One cause fits both: the hook machinery belongs to the
+    // _ASSERT/_ASSERTE macros, and standard assert() only consults the mode.
+    //
+    // So the note is missing on MSVC and the rest of the report is not: the
+    // fault, the phase, the scene and the backtrace all arrive, with wassert
+    // sitting plainly in the stack. That is worth having on its own.
+    //
+    // The route for anyone with a debugger and an afternoon:
+    // _CrtSetReportFile takes a HANDLE of your choosing, so _wassert can be
+    // made to write its text somewhere the handler can read it back. That
+    // wants trying against a real MSVC build rather than guessing at it from
+    // a CI log, which is why it is not attempted here.
     TEST_CASE("a failed assertion reaches the report", "[crash]")
     {
         auto dir = uniqueTempDir();

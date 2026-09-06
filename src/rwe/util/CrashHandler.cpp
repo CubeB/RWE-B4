@@ -601,14 +601,16 @@ namespace rwe
         // report hook, which is the supported way in. Returning FALSE leaves
         // the CRT to carry on and abort as it would have.
         //
-        // There are two hooks, and assert() uses the one you would not guess.
-        // A failed assert() in C++ goes through _wassert, which reports with
-        // _CrtDbgReportW -- and the wide path only calls hooks installed by
-        // _CrtSetReportHookW2. A hook registered with the narrow
-        // _CrtSetReportHook is never asked, so the report came out with a
-        // backtrace naming wassert and no note saying which assertion it was.
-        // Both are installed below; the narrow one still catches _CrtDbgReport
-        // calls made directly.
+        // Both the narrow and the wide hook are installed, and between them
+        // they catch _ASSERT, _ASSERTE and any direct _CrtDbgReport call.
+        //
+        // They do not catch a plain assert(). That was tried, twice: neither
+        // hook fires for one, while _CrtSetReportMode plainly does take
+        // effect, which says assert() consults the mode and never reaches the
+        // report machinery the hooks hang off. The note is therefore empty
+        // for an assert() on MSVC; every other field of the report, the
+        // backtrace included, is not. See the comment on the skipped case in
+        // CrashHandler.test.cpp for what to try next.
         int crtReportHook(int reportType, char* message, int* /*returnValue*/)
         {
             if (reportType == _CRT_ASSERT && message != nullptr)
