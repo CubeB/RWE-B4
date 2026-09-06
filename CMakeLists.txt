@@ -817,6 +817,7 @@ set(TEST_FILES
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/cloakdisplay.test.cpp
     src/rwe/game/damagesmoke.test.cpp
+    src/rwe/test_announce.cpp
     src/rwe/test_crt_silence.cpp
     src/rwe/game/exploredgrid.test.cpp
     src/rwe/game/hoveredfeature.test.cpp
