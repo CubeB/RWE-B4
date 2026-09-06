@@ -1,6 +1,6 @@
 # Robot War Engine — Revival Roadmap
 
-_Last updated: 2026-09-05. Status of the codebase is as of the `revival` integration branch (upstream `master` @ b2d8a31 + merged fork work, see Phase 0). The test suite stands at 437 cases / 58,780 assertions._
+_Last updated: 2026-09-05. Status of the codebase is as of the `revival` integration branch (upstream `master` @ b2d8a31 + merged fork work, see Phase 0). Run `rwe_test` for the current suite size -- see CLAUDE.md for why it is not recorded here._
 
 ## Where the project stands
 

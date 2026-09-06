@@ -30,7 +30,12 @@ make -j$(nproc)
 ./build/rwe_test "[tag]"
 ```
 
-The suite passes 452 cases / 59,909 assertions as of 2026-09-06. If a document quotes a different figure, run the suite rather than believing either of them.
+Run the suite for its current size; it prints the count on the way out, and so
+does every CI job's `test rwe` step. The figure is deliberately not written
+down here. It goes stale the moment anyone adds a test, and when two branches
+both bring it up to date they conflict on the only line either of them
+touched -- which happened three times in one day before this sentence
+replaced the number.
 
 This machine has two configured trees, both MSYS2/MinGW64 with `Unix Makefiles`: `build/` (Debug) and `build-release/` (Release). Play-testing uses `build-release/rwe.exe`. **Rebuild the `rwe` target, not just `rwe_test`** — a green test suite says nothing about whether the game still links, and several of the executables below share `librwe` with it.
 
@@ -87,8 +92,7 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
 - **`ui_probe`** — builds the real UI panels from the real game data headlessly, dumps every gadget's hitbox, and delivers clicks the way the scenes deliver them, printing which gadget takes each event and what message comes out. It diagnoses layout and dispatch faults without a window.
 - **`solar_probe <file.3do>`** — replays the engine's own shading pipeline over a model and prints the shade row each polygon would get. This is how the vertex-normal convention was settled, and it takes one command where a play-test took a round trip.
 - **`tools/visual-test.ps1`** — when only the renderer will do. It launches `build-release/rwe.exe`, finds the window, and then *drives* it: real clicks at client-relative coordinates, screenshots cropped and nearest-neighbour magnified around the thing under test. `-phase build|air|ship` are the scripted sequences already written; adding one is a few lines. Prefer this to ad-hoc screenshotting — a scripted click sequence is repeatable and an eyeballed one is not.
-- **Crash reports** are written by the game itself. Any fatal fault — a segfault, an access violation, a failed assertion, an uncaught exception — writes `rwe-crash-<timestamp>.txt` to the local data path next to `rwe.log`, holding the fault and its address, a backtrace, and what the game was doing: the phase of the frame (`Input`/`Update`/`SimTick`/`Render`/`Swap`), the scene, the map, the scene tick, the game time and the unit count. A failed assertion carries its own message into a `note:` field — the C library writes that text to stderr and nothing else captures it, so `librwe` replaces `__assert_fail` (and MinGW's `_assert`, and hooks the MSVC debug CRT) to record it before aborting; the console output and the signal are unchanged. Installed by `rwe` and `battle_test` as soon as the data path is known (`src/rwe/util/CrashHandler.*`), so nothing has to be started in advance. Two things to know when reading one: the top few frames are always the handler itself, and a **MinGW** build gets module+offset rather than function names, because dbghelp reads PDBs and MinGW emits DWARF — the report says so and gives the `addr2line -f -C -e <module> <offset>` that resolves a frame. `crash_probe` crashes on purpose (`segv|abort|terminate|assert|none`) and is what the tests drive.
-- **`tools/crash-catch.cmd`** runs the Debug build under gdb and writes a backtrace to `crash.txt`. Play normally, reproduce the crash, close the window. Still the tool of choice when you want live locals or to poke at the dying process; the crash report above is for the crash you did not expect.
+- **`tools/crash-catch.cmd`** runs the Debug build under gdb and writes a backtrace to `crash.txt`. Play normally, reproduce the crash, close the window.
 - Environment switches, all pure observers: `RWE_AI_PROFILE=1` times each AI pass and logs anything over 2 ms; `RWE_DEBUG_SPAWN=ARMPW*12@0:8:1` spawns units on a timer (`<type>*<count>@<owner>:<seconds>[:<near player>]`); `RWE_DEBUG_SELF_DESTRUCT[=_PLAYER]`, `RWE_TRACE_BOMBER`, `RWE_TRACE_GUNSHIP`, `RWE_TRACE_MISSILE`.
 
 ## Determinism
