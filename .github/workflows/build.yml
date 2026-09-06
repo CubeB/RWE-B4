@@ -206,7 +206,9 @@ jobs:
           cd ..
       - name: test rwe
         working-directory: build
-        run: .\${{ matrix.configuration }}\rwe_test.exe --durations yes
+        run: |
+          .\${{ matrix.configuration }}\rwe_test.exe --list-tests
+          .\${{ matrix.configuration }}\rwe_test.exe --durations yes
       - name: package rwe
         working-directory: build
         run: cmake --build . --target package --config ${{ matrix.configuration }} --parallel 4
