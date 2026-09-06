@@ -53,6 +53,9 @@ namespace rwe
             std::string command = "\"" RWE_CRASH_PROBE_PATH "\" \"" + dir.string() + "\" " + mode;
 #ifdef _WIN32
             command += " >nul 2>&1";
+            // cmd.exe strips the outer quote pair when the command begins
+            // with one, which takes the argument quoting with it.
+            command = "\"" + command + "\"";
 #else
             command += " >/dev/null 2>&1";
 #endif
