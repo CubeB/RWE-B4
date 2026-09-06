@@ -109,7 +109,7 @@ int main(int argc, char* argv[])
                       << "  --help                Show this message\n"
                       << "  --log <path>          Log output file path\n"
                       << "  --state-log <path>    Sim-state log file (desync debugging)\n"
-                      << "  --ai-difficulty <d>   easy | standard | hard | brutal (default: standard)\n"
+                      << "  --ai-difficulty <d>   idle | easy | standard | hard | brutal (default: standard)\n"
                       << "  --width <pixels>      Window width (default: 800)\n"
                       << "  --height <pixels>     Window height (default: 600)\n"
                       << "  --fullscreen          Start in fullscreen mode (same as --window-mode fullscreen)\n"
@@ -184,7 +184,13 @@ int main(int argc, char* argv[])
                 {
                     c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 }
-                if (difficulty == "easy")
+                if (difficulty == "idle" || difficulty == "none" || difficulty == "off")
+                {
+                    // A computer player that does nothing at all. Useful when
+                    // the thing being tested is anything other than the AI.
+                    gameParameters->aiDifficulty = rwe::AiDifficulty::Idle;
+                }
+                else if (difficulty == "easy")
                 {
                     gameParameters->aiDifficulty = rwe::AiDifficulty::Easy;
                 }

@@ -7,15 +7,35 @@ namespace rwe
 {
     void PerceptionManager::refresh(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, AiBlackboard& bb) const
     {
-        // Forget units that are gone, or that we can see are no longer where we left them.
+        // Forget an enemy only where a player would have seen it go.
+        //
+        // This used to drop a remembered unit the moment it died, wherever it
+        // died. That is knowledge nobody has: a tank killed on the far side of
+        // the map, out of our sight, would vanish off the AI's map at the
+        // instant it blew up. A player keeps the marker and has to go and look
+        // -- so the test is not "is it dead" but "are we watching the place we
+        // last saw it", which covers both the unit dying in front of us and
+        // the unit having quietly moved on.
         for (auto it = bb.knownEnemies.begin(); it != bb.knownEnemies.end();)
         {
             auto unitRef = sim.tryGetUnitState(it->second.unitId);
-            auto dead = !unitRef || unitRef->get().isDead();
-            auto lookedAndGone = !dead
-                && !sim.canSeeUnit(aiOwner, it->second.unitId)
-                && sim.isVisibleTo(aiOwner, it->second.lastKnownPosition);
-            if (dead || lookedAndGone)
+            auto gone = !unitRef || unitRef->get().isDead();
+
+            bool forget;
+            if (profile.cheatModeOmniscient)
+            {
+                // Brutal sees everything anyway, so a stale marker would only
+                // be a lie it tells itself.
+                forget = gone;
+            }
+            else
+            {
+                auto watching = sim.isVisibleTo(aiOwner, it->second.lastKnownPosition);
+                auto stillThere = !gone && sim.canSeeUnit(aiOwner, it->second.unitId);
+                forget = watching && !stillThere;
+            }
+
+            if (forget)
             {
                 it = bb.knownEnemies.erase(it);
             }

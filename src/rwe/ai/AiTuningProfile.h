@@ -7,6 +7,17 @@ namespace rwe
 {
     enum class AiDifficulty
     {
+        /**
+         * Does nothing at all: builds nothing, scouts nothing, never attacks.
+         *
+         * Not a difficulty so much as a way of getting the computer player out
+         * of the way. A skirmish against an Idle opponent gives you a real
+         * game with a real second player, real fog and a real commander to go
+         * and find, but with nothing happening that you did not cause -- which
+         * is what you want when the thing being tested is a shader, a unit, or
+         * an interface, and an AI building a base would only be noise.
+         */
+        Idle,
         Easy,
         Standard,
         Hard,
@@ -70,6 +81,12 @@ namespace rwe
         /** Weighting of enemy anti-ground threat against economic value when choosing targets. */
         SimScalar threatAversion{1_ss};
 
+        /**
+         * When set the controller returns from tick() before doing anything.
+         * See AiDifficulty::Idle.
+         */
+        bool idle{false};
+
         // --- Cheats (Brutal) ---
         bool cheatModeOmniscient{false};
         SimScalar resourceCheatMultiplier{1_ss};
@@ -77,6 +94,7 @@ namespace rwe
 
     AiTuningProfile makeDefaultStandardProfile();
     AiTuningProfile makeDefaultBrutalProfile();
+    AiTuningProfile makeIdleProfile();
     AiTuningProfile makeProfileForDifficulty(AiDifficulty difficulty);
     const char* aiDifficultyName(AiDifficulty difficulty);
 }

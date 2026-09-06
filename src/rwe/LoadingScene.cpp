@@ -253,6 +253,37 @@ namespace rwe
             throw std::runtime_error("No local player!");
         }
 
+        // What the map looks like, read once before anyone moves. Every AI
+        // gets the same copy: it describes ground, not a player's situation.
+        //
+        // The start positions are in here because a human has them too -- the
+        // lobby draws them on the map preview. Which one the enemy actually
+        // took is not, and cannot be, since the AI is handed the list and not
+        // the deal; it has to scout for that like anybody else.
+        std::vector<SimVector> declaredStartPositions;
+        {
+            const auto& startSchema = ota.schemas.at(schemaIndex);
+            // StartPos keys are 1-based and a map may leave gaps in them, so
+            // scan the whole range the slot table can hold rather than
+            // stopping at the first one missing.
+            for (int n = 1; n <= 10; ++n)
+            {
+                auto key = std::string("StartPos") + std::to_string(n);
+                auto it = std::find_if(startSchema.specials.begin(), startSchema.specials.end(), [&key](const OtaSpecial& s) { return s.specialWhat == key; });
+                if (it == startSchema.specials.end())
+                {
+                    continue;
+                }
+                auto world = simulation.terrain.topLeftCoordinateToWorld(SimVector(SimScalar(it->xPos), 0_ss, SimScalar(it->zPos)));
+                world.y = simulation.terrain.getHeightAt(world.x, world.z);
+                declaredStartPositions.push_back(world);
+            }
+        }
+        auto mapIntel = analyseMap(simulation.terrain, std::move(declaredStartPositions));
+        LOG_INFO << "Map " << mapName << " reads as " << mapCharacterName(mapIntel.character)
+                 << " (" << static_cast<int>(mapIntel.waterFraction * 100.0f) << "% water, "
+                 << mapIntel.startPositions.size() << " start positions)";
+
         // Instantiate one AiPlayerController per Computer player.
         // The controller's RNG is sub-seeded from simulation.rng so its
         // sequence is part of the seeded sim and survives replays
@@ -287,7 +318,7 @@ namespace rwe
 
             simulation.addAiController(
                 aiPlayerId,
-                std::make_unique<AiPlayerController>(aiPlayerId, std::move(profile), aiSeed));
+                std::make_unique<AiPlayerController>(aiPlayerId, std::move(profile), aiSeed, mapIntel));
         }
 
         // Which of the map's start positions each filled slot takes. Fixed

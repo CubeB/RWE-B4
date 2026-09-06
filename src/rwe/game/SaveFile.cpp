@@ -57,6 +57,8 @@ namespace rwe
         {
             switch (d)
             {
+                case AiDifficulty::Idle:
+                    return "idle";
                 case AiDifficulty::Easy:
                     return "easy";
                 case AiDifficulty::Hard:
@@ -70,6 +72,10 @@ namespace rwe
 
         AiDifficulty aiDifficultyFromString(const std::string& s)
         {
+            if (s == "idle")
+            {
+                return AiDifficulty::Idle;
+            }
             if (s == "easy")
             {
                 return AiDifficulty::Easy;

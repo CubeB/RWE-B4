@@ -25,10 +25,21 @@ namespace rwe
         return p;
     }
 
+    AiTuningProfile makeIdleProfile()
+    {
+        AiTuningProfile p;
+        p.name = "IDLE";
+        p.difficulty = AiDifficulty::Idle;
+        p.idle = true;
+        return p;
+    }
+
     AiTuningProfile makeProfileForDifficulty(AiDifficulty difficulty)
     {
         switch (difficulty)
         {
+            case AiDifficulty::Idle:
+                return makeIdleProfile();
             case AiDifficulty::Easy:
             {
                 auto p = makeDefaultStandardProfile();
@@ -75,6 +86,7 @@ namespace rwe
     {
         switch (difficulty)
         {
+            case AiDifficulty::Idle: return "Idle";
             case AiDifficulty::Easy: return "Easy";
             case AiDifficulty::Standard: return "Standard";
             case AiDifficulty::Hard: return "Hard";

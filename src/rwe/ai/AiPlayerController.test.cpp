@@ -173,8 +173,8 @@ namespace rwe
         addCommanderUnit(simB, PlayerId(1), "ARMCOM", commanderPos, script);
 
         // Two controllers seeded the same way.
-        AiPlayerController aiA(PlayerId(1), makeDefaultStandardProfile(), aiSeed);
-        AiPlayerController aiB(PlayerId(1), makeDefaultStandardProfile(), aiSeed);
+        AiPlayerController aiA(PlayerId(1), makeDefaultStandardProfile(), aiSeed, MapIntel{});
+        AiPlayerController aiB(PlayerId(1), makeDefaultStandardProfile(), aiSeed, MapIntel{});
 
         std::vector<PlayerCommand> commandsA;
         std::vector<PlayerCommand> commandsB;
@@ -223,7 +223,7 @@ namespace rwe
             sim.terrain.heightmapIndexToWorldCenter(16, 16).z);
         addCommanderUnit(sim, PlayerId(0), "ARMCOM", commanderPos, script);
 
-        AiPlayerController ai(PlayerId(0), makeDefaultStandardProfile(), 42u);
+        AiPlayerController ai(PlayerId(0), makeDefaultStandardProfile(), 42u, MapIntel{});
 
         std::vector<PlayerCommand> commands;
 
@@ -238,6 +238,56 @@ namespace rwe
         // 30th tick triggers the first plan.
         ai.tick(sim, commands);
         REQUIRE(commands.size() == 1);
+    }
+
+    TEST_CASE("An Idle computer player does nothing at all", "[ai]")
+    {
+        // The same setup as the cadence test above, which reaches its first
+        // build order on tick 30. An Idle profile has to stay silent past
+        // that, and past every later planning interval, or it is not idle --
+        // it is just slow.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 5u, 0, 0);
+
+        GamePlayerInfo computer{
+            std::optional<std::string>("ai"),
+            GamePlayerType::Computer,
+            PlayerColorIndex(0),
+            GamePlayerStatus::Alive,
+            std::string("ARM"),
+            Metal(1000.0f),
+            Energy(1000.0f),
+            Metal(1000.0f),
+            Energy(1000.0f),
+            Metal(1000.0f),
+            Energy(1000.0f),
+        };
+        sim.addPlayer(computer);
+
+        sim.unitDefinitions["ARMCOM"] = makeUnitDef(true, true, false);
+        sim.unitDefinitions["ARMMEX"] = makeUnitDef(false, false, true);
+        sim.unitDefinitions["ARMSOLAR"] = makeUnitDef(false, false, false);
+
+        const SimVector commanderPos(
+            sim.terrain.heightmapIndexToWorldCenter(16, 16).x,
+            0_ss,
+            sim.terrain.heightmapIndexToWorldCenter(16, 16).z);
+        addCommanderUnit(sim, PlayerId(0), "ARMCOM", commanderPos, script);
+
+        AiPlayerController ai(PlayerId(0), makeProfileForDifficulty(AiDifficulty::Idle), 42u, MapIntel{});
+
+        std::vector<PlayerCommand> commands;
+        for (int i = 0; i < 200; ++i)
+        {
+            ai.tick(sim, commands);
+        }
+        REQUIRE(commands.empty());
+
+        // And it does not even look: an idle player costs nothing, which is
+        // the point when the reason for switching it off was to measure
+        // something else.
+        REQUIRE(ai.getBlackboard().ownedTotalCounts.empty());
+        REQUIRE(!ai.getBlackboard().commanderUnitId);
     }
 
     TEST_CASE("AiPlayerController emits no commands when no commander exists", "[ai]")
@@ -265,7 +315,7 @@ namespace rwe
 
         // No units spawned at all — bb.commanderUnitId stays empty.
 
-        AiPlayerController ai(PlayerId(0), makeDefaultStandardProfile(), 42u);
+        AiPlayerController ai(PlayerId(0), makeDefaultStandardProfile(), 42u, MapIntel{});
 
         std::vector<PlayerCommand> commands;
         for (int i = 0; i < 60; ++i)

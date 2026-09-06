@@ -1,4 +1,5 @@
 #include "EconomyManager.h"
+#include <algorithm>
 #include <rwe/ai/AiSideUnits.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitDefinition.h>
@@ -42,6 +43,12 @@ namespace rwe
         bb.metalStalled = player.metalStalled;
         bb.energyStalled = player.energyStalled;
 
+        // What is standing this tick, to be diffed against last tick's at the
+        // end of the pass. Ordered, because the losses that come out of the
+        // diff go on to steer building and must do so identically on every
+        // peer.
+        std::map<unsigned int, StandingBuilding> standingNow;
+
         // VectorMap iterates in id order, which keeps everything below deterministic.
         for (const auto& [unitId, unit] : sim.units)
         {
@@ -59,6 +66,11 @@ namespace rwe
                 continue;
             }
             ++bb.ownedCompletedCounts[unit.unitType];
+
+            if (!def.isMobile)
+            {
+                standingNow.emplace(unitId.value, StandingBuilding{unit.unitType, unit.position});
+            }
 
             if (def.commander)
             {
@@ -121,6 +133,40 @@ namespace rwe
                 }
             }
         }
+
+        // What went missing since last tick? Anything that was standing and
+        // is not standing now was destroyed or captured; either way it is
+        // gone and wants replacing. The counts alone could not tell us this
+        // -- they cannot distinguish a solar collector that blew up from one
+        // that was never built -- which is why the ids are kept.
+        //
+        // Skipped on the very first pass, when there is nothing to diff
+        // against and every building would otherwise read as a fresh loss.
+        if (!bb.standingBuildings.empty())
+        {
+            for (const auto& [unitId, standing] : bb.standingBuildings)
+            {
+                if (standingNow.count(unitId) != 0)
+                {
+                    continue;
+                }
+                bb.recentLosses.insert(bb.recentLosses.begin(), LostBuilding{standing.unitType, standing.position, bb.now});
+            }
+            if (bb.recentLosses.size() > MaxRememberedLosses)
+            {
+                bb.recentLosses.resize(MaxRememberedLosses);
+            }
+        }
+        bb.standingBuildings = std::move(standingNow);
+
+        // Age the memory out, so a raid stops steering the build order once
+        // it has been answered.
+        bb.recentLosses.erase(
+            std::remove_if(
+                bb.recentLosses.begin(),
+                bb.recentLosses.end(),
+                [&](const LostBuilding& loss) { return bb.now.value - loss.lostAt.value > LossMemoryTicks; }),
+            bb.recentLosses.end());
 
         bb.armySize = static_cast<int>(bb.combatUnits.size()) - (bb.scoutUnitId ? 1 : 0);
         if (bb.armySize < 0)

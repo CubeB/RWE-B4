@@ -59,15 +59,29 @@ namespace rwe
     AiPlayerController::AiPlayerController(
         PlayerId playerId,
         AiTuningProfile profile,
-        std::uint64_t rngSeed)
+        std::uint64_t rngSeed,
+        MapIntel mapIntel)
         : playerId(playerId),
           profile(std::move(profile)),
           rng(static_cast<std::uint_fast32_t>(rngSeed))
     {
+        // Read once from map data that cannot change, before the first tick,
+        // and never touched again -- so it sits on the blackboard beside the
+        // per-tick state rather than being threaded through every manager.
+        blackboard.mapIntel = std::move(mapIntel);
     }
 
     void AiPlayerController::tick(const GameSimulation& sim, std::vector<PlayerCommand>& outCommands)
     {
+        // An Idle opponent does nothing: no economy pass, no perception, no
+        // commands. Bailing here rather than at each manager means an idle
+        // player also costs nothing, which is the point when the reason for
+        // switching it off was to measure something else.
+        if (profile.idle)
+        {
+            return;
+        }
+
         // Times a pass when RWE_AI_PROFILE is set, and simply runs it otherwise.
         // Nothing measured here feeds back into the sim, so this is invisible
         // to determinism.

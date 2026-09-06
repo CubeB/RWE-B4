@@ -184,6 +184,8 @@ set(SOURCE_FILES
     src/rwe/ai/BuildManager.h
     src/rwe/ai/EconomyManager.cpp
     src/rwe/ai/EconomyManager.h
+    src/rwe/ai/MapIntel.cpp
+    src/rwe/ai/MapIntel.h
     src/rwe/ai/PerceptionManager.cpp
     src/rwe/ai/PerceptionManager.h
     src/rwe/ai/ScoutManager.cpp
@@ -812,6 +814,7 @@ endif()
 set(TEST_FILES
     src/rwe/ai/AiPlayerController.test.cpp
     src/rwe/ai/AiBehaviour.test.cpp
+    src/rwe/ai/MapIntel.test.cpp
     src/rwe/BoxTreeSplit.test.cpp
     src/rwe/GlobalConfig.test.cpp
     src/rwe/Viewport.test.cpp

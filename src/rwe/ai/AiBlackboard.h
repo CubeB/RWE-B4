@@ -3,6 +3,7 @@
 #include <map>
 #include <optional>
 #include <rwe/ai/AiSideUnits.h>
+#include <rwe/ai/MapIntel.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/GameTime.h>
@@ -39,6 +40,32 @@ namespace rwe
         bool isArmed;
     };
 
+    /** A completed building of ours, remembered so that losing it can be noticed. */
+    struct StandingBuilding
+    {
+        std::string unitType;
+        SimVector position;
+    };
+
+    /** One of ours that was standing last tick and is not standing now. */
+    struct LostBuilding
+    {
+        std::string unitType;
+        SimVector position;
+        GameTime lostAt;
+    };
+
+    /**
+     * How long a loss stays worth reacting to, in ticks. Long enough that a
+     * raid which flattens three buildings is still being answered while the
+     * replacements go up, short enough that the AI is not still avenging
+     * something from five minutes ago.
+     */
+    constexpr unsigned int LossMemoryTicks = 60u * 30u;
+
+    /** Losses remembered at once. A razed base should not crowd out everything else. */
+    constexpr std::size_t MaxRememberedLosses = 8;
+
     /**
      * Shared scratch state between the AI's managers. Rebuilt from the sim
      * every tick by the perception and economy passes; the managers only
@@ -48,6 +75,15 @@ namespace rwe
     {
         GamePhase phase{GamePhase::Opening};
         GameTime now{0};
+
+        // --- Map ---
+        /**
+         * What the map looks like, and where it declares its start positions.
+         * Unlike everything else here this is set once, before the first
+         * tick, and never refreshed -- it describes ground that does not
+         * change. See MapIntel.h for why the AI is allowed to know it.
+         */
+        MapIntel mapIntel;
 
         // --- Side ---
         bool sideUnitsResolved{false};
@@ -86,6 +122,18 @@ namespace rwe
         bool groundReachabilityValid{false};
         /** True when the map has ground the base cannot walk to (islands, far banks). */
         bool hasUnreachableGround{false};
+
+        // --- Losses ---
+        /**
+         * Our completed buildings as of last tick, keyed by raw unit id.
+         * Diffed against this tick's to notice what has been destroyed --
+         * nothing else tells the AI, because the counts alone cannot say
+         * whether a solar collector is missing because it blew up or because
+         * one was never built.
+         */
+        std::map<unsigned int, StandingBuilding> standingBuildings;
+        /** What we have lost lately, most recent first, aged out after LossMemoryTicks. */
+        std::vector<LostBuilding> recentLosses;
 
         // --- Enemy ---
         /** Keyed by the enemy unit's raw id so iteration is deterministic. */

@@ -235,7 +235,7 @@ namespace rwe
         defineWorld(sim);
         auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
 
-        AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u);
+        AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
         std::vector<PlayerCommand> commands;
         runTicks(sim, controller, 31, commands);
 
@@ -287,7 +287,7 @@ namespace rwe
 
         SECTION("an honest AI has not seen the enemy")
         {
-            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u);
+            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 2, commands);
             REQUIRE(controller.getBlackboard().knownEnemies.empty());
@@ -296,7 +296,7 @@ namespace rwe
 
         SECTION("an omniscient AI knows where the enemy base is")
         {
-            AiPlayerController controller(ai, makeDefaultBrutalProfile(), 42u);
+            AiPlayerController controller(ai, makeDefaultBrutalProfile(), 42u, MapIntel{});
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 2, commands);
             REQUIRE(controller.getBlackboard().knownEnemies.size() == 1);
@@ -306,7 +306,7 @@ namespace rwe
 
         SECTION("an enemy that walks into view is remembered, and forgotten once seen to be gone")
         {
-            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u);
+            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
             std::vector<PlayerCommand> commands;
             auto raiderId = addUnit(sim, "ARMPW", human, SimVector(100_ss, 0_ss, 0_ss), script);
             runTicks(sim, controller, 2, commands);
@@ -332,7 +332,7 @@ namespace rwe
         auto profile = makeDefaultStandardProfile();
         profile.attackArmySize = 3;
         profile.scoutCount = 0;
-        AiPlayerController controller(ai, profile, 42u);
+        AiPlayerController controller(ai, profile, 42u, MapIntel{});
         std::vector<PlayerCommand> commands;
 
         SECTION("an enemy at the gates puts the AI on the defensive and its units attack it")
@@ -360,7 +360,7 @@ namespace rwe
             auto brutal = makeDefaultBrutalProfile();
             brutal.attackArmySize = 3;
             brutal.scoutCount = 0;
-            AiPlayerController cheat(ai, brutal, 42u);
+            AiPlayerController cheat(ai, brutal, 42u, MapIntel{});
             addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 0_ss, 200_ss), script);
             for (int i = 0; i < 3; ++i)
             {
@@ -382,7 +382,7 @@ namespace rwe
         defineWorld(sim);
         addUnit(sim, "ARMCOM", ai, SimVector(100_ss, 0_ss, 100_ss), script);
 
-        AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u);
+        AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
         std::vector<PlayerCommand> commands;
 
         SECTION("a scout plane is sent along a string of legs and the army keeps its raiders")
@@ -456,7 +456,7 @@ namespace rwe
 
         auto profile = makeDefaultStandardProfile();
         profile.scoutCount = 0;
-        AiPlayerController controller(ai, profile, 42u);
+        AiPlayerController controller(ai, profile, 42u, MapIntel{});
         std::vector<PlayerCommand> commands;
 
         SECTION("the base knows the far bank is out of reach")
@@ -513,4 +513,55 @@ namespace rwe
         REQUIRE(makeProfileForDifficulty(AiDifficulty::Brutal).cheatModeOmniscient);
         REQUIRE_FALSE(makeProfileForDifficulty(AiDifficulty::Hard).cheatModeOmniscient);
     }
+    TEST_CASE("The AI notices a building it has lost", "[ai]")
+    {
+        // Counting units cannot tell a building that blew up from one that
+        // was never built, so the AI keeps the ids of what was standing and
+        // diffs them. Without that, a razed base is rebuilt in the order a
+        // base is built from nothing, and whatever the raid actually took out
+        // is replaced whenever the generic list happens to reach it.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 5u, 0, 0);
+        defineWorld(sim);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto solarId = addUnit(sim, "ARMSOLAR", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+
+        // The first pass has nothing to diff against, so it must not report
+        // every building we own as a fresh loss.
+        runTicks(sim, controller, 2, commands);
+        REQUIRE(controller.getBlackboard().recentLosses.empty());
+        REQUIRE(controller.getBlackboard().standingBuildings.size() == 1);
+
+        sim.getUnitState(solarId).markAsDead();
+        runTicks(sim, controller, 2, commands);
+
+        const auto& losses = controller.getBlackboard().recentLosses;
+        REQUIRE(losses.size() == 1);
+        REQUIRE(losses.front().unitType == "ARMSOLAR");
+        REQUIRE(losses.front().position.x == 100_ss);
+        REQUIRE(controller.getBlackboard().standingBuildings.empty());
+    }
+
+    TEST_CASE("A building that is still standing is not reported lost", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 5u, 0, 0);
+        defineWorld(sim);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMSOLAR", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 90, commands);
+
+        REQUIRE(controller.getBlackboard().recentLosses.empty());
+    }
+
 }

@@ -67,7 +67,8 @@ namespace rwe
         AiPlayerController(
             PlayerId playerId,
             AiTuningProfile profile,
-            std::uint64_t rngSeed);
+            std::uint64_t rngSeed,
+            MapIntel mapIntel);
 
         void tick(const GameSimulation& sim, std::vector<PlayerCommand>& outCommands);
 

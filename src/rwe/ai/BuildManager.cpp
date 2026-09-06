@@ -303,7 +303,16 @@ namespace rwe
         // ground to reach that no one can walk to. Metal is nearly always
         // short on a poor map, so this is not gated on it: a blind AI is
         // worth less than a slow one.
-        if (total(s.lab) >= 1 && total(s.airPlant) < profile.targetAirPlantCount && total(s.solar) >= profile.openingSolarCount && total(s.radar) >= profile.targetRadarCount)
+        //
+        // On a map where the ground runs out, the air plant stops being a
+        // convenience and becomes the only way anything crosses at all, so it
+        // comes forward: no waiting on the radar first. That is read off the
+        // map before the game starts, the way a player reads it off the
+        // preview, and confirmed later by the reachability pass finding
+        // ground it cannot walk to.
+        auto airMatters = (bb.mapIntel.valid && bb.mapIntel.character != MapCharacter::Land) || bb.hasUnreachableGround;
+        if (total(s.lab) >= 1 && total(s.airPlant) < profile.targetAirPlantCount && total(s.solar) >= profile.openingSolarCount
+            && (airMatters || total(s.radar) >= profile.targetRadarCount))
         {
             want(s.airPlant);
         }
@@ -320,6 +329,36 @@ namespace rwe
         {
             want(s.vehiclePlant);
         }
+        // Replace what was just destroyed before getting on with the plan.
+        //
+        // Without this a razed base is rebuilt in generic priority order,
+        // which is the order a base is built in from nothing -- so an AI that
+        // has just lost its radar and two solars to a raid goes back to the
+        // top of the list and works down, and may not reach the radar for a
+        // long time. Anything lost lately that is still wanted is moved to
+        // the front, most recently lost first, and the rest of the plan
+        // follows behind it unchanged.
+        if (!bb.recentLosses.empty())
+        {
+            std::vector<std::string> urgent;
+            for (const auto& loss : bb.recentLosses)
+            {
+                auto it = std::find(wanted.begin(), wanted.end(), loss.unitType);
+                if (it == wanted.end())
+                {
+                    // Already replaced, or not something we want any more.
+                    continue;
+                }
+                if (std::find(urgent.begin(), urgent.end(), loss.unitType) != urgent.end())
+                {
+                    continue;
+                }
+                urgent.push_back(loss.unitType);
+                wanted.erase(it);
+            }
+            wanted.insert(wanted.begin(), urgent.begin(), urgent.end());
+        }
+
         return wanted;
     }
 
@@ -400,7 +439,6 @@ namespace rwe
         std::minstd_rand& rng,
         std::vector<PlayerCommand>& outCommands)
     {
-        (void)aiOwner;
         ++ticksSinceLastPlanning;
         if (ticksSinceLastPlanning < profile.buildPlannerTickInterval)
         {
@@ -444,7 +482,26 @@ namespace rwe
                 site = chooseMexSite(sim, next, builder.position, profile.maxMexSearchRadius, rng, walkable);
                 if (!site && builderAtBase)
                 {
-                    site = chooseMexSite(sim, next, *bb.baseAnchor, profile.expansionMexSearchRadius, rng, walkable);
+                    // Expanding, as opposed to filling in around the base,
+                    // takes ground we have actually looked at. Metal shows on
+                    // a player's map only where that player has explored, so
+                    // an AI reading the whole metal grid is claiming patches
+                    // it has no business knowing about.
+                    //
+                    // The near search above is deliberately left alone. What
+                    // is inside maxMexSearchRadius of a builder standing in
+                    // its own base is ground that base can see, and gating it
+                    // as well starves the opening: an AI that has not built a
+                    // scout yet then cannot expand at all, and an AI with no
+                    // metal never builds the scout.
+                    auto exploredAndWalkable = [&](const SimVector& p) {
+                        if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, p))
+                        {
+                            return false;
+                        }
+                        return !walkable || walkable(p);
+                    };
+                    site = chooseMexSite(sim, next, *bb.baseAnchor, profile.expansionMexSearchRadius, rng, exploredAndWalkable);
                 }
             }
             else if (next == sideUnits.lightLaserTower && bb.enemyBasePosition)
@@ -481,6 +538,13 @@ namespace rwe
             {
                 const auto& featureDefinition = sim.getFeatureDefinition(feature.featureName);
                 if (!featureDefinition.reclaimable || featureDefinition.metal <= 0)
+                {
+                    continue;
+                }
+                // A wreck we have never had eyes on is not ours to know
+                // about. Explored rather than visible, because a player keeps
+                // seeing wreckage in ground they have already uncovered.
+                if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, feature.position))
                 {
                     continue;
                 }
