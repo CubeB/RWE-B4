@@ -1,6 +1,6 @@
 # RWE Skirmish AI Architecture
 
-**Status: built. This was a design proposal (rts-ai-architect agent, 2026-04-26); it is kept because the architecture it describes is the architecture that exists.** The AI lives in `src/rwe/ai/` and plays a skirmish game. Read the header below for what was built and where it diverged, then the body for *why* each decision was made — that reasoning is not written down anywhere else, and §12's answered questions in particular are the record of decisions that would otherwise have to be re-argued.
+**Status: built. This was a design proposal (rts-ai-architect agent, 2026-04-26); it is kept because the architecture it describes is the architecture that exists.** The AI lives in `src/rwe/ai/` and plays a skirmish game. Read the header below for what was built and where it diverged, then the body for *why* each decision was made. **Section 13 is the current plan** and is the one to read if you are about to work on the AI: it was written after the September 2026 map/fog/loss pass and says what is still missing, what each piece would take, and which files a per-slot AI setting has to pass through — that reasoning is not written down anywhere else, and §12's answered questions in particular are the record of decisions that would otherwise have to be re-argued.
 
 The text from §1 onwards is the proposal as written, in the future tense it was written in, annotated where reality departed from it. Its RWE `file:line` citations are as of April 2026 and most have moved; the file paths are still right, and the architectural claims still hold. The paragraph this header replaces asserted that there was no computer player at all, citing a `// TODO: implement computer AI logic` in `GameScene` that no longer exists.
 
@@ -755,3 +755,167 @@ Recommendation: (a) for v1, (b) added in a 4.5 if a tester complains. Sign-off n
 ---
 
 End of the 2026-04-26 proposal. Total: 12 sections, ~3,400 words. Annotated 2026-09-04 against the code as built.
+
+---
+
+# 13. What is next, and what it will take (2026-09-06)
+
+The sections above are the 2026-04 proposal and its annotations. This one is
+written after the map/fog/loss pass and is a plan rather than a record: what is
+still missing, in roughly the order it is worth doing, with the plumbing each
+piece actually needs. It exists because the AI has reached the point where the
+next steps are no longer obvious from reading the code.
+
+## 13.1 What that pass added
+
+- `MapIntel` (`src/rwe/ai/MapIntel.{h,cpp}`): water fraction, a Land/Mixed/Water
+  verdict, and the map's declared start positions. Read once at load in
+  `LoadingScene::createGameScene` and handed to every controller. Not simulation
+  state -- computed from map data that cannot change, so it is neither saved nor
+  hashed, on the `UnitSpatialIndex` precedent.
+- Scouts open by checking declared start positions, until the enemy base is
+  found.
+- The air plant comes forward on anything that is not a Land map.
+- Three fog leaks closed: remembered enemies are no longer forgotten when they
+  die unseen, wrecks are not reclaimed out of unexplored ground, and expansion
+  metal has to have been looked at.
+- Loss tracking: `AiBlackboard::standingBuildings` is diffed each tick and
+  `recentLosses` jumps the build queue.
+- `AiDifficulty::Idle`.
+
+## 13.2 Naval, which is the biggest single gap
+
+The AI has no navy at all. `AiSideUnits` has fifteen fields and not one is a
+ship, so on a water map it ferries ground units by air and fights for the land.
+That works, and it is why naval was deprioritised, but on a map that reads as
+Water it leaves the sea uncontested.
+
+What it needs, in order:
+
+1. **Unit table.** `AiSideUnits` gains `shipyard`, `conShip`, `scoutShip`,
+   `attackShip`; `AiSideUnits.cpp` gains the ARM and CORE names. Cheap.
+2. **A coastal build site finder.** This is the real work. A shipyard needs a
+   cell on land, adjacent to water deep enough to float what it builds, and
+   reachable by a builder. `BuildManager` searches rings around an anchor; a
+   coastal variant wants the same ring walk with a water-adjacency test, and
+   `MapIntel` is the natural place to precompute the coastline once rather than
+   testing it per candidate.
+3. **A naval branch in `buildPriorities`,** gated on
+   `mapIntel.character == MapCharacter::Water`, or Mixed plus
+   `hasUnreachableGround`.
+4. **Naval movement in `ReachabilityMap`.** It labels connected components for
+   exactly one movement class today -- the constructor's. A ship needs its own
+   labelling, or the map needs to hold a component id per class. This is what
+   makes "can my navy get from here to there" answerable at all.
+5. **`ArmyManager` needs to know a ship cannot chase a tank inland,** which is
+   the same reachability question from the other end.
+
+Steps 1 and 3 are an afternoon. Steps 2 and 4 are the substance, and 4 in
+particular changes a data structure several managers read.
+
+## 13.3 Opponent modelling
+
+Nothing models the opponent. `StrategicManager` is a five-state machine driven
+entirely by our own army size and whether something armed is near our base;
+`GamePhase::Tech` and `GamePhase::Endgame` are declared and never assigned.
+
+The cheapest thing that would deserve the name: a rolling histogram of enemy
+unit types seen, kept on the blackboard beside `knownEnemies` and decayed
+rather than reset, plus two derived numbers -- what share of what we have seen
+is air, and what share is armour. Then:
+
+- **Mostly air seen and we own no anti-air: build anti-air.** This is the
+  single highest-value adaptation there is, because an AI that never builds
+  anti-air loses to one bomber.
+- **Nothing seen for a long time while our scouts are alive:** the enemy is
+  turtling or teching. Expand harder.
+- **Repeated losses at one edge of the base:** fortify that side. `recentLosses`
+  already carries the positions, and `BuildManager` currently faces its towers
+  at `enemyBasePosition` instead, which is the wrong direction whenever the
+  attacks are coming from somewhere else.
+
+That last one is a small change and `recentLosses` was built with it in mind.
+
+## 13.4 Personalities and a pre-skirmish screen
+
+The end goal is choosing what kind of opponent you get, not only how good it
+is. The clean shape is an `AiPersonality` orthogonal to `AiDifficulty`:
+difficulty says how well it plays, personality says what it is trying to do.
+
+```cpp
+enum class AiPersonality { Balanced, Aggressive, Turtle, Rush, Economic };
+```
+
+applied as an overlay after `makeProfileForDifficulty`, so that the two
+compose. Aggressive lowers `attackArmySize` and `retreatArmySize` and raises
+`threatAversion`; Turtle raises `targetDefenceCount` and `attackArmySize`; Rush
+cuts the opening economy targets and attacks off the first factory; Economic
+raises the extractor and solar targets and delays the lab.
+
+Every file a per-slot setting has to pass through, traced 2026-09-06:
+
+| # | File | What changes |
+|---|---|---|
+| 1 | `ai/AiTuningProfile.h` | the enum, beside `AiDifficulty` |
+| 2 | `ai/AiTuningProfile.cpp` | an `applyPersonality` overlay |
+| 3 | `MainMenuModel.h` | a subject on **`PlayerSettings`**, not on `skirmishOptions` -- the latter is per-game and is the wrong home |
+| 4 | `MainMenuScene.cpp` | `describeSkirmishOption`, `attachSkirmishOptionComponents`, `cycleSkirmishOption`, the stage-to-enum mapper, and `startGame` where `PlayerInfo` is built |
+| 5 | `SKIRMISH.GUI` (game data) | there is no per-slot gadget for this and the GUI files are read-only, so it has to be built in code -- `UiFactory::replaceStagedButton` is the mechanism, added for the VISUALS shading switch |
+| 6 | `game/GameParameters.h` | a field on `PlayerInfo`, beside the existing per-game `aiDifficulty` |
+| 7 | `game/SaveFile.cpp` | the enum-to-string helpers, the write and the read, or it is lost on save |
+| 8 | `main.cpp` | usage text; per-slot rides most naturally on `parsePlayerInfoFromArg` |
+| 9 | `LoadingScene.cpp` | the controller instantiation loop reads it off `gameParameters.players[i]` |
+| 10 | `game/GameScene.cpp` | the F10 debug line, which prints the difficulty today |
+
+Two things worth fixing while in there: **difficulty is per-game, not per-slot**
+(`LoadingScene.cpp` says so in a comment), and **the lobby exposes only three of
+the tiers** -- Brutal, and now Idle, are reachable from `--ai-difficulty` and
+from a save file but not from the UI.
+
+## 13.5 Difficulty should scale judgement, not just cadence
+
+The four tiers differ in nine count thresholds and three tick intervals. The
+build order, the engage and retreat radii, the site-search radii, the scouting
+policy and the whole of `ArmyManager` are identical at Easy and at Hard. Brutal
+is Standard plus omniscience and a 1.25x income, which leaves it economically
+*weaker* than Hard except for the cheat.
+
+Things that should vary by tier and do not:
+
+- **Reaction delay.** Cheap and very effective: hold a decision for N ticks
+  before acting on it, N falling with difficulty. Easy noticing a raid ten
+  seconds late reads as convincingly weak in a way that Easy building six
+  solars instead of ten never will.
+- **Scout memory.** Easy could decay `knownEnemies` faster. Forgetting is a
+  better model of a weak player than never looking.
+- **Target choice.** `threatAversion` is a profile constant that varies by
+  neither tier nor circumstance.
+- **Anti-air, counters and repair.** None of them exist at any tier, so there
+  is nothing there to scale yet.
+
+## 13.6 Other ideas, roughly by value per line of code
+
+1. **Anti-air.** The AI cannot answer aircraft at all. One bomber beats it.
+2. **Repair.** Damaged units are never sent to a repair pad and idle builders
+   never repair anything, although `docs/TOTALA-EXE.md` S:94 has the original's
+   repair-pad behaviour decoded and waiting.
+3. **Reclaim as a strategy rather than a fallback.** Reclaim fires only when
+   every build priority failed to find a site, only for a builder at base, only
+   within 1200 units, and it takes the nearest wreck rather than the richest.
+   After a battle the wreck field is the best metal on the map and the AI
+   mostly walks past it.
+4. **Guard and assist.** Idle builders could assist the factory or guard the
+   commander instead of standing still.
+5. **Staged attacks.** One army, one target. The proposal's platoons (S:7) were
+   designed and never built; even two groups, one holding and one attacking,
+   would stop the AI throwing everything away at once.
+6. **Retreat that works.** Units fall back on an army-size threshold rather than
+   on their own damage. A badly hurt unit should leave -- the scouts already do
+   exactly this, so the shape is there to copy.
+7. **Save the AI's state.** `save_util.h` deliberately drops `aiControllers`, so
+   a loaded game re-plans from nothing and forgets everything it had scouted.
+   With `MapIntel` and `recentLosses` on the blackboard there is now more to
+   lose than there was.
+8. **Multiplayer.** Still broken by design: every peer runs its own AI and never
+   transmits, so an AI in a network game desyncs. Either run it on one host and
+   send its commands, or make its timing peer-independent.
