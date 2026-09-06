@@ -8,6 +8,11 @@ on:
   workflow_dispatch:
 jobs:
   build-linux:
+    # A job that hangs should fail in a reasonable time rather than
+    # hold a runner for GitHub's six-hour default: on 2026-09-06 a
+    # modal assertion dialog in the MSVC Debug test run sat for two
+    # hours and eighteen minutes before it was cancelled by hand.
+    timeout-minutes: 60
     strategy:
       matrix:
         include:
@@ -150,6 +155,11 @@ jobs:
           path: Robot_War_Engine-*.AppImage
           if-no-files-found: error
   build-windows-msvc:
+    # A job that hangs should fail in a reasonable time rather than
+    # hold a runner for GitHub's six-hour default: on 2026-09-06 a
+    # modal assertion dialog in the MSVC Debug test run sat for two
+    # hours and eighteen minutes before it was cancelled by hand.
+    timeout-minutes: 60
     strategy:
       matrix:
         configuration: [Debug, Release]
@@ -213,6 +223,11 @@ jobs:
           path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}.exe
           if-no-files-found: error
   build-windows-mingw64:
+    # A job that hangs should fail in a reasonable time rather than
+    # hold a runner for GitHub's six-hour default: on 2026-09-06 a
+    # modal assertion dialog in the MSVC Debug test run sat for two
+    # hours and eighteen minutes before it was cancelled by hand.
+    timeout-minutes: 60
     strategy:
       matrix:
         configuration: [Debug, Release]
