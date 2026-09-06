@@ -118,6 +118,18 @@ namespace rwe
             out.set_unit(o.target.value);
         }
 
+        void operator()(const ResurrectOrder& o)
+        {
+            auto& out = *cmd->mutable_resurrect();
+            out.set_feature(o.target.value);
+            // The countdown travels with the order, as capture's progress
+            // does, so a command replayed on a peer carries the same state.
+            if (o.remainingTicks)
+            {
+                out.set_remaining_ticks(*o.remainingTicks);
+            }
+        }
+
         void operator()(const ReclaimOrder& o)
         {
             auto& out = *cmd->mutable_reclaim();
@@ -518,6 +530,17 @@ namespace rwe
         {
             const auto& capture = cmd.capture();
             return CaptureOrder(UnitId(capture.unit()));
+        }
+
+        if (cmd.has_resurrect())
+        {
+            const auto& resurrect = cmd.resurrect();
+            auto order = ResurrectOrder(FeatureId(resurrect.feature()));
+            if (resurrect.has_remaining_ticks())
+            {
+                order.remainingTicks = resurrect.remaining_ticks();
+            }
+            return order;
         }
 
         if (cmd.has_reclaim())

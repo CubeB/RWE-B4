@@ -159,6 +159,7 @@ namespace rwe
     GameHash computeHashOf(const UnloadOrder& o) { return computeHashOf(o.destination); }
     GameHash computeHashOf(const DgunOrder& o) { return computeHashOf(o.target); }
     GameHash computeHashOf(const LandOnAirBaseOrder& o) { return computeHashOf(o.target); }
+    GameHash computeHashOf(const ResurrectOrder& o) { return computeHashOf(o.target); }
 
     GameHash computeHashOf(const UnitWeapon& w)
     {

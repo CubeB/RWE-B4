@@ -5,6 +5,7 @@
 #include <rwe/util/SimpleLogger.h>
 #include <rwe/cob/CobExecutionContext.h>
 #include <rwe/sim/SimTicksPerSecond.h>
+#include <rwe/util/rwe_string.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/sim_prof.h>
 #include <rwe/cob/cob_util.h>
@@ -1828,6 +1829,9 @@ namespace rwe
             [&](const ReclaimOrder& o) {
                 return handleReclaimOrder(unitInfo, o);
             },
+            [&](ResurrectOrder& o) {
+                return handleResurrectOrder(unitInfo, o);
+            },
             [&](const RepairOrder& o) {
                 return handleRepairOrder(unitInfo, o);
             },
@@ -3460,6 +3464,119 @@ namespace rwe
         }
 
         return reclaimTarget(unitInfo, reclaimOrder.target);
+    }
+
+    std::optional<std::string> UnitBehaviorService::resurrectedUnitType(const std::string& featureName) const
+    {
+        auto underscore = featureName.find('_');
+        if (underscore == std::string::npos || underscore == 0)
+        {
+            return std::nullopt;
+        }
+
+        auto candidate = toUpper(featureName.substr(0, underscore));
+        if (sim->unitDefinitions.find(candidate) == sim->unitDefinitions.end())
+        {
+            return std::nullopt;
+        }
+
+        return candidate;
+    }
+
+    bool UnitBehaviorService::handleResurrectOrder(UnitInfo unitInfo, ResurrectOrder& resurrectOrder)
+    {
+        // 0x404E55: the capability is tested before anything else.
+        if (!unitInfo.definition->canResurrect)
+        {
+            return true;
+        }
+
+        auto featureRef = sim->tryGetFeature(resurrectOrder.target);
+        if (!featureRef)
+        {
+            // "Ressurection failed" -- the corpse has gone.
+            return true;
+        }
+        const auto& feature = featureRef->get();
+        const auto& featureDefinition = sim->getFeatureDefinition(feature.featureName);
+
+        // 0x404E0F tests the feature's reclaimable bit, not a resurrect bit
+        // of its own: anything you could have reclaimed you can raise.
+        if (!featureDefinition.reclaimable)
+        {
+            return true;
+        }
+
+        auto unitType = resurrectedUnitType(featureDefinition.name);
+        if (!unitType)
+        {
+            return true;
+        }
+
+        auto maxRangeSquared = 300_ss * 300_ss;
+        if (unitInfo.state->position.distanceSquared(feature.position) > maxRangeSquared)
+        {
+            navigateTo(unitInfo, resurrectOrder.target);
+            return false;
+        }
+
+        if (!resurrectOrder.remainingTicks)
+        {
+            // (BuildTime * 0.3) / (WorkerTime / 30), and this is the one job
+            // of the three that does scale with the builder -- capture does
+            // not, and neither does reclaim. The divisor is already the
+            // integer WorkerTime/30 the original computes.
+            const auto& resurrectedDefinition = sim->unitDefinitions.at(*unitType);
+            auto workerTime = unitInfo.definition->workerTimePerTick;
+            if (workerTime == 0)
+            {
+                // No worker time is an infinite job; the original would divide
+                // by zero here, and a unit that cannot work cannot raise
+                // anything.
+                return true;
+            }
+
+            auto work = (static_cast<std::uint64_t>(resurrectedDefinition.buildTime) * 3u) / 10u;
+            resurrectOrder.remainingTicks = static_cast<unsigned int>(work / workerTime);
+        }
+
+        if (*resurrectOrder.remainingTicks > 0)
+        {
+            --*resurrectOrder.remainingTicks;
+            return false;
+        }
+
+        // 0x4050F2 onwards: the resurrector's owner, the type worked out
+        // above, the corpse's position and the orientation copied off the
+        // corpse -- then the feature goes.
+        auto position = feature.position;
+        auto rotation = feature.rotation;
+
+        // The corpse goes first, where the original creates the unit and then
+        // removes the feature (0x405104 then 0x405198). It has to: a corpse
+        // is `blocking`, and RWE refuses to place a unit on an occupied
+        // footprint, so creating first can never succeed and the order would
+        // retry for ever. Same outcome, opposite order.
+        sim->deleteFeature(resurrectOrder.target);
+
+        auto newUnitId = sim->trySpawnUnit(*unitType, unitInfo.state->owner, position, rotation);
+        if (!newUnitId)
+        {
+            // The original prints "Unable to create any more units" and tries
+            // again in 300 ticks, but it still has its corpse to try with.
+            // Ours is spent, so the order ends here.
+            return true;
+        }
+
+        // 0x405219/0x405226: complete rather than a nanoframe, and on exactly
+        // one hit point -- it has to be repaired afterwards or a stiff breeze
+        // finishes it.
+        auto& newUnit = sim->getUnitState(*newUnitId);
+        const auto& newUnitDefinition = sim->unitDefinitions.at(newUnit.unitType);
+        newUnit.buildTimeCompleted = newUnitDefinition.buildTime;
+        newUnit.hitPoints = 1;
+
+        return true;
     }
 
     bool UnitBehaviorService::handleRepairOrder(UnitInfo unitInfo, const RepairOrder& repairOrder)

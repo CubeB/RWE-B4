@@ -387,6 +387,7 @@ namespace rwe
         Repairing,
         Patrolling,
         Capturing,
+        Resurrecting,
         Loading,
         Unloading,
         Landing,

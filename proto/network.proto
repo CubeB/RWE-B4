@@ -50,6 +50,16 @@ message GuardOrder
     required int32 unit = 1;
 }
 
+message ResurrectOrder
+{
+    required int32 feature = 1;
+
+    // The countdown travels with the order, as capture's progress does, so a
+    // command replayed on a peer carries the same state. Optional because it
+    // is empty until the work starts.
+    optional uint32 remaining_ticks = 2;
+}
+
 message ReclaimOrder
 {
     oneof target {
@@ -129,6 +139,7 @@ message PlayerUnitCommand
             UnloadOrder unload = 12;
             DgunOrder dgun = 13;
             LandOnAirBaseOrder land_on_air_base = 14;
+            ResurrectOrder resurrect = 15;
         }
     }
 

@@ -74,6 +74,35 @@ namespace rwe
         explicit ReclaimOrder(const FeatureId& target) : target(target) {}
     };
 
+    /**
+     * Turn a corpse back into the unit it came from.
+     *
+     * The original resolves the unit type from the feature's own name rather
+     * than from any table: it truncates at the first underscore and looks the
+     * rest up as a unit type, so `armsolar_dead` becomes `armsolar`
+     * (0x404F36). The unit arrives complete, facing the way the corpse lay,
+     * and on a single hit point. See TOTALA-EXE.md S:98.
+     *
+     * Nothing in the shipped data can issue this -- no FBI names
+     * `CanResurrect` -- so it exists for mods.
+     */
+    struct ResurrectOrder
+    {
+        FeatureId target;
+
+        /**
+         * Ticks left, counted down one a tick once the work starts.
+         *
+         * On the order rather than on the feature, because that is where the
+         * original keeps it -- `mission+0x3A` -- and it has the same
+         * consequence as capture's: a builder called away loses the work.
+         * Empty until the order first runs and the total is worked out.
+         */
+        std::optional<unsigned int> remainingTicks;
+
+        explicit ResurrectOrder(const FeatureId& target) : target(target) {}
+    };
+
     /** Restore a damaged unit to full health, or finish it if it is still under construction. */
     struct RepairOrder
     {
@@ -168,5 +197,5 @@ namespace rwe
         explicit UnloadOrder(const SimVector& destination) : destination(destination) {}
     };
 
-    using UnitOrder = std::variant<MoveOrder, AttackOrder, BuildOrder, BuggerOffOrder, CompleteBuildOrder, GuardOrder, ReclaimOrder, RepairOrder, PatrolOrder, CaptureOrder, LoadOrder, UnloadOrder, DgunOrder, LandOnAirBaseOrder>;
+    using UnitOrder = std::variant<MoveOrder, AttackOrder, BuildOrder, BuggerOffOrder, CompleteBuildOrder, GuardOrder, ReclaimOrder, RepairOrder, PatrolOrder, CaptureOrder, LoadOrder, UnloadOrder, DgunOrder, LandOnAirBaseOrder, ResurrectOrder>;
 }

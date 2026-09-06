@@ -109,6 +109,7 @@ namespace rwe
         bool canMove;
         bool canGuard;
         bool canCapture;
+        bool canResurrect;
         bool canStop;
         bool canPatrol;
         bool canReclamate;

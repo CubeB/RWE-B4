@@ -99,6 +99,12 @@ namespace rwe
         bool canMove;
         bool canGuard;
         bool canCapture;
+
+        /**
+         * `CanResurrect` -- def+0x245 bit 11. Not one of the 189 shipped FBIs
+         * names it, so this is a mod-only capability; see TOTALA-EXE.md S:98.
+         */
+        bool canResurrect{false};
         bool canStop{false};
         bool canPatrol{false};
         bool canReclamate{false};

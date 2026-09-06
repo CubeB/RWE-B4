@@ -57,6 +57,7 @@ namespace rwe
     GameHash computeHashOf(const UnloadOrder& o);
     GameHash computeHashOf(const DgunOrder& o);
     GameHash computeHashOf(const LandOnAirBaseOrder& o);
+    GameHash computeHashOf(const ResurrectOrder& o);
 
     GameHash computeHashOf(const UnitPhysicsInfoGround& p);
     GameHash computeHashOf(const UnitPhysicsInfoAir& p);

@@ -71,6 +71,22 @@ namespace rwe
 
         bool handleReclaimOrder(UnitInfo unitInfo, const ReclaimOrder& reclaimOrder);
 
+        bool handleResurrectOrder(UnitInfo unitInfo, ResurrectOrder& resurrectOrder);
+
+        /**
+         * The unit type a corpse came from, or nothing if it did not come
+         * from one.
+         *
+         * A string operation rather than a table (0x404F36): the feature
+         * definition's own name truncated at the first underscore, looked up
+         * as a unit type. `armsolar_dead` gives `armsolar`. A name with no
+         * underscore, or whose prefix is not a unit type, cannot be
+         * resurrected -- and `armsolar_heap`, the second-stage wreck, also
+         * gives `armsolar`, which is what the code says whether or not it was
+         * meant.
+         */
+        std::optional<std::string> resurrectedUnitType(const std::string& featureName) const;
+
         bool handleRepairOrder(UnitInfo unitInfo, const RepairOrder& repairOrder);
 
         bool handlePatrolOrder(UnitInfo unitInfo, const PatrolOrder& patrolOrder);

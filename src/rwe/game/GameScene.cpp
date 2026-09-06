@@ -1775,6 +1775,14 @@ namespace rwe
                         },
                         [&](const SimVector& v) { return v; });
                 },
+                [&](const ResurrectOrder& o) {
+                    const auto& f = simulation.tryGetFeature(o.target);
+                    if (!f)
+                    {
+                        return pos;
+                    }
+                    return f->get().position;
+                },
                 [&](const ReclaimOrder& o) {
                     return match(
                         o.target,
@@ -1805,6 +1813,7 @@ namespace rwe
                 [&](const CompleteBuildOrder&) { return std::optional<CursorType>(CursorType::Repair); },
                 [&](const GuardOrder&) { return std::optional<CursorType>(CursorType::Guard); },
                 [&](const ReclaimOrder&) { return std::optional<CursorType>(CursorType::Reclaim); },
+                [&](const ResurrectOrder&) { return std::optional<CursorType>(CursorType::Reclaim); },
                 [&](const RepairOrder&) { return std::optional<CursorType>(CursorType::Repair); },
                 [&](const PatrolOrder&) { return std::optional<CursorType>(CursorType::Patrol); },
                 [&](const CaptureOrder&) { return std::optional<CursorType>(CursorType::Capture); },
@@ -1843,6 +1852,7 @@ namespace rwe
                     [&](const CompleteBuildOrder&) { return true; },
                     [&](const GuardOrder&) { return true; },
                     [&](const ReclaimOrder&) { return true; },
+                    [&](const ResurrectOrder&) { return true; },
                     [&](const RepairOrder&) { return true; },
                     [&](const PatrolOrder&) { return true; },
                     [&](const CaptureOrder&) { return true; },

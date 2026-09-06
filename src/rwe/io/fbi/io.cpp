@@ -85,6 +85,7 @@ namespace rwe
         tdf.readOrDefault("CanMove", u.canMove);
         tdf.readOrDefault("CanGuard", u.canGuard);
         tdf.readOrDefault("CanCapture", u.canCapture);
+        tdf.readOrDefault("CanResurrect", u.canResurrect);
         tdf.readOrDefault("CanStop", u.canStop);
         tdf.readOrDefault("CanPatrol", u.canPatrol);
         tdf.readOrDefault("CanReclamate", u.canReclamate);

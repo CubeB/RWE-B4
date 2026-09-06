@@ -1528,6 +1528,9 @@ namespace rwe
                 return "Guarding";
             case UnitActivity::Reclaiming:
                 return "Reclaiming";
+            case UnitActivity::Resurrecting:
+                // 0x5013A0, the display name on row 42 of the ground table.
+                return "Resurrecting";
             case UnitActivity::Repairing:
                 return "Repairing";
             case UnitActivity::Patrolling:
@@ -1604,6 +1607,7 @@ namespace rwe
             [](const CompleteBuildOrder&) { return UnitActivity::Nanolathing; },
             [](const GuardOrder&) { return UnitActivity::Guarding; },
             [](const ReclaimOrder&) { return UnitActivity::Reclaiming; },
+            [](const ResurrectOrder&) { return UnitActivity::Resurrecting; },
             [](const RepairOrder&) { return UnitActivity::Repairing; },
             [](const PatrolOrder&) { return UnitActivity::Patrolling; },
             [](const CaptureOrder&) { return UnitActivity::Capturing; },
@@ -1641,6 +1645,8 @@ namespace rwe
                 }
                 return std::optional<UnitId>();
             },
+            // A resurrect order names a feature, never a unit.
+            [](const ResurrectOrder&) { return std::optional<UnitId>(); },
             [](const RepairOrder& o) { return std::optional<UnitId>(o.target); },
             [](const PatrolOrder&) { return std::optional<UnitId>(); },
             [](const CaptureOrder& o) { return std::optional<UnitId>(o.target); },

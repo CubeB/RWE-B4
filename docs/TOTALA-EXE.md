@@ -9676,6 +9676,13 @@ is why it was left for whoever owns the scene.
 
 ## 98. Resurrect: a real mission, a crude corpse mapping, and nothing that can use it
 
+> **Ported, 2026-09-06.** `ResurrectOrder` implements what follows, with one
+> departure recorded in §88: the corpse is removed *before* the unit is
+> created rather than after. A corpse is `blocking`, and RWE refuses to place
+> a unit on an occupied footprint, so the original's order can never succeed
+> here. Same outcome, opposite order. The order carries the countdown, as the
+> mission record does and as capture does since §96.
+
 The original has a `Resurrect` mission. Nothing in the shipped data can issue
 it — §19's shipped-data check found `canresurrect` (`def+0x245` bit 11, key
 string `0x503A64`, parsed at `0x42CA2E`) named by not one of the 189 FBIs — but

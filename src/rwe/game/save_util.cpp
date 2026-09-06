@@ -834,6 +834,16 @@ namespace rwe
                 [&](const ReclaimOrder& r) { return json{{"kind", "reclaim"}, {"target", saveReclaimTarget(r.target, ctx)}}; },
                 [&](const RepairOrder& r) { return json{{"kind", "repair"}, {"target", saveUnitIdRef(r.target, ctx)}}; },
                 [](const PatrolOrder& p) { return json{{"kind", "patrol"}, {"destination", saveSimVector(p.destination)}}; },
+                [&](const ResurrectOrder& r) {
+                    // The countdown rides on the order, as capture's progress
+                    // does -- see TOTALA-EXE.md S:96 and S:98.
+                    auto j = json{{"kind", "resurrect"}, {"target", saveFeatureIdRef(r.target, ctx)}};
+                    if (r.remainingTicks)
+                    {
+                        j["remainingTicks"] = *r.remainingTicks;
+                    }
+                    return j;
+                },
                 [&](const CaptureOrder& c) {
                     // Capture progress rides on the order, not on the
                     // target -- see CaptureOrder -- so it is saved here.
@@ -884,6 +894,15 @@ namespace rwe
             if (kind == "guard")
             {
                 return GuardOrder(loadUnitIdRef(j.at("target"), ctx));
+            }
+            if (kind == "resurrect")
+            {
+                auto order = ResurrectOrder(loadFeatureIdRef(j.at("target"), ctx));
+                if (j.contains("remainingTicks"))
+                {
+                    order.remainingTicks = j.at("remainingTicks").get<unsigned int>();
+                }
+                return order;
             }
             if (kind == "reclaim")
             {
