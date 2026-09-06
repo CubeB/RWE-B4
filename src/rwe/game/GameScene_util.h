@@ -53,6 +53,24 @@ namespace rwe
         }
     };
 
+    /**
+     * The feature under the cursor, if it is still there.
+     *
+     * The id is chosen while the scene updates and read again when the panel
+     * draws or the cursor is resolved, and a feature can be reclaimed between
+     * the two. GameSimulation::getFeature asserts on an id that no longer
+     * resolves, so every read of a hovered id has to go through here.
+     */
+    std::optional<std::reference_wrapper<const MapFeature>> tryGetHoveredFeature(
+        const GameSimulation& simulation, const std::optional<FeatureId>& hoveredFeature);
+
+    /**
+     * Whether the feature is one a construction unit could reclaim. False for
+     * a feature that has already gone: something that is not there cannot be
+     * reclaimed, and the callers pass a hovered id that may be stale.
+     */
+    bool featureCanBeReclaimed(const GameSimulation& sim, FeatureId featureId);
+
     ViewCullTest makeViewCullTest(const Matrix4f& viewProjectionMatrix);
 
     /**
