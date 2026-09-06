@@ -336,7 +336,7 @@ namespace rwe
                     // patrol breaks off on contact and has been relied on to
                     // do that from its first tick, before visibility for the
                     // tick has been worked out.
-                    if (freeTarget && !sim->canDetectUnit(unitInfo.state->owner, *freeTarget))
+                    if (freeTarget && !sim->canSeeUnit(unitInfo.state->owner, *freeTarget))
                     {
                         freeTarget.reset();
                     }
@@ -2584,9 +2584,12 @@ namespace rwe
                 continue;
             }
 
-            // Only what the owner can see or has on radar is fair game,
-            // and a torpedo cannot reach something standing on land.
-            if (!sim->canDetectUnit(unit.owner, otherUnitId) || !weaponCanHitUnit(weaponDefinition, unit, otherUnit))
+            // Only what the owner can actually see is fair game, and a torpedo
+            // cannot reach something standing on land. Seeing it, not holding
+            // it on radar: 0x40AA40 puts every candidate through 0x465AC0
+            // before the list this scan walks is built, and that predicate
+            // never reads the radar bit.
+            if (!sim->canSeeUnit(unit.owner, otherUnitId) || !weaponCanHitUnit(weaponDefinition, unit, otherUnit))
             {
                 continue;
             }

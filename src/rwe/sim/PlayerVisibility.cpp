@@ -84,6 +84,7 @@ namespace rwe
         radarDetectors.clear();
         radarJammers.clear();
         radarContacts.clear();
+        sonarContacts.clear();
     }
 
     void PlayerVisibility::beginReveal()

@@ -1190,6 +1190,13 @@ weapon an airborne target.** There is no reciprocal flag, no unit category test
 in `0x40B7B0`, and no filter in the candidate gather `0x40AD80`, which walks the
 player's enemy list applying only a flat radius, the alive bit and bit 14.
 
+Those three tests are all `0x40AD80` applies, but do not read that as "the
+candidate set is unfiltered". **The list it walks is can-see filtered at
+construction**: `0x40AA40` rebuilds it and puts every enemy through `0x465AC0`
+before appending (the call at `0x40AB11`). Cloak, the waterline and line of
+sight have all been applied one call upstream, which is why the scan itself
+does not repeat them. See §17a for the chain.
+
 What keeps ground units off aircraft is the **preference**, and only the
 preference: sixty of the shipped units name `wpri_badTargetCategory=VTOL` and
 forty-four name `NoChaseCategory=VTOL`. §9 has the mechanism right — the
@@ -2858,6 +2865,26 @@ The split explains what sonar is for: a submerged unit is only ever a sonar
 contact, a unit standing clear of the water only ever a radar one, and a
 half-submerged one can be both.
 
+**Where the two bits are then read**, which is not symmetric and is the whole
+of why they are two bits and not one:
+
+- **bit 9 (sonar) is read by `0x465AC0`**, the can-see predicate, at
+  `0x465B38`. It is a veto lifted rather than a contact granted: with bit 9
+  clear, a unit whose model top (`y + def+0x16E`) is below sea level — the byte
+  at `global+0x1427F`, shifted into 16.16 — returns 0 at `0x465B50` without the
+  fog grid being consulted. With bit 9 set the unit simply carries on to the
+  same line-of-sight test everything else faces. So sonar does not let you
+  shoot at something you cannot see; it is what stops a submarine being
+  invisible to the destroyer standing over it. Every unit in the shipped data
+  that can fight submarines carries sonar reaching at least as far as it can
+  shoot — the shortest is `ARMROY`/`CORROY` at 305 against 330 of sight — and a
+  sonar station's 1180 buys picture, not targets;
+- **bit 8 (radar) is read by nothing in `0x465AC0` at all.** It reaches the
+  minimap draw at `0x466DC0`, and it appends to the fallback candidate list in
+  `0x40AA40` at `0x40AB3F`, which `0x40AD80` only walks behind the Targeting
+  Facility gate — see §17a. A radar contact is a blip; without `ARMTARG` or
+  `CORTARG` on the field it is never a target.
+
 **Loop 2, `0x4675EC` — the jammer.** Every live unit **not owned by the viewer**
 that is switched on and names a `radardistancejam` calls the same `0x47E890` with
 that radius and the visitor at `0x467960`, which clears bit 8 and sets bit 10 on
@@ -2900,9 +2927,110 @@ own cloak.
 
 It is **not** read by the weapon target scan. Neither `0x40AD80` (gather enemies
 in radius), `0x40B7B0` (choose one) nor `0x49ABB0` (can this weapon engage that
-unit) looks at it. In the original a cloaked unit standing inside an enemy gun's
-range is still shot at; cloak hides it from your eyes and from the AI's search,
-not from a turret already pointed at it.
+unit) looks at it.
+
+An earlier reading of this page concluded from that that "a cloaked unit
+standing inside an enemy gun's range is still shot at". **That is wrong, and it
+is wrong in the direction that matters.** The scan does not need to read the
+cloak bit, because a cloaked unit never reaches it: the list `0x40AD80` walks is
+built by `0x40AA40`, which puts every candidate through `0x465AC0` first, and
+`0x465AC0` rejects cloak at `0x465AE8` — `test BYTE PTR [ebx+0x10E],0x4`,
+return 0 — before it looks at anything else. Cloak hides a unit from your eyes,
+from the AI's search *and* from the turret. The three call sites above are
+evidence about where the test lives, not about whether it happens.
+
+The bit is confirmed as cloak independently at `0x401872`. The routine there
+checks `unit+0x110` bit 11 (cloak wanted) and bit 12 (suppressed by
+`mincloakdistance`), picks `CloakCost` `[def+0x1DA]` or `CloakCostMoving`
+`[def+0x1DE]` according to `unit+0x110 & 0xC`, tries to debit the player's
+energy at `[unit+0xEC]+0x8C`, and calls `0x48B090(unit, 4, paid)` — so
+`unit+0x10E` bit 2 is set only when the cloak was actually paid for.
+
+### §17a — the target-acquisition chain
+
+Worth writing down once, because its absence is what produced the near-miss
+above and nearly produced a second one:
+
+```
+0x40B7B0   weapon auto-acquire: choose a target
+  └─ 0x40AD80(playerIdx, &centre, radius, out)   called at 0x40B82F, 0x40B85F
+       reads [playerIdx*4 + 0x5119C0], the per-player scratch object
+       loop 1 walks the vector at obj+0x5   (begin [obj+0x9], end [obj+0xD])
+       loop 2 walks the vector at obj+0x15  (begin [obj+0x19], end [obj+0x1D])
+                — only if loop 1 found nothing, and only if [obj+0x79] is set
+  └─ 0x40AA40  rebuilds both vectors, per player, every 30 ticks
+       (the maintenance entry is 0x40AD20: rebuild when
+        world tick [global+0x38A47] >= [obj+0xED] + 0x1E)
+       walks the global unit array [global+0x14357]..[global+0x1435B], stride 0x118
+       rejects: [unit+0x110] & 0x10000000 clear (not alive), or bit 14 set
+       enemy branch:
+         push unit; push player; call 0x465AC0    ← 0x40AB11, the can-see gate
+         test eax,eax; je skip-append             ← nothing unseen is appended
+         ...then, outside that gate, [unit+0x110] bit 8 appends to list B
+```
+
+So the candidate set the weapon scan chooses from is **`0x465AC0`-filtered**,
+and the "three tests only" in `0x40AD80` is the tail of a longer filter, not the
+whole of one.
+
+`0x465AC0(player, unit)` — `stdcall`, two arguments, the *second* push is the
+unit — in full:
+
+```
+465ACE  if (unit+0x96 == player)            return 1     ; own unit
+465AE8  if (unit+0x10E & 0x4)               return 0     ; cloaked
+465AFD  def = unit+0x92
+        A = unit+0x6A + def+0x15E     ; x
+        B = unit+0x6E + def+0x16E     ; top of the model
+        C = unit+0x72 + def+0x166     ; z
+465B38  if (!(unit+0x110 & 0x200))                       ; not a sonar contact
+465B4C      if (B < global+0x1427F << 16)  return 0      ; fully under water
+        ; the fog grid, at the four corners of the footprint in turn
+465B6A  if (lit(A,          B,          C         )) return 1
+465BDB  if (lit(A+def+0x176, B,          C         )) return 1
+465C73  if (lit(A+def+0x176, B-def+0x17A, C+def+0x17E)) return 1
+465D19  return lit(A,        B-def+0x17A, C+def+0x17E)
+```
+
+`lit(x, y, z)` indexes the fog grid at `(x >> 5, (z − y/2) >> 5)`, the usual
+cabinet skew, bounds-checked against `[player+0x80]`/`[player+0x84]`. It has
+two backends chosen by `global+0x14281 & 2`: the per-player byte grid at
+`[player+0x7C]` when set, and otherwise a call to `0x408090`, which reads the
+shared word-bitmask grid at `[global+0x14273]` and tests the bit for the
+viewing player index at `global+0x2A43`. `0x4658E0` is a sibling predicate for
+a rectangle with the same two backends.
+
+Four things follow that are worth stating plainly, because each has been got
+wrong at least once:
+
+- **there is no radar term** — `unit+0x110` bit 8 is never read here;
+- **cloak is rejected second**, before anything positional;
+- **the sonar bit is read**, but only to lift the underwater veto — see "The
+  visibility pass" above, and §18, which had this right;
+- **the footprint is probed four times**, not once, so a large unit is seen if
+  any corner of its extent is lit.
+
+Two details of the second list are easy to miss and both matter:
+
+- **list B is the radar picture, and it is gated on the Targeting Facility.**
+  `[obj+0x79]` is cleared at the top of every rebuild (`0x40AA80`) and set at
+  `0x40AC06` only when the player owns a live, switched-on unit whose definition
+  sets **`istargetingupgrade`** — `[unitdef+0x241]` bit 10, tested at
+  `0x40ABF3`/`0x40ABF9`. With no such unit the flag stays zero and `0x40AD80`
+  never walks list B at all. That is the Core Contingency Targeting Facility
+  (`ARMTARG`/`CORTARG`), and it is the whole mechanism by which the original
+  lets units shoot at what only radar can see;
+- even with one, list B is a **fallback**: `0x40AE85`–`0x40AEA1` walks it only
+  when the output vector is still empty, so anything actually visible is
+  preferred over any radar contact.
+
+`istargetingupgrade` is parsed at `0x42C5F7` (string at VA `0x503BB0`, `and
+eax,1; shl eax,0xA` into `[unitdef+0x241]`, with `and ch,0xFB` clearing the bit
+first). It was at one point thought to be a field the v3.1 engine parses and
+never reads — a negative from searching for `test <mem>,0x400` against the
+definition. That search could not have found it: the reader loads the dword
+into a register first and tests `dh,0x4`. There is exactly one reader in
+`.text`, and it is the one above.
 
 ### Where the ranges are drawn
 
@@ -3157,7 +3285,13 @@ at `0x46506A`) and again after a fog-mode rebuild (`0x48191F`). The gate is
 466e6f  owner == viewer ? draw : skip
 ```
 
-and that is the **only** place in the binary that reads those bits raw. The
+and that is the only place that reads those bits raw *for drawing*. It is not
+the only reader in the binary: `0x40AA40` reads bit 8 at `0x40AB3F` —
+`shr eax,0x8; test bl,al`, a shift-and-test rather than a `test ah,imm`, which
+is why a sweep for the latter form missed it — to append to the fallback
+candidate list that the Targeting Facility unlocks. See §17a.
+
+The
 sprite is the GAF animation `radlogo` (`world+0x147DF`, loaded by name at
 `0x42990D`), frame = the owner's colour byte, blitted at `0x466ECC`–`0x466F0B`.
 In the shipped `anims/FX.GAF` it is ten frames, every one **4×4 pixels**,
@@ -8429,6 +8563,26 @@ equivalent for.
 
 Recorded so these do not get "fixed" back later by someone comparing against the
 original:
+
+- **Detection is evaluated live, every tick.** The original answers "can this
+  player see that unit" out of a snapshot: `0x40AA40` rebuilds each player's
+  enemy list only every 30 ticks (`0x40AD20`), so a target can be up to a
+  second stale — visible for a second after it has gone dark, and invisible for
+  up to a second after it has been lit. RWE calls `canSeeUnit` at the moment it
+  matters. The staleness is an artefact of the original's budget, not a
+  behaviour worth reproducing, and copying it would mean carrying a
+  30-tick-old candidate list in hashed simulation state.
+- **No bit-8 fallback list, and no Targeting Facility.** The original's second
+  candidate list (§17a) is appended *outside* the can-see gate, on `unit+0x110`
+  bit 8 — "on my radar picture at all" — walked only when the first list is
+  empty and only when the player owns a unit with `istargetingupgrade`. RWE has
+  neither the list nor the flag. Two reasons it should stay that way: the units
+  that carry the flag (`ARMTARG`/`CORTARG`) are Core Contingency and are not in
+  the shipped data here, and the radar picture the list is built from is
+  recomputed for **one** player per tick (§17, the visibility pass), so feeding it into a simulation
+  decision would make the outcome depend on who is sitting at the keyboard.
+  RWE's radar and sonar contacts therefore reach the minimap (`canDetectUnit`)
+  and nothing else; every simulation decision goes through `canSeeUnit`.
 
 - **Nanolathe spray lands on the roof**, not inside the model. The original
   samples the landing height inside the model too, which it can afford because

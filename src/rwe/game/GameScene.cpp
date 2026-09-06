@@ -1026,7 +1026,7 @@ namespace rwe
                 }
                 else if (auto targetId = unitOrderTargetUnit(unit); targetId)
                 {
-                    if (auto target = tryGetUnit(*targetId); target && unitIsDetectableByLocalPlayer(target->get()))
+                    if (auto target = tryGetUnit(*targetId); target && unitIsDetectableByLocalPlayer(*targetId, target->get()))
                     {
                         const auto& targetUnit = target->get();
                         const auto& targetDefinition = simulation.unitDefinitions.at(targetUnit.unitType);
@@ -1153,9 +1153,9 @@ namespace rwe
         auto worldToMinimap = worldToMinimapMatrix(simulation.terrain, minimapRect);
 
         // draw minimap dots
-        for (const auto& [_, unit] : simulation.units)
+        for (const auto& [unitId, unit] : simulation.units)
         {
-            if (!unitIsDetectableByLocalPlayer(unit) || unit.carriedBy)
+            if (!unitIsDetectableByLocalPlayer(unitId, unit) || unit.carriedBy)
             {
                 // Units riding in a transport are inside it: only the
                 // transport shows on the minimap.
@@ -2009,9 +2009,9 @@ namespace rwe
         UnitShadowMeshBatch unitShadowMeshBatch;
         {
             RWE_RENDERPROF("w.shadow.build");
-            for (const auto& [_, unit] : simulation.units)
+            for (const auto& [unitId, unit] : simulation.units)
             {
-                if (!unitIsVisibleToLocalPlayer(unit))
+                if (!unitIsVisibleToLocalPlayer(unitId, unit))
                 {
                     continue;
                 }
@@ -2083,7 +2083,7 @@ namespace rwe
             RWE_RENDERPROF("w.unit.build");
             for (const auto& [unitId, unit] : simulation.units)
             {
-                if (!unitIsVisibleToLocalPlayer(unit))
+                if (!unitIsVisibleToLocalPlayer(unitId, unit))
                 {
                     continue;
                 }
@@ -2139,7 +2139,7 @@ namespace rwe
             ColoredMeshBatch wireframeBatch;
             for (const auto& [unitId, unit] : simulation.units)
             {
-                if (!unitIsVisibleToLocalPlayer(unit))
+                if (!unitIsVisibleToLocalPlayer(unitId, unit))
                 {
                     continue;
                 }
@@ -5465,7 +5465,7 @@ namespace rwe
                 // units and enemies you can see or have on radar. Asking the
                 // same predicate the dots are drawn with, rather than the
                 // simulation's own detection test, is what makes that true.
-                if (!unitIsDetectableByLocalPlayer(unit))
+                if (!unitIsDetectableByLocalPlayer(unitId, unit))
                 {
                     continue;
                 }
@@ -5542,7 +5542,7 @@ namespace rwe
 
         for (const auto& entry : simulation.units)
         {
-            if (!unitIsVisibleToLocalPlayer(entry.second))
+            if (!unitIsVisibleToLocalPlayer(entry.first, entry.second))
             {
                 // What cannot be seen cannot be clicked.
                 continue;
@@ -6675,7 +6675,7 @@ namespace rwe
         return *revealedVisibility;
     }
 
-    bool GameScene::unitIsVisibleToLocalPlayer(const UnitState& unit) const
+    bool GameScene::unitIsVisibleToLocalPlayer(UnitId unitId, const UnitState& unit) const
     {
         // Stowed inside a ship's hold (attached to no piece): out of sight until unloaded.
         if (unit.carriedBy && unit.carriedPiece.empty())
@@ -6686,18 +6686,50 @@ namespace rwe
             }
         }
 
-        // Same three questions the original's draw predicate asks, in the same
-        // order: whose it is, whether it is cloaked, and only then whether the
-        // ground under it is lit. It has to agree with the simulation's
-        // canSeeUnit or a cloaked unit would be drawn to an enemy who cannot
-        // target it.
+        // The same questions the original's draw predicate asks, in the same
+        // order: whose it is, whether it is cloaked, whether anything of it
+        // breaks the surface, and only then whether the ground under it is
+        // lit. It has to agree with the simulation's canSeeUnit or a unit
+        // would be drawn to an enemy who cannot target it.
+        //
+        // The waterline question is the sonar one. 0x465AC0 refuses a unit
+        // whose model is entirely below sea level unless the viewer holds it
+        // on sonar, so a submarine is drawn to a destroyer and not to a
+        // Peewee standing on the beach beside it.
+        // Skipped with the fog off, which is a fully lit map and not a second
+        // way of drawing one: nothing may stay hidden under it.
+        if (fogOfWarEnabled && !unit.isOwnedBy(localPlayerId))
+        {
+            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+            if (unit.position.y + simulation.modelHeightOf(unitDefinition) < simulation.terrain.getSeaLevel())
+            {
+                const auto& heard = simulation.playerVisibility.at(localPlayerId.value).sonarContacts;
+                if (heard.find(unitId) == heard.end())
+                {
+                    return false;
+                }
+            }
+        }
+
         auto style = computeUnitDrawStyle(unit.isOwnedBy(localPlayerId), unit.cloaked, positionIsVisibleToLocalPlayer(unit.position));
         return style != UnitDrawStyle::Hidden;
     }
 
-    bool GameScene::unitIsDetectableByLocalPlayer(const UnitState& unit) const
+    bool GameScene::unitIsDetectableByLocalPlayer(UnitId unitId, const UnitState& unit) const
     {
-        return unitIsVisibleToLocalPlayer(unit) || simulation.isOnRadarOf(localPlayerId, unit.position);
+        if (unitIsVisibleToLocalPlayer(unitId, unit))
+        {
+            return true;
+        }
+
+        // 0x466E6A: the minimap draws on either raw contact bit. The contact
+        // sets are used rather than a plain range test against the dishes so
+        // that the dot obeys the same stealth, jamming and waterline rules the
+        // detection pass applied -- a submarine gets a dot from sonar and not
+        // from a radar dish that cannot hear it.
+        const auto& visibility = simulation.playerVisibility.at(localPlayerId.value);
+        return visibility.radarContacts.find(unitId) != visibility.radarContacts.end()
+            || visibility.sonarContacts.find(unitId) != visibility.sonarContacts.end();
     }
 
     bool GameScene::positionIsExploredByLocalPlayer(const SimVector& position) const
@@ -8840,10 +8872,10 @@ namespace rwe
 
     void GameScene::spawnNanoParticles()
     {
-        for (const auto& [_, unit] : simulation.units)
+        for (const auto& [unitId, unit] : simulation.units)
         {
             auto nanolatheTarget = unit.getActiveNanolatheTarget();
-            if (!nanolatheTarget || !unitIsVisibleToLocalPlayer(unit))
+            if (!nanolatheTarget || !unitIsVisibleToLocalPlayer(unitId, unit))
             {
                 continue;
             }

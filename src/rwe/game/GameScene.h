@@ -885,9 +885,9 @@ namespace rwe
          */
         const PlayerVisibility& localPlayerVisibility() const;
 
-        bool unitIsVisibleToLocalPlayer(const UnitState& unit) const;
+        bool unitIsVisibleToLocalPlayer(UnitId unitId, const UnitState& unit) const;
 
-        bool unitIsDetectableByLocalPlayer(const UnitState& unit) const;
+        bool unitIsDetectableByLocalPlayer(UnitId unitId, const UnitState& unit) const;
 
         bool positionIsExploredByLocalPlayer(const SimVector& position) const;
 

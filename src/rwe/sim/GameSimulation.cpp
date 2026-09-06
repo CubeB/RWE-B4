@@ -1334,38 +1334,79 @@ namespace rwe
 
     bool GameSimulation::canSeeUnit(PlayerId viewer, UnitId unitId) const
     {
+        // 0x465AC0 in full, in its own order. It is the original's only
+        // "can this player see that unit" question: the world render's draw
+        // list is built through it, and so is the enemy list the weapon scan
+        // and the computer player both choose their targets out of.
         const auto& unit = getUnitState(unitId);
+
+        // 0x465ACE: own units pass before anything else is looked at.
         if (unit.isOwnedBy(viewer))
         {
             return true;
         }
 
-        // A cloaked unit is out of sight however well lit the ground under it
-        // is. The original asks this in the same order, own units first, in the
-        // predicate that decides whether to draw a unit at all.
-        return !unit.cloaked && isVisibleTo(viewer, unit.position);
-    }
-
-    bool GameSimulation::canDetectUnit(PlayerId viewer, UnitId unitId) const
-    {
-        const auto& unit = getUnitState(unitId);
-        if (unit.isOwnedBy(viewer))
-        {
-            return true;
-        }
-
+        // 0x465AE8: cloak is rejected next, however well lit the ground under
+        // the unit is.
         if (unit.cloaked)
         {
             return false;
         }
 
-        if (isVisibleTo(viewer, unit.position))
+        // 0x465B38. Sonar is a veto lifted, not a contact granted. With the
+        // sonar bit clear, a unit whose model does not break the surface is
+        // refused at 0x465B50 without the fog grid being consulted at all;
+        // with it set, the unit simply carries on to the same line-of-sight
+        // test everything else faces. That is why every sub-hunter in the
+        // shipped data carries sonar reaching at least as far as it can shoot,
+        // and why a sonar station's 1180 buys a picture rather than a target.
+        //
+        // "Below the surface" is measured to the top of the model, the same
+        // y + def+0x16E the detection visitor uses to decide that a unit is a
+        // radar contact rather than a sonar one, so the two can never disagree
+        // about which side of the waterline a unit is on.
+        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        if (unit.position.y + modelHeightOf(unitDefinition) < terrain.getSeaLevel())
+        {
+            const auto& heard = playerVisibility.at(viewer.value).sonarContacts;
+            if (heard.find(unitId) == heard.end())
+            {
+                return false;
+            }
+        }
+
+        // 0x465B6A onwards: the fog grid, asked of each corner of the unit's
+        // footprint in turn. RWE asks it once, of the unit's position.
+        return isVisibleTo(viewer, unit.position);
+    }
+
+    bool GameSimulation::canDetectUnit(PlayerId viewer, UnitId unitId) const
+    {
+        // Everything the player's picture shows, which is a wider thing than
+        // anything the simulation is allowed to act on: what can be seen, plus
+        // the raw radar and sonar contacts that put a dot on the minimap at
+        // 0x466DC0 and nowhere else.
+        //
+        // Nothing in the simulation may ask this. The original's weapon scan
+        // and computer player both consult a list built through 0x465AC0,
+        // which is canSeeUnit above; a radar contact is a blip and not a
+        // target, and the radar picture is recomputed for one player a tick in
+        // any case (section 18), so it could not feed a deterministic decision
+        // even if the original wanted it to.
+        if (canSeeUnit(viewer, unitId))
         {
             return true;
         }
 
-        const auto& contacts = playerVisibility.at(viewer.value).radarContacts;
-        return contacts.find(unitId) != contacts.end();
+        const auto& unit = getUnitState(unitId);
+        if (unit.cloaked)
+        {
+            return false;
+        }
+
+        const auto& visibility = playerVisibility.at(viewer.value);
+        return visibility.radarContacts.find(unitId) != visibility.radarContacts.end()
+            || visibility.sonarContacts.find(unitId) != visibility.sonarContacts.end();
     }
 
     const UnitSpatialIndex& GameSimulation::getUnitSpatialIndex()
@@ -1759,9 +1800,17 @@ namespace rwe
                     bySonar = false;
                 }
 
-                if (byRadar || bySonar)
+                // Kept apart rather than merged. The original sets two bits
+                // and reads them in two places for two purposes: bit 8 is the
+                // picture, bit 9 is what 0x465AC0 consults before it will
+                // admit anything below the waterline.
+                if (byRadar)
                 {
                     vis.radarContacts.insert(unitId);
+                }
+                if (bySonar)
+                {
+                    vis.sonarContacts.insert(unitId);
                 }
             }
         }
