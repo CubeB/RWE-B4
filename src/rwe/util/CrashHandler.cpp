@@ -338,7 +338,9 @@ namespace rwe
 
 #ifdef RWE_PLATFORM_WINDOWS
         using CrashFile = HANDLE;
-        constexpr CrashFile InvalidCrashFile = INVALID_HANDLE_VALUE;
+        // const rather than constexpr: INVALID_HANDLE_VALUE is a cast from -1
+        // to a pointer, which is not a constant expression.
+        const CrashFile InvalidCrashFile = INVALID_HANDLE_VALUE;
 
         CrashFile openCrashFile()
         {
@@ -465,7 +467,7 @@ namespace rwe
         }
 #else
         using CrashFile = int;
-        constexpr CrashFile InvalidCrashFile = -1;
+        const CrashFile InvalidCrashFile = -1;
 
         CrashFile openCrashFile()
         {
@@ -555,12 +557,14 @@ namespace rwe
             reportAndDie("std::terminate (uncaught exception)", nullptr);
         }
 
+#ifdef RWE_PLATFORM_WINDOWS
+        // Windows only: the POSIX side takes SIGABRT through sigaction with
+        // the rest of the fatal signals.
         void abortHandler(int)
         {
             reportAndDie("SIGABRT (abort)", nullptr);
         }
 
-#ifdef RWE_PLATFORM_WINDOWS
         LONG WINAPI exceptionFilter(EXCEPTION_POINTERS* info)
         {
             const char* name = "unknown exception";
