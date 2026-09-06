@@ -36,6 +36,16 @@ namespace rwe
      *   restored as a null thread reference, which fails to reap exactly the
      *   way the dangling pointer it replaces did.
      */
+    /**
+     * The explored grid as alternating run lengths, starting with unexplored.
+     *
+     * Exposed for its own test: the grid is the one piece of visibility a load
+     * cannot recompute, and an encoder that loses or gains a cell would be
+     * invisible inside a whole-simulation round trip.
+     */
+    nlohmann::json saveExploredGrid(const Grid<unsigned char>& grid);
+    void loadExploredGrid(const nlohmann::json& j, Grid<unsigned char>& grid);
+
     nlohmann::json saveSimulationToJson(const GameSimulation& sim);
 
     /**

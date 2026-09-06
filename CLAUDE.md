@@ -133,10 +133,7 @@ serialization, hash-validated round trip — see `sim/saveload.test.cpp`) and
 `src/rwe/game/SaveFile.*` (the on-disk container with the map/players header
 and the skirmish options). Saves are `<name>.rwesave` under the local data
 path. See the determinism section above for what a new piece of sim state
-obliges you to touch. Two known gaps: the `explored` grid is not serialized —
-`loadSimulationFromJson` ends in `updateVisibility()`, so a resumed game
-rebuilds visibility from where the units are standing and forgets the rest of
-the map — and the `SaveFile` header's `PlayerInfo` carries no `teamId` (the
+obliges you to touch. One known gap: the `SaveFile` header's `PlayerInfo` carries no `teamId` (the
 simulation's own player table does, and is what a load restores, so alliances
 do survive; the header is simply thinner than the sim).
 

@@ -485,6 +485,37 @@ namespace rwe
         std::string unitSpawnType;
         char unitSpawnFilter[32]{""};
         bool unitSpawnOnClick{false};
+
+        /** The spawner in its own window, rather than inside the debug panel. */
+        bool showUnitSpawnerWindow{false};
+
+        /**
+         * What fraction of its hit points a spawned unit arrives on.
+         *
+         * Most of what is worth testing needs a damaged unit -- repair pads,
+         * nanoframe decay, the wreck level a death picks, the info panel's
+         * damage bar -- and the alternative is shooting one carefully.
+         */
+        int unitSpawnHealthPercent{100};
+
+        /**
+         * Unit types grouped by the FBI's own `TEDClass`, built once.
+         *
+         * Each entry is (category, [(code, display name)]), both sorted. The
+         * display name is the FBI `Name`, which is what a player would call
+         * the thing.
+         */
+        std::vector<std::pair<std::string, std::vector<std::pair<std::string, std::string>>>> unitTypesByCategory;
+
+        /**
+         * The hit points a debug-spawned unit arrives on: the chosen
+         * percentage of its maximum, never below one, since a unit spawning
+         * dead is not a thing anyone wants to test.
+         */
+        unsigned int debugSpawnHitPoints(const UnitDefinition& unitDefinition) const;
+
+        void renderUnitSpawnerWindow();
+        void buildUnitTypeCategories();
         bool unitSpawnComplete{true};
         /** Every unit type in the loaded data, sorted, built once on first use. */
         std::vector<std::string> allUnitTypes;

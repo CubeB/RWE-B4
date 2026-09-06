@@ -2706,6 +2706,10 @@ namespace rwe
         ImGui::Checkbox("Pathfinding visualisation", &pathfindingVisualisationVisible);
         ImGui::Checkbox("Movement class grid", &movementClassGridVisible);
         ImGui::Separator();
+        if (ImGui::Button("Unit spawner window..."))
+        {
+            showUnitSpawnerWindow = true;
+        }
         renderUnitPlacer();
         ImGui::Separator();
         {
@@ -2739,6 +2743,8 @@ namespace rwe
         }
 
         ImGui::End();
+
+        renderUnitSpawnerWindow();
     }
 
     void GameScene::onKeyDown(const SDL_KeyboardEvent& keysym)
@@ -4285,6 +4291,179 @@ namespace rwe
         return simulation.trySpawnUnit(unitType, owner, position, rotation);
     }
 
+    unsigned int GameScene::debugSpawnHitPoints(const UnitDefinition& unitDefinition) const
+    {
+        auto percent = static_cast<unsigned int>(std::clamp(unitSpawnHealthPercent, 1, 100));
+        auto points = (static_cast<std::uint64_t>(unitDefinition.maxHitPoints) * percent) / 100u;
+        return static_cast<unsigned int>(std::max<std::uint64_t>(1u, points));
+    }
+
+    void GameScene::buildUnitTypeCategories()
+    {
+        if (!unitTypesByCategory.empty())
+        {
+            return;
+        }
+
+        // TEDClass is the game's own classification -- TANK, KBOT, VTOL, SHIP,
+        // FORT, PLANT, ENERGY, METAL, CNSTR, WATER, SPECIAL, COMMANDER -- so
+        // the grouping is the data's rather than one invented here. It is
+        // written with stray whitespace in a few files, hence the trim.
+        std::map<std::string, std::vector<std::pair<std::string, std::string>>> byCategory;
+        for (const auto& [unitType, definition] : simulation.unitDefinitions)
+        {
+            auto category = toUpper(definition.tedClass);
+            auto first = category.find_first_not_of(" \t");
+            auto last = category.find_last_not_of(" \t");
+            category = first == std::string::npos ? std::string() : category.substr(first, last - first + 1);
+            if (category.empty())
+            {
+                category = "UNCLASSIFIED";
+            }
+
+            auto name = definition.unitName.empty() ? unitType : definition.unitName;
+            byCategory[category].emplace_back(unitType, name);
+        }
+
+        for (auto& [category, units] : byCategory)
+        {
+            std::sort(units.begin(), units.end(), [](const auto& a, const auto& b) {
+                return a.second < b.second;
+            });
+            unitTypesByCategory.emplace_back(category, std::move(units));
+        }
+    }
+
+    void GameScene::renderUnitSpawnerWindow()
+    {
+        if (!showUnitSpawnerWindow)
+        {
+            return;
+        }
+
+        ImGui::SetNextWindowSize(ImVec2(420.0f, 520.0f), ImGuiCond_FirstUseEver);
+        if (!ImGui::Begin("Unit spawner", &showUnitSpawnerWindow))
+        {
+            ImGui::End();
+            return;
+        }
+
+        buildUnitTypeCategories();
+
+        // Owner, named with its side so it is obvious which team the unit
+        // will fight for.
+        std::string ownerLabel = "none";
+        if (unitSpawnPlayer >= 0 && unitSpawnPlayer < getSize(simulation.players))
+        {
+            const auto& player = simulation.players[unitSpawnPlayer];
+            ownerLabel = std::to_string(unitSpawnPlayer) + ": " + player.side
+                + (player.type == GamePlayerType::Human ? " (human)" : " (computer)")
+                + (PlayerId(unitSpawnPlayer) == localPlayerId ? " [you]" : "");
+        }
+        if (ImGui::BeginCombo("Owner", ownerLabel.c_str()))
+        {
+            for (Index i = 0; i < getSize(simulation.players); ++i)
+            {
+                const auto& player = simulation.players[i];
+                auto label = std::to_string(i) + ": " + player.side
+                    + (player.type == GamePlayerType::Human ? " (human)" : " (computer)")
+                    + (PlayerId(i) == localPlayerId ? " [you]" : "");
+                if (ImGui::Selectable(label.c_str(), unitSpawnPlayer == static_cast<int>(i)))
+                {
+                    unitSpawnPlayer = static_cast<int>(i);
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        ImGui::InputText("Filter", unitSpawnFilter, IM_ARRAYSIZE(unitSpawnFilter));
+        auto filter = toUpper(std::string(unitSpawnFilter));
+
+        ImGui::BeginChild("spawner unit list", ImVec2(0.0f, 300.0f), true);
+        for (const auto& [category, units] : unitTypesByCategory)
+        {
+            // Which units survive the filter decides whether the category is
+            // worth showing at all, so a search for "solar" does not leave
+            // eleven empty headers to open.
+            std::vector<const std::pair<std::string, std::string>*> matching;
+            for (const auto& unit : units)
+            {
+                if (filter.empty()
+                    || unit.first.find(filter) != std::string::npos
+                    || toUpper(unit.second).find(filter) != std::string::npos)
+                {
+                    matching.push_back(&unit);
+                }
+            }
+            if (matching.empty())
+            {
+                continue;
+            }
+
+            // Open by default while filtering: the point of typing is to see
+            // what matched, not to then go opening headers.
+            ImGui::SetNextItemOpen(!filter.empty(), ImGuiCond_Always);
+            auto header = category + " (" + std::to_string(matching.size()) + ")";
+            if (ImGui::TreeNode(header.c_str()))
+            {
+                for (const auto* unit : matching)
+                {
+                    // The name first, because that is what a person is looking
+                    // for, and the code after it, because that is what the
+                    // logs and the console use.
+                    auto label = unit->second + "  [" + unit->first + "]";
+                    if (ImGui::Selectable(label.c_str(), unit->first == unitSpawnType))
+                    {
+                        unitSpawnType = unit->first;
+                    }
+                }
+                ImGui::TreePop();
+            }
+        }
+        ImGui::EndChild();
+
+        if (unitSpawnType.empty())
+        {
+            ImGui::TextUnformatted("Nothing selected");
+        }
+        else
+        {
+            const auto& definition = simulation.unitDefinitions.at(unitSpawnType);
+            ImGui::Text("%s [%s]", definition.unitName.empty() ? unitSpawnType.c_str() : definition.unitName.c_str(), unitSpawnType.c_str());
+            if (!definition.unitDescription.empty())
+            {
+                ImGui::TextWrapped("%s", definition.unitDescription.c_str());
+            }
+            ImGui::Text("%u hit points", definition.maxHitPoints);
+        }
+
+        ImGui::Separator();
+
+        ImGui::SliderInt("Health %", &unitSpawnHealthPercent, 1, 100);
+        if (!unitSpawnType.empty())
+        {
+            const auto& definition = simulation.unitDefinitions.at(unitSpawnType);
+            ImGui::Text("spawns on %u of %u", debugSpawnHitPoints(definition), definition.maxHitPoints);
+        }
+
+        ImGui::Checkbox("Place on click (right-click to stop)", &unitSpawnOnClick);
+        ImGui::Checkbox("Place finished (off: place a nanoframe)", &unitSpawnComplete);
+        if (!unitSpawnComplete)
+        {
+            ImGui::TextUnformatted("(health applies to finished units only)");
+        }
+
+        if (ImGui::Button("Place one at the cursor"))
+        {
+            if (auto terrainPos = getMouseTerrainCoordinate())
+            {
+                placeDebugUnit(*terrainPos);
+            }
+        }
+
+        ImGui::End();
+    }
+
     void GameScene::placeDebugUnit(const SimVector& position)
     {
         if (unitSpawnType.empty() || !isValidUnitType(simulation, unitSpawnType))
@@ -4315,7 +4494,12 @@ namespace rwe
         auto owner = PlayerId(unitSpawnPlayer);
         if (unitSpawnComplete)
         {
-            spawnCompletedUnit(unitSpawnType, owner, position);
+            if (auto unit = spawnCompletedUnit(unitSpawnType, owner, position))
+            {
+                // A nanoframe's hit points track its build progress, so this
+                // only means anything for a finished unit; the window says so.
+                unit->get().hitPoints = debugSpawnHitPoints(unitDefinition);
+            }
         }
         else
         {
