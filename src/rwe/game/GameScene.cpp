@@ -4395,11 +4395,22 @@ namespace rwe
                 continue;
             }
 
-            // Open by default while filtering: the point of typing is to see
-            // what matched, not to then go opening headers.
-            ImGui::SetNextItemOpen(!filter.empty(), ImGuiCond_Always);
-            auto header = category + " (" + std::to_string(matching.size()) + ")";
-            if (ImGui::TreeNode(header.c_str()))
+            // Force every header open while filtering -- the point of typing
+            // is to see what matched, not to then go opening headers -- but
+            // only while filtering. This used to pass !filter.empty() with
+            // ImGuiCond_Always unconditionally, which re-asserted "closed" on
+            // every frame once the box was empty: a click opened the node and
+            // the next frame shut it again.
+            if (!filter.empty())
+            {
+                ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+            }
+
+            // The ID comes from the bare category and the count is only in the
+            // format string, so a header keeps its open state when the filter
+            // changes how many units it matches. Building the label into the
+            // ID, as this did, made every distinct count a different node.
+            if (ImGui::TreeNode(category.c_str(), "%s (%d)", category.c_str(), static_cast<int>(matching.size())))
             {
                 for (const auto* unit : matching)
                 {
