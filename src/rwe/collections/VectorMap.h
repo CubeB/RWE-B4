@@ -123,6 +123,17 @@ namespace rwe
             }
         }
 
+        /**
+         * Slots in use, live and freed alike. An upper bound on the number of
+         * members rather than a count of them: freed slots are kept for reuse
+         * and only an iteration could tell them apart. Cheap enough to read
+         * from a crash handler, which is what it is for.
+         */
+        std::size_t slotCount() const
+        {
+            return vec.size();
+        }
+
         void remove(Id id)
         {
             auto index = extractIndex(id);

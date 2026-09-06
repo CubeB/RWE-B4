@@ -1,5 +1,6 @@
 #include "SceneManager.h"
 #include <rwe/render/render_prof.h>
+#include <rwe/util/CrashHandler.h>
 
 namespace rwe
 {
@@ -113,6 +114,8 @@ namespace rwe
             auto startTime = timeService->getTicks();
             auto timeElapsed = lastFrameStartTime == 0 ? 0 : startTime - lastFrameStartTime;
 
+            setCrashPhase(CrashPhase::Input);
+
             SDL_Event event;
             // The whole frame, from here to the swap: the scene's own
             // breakdown is worth little without the number it has to add up
@@ -162,6 +165,7 @@ namespace rwe
             imGuiContext->newFrame(window);
             {
                 RWE_RENDERPROF("update");
+                setCrashPhase(CrashPhase::Update);
                 currentScene->update(timeElapsed);
             }
             if (showDemoWindow)
@@ -171,6 +175,7 @@ namespace rwe
             renderDebugWindow();
             imGuiContext->render();
 
+            setCrashPhase(CrashPhase::Render);
             graphics->clear();
             // The game scene points the GL viewport at its own buffers as
             // it works (the supersampled world among them), and the menu and
@@ -193,6 +198,7 @@ namespace rwe
 
             {
                 RWE_RENDERPROF("swap");
+                setCrashPhase(CrashPhase::Swap);
                 sdl->glSwapWindow(window);
             }
 
