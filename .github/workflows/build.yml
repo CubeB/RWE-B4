@@ -2,7 +2,15 @@ name: Build
 on:
   push:
     branches: [master, gh-actions, revival]
-    tags: ['v*']
+    # A change to prose does not need eight machines to agree about it.
+    # Anything touching code, shaders, the build or the workflow itself
+    # still builds -- a commit only skips if every file in it is listed
+    # here.
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
   pull_request:
     branches: [master, revival]
     # `labeled` is here only so that adding ci:full re-runs CI without
@@ -10,7 +18,18 @@ on:
     # was, so no other label costs anything: the run is created and every
     # job in it is skipped.
     types: [opened, synchronize, reopened, labeled]
+    # A change to prose does not need eight machines to agree about it.
+    # Anything touching code, shaders, the build or the workflow itself
+    # still builds -- a commit only skips if every file in it is listed
+    # here.
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
   workflow_dispatch:
+  # release.yml calls this on a tag, where no path filter applies.
+  workflow_call:
 
 # A pull request only needs its newest commit checked, and a branch push only
 # needs its newest push. Tags are exempt: a release run must not be cancelled
