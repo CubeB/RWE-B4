@@ -1,5 +1,7 @@
 #include "GameScene.h"
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <rwe/CroppedViewport.h>
@@ -809,9 +811,11 @@ namespace rwe
             chromeUiRenderService.drawSpriteAbs(rect.x, rect.y, rect.width, rect.height, *(*logos)->sprites.at(playerColorIndex.value));
         }
 
-        // A stalled resource flashes its bar red, as in TA.
-        const bool stallFlashOn = ((sceneContext.timeService->getTicks() / 250) % 2) == 0;
-        const Color stallColor(255, 40, 40);
+        // The bars show the stockpile and nothing else. A stall is not
+        // announced here: the original's bar keeps drawing the (empty)
+        // stockpile in its usual colour, and the red consumption figure
+        // beside it is the only sign. RWE used to flash the whole bar red
+        // while stalled, which the original never does.
 
         // draw energy bar
         {
@@ -820,14 +824,7 @@ namespace rwe
             auto rectWidth = localPlayer.maxEnergy == Energy(0) ? 0 : (rect.width * std::max(Energy(0), localPlayer.energy).value) / localPlayer.maxEnergy.value;
             const auto& colorIndex = localSideData.energyColor;
             const auto& color = sceneContext.palette->at(colorIndex);
-            if (localPlayer.energyStalled && stallFlashOn)
-            {
-                chromeUiRenderService.fillColor(rect.x, rect.y, rect.width, rect.height, stallColor);
-            }
-            else
-            {
-                chromeUiRenderService.fillColor(rect.x, rect.y, rectWidth, rect.height, color);
-            }
+            chromeUiRenderService.fillColor(rect.x, rect.y, rectWidth, rect.height, color);
         }
         {
             const auto& rect = localSideData.energy0;
@@ -861,14 +858,7 @@ namespace rwe
             auto rectWidth = localPlayer.maxMetal == Metal(0) ? 0 : (rect.width * std::max(Metal(0), localPlayer.metal).value) / localPlayer.maxMetal.value;
             const auto& colorIndex = localSideData.metalColor;
             const auto& color = sceneContext.palette->at(colorIndex);
-            if (localPlayer.metalStalled && stallFlashOn)
-            {
-                chromeUiRenderService.fillColor(rect.x, rect.y, rect.width, rect.height, stallColor);
-            }
-            else
-            {
-                chromeUiRenderService.fillColor(rect.x, rect.y, rectWidth, rect.height, color);
-            }
+            chromeUiRenderService.fillColor(rect.x, rect.y, rectWidth, rect.height, color);
         }
         {
             const auto& rect = localSideData.metal0;
@@ -4324,6 +4314,7 @@ namespace rwe
 
         if (replaySeekTarget && sceneTime.value >= *replaySeekTarget)
         {
+            LOG_INFO << "Replay: seek reached tick " << sceneTime.value;
             replaySeekTarget.reset();
             millisecondsBuffer = 0;
         }
@@ -5413,6 +5404,12 @@ namespace rwe
             replaySeekTarget = gameParameters.replaySeekToTick;
         }
 
+        if (const char* noKeyframes = std::getenv("RWE_REPLAY_NO_KEYFRAMES"); noKeyframes != nullptr && *noKeyframes != '\0' && *noKeyframes != '0')
+        {
+            replayKeyframesDisabled = true;
+            LOG_INFO << "Replay: keyframes disabled by RWE_REPLAY_NO_KEYFRAMES";
+        }
+
         availableReplays = listReplays();
     }
 
@@ -5476,13 +5473,13 @@ namespace rwe
             // at a still frame while nothing happens.
             if (replayPlaying && atEnd)
             {
-                restartReplayAt(0);
+                seekReplayTo(0);
             }
         }
         ImGui::SameLine();
         if (ImGui::Button("Restart"))
         {
-            restartReplayAt(0);
+            seekReplayTo(0);
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(150.0f);
@@ -5508,17 +5505,15 @@ namespace rwe
             // a wind-forward per pixel crossed would be a hundred of them.
             replayScrubbing = false;
             auto target = static_cast<unsigned int>(std::max(replayScrubSeconds, 0)) * ticksPerSecond;
-            if (target > sceneTime.value)
+            if (target != sceneTime.value)
             {
-                replaySeekTarget = target;
-            }
-            else if (target < sceneTime.value)
-            {
-                // A lockstep game only runs forwards, so going back means
-                // building it again from the start and winding on.
-                restartReplayAt(target);
+                seekReplayTo(target);
             }
         }
+        ImGui::TextDisabled("%zu keyframes, %zu MB, every %us",
+            replayKeyframes.size(),
+            replayKeyframeBytes / (1024u * 1024u),
+            ReplayKeyframeInterval / ticksPerSecond);
 
         ImGui::Checkbox("See everything", &spectatorMode);
         ImGui::SameLine();
@@ -5627,10 +5622,121 @@ namespace rwe
         sceneContext.sceneManager->setNextScene(scene);
     }
 
+    void GameScene::takeReplayKeyframe()
+    {
+        auto started = std::chrono::steady_clock::now();
+        auto bytes = nlohmann::json::to_cbor(saveSimulationToJson(simulation));
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+        replayKeyframeBytes += bytes.size();
+        LOG_INFO << "Replay: keyframe at tick " << sceneTime.value << ", " << (bytes.size() / 1024) << " KB in " << elapsed << " ms, "
+                 << (replayKeyframes.size() + 1) << " held in " << (replayKeyframeBytes / 1024) << " KB";
+        replayKeyframes.emplace(sceneTime.value, std::move(bytes));
+    }
+
+    void GameScene::restoreReplayKeyframe(unsigned int tick, const std::vector<std::uint8_t>& keyframe)
+    {
+        auto started = std::chrono::steady_clock::now();
+        clearSimulationForLoad(simulation);
+        loadSimulationFromJson(nlohmann::json::from_cbor(keyframe), simulation);
+        sceneTime = SceneTime(tick);
+
+        // Everything the scene remembers about particular units is now about
+        // units that may not exist, or may be somebody else in the same slot.
+        // Effects and the like can stay: they are pictures, and wrong ones
+        // for a moment is the worst they can be.
+        clearUnitSelection();
+        hoveredUnit = std::nullopt;
+        hoveredFeature = std::nullopt;
+        trackedUnitId = std::nullopt;
+        if (std::holds_alternative<CameraControlStateTrackingUnit>(cameraControlState))
+        {
+            cameraControlState = CameraControlStateFree();
+        }
+        for (auto& group : controlGroups)
+        {
+            group.clear();
+        }
+        cloakedUnits.clear();
+        unitGuiInfos.clear();
+        unconfirmedBuildQueueDelta.clear();
+        unconfirmedStockpileDelta.clear();
+        selfDestructAnnounced.clear();
+        buildBoxAppearedAt.clear();
+        nextUnitCursor = std::nullopt;
+        // Timed callbacks are keyed on a scene time that has just moved
+        // backwards, and would all fire at once on the next tick.
+        actions.clear();
+        // Decided later than where the playback now is; decided again when
+        // it gets there.
+        gameOver = std::nullopt;
+        gameOverTime = GameTime(0);
+        combinedVisibility = std::nullopt;
+        replayReachedEnd = false;
+        millisecondsBuffer = 0;
+
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+        LOG_INFO << "Replay: restored keyframe at tick " << tick << " in " << elapsed << " ms";
+    }
+
+    void GameScene::seekReplayTo(unsigned int tick)
+    {
+        LOG_INFO << "Replay: seek to tick " << tick << " from tick " << sceneTime.value;
+        if (tick >= sceneTime.value)
+        {
+            if (tick > sceneTime.value)
+            {
+                replaySeekTarget = tick;
+            }
+            return;
+        }
+
+        // The latest keyframe at or before the target. A lockstep game only
+        // runs forwards, so going back means starting from a state that is
+        // known to be earlier and winding on -- the keyframe, if there is
+        // one, or the start of the game if there is not.
+        auto it = replayKeyframes.upper_bound(tick);
+        if (it == replayKeyframes.begin())
+        {
+            restartReplayAt(tick);
+            return;
+        }
+        --it;
+
+        try
+        {
+            restoreReplayKeyframe(it->first, it->second);
+        }
+        catch (const std::exception& e)
+        {
+            // A keyframe that will not load is a bug, but the viewer can
+            // still do what it did before there were any.
+            LOG_ERROR << "Replay: could not restore keyframe at tick " << it->first << ": " << e.what();
+            restartReplayAt(tick);
+            return;
+        }
+
+        if (tick > sceneTime.value)
+        {
+            replaySeekTarget = tick;
+        }
+    }
+
     void GameScene::tryTickGame()
     {
         if (replayPlayback)
         {
+            // Before the tick's commands go in, so the keyframe is the state
+            // after the previous tick and nothing else -- restoring it and
+            // pushing this tick's commands is exactly what happens next
+            // here. Taken while winding forward as well as while watching,
+            // so that the ground a seek has crossed can be come back to.
+            // Not taken twice: a second pass over the same tick after a
+            // restore already has one, and it would be the same bytes.
+            if (!replayKeyframesDisabled && sceneTime.value % ReplayKeyframeInterval == 0 && replayKeyframes.find(sceneTime.value) == replayKeyframes.end())
+            {
+                takeReplayKeyframe();
+            }
+
             // One set per player for the tick about to run. Pushed here and
             // not in update() because the service pops exactly one set per
             // player per tick, and anywhere else means guessing how many
@@ -6574,14 +6680,14 @@ namespace rwe
          * banding reads as deliberate. A unit is small, in motion, and
          * shaded in world space rather than object space -- so the bands
          * slide across it as it turns, which reads as flicker rather than
-         * form. Pulling the unit strength further down keeps the shape
-         * information and drops most of that movement.
+         * form. Pulling the unit strength down keeps the shape information
+         * and drops most of that movement.
          *
-         * Both defaults are below 1.0, which is the fully faithful setting:
-         * at 1.0 row 0 is genuinely black, as the original's is. The two
-         * values are rwe.cfg keys (shading-strength-units,
-         * shading-strength-buildings) so the look can be tuned without a
-         * rebuild; setting both to 100 restores the original exactly.
+         * Both strengths default to 1.0, the faithful setting: row 0 is
+         * genuinely black, as the original's is, on units and buildings
+         * alike. The two values are rwe.cfg keys (shading-strength-units,
+         * shading-strength-buildings) for anyone who wants it softer, and
+         * the VISUALS switch still turns either category off outright.
          */
     }
 

@@ -598,6 +598,15 @@ namespace rwe
 
         std::optional<FeatureId> addFeature(FeatureDefinitionId featureType, int heightmapX, int heightmapZ);
 
+        /**
+         * Puts a saved feature back into the slot it was saved from, after
+         * `features.restoreLayout`. Only a load has any business calling
+         * this: it skips the occupancy check and keeps the hit points the
+         * feature arrives with. See VectorMap::Layout for why a load wants
+         * the slot back rather than just the feature.
+         */
+        FeatureId addFeatureInSlot(unsigned int slot, MapFeature&& newFeature);
+
         /** Removes a feature and frees the grid cells it occupied. No-op if the id is stale. */
         void deleteFeature(FeatureId id);
 
@@ -871,6 +880,9 @@ namespace rwe
 
         bool anyFeatureOccupies(const DiscreteRect& rect) const;
 
+        /** The grid side of placing a feature, shared by addFeature and addFeatureInSlot. */
+        void writeFeatureToGrids(FeatureId featureId, const FeatureDefinition& featureDefinition, const DiscreteRect& footprintRegion);
+
         bool containsAnyGeoMatch(const Grid<YardMapCell>& yardMap, unsigned int x, unsigned int y) const;
 
         bool isCollisionAt(const DiscreteRect& rect) const;
@@ -890,6 +902,11 @@ namespace rwe
         void enableShading(UnitId unitId, const std::string& name);
 
         void disableShading(UnitId unitId, const std::string& name);
+
+        /** The COB cache / dont-cache state of a piece; see UnitMesh::cached. */
+        void enableCaching(UnitId unitId, const std::string& name);
+
+        void disableCaching(UnitId unitId, const std::string& name);
 
         UnitState& getUnitState(UnitId id);
 

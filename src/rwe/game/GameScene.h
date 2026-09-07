@@ -1,9 +1,11 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <deque>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <optional>
 #include <queue>
 #include <rwe/AudioService.h>
@@ -527,10 +529,43 @@ namespace rwe
          */
         std::vector<ReplaySummary> availableReplays;
 
+        /**
+         * Snapshots of the simulation taken as a recording plays, keyed by
+         * the scene time each was taken at, so that a scrub backwards can
+         * start from the nearest one instead of from the beginning. Each is
+         * the save-game document in CBOR, which is a fraction of the json
+         * object's size in memory; a thirty-minute game holds sixty of them.
+         *
+         * A keyframe at scene time S is the state before tick S's commands
+         * are pushed, which is the state after tick S-1 has run in full.
+         * Restoring it sets sceneTime to S, and the next tryTickGame feeds
+         * tick S exactly as the first pass did.
+         */
+        std::map<unsigned int, std::vector<std::uint8_t>> replayKeyframes;
+        std::size_t replayKeyframeBytes{0};
+        /** Thirty seconds of game time between keyframes. */
+        static constexpr unsigned int ReplayKeyframeInterval = 900;
+        /**
+         * RWE_REPLAY_NO_KEYFRAMES=1 in the environment: take none, so every
+         * scrub backwards rebuilds the scene from the start as it did before
+         * there were any. For timing one path against the other, and for
+         * telling a keyframe bug from a playback one.
+         */
+        bool replayKeyframesDisabled{false};
+
         void pushReplayCommandsForTick(unsigned int tick);
         void renderReplayWindow();
         void restartReplayAt(unsigned int tick);
         void openReplay(const std::filesystem::path& path);
+        void takeReplayKeyframe();
+        /** Puts the simulation and the scene back to the keyframe at the given scene time. */
+        void restoreReplayKeyframe(unsigned int tick, const std::vector<std::uint8_t>& keyframe);
+        /**
+         * Moves the playback to the given tick: winds forward from where it
+         * is, or from the latest keyframe at or before the target, or if
+         * there is none rebuilds the scene from the start.
+         */
+        void seekReplayTo(unsigned int tick);
 
         /**
          * Shows what no player can see: cloaked enemies, and every unit

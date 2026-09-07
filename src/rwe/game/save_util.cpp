@@ -139,6 +139,55 @@ namespace rwe
         constexpr const char* StaleRef = "stale";
         constexpr unsigned int StaleIdValue = 0xFFu;
 
+        // ---- id table layout --------------------------------------------
+        //
+        // See VectorMap::Layout. Written as one flat array per table,
+        // [id, occupied, nextFree] a slot, because a map has thousands of
+        // features and the keyframes hold dozens of these in memory.
+
+        template <typename Layout>
+        json saveLayout(const Layout& layout)
+        {
+            json slots = json::array();
+            for (const auto& s : layout.slots)
+            {
+                slots.push_back(json::array({s.id, s.occupied, s.nextFreeIndex ? json(*s.nextFreeIndex) : json()}));
+            }
+            return json{
+                {"firstFree", layout.firstFreeIndex ? json(*layout.firstFreeIndex) : json()},
+                {"slots", slots},
+            };
+        }
+
+        template <typename T, typename Tag>
+        typename VectorMap<T, Tag>::Layout loadLayout(const json& j)
+        {
+            typename VectorMap<T, Tag>::Layout layout;
+            const auto& firstFree = j.at("firstFree");
+            layout.firstFreeIndex = firstFree.is_null() ? std::nullopt : std::make_optional(firstFree.get<unsigned int>());
+            for (const auto& s : j.at("slots"))
+            {
+                const auto& next = s.at(2);
+                layout.slots.push_back({s.at(0).get<unsigned int>(), s.at(1).get<bool>(), next.is_null() ? std::nullopt : std::make_optional(next.get<unsigned int>())});
+            }
+            return layout;
+        }
+
+        /** The slot numbers a layout's members occupy, in iteration order -- which is saved order. */
+        template <typename Layout>
+        std::vector<unsigned int> occupiedSlots(const Layout& layout)
+        {
+            std::vector<unsigned int> slots;
+            for (unsigned int i = 0; i < layout.slots.size(); ++i)
+            {
+                if (layout.slots[i].occupied)
+                {
+                    slots.push_back(i);
+                }
+            }
+            return slots;
+        }
+
         struct SaveContext
         {
             std::unordered_map<UnitId, uint32_t> units;
@@ -394,6 +443,7 @@ namespace rwe
                 {"name", m.name},
                 {"visible", m.visible},
                 {"shaded", m.shaded},
+                {"cached", m.cached},
                 {"offset", saveSimVector(m.offset)},
                 {"previousOffset", saveSimVector(m.previousOffset)},
                 {"previousRotationX", saveSimAngle(m.previousRotationX)},
@@ -416,6 +466,9 @@ namespace rwe
             m.name = j.at("name").get<std::string>();
             m.visible = j.at("visible").get<bool>();
             m.shaded = j.at("shaded").get<bool>();
+            // Saves written before the flag existed carry no key; every piece
+            // starts cached, which is the original's default too.
+            m.cached = j.value("cached", true);
             m.offset = loadSimVector(j.at("offset"));
             m.previousOffset = loadSimVector(j.at("previousOffset"));
             m.previousRotationX = loadSimAngle(j.at("previousRotationX"));
@@ -1986,6 +2039,20 @@ namespace rwe
         }
         j["projectiles"] = projectiles;
 
+        // The shape of the three id tables, so the load can put everything
+        // back in the slot it came from. Without this the load hands out
+        // dense ids, and the game is the same game only until the next unit
+        // is born: VectorMap refills freed slots, so a fresh table puts the
+        // newcomer at the end where the original put it in a hole, and from
+        // there on the two iterate in different orders and hash differently.
+        // A keyframe the replay viewer winds forward from cannot afford
+        // that; a saved game merely deserved better.
+        j["layout"] = json{
+            {"features", saveLayout(sim.features.layout())},
+            {"units", saveLayout(sim.units.layout())},
+            {"projectiles", saveLayout(sim.projectiles.layout())},
+        };
+
         json pathRequests = json::array();
         for (const auto& r : sim.pathRequests)
         {
@@ -2054,6 +2121,33 @@ namespace rwe
         sim.occupiedGrid.forEachIndexed([](const auto&, OccupiedCell& cell) { cell.featureId = std::nullopt; });
         sim.features = VectorMap<MapFeature, FeatureIdTag>();
 
+        // A save that recorded the shape of its id tables is put back into
+        // that shape, member by member into the slot each came from. One
+        // without (any save older than the layout) is laid out densely, as
+        // it always was, and the ids it hands out are the load's own.
+        std::optional<std::vector<unsigned int>> featureSlots;
+        std::optional<std::vector<unsigned int>> unitSlots;
+        std::optional<std::vector<unsigned int>> projectileSlots;
+        if (j.contains("layout"))
+        {
+            const auto& lj = j.at("layout");
+            auto featureLayout = loadLayout<MapFeature, FeatureIdTag>(lj.at("features"));
+            auto unitLayout = loadLayout<UnitState, UnitIdTag>(lj.at("units"));
+            auto projectileLayout = loadLayout<Projectile, ProjectileIdTag>(lj.at("projectiles"));
+            featureSlots = occupiedSlots(featureLayout);
+            unitSlots = occupiedSlots(unitLayout);
+            projectileSlots = occupiedSlots(projectileLayout);
+            if (featureSlots->size() != j.at("features").size()
+                || unitSlots->size() != j.at("units").size()
+                || projectileSlots->size() != j.at("projectiles").size())
+            {
+                throw std::runtime_error("save layout does not match its contents");
+            }
+            sim.features.restoreLayout(featureLayout);
+            sim.units.restoreLayout(unitLayout);
+            sim.projectiles.restoreLayout(projectileLayout);
+        }
+
         LoadContext ctx;
 
         for (const auto& fj : j.at("features"))
@@ -2062,7 +2156,15 @@ namespace rwe
             f.featureName = FeatureDefinitionId(fj.at("featureName").get<unsigned int>());
             f.position = loadSimVector(fj.at("position"));
             f.rotation = loadSimAngle(fj.at("rotation"));
-            auto id = sim.addFeature(std::move(f));
+            std::optional<FeatureId> id;
+            if (featureSlots)
+            {
+                id = sim.addFeatureInSlot((*featureSlots)[ctx.features.size()], std::move(f));
+            }
+            else
+            {
+                id = sim.addFeature(std::move(f));
+            }
             if (!id)
             {
                 throw std::runtime_error("could not place a loaded feature");
@@ -2097,13 +2199,27 @@ namespace rwe
             }
 
             auto env = std::make_unique<CobEnvironment>(&scriptIt->second);
-            ctx.units.push_back(UnitId(sim.units.emplace(pieces, std::move(env))));
+            if (unitSlots)
+            {
+                ctx.units.push_back(UnitId(sim.units.emplaceInSlot((*unitSlots)[ctx.units.size()], pieces, std::move(env))));
+            }
+            else
+            {
+                ctx.units.push_back(UnitId(sim.units.emplace(pieces, std::move(env))));
+            }
         }
 
         const auto& projectilesJson = j.at("projectiles");
         for (std::size_t i = 0; i < projectilesJson.size(); ++i)
         {
-            ctx.projectiles.push_back(ProjectileId(sim.projectiles.emplace()));
+            if (projectileSlots)
+            {
+                ctx.projectiles.push_back(ProjectileId(sim.projectiles.emplaceInSlot((*projectileSlots)[i])));
+            }
+            else
+            {
+                ctx.projectiles.push_back(ProjectileId(sim.projectiles.emplace()));
+            }
         }
 
         {
@@ -2164,5 +2280,31 @@ namespace rwe
                 loadExploredGrid(exploredJson[i], sim.playerVisibility[i].explored);
             }
         }
+    }
+
+    void clearSimulationForLoad(GameSimulation& sim)
+    {
+        sim.clearPlayers();
+
+        // Whole tables replaced rather than emptied one member at a time:
+        // the load puts its own layout in, so there is nothing to keep, and
+        // going through the death paths would fire events and write wrecks.
+        sim.units = VectorMap<UnitState, UnitIdTag>();
+        sim.projectiles = VectorMap<Projectile, ProjectileIdTag>();
+        sim.flyingUnitsSet.clear();
+        sim.occupiedGrid.forEachIndexed([](const auto&, OccupiedCell& cell) {
+            cell.mobileUnitId = std::nullopt;
+            cell.buildingInfo = std::nullopt;
+        });
+        // The features are the load's to sweep, as they are for a fresh sim.
+
+        // Derived caches that would otherwise answer for units that are no
+        // longer there. The spatial index is stamped with the game time it
+        // was built at and a restore can land on that very tick.
+        sim.invalidateUnitSpatialIndex();
+        sim.pathRequests.clear();
+        sim.unitCreationRequests.clear();
+        sim.events.clear();
+        sim.aiPendingCommands.clear();
     }
 }

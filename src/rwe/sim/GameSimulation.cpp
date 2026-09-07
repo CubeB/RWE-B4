@@ -274,7 +274,25 @@ namespace rwe
         newFeature.hitPoints = featureDefinition.damage;
 
         auto featureId = FeatureId(features.emplace(std::move(newFeature)));
+        writeFeatureToGrids(featureId, featureDefinition, footprintRegion);
+        return featureId;
+    }
 
+    FeatureId GameSimulation::addFeatureInSlot(unsigned int slot, MapFeature&& newFeature)
+    {
+        // No occupancy check: the saved set was consistent when it was
+        // written, and the check would only be asking whether a feature is
+        // standing where it stood. The hit points come from the save too, so
+        // they are not reset from the definition here.
+        const auto& featureDefinition = getFeatureDefinition(newFeature.featureName);
+        auto footprintRegion = computeFootprintRegion(newFeature.position, featureDefinition.footprintX, featureDefinition.footprintZ);
+        auto featureId = FeatureId(features.emplaceInSlot(slot, std::move(newFeature)));
+        writeFeatureToGrids(featureId, featureDefinition, footprintRegion);
+        return featureId;
+    }
+
+    void GameSimulation::writeFeatureToGrids(FeatureId featureId, const FeatureDefinition& featureDefinition, const DiscreteRect& footprintRegion)
+    {
         occupiedGrid.forEach(occupiedGrid.clipRegion(footprintRegion), [&](auto& cell) {
             cell.featureId = featureId;
         });
@@ -288,8 +306,6 @@ namespace rwe
         {
             geoGrid.set(geoGrid.clipRegion(footprintRegion), true);
         }
-
-        return featureId;
     }
 
     int computeMidpointHeight(const Grid<unsigned char>& heightmap, int x, int y)
@@ -2398,6 +2414,24 @@ namespace rwe
         if (mesh)
         {
             mesh->get().shaded = false;
+        }
+    }
+
+    void GameSimulation::enableCaching(UnitId unitId, const std::string& name)
+    {
+        auto mesh = getUnitState(unitId).findPiece(name);
+        if (mesh)
+        {
+            mesh->get().cached = true;
+        }
+    }
+
+    void GameSimulation::disableCaching(UnitId unitId, const std::string& name)
+    {
+        auto mesh = getUnitState(unitId).findPiece(name);
+        if (mesh)
+        {
+            mesh->get().cached = false;
         }
     }
 

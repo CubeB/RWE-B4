@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace rwe
 {
@@ -102,6 +103,95 @@ namespace rwe
         using key_type = Id;
         using mapped_type = T;
         using value_type = OccupiedEntry;
+
+        /**
+         * The shape of the map without its contents: one entry per slot,
+         * live or freed, and the head of the free list.
+         *
+         * An id here is a slot number and a generation, the generation
+         * advancing each time the slot is refilled, and `remove` keeps the
+         * freed slot on a LIFO chain for `emplace` to hand out again. So two
+         * maps holding the same members in the same order are not the same
+         * map: the next `emplace` can land in different slots, which changes
+         * the id it returns and where the member sits in iteration order. A
+         * save that means to reproduce the game exactly has to carry this,
+         * and this is the form it carries it in.
+         */
+        struct SlotLayout
+        {
+            /** The occupant's id, or for a freed slot the id its last occupant had. */
+            unsigned int id;
+            bool occupied;
+            /** A freed slot's link to the next freed slot, in slot numbers. */
+            std::optional<unsigned int> nextFreeIndex;
+        };
+        struct Layout
+        {
+            std::vector<SlotLayout> slots;
+            std::optional<unsigned int> firstFreeIndex;
+        };
+
+        Layout layout() const
+        {
+            Layout l;
+            l.slots.reserve(vec.size());
+            for (const auto& entry : vec)
+            {
+                match(
+                    entry,
+                    [&](const FreeEntry& f) {
+                        l.slots.push_back(SlotLayout{f.id.value, false, f.nextIndex ? std::make_optional(f.nextIndex->value) : std::nullopt});
+                    },
+                    [&](const OccupiedEntry& e) {
+                        l.slots.push_back(SlotLayout{e.first.value, true, std::nullopt});
+                    });
+            }
+            l.firstFreeIndex = firstFreeSlotIndex ? std::make_optional(firstFreeSlotIndex->value) : std::nullopt;
+            return l;
+        }
+
+        /**
+         * Throws away the contents and gives the map the given shape. Every
+         * freed slot comes back freed, with its id and its place in the free
+         * chain; every occupied slot comes back as an empty placeholder
+         * waiting for emplaceInSlot, which is not on the free chain and so
+         * cannot be handed out by emplace in the meantime.
+         */
+        void restoreLayout(const Layout& l)
+        {
+            vec.clear();
+            for (const auto& slot : l.slots)
+            {
+                auto next = slot.nextFreeIndex ? std::make_optional(Index(*slot.nextFreeIndex)) : std::nullopt;
+                vec.emplace_back(FreeEntry(Id(slot.id), slot.occupied ? std::nullopt : next));
+            }
+            firstFreeSlotIndex = l.firstFreeIndex ? std::make_optional(Index(*l.firstFreeIndex)) : std::nullopt;
+            ++growCount;
+        }
+
+        /**
+         * Fills a placeholder left by restoreLayout, under the id the layout
+         * recorded for it -- not the next generation, which is what emplace
+         * would hand out, because this is the same member coming back rather
+         * than a new one moving in.
+         */
+        template <typename... Args>
+        Id emplaceInSlot(unsigned int index, Args&&... args)
+        {
+            if (index >= vec.size())
+            {
+                throw std::runtime_error("emplaceInSlot: no such slot");
+            }
+            auto& entry = vec[index];
+            const auto* freeEntry = std::get_if<FreeEntry>(&entry);
+            if (freeEntry == nullptr)
+            {
+                throw std::runtime_error("emplaceInSlot: slot is already occupied");
+            }
+            auto id = freeEntry->id;
+            entry = std::make_pair(id, T(std::forward<Args>(args)...));
+            return id;
+        }
 
     private:
         std::deque<Entry> vec;

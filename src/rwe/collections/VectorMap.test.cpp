@@ -320,4 +320,68 @@ namespace rwe
             }
         });
     }
+
+    TEST_CASE("VectorMap layout")
+    {
+        SECTION("a restored layout hands out the same ids in the same order as the original")
+        {
+            VectorMap<char, IdTag> m;
+            auto idA = m.emplace('a');
+            auto idB = m.emplace('b');
+            auto idC = m.emplace('c');
+            auto idD = m.emplace('d');
+            // Two holes, so the free chain has a link in it, and one of them
+            // refilled, so a slot carries a generation above zero.
+            m.remove(idB);
+            m.remove(idC);
+            auto idC2 = m.emplace('e');
+            REQUIRE(idC2 != idC);
+            (void)idA;
+            (void)idD;
+
+            auto layout = m.layout();
+            REQUIRE(layout.slots.size() == 4);
+            REQUIRE(layout.slots[1].occupied == false);
+            REQUIRE(layout.slots[2].occupied == true);
+            REQUIRE(layout.firstFreeIndex == std::optional<unsigned int>(1));
+
+            VectorMap<char, IdTag> n;
+            n.restoreLayout(layout);
+            std::vector<char> contents;
+            for (const auto& [_, c] : m)
+            {
+                contents.push_back(c);
+            }
+            unsigned int i = 0;
+            for (const auto& slot : layout.slots)
+            {
+                if (slot.occupied)
+                {
+                    n.emplaceInSlot(i, contents[0]);
+                    contents.erase(contents.begin());
+                }
+                ++i;
+            }
+
+            REQUIRE(n.tryGet(idA) == 'a');
+            REQUIRE(n.tryGet(idB) == std::nullopt);
+            REQUIRE(n.tryGet(idC2) == 'e');
+            REQUIRE(n.tryGet(idD) == 'd');
+
+            // The same shape, so the next arrivals get the same ids from
+            // both -- which is what makes a game restored this way run the
+            // same as the one it was taken from.
+            auto layoutN = n.layout();
+            REQUIRE(layoutN.firstFreeIndex == layout.firstFreeIndex);
+            REQUIRE(layoutN.slots.size() == layout.slots.size());
+            for (std::size_t k = 0; k < layout.slots.size(); ++k)
+            {
+                REQUIRE(layoutN.slots[k].id == layout.slots[k].id);
+                REQUIRE(layoutN.slots[k].occupied == layout.slots[k].occupied);
+                REQUIRE(layoutN.slots[k].nextFreeIndex == layout.slots[k].nextFreeIndex);
+            }
+            REQUIRE(m.emplace('f') == n.emplace('f'));
+            REQUIRE(m.emplace('g') == n.emplace('g'));
+        }
+    }
 }

@@ -836,6 +836,7 @@ set(TEST_FILES
     src/rwe/test_crt_silence.cpp
     src/rwe/game/exploredgrid.test.cpp
     src/rwe/game/ReplayFile.test.cpp
+    src/rwe/game/replaykeyframe.test.cpp
     src/rwe/game/hoveredfeature.test.cpp
     src/rwe/game/infopanel.test.cpp
     src/rwe/game/orderbuttons.test.cpp
