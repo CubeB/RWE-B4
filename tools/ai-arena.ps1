@@ -16,7 +16,7 @@
 
 param(
     [int]$games = 10,
-    [int]$seconds = 600,
+    [int]$seconds = 1800,   # a cap, not the length: a game ends when somebody wins
     [string]$map = "Coast To Coast",
     [string]$difficulty = "standard",
     [string]$sideA = "ARM",

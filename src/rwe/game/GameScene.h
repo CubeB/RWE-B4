@@ -492,6 +492,34 @@ namespace rwe
         std::optional<unsigned int> replaySeekTarget;
 
         /**
+         * Where the scrub handle is, in seconds. Held here rather than made
+         * fresh from the playback position each frame: rebuilding it every
+         * frame means the game drags the handle out from under the mouse,
+         * which is what made scrubbing unusable.
+         */
+        int replayScrubSeconds{0};
+        /** True while the handle is being dragged, so the position stops following the game. */
+        bool replayScrubbing{false};
+        /** Set once the end has been reached, so it is only paused there once. */
+        bool replayReachedEnd{false};
+
+        /**
+         * Which player's resources and panel art the interface shows. A
+         * recording has no local player in the sense the interface means, and
+         * whichever slot stood in for one is not necessarily the side worth
+         * watching.
+         */
+        std::optional<PlayerId> hudPlayerOverride;
+
+        /**
+         * Both sides' fog at once, rebuilt when the tick moves on. A spectator
+         * with the fog on wants to see what each side could see, which is
+         * neither player's own grid nor a fully lit map.
+         */
+        mutable std::optional<PlayerVisibility> combinedVisibility;
+        mutable unsigned int combinedVisibilityTick{0};
+
+        /**
          * The other recordings on disk, so one can be picked without going
          * back to a command line. Read when playback starts and when the
          * refresh button is pressed, rather than every frame: it is a
@@ -753,6 +781,9 @@ namespace rwe
         void enableReplayRecording(const std::filesystem::path& path, const ReplayHeader& header);
 
         bool isReplayPlayback() const { return replayPlayback.has_value(); }
+
+        /** Whose resources the top bar reads out; the local player unless a replay says otherwise. */
+        PlayerId hudPlayerId() const { return hudPlayerOverride.value_or(localPlayerId); }
 
         void setCameraPosition(const Vector3f& newPosition);
 

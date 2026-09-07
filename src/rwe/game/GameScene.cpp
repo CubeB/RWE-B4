@@ -778,7 +778,7 @@ namespace rwe
     {
         renderMinimap();
 
-        const auto& localSideData = sceneContext.sideData->at(getPlayer(localPlayerId).side);
+        const auto& localSideData = sceneContext.sideData->at(getPlayer(hudPlayerId()).side);
 
         // render top bar
         const auto& intGafName = localSideData.intGaf;
@@ -804,7 +804,7 @@ namespace rwe
         auto logos = sceneContext.textureService->tryGetGafEntry("textures/LOGOS.GAF", "32xlogos");
         if (logos)
         {
-            auto playerColorIndex = getPlayer(localPlayerId).color;
+            auto playerColorIndex = getPlayer(hudPlayerId()).color;
             const auto& rect = localSideData.logo.toDiscreteRect();
             chromeUiRenderService.drawSpriteAbs(rect.x, rect.y, rect.width, rect.height, *(*logos)->sprites.at(playerColorIndex.value));
         }
@@ -816,7 +816,7 @@ namespace rwe
         // draw energy bar
         {
             const auto& rect = localSideData.energyBar.toDiscreteRect();
-            const auto& localPlayer = getPlayer(localPlayerId);
+            const auto& localPlayer = getPlayer(hudPlayerId());
             auto rectWidth = localPlayer.maxEnergy == Energy(0) ? 0 : (rect.width * std::max(Energy(0), localPlayer.energy).value) / localPlayer.maxEnergy.value;
             const auto& colorIndex = localSideData.energyColor;
             const auto& color = sceneContext.palette->at(colorIndex);
@@ -835,29 +835,29 @@ namespace rwe
         }
         {
             const auto& rect = localSideData.energyMax;
-            auto text = formatResource(getPlayer(localPlayerId).maxEnergy);
+            auto text = formatResource(getPlayer(hudPlayerId()).maxEnergy);
             chromeUiRenderService.drawTextAlignRight(rect.x1, rect.y1, text, *guiFont);
         }
         {
             const auto& rect = localSideData.energyNum;
-            auto text = formatResource(std::max(Energy(0), getPlayer(localPlayerId).energy));
+            auto text = formatResource(std::max(Energy(0), getPlayer(hudPlayerId()).energy));
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont);
         }
         {
             const auto& rect = localSideData.energyProduced;
-            auto text = formatResourceDelta(getPlayer(localPlayerId).previousEnergyProductionBuffer);
+            auto text = formatResourceDelta(getPlayer(hudPlayerId()).previousEnergyProductionBuffer);
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont, Color(83, 223, 79));
         }
         {
             const auto& rect = localSideData.energyConsumed;
-            auto text = formatResourceDelta(getPlayer(localPlayerId).previousDesiredEnergyConsumptionBuffer);
+            auto text = formatResourceDelta(getPlayer(hudPlayerId()).previousDesiredEnergyConsumptionBuffer);
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont, Color(255, 71, 0));
         }
 
         // draw metal bar
         {
             const auto& rect = localSideData.metalBar.toDiscreteRect();
-            const auto& localPlayer = getPlayer(localPlayerId);
+            const auto& localPlayer = getPlayer(hudPlayerId());
             auto rectWidth = localPlayer.maxMetal == Metal(0) ? 0 : (rect.width * std::max(Metal(0), localPlayer.metal).value) / localPlayer.maxMetal.value;
             const auto& colorIndex = localSideData.metalColor;
             const auto& color = sceneContext.palette->at(colorIndex);
@@ -876,22 +876,22 @@ namespace rwe
         }
         {
             const auto& rect = localSideData.metalMax;
-            auto text = formatResource(getPlayer(localPlayerId).maxMetal);
+            auto text = formatResource(getPlayer(hudPlayerId()).maxMetal);
             chromeUiRenderService.drawTextAlignRight(rect.x1, rect.y1, text, *guiFont);
         }
         {
             const auto& rect = localSideData.metalNum;
-            auto text = formatResource(std::max(Metal(0), getPlayer(localPlayerId).metal));
+            auto text = formatResource(std::max(Metal(0), getPlayer(hudPlayerId()).metal));
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont);
         }
         {
             const auto& rect = localSideData.metalProduced;
-            auto text = formatResourceDelta(getPlayer(localPlayerId).previousMetalProductionBuffer);
+            auto text = formatResourceDelta(getPlayer(hudPlayerId()).previousMetalProductionBuffer);
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont, Color(83, 223, 79));
         }
         {
             const auto& rect = localSideData.metalConsumed;
-            auto text = formatResourceDelta(getPlayer(localPlayerId).previousDesiredMetalConsumptionBuffer);
+            auto text = formatResourceDelta(getPlayer(hudPlayerId()).previousDesiredMetalConsumptionBuffer);
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont, Color(255, 71, 0));
         }
 
@@ -4328,6 +4328,18 @@ namespace rwe
             millisecondsBuffer = 0;
         }
 
+        // The recording has run out. Pause rather than carry on ticking a
+        // game with no more commands coming, which looks like the viewer has
+        // frozen when in fact it has finished.
+        if (replayPlayback && !replaySeekTarget && !replayReachedEnd
+            && sceneTime.value >= replayPlayback->lastTick)
+        {
+            replayReachedEnd = true;
+            replayPlaying = false;
+            millisecondsBuffer = 0;
+            LOG_INFO << "Replay: reached the end at tick " << sceneTime.value;
+        }
+
         // A launcher's magazine fills without anybody ordering anything, so its
         // readout cannot be refreshed off a command the way a build queue's is.
         refreshStockpileGuiTotal();
@@ -5452,11 +5464,20 @@ namespace rwe
             return;
         }
 
-        ImGui::Text("%d:%02d of %d:%02d", nowSeconds / 60, nowSeconds % 60, endSeconds / 60, endSeconds % 60);
+        auto atEnd = sceneTime.value >= lastTick;
+        ImGui::Text("%d:%02d of %d:%02d%s",
+            nowSeconds / 60, nowSeconds % 60, endSeconds / 60, endSeconds % 60,
+            atEnd ? "   (end)" : "");
 
         if (ImGui::Button(replayPlaying ? "Pause" : "Play"))
         {
             replayPlaying = !replayPlaying;
+            // Pressing play at the end means watching it again, not staring
+            // at a still frame while nothing happens.
+            if (replayPlaying && atEnd)
+            {
+                restartReplayAt(0);
+            }
         }
         ImGui::SameLine();
         if (ImGui::Button("Restart"))
@@ -5467,14 +5488,26 @@ namespace rwe
         ImGui::SetNextItemWidth(150.0f);
         ImGui::SliderInt("Speed", &replaySpeed, 1, 16, "%dx");
 
-        // Only act when the slider is let go. Seeking on every frame of a
-        // drag would start a fresh wind-forward for every pixel crossed.
-        int seekSeconds = nowSeconds;
-        ImGui::SetNextItemWidth(-1.0f);
-        ImGui::SliderInt("##seek", &seekSeconds, 0, std::max(endSeconds, 1), "%ds");
-        if (ImGui::IsItemDeactivatedAfterEdit())
+        // The handle only follows the game when nobody is holding it. Setting
+        // it from the playback position every frame, which is what this did,
+        // means the game drags it back out from under the mouse and the bar
+        // cannot be moved at all while anything is playing.
+        if (!replayScrubbing)
         {
-            auto target = static_cast<unsigned int>(std::max(seekSeconds, 0)) * ticksPerSecond;
+            replayScrubSeconds = nowSeconds;
+        }
+        ImGui::SetNextItemWidth(-1.0f);
+        ImGui::SliderInt("##seek", &replayScrubSeconds, 0, std::max(endSeconds, 1), "%ds");
+        if (ImGui::IsItemActivated())
+        {
+            replayScrubbing = true;
+        }
+        if (ImGui::IsItemDeactivated())
+        {
+            // Acted on when the handle is let go rather than during the drag:
+            // a wind-forward per pixel crossed would be a hundred of them.
+            replayScrubbing = false;
+            auto target = static_cast<unsigned int>(std::max(replayScrubSeconds, 0)) * ticksPerSecond;
             if (target > sceneTime.value)
             {
                 replaySeekTarget = target;
@@ -5482,8 +5515,7 @@ namespace rwe
             else if (target < sceneTime.value)
             {
                 // A lockstep game only runs forwards, so going back means
-                // building it again from the start and winding on. That costs
-                // a reload, which is why it is not done on the drag.
+                // building it again from the start and winding on.
                 restartReplayAt(target);
             }
         }
@@ -5491,6 +5523,35 @@ namespace rwe
         ImGui::Checkbox("See everything", &spectatorMode);
         ImGui::SameLine();
         ImGui::Checkbox("Fog", &fogOfWarEnabled);
+        if (fogOfWarEnabled)
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(both sides)");
+        }
+
+        // Whose economy the top bar reads out. A recording has no local
+        // player in the sense the interface means -- whichever slot stood in
+        // for one is not necessarily the side worth watching.
+        auto playerCount = getSize(simulation.players);
+        if (playerCount > 1)
+        {
+            auto current = hudPlayerId();
+            std::string label = "Player " + std::to_string(current.value) + ": " + simulation.getPlayer(current).side;
+            ImGui::SetNextItemWidth(200.0f);
+            if (ImGui::BeginCombo("Economy", label.c_str()))
+            {
+                for (Index i = 0; i < playerCount; ++i)
+                {
+                    PlayerId id(i);
+                    auto entry = "Player " + std::to_string(i) + ": " + simulation.getPlayer(id).side;
+                    if (ImGui::Selectable(entry.c_str(), id == current))
+                    {
+                        hudPlayerOverride = id;
+                    }
+                }
+                ImGui::EndCombo();
+            }
+        }
 
         ImGui::Separator();
         // Open the first time it is seen: choosing what to watch is half of
@@ -5629,7 +5690,14 @@ namespace rwe
         if (arenaReport)
         {
             arenaReport->update(simulation);
-            if (arenaEndTick && simulation.gameTime.value >= *arenaEndTick)
+
+            // A game is over when somebody has won it. The time limit is a
+            // cap for the games that never get there, not the point of the
+            // exercise -- stopping every game at ten minutes measured two
+            // economies rather than a fight, which is exactly what made the
+            // AIs look like they never met.
+            auto decided = gameOver.has_value();
+            if (arenaEndTick && (decided || simulation.gameTime.value >= *arenaEndTick))
             {
                 // Beside the log, or the working directory if there is no
                 // local data path -- a measurement run that cannot find
@@ -5638,7 +5706,7 @@ namespace rwe
                 auto csvPath = localDataPath ? *localDataPath : std::filesystem::path(".");
                 csvPath /= "ai-arena.csv";
                 auto summary = arenaReport->write(csvPath, simulation);
-                LOG_INFO << summary;
+                LOG_INFO << summary << (decided ? " | ended=decided" : " | ended=timeout");
                 LOG_INFO << "AI arena: wrote " << csvPath.string();
                 arenaReport.reset();
                 sceneContext.sceneManager->requestExit();
@@ -5646,13 +5714,27 @@ namespace rwe
             }
         }
 
-        GameHash gameHash{0};
+        // The sync hash is what a peer is compared against, and a replay has
+        // no peer: it is one machine replaying its own recording. It is not
+        // free either -- computeHashOf walks every unit, every projectile and
+        // every map feature, and a map has thousands of features -- so it is
+        // work with nothing to show for it. checkHashes stays happy with an
+        // empty buffer, so there is nothing to keep fed.
+        //
+        // Measured, in case anyone hopes otherwise: this does NOT noticeably
+        // speed up winding the scrub bar forward. That still runs at about
+        // ten times real time, and the cost is the simulation itself rather
+        // than anything around it. Periodic keyframes are the fix for that.
+        if (!replayPlayback)
         {
-            RWE_RENDERPROF("u.hash");
-            gameHash = simulation.computeHash();
+            GameHash gameHash{0};
+            {
+                RWE_RENDERPROF("u.hash");
+                gameHash = simulation.computeHash();
+            }
+            playerCommandService->pushHash(localPlayerId, gameHash);
+            gameNetworkService->submitGameHash(gameHash);
         }
-        playerCommandService->pushHash(localPlayerId, gameHash);
-        gameNetworkService->submitGameHash(gameHash);
 
         if (stateLogStream)
         {
@@ -7053,7 +7135,40 @@ namespace rwe
         const auto& vis = simulation.playerVisibility.at(localPlayerId.value);
         if (fogOfWarEnabled)
         {
-            return vis;
+            if (!replayPlayback)
+            {
+                return vis;
+            }
+
+            // Watching a recording with the fog on: show what BOTH sides can
+            // see, which is neither player's own grid. One side's fog would
+            // hide half of what there is to watch, and a lit map hides the
+            // thing the fog is interesting for -- who had eyes where, and
+            // when. Rebuilt when the tick moves on, because visibility does.
+            if (!combinedVisibility
+                || combinedVisibilityTick != simulation.gameTime.value
+                || combinedVisibility->explored.getWidth() != vis.explored.getWidth()
+                || combinedVisibility->explored.getHeight() != vis.explored.getHeight())
+            {
+                PlayerVisibility combined(vis.explored.getWidth(), vis.explored.getHeight());
+                auto& explored = combined.explored.getVector();
+                auto& visible = combined.visible.getVector();
+                std::fill(explored.begin(), explored.end(), static_cast<unsigned char>(0));
+                std::fill(visible.begin(), visible.end(), static_cast<unsigned char>(0));
+                for (const auto& other : simulation.playerVisibility)
+                {
+                    const auto& otherExplored = other.explored.getVector();
+                    const auto& otherVisible = other.visible.getVector();
+                    for (std::size_t i = 0; i < explored.size() && i < otherExplored.size(); ++i)
+                    {
+                        explored[i] = explored[i] || otherExplored[i];
+                        visible[i] = visible[i] || otherVisible[i];
+                    }
+                }
+                combinedVisibility = std::move(combined);
+                combinedVisibilityTick = simulation.gameTime.value;
+            }
+            return *combinedVisibility;
         }
 
         // Fog off is a fully lit map rather than a second way of drawing one:
