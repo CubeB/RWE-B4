@@ -1,6 +1,6 @@
 # RWE Skirmish AI Architecture
 
-**Status: built. This was a design proposal (rts-ai-architect agent, 2026-04-26); it is kept because the architecture it describes is the architecture that exists.** The AI lives in `src/rwe/ai/` and plays a skirmish game. Read the header below for what was built and where it diverged, then the body for *why* each decision was made. **Section 13 is the current plan** and is the one to read if you are about to work on the AI: it was written after the September 2026 map/fog/loss pass and says what is still missing, what each piece would take, and which files a per-slot AI setting has to pass through — that reasoning is not written down anywhere else, and §12's answered questions in particular are the record of decisions that would otherwise have to be re-argued.
+**Status: built. This was a design proposal (rts-ai-architect agent, 2026-04-26); it is kept because the architecture it describes is the architecture that exists.** The AI lives in `src/rwe/ai/` and plays a skirmish game. Read the header below for what was built and where it diverged, then the body for *why* each decision was made. **Section 14 is the current plan** and is the one to read if you are about to work on the AI: it is written against the Wikibooks *Total Annihilation Tactics and Strategy Guide*, taken as a specification for what a competent human does, and it orders the work by what would most stop the AI looking like a beginner. Section 13 is the gap list it grew out of and still holds the file-by-file plumbing traces: it was written after the September 2026 map/fog/loss pass and says what is still missing, what each piece would take, and which files a per-slot AI setting has to pass through — that reasoning is not written down anywhere else, and §12's answered questions in particular are the record of decisions that would otherwise have to be re-argued.
 
 The text from §1 onwards is the proposal as written, in the future tense it was written in, annotated where reality departed from it. Its RWE `file:line` citations are as of April 2026 and most have moved; the file paths are still right, and the architectural claims still hold. The paragraph this header replaces asserted that there was no computer player at all, citing a `// TODO: implement computer AI logic` in `GameScene` that no longer exists.
 
@@ -925,3 +925,264 @@ Things that should vary by tier and do not:
 8. **Multiplayer.** Still broken by design: every peer runs its own AI and never
    transmits, so an AI in a network game desyncs. Either run it on one host and
    send its commands, or make its timing peer-independent.
+
+---
+
+# 14. A plan for playing well (2026-09-07)
+
+Section 13 lists gaps. This one is a plan, and it is written against a source:
+the Wikibooks *Total Annihilation Tactics and Strategy Guide*, read as a
+specification for what a competent human does. Every phase below names the
+advice it comes from, what the AI does instead today, and what it would take.
+
+## 14.0 Two constraints to get out of the way
+
+**This data set is base TA v3.1, not Core Contingency.** Checked against
+`D:\RWE-extract\totala1\units`: `ARMVULC`, `ARMMMKR`, `ARMFLAK`, `ARMJAMT`,
+`ARMTARG` and `ARMSHOT` are all **absent**. So the guide's porcupine-of-Vulcans,
+its Moho metal makers, its Flakker anti-air, and every mention of radar jamming
+cannot be built at all, and the plan does not pretend otherwise. What *is*
+present is the whole of the base tech tree: `ARMFUS` (fusion), `ARMBRTHA` (Big
+Bertha), `ARMGUARD` (Guardian), `ARMARAD` (advanced radar), `ARMSILO` (nuke),
+`ARMACK`/`ARMACV`/`ARMACA` (advanced constructors), `ARMALAB`/`ARMAVP`/`ARMAAP`
+(advanced plants), `ARMESTOR`/`ARMMSTOR` (storage), `ARMSY`/`ARMASY` (shipyards),
+`ARMFIG`/`ARMTHUND` (fighter, bomber), `ARMHLT` (heavy laser tower). That is
+more than enough to play the guide's game.
+
+**The engine already speaks the vocabulary.** `PlayerUnitCommand::Command` is
+`IssueOrder | ModifyBuildQueue | ModifyStockpile | Stop | SetFireOrders |
+SetMovementOrders | SetOnOff | SetCloak | SelfDestruct | CancelBuildOrder`.
+Metal-maker toggling, nuke stockpiling, hold-fire and hold-position are all
+issuable today, by the same path a human uses. Almost nothing below needs
+engine work; it needs the AI to decide to use what is there.
+
+## 14.1 Phase 0: be able to tell whether any of this helped
+
+Everything after this is guesswork without it, and this project has been caught
+by that before -- gating the whole metal search on exploration looked obviously
+right and measurably starved the opening.
+
+Build an **AI-versus-AI harness**. `battle_test` already launches the real
+`GameLaunch::run` and deliberately skips AI instantiation
+(`LoadingScene.cpp`, the `battleTestUnitsPerSide` guard). A sibling mode --
+`--ai-vs-ai`, two computer players, no human, headless, fixed seed, hard time
+limit -- would give a repeatable experiment. Report per side, per minute: metal
+and energy income and how much was wasted to a full store, units built by type,
+units lost, structures lost, and who was still alive at the cap.
+
+That single tool turns every phase below from an opinion into a measurement:
+run the change against the unchanged AI, twenty games, count wins. It is also
+the only honest way to tune difficulty tiers against each other.
+
+## 14.2 Phase 1: an economy that does not leak
+
+**The guide:** "If you are gaining net metal or energy, and the storage for
+that resource is full, then the resources you should be getting are simply
+lost." Build storage; spend surplus energy on metal makers; toggle makers to
+balance. And, specifically: turn metal makers **off** under heavy attack so the
+plasma batteries can keep firing.
+
+**Today:** the AI builds `ARMMAKR` when metal is short and energy is rich, and
+then never touches it again. It builds no storage of any kind. It has no notion
+of waste. Two three-minute runs during the map/fog pass logged
+`energy 0(stalled) (+105/-376 per s)` and `metal 0(stalled)` -- it is not
+managing an economy, it is riding one.
+
+**Work:**
+- `EconomyManager` computes waste: production that had nowhere to go because
+  the store was full, per resource, as a rolling figure on the blackboard.
+- `BuildManager` wants `ARMESTOR`/`ARMMSTOR` when waste is non-zero and the
+  store is small relative to income. This is the cheapest real improvement
+  available.
+- A new small pass -- call it the maker controller -- issues `SetOnOff` over
+  the owned metal makers each planning tick: on while energy is above a high
+  water mark, off below a low one. Hysteresis, or they will flap.
+- Under attack (`enemiesNearBase` non-empty), force them all off. This is the
+  guide's own note and it costs one condition.
+- `ARMFUS` once energy demand outgrows what solars can supply, which is the
+  guide's stated mid-game shift.
+
+**How we will know:** wasted-resource figure per minute goes to near zero, and
+stall time drops, in the Phase 0 harness.
+
+## 14.3 Phase 2: construction that is actually parallel
+
+**The guide, first substantive advice it gives:** "One of the construction units
+will initiate the construction with the other units guarding that unit. Having
+construction units guard another construction unit will make them automatically
+follow and help constructing whatever this unit is building." And the warning
+that guarding *structures* blocks placement later, so helpers belong on patrol
+near the site rather than parked on it.
+
+**Today:** `bb.idleBuilders` is a list, and a builder for whom no site was found
+does nothing at all except the last-resort wreck reclaim. Builds are strictly
+one builder, one job. The commander does most of the work alone.
+
+**Work:**
+- Idle builders `GuardOrder` the busiest building builder. `GuardOrder` already
+  exists and is already matched in the status log.
+- Cap the number assisting one job so the rest keep expanding.
+- Heed the guide's warning: assist the *builder*, never the structure.
+
+This is a handful of lines against the largest single lever on early tempo.
+
+## 14.4 Phase 3: a commander that survives
+
+**The guide:** the commander "houses almost all of the energy and metal
+resources of the player", should assist construction all game, and "should only
+engage in battles where it is certain it will not be destroyed... should not be
+a unit part of a large defence or attack force". Its D-gun "will destroy almost
+everything with a single hit".
+
+**Today:** the commander is just another entry in `idleBuilders`. It walks to
+whatever site the planner picked, including toward the enemy, and there is no
+rule anywhere that pulls it out of trouble. `EconomyManager` has a
+`homePosition` for laying out buildings and nothing that uses it for safety.
+
+**Work:**
+- A commander leash: never take a build site whose threat-map anti-ground value
+  is non-zero, and never one further from `homePosition` than a profile radius.
+- Retreat on damage or on an enemy inside a close radius, back toward the base
+  anchor.
+- D-gun: when something hostile is within D-gun range and the commander has the
+  energy, fire it. High value, and `docs/TOTALA-EXE.md` S:85 already has what
+  commandfire costs an order.
+
+## 14.5 Phase 4: attacking like the guide, not trickling
+
+**The guide is emphatic and specific.** New players fail by spreading forces;
+instead gather "all to one spot close to the enemy but out of enemy range, and
+then send them in", or "have your army guard its slowest unit, then send that
+unit on its way". "The attack should not be initiated before all units are in
+place." A group must be mixed -- not only attack units, but anti-air where the
+air is contested. Attacks should come "from the least expected directions
+simultaneously, e.g. from top and rear instead of a frontal assault."
+
+**Today:** one army, one target, and units are commanded individually to the
+rally point and then to `attackTarget`. Whoever is fastest arrives first and
+dies first. Composition is whatever the lab happened to make: two raiders per
+rocket kbot, forever, on every map and at every difficulty.
+
+**Work, in order of value:**
+1. **Stage, then commit.** A staging point at a profile distance short of the
+   target; hold there until a set fraction of the army has arrived; then move
+   as one. This alone converts the AI's attacks from a queue of suicides into
+   a wave.
+2. **Move at the speed of the slowest.** The guide's own trick -- guard the
+   slowest unit -- is one order per unit and needs no new machinery.
+3. **Composition templates.** The proposal's platoons (S:7) designed and never
+   built. A template is a list of (type, share): raiders, rockets, and now
+   anti-air, with the anti-air share rising with `knownEnemyAirCount`. The
+   anti-air work of 2026-09-07 already put mobile AA in its own list and out of
+   the army; a template is what lets some of it be released to escort.
+4. **Two groups, not one.** Even a crude split -- one holding at home, one
+   attacking -- stops the AI emptying its base to attack.
+5. **Second axis.** Once there are two groups, sending them at different
+   approach bearings is a small change to target selection and is the guide's
+   "least expected directions".
+
+## 14.6 Phase 5: seeing the map
+
+**The guide:** "Scouting should start early and be a continuous activity
+throughout the game", and construction aircraft should place "advanced radars in
+various locations, this will give you a nice overview of the map."
+
+**Today:** better than it was -- scouts open on the declared start positions and
+then follow map staleness -- but there is exactly one scout of each type, no
+re-scouting of a known base to refresh a stale picture, and radar is one
+`ARMRAD` at home.
+
+**Work:** scout count scaling with difficulty and map size; a periodic re-look
+at the known enemy base so the picture does not rot; and a radar network --
+`ARMRAD` forward at chokepoints, `ARMARAD` when level 2 arrives. Radar coverage
+is also what makes Phase 4's target selection worth anything.
+
+## 14.7 Phase 6: expanding, and holding what you took
+
+**The guide** sets out the trade squarely: spreading out gives flexibility but
+"the player will be mostly unable to effectively defend every structure
+scattered across the map, offering the enemy easy targets". The porcupine is
+the other pole -- valuable structures grouped, ringed with fixed weapons.
+
+**Today:** the AI expands mexes outward and defends nothing but the base
+anchor, with towers pointed at `enemyBasePosition`. It has the worst half of
+both strategies.
+
+**Work:** an expansion is a *place*, not a mex -- a cluster with a tower and
+eventually a radar, built as a unit. And defences go where attacks actually
+come from: `recentLosses` already carries the positions of everything destroyed
+and nothing reads them yet.
+
+## 14.8 Phase 7: level two
+
+**The guide's mid-game** is fusion, advanced constructors and better units.
+Everything needed is in the data: `ARMACK`/`ARMACV`/`ARMACA`, `ARMALAB`/
+`ARMAVP`/`ARMAAP`, `ARMFUS`, `ARMHLT`, `ARMGUARD`.
+
+**Today:** `GamePhase::Tech` exists in the enum and is never assigned. The AI
+plays the whole game on level 1.
+
+**Work:** a tech trigger on economy rather than on a clock -- income above a
+threshold and the level-1 targets met -- then an advanced constructor, an
+advanced plant, and the better units in the composition templates from Phase 4.
+This is the phase that makes the AI dangerous in a long game rather than merely
+busy.
+
+## 14.9 Phase 8: breaking a base that will not break
+
+**The guide** lists the ways: long-range weapons built outside the enemy's
+artillery range; nukes timed against the window when anti-nuke stockpiles are
+empty; cloaked strikes on grouped structures.
+
+Cloaked strikes are out -- `ARMSHOT` is not in this data set. The other two are
+available: `ARMBRTHA` and `ARMSILO` both exist, and `ModifyStockpile` is
+already a player command.
+
+**Work:** only worth doing after Phase 7, and only as a response to a stalled
+attack -- an AI that opens with Big Bertha is a worse opponent, not a better
+one. The trigger should be "my last two attacks failed against fixed defences",
+which needs the attack outcomes Phase 0's harness would already be counting.
+
+## 14.10 Phase 9: naval
+
+Unchanged from S:13.2, and it stays last because it is the most work for the
+narrowest gain: `ARMSY`, `ARMROY`, `ARMCRUS`, `ARMSUB` and `CORSY` are all
+present, but the substance is a coastal build-site finder and a
+`ReachabilityMap` that can label more than one movement class. Until then the
+air ferry is a legitimate answer to water, and the guide's own advice about
+unexpected approach directions is better served by Phase 4's second axis.
+
+## 14.11 What difficulty and personality mean once this exists
+
+Today the tiers differ in nine thresholds and three tick intervals; Easy and
+Hard share a doctrine. With the phases above there is something real to scale:
+
+| | Easy | Standard | Hard | Brutal |
+|---|---|---|---|---|
+| Economy (14.2) | no storage, no toggling | storage, toggling | + fusion | + fusion |
+| Assist (14.3) | commander alone | assist | full assist | full assist |
+| Commander (14.4) | wanders | leashed | leashed + D-gun | leashed + D-gun |
+| Attack (14.5) | trickles | stages | stages + composition | + second axis |
+| Tech (14.8) | never | late | on economy | early |
+
+And the personalities of S:13.4 stop being adjectives: Turtle is Phase 6's
+porcupine with Phase 7's Guardians; Rush is Phase 4 with the staging distance
+at zero and no Phase 6; Economic is Phase 2 and Phase 7 with the attack
+threshold doubled.
+
+## 14.12 The order, and why
+
+1. **Phase 0**, the harness. Nothing else can be judged without it.
+2. **Phase 1**, economy leaks. Cheapest real gain; the AI is visibly stalling
+   in every log we have.
+3. **Phase 2**, assist. A handful of lines against the biggest early lever.
+4. **Phase 3**, commander safety. Cheap, and losing the commander is the single
+   worst thing that happens to this AI.
+5. **Phase 4**, attack discipline. The largest change in how the AI *plays*,
+   and the guide is most specific here.
+6. **Phases 5-7**, seeing, holding, teching. Each depends on the ones above.
+7. **Phases 8-9**, siege and navy. Last, and honestly optional.
+
+The first four are small and independently shippable. They are also the four
+that would make the AI stop looking like a beginner, which is what the guide is
+a description of.
