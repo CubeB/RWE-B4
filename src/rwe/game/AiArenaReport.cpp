@@ -9,6 +9,48 @@
 
 namespace rwe
 {
+    namespace
+    {
+        std::string categorise(const UnitDefinition& def)
+        {
+            if (def.commander)
+            {
+                return "commander";
+            }
+            if (!def.isMobile)
+            {
+                if (def.builder)
+                {
+                    return "factory";
+                }
+                if (def.extractsMetal.value > 0.0f || def.energyMake.value > 0.0f
+                    || def.metalMake.value > 0.0f || def.makesMetal.value > 0.0f)
+                {
+                    return "economy";
+                }
+                if (def.canAttack)
+                {
+                    return "defence";
+                }
+                // Radar, storage, anything else that only stands there.
+                return "support";
+            }
+            if (def.builder)
+            {
+                return "builder";
+            }
+            if (def.canFly && !def.canAttack)
+            {
+                return "scout";
+            }
+            if (def.canAttack)
+            {
+                return "army";
+            }
+            return "other";
+        }
+    }
+
     AiArenaReport::AiArenaReport(unsigned int sampleIntervalTicks)
         : sampleIntervalTicks(sampleIntervalTicks == 0 ? 1 : sampleIntervalTicks)
     {
@@ -16,11 +58,64 @@ namespace rwe
 
     void AiArenaReport::update(const GameSimulation& sim)
     {
-        if (sim.gameTime.value % sampleIntervalTicks != 0)
+        // Every tick, because when a thing was started is the question a
+        // person is asking when they read the timeline.
+        trackUnits(sim);
+
+        if (sim.gameTime.value % sampleIntervalTicks == 0)
         {
-            return;
+            sample(sim);
         }
-        sample(sim);
+    }
+
+    void AiArenaReport::trackUnits(const GameSimulation& sim)
+    {
+        auto now = sim.gameTime.value;
+
+        for (const auto& [unitId, unit] : sim.units)
+        {
+            const auto& def = sim.unitDefinitions.at(unit.unitType);
+            auto it = units.find(unitId.value);
+            if (it == units.end())
+            {
+                UnitRecord r{};
+                r.player = static_cast<int>(unit.owner.value);
+                r.unitType = unit.unitType;
+                r.isBuilding = !def.isMobile;
+                r.category = categorise(def);
+                r.bornTick = now;
+                r.dead = false;
+                r.completed = false;
+                it = units.emplace(unitId.value, std::move(r)).first;
+            }
+
+            auto& record = it->second;
+            if (!record.completed && !unit.isBeingBuilt(def))
+            {
+                record.completed = true;
+                record.completedTick = now;
+            }
+            if (!record.dead && unit.isDead())
+            {
+                record.dead = true;
+                record.diedTick = now;
+            }
+        }
+
+        // A unit removed from the list entirely is gone too. Only worth
+        // checking the ones we have not already buried.
+        for (auto& [rawId, record] : units)
+        {
+            if (record.dead)
+            {
+                continue;
+            }
+            if (!sim.tryGetUnitState(UnitId(rawId)))
+            {
+                record.dead = true;
+                record.diedTick = now;
+            }
+        }
     }
 
     void AiArenaReport::sample(const GameSimulation& sim)
@@ -48,25 +143,14 @@ namespace rwe
             current.push_back(r);
         }
 
-        // One walk of the unit list for everybody, rather than one per player.
         for (const auto& [unitId, unit] : sim.units)
         {
             auto owner = static_cast<int>(unit.owner.value);
-            if (owner < 0 || owner >= static_cast<int>(current.size()))
+            if (owner < 0 || owner >= static_cast<int>(current.size()) || !unit.isAlive())
             {
                 continue;
             }
             const auto& def = sim.unitDefinitions.at(unit.unitType);
-
-            // Remember it whether or not it is alive right now: the point of
-            // the record is to survive the unit.
-            everOwned[owner][unitId.value] = !def.isMobile;
-
-            if (!unit.isAlive())
-            {
-                continue;
-            }
-
             auto& r = current[static_cast<std::size_t>(owner)];
             ++r.units;
             if (!def.isMobile)
@@ -83,29 +167,20 @@ namespace rwe
             }
         }
 
-        // Losses: everything ever owned that is not standing now.
-        for (auto& r : current)
+        for (const auto& [rawId, record] : units)
         {
-            auto it = everOwned.find(r.player);
-            if (it == everOwned.end())
+            if (!record.dead || record.player < 0 || record.player >= static_cast<int>(current.size()))
             {
                 continue;
             }
-            for (const auto& [rawId, wasBuilding] : it->second)
+            auto& r = current[static_cast<std::size_t>(record.player)];
+            if (record.isBuilding)
             {
-                auto unitRef = sim.tryGetUnitState(UnitId(rawId));
-                if (unitRef && !unitRef->get().isDead())
-                {
-                    continue;
-                }
-                if (wasBuilding)
-                {
-                    ++r.buildingsLost;
-                }
-                else
-                {
-                    ++r.unitsLost;
-                }
+                ++r.buildingsLost;
+            }
+            else
+            {
+                ++r.unitsLost;
             }
         }
 
@@ -125,6 +200,8 @@ namespace rwe
             sample(sim);
         }
 
+        auto ticksPerSecond = static_cast<unsigned int>(SimTicksPerSecond);
+
         std::ofstream out(csvPath);
         if (out)
         {
@@ -133,11 +210,8 @@ namespace rwe
                    "units,buildings,army,builders,unitsLost,buildingsLost\n";
             for (const auto& r : rows)
             {
-                out << r.tick << ','
-                    << (r.tick / static_cast<unsigned int>(SimTicksPerSecond)) << ','
-                    << r.player << ','
-                    << r.side << ','
-                    << r.status << ','
+                out << r.tick << ',' << (r.tick / ticksPerSecond) << ','
+                    << r.player << ',' << r.side << ',' << r.status << ','
                     << r.metal << ',' << r.energy << ','
                     << r.maxMetal << ',' << r.maxEnergy << ','
                     << r.metalIncome << ',' << r.energyIncome << ','
@@ -151,16 +225,49 @@ namespace rwe
             LOG_ERROR << "AI arena: could not write " << csvPath.string();
         }
 
+        auto eventsPath = csvPath;
+        eventsPath.replace_filename(csvPath.stem().string() + "-events.csv");
+        std::ofstream events(eventsPath);
+        if (events)
+        {
+            events << "player,unitType,category,isBuilding,startedTick,startedSeconds,"
+                      "completedTick,completedSeconds,diedTick,diedSeconds\n";
+            for (const auto& [rawId, r] : units)
+            {
+                events << r.player << ',' << r.unitType << ',' << r.category << ',' << (r.isBuilding ? 1 : 0) << ','
+                       << r.bornTick << ',' << (r.bornTick / ticksPerSecond) << ',';
+                if (r.completed)
+                {
+                    events << r.completedTick << ',' << (r.completedTick / ticksPerSecond) << ',';
+                }
+                else
+                {
+                    events << ",,";
+                }
+                if (r.dead)
+                {
+                    events << r.diedTick << ',' << (r.diedTick / ticksPerSecond) << '\n';
+                }
+                else
+                {
+                    events << ",\n";
+                }
+            }
+        }
+        else
+        {
+            LOG_ERROR << "AI arena: could not write " << eventsPath.string();
+        }
+
         // The summary line is what a batch script reads. One field per player,
         // in player order, so a run of twenty games can be reduced with grep
         // and awk and nothing else.
         std::string summary = "AI-ARENA-RESULT ticks=" + std::to_string(sim.gameTime.value)
-            + " seconds=" + std::to_string(sim.gameTime.value / static_cast<unsigned int>(SimTicksPerSecond));
+            + " seconds=" + std::to_string(sim.gameTime.value / ticksPerSecond);
 
         auto playerCount = getSize(sim.players);
         for (Index i = 0; i < playerCount; ++i)
         {
-            // The last row we recorded for this player is its final state.
             const Row* last = nullptr;
             for (const auto& r : rows)
             {
