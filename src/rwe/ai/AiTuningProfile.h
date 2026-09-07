@@ -40,7 +40,15 @@ namespace rwe
         // --- Expansion targets once a factory is up ---
         int targetSolarCount{10};
         int targetMetalExtractorCount{8};
-        int targetConstructorCount{2};
+        /**
+         * Measured, not guessed: more construction kbots made the AI weaker,
+         * monotonically. On the same map and seed, one constructor produced
+         * an army of 11 and three produced an army of 1, because each extra
+         * builder costs 120 metal and splits an already oversubscribed build
+         * budget across one more nanoframe. Build power was never the
+         * constraint; metal was.
+         */
+        int targetConstructorCount{1};
         int targetDefenceCount{2};
         /**
          * Anti-air towers kept whether or not anything has flown over. Cheap
@@ -77,6 +85,17 @@ namespace rwe
         int ferryTimeoutSeconds{120};
 
         // --- Site search ---
+        /**
+         * How far a builder looks for a patch to stand a metal extractor on.
+         *
+         * Separate from maxMexSearchRadius, which turned out to be doing two
+         * jobs: it is also the ring count chooseBuildSite lays every OTHER
+         * structure out in, so raising the one number to find further metal
+         * would have sprawled the base to match. Painted Desert's nearest
+         * unclaimed patches sit at 724, 944 and 1056 world units, all outside
+         * the 512 this used to share.
+         */
+        SimScalar nearMexSearchRadius{1200_ss};
         SimScalar maxMexSearchRadius{512_ss};
         SimScalar expansionMexSearchRadius{2048_ss};
         SimScalar buildSiteGridSpacing{16_ss};

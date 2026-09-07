@@ -51,7 +51,6 @@ namespace rwe
                 // Slow to expand, slow to react, and only attacks with a big, late army.
                 p.targetSolarCount = 6;
                 p.targetMetalExtractorCount = 5;
-                p.targetConstructorCount = 1;
                 p.targetDefenceCount = 1;
                 p.targetVehiclePlantCount = 0;
                 // Forgets about aircraft until they are overhead, and then
@@ -76,7 +75,7 @@ namespace rwe
                 p.difficulty = AiDifficulty::Hard;
                 p.targetSolarCount = 12;
                 p.targetMetalExtractorCount = 10;
-                p.targetConstructorCount = 3;
+                p.targetConstructorCount = 2;
                 p.targetDefenceCount = 3;
                 p.baseAntiAirTowerCount = 2;
                 p.reactiveAntiAirTowerCount = 5;

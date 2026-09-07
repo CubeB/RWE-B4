@@ -1212,3 +1212,87 @@ threshold doubled.
 The first four are small and independently shippable. They are also the four
 that would make the AI stop looking like a beginner, which is what the guide is
 a description of.
+
+## 14.13 What the arena then said, and what it corrected (2026-09-07)
+
+The plan above was written before the arena had been pointed at the AI properly.
+Once it was, it falsified four of its own claims. They are left standing above
+and corrected here rather than quietly edited, because the corrections are the
+more useful record.
+
+**The AI is not short of energy. It is drowning in it.** S:14.2 says it "lives
+permanently underwater", quoting a demand of 191 against an income of 138. That
+was true of the build it was measured on and stopped being true the moment
+`MetalMakerManager` landed: measured across three seeds afterwards, energy
+income runs 169-208 against a demand of 96-164, and **storage sits at the cap
+for 35-68% of every game**. Building storage, S:14.2's headline suggestion,
+would have filled a store that never empties. Metal is the binding constraint
+and always was -- stock at zero for 31-43% of samples, and 78% on Ashap
+Plateau.
+
+**Builders are not idle, so assist is not the top lever.** S:14.3 called
+parallel construction "the largest single lever on early tempo", on the premise
+that idle builders were doing nothing. The status line reads `idle builders 0`
+through the entire stall. What is actually happening is that build power is
+committed 8.5 times over: demand 37/s against income 4.4/s, sustained for 150
+seconds with the same status line repeated verbatim. Adding builders to that
+opens the throttle on nothing, which is exactly what the count experiment
+below shows.
+
+**More is not better, and difficulty was scaling the wrong way.** S:14.11's
+table assumes turning the knobs up makes a stronger opponent. Measured on one
+map and seed, `targetConstructorCount` inverted it:
+
+| | constructors | first fighting unit | final army |
+|---|---|---|---|
+| Easy | 1 | 344s | 11 |
+| Standard | 2 | 507s | 6 |
+| Hard | 3 | 586s | 4 |
+
+Easy beat Hard by three to one. Each extra builder costs 120 metal and splits
+an oversubscribed budget across one more nanoframe.
+
+**And the real cause of the whole thing was four metal extractors that were
+never built.** Income froze at 4.4/s from t=60 to t=380 in every Standard run.
+Painted Desert's nearest unclaimed patches are at 724, 944 and 1056 world
+units; the near search radius was 512. Brutal isolates it exactly -- its
+omniscience is the only difference in the site test, and it takes the fourth
+extractor at t=198 instead of t=492 and finishes on 11.5 income instead of 7.6.
+
+### What was changed, and what it bought
+
+- A `nearMexSearchRadius` of 1200, separate from `maxMexSearchRadius`, which
+  turned out to be doing two jobs: it is also the ring count every other
+  structure is laid out in, so raising the one number would have sprawled the
+  base to match.
+- `targetConstructorCount` down to 1 at Standard and 2 at Hard.
+- The air plant waits, on a land map, until the extractors it competes with
+  are up. It is 850 metal for one 40-metal scout, `planFactories` has nothing
+  else to give it once that is built, and it was 21% of everything the AI
+  committed in ten minutes.
+
+Like for like at ten minutes on Painted Desert, three seeds:
+
+| | before | after |
+|---|---|---|
+| metal extractors | 5 | 9 |
+| metal income | 7.6 | 9 |
+| units lost | 0-1 | 8-13 |
+
+The last row is the one that matters: the two AIs now meet and fight inside
+ten minutes instead of never. Given thirty minutes, two of three games end in
+an elimination -- armies of 32 and 38, and a hundred-odd units lost apiece.
+
+### Still open, in order
+
+1. **No affordability test anywhere.** `buildPriorities` picks on counts and a
+   `metalShort` boolean; nothing compares an item's draw against income, and
+   nothing counts open nanoframes. `BuildManager::update` returns early unless
+   a builder is idle, so a builder pinned on an unaffordable nanoframe never
+   re-plans -- an air plant took 183 seconds against a nominal 24. This is the
+   deepest remaining fault and the next thing to fix.
+2. **The mex expansion search still needs explored ground**, and the only
+   scout is a plane that does not exist until t=380. Either send a builder to
+   look, which is what a human does, or let radar coverage count.
+3. **Anti-air costs 256 metal and the first two lab slots** the moment one
+   enemy scout plane is seen. It is the right rule reacting to too little.

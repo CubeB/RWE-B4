@@ -350,7 +350,18 @@ namespace rwe
         // preview, and confirmed later by the reachability pass finding
         // ground it cannot walk to.
         auto airMatters = (bb.mapIntel.valid && bb.mapIntel.character != MapCharacter::Land) || bb.hasUnreachableGround;
+
+        // On a map where the ground does not run out, an air plant is 850
+        // metal that buys one 40-metal scout and then stands idle for the
+        // rest of the game -- planFactories has nothing else to give it,
+        // since the transport is only wanted when there is water to cross.
+        // Measured over three seeds it was 21% of all the metal the AI
+        // committed in ten minutes, and it owned the commander for two to
+        // five minutes at the point the economy most needed building. So on
+        // land it waits until the extractors it is competing with are up.
+        auto airPlantAffordable = airMatters || total(s.metalExtractor) >= profile.targetMetalExtractorCount;
         if (total(s.lab) >= 1 && total(s.airPlant) < profile.targetAirPlantCount && total(s.solar) >= profile.openingSolarCount
+            && airPlantAffordable
             && (airMatters || total(s.radar) >= profile.targetRadarCount))
         {
             want(s.airPlant);
@@ -525,7 +536,7 @@ namespace rwe
                 {
                     walkable = [&](const SimVector& p) { return reachability.isReachable(sim, p) == builderAtBase; };
                 }
-                site = chooseMexSite(sim, next, builder.position, profile.maxMexSearchRadius, rng, walkable);
+                site = chooseMexSite(sim, next, builder.position, profile.nearMexSearchRadius, rng, walkable);
                 if (!site && builderAtBase)
                 {
                     // Expanding, as opposed to filling in around the base,
