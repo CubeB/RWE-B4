@@ -824,9 +824,10 @@ unit types seen, kept on the blackboard beside `knownEnemies` and decayed
 rather than reset, plus two derived numbers -- what share of what we have seen
 is air, and what share is armour. Then:
 
-- **Mostly air seen and we own no anti-air: build anti-air.** This is the
-  single highest-value adaptation there is, because an AI that never builds
-  anti-air loses to one bomber.
+- ~~**Mostly air seen and we own no anti-air: build anti-air.**~~ Built
+  2026-09-07, and it is the model for the rest of this section: a fact about
+  the enemy recorded in `PerceptionManager`, decayed rather than reset, read
+  by `BuildManager` as a priority rather than a plan.
 - **Nothing seen for a long time while our scouts are alive:** the enemy is
   turtling or teching. Expand harder.
 - **Repeated losses at one edge of the base:** fortify that side. `recentLosses`
@@ -895,7 +896,12 @@ Things that should vary by tier and do not:
 
 ## 13.6 Other ideas, roughly by value per line of code
 
-1. **Anti-air.** The AI cannot answer aircraft at all. One bomber beats it.
+1. ~~**Anti-air.**~~ **Done, 2026-09-07.** Towers (ARMRL/CORRL) and mobile
+   (ARMJETH/CORCRASH), built reactively off a five-minute memory of having
+   seen enemy aircraft, held out of the army so they stay over the base, and
+   scaled by difficulty. This was the AI's first piece of opponent modelling
+   and the hooks it added -- `KnownEnemy::isAir`, `enemyAirThreat` -- are
+   what S:13.3 should build the rest on.
 2. **Repair.** Damaged units are never sent to a repair pad and idle builders
    never repair anything, although `docs/TOTALA-EXE.md` S:94 has the original's
    repair-pad behaviour decoded and waiting.
