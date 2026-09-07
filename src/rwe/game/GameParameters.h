@@ -126,6 +126,25 @@ namespace rwe
          */
         std::optional<unsigned int> aiArenaSeconds;
 
+        /** Write every command to this replay file as the game is played. */
+        std::optional<std::string> recordReplayFile;
+
+        /**
+         * Watch this replay instead of playing. The parameters around it are
+         * rebuilt from the replay's own header, so the simulation stands up
+         * exactly as it did when the game was recorded; this field is what
+         * tells the loader to idle the computer players and feed the recorded
+         * commands instead of live ones.
+         */
+        std::optional<std::string> replayFile;
+
+        /**
+         * Start a replay already wound forward to here. Seeking backwards
+         * means starting the simulation again, because a lockstep game can
+         * only be run forwards, and this is how the viewer asks for that.
+         */
+        unsigned int replaySeekToTick{0};
+
         /**
          * Mixed into the simulation's seed when set. Without it the seed
          * comes from the map and the players alone, so two arena runs of the

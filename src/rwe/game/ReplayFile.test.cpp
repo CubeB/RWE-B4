@@ -196,7 +196,10 @@ namespace rwe
         REQUIRE(replay.has_value());
         REQUIRE(replay->header.mapName == "Coast To Coast");
         REQUIRE(replay->commands.empty());
-        REQUIRE(replay->lastTick == 0u);
+        // Nothing was ordered, but the game still ran to tick 2, and that is
+        // the length a scrub bar has to span. A replay that ended at its last
+        // command would stop wherever the players last did something.
+        REQUIRE(replay->lastTick == 2u);
     }
 
     TEST_CASE("a replay truncated mid-record keeps everything before the cut", "[replay]")
@@ -219,9 +222,12 @@ namespace rwe
         REQUIRE(whole.has_value());
         REQUIRE(whole->lastTick == 7u);
 
-        SECTION("cut inside the last record's payload")
+        SECTION("cut inside the third record's payload")
         {
-            fs::resize_file(file.path, fs::file_size(file.path) - 1);
+            // Measured from the end of the second record rather than from the
+            // end of the file, because the file now ends with the end-of-game
+            // marker and trimming a byte off that would only lose the length.
+            fs::resize_file(file.path, sizeAfterTwoRecords + 13);
             auto replay = readReplayFile(file.path);
             REQUIRE(replay.has_value());
             REQUIRE(replay->lastTick == 6u);
@@ -229,7 +235,18 @@ namespace rwe
             REQUIRE(replay->commands.count(7) == 0);
         }
 
-        SECTION("cut inside the last record's fixed fields")
+        SECTION("cut so that only the end-of-game marker is lost")
+        {
+            // The commands all survive; what goes is the recording's own idea
+            // of how long it was, which falls back to the last command.
+            fs::resize_file(file.path, fs::file_size(file.path) - 1);
+            auto replay = readReplayFile(file.path);
+            REQUIRE(replay.has_value());
+            REQUIRE(replay->commands.size() == 3);
+            REQUIRE(replay->lastTick == 7u);
+        }
+
+        SECTION("cut inside the third record's fixed fields")
         {
             // The other half of the truncation case: the cut lands before the
             // length field, so the payload's own short-read check never gets a

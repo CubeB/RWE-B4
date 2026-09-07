@@ -3,6 +3,7 @@
 #include <memory>
 #include <SDL3/SDL.h>
 #include <rwe/GameLaunch.h>
+#include <rwe/game/ReplayFile.h>
 #include <rwe/GlobalConfig.h>
 #include <rwe/PathMapping.h>
 #include <rwe/setup/TaInstall.h>
@@ -113,6 +114,8 @@ int main(int argc, char* argv[])
                       << "  --ai-arena <seconds>  computer-vs-computer measurement run: draws nothing,\n"
                       << "                        runs flat out, writes ai-arena.csv and quits\n"
                       << "  --seed <n>            vary the simulation seed, for averaging arena runs\n"
+                      << "  --record-replay <f>   write every command to a replay file as you play\n"
+                      << "  --replay <file>       watch a replay instead of playing\n"
                       << "  --width <pixels>      Window width (default: 800)\n"
                       << "  --height <pixels>     Window height (default: 600)\n"
                       << "  --fullscreen          Start in fullscreen mode (same as --window-mode fullscreen)\n"
@@ -157,7 +160,32 @@ int main(int argc, char* argv[])
             config.shadingStrengthBuildings = std::min(100u, args.getUint("shading-strength-buildings", 40));
             config.antiAlias = args.getString("anti-alias", "true") != "false";
             std::optional<rwe::GameParameters> gameParameters;
-            if (args.contains("load"))
+            if (args.contains("replay"))
+            {
+                // A replay carries the conditions the game started under, so
+                // the parameters come out of the file rather than off the
+                // command line. Anything else given alongside it would be a
+                // different game, and would diverge on the first tick.
+                auto replayPath = std::filesystem::path(args.getString("replay"));
+                auto replay = rwe::readReplayFile(replayPath);
+                if (!replay)
+                {
+                    throw std::runtime_error("Could not read replay file: " + replayPath.string());
+                }
+                gameParameters = rwe::gameParametersFromReplayHeader(replay->header);
+                gameParameters->replayFile = replayPath.string();
+
+                // A replay can be run through the arena as well, which is how
+                // you check that it reproduces the game it recorded: the
+                // report out of the replay should match the report out of the
+                // original, figure for figure.
+                auto replayArenaSeconds = args.getUint("ai-arena", 0);
+                if (replayArenaSeconds > 0)
+                {
+                    gameParameters->aiArenaSeconds = replayArenaSeconds;
+                }
+            }
+            else if (args.contains("load"))
             {
                 // Resume a saved game straight from the command line, the same
                 // way the front end does it: the save header carries the map
@@ -190,6 +218,10 @@ int main(int argc, char* argv[])
                 if (args.getUint("seed", 0) > 0)
                 {
                     gameParameters->randomSeed = args.getUint("seed", 0);
+                }
+                if (!args.getString("record-replay", "").empty())
+                {
+                    gameParameters->recordReplayFile = args.getString("record-replay", "");
                 }
                 auto difficulty = args.getString("ai-difficulty", "standard");
                 for (auto& c : difficulty)

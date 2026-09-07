@@ -30,6 +30,13 @@ namespace rwe
         constexpr std::uint32_t MaxRecordSize = 1u << 20;
 
         /**
+         * Written in the player field of the final record, which carries no
+         * payload and says how long the game ran. A real player id is a slot
+         * index, so this cannot collide with one.
+         */
+        constexpr std::uint32_t EndOfGameMarker = 0xFFFFFFFFu;
+
+        /**
          * Written a byte at a time on purpose. The engine's saves and replays
          * are meant to be readable on a machine other than the one that wrote
          * them, and a struct blitted out of memory is neither portable across
@@ -292,6 +299,8 @@ namespace rwe
             return;
         }
 
+        lastTickSeen = std::max(lastTickSeen, tick);
+
         for (const auto& command : commands)
         {
             proto::PlayerCommand proto;
@@ -312,10 +321,20 @@ namespace rwe
 
     void ReplayWriter::close()
     {
-        if (out.is_open())
+        if (!out.is_open())
         {
-            out.close();
+            return;
         }
+
+        // How long the game ran, as a record with no player and no payload.
+        // Without it a replay ends at its last command, which on a quiet
+        // game is minutes early -- the scrub bar would stop somewhere in the
+        // middle and the playback would look like it had crashed.
+        writeUint32Le(out, lastTickSeen);
+        writeUint32Le(out, EndOfGameMarker);
+        writeUint32Le(out, 0u);
+        out.flush();
+        out.close();
     }
 
     std::optional<Replay> readReplayFile(const fs::path& path)
@@ -377,6 +396,14 @@ namespace rwe
             std::uint32_t payloadSize;
             if (!readUint32Le(in, tick) || !readUint32Le(in, playerId) || !readUint32Le(in, payloadSize))
             {
+                break;
+            }
+
+            if (playerId == EndOfGameMarker)
+            {
+                // How long the game ran. It is the last thing written, so
+                // there is nothing after it worth looking for.
+                replay.lastTick = std::max(replay.lastTick, tick);
                 break;
             }
             if (payloadSize > MaxRecordSize)

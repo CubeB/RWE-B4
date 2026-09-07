@@ -5,6 +5,7 @@
 #include <rwe/util/SpanStream.h>
 #include <rwe/LoadingScene_util.h>
 #include <rwe/ai/AiPlayerController.h>
+#include <rwe/game/ReplayFile.h>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/atlas_util.h>
 #include <rwe/collections/SimpleVectorMap.h>
@@ -252,11 +253,12 @@ namespace rwe
                 }
             }
         }
-        if (!localPlayerId && gameParameters.aiArenaSeconds)
+        if (!localPlayerId && (gameParameters.aiArenaSeconds || gameParameters.replayFile))
         {
-            // A computer-versus-computer measurement run has no human in it,
-            // but the scene still needs a point of view: the camera, the fog
-            // it draws and the interface all hang off a local player. The
+            // Nobody is playing: this is a measurement run, or a recording of
+            // a game between computer players being watched back. The scene
+            // still needs a point of view, because the camera, the fog it
+            // draws and the interface all hang off a local player, so the
             // first slot stands in. It keeps its AI controller -- GameScene
             // knows not to push an empty command buffer on top of the AI's
             // for a local player that is a computer -- so this really is
@@ -332,6 +334,21 @@ namespace rwe
             // the game (--ai-difficulty, or rwe.cfg). Per-slot difficulty can
             // follow once the lobby exposes it.
             auto profile = makeProfileForDifficulty(gameParameters.aiDifficulty);
+            if (gameParameters.replayFile)
+            {
+                // Watching rather than playing: the commands come out of the
+                // file, so a thinking AI would only add its own on top.
+                //
+                // The controller is still CONSTRUCTED, and that is the whole
+                // point of idling it here rather than skipping it. Building
+                // one draws a value from simulation.rng, and the start
+                // positions are dealt from that same stream a few lines
+                // further down -- skip the draw and every commander spawns
+                // somewhere else, which is a divergence on the very first
+                // tick and looks like anything except an off-by-one in the
+                // random number generator.
+                profile.idle = true;
+            }
             LOG_INFO << "Player " << i << " is a computer player at " << aiDifficultyName(profile.difficulty) << " difficulty";
 
             // Pull a single value from the sim RNG to seed the AI's
@@ -506,6 +523,20 @@ namespace rwe
         }
 
         gameScene->setCameraPosition(Vector3f(simScalarToFloat(humanStartPos->x), 0.0f, simScalarToFloat(humanStartPos->z)));
+
+        if (gameParameters.replayFile)
+        {
+            auto replay = readReplayFile(*gameParameters.replayFile);
+            if (!replay)
+            {
+                throw std::runtime_error("Could not read replay file: " + *gameParameters.replayFile);
+            }
+            gameScene->enableReplayPlayback(std::move(*replay));
+        }
+        else if (gameParameters.recordReplayFile)
+        {
+            gameScene->enableReplayRecording(*gameParameters.recordReplayFile, replayHeaderFromParameters(gameParameters));
+        }
 
         return gameScene;
     }

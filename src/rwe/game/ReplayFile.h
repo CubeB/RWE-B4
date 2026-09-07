@@ -68,13 +68,19 @@ namespace rwe
         ReplayWriter(const ReplayWriter&) = delete;
         ReplayWriter& operator=(const ReplayWriter&) = delete;
 
-        /** A tick with no commands in it writes nothing; most ticks are that. */
+        /**
+         * A tick with no commands in it writes nothing; most ticks are that.
+         * The tick number is still remembered, so that closing can say how
+         * long the game ran -- a scrub bar that stopped at the last command
+         * would have run out well before the game did.
+         */
         void recordTick(unsigned int tick, PlayerId player, const std::vector<PlayerCommand>& commands);
 
         void close();
 
     private:
         std::ofstream out;
+        unsigned int lastTickSeen{0};
     };
 
     struct Replay

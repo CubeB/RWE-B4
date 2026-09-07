@@ -8,6 +8,7 @@
 #include <queue>
 #include <rwe/AudioService.h>
 #include <rwe/game/AiArenaReport.h>
+#include <rwe/game/ReplayFile.h>
 #include <rwe/CroppedViewport.h>
 #include <rwe/CursorService.h>
 #include <rwe/RenderService.h>
@@ -469,6 +470,39 @@ namespace rwe
         std::optional<AiArenaReport> arenaReport;
         std::optional<unsigned int> arenaEndTick;
 
+        // --- Replays ---
+        /** Set while recording: every command popped for a tick is written here. */
+        std::optional<ReplayWriter> replayWriter;
+        /**
+         * Set while watching one. The commands are pushed into the command
+         * service a tick at a time instead of coming from a player or an AI,
+         * and the computer players are idled so they add nothing of their own.
+         */
+        std::optional<Replay> replayPlayback;
+        /** Playing or paused; separate from the game's own pause. */
+        bool replayPlaying{true};
+        /**
+         * Simulation ticks to run per frame while watching. One is real time.
+         * This is raised rather than the game speed because the speed control
+         * scales an accumulator that the per-frame tick cap then truncates,
+         * which silently drops ticks and ends the replay early.
+         */
+        int replaySpeed{1};
+        /** While seeking, run flat out until this tick is reached. */
+        std::optional<unsigned int> replaySeekTarget;
+
+        void pushReplayCommandsForTick(unsigned int tick);
+        void renderReplayWindow();
+        void restartReplayAt(unsigned int tick);
+
+        /**
+         * Shows what no player can see: cloaked enemies, and every unit
+         * whoever owns it. Distinct from fogOfWarEnabled, which only decides
+         * whether the map is lit -- a cloaked unit stays hidden with the fog
+         * off, because hiding it is not a fog rule.
+         */
+        bool spectatorMode{false};
+
         /** Sound lookup table, kept so a main menu scene can be built on the way out. */
         TdfBlock* audioLookup;
 
@@ -702,6 +736,14 @@ namespace rwe
 
         /** Applies a saved game's state onto the freshly built simulation. */
         void applyLoadedGame(const SaveFile& save);
+
+        /** Watch a recorded game instead of playing one. */
+        void enableReplayPlayback(Replay&& replay);
+
+        /** Write every command issued in this game to a replay file. */
+        void enableReplayRecording(const std::filesystem::path& path, const ReplayHeader& header);
+
+        bool isReplayPlayback() const { return replayPlayback.has_value(); }
 
         void setCameraPosition(const Vector3f& newPosition);
 

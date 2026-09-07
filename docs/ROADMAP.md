@@ -219,7 +219,13 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
 - [ ] Host a public master server (currently "connect to localhost" in dev); fix non-recommended port (#60).
 - [ ] Desync detection UX: `GameHash` mismatch → show which tick, dump state (`dump_util`) for bug reports.
 - [ ] In-game chat (upstream `network-chat` branch is a 1‑commit scaffold; start from it or from scratch).
-- [ ] Replays: record the `PlayerCommand` stream + seed; playback through the same sim.
+- [x] Replays: record the `PlayerCommand` stream + seed; playback through the same sim.
+      `--record-replay <file>` writes one, `--replay <file>` watches it, and the
+      arena keeps one per game. Verified by running a replay back through the
+      arena and getting the original's report figure for figure. Seeking forward
+      winds on at about a hundred times real time; seeking backwards restarts the
+      scene and winds forward, because a lockstep game only runs one way. Periodic
+      keyframes through `save_util` would make that instant and are the next step.
 - [ ] Lobby mod management (the stated reason the launcher exists): detect installed `.hpi/.ufo/.ccx`, hash them, require all players match.
 - [ ] Reconnect / drop handling instead of hard failure.
 

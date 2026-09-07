@@ -3924,7 +3924,25 @@ namespace rwe
         // == 1000 we accumulate 1ms per real ms; at 100 we accumulate
         // 0.1ms per real ms; at 5000 we accumulate 5ms per real ms.
         // The sim tick threshold (SimMillisecondsPerTick) is unchanged.
-        if (!paused)
+        if (replaySeekTarget)
+        {
+            // Seeking: fill the accumulator past anything the cap will
+            // dispatch, so the block runs at whatever rate the machine
+            // manages rather than at the rate the clock ticks.
+            millisecondsBuffer = static_cast<unsigned int>(SimMillisecondsPerTick) * 2001u;
+        }
+        else if (replayPlayback)
+        {
+            // Speed is a whole multiple of real time and multiplies the
+            // elapsed time rather than the game speed, so that one second of
+            // watching is one second of the recorded game at 1x whatever the
+            // frame rate is doing.
+            if (replayPlaying)
+            {
+                millisecondsBuffer += millisecondsElapsed * static_cast<unsigned int>(std::max(replaySpeed, 1));
+            }
+        }
+        else if (!paused)
         {
             millisecondsBuffer += (millisecondsElapsed * gameSpeed.perMille()) / 1000;
         }
@@ -4178,6 +4196,12 @@ namespace rwe
 
         LOG_DEBUG << "Buffer levels (real/target) " << bufferedCommandCount << "/" << targetCommandBufferSize;
 
+        // Watching a recording: every command for every player comes out of
+        // the file, one set per player per tick, pushed in tryTickGame where
+        // the tick number is known. Nothing below here may push as well.
+        if (!replayPlayback)
+        {
+
         // In an AI arena there is no human at all and the local player is
         // itself a computer, so its commands arrive through the drain below
         // like everybody else's. Pushing here as well would put two entries a
@@ -4240,6 +4264,7 @@ namespace rwe
                 playerCommandService->pushCommands(id, std::vector<PlayerCommand>());
             }
         }
+        }
 
         // If we are waiting to swap in a new unit GUI panel, do that now
         if (nextPanel)
@@ -4249,7 +4274,11 @@ namespace rwe
             attachOrdersMenuEventHandlers();
         }
 
-        auto averageSceneTime = gameNetworkService->estimateAvergeSceneTime(sceneTime);
+        // The drift gate below asks the network thread what time everyone
+        // else is at, and skips ticks to stay level with them. There is
+        // nobody else in a replay, and letting it skip would end the playback
+        // at a different game time than the recording did.
+        auto averageSceneTime = replayPlayback ? sceneTime : gameNetworkService->estimateAvergeSceneTime(sceneTime);
 
         // allow skipping sim frames every so often to get back down to average.
         // We tolerate X frames of drift in either direction to cope with noisiness in the estimation.
@@ -4259,7 +4288,17 @@ namespace rwe
         auto lowSceneTime = averageSceneTime <= frameTolerance ? SceneTime{0} : averageSceneTime - frameTolerance;
         // Cap the number of sim ticks we dispatch per frame to prevent
         // a runaway "spiral of death" if frame times spike at high speeds.
-        const int maxTicksPerFrame = 10;
+        //
+        // Watching a recording raises it instead of raising the game speed.
+        // Speed scales the accumulator, and whatever the cap then refuses to
+        // dispatch is thrown away below -- so a fast-forward driven that way
+        // silently drops ticks and finishes the replay early, which is the
+        // one thing a replay must not do. Seeking runs flat out in blocks,
+        // large enough to cross ten minutes in a couple of seconds and small
+        // enough that the window still answers between them.
+        const int maxTicksPerFrame = replaySeekTarget
+            ? 2000
+            : (replayPlayback ? 10 * std::max(replaySpeed, 1) : 10);
         int ticksThisFrame = 0;
         for (; millisecondsBuffer >= SimMillisecondsPerTick && ticksThisFrame < maxTicksPerFrame; millisecondsBuffer -= SimMillisecondsPerTick)
         {
@@ -4283,6 +4322,12 @@ namespace rwe
             millisecondsBuffer = 0;
         }
 
+        if (replaySeekTarget && sceneTime.value >= *replaySeekTarget)
+        {
+            replaySeekTarget.reset();
+            millisecondsBuffer = 0;
+        }
+
         // A launcher's magazine fills without anybody ordering anything, so its
         // readout cannot be refreshed off a command the way a build queue's is.
         refreshStockpileGuiTotal();
@@ -4295,6 +4340,7 @@ namespace rwe
         // this does the same.
         refreshBuildGuiTotals();
 
+        renderReplayWindow();
         renderDebugWindow();
     }
 
@@ -5307,8 +5353,167 @@ namespace rwe
         return inverseView * worldInverseProjection * minimapProjection;
     }
 
+    void GameScene::pushReplayCommandsForTick(unsigned int tick)
+    {
+        auto tickIt = replayPlayback->commands.find(tick);
+        for (Index i = 0; i < getSize(simulation.players); ++i)
+        {
+            std::vector<PlayerCommand> commands;
+            if (tickIt != replayPlayback->commands.end())
+            {
+                auto playerIt = tickIt->second.find(static_cast<unsigned int>(i));
+                if (playerIt != tickIt->second.end())
+                {
+                    commands = playerIt->second;
+                }
+            }
+
+            // The recorded game's pauses and speed changes are not the
+            // viewer's. Replaying them would stop the playback wherever
+            // whoever recorded it happened to stop, and fight the controls in
+            // the replay window for the rest of the game.
+            commands.erase(
+                std::remove_if(commands.begin(), commands.end(), [](const PlayerCommand& c) {
+                    return std::holds_alternative<PlayerPauseGameCommand>(c)
+                        || std::holds_alternative<PlayerUnpauseGameCommand>(c)
+                        || std::holds_alternative<PlayerSetGameSpeedCommand>(c);
+                }),
+                commands.end());
+
+            playerCommandService->pushCommands(PlayerId(i), commands);
+        }
+    }
+
+    void GameScene::enableReplayPlayback(Replay&& replay)
+    {
+        LOG_INFO << "Replay: " << replay.commands.size() << " ticks with commands, last at tick " << replay.lastTick;
+        replayPlayback = std::move(replay);
+
+        // A recording is watched, not played: show the whole map and both
+        // sides. Two flags, because they are two different rules -- the fog
+        // decides whether the ground is lit, and hiding a cloaked unit is not
+        // a fog rule and survives switching it off.
+        fogOfWarEnabled = false;
+        spectatorMode = true;
+
+        if (gameParameters.replaySeekToTick > 0)
+        {
+            replaySeekTarget = gameParameters.replaySeekToTick;
+        }
+    }
+
+    void GameScene::enableReplayRecording(const std::filesystem::path& path, const ReplayHeader& header)
+    {
+        replayWriter.emplace(path, header);
+        LOG_INFO << "Recording replay to " << path.string();
+    }
+
+    void GameScene::renderReplayWindow()
+    {
+        if (!replayPlayback)
+        {
+            return;
+        }
+
+        // An arena run draws nothing, and SceneManager's headless path skips
+        // imGuiContext->newFrame() along with everything else it does not
+        // need. Calling into ImGui with no frame open does not fail, it
+        // wedges: this hung the first replay run stone dead on its first
+        // frame, with the log stopping mid-tick and no error anywhere.
+        // renderDebugWindow only escapes the same fate because its flag
+        // defaults to off.
+        if (gameParameters.aiArenaSeconds)
+        {
+            return;
+        }
+
+        auto ticksPerSecond = static_cast<unsigned int>(SimTicksPerSecond);
+        auto lastTick = std::max(replayPlayback->lastTick, 1u);
+        auto nowSeconds = static_cast<int>(sceneTime.value / ticksPerSecond);
+        auto endSeconds = static_cast<int>(lastTick / ticksPerSecond);
+
+        ImGui::SetNextWindowSize(ImVec2(430.0f, 165.0f), ImGuiCond_FirstUseEver);
+        if (!ImGui::Begin("Replay"))
+        {
+            ImGui::End();
+            return;
+        }
+
+        if (replaySeekTarget)
+        {
+            ImGui::Text("Winding forward to %us...", *replaySeekTarget / ticksPerSecond);
+            ImGui::ProgressBar(static_cast<float>(sceneTime.value) / static_cast<float>(std::max(*replaySeekTarget, 1u)));
+            ImGui::End();
+            return;
+        }
+
+        ImGui::Text("%d:%02d of %d:%02d", nowSeconds / 60, nowSeconds % 60, endSeconds / 60, endSeconds % 60);
+
+        if (ImGui::Button(replayPlaying ? "Pause" : "Play"))
+        {
+            replayPlaying = !replayPlaying;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Restart"))
+        {
+            restartReplayAt(0);
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(150.0f);
+        ImGui::SliderInt("Speed", &replaySpeed, 1, 16, "%dx");
+
+        // Only act when the slider is let go. Seeking on every frame of a
+        // drag would start a fresh wind-forward for every pixel crossed.
+        int seekSeconds = nowSeconds;
+        ImGui::SetNextItemWidth(-1.0f);
+        ImGui::SliderInt("##seek", &seekSeconds, 0, std::max(endSeconds, 1), "%ds");
+        if (ImGui::IsItemDeactivatedAfterEdit())
+        {
+            auto target = static_cast<unsigned int>(std::max(seekSeconds, 0)) * ticksPerSecond;
+            if (target > sceneTime.value)
+            {
+                replaySeekTarget = target;
+            }
+            else if (target < sceneTime.value)
+            {
+                // A lockstep game only runs forwards, so going back means
+                // building it again from the start and winding on. That costs
+                // a reload, which is why it is not done on the drag.
+                restartReplayAt(target);
+            }
+        }
+
+        ImGui::Checkbox("See everything", &spectatorMode);
+        ImGui::SameLine();
+        ImGui::Checkbox("Fog", &fogOfWarEnabled);
+
+        ImGui::End();
+    }
+
+    void GameScene::restartReplayAt(unsigned int tick)
+    {
+        auto parameters = gameParameters;
+        parameters.replaySeekToTick = tick;
+        sceneContext.audioService->stopMusic();
+        auto scene = std::make_shared<LoadingScene>(
+            sceneContext,
+            audioLookup,
+            AudioService::LoopToken(),
+            parameters);
+        sceneContext.sceneManager->setNextScene(scene);
+    }
+
     void GameScene::tryTickGame()
     {
+        if (replayPlayback)
+        {
+            // One set per player for the tick about to run. Pushed here and
+            // not in update() because the service pops exactly one set per
+            // player per tick, and anywhere else means guessing how many
+            // ticks this frame is about to dispatch.
+            pushReplayCommandsForTick(sceneTime.value);
+        }
+
         if (!playerCommandService->checkHashes())
         {
             std::ofstream dumpFile;
@@ -5323,6 +5528,19 @@ namespace rwe
         {
             LOG_ERROR << "Blocked waiting for player commands";
             return;
+        }
+
+        if (replayWriter)
+        {
+            // Recorded at the pop rather than at the push, and keyed on the
+            // scene time about to be spent. What gets pushed includes padding
+            // whose size is derived from live network latency, so the pushed
+            // stream puts a command on a different tick from one run to the
+            // next; what gets popped is what the simulation actually saw.
+            for (const auto& [commandPlayerId, commands] : *playerCommands)
+            {
+                replayWriter->recordTick(sceneTime.value, commandPlayerId, commands);
+            }
         }
 
         sceneTime += SceneTime(1);
@@ -6828,6 +7046,15 @@ namespace rwe
                     return false;
                 }
             }
+        }
+
+        if (spectatorMode)
+        {
+            // A spectator is not a player and there is nobody for a unit to
+            // be hidden from. Switching the fog off is not enough on its own:
+            // a cloaked enemy stays hidden with the fog off, because hiding
+            // it was never a fog rule.
+            return true;
         }
 
         auto style = computeUnitDrawStyle(unit.isOwnedBy(localPlayerId), unit.cloaked, positionIsVisibleToLocalPlayer(unit.position));

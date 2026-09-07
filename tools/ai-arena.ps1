@@ -35,10 +35,14 @@ for ($seed = 1; $seed -le $games; $seed++) {
     $log = Join-Path $outDir "game-$seed.log"
     if (Test-Path $log) { Remove-Item $log }
 
+    # Every game keeps its replay, so anything the averages flag as odd can
+    # then be watched: rwe.exe --replay <file>
+    $replay = Join-Path $outDir "game-$seed.rwereplay"
     $gameArgs = @(
         '--log', $log,
         '--ai-arena', $seconds,
         '--seed', $seed,
+        '--record-replay', $replay,
         '--map', ('"' + $map + '"'),
         '--player', ('"A;Computer;' + $sideA + ';0"'),
         '--player', ('"B;Computer;' + $sideB + ';1"'),
@@ -94,6 +98,7 @@ foreach ($side in @(0, 1)) {
 
 $results | Export-Csv -NoTypeInformation -Path (Join-Path $outDir "summary.csv")
 Write-Host ("per-game rows: " + (Join-Path $outDir "summary.csv"))
+Write-Host ("replays:       " + (Join-Path $outDir "game-N.rwereplay") + "  (watch with: rwe.exe --replay <file>)")
 
 # The last game's own page, because averages say whether a change helped and
 # a timeline says what the AI actually did. A local file: nothing to sign in to.
