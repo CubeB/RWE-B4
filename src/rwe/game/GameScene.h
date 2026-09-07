@@ -7,6 +7,7 @@
 #include <optional>
 #include <queue>
 #include <rwe/AudioService.h>
+#include <rwe/game/AiArenaReport.h>
 #include <rwe/CroppedViewport.h>
 #include <rwe/CursorService.h>
 #include <rwe/RenderService.h>
@@ -459,6 +460,14 @@ namespace rwe
 
         /** What this game was started with, kept for the save-game header. */
         GameParameters gameParameters;
+
+        /**
+         * Set only for a computer-versus-computer measurement run. Samples
+         * the simulation as it goes and, at the time limit, writes a CSV and
+         * quits. See AiArenaReport for why this exists.
+         */
+        std::optional<AiArenaReport> arenaReport;
+        std::optional<unsigned int> arenaEndTick;
 
         /** Sound lookup table, kept so a main menu scene can be built on the way out. */
         TdfBlock* audioLookup;

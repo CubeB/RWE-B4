@@ -119,6 +119,21 @@ namespace rwe
         /** Set when this game is a saved game being resumed rather than a fresh start. */
         std::optional<std::string> loadFromSaveFile;
 
+        /**
+         * Seconds of game time to run before writing an AI report and
+         * quitting, when this is a computer-versus-computer measurement run
+         * rather than a game anyone is watching. See AiArenaReport.
+         */
+        std::optional<unsigned int> aiArenaSeconds;
+
+        /**
+         * Mixed into the simulation's seed when set. Without it the seed
+         * comes from the map and the players alone, so two arena runs of the
+         * same match-up are the same game -- fine for reproducing one, no use
+         * for averaging over twenty.
+         */
+        std::optional<unsigned int> randomSeed;
+
         /** The skirmish screen's own options, as chosen in the lobby. */
         LineOfSightMode lineOfSight{LineOfSightMode::True};
         MappingMode mapping{MappingMode::Unmapped};

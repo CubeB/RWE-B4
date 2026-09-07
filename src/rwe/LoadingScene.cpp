@@ -33,6 +33,10 @@ namespace rwe
     std::seed_seq seedFromGameParameters(const GameParameters& params)
     {
         std::vector<unsigned int> initialVec;
+        if (params.randomSeed)
+        {
+            initialVec.push_back(*params.randomSeed);
+        }
         std::copy(params.mapName.begin(), params.mapName.end(), std::back_inserter(initialVec));
 
         for (const auto& e : params.players)
@@ -245,6 +249,25 @@ namespace rwe
                 if (auto networkInfo = std::get_if<PlayerControllerTypeNetwork>(&params->controller); networkInfo != nullptr)
                 {
                     endpointInfos.emplace_back(playerId, networkService.getEndpoint(i));
+                }
+            }
+        }
+        if (!localPlayerId && gameParameters.aiArenaSeconds)
+        {
+            // A computer-versus-computer measurement run has no human in it,
+            // but the scene still needs a point of view: the camera, the fog
+            // it draws and the interface all hang off a local player. The
+            // first slot stands in. It keeps its AI controller -- GameScene
+            // knows not to push an empty command buffer on top of the AI's
+            // for a local player that is a computer -- so this really is
+            // every player being played by the AI.
+            for (Index i = 0; i < getSize(gamePlayers); ++i)
+            {
+                if (gamePlayers[i])
+                {
+                    localPlayerId = gamePlayers[i];
+                    LOG_INFO << "AI arena: no human player, watching from slot " << i;
+                    break;
                 }
             }
         }

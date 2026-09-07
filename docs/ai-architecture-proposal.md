@@ -958,21 +958,47 @@ engine work; it needs the AI to decide to use what is there.
 
 ## 14.1 Phase 0: be able to tell whether any of this helped
 
-Everything after this is guesswork without it, and this project has been caught
-by that before -- gating the whole metal search on exploration looked obviously
-right and measurably starved the opening.
+**Built, 2026-09-07.** `--ai-arena <seconds>` runs a computer-versus-computer
+game with no human in it, draws nothing, and quits at the time limit having
+written `ai-arena.csv` and logged a one-line `AI-ARENA-RESULT`. `--seed <n>`
+varies the simulation seed so a batch is a batch rather than the same game ten
+times. `tools\ai-arena.ps1` runs the batch and reduces it to averages.
 
-Build an **AI-versus-AI harness**. `battle_test` already launches the real
-`GameLaunch::run` and deliberately skips AI instantiation
-(`LoadingScene.cpp`, the `battleTestUnitsPerSide` guard). A sibling mode --
-`--ai-vs-ai`, two computer players, no human, headless, fixed seed, hard time
-limit -- would give a repeatable experiment. Report per side, per minute: metal
-and energy income and how much was wasted to a full store, units built by type,
-units lost, structures lost, and who was still alive at the cap.
+It is the real game: the same `GameLaunch::run`, the same `LoadingScene`, the
+same `GameScene`, the same `PlayerCommandService` the AI's commands already
+went through. The only differences are that `SceneManager` skips everything
+from the imgui frame to the buffer swap and hands the scene exactly one tick's
+worth of time per iteration instead of asking the clock, and that a game with
+no human borrows the first slot for a point of view. One tick per iteration
+rather than many because each tick pops one entry from every player's command
+buffer, and a frame asking for more ticks than the buffer holds would stall.
 
-That single tool turns every phase below from an opinion into a measurement:
-run the change against the unchanged AI, twenty games, count wins. It is also
-the only honest way to tune difficulty tiers against each other.
+Ten minutes of game time takes about six seconds of wall clock -- roughly a
+hundred times real time -- so twenty games take about two minutes.
+
+**The baseline it immediately produced,** six games, Standard, Coast To Coast,
+ten minutes each:
+
+| | units | buildings | army | lost | metal income |
+|---|---|---|---|---|---|
+| ARM | 26.7 | 20.5 | 1.8 | 0.3 | 6.2 |
+| CORE | 28.5 | 19.8 | 4.0 | 0.8 | 7.3 |
+
+Two things in that table are worth more than the rest of this document.
+
+**Nothing happens.** After ten minutes each side has lost well under one unit
+on average. Two AIs on a map with a water gap between them never meet. The army
+column -- two to four units after ten minutes, against twenty buildings -- says
+they are not playing a game so much as two solitaires.
+
+**The economy is not stalling, it is dead.** The last rows of every run read
+`metal 0`, `energyDemand` at 191 against an `energyIncome` of 138, and a metal
+income of six. That is the Phase 1 diagnosis confirmed before Phase 1 has been
+written: it is not that the AI occasionally overshoots, it is that it lives
+permanently underwater and everything downstream is paced by it.
+
+So the order in S:14.12 stands, and the first number to beat is army 2-4 and
+metal income 6 at ten minutes.
 
 ## 14.2 Phase 1: an economy that does not leak
 

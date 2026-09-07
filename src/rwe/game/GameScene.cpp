@@ -310,6 +310,16 @@ namespace rwe
           audioLookup(audioLookup),
           stateLogStream(std::move(stateLogStream))
     {
+        if (this->gameParameters.aiArenaSeconds)
+        {
+            // One row every ten seconds of game time: the interesting thing
+            // is the shape of the curve, and a row is cheap.
+            const unsigned int sampleIntervalTicks = 10u * static_cast<unsigned int>(SimTicksPerSecond);
+            arenaReport.emplace(sampleIntervalTicks);
+            arenaEndTick = *this->gameParameters.aiArenaSeconds * static_cast<unsigned int>(SimTicksPerSecond);
+            LOG_INFO << "AI arena: running for " << *this->gameParameters.aiArenaSeconds
+                     << " seconds of game time (" << *arenaEndTick << " ticks)";
+        }
     }
 
     GameScene::~GameScene()
@@ -4168,23 +4178,30 @@ namespace rwe
 
         LOG_DEBUG << "Buffer levels (real/target) " << bufferedCommandCount << "/" << targetCommandBufferSize;
 
-        // If we have too many commands buffered,
-        // defer submitting commands this frame
-        // so that we drop back down to the threshold.
-        if (bufferedCommandCount <= targetCommandBufferSize)
+        // In an AI arena there is no human at all and the local player is
+        // itself a computer, so its commands arrive through the drain below
+        // like everybody else's. Pushing here as well would put two entries a
+        // tick into one player's queue and take it out of step with the rest.
+        if (simulation.getPlayer(localPlayerId).type == GamePlayerType::Human)
         {
-            // Queue up commands collected from the local player
-            playerCommandService->pushCommands(localPlayerId, localPlayerCommandBuffer);
-            gameNetworkService->submitCommands(sceneTime, localPlayerCommandBuffer);
-            localPlayerCommandBuffer.clear();
-            ++bufferedCommandCount;
-        }
+            // If we have too many commands buffered,
+            // defer submitting commands this frame
+            // so that we drop back down to the threshold.
+            if (bufferedCommandCount <= targetCommandBufferSize)
+            {
+                // Queue up commands collected from the local player
+                playerCommandService->pushCommands(localPlayerId, localPlayerCommandBuffer);
+                gameNetworkService->submitCommands(sceneTime, localPlayerCommandBuffer);
+                localPlayerCommandBuffer.clear();
+                ++bufferedCommandCount;
+            }
 
-        // fill up to the required threshold
-        for (; bufferedCommandCount < targetCommandBufferSize; ++bufferedCommandCount)
-        {
-            playerCommandService->pushCommands(localPlayerId, std::vector<PlayerCommand>());
-            gameNetworkService->submitCommands(sceneTime, std::vector<PlayerCommand>());
+            // fill up to the required threshold
+            for (; bufferedCommandCount < targetCommandBufferSize; ++bufferedCommandCount)
+            {
+                playerCommandService->pushCommands(localPlayerId, std::vector<PlayerCommand>());
+                gameNetworkService->submitCommands(sceneTime, std::vector<PlayerCommand>());
+            }
         }
 
         // Queue up commands from the computer players. The AI runs inside
@@ -5326,6 +5343,26 @@ namespace rwe
         {
             RWE_RENDERPROF("u.simtick");
             simulation.tick();
+        }
+
+        if (arenaReport)
+        {
+            arenaReport->update(simulation);
+            if (arenaEndTick && simulation.gameTime.value >= *arenaEndTick)
+            {
+                // Beside the log, or the working directory if there is no
+                // local data path -- a measurement run that cannot find
+                // %APPDATA% should still hand back its numbers.
+                auto localDataPath = getLocalDataPath();
+                auto csvPath = localDataPath ? *localDataPath : std::filesystem::path(".");
+                csvPath /= "ai-arena.csv";
+                auto summary = arenaReport->write(csvPath, simulation);
+                LOG_INFO << summary;
+                LOG_INFO << "AI arena: wrote " << csvPath.string();
+                arenaReport.reset();
+                sceneContext.sceneManager->requestExit();
+                return;
+            }
         }
 
         GameHash gameHash{0};

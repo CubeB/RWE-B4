@@ -27,6 +27,14 @@ namespace rwe
         UiRenderService uiRenderService;
         Viewport* const viewport;
         bool requestedExit;
+        /**
+         * Draws nothing and stops asking the clock what time it is: every
+         * iteration of the loop advances the scene by exactly one simulation
+         * tick instead. Used by the AI arena, where the game is being
+         * measured rather than watched, and where waiting for a display to
+         * refresh would make a batch of twenty games take all afternoon.
+         */
+        bool headless{false};
         bool showDebugWindow{false};
         bool showDemoWindow{false};
 
@@ -42,6 +50,9 @@ namespace rwe
         void execute();
 
         void requestExit();
+
+        /** See the headless member. Set before execute(). */
+        void setHeadless(bool value) { headless = value; }
 
         /**
          * Switches the live window between windowed, borderless and

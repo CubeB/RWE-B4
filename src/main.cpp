@@ -110,6 +110,9 @@ int main(int argc, char* argv[])
                       << "  --log <path>          Log output file path\n"
                       << "  --state-log <path>    Sim-state log file (desync debugging)\n"
                       << "  --ai-difficulty <d>   idle | easy | standard | hard | brutal (default: standard)\n"
+                      << "  --ai-arena <seconds>  computer-vs-computer measurement run: draws nothing,\n"
+                      << "                        runs flat out, writes ai-arena.csv and quits\n"
+                      << "  --seed <n>            vary the simulation seed, for averaging arena runs\n"
                       << "  --width <pixels>      Window width (default: 800)\n"
                       << "  --height <pixels>     Window height (default: 600)\n"
                       << "  --fullscreen          Start in fullscreen mode (same as --window-mode fullscreen)\n"
@@ -179,6 +182,15 @@ int main(int argc, char* argv[])
                     gameParameters->stateLogFile = args.getString("state-log");
                 }
                 gameParameters->localNetworkPort = args.getString("port", "1337");
+                auto arenaSeconds = args.getUint("ai-arena", 0);
+                if (arenaSeconds > 0)
+                {
+                    gameParameters->aiArenaSeconds = arenaSeconds;
+                }
+                if (args.getUint("seed", 0) > 0)
+                {
+                    gameParameters->randomSeed = args.getUint("seed", 0);
+                }
                 auto difficulty = args.getString("ai-difficulty", "standard");
                 for (auto& c : difficulty)
                 {

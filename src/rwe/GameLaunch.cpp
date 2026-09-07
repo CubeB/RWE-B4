@@ -380,6 +380,14 @@ namespace rwe
         }
 
         LOG_INFO << "Entering main loop";
+        // An arena run is headless by definition: nobody is watching, and
+        // waiting for a display to refresh would make a batch of twenty games
+        // take all afternoon.
+        if (gameParameters && gameParameters->aiArenaSeconds)
+        {
+            sceneManager.setHeadless(true);
+        }
+
         sceneManager.execute();
 
         LOG_INFO << "Finished main loop, exiting";

@@ -1,5 +1,6 @@
 #include "SceneManager.h"
 #include <rwe/render/render_prof.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util/CrashHandler.h>
 
 namespace rwe
@@ -112,7 +113,16 @@ namespace rwe
             }
 
             auto startTime = timeService->getTicks();
-            auto timeElapsed = lastFrameStartTime == 0 ? 0 : startTime - lastFrameStartTime;
+            // Headless does not ask the clock how long the last frame took.
+            // It hands the scene exactly one tick's worth every iteration, so
+            // the simulation advances at whatever rate the CPU manages and
+            // the run is not paced by a display. One tick rather than many
+            // because each tick pops one entry from every player's command
+            // buffer, and a frame that asked for more ticks than the buffer
+            // holds would stall waiting for commands that never come.
+            auto timeElapsed = headless
+                ? static_cast<unsigned int>(SimMillisecondsPerTick)
+                : (lastFrameStartTime == 0 ? 0 : startTime - lastFrameStartTime);
 
             setCrashPhase(CrashPhase::Input);
 
@@ -154,19 +164,29 @@ namespace rwe
                 dispatchToScene(event, *currentScene);
             }
 
-            if (imGuiContext->io->WantCaptureMouse)
+            if (!headless)
             {
-                imGuiContext->io->ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
+                if (imGuiContext->io->WantCaptureMouse)
+                {
+                    imGuiContext->io->ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
+                }
+                else
+                {
+                    imGuiContext->io->ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+                }
+                imGuiContext->newFrame(window);
             }
-            else
-            {
-                imGuiContext->io->ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
-            }
-            imGuiContext->newFrame(window);
             {
                 RWE_RENDERPROF("update");
                 setCrashPhase(CrashPhase::Update);
                 currentScene->update(timeElapsed);
+            }
+            if (headless)
+            {
+                // Nothing below here draws anything worth drawing, and the
+                // swap at the end of it would wait for a display refresh.
+                lastFrameStartTime = startTime;
+                continue;
             }
             if (showDemoWindow)
             {
