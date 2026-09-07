@@ -8,6 +8,7 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
+#include <rwe/sim/WeaponDefinition.h>
 #include <tuple>
 
 namespace rwe
@@ -18,6 +19,21 @@ namespace rwe
         {
             auto it = counts.find(unitType);
             return it == counts.end() ? 0 : it->second;
+        }
+
+        /** The longest reach of any weapon the definition names; zero for an unarmed one. */
+        SimScalar weaponRange(const GameSimulation& sim, const UnitDefinition& def)
+        {
+            SimScalar best = 0_ss;
+            for (const auto& weaponName : {def.weapon1, def.weapon2, def.weapon3})
+            {
+                auto it = weaponName.empty() ? sim.weaponDefinitions.end() : sim.weaponDefinitions.find(weaponName);
+                if (it != sim.weaponDefinitions.end())
+                {
+                    best = std::max(best, it->second.maxRange);
+                }
+            }
+            return best;
         }
 
         PlayerCommand buildCommand(UnitId builder, const std::string& unitType, const SimVector& site)
@@ -73,6 +89,101 @@ namespace rwe
         }
     }
 
+    namespace
+    {
+        /** A site a building fits on, and which ring around the anchor it was found on. */
+        struct BuildableSite
+        {
+            SimVector position;
+            int ring;
+        };
+
+        /**
+         * Every site on the square rings around the anchor where the
+         * building fits: nearest ring first, scan order within a ring, out
+         * to the base radius -- or only the nearest ring that has room, when
+         * asked for that. Buildings are laid out on a grid with a two-tile
+         * lane between them, wide enough for a commander to walk through, so
+         * nothing gets walled in.
+         */
+        std::vector<BuildableSite> collectBuildableSites(
+            const GameSimulation& sim,
+            const AiTuningProfile& profile,
+            const UnitDefinition& def,
+            const SimVector& anchor,
+            bool nearestRingOnly)
+        {
+            const auto mc = sim.getAdHocMovementClass(def.movementCollisionInfo);
+            auto footprint = sim.getFootprintXZ(def.movementCollisionInfo);
+            auto spacingTiles = static_cast<float>(std::max(footprint.first, footprint.second) + 2);
+            const SimScalar spacing = SimScalar(spacingTiles * MapTerrain::HeightTileWidthInWorldUnits.value);
+            const SimScalar radius = profile.maxMexSearchRadius;
+            const int ringCount = std::max(1, static_cast<int>(radius.value / spacing.value));
+
+            std::vector<BuildableSite> sites;
+            for (int ring = 1; ring <= ringCount; ++ring)
+            {
+                for (int dz = -ring; dz <= ring; ++dz)
+                {
+                    for (int dx = -ring; dx <= ring; ++dx)
+                    {
+                        if (std::max(std::abs(dx), std::abs(dz)) != ring)
+                        {
+                            continue;
+                        }
+
+                        SimVector candidate(anchor.x + (SimScalar(static_cast<float>(dx)) * spacing), anchor.y, anchor.z + (SimScalar(static_cast<float>(dz)) * spacing));
+                        candidate.y = sim.terrain.getHeightAt(candidate.x, candidate.z);
+
+                        auto rect = sim.computeFootprintRegion(candidate, def.movementCollisionInfo);
+                        if (rect.x < 0 || rect.y < 0)
+                        {
+                            continue;
+                        }
+                        // Don't plant a building on a metal patch; mexes want
+                        // those. Checked before canBeBuiltAt, which walks the
+                        // whole footprint and is much the more expensive test.
+                        if (rect.x < sim.metalGrid.getWidth() && rect.y < sim.metalGrid.getHeight()
+                            && sim.metalGrid.get(rect.x, rect.y) > sim.surfaceMetal)
+                        {
+                            continue;
+                        }
+                        if (!sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+                        {
+                            continue;
+                        }
+                        sites.push_back(BuildableSite{candidate, ring});
+                    }
+                }
+                if (nearestRingOnly && !sites.empty())
+                {
+                    break;
+                }
+            }
+            return sites;
+        }
+
+        /** Distance across the ground, ignoring height: sites sit on the terrain and anchors do not. */
+        SimScalar flatDistance(const SimVector& a, const SimVector& b)
+        {
+            auto dx = a.x - b.x;
+            auto dz = a.z - b.z;
+            return rweSqrt((dx * dx) + (dz * dz));
+        }
+
+        /**
+         * Which way trouble comes from: the enemy base once one has been
+         * seen, and the middle of the map until then -- the world origin is
+         * the map's centre, and the centre is where the two sides meet.
+         */
+        SimVector threatDirection(const AiBlackboard& bb)
+        {
+            auto target = bb.enemyBasePosition ? *bb.enemyBasePosition : SimVector(0_ss, 0_ss, 0_ss);
+            auto towards = target - *bb.baseAnchor;
+            return SimVector(towards.x, 0_ss, towards.z).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+        }
+    }
+
     std::optional<SimVector> BuildManager::chooseBuildSite(
         const GameSimulation& sim,
         const AiTuningProfile& profile,
@@ -85,63 +196,206 @@ namespace rwe
         {
             return std::nullopt;
         }
-        const auto& def = defIt->second;
-        const auto mc = sim.getAdHocMovementClass(def.movementCollisionInfo);
-
-        // Lay buildings out on a grid with a two-tile lane between them, wide
-        // enough for a commander to walk through, so nothing gets walled in.
-        auto footprint = sim.getFootprintXZ(def.movementCollisionInfo);
-        auto spacingTiles = static_cast<float>(std::max(footprint.first, footprint.second) + 2);
-        const SimScalar spacing = SimScalar(spacingTiles * MapTerrain::HeightTileWidthInWorldUnits.value);
-        const SimScalar radius = profile.maxMexSearchRadius;
-        const int ringCount = std::max(1, static_cast<int>(radius.value / spacing.value));
-
-        std::vector<SimVector> tiedCandidates;
-        for (int ring = 1; ring <= ringCount; ++ring)
-        {
-            for (int dz = -ring; dz <= ring; ++dz)
-            {
-                for (int dx = -ring; dx <= ring; ++dx)
-                {
-                    if (std::max(std::abs(dx), std::abs(dz)) != ring)
-                    {
-                        continue;
-                    }
-
-                    SimVector candidate(anchor.x + (SimScalar(static_cast<float>(dx)) * spacing), anchor.y, anchor.z + (SimScalar(static_cast<float>(dz)) * spacing));
-                    candidate.y = sim.terrain.getHeightAt(candidate.x, candidate.z);
-
-                    auto rect = sim.computeFootprintRegion(candidate, def.movementCollisionInfo);
-                    if (rect.x < 0 || rect.y < 0)
-                    {
-                        continue;
-                    }
-                    // Don't plant a building on a metal patch; mexes want
-                    // those. Checked before canBeBuiltAt, which walks the
-                    // whole footprint and is much the more expensive test.
-                    if (rect.x < sim.metalGrid.getWidth() && rect.y < sim.metalGrid.getHeight()
-                        && sim.metalGrid.get(rect.x, rect.y) > sim.surfaceMetal)
-                    {
-                        continue;
-                    }
-                    if (!sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
-                    {
-                        continue;
-                    }
-                    tiedCandidates.push_back(candidate);
-                }
-            }
-            if (!tiedCandidates.empty())
-            {
-                break;
-            }
-        }
-
-        if (tiedCandidates.empty())
+        auto sites = collectBuildableSites(sim, profile, defIt->second, anchor, true);
+        if (sites.empty())
         {
             return std::nullopt;
         }
-        return tiedCandidates[randomBelow(rng, static_cast<unsigned int>(tiedCandidates.size()))];
+        return sites[randomBelow(rng, static_cast<unsigned int>(sites.size()))].position;
+    }
+
+    std::optional<SimVector> BuildManager::chooseScoredBuildSite(
+        const GameSimulation& sim,
+        const AiTuningProfile& profile,
+        const std::string& unitType,
+        const SimVector& anchor,
+        std::minstd_rand& rng,
+        const std::function<SiteScore(const SimVector&, int)>& score,
+        const std::function<bool(const SimVector&)>& accept) const
+    {
+        const auto defIt = sim.unitDefinitions.find(unitType);
+        if (defIt == sim.unitDefinitions.end())
+        {
+            return std::nullopt;
+        }
+        std::vector<SimVector> best;
+        std::optional<SiteScore> bestScore;
+        for (const auto& site : collectBuildableSites(sim, profile, defIt->second, anchor, false))
+        {
+            if (accept && !accept(site.position))
+            {
+                continue;
+            }
+            auto siteScore = score(site.position, site.ring);
+            if (!bestScore || siteScore > *bestScore)
+            {
+                bestScore = siteScore;
+                best.clear();
+                best.push_back(site.position);
+            }
+            else if (siteScore == *bestScore)
+            {
+                best.push_back(site.position);
+            }
+        }
+        if (best.empty())
+        {
+            return std::nullopt;
+        }
+        return best[randomBelow(rng, static_cast<unsigned int>(best.size()))];
+    }
+
+    std::optional<SimVector> BuildManager::chooseDefenceSite(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        const ReachabilityMap& reachability,
+        const std::string& unitType,
+        std::minstd_rand& rng) const
+    {
+        const auto defIt = sim.unitDefinitions.find(unitType);
+        if (defIt == sim.unitDefinitions.end() || !bb.baseAnchor)
+        {
+            return std::nullopt;
+        }
+        std::function<bool(const SimVector&)> walkable;
+        if (bb.groundReachabilityValid)
+        {
+            walkable = [&](const SimVector& p) { return reachability.isReachable(sim, p); };
+        }
+        // The spacing is the weapon's reach, read from the weapon table: a
+        // Defender reaches 700 and a light laser tower 300, and two towers
+        // 64 units apart -- which is where the nearest-ring rule put them --
+        // cover the same ground twice.
+        const auto range = weaponRange(sim, defIt->second);
+        if (range <= 0_ss)
+        {
+            return chooseBuildSite(sim, profile, unitType, *bb.baseAnchor, rng);
+        }
+        const auto rangeSquared = range * range;
+
+        // Towers of this type standing, going up, or on a builder's way --
+        // an order still being walked to is as good as placed, or the next
+        // builder plans a tower beside it -- and everything else of ours
+        // that stands still, which is what the towers are for. From the
+        // unit list in id order, so the choice is the same on every peer.
+        std::vector<SimVector> towers;
+        std::vector<SimVector> buildings;
+        for (const auto& [unitId, unit] : sim.units)
+        {
+            if (unit.owner != aiOwner || !unit.isAlive())
+            {
+                continue;
+            }
+            const auto& unitDef = sim.unitDefinitions.at(unit.unitType);
+            if (unit.unitType == unitType)
+            {
+                towers.push_back(unit.position);
+            }
+            else if (!unitDef.isMobile)
+            {
+                buildings.push_back(unit.position);
+            }
+            if (unitDef.builder && unitDef.isMobile)
+            {
+                for (const auto& order : unit.orders)
+                {
+                    if (auto build = std::get_if<BuildOrder>(&order); build && build->unitType == unitType)
+                    {
+                        towers.push_back(build->position);
+                    }
+                }
+            }
+        }
+
+        // How far the nearest tower of the type is, up to the range: beyond
+        // that the two no longer overlap and further apart is no better.
+        auto spread = [&](const SimVector& site) {
+            auto nearest = range;
+            for (const auto& tower : towers)
+            {
+                nearest = std::min(nearest, flatDistance(tower, site));
+            }
+            return nearest.value;
+        };
+
+        if (unitType == bb.sideUnits.antiAirTower)
+        {
+            // Coverage: what a tower here would take under its umbrella that
+            // no tower yet covers. The first goes wherever reaches the most
+            // of the base, which is its middle; the next goes where the
+            // umbrella runs out, towards whatever stands beyond it.
+            std::vector<SimVector> uncovered;
+            for (const auto& building : buildings)
+            {
+                bool covered = false;
+                for (const auto& tower : towers)
+                {
+                    if (tower.distanceSquared(building) <= rangeSquared)
+                    {
+                        covered = true;
+                        break;
+                    }
+                }
+                if (!covered)
+                {
+                    uncovered.push_back(building);
+                }
+            }
+            return chooseScoredBuildSite(sim, profile, unitType, *bb.baseAnchor, rng, [&](const SimVector& site, int) {
+                int newlyCovered = 0;
+                for (const auto& building : uncovered)
+                {
+                    if (building.distanceSquared(site) <= rangeSquared)
+                    {
+                        ++newlyCovered;
+                    }
+                }
+                return SiteScore{static_cast<float>(newlyCovered), spread(site), -flatDistance(site, *bb.baseAnchor).value};
+            },
+                walkable);
+        }
+
+        // Approaches: the post is on the side that faces the enemy, and
+        // "facing" stops counting beyond the post, so that the second tower
+        // -- a range from the first, at least as far forward as the post,
+        // and then as near the base as it can be -- lands beside the first
+        // rather than out in front of it or behind it. That makes a line
+        // across the front.
+        auto towards = threatDirection(bb);
+        auto post = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
+        return chooseScoredBuildSite(sim, profile, unitType, post, rng, [&](const SimVector& site, int) {
+            auto forward = std::min((site - *bb.baseAnchor).dot(towards), profile.defenceDistanceFromBase);
+            return SiteScore{spread(site), forward.value, -flatDistance(site, *bb.baseAnchor).value};
+        },
+            walkable);
+    }
+
+    std::optional<SimVector> BuildManager::chooseRadarSite(
+        const GameSimulation& sim,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        const ReachabilityMap& reachability,
+        const std::string& unitType,
+        std::minstd_rand& rng) const
+    {
+        if (!bb.baseAnchor)
+        {
+            return std::nullopt;
+        }
+        std::function<bool(const SimVector&)> walkable;
+        if (bb.groundReachabilityValid)
+        {
+            walkable = [&](const SimVector& p) { return reachability.isReachable(sim, p); };
+        }
+        // Nearest ring to the post, and the highest ground on it.
+        auto post = *bb.baseAnchor + (threatDirection(bb) * profile.radarDistanceFromBase);
+        return chooseScoredBuildSite(
+            sim, profile, unitType, post, rng, [](const SimVector& site, int ring) {
+                return SiteScore{-static_cast<float>(ring), site.y.value, 0.0f};
+            },
+            walkable);
     }
 
     std::optional<SimVector> BuildManager::chooseMexSite(
@@ -257,7 +511,208 @@ namespace rwe
         return tiedCandidates[randomBelow(rng, static_cast<unsigned int>(tiedCandidates.size()))];
     }
 
-    std::vector<std::string> BuildManager::buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase) const
+    bool BuildManager::siteFailedLately(const GameSimulation& sim, const SimVector& site) const
+    {
+        if (failedSites.empty())
+        {
+            return false;
+        }
+        auto cell = sim.terrain.worldToHeightmapCoordinate(site);
+        return failedSites.count(std::make_pair(cell.x, cell.y)) != 0;
+    }
+
+    std::optional<BuildManager::OutpostDefencePlan> BuildManager::planOutpostDefence(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb) const
+    {
+        const auto& s = bb.sideUnits;
+        if (!bb.baseAnchor || s.lightLaserTower.empty() || s.metalExtractor.empty() || profile.outpostDefenceCount <= 0)
+        {
+            return std::nullopt;
+        }
+        auto towerDefIt = sim.unitDefinitions.find(s.lightLaserTower);
+        if (towerDefIt == sim.unitDefinitions.end())
+        {
+            return std::nullopt;
+        }
+        // The tower covers what its own weapon reaches, read from the weapon
+        // table rather than assumed: a mod's tower reaches what it reaches.
+        const auto range = weaponRange(sim, towerDefIt->second);
+        if (range <= 0_ss)
+        {
+            return std::nullopt;
+        }
+        const auto rangeSquared = range * range;
+        const auto baseRadiusSquared = profile.defendRadius * profile.defendRadius;
+
+        // Our extractors, and every tower of ours standing or going up. A
+        // frame counts as cover so a second tower is not planned for the
+        // cluster the first is still being built at. In id order, from the
+        // unit list, so the choice below is the same on every peer.
+        std::vector<SimVector> extractors;
+        std::vector<SimVector> towers;
+        int outpostTowers = 0;
+        for (const auto& [unitId, unit] : sim.units)
+        {
+            if (unit.owner != aiOwner || !unit.isAlive())
+            {
+                continue;
+            }
+            if (unit.unitType == s.lightLaserTower)
+            {
+                towers.push_back(unit.position);
+                if (unit.position.distanceSquared(*bb.baseAnchor) > baseRadiusSquared)
+                {
+                    ++outpostTowers;
+                }
+            }
+            else if (unit.unitType == s.metalExtractor && !unit.isBeingBuilt(sim.unitDefinitions.at(unit.unitType)))
+            {
+                extractors.push_back(unit.position);
+            }
+        }
+        if (outpostTowers >= profile.outpostDefenceCount)
+        {
+            return std::nullopt;
+        }
+
+        // Uncovered: beyond the base's own defence, which the army answers
+        // (defendRadius is what puts it in Defend), and outside every tower.
+        std::vector<SimVector> uncovered;
+        for (const auto& position : extractors)
+        {
+            if (position.distanceSquared(*bb.baseAnchor) <= baseRadiusSquared)
+            {
+                continue;
+            }
+            bool covered = false;
+            for (const auto& tower : towers)
+            {
+                if (tower.distanceSquared(position) <= rangeSquared)
+                {
+                    covered = true;
+                    break;
+                }
+            }
+            if (!covered)
+            {
+                uncovered.push_back(position);
+            }
+        }
+        // Where extractors of ours were destroyed lately, beyond the base
+        // and outside every tower. recentLosses has carried these positions
+        // since the loss tracking went in and nothing built defences from
+        // them before; a tower where the raid came is what a player puts
+        // up, and it goes up even where the raid took the last extractor,
+        // since that is the site the plan is about to rebuild on.
+        std::vector<SimVector> raids;
+        std::vector<SimVector> losses;
+        for (const auto& loss : bb.recentLosses)
+        {
+            if (loss.unitType == s.metalExtractor)
+            {
+                losses.push_back(loss.position);
+            }
+        }
+        for (const auto& [cell, _] : raidedSites)
+        {
+            losses.push_back(sim.terrain.heightmapIndexToWorldCenter(cell.first, cell.second));
+        }
+        for (const auto& position : losses)
+        {
+            if (position.distanceSquared(*bb.baseAnchor) <= baseRadiusSquared)
+            {
+                continue;
+            }
+            bool covered = false;
+            for (const auto& tower : towers)
+            {
+                if (tower.distanceSquared(position) <= rangeSquared)
+                {
+                    covered = true;
+                    break;
+                }
+            }
+            if (!covered)
+            {
+                raids.push_back(position);
+            }
+        }
+        if (uncovered.empty() && raids.empty())
+        {
+            return std::nullopt;
+        }
+
+        // The cluster is whatever one tower's reach takes in around a seed
+        // -- an uncovered extractor, or the place one was lost. The best
+        // seed is the one with the most standing company, a raid within
+        // reach counting for the minimum on its own; the first in id order
+        // (extractors before losses, losses most recent first) on a tie.
+        std::vector<SimVector> seeds(uncovered);
+        seeds.insert(seeds.end(), raids.begin(), raids.end());
+        auto companyOf = [&](const SimVector& seed) {
+            int company = 0;
+            for (const auto& other : uncovered)
+            {
+                if (other.distanceSquared(seed) <= rangeSquared)
+                {
+                    ++company;
+                }
+            }
+            return company;
+        };
+        auto raidedAt = [&](const SimVector& seed) {
+            for (const auto& raid : raids)
+            {
+                if (raid.distanceSquared(seed) <= rangeSquared)
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+        std::optional<std::size_t> bestSeed;
+        int bestScore = 0;
+        for (std::size_t i = 0; i < seeds.size(); ++i)
+        {
+            auto score = companyOf(seeds[i]) + (raidedAt(seeds[i]) ? profile.outpostDefenceMinExtractors : 0);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestSeed = i;
+            }
+        }
+        if (!bestSeed || bestScore < profile.outpostDefenceMinExtractors)
+        {
+            return std::nullopt;
+        }
+
+        // Sited in the middle of what it covers; at the loss itself when
+        // nothing of ours is left standing there.
+        OutpostDefencePlan plan;
+        plan.raided = raidedAt(seeds[*bestSeed]);
+        SimVector sum(0_ss, 0_ss, 0_ss);
+        for (const auto& other : uncovered)
+        {
+            if (other.distanceSquared(seeds[*bestSeed]) <= rangeSquared)
+            {
+                sum += other;
+                ++plan.extractors;
+            }
+        }
+        if (plan.extractors == 0)
+        {
+            plan.anchor = seeds[*bestSeed];
+            return plan;
+        }
+        auto n = SimScalar(static_cast<float>(plan.extractors));
+        plan.anchor = SimVector(sum.x / n, sum.y / n, sum.z / n);
+        return plan;
+    }
+
+    std::vector<std::string> BuildManager::buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::string& builderType) const
     {
         const auto& s = bb.sideUnits;
         // Count what exists or is already going up, so we don't double up.
@@ -265,7 +720,18 @@ namespace rwe
 
         std::vector<std::string> wanted;
         auto want = [&](const std::string& t) {
-            if (!t.empty() && std::find(wanted.begin(), wanted.end(), t) == wanted.end())
+            if (t.empty() || !bb.buildTree.canBuild(builderType, t))
+            {
+                // Not something this builder has a button for. Every rule
+                // below is written as what the BASE wants, and the filter
+                // here is what turns that into what this builder can do
+                // about it -- so the commander stops putting up Defenders,
+                // which it has no button for and the AI did anyway, and the
+                // advanced constructor is the only thing that reaches a
+                // fusion plant. See AiBuildTree.h.
+                return;
+            }
+            if (std::find(wanted.begin(), wanted.end(), t) == wanted.end())
             {
                 wanted.push_back(t);
             }
@@ -356,6 +822,19 @@ namespace rwe
         {
             want(s.lightLaserTower);
         }
+        // Holding what was taken. An expansion is a place, not a mex, and
+        // the AI used to defend nothing but the base: measured over thirty
+        // minutes one side lost fifty-four extractors and kept ordering the
+        // same raided sites again. A cluster of ours beyond the base's
+        // cover gets a tower of its own, sited at the cluster (update()
+        // reads the plan for where). A raided one gets it even while metal
+        // is short, for the same reason the reactive anti-air is not gated:
+        // saving up while being raided is how the extractors and the metal
+        // are both lost.
+        if (outpost && total(s.lab) >= 1 && (!metalShort || outpost->raided))
+        {
+            want(s.lightLaserTower);
+        }
         // The standing anti-air, for the case where nothing has flown over
         // yet. The first bombing run arrives before anyone has scouted the
         // airfield that launched it, so waiting for proof is waiting too
@@ -418,7 +897,64 @@ namespace rwe
         // is being thrown away, and another lab is what turns it into an
         // army.
         auto metalFull = bb.metalStorage.value > 0.0f && bb.currentMetal.value >= bb.metalStorage.value * 0.8f;
-        if (metalFull && total(s.lab) >= 1 && total(s.lab) < 1 + profile.surplusLabCount)
+
+        // Level two, and it goes above the surplus lab because a full store
+        // buys more as an advanced lab than as a third level-one one.
+        //
+        // The trigger needs no machinery of its own: a store this near the
+        // cap is income being thrown away, and canAfford already says yes to
+        // anything at all when the stockpile is within a tenth of full. What
+        // level two really costs is energy -- the advanced constructor is 300
+        // metal against 5784 energy -- and energy is the resource the AI has
+        // been measured sitting on, storage pegged at the cap for a third to
+        // two thirds of every game. So this spends the surplus that exists
+        // rather than competing for the metal that does not. §15.3.
+        auto incomeSupportsTech = bb.metalIncome.value >= static_cast<float>(profile.techMinMetalIncome);
+        if (profile.techLevelTwo && incomeSupportsTech && total(s.lab) >= 1 && total(s.advancedLab) < profile.targetAdvancedLabCount)
+        {
+            want(s.advancedLab);
+        }
+        // What the advanced constructor is for. The radar first at 125 metal
+        // for several times the coverage; then the heavy towers, which the
+        // level-one constructor can also reach and the AI has never built;
+        // then a moho on any patch still going spare. Fusion last and rarely:
+        // 5130 metal is several minutes of the whole economy, so it waits
+        // until energy is genuinely the thing running out. §15.5.
+        if (profile.techLevelTwo && total(s.advancedLab) >= 1)
+        {
+            if (total(s.advancedRadar) < profile.targetAdvancedRadarCount)
+            {
+                want(s.advancedRadar);
+            }
+            if (!metalShort && total(s.heavyLaserTower) < profile.heavyDefenceCount)
+            {
+                want(s.heavyLaserTower);
+            }
+            if (incomeSupportsTech && total(s.heavyPlasmaTower) < profile.heavyDefenceCount)
+            {
+                want(s.heavyPlasmaTower);
+            }
+            if (incomeSupportsTech)
+            {
+                want(s.mohoExtractor);
+            }
+            auto energyBinding = bb.energyStalled
+                || (bb.energyStorage.value > 0.0f && bb.currentEnergy.value < bb.energyStorage.value * 0.25f);
+            if (energyBinding && metalFull && total(s.fusion) < profile.targetFusionCount)
+            {
+                want(s.fusion);
+            }
+        }
+
+        // A surplus buys a second level-one lab only once teching is done
+        // with, or impossible. Otherwise this rule quietly eats the tech
+        // step: the commander is planned first and has no button for the
+        // advanced lab, so it spent every full store on another Peewee lab
+        // and the one builder that could tech never found the store full.
+        // Measured, that was the whole of it -- eight games, three extra
+        // level-one labs, and not one advanced lab ordered.
+        auto techWanted = profile.techLevelTwo && !s.advancedLab.empty() && total(s.advancedLab) < profile.targetAdvancedLabCount;
+        if (metalFull && !techWanted && total(s.lab) >= 1 && total(s.lab) < 1 + profile.surplusLabCount)
         {
             want(s.lab);
         }
@@ -493,6 +1029,24 @@ namespace rwe
                     next = s.tank;
                 }
             }
+            else if (!s.advancedLab.empty() && factory.unitType == s.advancedLab)
+            {
+                // The advanced constructor first, for the same reason the
+                // level-one lab makes its constructor first: it is the only
+                // thing that unlocks the rest of the tier, and at 300 metal
+                // it is the cheapest thing this lab builds. Then assault
+                // kbots for the waves -- a Zeus is 267 metal against a
+                // Peewee's 65 and beats a great many of them, and the Can is
+                // 2800 hit points where the level-one line is 300.
+                if (!s.advancedConstructor.empty() && total(s.advancedConstructor) < profile.targetAdvancedConstructorCount)
+                {
+                    next = s.advancedConstructor;
+                }
+                else
+                {
+                    next = s.advancedAssault;
+                }
+            }
             else
             {
                 auto constructors = s.constructor.empty() ? 0 : countOf(bb.ownedTotalCounts, s.constructor);
@@ -565,6 +1119,60 @@ namespace rwe
         const auto& builder = sim.getUnitState(builderId);
         const auto& builderDef = sim.unitDefinitions.at(builder.unitType);
 
+        // Did this builder's last order come to anything? It is idle again;
+        // if nothing of ours stands where it was sent, the order was
+        // dropped -- unreachable, or the site occupied when it arrived --
+        // and the site is remembered so it is not handed straight back.
+        // (A dead builder never reaches here, and one that finished its
+        // job left a frame or a building behind.)
+        const auto memoryTicks = static_cast<unsigned int>(std::max(0, profile.failedSiteMemorySeconds)) * SimTicksPerSecond;
+        if (auto issued = issuedOrders.find(builderId.value); issued != issuedOrders.end())
+        {
+            const auto& order = issued->second;
+            if (bb.now.value - order.at.value <= memoryTicks)
+            {
+                bool somethingThere = false;
+                for (const auto& [unitId, unit] : sim.units)
+                {
+                    if (unitId != builderId && unit.owner == aiOwner && unit.isAlive() && unit.position.distanceSquared(order.site) <= (48_ss * 48_ss))
+                    {
+                        somethingThere = true;
+                        break;
+                    }
+                }
+                if (!somethingThere)
+                {
+                    auto cell = sim.terrain.worldToHeightmapCoordinate(order.site);
+                    failedSites[std::make_pair(cell.x, cell.y)] = bb.now;
+                    LOG_INFO << "AI build: unit " << builderId.value << " dropped its order for " << order.unitType << " at "
+                             << static_cast<int>(order.site.x.value) << "," << static_cast<int>(order.site.z.value)
+                             << "; the site is left alone for " << profile.failedSiteMemorySeconds << " s";
+                }
+            }
+            issuedOrders.erase(issued);
+        }
+        for (auto it = failedSites.begin(); it != failedSites.end();)
+        {
+            it = (bb.now.value - it->second.value > memoryTicks) ? failedSites.erase(it) : std::next(it);
+        }
+
+        // Raids on our extractors, remembered for longer than the
+        // blackboard keeps them: the outpost tower that answers one needs a
+        // builder to come free first.
+        const auto raidTicks = static_cast<unsigned int>(std::max(0, profile.outpostRaidMemorySeconds)) * SimTicksPerSecond;
+        for (const auto& loss : bb.recentLosses)
+        {
+            if (loss.unitType == sideUnits.metalExtractor)
+            {
+                auto cell = sim.terrain.worldToHeightmapCoordinate(loss.position);
+                raidedSites[std::make_pair(cell.x, cell.y)] = loss.lostAt;
+            }
+        }
+        for (auto it = raidedSites.begin(); it != raidedSites.end();)
+        {
+            it = (bb.now.value - it->second.value > raidTicks) ? raidedSites.erase(it) : std::next(it);
+        }
+
         // A builder that cannot walk home is running an outpost: it builds around itself.
         bool builderAtBase = !bb.groundReachabilityValid || reachability.isReachable(sim, builder.position);
         auto anchor = builderAtBase ? *bb.baseAnchor : builder.position;
@@ -606,7 +1214,16 @@ namespace rwe
         // it is saving.
         bool saving = false;
 
-        for (const auto& next : buildPriorities(profile, bb, builderAtBase))
+        // Whether an extractor cluster of ours is standing undefended, and
+        // where. Worked out once per pass; the priorities say whether a
+        // tower is wanted for it and the site choice below says where.
+        std::optional<OutpostDefencePlan> outpost;
+        if (builderAtBase)
+        {
+            outpost = planOutpostDefence(sim, aiOwner, profile, bb);
+        }
+
+        for (const auto& next : buildPriorities(profile, bb, builderAtBase, outpost, builder.unitType))
         {
             auto nextDefIt = sim.unitDefinitions.find(next);
             if (nextDefIt == sim.unitDefinitions.end())
@@ -615,10 +1232,28 @@ namespace rwe
             }
             if (!isEconomy(next))
             {
+                if (saving)
+                {
+                    // Holding for something dearer higher up the list, and
+                    // everything from here down is cheaper than that: buying
+                    // any of it is how the saving never completes.
+                    continue;
+                }
                 auto estimate = estimateBuild(nextDefIt->second, builderDef);
+                // A level-two building is worth waiting longer for. An
+                // advanced lab is 2007 metal, three or four minutes of the
+                // AI's income, and judged against the ordinary minute it is
+                // simply unaffordable for ever -- the planner skips past it
+                // to something cheap every pass and the AI never techs.
+                auto isLevelTwo = (!sideUnits.advancedLab.empty() && next == sideUnits.advancedLab)
+                    || (!sideUnits.fusion.empty() && next == sideUnits.fusion)
+                    || (!sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor)
+                    || (!sideUnits.heavyPlasmaTower.empty() && next == sideUnits.heavyPlasmaTower)
+                    || (!sideUnits.heavyLaserTower.empty() && next == sideUnits.heavyLaserTower);
+                auto window = isLevelTwo ? profile.techSaveUpSeconds : profile.saveUpSeconds;
                 if (!canAfford(bb, estimate))
                 {
-                    if (canAfford(bb, estimate, profile.saveUpSeconds))
+                    if (canAfford(bb, estimate, window))
                     {
                         // Within reach: wait for it rather than spend the
                         // money on something further down the list, which is
@@ -629,8 +1264,14 @@ namespace rwe
                             LOG_INFO << "AI build: unit " << builderId.value << " saving for " << next << ": " << estimate.metal << " metal, have " << bb.currentMetal.value
                                      << ", net " << (bb.metalIncome.value - bb.metalCommitted.value) << "/s";
                         }
+                        // Carry on down the list rather than stopping here.
+                        // Extractors and collectors are exempt from the
+                        // affordability test because they are what pays for
+                        // the thing being saved for, and a builder that
+                        // stood idle through four minutes of saving was
+                        // giving up the very income that ends the wait.
                         saving = true;
-                        break;
+                        continue;
                     }
                     LOG_DEBUG << "AI build: cannot afford " << next << " (" << estimate.metal << " metal over " << estimate.seconds << " s), skipping";
                     continue;
@@ -638,39 +1279,165 @@ namespace rwe
             }
 
             std::optional<SimVector> site;
-            if (next == sideUnits.metalExtractor)
+            // A moho extractor stands on a metal patch exactly as the
+            // level-one one does, and must go through the same search: the
+            // ordinary site chooser deliberately refuses a patch, so a moho
+            // routed through it would either find nowhere or stand somewhere
+            // it produces nothing.
+            if (next == sideUnits.metalExtractor || (!sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor))
             {
                 // Nearby patches first; further afield if there are none.
                 // Only patches the builder can walk to: islands are for the transport.
-                std::function<bool(const SimVector&)> walkable;
+                std::function<bool(const SimVector&)> reachable;
                 if (bb.groundReachabilityValid)
                 {
-                    walkable = [&](const SimVector& p) { return reachability.isReachable(sim, p) == builderAtBase; };
+                    reachable = [&](const SimVector& p) { return reachability.isReachable(sim, p) == builderAtBase; };
                 }
+                // Not under the enemy's guns. The nearest free patch stays
+                // the nearest free patch after the frame on it is shot, so
+                // without this the builder puts the same frame down again:
+                // measured, a commander ordered one site 232 times in five
+                // hundred seconds, each frame living a second or two.
+                auto gunsSquared = profile.mexAvoidsEnemyGunsRadius * profile.mexAvoidsEnemyGunsRadius;
+                auto underGuns = [&](const SimVector& p) {
+                    if (profile.mexAvoidsEnemyGunsRadius <= 0_ss)
+                    {
+                        return false;
+                    }
+                    for (const auto& [_, enemy] : bb.knownEnemies)
+                    {
+                        if (enemy.isArmed && !enemy.isAir && enemy.lastKnownPosition.distanceSquared(p) <= gunsSquared)
+                        {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                // The commander stays within reach of home in both searches.
+                // The near search is from wherever the builder stands, so a
+                // commander that had just built at the edge of the base
+                // could chain from there to the next patch and the next:
+                // measured, one was at the midfield building extractors 3900
+                // from its start when it was caught, and the game with it.
+                auto leashSquared = profile.commanderMexSearchRadius * profile.commanderMexSearchRadius;
+                auto walkable = [&](const SimVector& p) {
+                    if (builderDef.commander && builderAtBase && bb.baseAnchor->distanceSquared(p) > leashSquared)
+                    {
+                        return false;
+                    }
+                    return !underGuns(p) && !siteFailedLately(sim, p) && (!reachable || reachable(p));
+                };
                 site = chooseMexSite(sim, next, builder.position, profile.nearMexSearchRadius, rng, walkable);
                 if (!site && builderAtBase)
                 {
-                    // Expanding, as opposed to filling in around the base,
-                    // takes ground we have actually looked at. Metal shows on
-                    // a player's map only where that player has explored, so
-                    // an AI reading the whole metal grid is claiming patches
-                    // it has no business knowing about.
+                    // Expanding, as opposed to filling in around the base:
+                    // the nearest free patch to the base, so the base grows
+                    // outward, out to the builder's radius. The commander
+                    // has a shorter one -- it is the game, and it is planned
+                    // first -- so the far patches fall to the constructors.
                     //
-                    // The near search above is deliberately left alone. What
-                    // is inside maxMexSearchRadius of a builder standing in
-                    // its own base is ground that base can see, and gating it
-                    // as well starves the opening: an AI that has not built a
-                    // scout yet then cannot expand at all, and an AI with no
-                    // metal never builds the scout.
-                    auto exploredAndWalkable = [&](const SimVector& p) {
-                        if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, p))
+                    // Measured before this, the extractor count sat at eight
+                    // to ten for the middle third of every game: the ring of
+                    // patches past 2048 was out of reach, and the ring
+                    // inside it was gated on ground the AI had explored, which
+                    // with no scout until the eighth extractor meant nothing
+                    // until the plane flew over. Both are knobs now, and the
+                    // exploration gate is off: a player is shown every metal
+                    // spot on the map from the start.
+                    auto radius = builderDef.commander ? profile.commanderMexSearchRadius : profile.expansionMexSearchRadius;
+
+                    // Ours to take: nearer our base than the enemy's, once
+                    // the enemy has been found. Not, before that, nearer
+                    // than any other start position the map declares --
+                    // that was tried, and Crystal Maze declares ten of them,
+                    // so it threw out 405 of the 468 patch cells in reach
+                    // and the AI sat on twelve extractors while the other
+                    // side took fifty. A player in a two-player game takes
+                    // the empty starts' metal; so does this.
+                    auto onOurSide = [&](const SimVector& p) {
+                        if (!profile.expansionStaysOnOurSide || !bb.enemyBasePosition)
                         {
-                            return false;
+                            return true;
                         }
-                        return !walkable || walkable(p);
+                        return bb.baseAnchor->distanceSquared(p) <= bb.enemyBasePosition->distanceSquared(p);
                     };
-                    site = chooseMexSite(sim, next, *bb.baseAnchor, profile.expansionMexSearchRadius, rng, exploredAndWalkable);
+                    // Ground we have looked at, when the knob asks for it:
+                    // explored, or under a radar of ours, which is how a
+                    // player would know a patch was still free.
+                    auto known = [&](const SimVector& p) {
+                        if (!profile.expansionNeedsExploredGround || profile.cheatModeOmniscient)
+                        {
+                            return true;
+                        }
+                        return sim.isExploredBy(aiOwner, p) || sim.isOnRadarOf(aiOwner, p);
+                    };
+                    auto acceptable = [&](const SimVector& p) {
+                        return onOurSide(p) && known(p) && walkable(p);
+                    };
+                    site = chooseMexSite(sim, next, *bb.baseAnchor, radius, rng, acceptable);
+
+                    if (!site)
+                    {
+                        // Why not, for the log: which test threw out the
+                        // patches within reach. This is what showed the
+                        // plateau was the radius and the exploration gate
+                        // rather than a shortage of patches.
+                        indexMetalPatches(sim);
+                        int inRange = 0, offSide = 0, unknown = 0, guarded = 0, unwalkable = 0;
+                        auto radiusSquared = radius * radius;
+                        for (const auto& patch : metalPatches)
+                        {
+                            auto p = sim.terrain.heightmapIndexToWorldCenter(patch.x, patch.y);
+                            if (bb.baseAnchor->distanceSquared(p) > radiusSquared)
+                            {
+                                continue;
+                            }
+                            ++inRange;
+                            if (!onOurSide(p))
+                            {
+                                ++offSide;
+                            }
+                            else if (!known(p))
+                            {
+                                ++unknown;
+                            }
+                            else if (underGuns(p))
+                            {
+                                ++guarded;
+                            }
+                            else if (!walkable(p))
+                            {
+                                ++unwalkable;
+                            }
+                        }
+                        LOG_DEBUG << "AI build: expansion found no patch for unit " << builderId.value << " within " << radius.value
+                                  << ": " << inRange << " patch cells in range, " << offSide << " on the enemy's side, " << unknown << " unexplored, "
+                                  << guarded << " under enemy guns, " << unwalkable << " unreachable or beyond the commander's leash, the rest taken or unbuildable";
+                    }
                 }
+            }
+            else if (next == sideUnits.lightLaserTower && outpost && (outpost->raided || countOf(bb.ownedTotalCounts, next) >= profile.targetDefenceCount))
+            {
+                // The outpost tower, at the cluster it is to cover. The
+                // base's own towers come first unless the cluster has just
+                // been raided; the count includes the outpost towers, so a
+                // base rule that is still short of its target is the
+                // tie-break in the base's favour.
+                site = chooseBuildSite(sim, profile, next, outpost->anchor, rng);
+                if (site)
+                {
+                    LOG_INFO << "AI build: unit " << builderId.value << " defends " << outpost->extractors << " extractor(s) at "
+                             << static_cast<int>(outpost->anchor.x.value) << "," << static_cast<int>(outpost->anchor.z.value)
+                             << (outpost->raided ? " after a raid" : "");
+                }
+            }
+            else if (profile.spreadDefences && builderAtBase && (next == sideUnits.lightLaserTower || next == sideUnits.antiAirTower))
+            {
+                site = chooseDefenceSite(sim, aiOwner, profile, bb, reachability, next, rng);
+            }
+            else if (profile.spreadDefences && builderAtBase && next == sideUnits.radar)
+            {
+                site = chooseRadarSite(sim, profile, bb, reachability, next, rng);
             }
             else if (next == sideUnits.lightLaserTower && bb.enemyBasePosition)
             {
@@ -684,10 +1451,19 @@ namespace rwe
                 site = chooseBuildSite(sim, profile, next, anchor, rng);
             }
 
+            if (site && siteFailedLately(sim, *site))
+            {
+                // The same site the last order was dropped at. The extractor
+                // search already skips these; anything else is laid out by
+                // ring and would be offered the same place every pass.
+                LOG_DEBUG << "AI build: " << next << " would go where an order was just dropped; skipping it this pass";
+                site.reset();
+            }
             if (site)
             {
                 LOG_DEBUG << "AI build: unit " << builderId.value << " to build " << next << " at " << site->x.value << "," << site->z.value;
                 savingFor.clear();
+                issuedOrders[builderId.value] = IssuedOrder{next, *site, bb.now};
                 outCommands.push_back(buildCommand(builderId, next, *site));
                 return;
             }

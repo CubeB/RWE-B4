@@ -69,7 +69,8 @@ namespace rwe
             PlayerId playerId,
             AiTuningProfile profile,
             std::uint64_t rngSeed,
-            MapIntel mapIntel);
+            MapIntel mapIntel,
+            AiBuildTree buildTree = AiBuildTree{});
 
         void tick(const GameSimulation& sim, std::vector<PlayerCommand>& outCommands);
 

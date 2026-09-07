@@ -13,8 +13,15 @@ namespace rwe
 
     void StrategicManager::update(const AiTuningProfile& profile, AiBlackboard& bb) const
     {
-        // Something hostile in the base overrides everything else.
-        if (!bb.enemiesNearBase.empty())
+        // Something hostile in the base overrides everything else -- except
+        // a wave already on its way. Recalling the whole attack for one
+        // scout at the extractors is what the army used to do, and it is
+        // how a wave that had nearly reached the enemy turned round and
+        // walked home; the units gathering at the rally point for the next
+        // wave are the ones that answer an intruder (ArmyManager). Once the
+        // wave is spent the intruder gets everyone, as before.
+        auto waveOut = profile.attackInWaves && profile.reserveAnswersIntruders && bb.phase == GamePhase::Attack && !bb.waveSpent && !bb.attackGroup.empty();
+        if (!bb.enemiesNearBase.empty() && !waveOut)
         {
             bb.phase = GamePhase::Defend;
             return;

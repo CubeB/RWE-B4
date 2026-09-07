@@ -6,6 +6,7 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
+#include <rwe/util/SimpleLogger.h>
 #include <set>
 
 namespace rwe
@@ -41,6 +42,13 @@ namespace rwe
         {
             bb.sideUnits = resolveAiSideUnits(sim, player.side);
             bb.sideUnitsResolved = true;
+            // Worth a line once: a name the data does not define is cleared
+            // rather than reported, so an empty one here is the difference
+            // between "the AI chose not to" and "the AI could not".
+            LOG_INFO << "AI side " << player.side << ": lab " << bb.sideUnits.lab
+                     << ", advanced lab " << (bb.sideUnits.advancedLab.empty() ? "(none)" : bb.sideUnits.advancedLab)
+                     << ", advanced constructor " << (bb.sideUnits.advancedConstructor.empty() ? "(none)" : bb.sideUnits.advancedConstructor)
+                     << ", advanced assault " << (bb.sideUnits.advancedAssault.empty() ? "(none)" : bb.sideUnits.advancedAssault);
         }
         bb.currentMetal = player.metal;
         bb.currentEnergy = player.energy;
@@ -144,6 +152,31 @@ namespace rwe
                     {
                         attended.insert(guard->target.value);
                     }
+                }
+
+                // A build order the builder is still walking to has no frame
+                // yet, so nothing in sim.units stands for it, and the counts
+                // above would say the thing was never asked for. It was, and
+                // it counts from the moment it was ordered: the planner runs
+                // whenever a builder falls idle, and judged against counts
+                // that did not know, the second builder plans the same thing.
+                // That is where the two radars came from -- the commander
+                // was sent to a site 1200 units away and the construction
+                // kbot, idle a second later, put another up beside the lab.
+                // Only the front order can have a frame; anything queued
+                // behind it has not been started.
+                bool first = true;
+                for (const auto& order : unit.orders)
+                {
+                    if (auto build = std::get_if<BuildOrder>(&order))
+                    {
+                        bool framePlaced = first && (unit.buildOrderUnitId.has_value() || std::holds_alternative<UnitBehaviorStateBuilding>(unit.behaviourState));
+                        if (!framePlaced)
+                        {
+                            ++bb.ownedTotalCounts[build->unitType];
+                        }
+                    }
+                    first = false;
                 }
             }
 

@@ -208,6 +208,31 @@ namespace rwe
         // within reach, rather than sending two kbots at nine.
         auto outnumbered = profile.holdWhenOutnumbered && bb.enemiesNearBase.size() > bb.combatUnits.size();
 
+        // The intruder to answer: of the armed enemies inside the defend
+        // radius, the one nearest home. Not the nearest known enemy of any
+        // kind from the base -- that used to be the rule, and with a base
+        // near the map's middle it was as likely to be their solar
+        // collector as the raider at our extractors.
+        std::optional<UnitId> intruder;
+        if (bb.baseAnchor)
+        {
+            SimScalar nearest = 0_ss;
+            for (auto enemyId : bb.enemiesNearBase)
+            {
+                auto known = bb.knownEnemies.find(enemyId.value);
+                if (known == bb.knownEnemies.end())
+                {
+                    continue;
+                }
+                auto distance = bb.baseAnchor->distanceSquared(known->second.lastKnownPosition);
+                if (!intruder || distance < nearest)
+                {
+                    nearest = distance;
+                    intruder = enemyId;
+                }
+            }
+        }
+
         for (auto unitId : bb.combatUnits)
         {
             if (bb.scoutUnitId && *bb.scoutUnitId == unitId)
@@ -231,16 +256,13 @@ namespace rwe
                 case GamePhase::Defend:
                 {
                     // Head for the intruder closest to home.
-                    if (bb.baseAnchor && !outnumbered)
+                    if (intruder && !outnumbered)
                     {
-                        if (auto enemy = nearestKnownEnemy(sim, bb, *bb.baseAnchor, profile.defendRadius))
+                        if (!isAttackingUnit(unit, *intruder))
                         {
-                            if (!isAttackingUnit(unit, *enemy))
-                            {
-                                outCommands.push_back(attackCommand(unitId, *enemy));
-                            }
-                            break;
+                            outCommands.push_back(attackCommand(unitId, *intruder));
                         }
+                        break;
                     }
                     [[fallthrough]];
                 }
@@ -252,6 +274,17 @@ namespace rwe
                         if (!isMovingTo(unit, *bb.attackTarget))
                         {
                             outCommands.push_back(moveCommand(unitId, *bb.attackTarget));
+                        }
+                        break;
+                    }
+                    // The reserve: gathering for the next wave, and the ones
+                    // who answer an intruder while this wave is out, since
+                    // the strategic pass no longer recalls the wave for one.
+                    if (bb.phase == GamePhase::Attack && intruder && !outnumbered)
+                    {
+                        if (!isAttackingUnit(unit, *intruder))
+                        {
+                            outCommands.push_back(attackCommand(unitId, *intruder));
                         }
                         break;
                     }

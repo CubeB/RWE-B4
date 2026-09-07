@@ -1422,3 +1422,197 @@ waves were meant to buy: an army that survives to be one.
    coverage does not count (S:14.13 item 2, unchanged).
 4. **Anti-air costs 256 metal and the first two lab slots** the moment one
    enemy scout plane is seen (S:14.13 item 3, unchanged).
+
+# 15. Level two
+
+Everything up to here has been about playing the first ten minutes properly.
+This is about the AI ever leaving level one, which at the time of writing it
+cannot do: `GamePhase::Tech` exists in the enum and nothing enters it, no
+level-two unit name appears anywhere in `AiSideUnits`, and at the thirty-minute
+cap the AI fields sixty Peewees against a player who has had a Zeus line and a
+Guardian for ten minutes.
+
+## 15.1 A correction: this data set is not base 3.1
+
+S:14 was written on my claim that the installed data was base Total Annihilation
+v3.1 and therefore missing the units that make the strategy guide's advice
+work. **That was wrong.** `D:/RWE-Data` holds `ccdata.ccx`, `ccmaps.ccx` and
+`ccmiss.ccx` (Core Contingency) and `btdata.ccx`, `btmaps.ccx` (Battle
+Tactics) beside the base `totala*.hpi` and the `rev31.gp3` patch, and
+`battle_test --list-units` returns 278 units including `Armvulc`, `Corbuzz`,
+`CORKROG`, `ARMFLAK`, `CORFLAK`, `ARMTARG`, `ARMMMKR` and the whole moho and
+fusion line. The earlier note that six of those were "absent" was simply a bad
+reading, and it cost something: the user scaled down what they asked for on the
+strength of it. The full expansion roster is available and the plan below uses
+it.
+
+## 15.2 The tech tree, read out of the data
+
+The engine does **not** enforce a tech tree. `UnitBehaviorService::createNewUnit`
+takes any type name and builds it, and nothing between `BuildOrder` and the
+nanoframe asks whether this builder is allowed that unit. What constrains a
+*player* is the build menu: `<unitname><n>.GUI` in the `guis` directory, whose
+gadget `name=` fields are the unit types that page offers. `LoadingScene`
+already parses these into `BuilderGuisDatabase` for the human's UI panels, and
+a `TODO` there notes that `download.tdf` was never read. So the tree exists in
+the data, is already loaded, and the AI has simply never consulted it.
+
+Read out of the archives, the shape is one advanced plant per domain, each
+unlocked by that domain's own level-one constructor:
+
+| builder | unlocks |
+|---|---|
+| `ARMCK` construction kbot | `ARMALAB`, plus `ARMHLT`, `ARMGUARD`, `ARMRL`, `ARMGEO`, `ARMDRAG` |
+| `ARMCV` construction vehicle | `ARMAVP` |
+| `ARMCA` construction aircraft | `ARMAAP` |
+| `ARMALAB` advanced kbot lab | `ARMACK`, `ARMZEUS`, `ARMFIDO`, `ARMVADER`, `ARMASER`, `ARMFAST` |
+| `ARMACK` advanced constructor | `ARMARAD`, `ARMFUS`, `ARMMOHO`, `ARMBRTHA`, `ARMSILO`, `ARMANNI`, `ARMAMD`, `ARMASP` |
+
+Core is the same shape: `CORCK` → `CORALAB` → `CORACK`, with `CORPUN` where
+ARM has `ARMGUARD`, and `CORCAN`/`CORPYRO` where ARM has `ARMZEUS`/`ARMFIDO`.
+
+**And the commander is not a construction kbot.** `ARMCOM`'s three pages are
+the basic economy, the four level-one plants with `ARMLLT` and `ARMRAD`, and
+the underwater set. It cannot build `ARMALAB`, `ARMHLT`, `ARMGUARD` or
+`ARMRL`. The AI has been having it build `ARMRL` anyway — twice in game 2 of
+the `growth1` run, and in every game since anti-air landed — which is a thing
+no player can do. That is a fairness fault the tech work has to fix on its way
+past, and it is the reason the capability table below is not merely a tech-two
+enabler.
+
+## 15.3 Why level two is affordable now, and what it costs
+
+The measured shape of the AI's economy is the argument for teching. S:14.13
+found energy storage pegged at the cap for 35-68% of every game and metal the
+binding constraint throughout; S:14.14 then removed the extractor ceiling and
+income runs 9-16 by the half hour with the store repeatedly full. That full
+store is idle capital, and level two is what it buys — note where the prices
+sit:
+
+| | metal | energy | buildTime |
+|---|---|---|---|
+| `ARMALAB` advanced kbot lab | 2007 | 3277 | 13520 |
+| `ARMACK` advanced constructor | **300** | **5784** | 13432 |
+| `ARMZEUS` (875 hp) | 267 | 2228 | 5478 |
+| `CORCAN` (2800 hp) | 420 | 3500 | 7500 |
+| `ARMHLT` heavy laser tower | 584 | 5398 | 9575 |
+| `ARMGUARD` heavy plasma | 1946 | 7687 | 13377 |
+| `ARMARAD` advanced radar | 125 | 1830 | 4800 |
+| `ARMMOHO` moho extractor | 1508 | 8700 | 35750 |
+| `ARMFUS` fusion plant | 5130 | 36058 | 93768 |
+
+Level two is priced in **energy**, which is the resource the AI already has
+too much of. The advanced constructor is 300 metal. The advanced radar is 125
+metal for four times the coverage. Even the Zeus, at 267 metal, is barely more
+than two Peewees and beats a great many of them.
+
+The trigger therefore needs no new machinery: `BuildManager::canAfford`
+already returns true outright when the stockpile is within 90% of storage,
+which is the "we are rich" signal S:14.14 used for the surplus lab. Teching is
+a better use of a full store than a third level-one lab, so it goes above that
+rule in the order.
+
+## 15.4 What gets built
+
+1. **A build-capability table**, `AiBuildTree`, assembled at load from
+   `BuilderGuisDatabase` and handed to each `AiPlayerController` the way
+   `MapIntel` is. `buildPriorities` is then filtered by what *this* builder can
+   actually build, so the commander stops putting up Defenders and the advanced
+   constructor is the only thing that reaches fusion. A builder the table does
+   not know (a mod with no GUI page) is allowed everything, so nothing regresses
+   to a base that builds nothing.
+2. **Level-two names in `AiSideUnits`**: advanced lab, advanced constructor,
+   advanced assault kbot, heavy laser tower, heavy plasma turret, advanced
+   radar, moho extractor, fusion.
+3. **The tech rule** in `buildPriorities`: with the level-one plan satisfied
+   and the store rich, want the advanced lab; above the surplus-lab rule.
+4. **Advanced production** in `planFactories`: the advanced lab makes its
+   constructor first, then level-two assault kbots, mirroring what the
+   level-one lab does with `ARMCK` and raiders.
+5. **What the advanced constructor is for**: advanced radar early (125 metal),
+   heavy towers at the front, then fusion once energy actually binds.
+6. ~~**`GamePhase::Tech`** entered when the advanced lab stands.~~ Dropped on
+   reading the code: the phase machine is the army's posture, not the
+   economy's, and `ArmyManager` treats `Tech` as its `default` case -- gather
+   at the rally and do not attack. Entering it would have stopped the army to
+   celebrate a building. The enum member stays unused.
+
+## 15.5 Deliberately deferred
+
+- **Moho in place of a level-one extractor.** A moho must stand on a metal
+  patch, and by the time the AI can afford one it has claimed every patch it
+  can reach, so the upgrade is reclaim-then-rebuild: a two-step operation on a
+  building the AI currently only ever adds. Until that exists, mohos go on
+  unclaimed patches only, which on a busy map means seldom.
+- **Fusion**, at 5130 metal, is 300-500 seconds of the AI's whole income. It
+  is gated on energy actually binding, which with the current maker count it
+  rarely does. Expect it to fire late or never until metal makers scale.
+- **Level-two air and naval**, and the big guns (`ARMBRTHA`, `ARMANNI`,
+  `CORDOOM`). Siege is S:14.9 and wants the army rework behind it.
+- **Per-side composition by unit strength.** The Can has 2800 hit points to
+  the Zeus's 875 and Core's level-one line is the weaker of the two; a
+  composition rule that reads hit points and damage rather than a fixed ratio
+  is what finally answers "ARM beats CORE from either slot", and it belongs
+  with this work but not in its first step.
+
+## 15.6 What it measured, and why it ships switched off
+
+All of §15.4 is built and works: the AI reaches the advanced lab, the advanced
+constructor, the Zeus or the Can, and the advanced radar, in that order, and
+the build tree keeps each of them behind the builder that really unlocks it.
+Then it was measured, and **it loses**.
+
+The trigger took two attempts, and the first failure is worth recording
+because it was the same mistake §14.13 caught once already. The rule was
+written as "tech when the store is full", reusing S:14.14's surplus signal on
+the strength of the finding that storage sits pegged at the cap. But that
+finding was about **energy**, and it stopped being true of metal the moment
+S:14.14 gave expansion somewhere to go: the AI now spends every metal it earns
+on extractors, and metal stood at or above four fifths of storage in eleven
+samples out of a hundred and eighty. Across eight games not one advanced lab
+was ordered, and the A/B looked like a clean null -- both orderings returned
+byte-identical results, because the knob was switching nothing. The trigger is
+now metal income against `techMinMetalIncome`, and a longer saving window
+(`techSaveUpSeconds`, four minutes) because a 2007-metal building judged
+against the ordinary one-minute window is unaffordable for ever.
+
+A second rule had to move with it. The surplus-lab rule from S:14.14 fires on
+the same full store and the commander is planned first, so the commander --
+which has no button for an advanced lab -- spent every full store on another
+level-one lab and the one builder that could tech never saw the store full.
+The surplus lab now waits until teching is done with or impossible.
+
+With that working, the results, all ARM against ARM on Painted Desert, four
+games per slot ordering per variant so that Painted Desert's considerable slot
+bias cannot flatter either side:
+
+| how the lab was paid for | tech side army | level-one side army |
+|---|---|---|
+| save the full price, builder idles | 31.0 | 47.2 |
+| save, but keep building extractors meanwhile | 31.0 | 47.2 |
+| place it and let the nanoframe draw | 22.1 | 59.2 |
+
+The third variant is the one a player would recognise and it is the worst of
+the three, because it pins the only builder that can tech onto a 2007-metal
+frame for minutes. Six ninety-minute games, long enough that they end in
+elimination rather than at the cap, gave the teching side two wins out of six.
+
+The cause is timing, not the tier. The lab completes at minute 24 to 28 of a
+thirty-minute game, and 2007 metal is about thirty Peewees, so the level-one
+side simply spends the same metal sooner. Nothing about the Zeus is wrong; it
+never gets built in numbers that matter.
+
+So `techLevelTwo` defaults to **false**. The machinery stays, because it is
+correct and because the next attempt needs all of it, and because one part of
+it -- the build tree -- is a fairness fix that stands on its own.
+
+**What would change the answer.** The lab has to be up by minute twelve to
+fifteen, and it cannot be while it competes with expansion for the same
+builder and the same metal. Two things to try, in order: set a builder aside
+for the tech step so it is not also the one claiming every patch (a second
+construction kbot techs three to five minutes earlier, but measured worse
+overall -- 19 army against 27.5 -- so the extra builder has to be *dedicated*,
+not merely present); and let the planner run more than one builder a pass,
+which the counts can now support since a queued build order is counted from
+the moment it is ordered. Until one of those lands, teching stays off rather
+than shipping an opponent measured to be worse.

@@ -182,6 +182,8 @@ set(SOURCE_FILES
     src/rwe/ai/ArmyManager.h
     src/rwe/ai/BuildManager.cpp
     src/rwe/ai/BuildManager.h
+    src/rwe/ai/AiBuildTree.cpp
+    src/rwe/ai/AiBuildTree.h
     src/rwe/ai/EconomyManager.cpp
     src/rwe/ai/EconomyManager.h
     src/rwe/ai/MapIntel.cpp
@@ -821,6 +823,7 @@ set(TEST_FILES
     src/rwe/ai/AiPlayerController.test.cpp
     src/rwe/ai/AiBehaviour.test.cpp
     src/rwe/ai/MapIntel.test.cpp
+    src/rwe/ai/AiBuildTree.test.cpp
     src/rwe/BoxTreeSplit.test.cpp
     src/rwe/GlobalConfig.test.cpp
     src/rwe/Viewport.test.cpp

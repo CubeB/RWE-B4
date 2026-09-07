@@ -4,8 +4,10 @@
 #include <rwe/util/CrashHandler.h>
 #include <rwe/util/SpanStream.h>
 #include <rwe/LoadingScene_util.h>
+#include <rwe/ai/AiBuildTree.h>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/game/ReplayFile.h>
+#include <set>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/atlas_util.h>
 #include <rwe/collections/SimpleVectorMap.h>
@@ -309,6 +311,21 @@ namespace rwe
                  << " (" << static_cast<int>(mapIntel.waterFraction * 100.0f) << "% water, "
                  << mapIntel.startPositions.size() << " start positions)";
 
+        // What each builder is allowed to build, read out of the same build
+        // menus the human's panels are drawn from. The engine enforces no
+        // tech tree of its own -- a BuildOrder naming any type at all becomes
+        // a nanoframe -- so without this the AI quietly builds things no
+        // player could order from that unit, and cannot know that the
+        // advanced constructor is the only way to a fusion plant. See
+        // docs/ai-architecture-proposal.md §15.2.
+        std::set<std::string> knownUnitTypes;
+        for (const auto& [unitType, unitDefinition] : simulation.unitDefinitions)
+        {
+            knownUnitTypes.insert(unitType);
+        }
+        auto buildTree = buildTreeFromBuilderGuis(dataMaps.builderGuisDatabase, knownUnitTypes);
+        LOG_INFO << "AI build tree: " << buildTree.buildableBy.size() << " builders with a build menu";
+
         // Instantiate one AiPlayerController per Computer player.
         // The controller's RNG is sub-seeded from simulation.rng so its
         // sequence is part of the seeded sim and survives replays
@@ -381,7 +398,7 @@ namespace rwe
 
             simulation.addAiController(
                 aiPlayerId,
-                std::make_unique<AiPlayerController>(aiPlayerId, std::move(profile), aiSeed, mapIntel));
+                std::make_unique<AiPlayerController>(aiPlayerId, std::move(profile), aiSeed, mapIntel, buildTree));
         }
 
         // Which of the map's start positions each filled slot takes. Fixed

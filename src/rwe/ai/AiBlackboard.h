@@ -3,6 +3,7 @@
 #include <map>
 #include <optional>
 #include <rwe/ai/AiSideUnits.h>
+#include <rwe/ai/AiBuildTree.h>
 #include <rwe/ai/MapIntel.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/sim/Energy.h>
@@ -98,6 +99,13 @@ namespace rwe
         // --- Side ---
         bool sideUnitsResolved{false};
         AiSideUnits sideUnits;
+        /**
+         * What each of our builders is allowed to build, read out of the
+         * game's own build menus. Set once before the first tick like
+         * mapIntel, and for the same reason: it describes the data, not the
+         * game in progress. See AiBuildTree.h.
+         */
+        AiBuildTree buildTree;
 
         // --- Economy ---
         Metal currentMetal{0};
@@ -133,6 +141,13 @@ namespace rwe
 
         // --- Own units ---
         std::map<std::string, int> ownedCompletedCounts;
+        /**
+         * Everything that exists or has been asked for, by type: complete
+         * units, frames on the ground, and build orders a builder is still
+         * walking to. The last is what keeps two builders from planning the
+         * same thing -- a frame appears only when the builder arrives, and
+         * the second builder falls idle long before that.
+         */
         std::map<std::string, int> ownedTotalCounts;
         int idleBuilderCount{0};
         std::optional<UnitId> commanderUnitId;

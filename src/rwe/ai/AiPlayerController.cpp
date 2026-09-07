@@ -60,7 +60,8 @@ namespace rwe
         PlayerId playerId,
         AiTuningProfile profile,
         std::uint64_t rngSeed,
-        MapIntel mapIntel)
+        MapIntel mapIntel,
+        AiBuildTree buildTree)
         : playerId(playerId),
           profile(std::move(profile)),
           rng(static_cast<std::uint_fast32_t>(rngSeed))
@@ -69,6 +70,11 @@ namespace rwe
         // and never touched again -- so it sits on the blackboard beside the
         // per-tick state rather than being threaded through every manager.
         blackboard.mapIntel = std::move(mapIntel);
+
+        // Likewise the build tree, which describes the game's data rather
+        // than the game. A default-constructed one knows no builder and so
+        // permits everything, which is what the tests and the harnesses get.
+        blackboard.buildTree = std::move(buildTree);
     }
 
     void AiPlayerController::tick(const GameSimulation& sim, std::vector<PlayerCommand>& outCommands)
