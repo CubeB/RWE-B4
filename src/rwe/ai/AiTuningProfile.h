@@ -101,6 +101,20 @@ namespace rwe
         SimScalar buildSiteGridSpacing{16_ss};
         SimScalar defenceDistanceFromBase{160_ss};
 
+        /**
+         * How long a builder will wait for the stockpile to reach the price
+         * of the thing it wants most, before giving up on it and building
+         * something cheaper instead. While it waits it reclaims.
+         *
+         * The AI used to start whatever came next and let the economy sort
+         * it out, which the economy does by stalling everything in equal
+         * measure: measured, it sat committed at two and a half times its
+         * income for the first ten minutes and an air plant that takes 39
+         * seconds took 183. A player saves up for the expensive things, and
+         * so does this.
+         */
+        int saveUpSeconds{60};
+
         // --- Cadence (ticks) ---
         int buildPlannerTickInterval{30};
         int threatMapTickInterval{30};

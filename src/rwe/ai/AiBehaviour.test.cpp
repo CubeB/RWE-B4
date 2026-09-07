@@ -4,6 +4,7 @@
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
+#include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
@@ -299,6 +300,164 @@ namespace rwe
             runTicks(sim, controller, 31, commands);
             REQUIRE(countQueueCommands(commands, "ARMCK") == 1);
             REQUIRE(controller.getBlackboard().phase == GamePhase::Boom);
+        }
+    }
+
+    TEST_CASE("the AI does not start what it cannot pay for", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        // The opening quotas are met, so the lab is what the plan wants next.
+        for (int i = 0; i < 4; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(100.0f + i * 40.0f), 0_ss, 0_ss), script);
+        }
+        for (int i = 0; i < 3; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(0_ss, 0_ss, SimScalar(100.0f + i * 40.0f)), script);
+        }
+
+        AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+
+        SECTION("with the metal in hand the lab goes up")
+        {
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(buildOrderTypes(commands) == std::vector<std::string>{"ARMLAB"});
+        }
+
+        SECTION("with no metal and no income, nothing is started")
+        {
+            sim.getPlayer(ai).metal = Metal(0.0f);
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(buildOrderTypes(commands).empty());
+        }
+
+        SECTION("a stockpile at the cap is spent whatever the rate, because income over the cap is lost")
+        {
+            sim.getPlayer(ai).metal = Metal(1000.0f);
+            sim.getPlayer(ai).maxMetal = Metal(1000.0f);
+            AiBlackboard bb;
+            bb.currentMetal = Metal(1000.0f);
+            bb.metalStorage = Metal(1000.0f);
+            bb.metalIncome = Metal(0.0f);
+            bb.metalDemand = Metal(50.0f);
+            BuildManager::BuildEstimate expensive{5000.0f, 100.0f};
+            REQUIRE(BuildManager::canAfford(bb, expensive));
+        }
+
+        SECTION("the estimate is the unbuilt share of the price at the builder's own rate")
+        {
+            UnitDefinition target{};
+            target.buildTime = 3000u;
+            target.buildCostMetal = Metal(600.0f);
+            UnitDefinition builder{};
+            builder.workerTimePerTick = 5u;
+            auto fresh = BuildManager::estimateBuild(target, builder);
+            REQUIRE(fresh.metal == 600.0f);
+            REQUIRE(fresh.seconds == 20.0f);
+            auto halfDone = BuildManager::estimateBuild(target, builder, 1500u);
+            REQUIRE(halfDone.metal == 300.0f);
+            REQUIRE(halfDone.seconds == 10.0f);
+        }
+
+        SECTION("while it saves, the builder reclaims rather than spending on something cheaper")
+        {
+            // A little income, so the lab is within reach of waiting but not
+            // of the stockpile: the rule is to wait for it, not to build the
+            // radar instead and never get there.
+            sim.getPlayer(ai).metal = Metal(0.0f);
+            sim.unitDefinitions["ARMMEX"].metalMake = Metal(2.0f);
+            // Reclaiming needs the rock to have been seen. True line of
+            // sight walks ray tables this bare simulation does not carry,
+            // so it sees nothing past its own cell; circular sight is plain
+            // geometry and does.
+            sim.lineOfSightMode = LineOfSightMode::Circular;
+            FeatureDefinition rock{};
+            rock.name = "rock";
+            rock.footprintX = 1;
+            rock.footprintZ = 1;
+            rock.reclaimable = true;
+            rock.metal = 30;
+            auto rockDef = sim.featureDefinitions.insert(rock);
+            // Heightmap (34, 34) is a few tiles from the commander: world
+            // coordinates run from the middle of the map, not its corner.
+            auto rockId = sim.addFeature(rockDef, 34, 34).value();
+
+            runTicks(sim, controller, 61, commands);
+            REQUIRE(buildOrderTypes(commands).empty());
+            auto reclaims = ordersFor<ReclaimOrder>(commands, commanderId);
+            REQUIRE(!reclaims.empty());
+            REQUIRE(std::get<FeatureId>(reclaims.front().target) == rockId);
+        }
+
+        SECTION("what a builder is already on counts against what the next one can afford")
+        {
+            // The commander is on a lab frame: 100 metal over the 3.3
+            // seconds a worker of rate 1 takes, thirty a second. A second
+            // builder falls idle with income of six and nothing in the
+            // bank, and the radar it wants next is out of reach.
+            sim.getPlayer(ai).metal = Metal(0.0f);
+            sim.unitDefinitions["ARMMEX"].metalMake = Metal(2.0f);
+            auto frameId = addUnit(sim, "ARMLAB", ai, SimVector(200_ss, 0_ss, 200_ss), script);
+            sim.getUnitState(frameId).buildTimeCompleted = 0u;
+            sim.getUnitState(commanderId).orders.push_back(BuildOrder("ARMLAB", SimVector(200_ss, 0_ss, 200_ss)));
+            sim.getUnitState(commanderId).buildOrderUnitId = frameId;
+            auto kbotId = addUnit(sim, "ARMCK", ai, SimVector(40_ss, 0_ss, 40_ss), script);
+
+            runTicks(sim, controller, 61, commands);
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.metalCommitted.value > 29.0f);
+            REQUIRE(bb.metalCommitted.value < 31.0f);
+            REQUIRE(bb.orphanedFrames.empty());
+            REQUIRE(bb.idleBuilders == std::vector<UnitId>{kbotId});
+            REQUIRE(buildOrderTypes(commands).empty());
+        }
+    }
+
+    TEST_CASE("a frame nobody is working on is finished before anything new is started", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        for (int i = 0; i < 4; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(100.0f + i * 40.0f), 0_ss, 0_ss), script);
+        }
+        for (int i = 0; i < 3; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(0_ss, 0_ss, SimScalar(100.0f + i * 40.0f)), script);
+        }
+
+        // Half a radar, as a raid that killed the constructor would leave it.
+        auto frameId = addUnit(sim, "ARMRAD", ai, SimVector(150_ss, 0_ss, 150_ss), script);
+        sim.getUnitState(frameId).buildTimeCompleted = 50u;
+
+        AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 31, commands);
+
+        REQUIRE(controller.getBlackboard().orphanedFrames == std::vector<UnitId>{frameId});
+        REQUIRE(buildOrderTypes(commands).empty());
+        auto repairs = ordersFor<RepairOrder>(commands, commanderId);
+        REQUIRE(repairs.size() == 1);
+        REQUIRE(repairs.front().target == frameId);
+
+        SECTION("once a builder is on its way it is nobody's orphan")
+        {
+            sim.getUnitState(commanderId).orders.push_back(RepairOrder(frameId));
+            commands.clear();
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(controller.getBlackboard().orphanedFrames.empty());
+            REQUIRE(ordersFor<RepairOrder>(commands, commanderId).empty());
         }
     }
 

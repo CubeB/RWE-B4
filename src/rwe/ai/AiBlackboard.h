@@ -119,6 +119,17 @@ namespace rwe
         Energy energyIncome{0};
         Metal metalDemand{0};
         Energy energyDemand{0};
+        /**
+         * Metal per second that our builders and factories will go on
+         * drawing, worked out from the frames they are actually on rather
+         * than read from last tick's demand. The two differ exactly when it
+         * matters: the planner runs the moment a builder falls idle, and
+         * last tick's demand still has that builder's finished job in it.
+         * Judged against that, a 705-metal lab was "unaffordable" with 627
+         * in the bank and nothing else drawing, and ten solar collectors
+         * went up in its place.
+         */
+        Metal metalCommitted{0};
 
         // --- Own units ---
         std::map<std::string, int> ownedCompletedCounts;
@@ -154,6 +165,13 @@ namespace rwe
         std::vector<UnitId> antiAirUnits;
         /** Complete mobile transports, in id order. */
         std::vector<UnitId> transports;
+        /**
+         * Our building frames that no builder is on, in id order: the one
+         * that started them died, or was sent elsewhere. Half the metal is
+         * already in them, and a frame left alone rots away (TOTALA-EXE.md
+         * s93), so they come before anything new.
+         */
+        std::vector<UnitId> orphanedFrames;
 
         // --- Ground ---
         /** Whether the reachability grid has been built yet. */

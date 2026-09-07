@@ -70,6 +70,14 @@ for ($seed = 1; $seed -le $games; $seed++) {
     }
     $results += [pscustomobject]$row
     Write-Host ("game {0,-3} {1}" -f $seed, ($text -replace '.*AI-ARENA-RESULT ', ''))
+
+    # The economy samples and events are written to one fixed pair of files
+    # in the data folder, so each game overwrites the last. Keep a copy per
+    # game: a stall that shows in the averages needs the run it came from.
+    foreach ($name in @('ai-arena.csv', 'ai-arena-events.csv')) {
+        $src = Join-Path $env:APPDATA ("RWE/" + $name)
+        if (Test-Path $src) { Copy-Item $src (Join-Path $outDir ("game-$seed-" + $name)) -Force }
+    }
 }
 
 $sw.Stop()

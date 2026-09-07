@@ -1,9 +1,12 @@
 #include "EconomyManager.h"
 #include <algorithm>
 #include <rwe/ai/AiSideUnits.h>
+#include <rwe/ai/BuildManager.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
+#include <set>
 
 namespace rwe
 {
@@ -31,6 +34,7 @@ namespace rwe
         bb.scoutUnits.clear();
         bb.antiAirUnits.clear();
         bb.transports.clear();
+        bb.orphanedFrames.clear();
 
         const auto& player = sim.getPlayer(aiOwner);
         if (!bb.sideUnitsResolved)
@@ -55,6 +59,32 @@ namespace rwe
         // peer.
         std::map<unsigned int, StandingBuilding> standingNow;
 
+        // Frames on the ground, and the frames some builder of ours is
+        // attending to; the difference is what has been abandoned. A builder
+        // counts as attending from the moment it is ordered there, not from
+        // the moment it arrives, or the frame would be handed to a second
+        // builder while the first was still walking.
+        std::vector<UnitId> frames;
+        std::set<unsigned int> attended;
+
+        // The nominal draw of a frame at a worker's rate: what it will ask
+        // for each second until it is done, whether or not it gets it.
+        float committed = 0.0f;
+        auto drawOf = [&](UnitId frameId, const UnitDefinition& workerDef) {
+            auto frame = sim.tryGetUnitState(frameId);
+            if (!frame || frame->get().isDead())
+            {
+                return 0.0f;
+            }
+            const auto& frameDef = sim.unitDefinitions.at(frame->get().unitType);
+            if (!frame->get().isBeingBuilt(frameDef))
+            {
+                return 0.0f;
+            }
+            auto estimate = BuildManager::estimateBuild(frameDef, workerDef, frame->get().buildTimeCompleted);
+            return estimate.seconds > 0.0f ? estimate.metal / estimate.seconds : 0.0f;
+        };
+
         // VectorMap iterates in id order, which keeps everything below deterministic.
         for (const auto& [unitId, unit] : sim.units)
         {
@@ -69,9 +99,53 @@ namespace rwe
             const bool isCompleted = !unit.isBeingBuilt(def);
             if (!isCompleted)
             {
+                if (!def.isMobile)
+                {
+                    frames.push_back(unitId);
+                }
                 continue;
             }
             ++bb.ownedCompletedCounts[unit.unitType];
+
+            if (def.builder)
+            {
+                // A builder's draw is counted once even when both records
+                // name the same frame, which they do for a build in
+                // progress; a repair or an assist has only the second.
+                std::optional<UnitId> drawing;
+                if (unit.buildOrderUnitId)
+                {
+                    attended.insert(unit.buildOrderUnitId->value);
+                    drawing = unit.buildOrderUnitId;
+                }
+                if (auto building = std::get_if<UnitBehaviorStateBuilding>(&unit.behaviourState))
+                {
+                    attended.insert(building->targetUnit.value);
+                    if (!drawing)
+                    {
+                        drawing = building->targetUnit;
+                    }
+                }
+                if (auto factory = std::get_if<FactoryBehaviorStateBuilding>(&unit.factoryState); factory && factory->targetUnit)
+                {
+                    drawing = factory->targetUnit->first;
+                }
+                if (drawing)
+                {
+                    committed += drawOf(*drawing, def);
+                }
+                if (!unit.orders.empty())
+                {
+                    if (auto repair = std::get_if<RepairOrder>(&unit.orders.front()))
+                    {
+                        attended.insert(repair->target.value);
+                    }
+                    else if (auto guard = std::get_if<GuardOrder>(&unit.orders.front()))
+                    {
+                        attended.insert(guard->target.value);
+                    }
+                }
+            }
 
             if (!def.isMobile)
             {
@@ -129,6 +203,15 @@ namespace rwe
                 bb.combatUnits.push_back(unitId);
             }
         }
+
+        for (auto frameId : frames)
+        {
+            if (attended.count(frameId.value) == 0)
+            {
+                bb.orphanedFrames.push_back(frameId);
+            }
+        }
+        bb.metalCommitted = Metal(committed);
 
         // No commander? Anchor the base on the first factory, then on any unit,
         // so a decapitated AI keeps building and fighting from where it is.

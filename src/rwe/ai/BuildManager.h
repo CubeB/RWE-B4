@@ -17,6 +17,7 @@
 namespace rwe
 {
     struct GameSimulation;
+    struct UnitDefinition;
 
     /**
      * Turns the blackboard's picture of the economy into build orders for
@@ -35,6 +36,32 @@ namespace rwe
             const ReachabilityMap& reachability,
             std::minstd_rand& rng,
             std::vector<PlayerCommand>& outCommands);
+
+        /** What is still to be paid for a unit, and how long that takes a given builder. */
+        struct BuildEstimate
+        {
+            /** Metal still to be paid. */
+            float metal{0.0f};
+            /** Build time at the builder's own rate, unstalled, in seconds. */
+            float seconds{0.0f};
+        };
+
+        /** `alreadyBuilt` is the frame's buildTimeCompleted; zero for something not yet started. */
+        static BuildEstimate estimateBuild(const UnitDefinition& target, const UnitDefinition& builder, unsigned int alreadyBuilt = 0);
+
+        /**
+         * Whether the stockpile lasts the build, at income less what our
+         * builders are already committed to, given `extraSeconds` of saving
+         * beforehand. A stockpile near the cap is always affordable: income
+         * over the cap is thrown away, and the one thing worse than a stall
+         * is metal nobody spends.
+         *
+         * Conservative on purpose. The commitment counts builds that will
+         * finish before this one does, and income leaves out extractors
+         * still going up; both errors make it say no when the answer was
+         * yes, never the other way round.
+         */
+        static bool canAfford(const AiBlackboard& bb, const BuildEstimate& estimate, int extraSeconds = 0);
 
         std::optional<SimVector> chooseBuildSite(
             const GameSimulation& sim,
@@ -58,6 +85,9 @@ namespace rwe
 
     private:
         int ticksSinceLastPlanning{0};
+
+        /** What the builder is waiting for the metal for, so the log says so once rather than every second. */
+        std::string savingFor;
 
         /**
          * Every heightmap cell that sits on a metal patch, in scan order.

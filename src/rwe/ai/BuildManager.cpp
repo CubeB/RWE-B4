@@ -4,6 +4,7 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/util/SimpleLogger.h>
 #include <rwe/sim/MapTerrain.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -23,6 +24,33 @@ namespace rwe
         {
             return PlayerUnitCommand(builder, PlayerUnitCommand::IssueOrder(BuildOrder(unitType, site), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
         }
+    }
+
+    BuildManager::BuildEstimate BuildManager::estimateBuild(const UnitDefinition& target, const UnitDefinition& builder, unsigned int alreadyBuilt)
+    {
+        // A builder adds workerTimePerTick to the frame each tick and the
+        // frame is done at buildTime, paying for itself pro rata as it goes
+        // (UnitState::getBuildCostInfo). So what is left to pay is the
+        // unbuilt fraction of the price, and the time is the unbuilt work
+        // at the builder's rate.
+        auto total = std::max(1u, target.buildTime);
+        auto remaining = total - std::min(alreadyBuilt, total);
+        auto fraction = static_cast<float>(remaining) / static_cast<float>(total);
+        auto rate = std::max(1u, builder.workerTimePerTick);
+        BuildEstimate estimate;
+        estimate.metal = target.buildCostMetal.value * fraction;
+        estimate.seconds = static_cast<float>(remaining) / static_cast<float>(rate) / static_cast<float>(SimTicksPerSecond);
+        return estimate;
+    }
+
+    bool BuildManager::canAfford(const AiBlackboard& bb, const BuildEstimate& estimate, int extraSeconds)
+    {
+        if (bb.metalStorage.value > 0.0f && bb.currentMetal.value >= bb.metalStorage.value * 0.9f)
+        {
+            return true;
+        }
+        auto net = bb.metalIncome.value - bb.metalCommitted.value;
+        return bb.currentMetal.value + (net * (estimate.seconds + static_cast<float>(extraSeconds))) >= estimate.metal;
     }
 
     void BuildManager::indexMetalPatches(const GameSimulation& sim) const
@@ -519,13 +547,80 @@ namespace rwe
         }
         auto builderId = bb.idleBuilders.front();
         const auto& builder = sim.getUnitState(builderId);
+        const auto& builderDef = sim.unitDefinitions.at(builder.unitType);
 
         // A builder that cannot walk home is running an outpost: it builds around itself.
         bool builderAtBase = !bb.groundReachabilityValid || reachability.isReachable(sim, builder.position);
         auto anchor = builderAtBase ? *bb.baseAnchor : builder.position;
 
+        // Extractors and makers are exempt from the affordability test
+        // below: they are what makes the next thing affordable, and a
+        // stalled extractor still finishes, just later. A solar collector
+        // is exempt only while energy is actually wanted; otherwise it is
+        // 165 metal like anything else, and the AI's energy is nearly always
+        // in surplus.
+        auto energyWanted = bb.energyStalled || (bb.energyStorage.value > 0.0f && bb.currentEnergy.value < bb.energyStorage.value * 0.5f);
+        auto isEconomy = [&](const std::string& t) {
+            return t == sideUnits.metalExtractor || t == sideUnits.metalMaker || (energyWanted && t == sideUnits.solar);
+        };
+
+        // A frame left standing comes before anything new. Its metal is
+        // already half paid, the plan wanted it, and it is rotting.
+        for (auto frameId : bb.orphanedFrames)
+        {
+            const auto& frame = sim.getUnitState(frameId);
+            if (bb.groundReachabilityValid && reachability.isReachable(sim, frame.position) != builderAtBase)
+            {
+                continue;
+            }
+            auto estimate = estimateBuild(sim.unitDefinitions.at(frame.unitType), builderDef, frame.buildTimeCompleted);
+            if (!isEconomy(frame.unitType) && !canAfford(bb, estimate))
+            {
+                continue;
+            }
+            LOG_INFO << "AI build: unit " << builderId.value << " resumes abandoned " << frame.unitType << " (" << estimate.metal << " metal left)";
+            savingFor.clear();
+            outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(frameId), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+            return;
+        }
+
+        // Set when the builder is holding off for the stockpile to catch up
+        // with the price of the thing it wants; it reclaims meanwhile and
+        // does not lend a hand at the factory, since that would spend what
+        // it is saving.
+        bool saving = false;
+
         for (const auto& next : buildPriorities(profile, bb, builderAtBase))
         {
+            auto nextDefIt = sim.unitDefinitions.find(next);
+            if (nextDefIt == sim.unitDefinitions.end())
+            {
+                continue;
+            }
+            if (!isEconomy(next))
+            {
+                auto estimate = estimateBuild(nextDefIt->second, builderDef);
+                if (!canAfford(bb, estimate))
+                {
+                    if (canAfford(bb, estimate, profile.saveUpSeconds))
+                    {
+                        // Within reach: wait for it rather than spend the
+                        // money on something further down the list, which is
+                        // how the expensive things never get built.
+                        if (savingFor != next)
+                        {
+                            savingFor = next;
+                            LOG_INFO << "AI build: unit " << builderId.value << " saving for " << next << ": " << estimate.metal << " metal, have " << bb.currentMetal.value
+                                     << ", net " << (bb.metalIncome.value - bb.metalCommitted.value) << "/s";
+                        }
+                        saving = true;
+                        break;
+                    }
+                    LOG_DEBUG << "AI build: cannot afford " << next << " (" << estimate.metal << " metal over " << estimate.seconds << " s), skipping";
+                    continue;
+                }
+            }
+
             std::optional<SimVector> site;
             if (next == sideUnits.metalExtractor)
             {
@@ -576,25 +671,35 @@ namespace rwe
             if (site)
             {
                 LOG_DEBUG << "AI build: unit " << builderId.value << " to build " << next << " at " << site->x.value << "," << site->z.value;
+                savingFor.clear();
                 outCommands.push_back(buildCommand(builderId, next, *site));
                 return;
             }
             LOG_DEBUG << "AI build: no site found for " << next << " near " << builder.position.x.value << "," << builder.position.z.value;
         }
 
-        // Nothing to build (or nowhere to build it): harvest the battlefield.
-        // Wreck fields are a real economy -- the standing advice is to work
-        // them even deep in enemy territory -- so an idle builder reclaims
-        // the nearest metal-bearing wreck around the base before falling
-        // back to lending a hand at the factory.
+        // Nothing to build, nowhere to build it, or saving up: harvest the
+        // battlefield. Wreck fields are a real economy -- the standing advice
+        // is to work them even deep in enemy territory -- and so are the
+        // rocks, which is what a player's commander spends the opening on
+        // between extractors. Metal first, nearest first; a tree is only
+        // worth the walk when energy is actually wanted, which on the maps
+        // measured it hardly ever is.
         if (builderAtBase)
         {
-            std::optional<FeatureId> bestWreck;
-            auto bestDistanceSquared = SimScalar(1200.0f * 1200.0f);
+            const auto reachSquared = SimScalar(1200.0f * 1200.0f);
+            std::optional<FeatureId> best;
+            bool bestHasMetal = false;
+            auto bestDistanceSquared = reachSquared;
             for (const auto& [featureId, feature] : sim.features)
             {
                 const auto& featureDefinition = sim.getFeatureDefinition(feature.featureName);
-                if (!featureDefinition.reclaimable || featureDefinition.metal <= 0)
+                if (!featureDefinition.reclaimable)
+                {
+                    continue;
+                }
+                bool hasMetal = featureDefinition.metal > 0;
+                if (!hasMetal && !(energyWanted && featureDefinition.energy > 0))
                 {
                     continue;
                 }
@@ -606,21 +711,26 @@ namespace rwe
                     continue;
                 }
                 auto distanceSquared = bb.baseAnchor->distanceSquared(feature.position);
-                if (distanceSquared < bestDistanceSquared)
+                if (distanceSquared >= reachSquared)
+                {
+                    continue;
+                }
+                if (!best || std::make_pair(!hasMetal, distanceSquared) < std::make_pair(!bestHasMetal, bestDistanceSquared))
                 {
                     bestDistanceSquared = distanceSquared;
-                    bestWreck = featureId;
+                    bestHasMetal = hasMetal;
+                    best = featureId;
                 }
             }
-            if (bestWreck)
+            if (best)
             {
-                outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(ReclaimOrder(*bestWreck), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(ReclaimOrder(*best), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
                 return;
             }
         }
 
         // Otherwise lend a hand at the factory.
-        if (!bb.factories.empty() && builderAtBase)
+        if (!bb.factories.empty() && builderAtBase && !saving)
         {
             const auto& factory = sim.getUnitState(bb.factories.front());
             if (!factory.buildQueue.empty())
