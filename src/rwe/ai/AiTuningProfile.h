@@ -76,6 +76,17 @@ namespace rwe
         int metalMakerOnAbovePercent{70};
         int targetAirPlantCount{1};
         int targetVehiclePlantCount{1};
+        /**
+         * Labs added beyond the first while the metal store is full.
+         *
+         * A full store is income thrown away, and measured over thirty
+         * minutes that is where the AI ended up: both sides at the cap from
+         * minute fifteen to the end, the commander lending a hand at the
+         * one lab and the one lab unable to spend it. Production, not
+         * metal, was the ceiling by then, and another factory is what a
+         * player buys with a surplus.
+         */
+        int surplusLabCount{1};
         /** Dedicated scouts kept alive: planes from the air plant, fast vehicles from the vehicle plant. */
         int targetScoutPlaneCount{1};
         int targetScoutVehicleCount{1};

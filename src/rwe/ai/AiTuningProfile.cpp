@@ -53,6 +53,7 @@ namespace rwe
                 p.targetMetalExtractorCount = 5;
                 p.targetDefenceCount = 1;
                 p.targetVehiclePlantCount = 0;
+                p.surplusLabCount = 0;
                 // Forgets about aircraft until they are overhead, and then
                 // under-builds. Being slow to answer a bomber is a more
                 // convincing weakness than owning fewer solar collectors.
@@ -76,6 +77,7 @@ namespace rwe
                 p.targetSolarCount = 12;
                 p.targetMetalExtractorCount = 10;
                 p.targetConstructorCount = 2;
+                p.surplusLabCount = 2;
                 p.targetDefenceCount = 3;
                 p.baseAntiAirTowerCount = 2;
                 p.reactiveAntiAirTowerCount = 5;

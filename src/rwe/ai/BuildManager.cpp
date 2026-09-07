@@ -407,6 +407,22 @@ namespace rwe
         {
             want(s.vehiclePlant);
         }
+
+        // Growth, once the plan above is satisfied. The targets are where
+        // the base starts, not where it stops: the AI used to build its
+        // eighth extractor and never another, and its income sat at ten a
+        // second from the seventh minute to the thirtieth in every game
+        // measured, with patches to spare. An extractor is fifty metal
+        // that pays for itself in half a minute; there is no count at which
+        // it stops being worth having. And when the store is full, income
+        // is being thrown away, and another lab is what turns it into an
+        // army.
+        auto metalFull = bb.metalStorage.value > 0.0f && bb.currentMetal.value >= bb.metalStorage.value * 0.8f;
+        if (metalFull && total(s.lab) >= 1 && total(s.lab) < 1 + profile.surplusLabCount)
+        {
+            want(s.lab);
+        }
+        want(s.metalExtractor);
         // Replace what was just destroyed before getting on with the plan.
         //
         // Without this a razed base is rebuilt in generic priority order,
