@@ -26,6 +26,7 @@ namespace rwe
         bb.baseAnchor.reset();
         bb.idleBuilders.clear();
         bb.factories.clear();
+        bb.metalMakers.clear();
         bb.combatUnits.clear();
         bb.scoutUnits.clear();
         bb.antiAirUnits.clear();
@@ -43,6 +44,10 @@ namespace rwe
         bb.energyStorage = player.maxEnergy;
         bb.metalStalled = player.metalStalled;
         bb.energyStalled = player.energyStalled;
+        bb.metalIncome = player.previousMetalProductionBuffer;
+        bb.energyIncome = player.previousEnergyProductionBuffer;
+        bb.metalDemand = player.previousDesiredMetalConsumptionBuffer;
+        bb.energyDemand = player.previousDesiredEnergyConsumptionBuffer;
 
         // What is standing this tick, to be diffed against last tick's at the
         // end of the pass. Ordered, because the losses that come out of the
@@ -71,6 +76,11 @@ namespace rwe
             if (!def.isMobile)
             {
                 standingNow.emplace(unitId.value, StandingBuilding{unit.unitType, unit.position});
+            }
+
+            if (def.onOffable && def.makesMetal.value > 0.0f)
+            {
+                bb.metalMakers.push_back(unitId);
             }
 
             if (def.commander)

@@ -186,6 +186,8 @@ set(SOURCE_FILES
     src/rwe/ai/EconomyManager.h
     src/rwe/ai/MapIntel.cpp
     src/rwe/ai/MapIntel.h
+    src/rwe/ai/MetalMakerManager.cpp
+    src/rwe/ai/MetalMakerManager.h
     src/rwe/ai/PerceptionManager.cpp
     src/rwe/ai/PerceptionManager.h
     src/rwe/ai/ScoutManager.cpp

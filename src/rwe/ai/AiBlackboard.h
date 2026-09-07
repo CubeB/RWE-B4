@@ -106,6 +106,19 @@ namespace rwe
         Energy energyStorage{0};
         bool metalStalled{false};
         bool energyStalled{false};
+        /**
+         * Last tick's production and demand for each resource.
+         *
+         * Stored because "am I rich" cannot be answered from the stockpile
+         * alone: a base can be sitting on full energy storage and still be
+         * one metal maker away from never producing anything again. Income
+         * against demand is the question that matters, and nothing on the
+         * blackboard could answer it before.
+         */
+        Metal metalIncome{0};
+        Energy energyIncome{0};
+        Metal metalDemand{0};
+        Energy energyDemand{0};
 
         // --- Own units ---
         std::map<std::string, int> ownedCompletedCounts;
@@ -120,6 +133,12 @@ namespace rwe
         std::vector<UnitId> idleBuilders;
         /** Complete factories (immobile builders), in id order. */
         std::vector<UnitId> factories;
+        /**
+         * Complete metal makers, in id order: anything that can be switched
+         * off and turns energy into metal. Found by what the unit does rather
+         * than by name, so a mod's own maker is picked up too.
+         */
+        std::vector<UnitId> metalMakers;
         /** Complete, mobile, armed, non-builder units, in id order. */
         std::vector<UnitId> combatUnits;
         /** Complete scout planes and scout vehicles, in id order. */

@@ -8,6 +8,7 @@
 #include <rwe/ai/ArmyManager.h>
 #include <rwe/ai/BuildManager.h>
 #include <rwe/ai/EconomyManager.h>
+#include <rwe/ai/MetalMakerManager.h>
 #include <rwe/ai/PerceptionManager.h>
 #include <rwe/ai/ReachabilityMap.h>
 #include <rwe/ai/ScoutManager.h>
@@ -94,6 +95,7 @@ namespace rwe
 
         PerceptionManager perception;
         EconomyManager economy;
+        MetalMakerManager metalMakers;
         StrategicManager strategic;
         BuildManager build;
         ScoutManager scout;

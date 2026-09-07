@@ -59,6 +59,13 @@ namespace rwe
         int antiAirMobileCount{2};
         int targetRadarCount{1};
         int targetMetalMakerCount{2};
+        /**
+         * Metal makers switch off below this share of energy storage and back
+         * on above the other one. Two marks rather than one because a single
+         * threshold makes them flap on and off every tick at the boundary.
+         */
+        int metalMakerOffBelowPercent{25};
+        int metalMakerOnAbovePercent{70};
         int targetAirPlantCount{1};
         int targetVehiclePlantCount{1};
         /** Dedicated scouts kept alive: planes from the air plant, fast vehicles from the vehicle plant. */

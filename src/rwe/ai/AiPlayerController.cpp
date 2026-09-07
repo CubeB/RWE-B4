@@ -190,6 +190,10 @@ namespace rwe
         }
 
         // 5. Economy and production.
+        //
+        // The makers go first: what they are switched to decides how much
+        // energy the build pass below has to spend.
+        timed("makers", [&] { metalMakers.update(sim, profile, blackboard, outCommands); });
         timed("build", [&] { build.update(sim, playerId, profile, blackboard, reachability, rng, outCommands); });
 
         // 6. Eyes, lift and fists.

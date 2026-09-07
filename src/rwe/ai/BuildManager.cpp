@@ -301,7 +301,20 @@ namespace rwe
             want(s.antiAirTower);
         }
         // Out of patches but swimming in energy: turn energy into metal.
-        auto energyRich = bb.energyStorage.value > 0.0f && bb.currentEnergy.value >= bb.energyStorage.value * 0.8f;
+        // A full tank is not the same as a surplus, and telling them apart is
+        // the difference between an economy and a trap. The AI used to build a
+        // maker whenever storage happened to be near full, which on six solar
+        // collectors it briefly is -- and each maker then draws sixty energy a
+        // second for ever, so two of them ate the whole generation and left
+        // nothing to build with. Ten minutes into an arena game it sat at zero
+        // energy with demand at 191 against income of 138.
+        //
+        // So: near-full storage AND production actually running ahead of
+        // demand. MetalMakerManager switches the ones we have off when that
+        // stops being true, which is also what stops this rule seeing a full
+        // tank that only looks full because nothing can afford to spend it.
+        auto energySurplus = bb.energyIncome.value > bb.energyDemand.value;
+        auto energyRich = bb.energyStorage.value > 0.0f && bb.currentEnergy.value >= bb.energyStorage.value * 0.8f && energySurplus;
         if (metalShort && energyRich && total(s.metalMaker) < profile.targetMetalMakerCount && total(s.lab) >= 1)
         {
             want(s.metalMaker);
