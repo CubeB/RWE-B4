@@ -1,4 +1,5 @@
 #include "ArmyManager.h"
+#include <algorithm>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -167,6 +168,46 @@ namespace rwe
 
         updateAntiAir(sim, profile, bb, outCommands);
 
+        // Who is in the wave. Formed once, when the attack is called, from
+        // everyone then in the army; pruned as they die; and declared spent
+        // when it has shrunk to the retreat size. Anything built after the
+        // call is not in it and gathers at the rally point instead of
+        // walking to the front alone, which is what the army used to do:
+        // measured, a side that had lost its wave sent each new kbot out
+        // by itself and stayed at an army of one to four for the rest of
+        // the game.
+        if (bb.phase == GamePhase::Attack && profile.attackInWaves)
+        {
+            for (auto it = bb.attackGroup.begin(); it != bb.attackGroup.end();)
+            {
+                auto alive = std::binary_search(bb.combatUnits.begin(), bb.combatUnits.end(), UnitId(*it), [](UnitId a, UnitId b) { return a.value < b.value; });
+                it = alive ? std::next(it) : bb.attackGroup.erase(it);
+            }
+            if (bb.attackGroup.empty() && !bb.waveSpent)
+            {
+                for (auto unitId : bb.combatUnits)
+                {
+                    if (!(bb.scoutUnitId && *bb.scoutUnitId == unitId))
+                    {
+                        bb.attackGroup.insert(unitId.value);
+                    }
+                }
+            }
+            if (static_cast<int>(bb.attackGroup.size()) < profile.retreatArmySize)
+            {
+                bb.waveSpent = true;
+            }
+        }
+        else
+        {
+            bb.attackGroup.clear();
+            bb.waveSpent = false;
+        }
+
+        // Outnumbered at home: hold at the rally point and fight what comes
+        // within reach, rather than sending two kbots at nine.
+        auto outnumbered = profile.holdWhenOutnumbered && bb.enemiesNearBase.size() > bb.combatUnits.size();
+
         for (auto unitId : bb.combatUnits)
         {
             if (bb.scoutUnitId && *bb.scoutUnitId == unitId)
@@ -190,7 +231,7 @@ namespace rwe
                 case GamePhase::Defend:
                 {
                     // Head for the intruder closest to home.
-                    if (bb.baseAnchor)
+                    if (bb.baseAnchor && !outnumbered)
                     {
                         if (auto enemy = nearestKnownEnemy(sim, bb, *bb.baseAnchor, profile.defendRadius))
                         {
@@ -205,7 +246,8 @@ namespace rwe
                 }
                 case GamePhase::Attack:
                 {
-                    if (bb.phase == GamePhase::Attack && bb.attackTarget)
+                    auto inWave = !profile.attackInWaves || bb.attackGroup.count(unitId.value) != 0;
+                    if (bb.phase == GamePhase::Attack && bb.attackTarget && inWave)
                     {
                         if (!isMovingTo(unit, *bb.attackTarget))
                         {

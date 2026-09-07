@@ -560,6 +560,105 @@ namespace rwe
         }
     }
 
+    TEST_CASE("the army attacks in waves and holds when outnumbered", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        // Omniscient, so the enemy base is known without a scout.
+        auto profile = makeDefaultBrutalProfile();
+        profile.attackArmySize = 3;
+        profile.retreatArmySize = 2;
+        profile.scoutCount = 0;
+
+        SECTION("a unit built during the attack gathers for the next wave instead of walking to the front")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 0_ss, 200_ss), script);
+            std::vector<UnitId> wave;
+            for (int i = 0; i < 3; ++i)
+            {
+                wave.push_back(addUnit(sim, "ARMPW", ai, SimVector(SimScalar(-100.0f - i * 40.0f), 0_ss, 0_ss), script));
+            }
+            runTicks(sim, controller, 20, commands);
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.phase == GamePhase::Attack);
+            REQUIRE(bb.attackGroup.size() == 3);
+            REQUIRE(bb.attackTarget.has_value());
+
+            auto lateId = addUnit(sim, "ARMPW", ai, SimVector(-300_ss, 0_ss, -300_ss), script);
+            commands.clear();
+            runTicks(sim, controller, 20, commands);
+            REQUIRE(bb.phase == GamePhase::Attack);
+            REQUIRE(bb.attackGroup.count(lateId.value) == 0);
+            auto legs = ordersFor<MoveOrder>(commands, lateId);
+            REQUIRE(!legs.empty());
+            REQUIRE(bb.rallyPoint.has_value());
+            REQUIRE(legs.front().destination.distanceSquared(*bb.rallyPoint) < (64_ss * 64_ss));
+            REQUIRE(legs.front().destination.distanceSquared(*bb.attackTarget) > (200_ss * 200_ss));
+
+            SECTION("and the attack ends when the wave that set out is spent, not when the army is")
+            {
+                sim.getUnitState(wave[0]).markAsDeadNoCorpse();
+                sim.getUnitState(wave[1]).markAsDeadNoCorpse();
+                runTicks(sim, controller, 20, commands);
+                REQUIRE(bb.phase == GamePhase::Boom);
+                REQUIRE(bb.attackGroup.empty());
+                REQUIRE_FALSE(bb.waveSpent);
+            }
+        }
+
+        SECTION("outnumbered at home, the army holds at the rally point rather than charging")
+        {
+            // One of ours against three of theirs, inside the defend radius
+            // but beyond anything's engage radius.
+            auto ownId = addUnit(sim, "ARMPW", ai, SimVector(-100_ss, 0_ss, 0_ss), script);
+            for (int i = 0; i < 3; ++i)
+            {
+                addUnit(sim, "ARMPW", human, SimVector(650_ss, 0_ss, SimScalar(i * 40.0f)), script);
+            }
+
+            SECTION("held")
+            {
+                AiPlayerController controller(ai, profile, 42u, MapIntel{});
+                std::vector<PlayerCommand> commands;
+                runTicks(sim, controller, 20, commands);
+                REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
+                REQUIRE(controller.getBlackboard().enemiesNearBase.size() == 3);
+                REQUIRE(ordersFor<AttackOrder>(commands, ownId).empty());
+                REQUIRE(!ordersFor<MoveOrder>(commands, ownId).empty());
+            }
+
+            SECTION("or, with the rule off, thrown at them one at a time")
+            {
+                profile.holdWhenOutnumbered = false;
+                AiPlayerController controller(ai, profile, 42u, MapIntel{});
+                std::vector<PlayerCommand> commands;
+                runTicks(sim, controller, 20, commands);
+                REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
+                REQUIRE(!ordersFor<AttackOrder>(commands, ownId).empty());
+            }
+        }
+    }
+
+    TEST_CASE("an AI knob can be set by name", "[ai]")
+    {
+        auto p = makeDefaultStandardProfile();
+        REQUIRE(applyAiTuning(p, "attackArmySize", "12"));
+        REQUIRE(p.attackArmySize == 12);
+        REQUIRE(applyAiTuning(p, "attackInWaves", "0"));
+        REQUIRE_FALSE(p.attackInWaves);
+        REQUIRE(applyAiTuning(p, "engageRadius", "300"));
+        REQUIRE(p.engageRadius == 300_ss);
+        REQUIRE_FALSE(applyAiTuning(p, "noSuchKnob", "1"));
+    }
+
     TEST_CASE("scouts explore the ground the AI has not seen", "[ai]")
     {
         auto script = makeEmptyCobScript();

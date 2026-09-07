@@ -1296,3 +1296,129 @@ an elimination -- armies of 32 and 38, and a hundred-odd units lost apiece.
    look, which is what a human does, or let radar coverage count.
 3. **Anti-air costs 256 metal and the first two lab slots** the moment one
    enemy scout plane is seen. It is the right rule reacting to too little.
+
+## 14.14 Affordability, growth, and waves (2026-09-07, later)
+
+Three more changes, each measured before it was kept. The measurement
+runner now keeps every game's economy and event CSVs beside the summary
+(`tools/ai-arena.ps1 -outDir`), and a small script over those is what the
+tables below come from: the result line says who won, the samples say why.
+
+### The affordability test, and the run it took to get right
+
+Item 1 of S:14.13's list. Nothing in `BuildManager` asked whether the next
+item could be paid for; it started whatever came next and the economy
+answered by stalling everything in equal measure. Measured: committed at 2.4
+times income through the opening, metal-stalled 12-18% of the first ten
+minutes, an air plant that takes 24 seconds taking 85.
+
+Now an idle builder estimates the draw of the next item -- the unbuilt share
+of its price at the builder's own rate, `BuildManager::estimateBuild` -- and
+starts it only if the stockpile lasts the build at income less what the
+other builders are already committed to. Within a minute's saving, it waits
+and reclaims rocks meanwhile; out of reach altogether, it is skipped.
+Extractors and makers are exempt, being the way out of a stall. Frames
+nobody is on are resumed with a repair order before anything new, since
+half their metal is already in them and they rot (S:93).
+
+The first version of this made the AI **worse**, and the reason is worth
+the paragraph. "What the other builders are committed to" was read from
+last tick's demand buffer. The planner runs on the tick a builder falls
+idle, and that buffer still carries the job it just finished -- so a
+705-metal lab was judged unaffordable with 627 in the bank and nothing
+drawing, was skipped, and ten solar collectors went up in its place. First
+fighting unit at 550 seconds instead of 230. The fix is
+`AiBlackboard::metalCommitted`, worked out from the frames our builders
+and factories are actually on. With that:
+
+| ten minutes, Painted Desert, 4 games | before | after |
+|---|---|---|
+| metal-stalled samples | 12-18% | 2-5% (six of eight sides) |
+| army | 5-8 | 8-11 |
+| metal income | 7.5-9.2 | 8.7-9.6 |
+| fourth extractor, lab, first fighter | 175s, 119s, 230s | unchanged |
+
+### Growth: the targets are where the base starts
+
+The thirty-minute samples then showed the ceiling. Income sat at 8-11 from
+the seventh minute to the thirtieth in every game, with 7-8 extractors
+standing and patches to spare, because `targetMetalExtractorCount` was 8
+and nothing asked for a ninth. And game 2 had both sides at a full 1350
+metal from minute fifteen to the end -- the commander lending a hand at the
+one lab, and the one lab unable to spend it.
+
+So an extractor is wanted whenever the plan has nothing else (fifty metal
+that pays for itself in half a minute), and a store four-fifths full asks
+for another lab, up to `surplusLabCount` beyond the first.
+
+| thirty minutes, ARM side, 4 games | before | after |
+|---|---|---|
+| extractors standing | 7-8 | 10-19 |
+| labs | 1 | 1-3 |
+| income at the end | 8-11 | 9-16 |
+| army at the end | 11-39 | 19-52 |
+
+The ten-minute figures did not move, which is the point: it starts where
+the old plan ran out.
+
+### ARM beats CORE, from either slot
+
+With both of the above in, ARM won or dominated every game, and swapping
+the sides (`-sideA CORE -sideB ARM`) did not change that: CORE at slot 0
+was eliminated in three of four. Same code both sides, so it is the unit
+set. The lab's "two raiders per rocket kbot" gives CORE an army of A.K.s,
+and an A.K. loses to a Peewee. Not fixed yet; it is measurable now, and it
+is why a behaviour change has to be judged with both sides on the same
+faction.
+
+### Waves, and holding when outnumbered
+
+Game 4's trace showed the other half of why a side collapses. CORE's wave
+fell to two units at minute twelve and its army then sat at one to four for
+the rest of the game: each kbot the lab finished was sent to the front
+alone (`ArmyManager` moved every combat unit to the attack target the
+moment one existed), and in Defend every unit charged the nearest intruder
+whatever the odds, so a raiding party of nine was answered two kbots at a
+time.
+
+Two rules, both knobs: `attackInWaves` -- the units at the rally point when
+the attack is called are the wave, anything built after gathers for the
+next one, and the attack ends when the wave is spent rather than when the
+whole army is; and `holdWhenOutnumbered` -- with more armed intruders near
+the base than combat units, hold at the rally point and fight what comes
+within reach.
+
+Judging these needed something the arena could not do: a mirror match
+gives both sides the change. `--ai-tune <player>:<knob>=<value>` sets one
+knob for one player (`applyAiTuning`), and the runner's `-tuneA`/`-tuneB`
+pass it through, so the change is played against its absence in the same
+game, both sides ARM.
+
+Eight games, ARM against ARM, the new rules on one side and off on the
+other, four with each ordering so the slot cancels:
+
+| | new rules | old rules |
+|---|---|---|
+| eliminated the other side | 2 | 2 |
+| ahead at the thirty-minute cap | 4 of 4 | 0 of 4 |
+| army at the end, ordering A / B | 29 / 51 | 14 / 21 |
+| income at the end, ordering A / B | 15 / 16 | 15.5 / 11 |
+
+Not a rout -- the old rules still took two games outright, both by an
+early wave the new side was still gathering for -- but at the cap the new
+side stands with two to four times the army every time, which is what
+waves were meant to buy: an army that survives to be one.
+
+### Still open, in order
+
+1. **CORE loses to ARM under the same code.** The lab's two-raiders-per-rocket
+   ratio gives CORE an army of A.K.s. Per-side composition, or a ratio
+   that reads the units' actual strength, is the fix; the swapped-sides run
+   is the test.
+2. **The whole army is recalled by one intruder.** `enemiesNearBase` puts
+   the AI in Defend for a single scout, and the wave on its way to the
+   enemy turns round. Defend should need a threat worth answering.
+3. **The mex expansion search still needs explored ground**, and radar
+   coverage does not count (S:14.13 item 2, unchanged).
+4. **Anti-air costs 256 metal and the first two lab slots** the moment one
+   enemy scout plane is seen (S:14.13 item 3, unchanged).

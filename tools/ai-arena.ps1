@@ -11,8 +11,14 @@
 #   tools\ai-arena.ps1                          # 10 games, 10 minutes each
 #   tools\ai-arena.ps1 -games 20 -seconds 900
 #   tools\ai-arena.ps1 -difficulty hard -map "Great Divide"
+#   tools\ai-arena.ps1 -sideA ARM -sideB ARM -tuneB "attackInWaves=0,holdWhenOutnumbered=0"
 #
 # Compare two builds by running it against each and diffing the averages.
+# Compare two BEHAVIOURS with -tuneA / -tuneB, which set AI knobs for one
+# side only (comma-separated knob=value, names as in AiTuningProfile.h): a
+# mirror match cannot show whether a change helped, because both sides get
+# it, so play the change against its absence in the same game -- and give
+# both sides the same faction, or the faction difference is measured too.
 
 param(
     [int]$games = 10,
@@ -21,6 +27,8 @@ param(
     [string]$difficulty = "standard",
     [string]$sideA = "ARM",
     [string]$sideB = "CORE",
+    [string]$tuneA = "",
+    [string]$tuneB = "",
     [string]$exe = "D:\RWE\build-release\rwe.exe",
     [string]$outDir = "$env:TEMP\rwe-arena"
 )
@@ -48,6 +56,8 @@ for ($seed = 1; $seed -le $games; $seed++) {
         '--player', ('"B;Computer;' + $sideB + ';1"'),
         '--ai-difficulty', $difficulty
     )
+    foreach ($t in ($tuneA -split ',' | Where-Object { $_ })) { $gameArgs += @('--ai-tune', ('0:' + $t)) }
+    foreach ($t in ($tuneB -split ',' | Where-Object { $_ })) { $gameArgs += @('--ai-tune', ('1:' + $t)) }
     $p = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -ArgumentList $gameArgs -PassThru -Wait
     if ($p.ExitCode -ne 0) { Write-Warning "game $seed exited $($p.ExitCode)"; continue }
 

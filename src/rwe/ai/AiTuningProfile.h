@@ -138,6 +138,23 @@ namespace rwe
         int attackArmySize{8};
         /** Fall back to the rally point when the attacking army drops below this. */
         int retreatArmySize{3};
+        /**
+         * Units built during an attack gather at the rally point for the
+         * next wave instead of walking to the front one at a time. The
+         * attack is over when the wave that set out has fallen below
+         * retreatArmySize, not when the whole army has -- the reinforcements
+         * waiting at home are the next wave, not a reason to keep this one
+         * going.
+         */
+        bool attackInWaves{true};
+        /**
+         * With more armed intruders near the base than we have combat units,
+         * hold at the rally point and fight what comes within reach, rather
+         * than charging the nearest one. Two kbots sent at a raiding party
+         * of nine are two kbots lost; kept, they are the start of the wave
+         * that answers it.
+         */
+        bool holdWhenOutnumbered{true};
         /** Enemies this close to the base anchor trigger a defence. */
         SimScalar defendRadius{900_ss};
         /** How far from a known enemy an army unit will pick a fight. */
@@ -163,4 +180,14 @@ namespace rwe
     AiTuningProfile makeIdleProfile();
     AiTuningProfile makeProfileForDifficulty(AiDifficulty difficulty);
     const char* aiDifficultyName(AiDifficulty difficulty);
+
+    /**
+     * Sets one knob by its field name, from text. This is what
+     * `--ai-tune <player>:<knob>=<value>` applies, and it exists for the
+     * arena: a change to the AI's behaviour cannot be judged in a mirror
+     * match, where both sides get it, so the runner plays one setting
+     * against the other in the same game. False for a name it does not
+     * know; the caller decides whether that is fatal.
+     */
+    bool applyAiTuning(AiTuningProfile& profile, const std::string& knob, const std::string& value);
 }

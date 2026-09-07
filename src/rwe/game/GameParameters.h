@@ -116,6 +116,14 @@ namespace rwe
         /** Tuning profile given to every computer player in this game. */
         AiDifficulty aiDifficulty{AiDifficulty::Standard};
 
+        /**
+         * Single AI knobs overridden for one player, each as
+         * "<player>:<knob>=<value>", from --ai-tune. For the arena: a
+         * behaviour change cannot be judged in a mirror match, so this is
+         * how one setting is played against the other in the same game.
+         */
+        std::vector<std::string> aiTuning;
+
         /** Set when this game is a saved game being resumed rather than a fresh start. */
         std::optional<std::string> loadFromSaveFile;
 

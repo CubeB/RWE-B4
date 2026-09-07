@@ -114,6 +114,7 @@ int main(int argc, char* argv[])
                       << "  --ai-arena <seconds>  computer-vs-computer measurement run: draws nothing,\n"
                       << "                        runs flat out, writes ai-arena.csv and quits\n"
                       << "  --seed <n>            vary the simulation seed, for averaging arena runs\n"
+                      << "  --ai-tune <p>:<k>=<v> override one AI knob for player p (see applyAiTuning)\n"
                       << "  --record-replay <f>   write every command to a replay file as you play\n"
                       << "  --replay <file>       watch a replay instead of playing\n"
                       << "  --width <pixels>      Window width (default: 800)\n"
@@ -252,6 +253,10 @@ int main(int argc, char* argv[])
                 else
                 {
                     gameParameters->aiDifficulty = rwe::AiDifficulty::Standard;
+                }
+                for (const auto& tuning : args.getMulti("ai-tune"))
+                {
+                    gameParameters->aiTuning.push_back(tuning);
                 }
                 unsigned int playerIndex = 0;
                 if (players.size() > 10)

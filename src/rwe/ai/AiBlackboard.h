@@ -223,5 +223,20 @@ namespace rwe
         std::optional<SimVector> rallyPoint;
         std::optional<SimVector> attackTarget;
         int armySize{0};
+        /**
+         * The units that set out on the attack now under way, by raw id.
+         * Formed from everything at the rally point when the attack was
+         * called, and never added to: a unit built after that gathers for
+         * the next wave. Empty outside an attack.
+         */
+        std::set<unsigned int> attackGroup;
+        /**
+         * Set by the army pass when the wave has fallen below the retreat
+         * size; the strategic pass then ends the attack. Two flags rather
+         * than one test because the strategic pass runs first in the tick,
+         * and on the tick an attack is called the group has not been
+         * formed yet.
+         */
+        bool waveSpent{false};
     };
 }

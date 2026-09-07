@@ -1,4 +1,5 @@
 #include "AiTuningProfile.h"
+#include <stdexcept>
 
 namespace rwe
 {
@@ -93,6 +94,72 @@ namespace rwe
                 return makeDefaultBrutalProfile();
         }
         return makeDefaultStandardProfile();
+    }
+
+    bool applyAiTuning(AiTuningProfile& p, const std::string& knob, const std::string& value)
+    {
+        auto asInt = [&] { return std::stoi(value); };
+        auto asBool = [&] { return value == "1" || value == "true" || value == "on" || value == "yes"; };
+        auto asScalar = [&] { return SimScalar(std::stof(value)); };
+
+        auto setInt = [&](const char* name, int& field) {
+            if (knob != name)
+            {
+                return false;
+            }
+            field = asInt();
+            return true;
+        };
+        auto setBool = [&](const char* name, bool& field) {
+            if (knob != name)
+            {
+                return false;
+            }
+            field = asBool();
+            return true;
+        };
+        auto setScalar = [&](const char* name, SimScalar& field) {
+            if (knob != name)
+            {
+                return false;
+            }
+            field = asScalar();
+            return true;
+        };
+
+        return setInt("openingMetalExtractorCount", p.openingMetalExtractorCount)
+            || setInt("openingSolarCount", p.openingSolarCount)
+            || setInt("targetSolarCount", p.targetSolarCount)
+            || setInt("targetMetalExtractorCount", p.targetMetalExtractorCount)
+            || setInt("targetConstructorCount", p.targetConstructorCount)
+            || setInt("targetDefenceCount", p.targetDefenceCount)
+            || setInt("baseAntiAirTowerCount", p.baseAntiAirTowerCount)
+            || setInt("reactiveAntiAirTowerCount", p.reactiveAntiAirTowerCount)
+            || setInt("antiAirMobileCount", p.antiAirMobileCount)
+            || setInt("targetRadarCount", p.targetRadarCount)
+            || setInt("targetMetalMakerCount", p.targetMetalMakerCount)
+            || setInt("targetAirPlantCount", p.targetAirPlantCount)
+            || setInt("targetVehiclePlantCount", p.targetVehiclePlantCount)
+            || setInt("surplusLabCount", p.surplusLabCount)
+            || setInt("targetScoutPlaneCount", p.targetScoutPlaneCount)
+            || setInt("targetScoutVehicleCount", p.targetScoutVehicleCount)
+            || setInt("saveUpSeconds", p.saveUpSeconds)
+            || setInt("buildPlannerTickInterval", p.buildPlannerTickInterval)
+            || setInt("scoutTickInterval", p.scoutTickInterval)
+            || setInt("tacticalTickInterval", p.tacticalTickInterval)
+            || setInt("attackArmySize", p.attackArmySize)
+            || setInt("retreatArmySize", p.retreatArmySize)
+            || setBool("attackInWaves", p.attackInWaves)
+            || setBool("holdWhenOutnumbered", p.holdWhenOutnumbered)
+            || setBool("cheatModeOmniscient", p.cheatModeOmniscient)
+            || setScalar("nearMexSearchRadius", p.nearMexSearchRadius)
+            || setScalar("maxMexSearchRadius", p.maxMexSearchRadius)
+            || setScalar("expansionMexSearchRadius", p.expansionMexSearchRadius)
+            || setScalar("defendRadius", p.defendRadius)
+            || setScalar("engageRadius", p.engageRadius)
+            || setScalar("rallyDistance", p.rallyDistance)
+            || setScalar("threatAversion", p.threatAversion)
+            || setScalar("resourceCheatMultiplier", p.resourceCheatMultiplier);
     }
 
     const char* aiDifficultyName(AiDifficulty difficulty)

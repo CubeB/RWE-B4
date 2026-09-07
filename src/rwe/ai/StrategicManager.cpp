@@ -41,8 +41,11 @@ namespace rwe
             }
             case GamePhase::Attack:
             {
-                // Too few left standing: regroup and rebuild.
-                if (bb.armySize < profile.retreatArmySize)
+                // Too few left standing: regroup and rebuild. In waves it is
+                // the wave that is counted, not the army -- the units at the
+                // rally point are the next wave, not a reason to press on.
+                auto spent = profile.attackInWaves ? bb.waveSpent : bb.armySize < profile.retreatArmySize;
+                if (spent)
                 {
                     bb.phase = GamePhase::Boom;
                 }

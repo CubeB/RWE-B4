@@ -334,6 +334,29 @@ namespace rwe
             // the game (--ai-difficulty, or rwe.cfg). Per-slot difficulty can
             // follow once the lobby exposes it.
             auto profile = makeProfileForDifficulty(gameParameters.aiDifficulty);
+            for (const auto& entry : gameParameters.aiTuning)
+            {
+                auto colon = entry.find(':');
+                auto equals = entry.find('=');
+                if (colon == std::string::npos || equals == std::string::npos || equals < colon)
+                {
+                    throw std::runtime_error("--ai-tune wants <player>:<knob>=<value>, got " + entry);
+                }
+                if (std::stoul(entry.substr(0, colon)) != static_cast<unsigned long>(i))
+                {
+                    continue;
+                }
+                auto knob = entry.substr(colon + 1, equals - colon - 1);
+                auto value = entry.substr(equals + 1);
+                // A misspelt knob that silently did nothing would make an
+                // arena comparison between two identical AIs look like a
+                // result, so it is fatal.
+                if (!applyAiTuning(profile, knob, value))
+                {
+                    throw std::runtime_error("--ai-tune: no such AI knob: " + knob);
+                }
+                LOG_INFO << "Player " << i << " AI knob " << knob << " = " << value;
+            }
             if (gameParameters.replayFile)
             {
                 // Watching rather than playing: the commands come out of the
