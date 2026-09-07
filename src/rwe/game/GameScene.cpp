@@ -5400,6 +5400,8 @@ namespace rwe
         {
             replaySeekTarget = gameParameters.replaySeekToTick;
         }
+
+        availableReplays = listReplays();
     }
 
     void GameScene::enableReplayRecording(const std::filesystem::path& path, const ReplayHeader& header)
@@ -5432,7 +5434,10 @@ namespace rwe
         auto nowSeconds = static_cast<int>(sceneTime.value / ticksPerSecond);
         auto endSeconds = static_cast<int>(lastTick / ticksPerSecond);
 
-        ImGui::SetNextWindowSize(ImVec2(430.0f, 165.0f), ImGuiCond_FirstUseEver);
+        // Tall enough for the controls and the recordings list under them,
+        // which is otherwise clipped to its first row the first time it is
+        // opened -- and the first time is when it matters.
+        ImGui::SetNextWindowSize(ImVec2(470.0f, 360.0f), ImGuiCond_FirstUseEver);
         if (!ImGui::Begin("Replay"))
         {
             ImGui::End();
@@ -5487,7 +5492,65 @@ namespace rwe
         ImGui::SameLine();
         ImGui::Checkbox("Fog", &fogOfWarEnabled);
 
+        ImGui::Separator();
+        // Open the first time it is seen: choosing what to watch is half of
+        // what this window is for, and a list nobody knows is there is not a
+        // chooser. Once, not always, so it stays shut if it is closed.
+        ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+        if (ImGui::CollapsingHeader("Recordings"))
+        {
+            ImGui::SameLine(ImGui::GetWindowWidth() - 70.0f);
+            if (ImGui::SmallButton("Refresh"))
+            {
+                availableReplays = listReplays();
+            }
+
+            ImGui::BeginChild("replay list", ImVec2(0.0f, 140.0f), true);
+            for (const auto& summary : availableReplays)
+            {
+                auto minutes = summary.seconds / 60;
+                auto seconds = summary.seconds % 60;
+                auto label = summary.path.stem().string() + "  -  " + summary.mapName
+                    + "  -  " + summary.players
+                    + "  -  " + std::to_string(minutes) + ":" + (seconds < 10 ? "0" : "") + std::to_string(seconds);
+
+                auto isCurrent = gameParameters.replayFile && summary.path == std::filesystem::path(*gameParameters.replayFile);
+                if (ImGui::Selectable(label.c_str(), isCurrent) && !isCurrent)
+                {
+                    openReplay(summary.path);
+                }
+            }
+            if (availableReplays.empty())
+            {
+                ImGui::TextUnformatted("Nothing in the Replays folder yet.");
+            }
+            ImGui::EndChild();
+        }
+
         ImGui::End();
+    }
+
+    void GameScene::openReplay(const std::filesystem::path& path)
+    {
+        auto replay = readReplayFile(path);
+        if (!replay)
+        {
+            printConsole("Could not read replay: " + path.string());
+            return;
+        }
+
+        // Every recording brings its own map, players and seed, so switching
+        // to one is starting a different game rather than pointing this one
+        // somewhere else.
+        auto parameters = gameParametersFromReplayHeader(replay->header);
+        parameters.replayFile = path.string();
+        sceneContext.audioService->stopMusic();
+        auto scene = std::make_shared<LoadingScene>(
+            sceneContext,
+            audioLookup,
+            AudioService::LoopToken(),
+            parameters);
+        sceneContext.sceneManager->setNextScene(scene);
     }
 
     void GameScene::restartReplayAt(unsigned int tick)

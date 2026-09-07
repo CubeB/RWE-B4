@@ -105,4 +105,57 @@ namespace rwe
      * game that crashed, not a corruption to report.
      */
     std::optional<Replay> readReplayFile(const std::filesystem::path& path);
+
+    /**
+     * Where replays are kept when no path is given: <local data path>/Replays,
+     * created on demand.
+     *
+     * Nothing rather than SaveFile's throw for a machine with no data path.
+     * The front end asks this to decide whether to offer a replay menu at all,
+     * and on such a machine the answer is that there are no replays, which is
+     * not a failure worth an exception.
+     */
+    std::optional<std::filesystem::path> replaysDirectory();
+
+    /**
+     * A bare name becomes a file in replaysDirectory(); anything already
+     * carrying a separator or an extension is a path the caller picked out and
+     * is left exactly as given.
+     */
+    std::filesystem::path replayPathForName(const std::string& name);
+
+    /** Enough to put a replay in a list and let someone choose one. */
+    struct ReplaySummary
+    {
+        std::filesystem::path path;
+        std::string mapName;
+
+        /** The filled slots' sides, in slot order: "ARM v CORE". */
+        std::string players;
+
+        /** Length of the recording in seconds. */
+        unsigned int seconds{0};
+
+        /** Last write time, so the list can be newest first. */
+        std::filesystem::file_time_type modified{};
+    };
+
+    /**
+     * Every readable replay in replaysDirectory(), newest first.
+     *
+     * A directory that was never made, a file that will not open and a file
+     * that is not a replay are all ordinary: the directory holds whatever
+     * anyone drops in it. Each is skipped, and none of them throws.
+     */
+    std::vector<ReplaySummary> listReplays();
+
+    /**
+     * The same for a directory named outright, which is what a viewer pointed
+     * at one wants. The other form reads the machine's own data path, which a
+     * test has no way to move.
+     */
+    std::vector<ReplaySummary> listReplays(const std::filesystem::path& directory);
+
+    /** Nothing for a file readReplayFile will not read. */
+    std::optional<ReplaySummary> summariseReplay(const std::filesystem::path& path);
 }

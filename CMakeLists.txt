@@ -1000,6 +1000,12 @@ target_link_libraries(battle_test librwe)
 add_executable(path_bench src/path_bench.cpp)
 target_link_libraries(path_bench librwe)
 
+# Watches a recorded game. Its own executable rather than a switch on rwe.exe
+# because watching one is a separate thing to do, with its own list of what
+# there is to watch.
+add_executable(replay_viewer src/replay_viewer.cpp)
+target_link_libraries(replay_viewer librwe)
+
 # Crashes on purpose, so the crash handler has something to be tested against.
 # rwe_test runs it as a subprocess: nothing else exercises a real fault.
 add_executable(crash_probe src/crash_probe.cpp)
@@ -1009,5 +1015,5 @@ target_link_libraries(crash_probe librwe)
 # symbol table, which for an executable means linking with -rdynamic. Without
 # this the crash reports on Linux are addresses and nothing else.
 if(NOT WIN32)
-    set_target_properties(rwe battle_test crash_probe PROPERTIES ENABLE_EXPORTS ON)
+    set_target_properties(rwe battle_test replay_viewer crash_probe PROPERTIES ENABLE_EXPORTS ON)
 endif()

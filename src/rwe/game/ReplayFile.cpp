@@ -1,11 +1,14 @@
 #include "ReplayFile.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
 #include <network.pb.h>
 #include <nlohmann/json.hpp>
 #include <rwe/proto/serialization.h>
+#include <rwe/sim/SimTicksPerSecond.h>
+#include <rwe/util.h>
 #include <rwe/util/match.h>
 #include <stdexcept>
 #include <string>
@@ -20,6 +23,8 @@ namespace rwe
         constexpr char Magic[] = {'R', 'W', 'E', 'R', 'E', 'P', 'L', 'A', 'Y'};
         constexpr std::size_t MagicSize = sizeof(Magic);
         constexpr char Version = 1;
+
+        constexpr const char* ReplayExtension = ".rwereplay";
 
         /**
          * A serialized command runs to tens of bytes; the longest carries a
@@ -440,5 +445,101 @@ namespace rwe
         }
 
         return replay;
+    }
+
+    std::optional<fs::path> replaysDirectory()
+    {
+        auto base = getLocalDataPath();
+        if (!base)
+        {
+            return std::nullopt;
+        }
+
+        auto dir = *base / "Replays";
+        std::error_code ec;
+        fs::create_directories(dir, ec);
+        return dir;
+    }
+
+    fs::path replayPathForName(const std::string& name)
+    {
+        fs::path given(name);
+        if (given.has_parent_path() || given.has_extension())
+        {
+            return given;
+        }
+
+        // An empty base leaves the name relative to wherever the process was
+        // started, which is the only place left that a file could be.
+        auto dir = replaysDirectory();
+        return (dir ? *dir : fs::path()) / (name + ReplayExtension);
+    }
+
+    std::optional<ReplaySummary> summariseReplay(const fs::path& path)
+    {
+        // The whole file rather than the header alone, because the length of
+        // the recording is the last thing written: stopping at the header
+        // would mean stopping just short of the one figure it does not carry.
+        // A replay is a few kilobytes, and this runs once per file in a list.
+        auto replay = readReplayFile(path);
+        if (!replay)
+        {
+            return std::nullopt;
+        }
+
+        ReplaySummary summary;
+        summary.path = path;
+        summary.mapName = replay->header.mapName;
+        for (const auto& p : replay->header.players)
+        {
+            if (!p)
+            {
+                continue;
+            }
+            if (!summary.players.empty())
+            {
+                summary.players += " v ";
+            }
+            summary.players += p->side;
+        }
+        summary.seconds = replay->lastTick / static_cast<unsigned int>(SimTicksPerSecond);
+
+        std::error_code ec;
+        summary.modified = fs::last_write_time(path, ec);
+        return summary;
+    }
+
+    std::vector<ReplaySummary> listReplays()
+    {
+        auto dir = replaysDirectory();
+        if (!dir)
+        {
+            return {};
+        }
+        return listReplays(*dir);
+    }
+
+    std::vector<ReplaySummary> listReplays(const fs::path& directory)
+    {
+        std::vector<ReplaySummary> summaries;
+
+        // The error_code overload so that a directory nobody has recorded
+        // into yet iterates as an empty one instead of throwing.
+        std::error_code ec;
+        for (const auto& entry : fs::directory_iterator(directory, ec))
+        {
+            if (entry.path().extension() != ReplayExtension)
+            {
+                continue;
+            }
+
+            if (auto summary = summariseReplay(entry.path()); summary)
+            {
+                summaries.push_back(std::move(*summary));
+            }
+        }
+
+        std::sort(summaries.begin(), summaries.end(), [](const auto& a, const auto& b) { return a.modified > b.modified; });
+        return summaries;
     }
 }

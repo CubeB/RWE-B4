@@ -37,6 +37,23 @@ namespace rwe
             }
         };
 
+        /** Deletes its directory and whatever the test put in it, either way. */
+        struct TempDir
+        {
+            fs::path path{uniqueTempPath().replace_extension()};
+
+            TempDir()
+            {
+                fs::create_directories(path);
+            }
+
+            ~TempDir()
+            {
+                std::error_code ec;
+                fs::remove_all(path, ec);
+            }
+        };
+
         PlayerInfo makePlayer(const std::string& name, const std::string& side, unsigned int color, std::optional<int> teamId)
         {
             PlayerInfo p{
@@ -297,6 +314,128 @@ namespace rwe
             out << "RWE";
             out.close();
             REQUIRE(!readReplayFile(file.path).has_value());
+        }
+    }
+
+    TEST_CASE("a replay summarises into something a person can choose from", "[replay]")
+    {
+        TempFile file;
+
+        SECTION("map, sides and length off a replay that was really written")
+        {
+            auto header = makeHeader();
+            header.players.push_back(makePlayer("Blue", "ARM", 0, std::nullopt));
+            header.players.push_back(std::nullopt);
+            header.players.push_back(makePlayer("Red", "CORE", 1, std::nullopt));
+
+            {
+                ReplayWriter writer(file.path, header);
+                writer.recordTick(95, PlayerId(0), unitStop(1));
+            }
+
+            auto summary = summariseReplay(file.path);
+            REQUIRE(summary.has_value());
+            REQUIRE(summary->path == file.path);
+            REQUIRE(summary->mapName == "Coast To Coast");
+
+            // The empty slot leaves no gap here. This line is for a person to
+            // read, not the slot-indexed list the commands are named by.
+            REQUIRE(summary->players == "ARM v CORE");
+
+            // 95 ticks at thirty a second, and the part second is dropped.
+            REQUIRE(summary->seconds == 3u);
+        }
+
+        SECTION("nothing at all for a file that is not a replay")
+        {
+            std::ofstream out(file.path, std::ios::binary);
+            out << "RWESAVE!!" << '\1' << "whatever follows";
+            out.close();
+            REQUIRE(!summariseReplay(file.path).has_value());
+        }
+    }
+
+    TEST_CASE("listing a folder keeps to the replays in it", "[replay]")
+    {
+        TempDir dir;
+
+        {
+            ReplayWriter writer(dir.path / "game.rwereplay", makeHeader());
+            writer.recordTick(30, PlayerId(0), unitStop(1));
+        }
+        {
+            std::ofstream out(dir.path / "notes.txt");
+            out << "not a replay, and not claiming to be";
+        }
+        {
+            // The harder half: it has the extension, so the listing opens it
+            // and finds it is not one. A person's folder holds what they put
+            // in it, and a half-written recording is a normal thing to find.
+            std::ofstream out(dir.path / "damaged.rwereplay", std::ios::binary);
+            out << "RWESAVE!!" << '\1' << "cut off here";
+        }
+
+        auto replays = listReplays(dir.path);
+        REQUIRE(replays.size() == 1);
+        REQUIRE(replays[0].path.filename() == "game.rwereplay");
+        REQUIRE(replays[0].seconds == 1u);
+    }
+
+    TEST_CASE("a folder nobody has recorded into lists as empty", "[replay]")
+    {
+        TempDir dir;
+        REQUIRE(listReplays(dir.path / "not-made-yet").empty());
+    }
+
+    TEST_CASE("the newest replay is listed first", "[replay]")
+    {
+        TempDir dir;
+
+        auto now = fs::file_time_type::clock::now();
+
+        // Stamped rather than written slowly apart: sleeping would make the
+        // test slow and still leave it at the mercy of the filesystem's
+        // timestamp resolution.
+        auto write = [&](const std::string& name, int hoursOld) {
+            auto path = dir.path / (name + ".rwereplay");
+            ReplayWriter(path, makeHeader()).close();
+            fs::last_write_time(path, now - std::chrono::hours(hoursOld));
+        };
+
+        write("middle", 2);
+        write("newest", 0);
+        write("oldest", 5);
+
+        auto replays = listReplays(dir.path);
+        REQUIRE(replays.size() == 3);
+        REQUIRE(replays[0].path.stem() == "newest");
+        REQUIRE(replays[1].path.stem() == "middle");
+        REQUIRE(replays[2].path.stem() == "oldest");
+    }
+
+    TEST_CASE("a bare name resolves into the replays folder, a path does not", "[replay]")
+    {
+        SECTION("a path the caller wrote out is left alone")
+        {
+            TempFile file;
+            REQUIRE(replayPathForName(file.path.string()) == file.path);
+        }
+
+        SECTION("so is a bare filename that already carries an extension")
+        {
+            REQUIRE(replayPathForName("game.rwereplay") == fs::path("game.rwereplay"));
+        }
+
+        SECTION("a bare name becomes a file in the replays folder")
+        {
+            auto path = replayPathForName("my-game");
+            REQUIRE(path.filename() == "my-game.rwereplay");
+
+            // Against the folder rather than a spelling of one, because a
+            // machine with no data path has no folder to be in -- an MSYS
+            // login shell drops APPDATA, which is how this was noticed -- and
+            // the name stays relative there.
+            REQUIRE(path.parent_path() == replaysDirectory().value_or(fs::path()));
         }
     }
 }

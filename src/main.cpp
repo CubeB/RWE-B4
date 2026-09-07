@@ -221,7 +221,10 @@ int main(int argc, char* argv[])
                 }
                 if (!args.getString("record-replay", "").empty())
                 {
-                    gameParameters->recordReplayFile = args.getString("record-replay", "");
+                    // A bare name lands in the Replays folder, which is
+                    // where the viewer looks; a path is left alone.
+                    gameParameters->recordReplayFile =
+                        rwe::replayPathForName(args.getString("record-replay", "")).string();
                 }
                 auto difficulty = args.getString("ai-difficulty", "standard");
                 for (auto& c : difficulty)

@@ -491,9 +491,18 @@ namespace rwe
         /** While seeking, run flat out until this tick is reached. */
         std::optional<unsigned int> replaySeekTarget;
 
+        /**
+         * The other recordings on disk, so one can be picked without going
+         * back to a command line. Read when playback starts and when the
+         * refresh button is pressed, rather than every frame: it is a
+         * directory scan and a header parse per file.
+         */
+        std::vector<ReplaySummary> availableReplays;
+
         void pushReplayCommandsForTick(unsigned int tick);
         void renderReplayWindow();
         void restartReplayAt(unsigned int tick);
+        void openReplay(const std::filesystem::path& path);
 
         /**
          * Shows what no player can see: cloaked enemies, and every unit
