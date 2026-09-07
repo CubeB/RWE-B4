@@ -81,6 +81,10 @@ namespace rwe
             sim.unitDefinitions["ARMROCK"] = makeDef(false, false, true, "LASER", 200u);
             sim.unitDefinitions["ARMLLT"] = makeDef(false, false, false, "LASER", 200u);
             sim.unitDefinitions["ARMRAD"] = makeDef(false, false, false, "", 100u);
+            // Anti-air: a missile tower a constructor puts up, and the
+            // level-1 kbot the first lab can already build.
+            sim.unitDefinitions["ARMRL"] = makeDef(false, false, false, "LASER", 200u);
+            sim.unitDefinitions["ARMJETH"] = makeDef(false, false, true, "LASER", 200u);
             sim.unitDefinitions["CORCOM"] = makeDef(true, true, true, "", 300u);
             sim.unitDefinitions["CORSOLAR"] = makeDef(false, false, false, "", 50u);
 
@@ -155,6 +159,30 @@ namespace rwe
                 unit.physics = air;
             }
             return unitId;
+        }
+
+        /** Build orders naming a particular unit type. */
+        int countOrdersFor(const std::vector<PlayerCommand>& commands, const std::string& unitType)
+        {
+            int n = 0;
+            for (const auto& c : commands)
+            {
+                auto unitCommand = std::get_if<PlayerUnitCommand>(&c);
+                if (!unitCommand)
+                {
+                    continue;
+                }
+                auto issue = std::get_if<PlayerUnitCommand::IssueOrder>(&unitCommand->command);
+                if (!issue)
+                {
+                    continue;
+                }
+                if (auto build = std::get_if<BuildOrder>(&issue->order); build && build->unitType == unitType)
+                {
+                    ++n;
+                }
+            }
+            return n;
         }
 
         template <typename Order>
@@ -562,6 +590,106 @@ namespace rwe
         runTicks(sim, controller, 90, commands);
 
         REQUIRE(controller.getBlackboard().recentLosses.empty());
+    }
+
+    TEST_CASE("the AI answers aircraft, and only once it has seen one", "[ai]")
+    {
+        // Before this the AI had no answer to air at all: nothing it built was
+        // chosen for it and nothing it owned was held back for it, so a single
+        // bomber could work through a base unopposed.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+        // Past the opening solar count, so the planner is not still busy with
+        // power when it reaches the question under test.
+        for (int i = 0; i < 5; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(-100.0f - i * 40.0f), 0_ss, 0_ss), script);
+        }
+
+        SECTION("nothing airborne seen: no air threat")
+        {
+            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE_FALSE(controller.getBlackboard().enemyAirThreat);
+            REQUIRE(controller.getBlackboard().knownEnemyAirCount == 0);
+        }
+
+        SECTION("an aircraft in sight raises the threat and buys a Defender")
+        {
+            // Inside the commander's 300-unit sight, so it is genuinely seen
+            // rather than assumed.
+            addUnit(sim, "ARMPEEP", human, SimVector(150_ss, 0_ss, 0_ss), script);
+
+            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            REQUIRE(controller.getBlackboard().enemyAirThreat);
+            REQUIRE(controller.getBlackboard().knownEnemyAirCount == 1);
+            REQUIRE(countOrdersFor(commands, "ARMRL") > 0);
+        }
+
+        SECTION("the threat outlives the sighting, because aircraft do not sit still")
+        {
+            auto peeperId = addUnit(sim, "ARMPEEP", human, SimVector(150_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 4, commands);
+            REQUIRE(controller.getBlackboard().enemyAirThreat);
+
+            // Gone, and seen to be gone, so it leaves knownEnemies. The threat
+            // has to survive that: otherwise the AI puts up a tower, loses
+            // sight of the bomber, and drops the tower off its wanted list
+            // before the bomber comes back.
+            sim.getUnitState(peeperId).markAsDeadNoCorpse();
+            runTicks(sim, controller, 4, commands);
+            REQUIRE(controller.getBlackboard().knownEnemyAirCount == 0);
+            REQUIRE(controller.getBlackboard().enemyAirThreat);
+            REQUIRE(controller.getBlackboard().lastEnemyAirSeenAt.has_value());
+        }
+    }
+
+    TEST_CASE("mobile anti-air covers the base instead of joining the army", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMPW", ai, SimVector(50_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMJETH", ai, SimVector(60_ss, 0_ss, 0_ss), script);
+
+        AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 2, commands);
+
+        const auto& bb = controller.getBlackboard();
+        REQUIRE(bb.antiAirUnits.size() == 1);
+        REQUIRE(bb.combatUnits.size() == 1);
+
+        // And it is not counted towards the attack threshold, or the AI would
+        // attack sooner for having built defences.
+        REQUIRE(bb.armySize == 1);
+    }
+
+    TEST_CASE("difficulty decides how seriously aircraft are taken", "[ai]")
+    {
+        // Easy forgets about air until it is overhead and then under-builds.
+        // Being slow to answer a bomber is a more convincing weakness than
+        // owning fewer solar collectors.
+        REQUIRE(makeProfileForDifficulty(AiDifficulty::Easy).baseAntiAirTowerCount == 0);
+        REQUIRE(makeProfileForDifficulty(AiDifficulty::Easy).antiAirMobileCount == 0);
+        REQUIRE(makeProfileForDifficulty(AiDifficulty::Standard).baseAntiAirTowerCount > 0);
+        REQUIRE(makeProfileForDifficulty(AiDifficulty::Hard).reactiveAntiAirTowerCount
+            > makeProfileForDifficulty(AiDifficulty::Standard).reactiveAntiAirTowerCount);
     }
 
 }

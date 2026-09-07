@@ -28,6 +28,7 @@ namespace rwe
         bb.factories.clear();
         bb.combatUnits.clear();
         bb.scoutUnits.clear();
+        bb.antiAirUnits.clear();
         bb.transports.clear();
 
         const auto& player = sim.getPlayer(aiOwner);
@@ -105,6 +106,13 @@ namespace rwe
                     ++bb.idleBuilderCount;
                     bb.idleBuilders.push_back(unitId);
                 }
+            }
+            else if (def.isMobile && isAiAntiAirType(bb.sideUnits, unit.unitType) && !isFerryPassenger)
+            {
+                // Held back from the army deliberately. Anti-air that walks
+                // off with the attack is not cover, and counting it as army
+                // would make the AI attack sooner for having built defences.
+                bb.antiAirUnits.push_back(unitId);
             }
             else if (def.isMobile && def.canAttack && !def.canFly && (!def.weapon1.empty() || !def.weapon2.empty()) && !isFerryPassenger)
             {

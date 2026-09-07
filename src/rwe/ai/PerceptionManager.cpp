@@ -62,21 +62,39 @@ namespace rwe
             }
             const auto& def = sim.unitDefinitions.at(unit.unitType);
             auto armed = !def.weapon1.empty() || !def.weapon2.empty() || !def.weapon3.empty();
-            bb.knownEnemies[unitId.value] = KnownEnemy{unitId, unit.unitType, unit.position, bb.now, !def.isMobile, armed};
+            bb.knownEnemies[unitId.value] = KnownEnemy{unitId, unit.unitType, unit.position, bb.now, !def.isMobile, armed, def.canFly};
+            if (def.canFly)
+            {
+                bb.lastEnemyAirSeenAt = bb.now;
+            }
         }
 
-        // Where do we think the enemy lives? The centroid of their known buildings.
+        // Where do we think the enemy lives? The centroid of their known
+        // buildings. Counting their aircraft on the same walk, because that is
+        // what decides whether anti-air is worth any metal.
         bb.enemyBasePosition.reset();
+        bb.knownEnemyAirCount = 0;
         SimVector sum(0_ss, 0_ss, 0_ss);
         int buildings = 0;
         for (const auto& [_, enemy] : bb.knownEnemies)
         {
+            if (enemy.isAir)
+            {
+                ++bb.knownEnemyAirCount;
+            }
             if (enemy.isBuilding)
             {
                 sum = sum + enemy.lastKnownPosition;
                 ++buildings;
             }
         }
+
+        // Aircraft are fast and rarely sit still to be counted, so the
+        // sighting has to outlive the sight of it. Without the memory the AI
+        // would start a tower, lose the bomber, drop the tower off its wanted
+        // list, and be defenceless again by the time the bomber came back.
+        bb.enemyAirThreat = bb.knownEnemyAirCount > 0
+            || (bb.lastEnemyAirSeenAt && bb.now.value - bb.lastEnemyAirSeenAt->value <= AirThreatMemoryTicks);
         if (buildings > 0)
         {
             bb.enemyBasePosition = SimVector(sum.x / SimScalar(static_cast<float>(buildings)), 0_ss, sum.z / SimScalar(static_cast<float>(buildings)));

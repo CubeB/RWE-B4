@@ -284,6 +284,22 @@ namespace rwe
         {
             want(s.lab);
         }
+
+        // Anti-air, and it goes here -- above the radar, the towers and the
+        // second factory -- whenever aircraft are actually in the picture.
+        // The AI had no answer to air at all before this: nothing it built
+        // was chosen for it and nothing it owned was kept back for it, so a
+        // single bomber could work through a base unopposed. A Defender is 79
+        // metal against a bomber that costs several times that, and the
+        // exchange only gets better the longer the bomber keeps coming back.
+        //
+        // Deliberately not gated on metalShort. Saving up while being bombed
+        // is how a base ends up with neither the metal nor the buildings.
+        auto antiAirWanted = bb.enemyAirThreat ? profile.reactiveAntiAirTowerCount : profile.baseAntiAirTowerCount;
+        if (bb.enemyAirThreat && total(s.antiAirTower) < antiAirWanted)
+        {
+            want(s.antiAirTower);
+        }
         // Out of patches but swimming in energy: turn energy into metal.
         auto energyRich = bb.energyStorage.value > 0.0f && bb.currentEnergy.value >= bb.energyStorage.value * 0.8f;
         if (metalShort && energyRich && total(s.metalMaker) < profile.targetMetalMakerCount && total(s.lab) >= 1)
@@ -298,6 +314,16 @@ namespace rwe
         if (!metalShort && total(s.lightLaserTower) < profile.targetDefenceCount && total(s.lab) >= 1)
         {
             want(s.lightLaserTower);
+        }
+        // The standing anti-air, for the case where nothing has flown over
+        // yet. The first bombing run arrives before anyone has scouted the
+        // airfield that launched it, so waiting for proof is waiting too
+        // long -- but one tower, down here with the other luxuries, is all
+        // that buys. (A dedupe in want() means the reactive rule above keeps
+        // its higher position when both fire.)
+        if (!metalShort && total(s.antiAirTower) < antiAirWanted && total(s.lab) >= 1)
+        {
+            want(s.antiAirTower);
         }
         // An air plant for scout planes, and for transports when there is
         // ground to reach that no one can walk to. Metal is nearly always
@@ -405,6 +431,13 @@ namespace rwe
                 if (!s.constructor.empty() && constructors < profile.targetConstructorCount)
                 {
                     next = s.constructor;
+                }
+                else if (bb.enemyAirThreat && !s.antiAirKbot.empty() && total(s.antiAirKbot) < profile.antiAirMobileCount)
+                {
+                    // Ahead of the raiders: an anti-air kbot is level 1 and
+                    // this lab can already build it, so the answer to being
+                    // bombed does not need a second factory or a tech step.
+                    next = s.antiAirKbot;
                 }
                 else if (!s.raider.empty() && !s.rocketKbot.empty())
                 {

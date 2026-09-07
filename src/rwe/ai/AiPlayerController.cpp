@@ -129,6 +129,18 @@ namespace rwe
             }
         }
 
+        // Worth a line: it is the one thing the AI reacts to rather than
+        // plans for, so a play-test log that shows a base full of Defenders
+        // should also show when it decided it needed them.
+        if (blackboard.enemyAirThreat != loggedAirThreat)
+        {
+            loggedAirThreat = blackboard.enemyAirThreat;
+            LOG_INFO << "AI player " << playerId.value << ": enemy air threat "
+                     << (loggedAirThreat ? "detected" : "expired")
+                     << " at tick " << sim.gameTime.value
+                     << ", aircraft known " << blackboard.knownEnemyAirCount;
+        }
+
         // 4. Which phase of the game are we in?
         auto previousPhase = blackboard.phase;
         strategic.update(profile, blackboard);

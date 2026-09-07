@@ -56,12 +56,16 @@ namespace rwe
         bb.rallyPoint = *bb.baseAnchor + (towards * profile.rallyDistance);
     }
 
-    std::optional<UnitId> ArmyManager::nearestKnownEnemy(const GameSimulation& sim, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance) const
+    std::optional<UnitId> ArmyManager::nearestKnownEnemy(const GameSimulation& sim, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly) const
     {
         std::optional<UnitId> best;
         auto bestDistanceSquared = maxDistance * maxDistance;
         for (const auto& [_, enemy] : bb.knownEnemies)
         {
+            if (airOnly && !enemy.isAir)
+            {
+                continue;
+            }
             auto unitRef = sim.tryGetUnitState(enemy.unitId);
             if (!unitRef || unitRef->get().isDead())
             {
@@ -75,6 +79,57 @@ namespace rwe
             }
         }
         return best;
+    }
+
+    void ArmyManager::updateAntiAir(
+        const GameSimulation& sim,
+        const AiTuningProfile& profile,
+        AiBlackboard& bb,
+        std::vector<PlayerCommand>& outCommands) const
+    {
+        // How far anti-air may drift from the base before it is called back.
+        // Wide enough to chase a bomber across the base without being turned
+        // round every pass; narrow enough that it is still cover.
+        const SimScalar AntiAirLeash = 700_ss;
+
+        for (auto unitId : bb.antiAirUnits)
+        {
+            auto unitRef = sim.tryGetUnitState(unitId);
+            if (!unitRef)
+            {
+                continue;
+            }
+            const auto& unit = unitRef->get();
+
+            // Anything airborne within reach gets shot at. The army's engage
+            // radius, because it is the same question: is that close enough
+            // to be worth leaving what I am doing.
+            if (auto enemy = nearestKnownEnemy(sim, bb, unit.position, profile.engageRadius, true))
+            {
+                if (!isAttackingUnit(unit, *enemy))
+                {
+                    outCommands.push_back(attackCommand(unitId, *enemy));
+                }
+                continue;
+            }
+
+            // Nothing to shoot at: go back and stand over the base. This is
+            // the whole reason anti-air is kept out of combatUnits -- left in
+            // the army it would walk off with the attack, and the base it was
+            // built to cover would be open again.
+            if (!bb.baseAnchor)
+            {
+                continue;
+            }
+            if (unit.position.distanceSquared(*bb.baseAnchor) <= AntiAirLeash * AntiAirLeash)
+            {
+                continue;
+            }
+            if (!isMovingTo(unit, *bb.baseAnchor))
+            {
+                outCommands.push_back(moveCommand(unitId, *bb.baseAnchor));
+            }
+        }
     }
 
     void ArmyManager::update(
@@ -109,6 +164,8 @@ namespace rwe
                 bb.attackTarget = bb.knownEnemies.begin()->second.lastKnownPosition;
             }
         }
+
+        updateAntiAir(sim, profile, bb, outCommands);
 
         for (auto unitId : bb.combatUnits)
         {

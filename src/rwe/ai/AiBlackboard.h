@@ -38,6 +38,7 @@ namespace rwe
         GameTime lastSeen;
         bool isBuilding;
         bool isArmed;
+        bool isAir;
     };
 
     /** A completed building of ours, remembered so that losing it can be noticed. */
@@ -54,6 +55,15 @@ namespace rwe
         SimVector position;
         GameTime lostAt;
     };
+
+    /**
+     * How long the memory of enemy aircraft keeps anti-air worth building,
+     * in ticks. Aircraft are fast and rarely sit still to be counted, so the
+     * AI would otherwise put up a tower, lose sight of the bomber, and drop
+     * the tower off its wanted list before the bomber came back. Five minutes
+     * is long enough to cover a raid cycle.
+     */
+    constexpr unsigned int AirThreatMemoryTicks = 300u * 30u;
 
     /**
      * How long a loss stays worth reacting to, in ticks. Long enough that a
@@ -114,6 +124,15 @@ namespace rwe
         std::vector<UnitId> combatUnits;
         /** Complete scout planes and scout vehicles, in id order. */
         std::vector<UnitId> scoutUnits;
+        /**
+         * Complete mobile anti-air, in id order, kept out of combatUnits.
+         *
+         * These do not join the army and are not counted towards the attack
+         * threshold. Anti-air that marches off with the attack is not cover,
+         * and an AI that counted it as army would attack earlier for having
+         * built defences.
+         */
+        std::vector<UnitId> antiAirUnits;
         /** Complete mobile transports, in id order. */
         std::vector<UnitId> transports;
 
@@ -140,6 +159,18 @@ namespace rwe
         std::map<unsigned int, KnownEnemy> knownEnemies;
         /** Centroid of the enemy's known buildings, if any have been seen. */
         std::optional<SimVector> enemyBasePosition;
+        /** How many aircraft we currently believe the enemy has. */
+        int knownEnemyAirCount{0};
+        /** When we last actually had eyes on one. Never reset, so the memory outlives the sighting. */
+        std::optional<GameTime> lastEnemyAirSeenAt;
+        /**
+         * Whether aircraft are worth defending against: one is in our picture
+         * now, or one was within AirThreatMemoryTicks. This is what turns the
+         * anti-air build on, and it is the AI's only piece of opponent
+         * modelling -- it reacts to what the enemy actually has rather than
+         * to a fixed plan.
+         */
+        bool enemyAirThreat{false};
         /** Known enemies within the defend radius of our base, in id order. */
         std::vector<UnitId> enemiesNearBase;
 

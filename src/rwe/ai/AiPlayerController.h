@@ -89,6 +89,8 @@ namespace rwe
         int ticksSinceThreatRebuild{0};
         ReachabilityMap reachability;
         int ticksSinceReachabilityRebuild{0};
+        /** So the air-threat line is logged when it changes rather than every tick. */
+        bool loggedAirThreat{false};
 
         PerceptionManager perception;
         EconomyManager economy;

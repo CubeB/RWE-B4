@@ -42,6 +42,21 @@ namespace rwe
         int targetMetalExtractorCount{8};
         int targetConstructorCount{2};
         int targetDefenceCount{2};
+        /**
+         * Anti-air towers kept whether or not anything has flown over. Cheap
+         * insurance: a Defender is 79 metal against a bomber that costs many
+         * times that, and the first bomber run arrives before anyone has
+         * scouted it.
+         */
+        int baseAntiAirTowerCount{1};
+        /** Anti-air towers wanted once enemy aircraft are actually in the picture. */
+        int reactiveAntiAirTowerCount{3};
+        /**
+         * Mobile anti-air wanted once enemy aircraft are in the picture, and
+         * none before. Towers cover the base; these cover what the towers do
+         * not, and they cost a factory slot the army would otherwise use.
+         */
+        int antiAirMobileCount{2};
         int targetRadarCount{1};
         int targetMetalMakerCount{2};
         int targetAirPlantCount{1};

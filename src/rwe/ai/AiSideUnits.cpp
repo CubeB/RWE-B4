@@ -24,12 +24,14 @@ namespace rwe
         if (upper == "CORE")
         {
             units = AiSideUnits{"CORMEX", "CORSOLAR", "CORLAB", "CORCK", "CORAK", "CORSTORM", "CORLLT", "CORRAD", "CORMAKR",
-                "CORAP", "CORFINK", "CORVALK", "CORVP", "CORFAV", "CORGATOR"};
+                "CORAP", "CORFINK", "CORVALK", "CORVP", "CORFAV", "CORGATOR",
+                "CORRL", "CORCRASH"};
         }
         else
         {
             units = AiSideUnits{"ARMMEX", "ARMSOLAR", "ARMLAB", "ARMCK", "ARMPW", "ARMROCK", "ARMLLT", "ARMRAD", "ARMMAKR",
-                "ARMAP", "ARMPEEP", "ARMATLAS", "ARMVP", "ARMFAV", "ARMFLASH"};
+                "ARMAP", "ARMPEEP", "ARMATLAS", "ARMVP", "ARMFAV", "ARMFLASH",
+                "ARMRL", "ARMJETH"};
         }
 
         auto check = [&](std::string& name) {
@@ -53,11 +55,18 @@ namespace rwe
         check(units.vehiclePlant);
         check(units.scoutVehicle);
         check(units.tank);
+        check(units.antiAirTower);
+        check(units.antiAirKbot);
         return units;
     }
 
     bool isAiScoutType(const AiSideUnits& units, const std::string& unitType)
     {
         return !unitType.empty() && (unitType == units.scoutPlane || unitType == units.scoutVehicle);
+    }
+
+    bool isAiAntiAirType(const AiSideUnits& units, const std::string& unitType)
+    {
+        return !unitType.empty() && unitType == units.antiAirKbot;
     }
 }

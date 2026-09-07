@@ -20,6 +20,9 @@ namespace rwe
         p.attackArmySize = 6;
         p.targetConstructorCount = 3;
         p.targetDefenceCount = 3;
+        p.baseAntiAirTowerCount = 2;
+        p.reactiveAntiAirTowerCount = 5;
+        p.antiAirMobileCount = 3;
         p.buildPlannerTickInterval = 20;
         p.tacticalTickInterval = 10;
         return p;
@@ -51,6 +54,12 @@ namespace rwe
                 p.targetConstructorCount = 1;
                 p.targetDefenceCount = 1;
                 p.targetVehiclePlantCount = 0;
+                // Forgets about aircraft until they are overhead, and then
+                // under-builds. Being slow to answer a bomber is a more
+                // convincing weakness than owning fewer solar collectors.
+                p.baseAntiAirTowerCount = 0;
+                p.reactiveAntiAirTowerCount = 1;
+                p.antiAirMobileCount = 0;
                 p.attackArmySize = 14;
                 p.retreatArmySize = 5;
                 p.buildPlannerTickInterval = 60;
@@ -69,6 +78,9 @@ namespace rwe
                 p.targetMetalExtractorCount = 10;
                 p.targetConstructorCount = 3;
                 p.targetDefenceCount = 3;
+                p.baseAntiAirTowerCount = 2;
+                p.reactiveAntiAirTowerCount = 5;
+                p.antiAirMobileCount = 3;
                 p.attackArmySize = 7;
                 p.retreatArmySize = 2;
                 p.buildPlannerTickInterval = 20;
