@@ -94,3 +94,13 @@ foreach ($side in @(0, 1)) {
 
 $results | Export-Csv -NoTypeInformation -Path (Join-Path $outDir "summary.csv")
 Write-Host ("per-game rows: " + (Join-Path $outDir "summary.csv"))
+
+# The last game's own page, because averages say whether a change helped and
+# a timeline says what the AI actually did. A local file: nothing to sign in to.
+$python = "D:/msys64/mingw64/bin/python.exe"
+$csv = Join-Path $env:APPDATA "RWE/ai-arena.csv"
+if ((Test-Path $python) -and (Test-Path $csv)) {
+    $html = Join-Path $env:APPDATA "RWE/ai-arena.html"
+    & $python "D:/RWE/tools/arena-report.py" $csv --out $html | Out-Null
+    if (Test-Path $html) { Write-Host ("last game, as a page: " + $html) }
+}
