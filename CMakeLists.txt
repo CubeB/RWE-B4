@@ -314,6 +314,8 @@ set(SOURCE_FILES
     src/rwe/game/PlayerCommandService.cpp
     src/rwe/game/PlayerCommandService.h
     src/rwe/game/ProjectileRenderType.h
+    src/rwe/game/ReplayFile.cpp
+    src/rwe/game/ReplayFile.h
     src/rwe/game/SceneTime.cpp
     src/rwe/game/SceneTime.h
     src/rwe/game/UnitPieceMeshInfo.cpp
@@ -833,6 +835,7 @@ set(TEST_FILES
     src/rwe/test_announce.cpp
     src/rwe/test_crt_silence.cpp
     src/rwe/game/exploredgrid.test.cpp
+    src/rwe/game/ReplayFile.test.cpp
     src/rwe/game/hoveredfeature.test.cpp
     src/rwe/game/infopanel.test.cpp
     src/rwe/game/orderbuttons.test.cpp
