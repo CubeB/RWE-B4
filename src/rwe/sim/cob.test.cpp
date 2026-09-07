@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
+#include <rwe/cob/CobOpCode.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameHash_util.h>
@@ -252,6 +253,63 @@ namespace rwe
 
             REQUIRE(handleQuery(sim, env, c, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::MinId{}}) == static_cast<int>(expectedMin));
             REQUIRE(handleQuery(sim, env, c, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::MaxId{}}) == static_cast<int>(expectedMax));
+        }
+    }
+
+    TEST_CASE("cache and dont-cache set the piece's cached flag", "[cob][shading]")
+    {
+        // The original's piece-list builder starts every piece cached, and a
+        // script says dont-cache on the pieces that move; a finished unit's
+        // uncached pieces are then drawn by the unshaded rasterizer
+        // (TOTALA-EXE-SHADING.md S:12a). 137 shipped scripts do this, so the
+        // opcode has to reach the piece rather than be swallowed.
+        auto op = [](OpCode code) { return static_cast<uint32_t>(code); };
+        auto makeScript = [&](OpCode code) {
+            auto script = std::make_shared<CobScript>();
+            script->staticVariableCount = 0;
+            script->pieces.push_back("base");
+            script->pieces.push_back("turret");
+            script->functions.push_back(CobFunctionInfo{"Create", 0});
+            script->instructions = std::vector<uint32_t>{
+                op(code), 1,
+                op(OpCode::PUSH_CONSTANT), 0,
+                op(OpCode::RETURN),
+            };
+            return script;
+        };
+        auto addUnit = [&](GameSimulation& sim, const std::shared_ptr<CobScript>& script) {
+            auto env = std::make_unique<CobEnvironment>(script.get());
+            UnitMesh base;
+            base.name = "base";
+            UnitMesh turret;
+            turret.name = "turret";
+            std::vector<UnitMesh> pieces{base, turret};
+            auto unitId = UnitId(sim.units.emplace(pieces, std::move(env)));
+            sim.getUnitState(unitId).cobEnvironment->createThread("Create", {});
+            runUnitCobScripts(sim, unitId);
+            return unitId;
+        };
+
+        GameSimulation sim(makeMinimalTerrain(), 0u, 0, 0);
+
+        SECTION("dont-cache clears it on that piece alone")
+        {
+            auto unitId = addUnit(sim, makeScript(OpCode::DONT_CACHE));
+            const auto& unit = sim.getUnitState(unitId);
+            REQUIRE(unit.pieces[0].cached);
+            REQUIRE(!unit.pieces[1].cached);
+        }
+
+        SECTION("cache sets it back")
+        {
+            auto unitId = addUnit(sim, makeScript(OpCode::CACHE));
+            auto& unit = sim.getUnitState(unitId);
+            REQUIRE(unit.pieces[1].cached);
+
+            sim.disableCaching(unitId, "turret");
+            REQUIRE(!unit.pieces[1].cached);
+            sim.enableCaching(unitId, "turret");
+            REQUIRE(unit.pieces[1].cached);
         }
     }
 }

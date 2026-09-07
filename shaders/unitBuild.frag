@@ -78,24 +78,24 @@ float shadeIntensity()
         return 1.0;
     }
 
-    // The original truncates the interpolated row to an integer at every
-    // pixel, which quantises each gradient into at most thirty-two bands.
-    // Reading between the two neighbouring rows instead keeps the transition
-    // into shadow smooth. That is a deliberate divergence and the only one
-    // left in this function.
-    float row = clamp(shadeLevel, 0.0, 31.0);
-    float lower = floor(row);
-    float tableValue = mix(
-        shadeTable[int(lower)],
-        shadeTable[int(min(lower + 1.0, 31.0))],
-        row - lower);
+    // The original re-derives the row at every pixel as `sar 16` of the
+    // 16.16 interpolant and indexes the table with it, nothing else
+    // (TOTALA-EXE-SHADING.md S:21) -- a truncation, so each gradient is
+    // quantised into whole rows and a face steps down the table one band at
+    // a time. This used to read between the two neighbouring rows to smooth
+    // that out; the bands are the original's look, so they stay. Both ends
+    // of the interpolation are masked rows in 0..31, so the value cannot
+    // leave that range and the original clamps nothing. The min here is
+    // against the array bound alone, for a value that lands on 31.00001 in
+    // float, and int() truncates toward zero exactly as the shift does.
+    float tableValue = shadeTable[min(int(shadeLevel), 31)];
 
     // Strength blends the measured curve towards "not shaded at all". At 1.0
-    // this is the table as measured, row 0 included, which is genuinely
-    // black -- the original's is too. Below 1.0 it is the same curve with its
-    // contrast pulled in around the unshaded colour, which is what the
-    // VISUALS switch's per-category strengths use and what makes a unit read
-    // more softly than the building behind it.
+    // -- the default -- this is the table as measured, row 0 included, which
+    // is genuinely black; the original's is too. Below 1.0 it is the same
+    // curve with its contrast pulled in around the unshaded colour, an
+    // rwe.cfg option for anyone who wants the model to read more softly than
+    // the original draws it.
     return mix(1.0, tableValue, shadeStrength);
 }
 

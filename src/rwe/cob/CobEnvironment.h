@@ -108,6 +108,18 @@ namespace rwe
             struct DisableShading
             {
             };
+            /**
+             * cache / dont-cache: whether the piece lives in the unit's
+             * cached bitmap. The original draws a dont-cache piece of a
+             * finished unit straight to the screen through its unshaded
+             * rasterizer, so the flag decides whether the piece is shaded.
+             */
+            struct EnableCaching
+            {
+            };
+            struct DisableCaching
+            {
+            };
             struct EmitSfx
             {
                 CobSfxType sfxType;
@@ -127,7 +139,7 @@ namespace rwe
             {
                 unsigned int unit;
             };
-            using CommandType = std::variant<Move, Turn, Spin, StopSpin, Show, Hide, EnableShading, DisableShading, EmitSfx, Explode, AttachUnit, DropUnit>;
+            using CommandType = std::variant<Move, Turn, Spin, StopSpin, Show, Hide, EnableShading, DisableShading, EnableCaching, DisableCaching, EmitSfx, Explode, AttachUnit, DropUnit>;
 
             unsigned int piece;
             CommandType command;

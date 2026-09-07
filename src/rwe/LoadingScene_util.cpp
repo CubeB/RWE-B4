@@ -416,6 +416,7 @@ namespace rwe
         u.cantBeTransported = fbi.cantBeTransported;
         u.isAirBase = fbi.isAirBase;
         u.noShadow = fbi.noShadow;
+        u.zBuffer = fbi.zBuffer;
 
         u.cruiseAltitude = SimScalar(fbi.cruiseAlt);
         u.bankScale = SimScalar(fbi.bankScale);

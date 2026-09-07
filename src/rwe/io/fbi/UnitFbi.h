@@ -188,6 +188,13 @@ namespace rwe
         /** Casts no shadow. Fifteen units name it, mostly the map props. */
         bool noShadow;
 
+        /**
+         * Whether the unit's cached bitmap carries a height plane. Every
+         * shipped unit says 1 except CORFAV and CORTRUCK, and the original
+         * draws a finished unit without one unsorted and unshaded.
+         */
+        bool zBuffer{true};
+
         unsigned int cruiseAlt;
 
         /**

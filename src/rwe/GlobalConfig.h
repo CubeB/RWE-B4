@@ -98,19 +98,19 @@ namespace rwe
          * a genuine black -- and lower values keep the same curve with its
          * contrast pulled in around the unshaded colour.
          *
-         * These are deliberately not on the options screen: VISUALRT has no
-         * gadget for them and the GUI files are read-only game data. They are
-         * rwe.cfg keys for anyone who wants to tune the look.
+         * Both default to 100, so what ships is what the original draws.
+         * They shipped at 25 and 40 for a while, chosen by measuring how
+         * much of a solar collector went black at full strength (twice the
+         * share of pixels under luminance 16, 18.4% against 8.8% unshaded)
+         * -- but that darkness is the original's, row 0 being a true black
+         * landing on an already dark texture, and the ask became to match
+         * it exactly rather than soften it.
          *
-         * The defaults were picked by measurement, not by eye. Shading a
-         * solar collector on Coast To Coast at 100 doubles the share of its
-         * pixels darker than luminance 16, from 8.8% unshaded to 18.4%, while
-         * leaving the mean untouched -- that is the "too much shadow" the
-         * change was made to answer, and it comes from row 0 being a true
-         * black landing on an already dark texture. At 40 the excess is
-         * roughly halved, to 12.4%, and the model still reads with its lit
-         * side clearly lighter than its shaded side. Units sit lower again
-         * because their banding moves as they turn. See TOTALA-EXE.md S:88.
+         * These are deliberately not on the options screen: VISUALRT has no
+         * gadget for them and the GUI files are read-only game data. They
+         * are rwe.cfg keys (shading-strength-units,
+         * shading-strength-buildings) for anyone who does want it softer.
+         * See TOTALA-EXE.md S:88.
          */
         unsigned int shadingStrengthUnits{25};
         unsigned int shadingStrengthBuildings{40};

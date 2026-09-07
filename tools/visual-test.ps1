@@ -1,4 +1,6 @@
-param([string]$phase = "build")
+# -extraArgs appends launch options, space separated, e.g.
+# "--shading-strength-units 25 --shading-strength-buildings 40".
+param([string]$phase = "build", [string]$outDir = "D:\RWE", [string]$tag = "", [string]$extraArgs = "")
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
@@ -38,6 +40,8 @@ function Click($x, $y) {
 }
 
 $launchArgs = @('--log','D:\RWE\rwe-vt.log','--map','"Coast To Coast"','--player','"Baile;Human;ARM;0"','--player','"Bot;Computer;CORE;1"')
+if ($extraArgs -ne "") { $launchArgs += ($extraArgs -split ' ') }
+Remove-Item 'D:\RWE\rwe-vt.log' -ErrorAction SilentlyContinue
 if ($phase -eq "info") {
   # 640x480 makes the window's client coordinates the same numbers as the
   # UI's own virtual coordinates, so a gadget's xpos/ypos out of the GUI file
@@ -54,14 +58,46 @@ if ($phase -eq "ring") {
   $launchArgs += @('--width','640','--height','480')
   $env:RWE_DEBUG_SPAWN = 'ARMAMD*1@0:8:0'
 }
+if ($phase -eq "shade") {
+  # A solar collector dropped 96 units east of the commander at six seconds,
+  # so both stand still for the camera without a click sequence that would
+  # have to know where the commander is.
+  $env:RWE_DEBUG_SPAWN = 'ARMSOLAR*1@0:6:0'
+}
 $p = Start-Process -FilePath "D:\RWE\build-release\rwe.exe" -WorkingDirectory "D:\RWE\build-release" -ArgumentList $launchArgs -PassThru
-Start-Sleep -Seconds 20
-$proc = Get-Process rwe -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-if (-not $proc) { "no window"; exit 1 }
+# The window can take a while to appear when a build is running alongside, so
+# poll for it rather than trust a fixed wait, and then give the game time to
+# get from the loading screen into the scene. A launch that never shows a
+# window is killed rather than left running: a stray rwe.exe holds the DLLs
+# the next build wants to copy.
+$proc = $null
+for ($w = 0; $w -lt 120 -and -not $proc; $w++) {
+  Start-Sleep -Seconds 1
+  $proc = Get-Process rwe -ErrorAction SilentlyContinue | Where-Object { $_.Id -eq $p.Id -and $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+}
+if (-not $proc) { "no window"; Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; exit 1 }
+# Loading can take a minute when the machine is busy, and a fixed wait has
+# caught the loading screen more than once. The simulation only runs inside
+# the game scene, so the first line it logs -- the AI's half-minute status,
+# or a debug spawn -- says the scene is up.
+$inScene = $false
+for ($w = 0; $w -lt 240 -and -not $inScene; $w++) {
+  Start-Sleep -Seconds 1
+  $inScene = (Test-Path 'D:\RWE\rwe-vt.log') -and (Select-String -Path 'D:\RWE\rwe-vt.log' -Pattern 'AI player . status|Debug: spawning' -Quiet)
+}
+if (-not $inScene) { "never reached the scene"; Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; exit 1 }
+Start-Sleep -Seconds 2
 $h = $proc.MainWindowHandle
 [W]::SetForegroundWindow($h) | Out-Null
 Start-Sleep -Milliseconds 500
-$o = New-Object POINT; [W]::ClientToScreen($h, [ref]$o) | Out-Null
+function Origin() {
+  # Asked for afresh before each click and shot: the window has been seen
+  # to move after it first appears, and a stale origin puts every crop and
+  # click somewhere else.
+  $pt = New-Object POINT; [W]::ClientToScreen($h, [ref]$pt) | Out-Null
+  return $pt
+}
+$o = Origin
 "client origin $($o.X),$($o.Y)"
 
 if ($phase -eq "build") {
@@ -268,6 +304,55 @@ if ($phase -eq "ring") {
   Crop $bmp "D:\RWE\vt-ring-minimap.png" $o.X ($o.Y + 28) 128 104 5
   $bmp.Save("D:\RWE\vt-ring-full.png")
   $bmp.Dispose()
+}
+
+if ($phase -eq "shade") {
+  # The commander and the collector spawned beside him, both standing still
+  # for the camera. The collector is the reference case for the model
+  # shading (TOTALA-EXE-SHADING.md S:13): its left panel sits at rows 28-29
+  # and its right panel at row 0, solid black, and the skirt between them is
+  # where the Gouraud ramp through the middle of the table shows. -tag names
+  # the build under test so a before and an after can sit side by side. On
+  # Coast To Coast at this window size the commander starts near (505,165)
+  # of the client area and the collector lands about 110 pixels east.
+  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Start-Sleep -Seconds 10
+  $o = Origin
+  [W]::SetForegroundWindow($h) | Out-Null
+  Start-Sleep -Milliseconds 300
+  $bmp = Shot
+  # The client area alone, never the whole screen: the desktop around the
+  # window is not under test.
+  Crop $bmp "$outDir\vt-shade$tag-full.png" $o.X $o.Y 800 600 1
+  Crop $bmp "$outDir\vt-shade$tag-scene.png" ($o.X + 400) ($o.Y + 90) 300 160 3
+  Crop $bmp "$outDir\vt-shade$tag-solar.png" ($o.X + 570) ($o.Y + 120) 90 90 6
+  Crop $bmp "$outDir\vt-shade$tag-commander.png" ($o.X + 470) ($o.Y + 120) 70 90 6
+  $bmp.Dispose()
+}
+
+if ($phase -eq "stall") {
+  # The commander builds a metal maker below himself: page one of his menu
+  # (ARMCOM1.GUI) puts ARMMAKR at (64,155) in a page at (0,128), and a
+  # finished maker switches itself on and draws 60 energy a second against
+  # a fresh start's 25, so the stockpile is empty within a minute. Then four
+  # shots of the top bar a quarter of a second apart: a bar that flashes
+  # shows up as frames that disagree, a steady one as four alike.
+  $o = Origin
+  Click ($o.X + 505) ($o.Y + 165)
+  Click ($o.X + 96) ($o.Y + 315)
+  Click ($o.X + 505) ($o.Y + 330)
+  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Start-Sleep -Seconds 75
+  $o = Origin
+  [W]::SetForegroundWindow($h) | Out-Null
+  Start-Sleep -Milliseconds 300
+  for ($i = 0; $i -lt 4; $i++) {
+    $bmp = Shot
+    if ($i -eq 0) { Crop $bmp "$outDir\vt-stall$tag-full.png" $o.X $o.Y 800 600 1 }
+    Crop $bmp "$outDir\vt-stall$tag-$i.png" $o.X $o.Y 800 40 2
+    $bmp.Dispose()
+    Start-Sleep -Milliseconds 260
+  }
 }
 
 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue

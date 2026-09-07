@@ -8584,20 +8584,26 @@ original:
   RWE's radar and sonar contacts therefore reach the minimap (`canDetectUnit`)
   and nothing else; every simulation decision goes through `canSeeUnit`.
 
-- **Model shading is split by category, and neither category runs at full
-  strength.** The original shades every unit and every feature through one
-  routine and never reads a "is a building" flag: `0x459C70` branches on the
-  piece's COB `SHADE` bit and on nothing else (TOTALA-EXE-SHADING.md S:11,
-  NOT FOUND for a building test). RWE's VISUALS page carries a four-state
-  Shading switch -- Off, Units, Buildings, Both -- and applies the measured
-  `PALETTE.SHD` ramp at 0.70 for buildings and 0.45 for units rather than 1.0.
-  The reason is that the same arithmetic reads differently on the two: the
-  shade level is computed in world space, so a building holds its banding
-  still while a unit's slides across it as the unit turns, which reads as
-  flicker rather than as form. Setting both strengths to 1.0 restores the
-  original exactly, and nothing else has to change to do it -- the level, the
-  wrap, the unnormalised normals and the unnormalised sun are all faithful
-  either way.
+- **Model shading can be switched off by category.** The original shades
+  every unit and every feature through one routine and never reads a "is a
+  building" flag: `0x459C70` branches on the piece's COB `SHADE` bit and on
+  nothing else (TOTALA-EXE-SHADING.md S:11, NOT FOUND for a building test).
+  RWE's VISUALS page carries a four-state Shading switch -- Off, Units,
+  Buildings, Both -- and two rwe.cfg keys, `shading-strength-units` and
+  `shading-strength-buildings`, blend the measured `PALETTE.SHD` ramp towards
+  the unshaded colour. Both strengths default to 100, so what ships is the
+  original's arithmetic in full: the per-vertex level, the wrap, the
+  unnormalised normals and sun, the row truncated per pixel. (They shipped
+  at 40 and 25 for a while, because the level is computed in world space and
+  a unit's banding slides across it as it turns, which reads as flicker
+  rather than form on something small and moving; that softening is now
+  opt-in.)
+- **A finished `ZBuffer=0` unit's flat-coloured faces are unshaded.** The
+  original leaves such a unit's textured quads raw but still shades its
+  flat-colour n-gons (TOTALA-EXE-SHADING.md S:23). RWE draws the whole model
+  raw: its mesh does not keep the two kinds of face apart, and the difference
+  is nine faces of CORFAV and one of CORTRUCK, the only two units that say
+  `ZBuffer=0`.
 - **Nanolathe spray lands on the roof**, not inside the model. The original
   samples the landing height inside the model too, which it can afford because
   its spray is composited in a late layer. RWE's is depth-tested so a

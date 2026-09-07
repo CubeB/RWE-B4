@@ -354,6 +354,11 @@ namespace rwe
 
             // A chase the unit started for itself, which gives up at the leash.
             marked.orders.push_back(AttackOrder(markedId, AttackLeash(SimVector(11_ss, 0_ss, 22_ss), 640_ss)));
+
+            // A piece the script has said dont-cache on, which the renderer
+            // then draws unshaded. Render-facing, like `shaded`, and hashed
+            // by nothing.
+            marked.pieces.front().cached = false;
         }
 
         auto deadId = spawnUnit(simA, "KBOT", us, SimVector(360_ss, 0_ss, 300_ss));
@@ -371,6 +376,7 @@ namespace rwe
         // rather than pointing at a diff of the whole save.
         const auto& markedB = simB.getUnitState(markedId);
         REQUIRE(markedB.commandFireShotFired);
+        REQUIRE(!markedB.pieces.front().cached);
 
         REQUIRE(!markedB.orders.empty());
         const auto* attack = std::get_if<AttackOrder>(&markedB.orders.front());

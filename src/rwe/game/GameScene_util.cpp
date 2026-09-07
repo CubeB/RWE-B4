@@ -466,7 +466,14 @@ namespace rwe
                 continue;
             }
 
-            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], mesh.shaded ? shadeStrength : 0.0f, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, out);
+            // A dont-cache piece is left out of the original's cached bitmap
+            // and drawn to the screen by the unshaded rasterizer instead
+            // (TOTALA-EXE-SHADING.md S:12a) -- but only once the unit is
+            // finished, which is the only time this function draws it; the
+            // nanoframe path shades every piece the script has not said
+            // DONT_SHADE on, as the construction pass does.
+            auto pieceShadeStrength = mesh.shaded && mesh.cached ? shadeStrength : 0.0f;
+            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], pieceShadeStrength, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, out);
         }
     }
 
@@ -627,7 +634,21 @@ namespace rwe
             // reached the batch. A nanoframe never gets here cloaked either --
             // the drain skips a unit that is still being built.
             auto& out = unit.cloaked ? batch.cloakedMeshes : batch.meshes;
-            drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, playerColorIndex, frac, shadeStrength, unitTextureAtlas, unitTeamTextureAtlases, out);
+
+            // A finished unit whose FBI says ZBuffer=0 gets a cached bitmap
+            // with no height plane, and the original's textured span filler
+            // only looks the shade table up when there is one: its texels go
+            // to the screen untouched (TOTALA-EXE-SHADING.md S:23). Only
+            // while it is being built does it get the plane, for the
+            // construction wipe, and shade like everything else -- which is
+            // why this sits on the finished branch alone. CORFAV and
+            // CORTRUCK are the two shipped units it reaches. (The flat-colour
+            // n-gons of such a unit are still shaded by the original; RWE's
+            // mesh does not keep them apart from the textured quads, so they
+            // go unshaded with the rest, a difference on nine faces of the
+            // Weasel and one of the truck.)
+            auto finishedShadeStrength = unitDefinition.zBuffer ? shadeStrength : 0.0f;
+            drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, playerColorIndex, frac, finishedShadeStrength, unitTextureAtlas, unitTeamTextureAtlases, out);
         }
     }
 
