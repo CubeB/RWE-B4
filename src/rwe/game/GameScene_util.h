@@ -175,6 +175,22 @@ namespace rwe
 
     void drawMovementClassCollisionGrid(const MapTerrain& terrain, const Grid<char>& movementClassGrid, const Vector3f& cameraPosition, float viewportWidth, float viewportHeight, ColoredMeshBatch& batch);
 
+    /**
+     * The textures a unit's skin is drawn from. Each atlas comes in two
+     * parallel copies, the same size and the same layout: the colour one the
+     * fragment lands on, and a single-channel one holding that texel's
+     * palette index. The index is what the original shades by -- it reads
+     * PALETTE.SHD[row * 256 + texel] with the raw index out of the texture --
+     * so a shaded draw needs both.
+     */
+    struct UnitTextureAtlases
+    {
+        TextureIdentifier atlas;
+        TextureIdentifier paletteIndexAtlas;
+        const std::vector<SharedTextureHandle>* teamAtlases;
+        const std::vector<SharedTextureHandle>* teamPaletteIndexAtlases;
+    };
+
     void drawUnit(
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,
@@ -186,8 +202,7 @@ namespace rwe
         unsigned int gameTime,
         float frac,
         float shadeStrength,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         UnitMeshBatch& batch);
 
     void drawMeshFeature(
@@ -196,8 +211,7 @@ namespace rwe
         const Matrix4f& viewProjectionMatrix,
         const MapFeature& feature,
         float shadeStrength,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         UnitMeshBatch& batch);
 
     /**
@@ -219,8 +233,7 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         float frac,
         float groundHeight,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         UnitShadowMeshBatch& batch);
 
     void drawFeatureMeshShadow(
@@ -229,8 +242,7 @@ namespace rwe
         const Matrix4f& viewProjectionMatrix,
         const MapFeature& feature,
         float groundHeight,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         UnitShadowMeshBatch& batch);
 
     /** fogged draws the sprite in fog-of-war grey; currentTime drives the burning animation. */
@@ -259,8 +271,7 @@ namespace rwe
         const Matrix4f& matrix,
         PlayerColorIndex playerColorIndex,
         float shadeStrength,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         UnitMeshBatch& batch);
 
     /** A small dark square: a fragment of a shattered piece. */
@@ -314,8 +325,7 @@ namespace rwe
         const UnitDefinition& unitDefinition,
         const UnitModelDefinition& modelDefinition,
         float frac,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         std::vector<UnitTextureMeshRenderInfo>& out);
 
     void drawSpriteParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, SpriteBatch& batch);
@@ -381,8 +391,7 @@ namespace rwe
         const VectorMap<Projectile, ProjectileIdTag>& projectiles,
         GameTime currentTime,
         float frac,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         ColoredMeshBatch& coloredMeshbatch,
         SpriteBatch& spriteBatch,
         UnitMeshBatch& unitMeshBatch);

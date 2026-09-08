@@ -1375,6 +1375,10 @@ namespace rwe
         // eight hundred units, and a screenful is a fraction of them.
         auto viewCull = makeViewCullTest(viewProjectionMatrix);
 
+        // Everything below that draws a model draws it from the same four
+        // atlases, so they are gathered once rather than named at each call.
+        UnitTextureAtlases unitAtlases{unitTextureAtlas.get(), unitPaletteIndexAtlas.get(), &unitTeamTextureAtlases, &unitTeamPaletteIndexAtlases};
+
         UnitShadowMeshBatch unitShadowMeshBatch;
         {
             RWE_RENDERPROF("w.shadow.build");
@@ -1407,14 +1411,14 @@ namespace rwe
                     continue;
                 }
 
-                drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch);
+                drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), unitAtlases, unitShadowMeshBatch);
 
                 if (unit.isBeingBuilt(unitDefinition))
                 {
                     // The frame is see-through while it is built, so the shadow
                     // would show through it. Keep only the part cast outside the
                     // model's own outline.
-                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch.cutouts);
+                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitAtlases, unitShadowMeshBatch.cutouts);
                 }
             }
             for (const auto& [_, feature] : simulation.features)
@@ -1436,7 +1440,7 @@ namespace rwe
                     continue;
                 }
 
-                drawFeatureMeshShadow(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, simScalarToFloat(groundHeight), unitTextureAtlas.get(), unitTeamTextureAtlases, unitShadowMeshBatch);
+                drawFeatureMeshShadow(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, simScalarToFloat(groundHeight), unitAtlases, unitShadowMeshBatch);
             }
         }
         {
@@ -1462,7 +1466,7 @@ namespace rwe
                 }
                 const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
                 const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
-                drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, simulation.gameTime.value, interpolationFraction, shadeStrengthFor(!unitDefinition.isMobile), unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+                drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, simulation.gameTime.value, interpolationFraction, shadeStrengthFor(!unitDefinition.isMobile), unitAtlases, unitMeshBatch);
             }
             for (const auto& [_, feature] : simulation.features)
             {
@@ -1474,7 +1478,7 @@ namespace rwe
                 {
                     continue;
                 }
-                drawMeshFeature(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, shadeStrengthFor(true), unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+                drawMeshFeature(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, shadeStrengthFor(true), unitAtlases, unitMeshBatch);
             }
             for (const auto& d : debris)
             {
@@ -1485,13 +1489,13 @@ namespace rwe
                 auto position = d.position + (d.velocity * interpolationFraction);
                 auto rotation = d.rotation + (d.angularVelocity * interpolationFraction);
                 auto matrix = Matrix4f::translation(position) * Matrix4f::rotationZXY(rotation);
-                drawDebrisPiece(gameMediaDatabase, viewProjectionMatrix, d.objectName, d.pieceName, matrix, d.color, shadeStrengthFor(false), unitTextureAtlas.get(), unitTeamTextureAtlases, unitMeshBatch);
+                drawDebrisPiece(gameMediaDatabase, viewProjectionMatrix, d.objectName, d.pieceName, matrix, d.color, shadeStrengthFor(false), unitAtlases, unitMeshBatch);
             }
         }
         {
             RWE_RENDERPROF("w.unit.draw");
             RWE_RENDERPROF_COUNT("n.unitmesh", unitMeshBatch.meshes.size() + unitMeshBatch.buildingMeshes.size() + unitMeshBatch.cloakedMeshes.size());
-            worldRenderService.drawUnitMeshBatch(unitMeshBatch, simScalarToFloat(seaLevel));
+            worldRenderService.drawUnitMeshBatch(unitMeshBatch, simScalarToFloat(seaLevel), shadeTableTexture.get());
         }
 
         // Construction wireframe: the visible polygon edges of each nanoframe,
@@ -1534,9 +1538,9 @@ namespace rwe
         UnitMeshBatch meshProjectilesBatch;
         {
             RWE_RENDERPROF("w.projectiles");
-            drawProjectiles(simulation, localPlayerVisibility(), gameMediaDatabase, viewProjectionMatrix, simulation.projectiles, simulation.gameTime, interpolationFraction, unitTextureAtlas.get(), unitTeamTextureAtlases, lineProjectilesBatch, spriteProjectilesBatch, meshProjectilesBatch);
+            drawProjectiles(simulation, localPlayerVisibility(), gameMediaDatabase, viewProjectionMatrix, simulation.projectiles, simulation.gameTime, interpolationFraction, unitAtlases, lineProjectilesBatch, spriteProjectilesBatch, meshProjectilesBatch);
             worldRenderService.drawBatch(lineProjectilesBatch, viewProjectionMatrix);
-            worldRenderService.drawUnitMeshBatch(meshProjectilesBatch, simScalarToFloat(seaLevel));
+            worldRenderService.drawUnitMeshBatch(meshProjectilesBatch, simScalarToFloat(seaLevel), shadeTableTexture.get());
             worldRenderService.drawSpriteBatch(spriteProjectilesBatch);
         }
 

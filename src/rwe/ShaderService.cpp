@@ -46,6 +46,8 @@ namespace rwe
         s.unitTexture.seaLevel = graphics.getUniformLocation(s.unitTexture.handle.get(), "seaLevel");
         s.unitTexture.shadeStrength = graphics.getUniformLocation(s.unitTexture.handle.get(), "shadeStrength");
         s.unitTexture.alpha = graphics.getUniformLocation(s.unitTexture.handle.get(), "alpha");
+        s.unitTexture.paletteIndexSampler = graphics.getUniformLocation(s.unitTexture.handle.get(), "paletteIndexSampler");
+        s.unitTexture.shadeTableSampler = graphics.getUniformLocation(s.unitTexture.handle.get(), "shadeTableSampler");
 
         s.unitShadow.handle = loadShader(graphics, "shaders/unitShadow.vert", "shaders/unitShadow.frag", texturedVertexAttribs);
         s.unitShadow.vpMatrix = graphics.getUniformLocation(s.unitShadow.handle.get(), "vpMatrix");
@@ -65,6 +67,8 @@ namespace rwe
         s.unitBuild.belowMode = graphics.getUniformLocation(s.unitBuild.handle.get(), "belowMode");
         s.unitBuild.buildColorA = graphics.getUniformLocation(s.unitBuild.handle.get(), "buildColorA");
         s.unitBuild.buildColorB = graphics.getUniformLocation(s.unitBuild.handle.get(), "buildColorB");
+        s.unitBuild.paletteIndexSampler = graphics.getUniformLocation(s.unitBuild.handle.get(), "paletteIndexSampler");
+        s.unitBuild.shadeTableSampler = graphics.getUniformLocation(s.unitBuild.handle.get(), "shadeTableSampler");
 
         s.flashEffect.handle = loadShader(graphics, "shaders/flashEffect.vert", "shaders/flashEffect.frag", texturedVertexAttribs);
         s.flashEffect.mvpMatrix = graphics.getUniformLocation(s.flashEffect.handle.get(), "mvpMatrix");

@@ -37,6 +37,8 @@ namespace rwe
         UniformLocation seaLevel;
         UniformLocation shadeStrength;
         UniformLocation alpha;
+        UniformLocation paletteIndexSampler;
+        UniformLocation shadeTableSampler;
     };
 
     struct UnitShadowShader
@@ -62,6 +64,8 @@ namespace rwe
         UniformLocation belowMode;
         UniformLocation buildColorA;
         UniformLocation buildColorB;
+        UniformLocation paletteIndexSampler;
+        UniformLocation shadeTableSampler;
     };
 
     struct FlashEffectShader

@@ -514,6 +514,29 @@ Two things fall out:
   primaries barely brightens at all; a mid-grey one brightens by 80%. There is
   no linear multiplier that reproduces this. **Use the file.**
 
+A census of the whole table says the same thing more sharply. Counting, for
+each row, how many of the 256 entries it leaves exactly where they are, how
+many it sends to a black entry and how many to a white one:
+
+| row | unchanged | to black | to white | | row | unchanged | to black | to white |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 1 | 256 | 0 | | 16 | 125 | 13 | 9 |
+| 1 | 1 | 118 | 0 | | 18 | 27 | 13 | 19 |
+| 4 | 1 | 30 | 0 | | 20 | 12 | 13 | 26 |
+| 8 | 5 | 13 | 0 | | 24 | 8 | 13 | 41 |
+| 13 | 59 | 13 | 0 | | 28 | 8 | 13 | 51 |
+| 14 | 216 | 13 | 1 | | 31 | **8** | 13 | **58** |
+| 15 | 232 | 13 | 3 | | | | | |
+
+Row 31 leaves eight of the 256 entries exactly where they are and puts
+fifty-eight of them on white; row 15, the identity row, is genuinely the
+identity for 232 of them and within 12/255 for the other 24, most of which are
+duplicate entries with the same RGB. A single multiplier does none of that. The
+black count falling to a floor of exactly thirteen from row 8 upward is the same
+thirteen entries every time -- the thirteen that `PALETTE.PAL` already holds as
+`(0,0,0)`, indices 0, 10-15 and 240-245 -- which is section 25's finding
+arrived at from the other end.
+
 `PALETTE.LHT` (`[disp+0xC8]`, `LIGHT TABLE`) is a different 32x256 ramp and is
 NOT used by this path. `PALETTE.ALP` (`[disp+0xC0]`) is the anti-alias blend
 table. Both re-confirmed.

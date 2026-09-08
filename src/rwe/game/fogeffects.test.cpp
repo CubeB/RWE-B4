@@ -67,8 +67,7 @@ namespace rwe
                 sim.projectiles,
                 sim.gameTime,
                 0.0f,
-                TextureIdentifier(),
-                teamAtlases,
+                UnitTextureAtlases{TextureIdentifier(), TextureIdentifier(), &teamAtlases, &teamAtlases},
                 lines,
                 sprites,
                 meshes);

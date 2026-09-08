@@ -195,6 +195,54 @@ namespace rwe
         return handle;
     }
 
+    TextureHandle GraphicsContext::createSingleChannelMipMappedTexture(const std::vector<Grid<unsigned char>>& mipLevels)
+    {
+        GLuint texture;
+        glGenTextures(1, &texture);
+        TextureIdentifier id(texture);
+        TextureHandle handle(id);
+
+        glBindTexture(GL_TEXTURE_2D, texture);
+
+        // Rows are a single byte per texel, so they are not word aligned.
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+        for (std::size_t i = 0; i < mipLevels.size(); ++i)
+        {
+            const auto& level = mipLevels[i];
+            glTexImage2D(
+                GL_TEXTURE_2D,
+                static_cast<GLint>(i),
+                GL_R8,
+                level.getWidth(),
+                level.getHeight(),
+                0,
+                GL_RED,
+                GL_UNSIGNED_BYTE,
+                level.getData());
+        }
+
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(mipLevels.size()) - 1);
+
+        // These bytes are palette indices, and the average of two indices names
+        // a third colour that is nowhere between them, so nothing may blend
+        // them: nearest at both ends, and no interpolation between levels
+        // either. It is also why the chain is handed to us instead of asked
+        // for -- glGenerateMipmap's box filter would do exactly that averaging.
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        requireNoOpenGlError();
+
+        return handle;
+    }
+
     void GraphicsContext::updateTexture(TextureIdentifier texture, unsigned int width, unsigned int height, const Color* image)
     {
         glBindTexture(GL_TEXTURE_2D, texture.value);
@@ -804,5 +852,10 @@ namespace rwe
     void GraphicsContext::setActiveTextureSlot1()
     {
         glActiveTexture(GL_TEXTURE1);
+    }
+
+    void GraphicsContext::setActiveTextureSlot2()
+    {
+        glActiveTexture(GL_TEXTURE2);
     }
 }

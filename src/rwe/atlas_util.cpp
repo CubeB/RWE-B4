@@ -4,8 +4,10 @@
 #include <rwe/util/SpanStream.h>
 #include <rwe/BoxTreeSplit.h>
 #include <rwe/io/gaf/GafArchive.h>
+#include <rwe/ShadeTable.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/match.h>
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -14,9 +16,10 @@ namespace rwe
         std::string name;
         unsigned int frameNumber;
         Grid<Color> data;
+        Grid<unsigned char> paletteIndices;
 
         FrameInfo(const std::string& name, unsigned int frameNumber, unsigned int width, unsigned int height)
-            : name(name), frameNumber(frameNumber), data(width, height)
+            : name(name), frameNumber(frameNumber), data(width, height), paletteIndices(width, height)
         {
         }
     };
@@ -64,6 +67,7 @@ namespace rwe
                     }
 
                     frameInfo->data.set(outPosX, outPosY, (*palette)[colorIndex]);
+                    frameInfo->paletteIndices.set(outPosX, outPosY, colorIndex);
                 }
             }
         }
@@ -85,7 +89,86 @@ namespace rwe
     using AtlasItem = std::variant<AtlasItemFrame, AtlasItemColor>;
 
 
-    std::pair<std::unordered_map<std::string, Rectangle2f>, std::vector<SharedTextureHandle>> createTeamColorAtlases(
+    /**
+     * The mip chain for a palette index atlas. GL cannot build this one: its
+     * box filter would average indices, and the mean of two palette indices
+     * names a third colour that is nowhere between them. Each level takes the
+     * commonest of the four texels it covers instead, so every value in the
+     * chain is a colour that really is in the image under it.
+     */
+    std::vector<Grid<unsigned char>> buildPaletteIndexMipChain(Grid<unsigned char> base)
+    {
+        std::vector<Grid<unsigned char>> levels;
+        levels.push_back(std::move(base));
+
+        while (levels.back().getWidth() > 1 || levels.back().getHeight() > 1)
+        {
+            const auto& source = levels.back();
+            auto width = std::max(1, source.getWidth() / 2);
+            auto height = std::max(1, source.getHeight() / 2);
+
+            Grid<unsigned char> level(width, height);
+            for (int y = 0; y < height; ++y)
+            {
+                for (int x = 0; x < width; ++x)
+                {
+                    unsigned char candidates[4]{};
+                    int candidateCount = 0;
+                    for (int dy = 0; dy < 2; ++dy)
+                    {
+                        for (int dx = 0; dx < 2; ++dx)
+                        {
+                            auto sx = (x * 2) + dx;
+                            auto sy = (y * 2) + dy;
+                            if (sx >= source.getWidth() || sy >= source.getHeight())
+                            {
+                                continue;
+                            }
+                            candidates[candidateCount++] = source.get(sx, sy);
+                        }
+                    }
+
+                    // Ties go to the earliest candidate, which is why this
+                    // counts rather than sorts: strictly greater keeps the
+                    // first of an equal pair.
+                    unsigned char best = candidates[0];
+                    int bestCount = 0;
+                    for (int i = 0; i < candidateCount; ++i)
+                    {
+                        int count = 0;
+                        for (int j = 0; j < candidateCount; ++j)
+                        {
+                            if (candidates[j] == candidates[i])
+                            {
+                                ++count;
+                            }
+                        }
+
+                        if (count > bestCount)
+                        {
+                            bestCount = count;
+                            best = candidates[i];
+                        }
+                    }
+
+                    level.set(x, y, best);
+                }
+            }
+
+            levels.push_back(std::move(level));
+        }
+
+        return levels;
+    }
+
+    struct TeamColorAtlases
+    {
+        std::unordered_map<std::string, Rectangle2f> atlasMap;
+        std::vector<SharedTextureHandle> atlases;
+        std::vector<SharedTextureHandle> paletteIndexAtlases;
+    };
+
+    TeamColorAtlases createTeamColorAtlases(
         AbstractVirtualFileSystem& vfs,
         GraphicsContext& graphics,
         const ColorPalette& palette)
@@ -142,9 +225,11 @@ namespace rwe
         }
 
         std::vector<SharedTextureHandle> atlases;
+        std::vector<SharedTextureHandle> paletteIndexAtlases;
         for (int i = 0; i < 10; ++i)
         {
             Grid<Color> atlas(packInfo.width, packInfo.height);
+            Grid<unsigned char> indexAtlas(packInfo.width, packInfo.height);
             for (const auto& e : packInfo.entries)
             {
                 const auto& frames = entries.at(e.value).second;
@@ -167,11 +252,18 @@ namespace rwe
                     std::min(firstFrame.data.getWidth(), frame.data.getWidth()),
                     std::min(firstFrame.data.getHeight(), frame.data.getHeight()),
                     frame.data);
+                indexAtlas.replace(
+                    e.x,
+                    e.y,
+                    std::min(firstFrame.data.getWidth(), frame.data.getWidth()),
+                    std::min(firstFrame.data.getHeight(), frame.data.getHeight()),
+                    frame.paletteIndices);
             }
             atlases.emplace_back(graphics.createTexture(atlas));
+            paletteIndexAtlases.emplace_back(graphics.createSingleChannelMipMappedTexture(buildPaletteIndexMipChain(std::move(indexAtlas))));
         }
 
-        return std::make_pair(std::move(atlasMap), std::move(atlases));
+        return TeamColorAtlases{std::move(atlasMap), std::move(atlases), std::move(paletteIndexAtlases)};
     }
 
     TextureAtlasInfo createTextureAtlases(AbstractVirtualFileSystem* vfs, GraphicsContext* graphics, const ColorPalette* palette)
@@ -242,6 +334,7 @@ namespace rwe
 
         // pack the textures
         Grid<Color> atlas(packInfo.width, packInfo.height);
+        Grid<unsigned char> indexAtlas(packInfo.width, packInfo.height);
         std::unordered_map<std::string, Rectangle2f> atlasMap;
         std::vector<Vector2f> atlasColorMap(palette->size());
 
@@ -259,14 +352,43 @@ namespace rwe
                     atlasMap.insert({toUpper(f.frameInfo->name), bounds});
 
                     atlas.replace(e.x, e.y, f.frameInfo->data);
+                    indexAtlas.replace(e.x, e.y, f.frameInfo->paletteIndices);
                 },
                 [&](const AtlasItemColor& c) {
                     atlasColorMap[c.colorIndex] = Vector2f((e.x + 0.5f) / static_cast<float>(packInfo.width), (e.y + 0.5f) / static_cast<float>(packInfo.height));
                     atlas.set(e.x, e.y, (*palette)[c.colorIndex]);
+                    // The flat-colour span filler at 0x4C0B10 shades a solid-coloured
+                    // polygon through the same table, with the polygon's colour index
+                    // standing in for a texel, so these single-texel entries need an
+                    // index of their own just as a real texture does.
+                    indexAtlas.set(e.x, e.y, static_cast<unsigned char>(c.colorIndex));
                 });
         }
 
         SharedTextureHandle atlasTexture(graphics->createTexture(atlas));
+        SharedTextureHandle paletteIndexAtlasTexture(graphics->createSingleChannelMipMappedTexture(buildPaletteIndexMipChain(std::move(indexAtlas))));
+
+        auto shadeTable = [&]() {
+            auto bytes = vfs->readFile("palettes/PALETTE.SHD");
+            if (bytes)
+            {
+                if (auto table = readShadeTable(*bytes); table)
+                {
+                    LOG_INFO << "Loaded shade table from palettes/PALETTE.SHD";
+                    return *table;
+                }
+
+                LOG_WARN << "palettes/PALETTE.SHD is not " << (ShadeTableRows * ShadeTableEntriesPerRow) << " bytes, generating a shade table from the palette instead";
+            }
+            else
+            {
+                LOG_WARN << "palettes/PALETTE.SHD could not be read, generating a shade table from the palette instead";
+            }
+
+            return generateShadeTable(*palette);
+        }();
+
+        SharedTextureHandle shadeTableTexture(graphics->createTexture(shadeTableToImage(shadeTable, *palette)));
 
         auto teamColorInfo = createTeamColorAtlases(*vfs, *graphics, *palette);
 
@@ -274,8 +396,11 @@ namespace rwe
             std::move(atlasTexture),
             std::move(atlasMap),
             std::move(atlasColorMap),
-            std::move(teamColorInfo.second),
-            std::move(teamColorInfo.first)};
+            std::move(teamColorInfo.atlases),
+            std::move(teamColorInfo.atlasMap),
+            std::move(paletteIndexAtlasTexture),
+            std::move(teamColorInfo.paletteIndexAtlases),
+            std::move(shadeTableTexture)};
     }
 
 }

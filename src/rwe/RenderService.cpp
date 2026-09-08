@@ -183,7 +183,7 @@ namespace rwe
         }
     }
 
-    void RenderService::drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel)
+    void RenderService::drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel, TextureIdentifier shadeTableTexture)
     {
         // Finished models first: a nanoframe's see-through parts still write
         // depth, so drawing it after the lab it sits in leaves the lab's bay
@@ -194,11 +194,29 @@ namespace rwe
             graphics->bindShader(textureShader.handle.get());
             graphics->setUniformFloat(textureShader.seaLevel, seaLevel);
             graphics->setUniformFloat(textureShader.alpha, 1.0f);
+
+            // Three samplers, one per texture unit: the colour atlas on 0, the
+            // palette-index copy of it on 1 and the shade table on 2. Every
+            // sampler has to be told which unit it is on -- one left unset
+            // reads zero and lands on slot 0 with the colour atlas, which is
+            // what the terrain's fog sampler explains at length above. The
+            // shade table is bound once for the whole block because it is the
+            // same image for every mesh. Each pass through the loop ends on
+            // slot 0, because every other bindTexture in the renderer assumes
+            // slot 0 is the current one.
+            graphics->setUniformInt(textureShader.paletteIndexSampler, 1);
+            graphics->setUniformInt(textureShader.shadeTableSampler, 2);
+            graphics->setActiveTextureSlot2();
+            graphics->bindTexture(shadeTableTexture);
+
             for (const auto& m : batch.meshes)
             {
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
+                graphics->setActiveTextureSlot1();
+                graphics->bindTexture(m.paletteIndexTexture);
+                graphics->setActiveTextureSlot0();
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -209,6 +227,10 @@ namespace rwe
             const auto& buildShader = shaders->unitBuild;
             graphics->bindShader(buildShader.handle.get());
             graphics->setUniformFloat(buildShader.seaLevel, seaLevel);
+            graphics->setUniformInt(buildShader.paletteIndexSampler, 1);
+            graphics->setUniformInt(buildShader.shadeTableSampler, 2);
+            graphics->setActiveTextureSlot2();
+            graphics->bindTexture(shadeTableTexture);
             for (const auto& m : batch.buildingMeshes)
             {
                 graphics->setUniformMatrix(buildShader.mvpMatrix, m.mvpMatrix);
@@ -223,6 +245,9 @@ namespace rwe
                 graphics->setUniformVec3(buildShader.buildColorA, m.buildColorA.x, m.buildColorA.y, m.buildColorA.z);
                 graphics->setUniformVec3(buildShader.buildColorB, m.buildColorB.x, m.buildColorB.y, m.buildColorB.z);
 
+                graphics->setActiveTextureSlot1();
+                graphics->bindTexture(m.paletteIndexTexture);
+                graphics->setActiveTextureSlot0();
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -242,6 +267,10 @@ namespace rwe
             const auto& textureShader = shaders->unitTexture;
             graphics->bindShader(textureShader.handle.get());
             graphics->setUniformFloat(textureShader.seaLevel, seaLevel);
+            graphics->setUniformInt(textureShader.paletteIndexSampler, 1);
+            graphics->setUniformInt(textureShader.shadeTableSampler, 2);
+            graphics->setActiveTextureSlot2();
+            graphics->bindTexture(shadeTableTexture);
 
             graphics->disableColorBuffer();
             for (const auto& m : batch.cloakedMeshes)
@@ -249,6 +278,9 @@ namespace rwe
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
+                graphics->setActiveTextureSlot1();
+                graphics->bindTexture(m.paletteIndexTexture);
+                graphics->setActiveTextureSlot0();
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -262,6 +294,9 @@ namespace rwe
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
+                graphics->setActiveTextureSlot1();
+                graphics->bindTexture(m.paletteIndexTexture);
+                graphics->setActiveTextureSlot0();
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -306,6 +341,14 @@ namespace rwe
             graphics->setUniformFloat(textureShader.seaLevel, 0.0f);
             graphics->setUniformFloat(textureShader.alpha, 1.0f);
             graphics->setUniformFloat(textureShader.shadeStrength, 0.0f);
+            // A strength of zero means the shader never reaches the table, so
+            // this pass binds neither of the other two textures. It still says
+            // which unit each sampler is on, so that the program's samplers
+            // are never all sitting on slot 0 with the colour atlas under
+            // them -- an invariant worth keeping true everywhere rather than
+            // only where it currently matters.
+            graphics->setUniformInt(textureShader.paletteIndexSampler, 1);
+            graphics->setUniformInt(textureShader.shadeTableSampler, 2);
             for (const auto& m : batch.cutouts)
             {
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);

@@ -6,6 +6,7 @@
 #include <rwe/ColorPalette.h>
 #include <rwe/Mesh.h>
 #include <rwe/geometry/CollisionMesh.h>
+#include <rwe/grid/Grid.h>
 #include <rwe/math/Vector3f.h>
 #include <rwe/render/FrameBufferHandle.h>
 #include <rwe/render/GlMesh.h>
@@ -145,6 +146,12 @@ namespace rwe
         TextureHandle createSingleChannelTexture(unsigned int width, unsigned int height, const unsigned char* image);
 
         /**
+         * The same, with the mip chain supplied rather than generated. Level 0
+         * is first and each level is half the size of the one before it.
+         */
+        TextureHandle createSingleChannelMipMappedTexture(const std::vector<Grid<unsigned char>>& mipLevels);
+
+        /**
          * Replaces a rectangle of a single-channel texture. The image pointer
          * is the whole image, of which the rectangle at (x, y) is uploaded.
          */
@@ -251,6 +258,7 @@ namespace rwe
 
         void setActiveTextureSlot0();
         void setActiveTextureSlot1();
+        void setActiveTextureSlot2();
 
     private:
         ShaderHandle compileShader(GLenum shaderType, const std::string& source);

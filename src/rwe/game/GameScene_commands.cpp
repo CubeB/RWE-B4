@@ -726,7 +726,7 @@ namespace rwe
     namespace
     {
         /**
-         * How much of the measured PALETTE.SHD ramp each kind of model gets.
+         * How much of the PALETTE.SHD lookup each kind of model gets.
          *
          * The original has no such split. 0x459C70 shades every unit and
          * every feature through one path and never reads a "is a building"

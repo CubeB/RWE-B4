@@ -249,6 +249,9 @@ namespace rwe
         GameMediaDatabase gameMediaDatabase;
         SharedTextureHandle unitTextureAtlas;
         std::vector<SharedTextureHandle> unitTeamTextureAtlases;
+        SharedTextureHandle unitPaletteIndexAtlas;
+        std::vector<SharedTextureHandle> unitTeamPaletteIndexAtlases;
+        SharedTextureHandle shadeTableTexture;
 
         UiRenderService worldUiRenderService;
         UiRenderService chromeUiRenderService;
@@ -760,6 +763,9 @@ namespace rwe
             const GameCameraState& cameraState,
             SharedTextureHandle unitTextureAtlas,
             std::vector<SharedTextureHandle>&& unitTeamTextureAtlases,
+            SharedTextureHandle unitPaletteIndexAtlas,
+            std::vector<SharedTextureHandle>&& unitTeamPaletteIndexAtlases,
+            SharedTextureHandle shadeTableTexture,
             GameSimulation&& simulation,
             MapTerrainGraphics&& terrainGraphics,
             BuilderGuisDatabase&& builderGuisDatabase,

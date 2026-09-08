@@ -39,6 +39,8 @@ namespace rwe
          */
         float shadeStrength;
         TextureIdentifier texture;
+        /** The same atlas again, one byte a texel: that texel's palette index. */
+        TextureIdentifier paletteIndexTexture;
     };
 
     /**
@@ -71,6 +73,8 @@ namespace rwe
          */
         float shadeStrength;
         TextureIdentifier texture;
+        /** The same atlas again, one byte a texel: that texel's palette index. */
+        TextureIdentifier paletteIndexTexture;
         float unitY;
         /** Height of the whole model, so the build fill can sweep bottom to top. */
         float unitHeight;
@@ -176,7 +180,7 @@ namespace rwe
 
         void drawBatch(const ColoredMeshBatch& batch, const Matrix4f& vpMatrix, float alpha = 1.0f);
 
-        void drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel);
+        void drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel, TextureIdentifier shadeTableTexture);
 
         void drawUnitShadowMeshBatch(const UnitShadowMeshBatch& batch);
 
