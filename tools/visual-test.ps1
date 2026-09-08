@@ -313,8 +313,12 @@ if ($phase -eq "shade") {
   # and its right panel at row 0, solid black, and the skirt between them is
   # where the Gouraud ramp through the middle of the table shows. -tag names
   # the build under test so a before and an after can sit side by side. On
-  # Coast To Coast at this window size the commander starts near (505,165)
-  # of the client area and the collector lands about 110 pixels east.
+  # Coast To Coast at this window size the commander stands near (465,155) of
+  # the client area and the collector lands about 90 pixels east of him, so
+  # the collector crop starts at 515. Re-measured 2026-09-08: it had been
+  # written down as 570, which caught the collector's left edge and 80 pixels
+  # of sand. If this phase ever comes back mostly terrain, measure it off the
+  # -full shot again rather than nudging it.
   [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
   Start-Sleep -Seconds 10
   $o = Origin
@@ -325,8 +329,8 @@ if ($phase -eq "shade") {
   # window is not under test.
   Crop $bmp "$outDir\vt-shade$tag-full.png" $o.X $o.Y 800 600 1
   Crop $bmp "$outDir\vt-shade$tag-scene.png" ($o.X + 400) ($o.Y + 90) 300 160 3
-  Crop $bmp "$outDir\vt-shade$tag-solar.png" ($o.X + 570) ($o.Y + 120) 90 90 6
-  Crop $bmp "$outDir\vt-shade$tag-commander.png" ($o.X + 470) ($o.Y + 120) 70 90 6
+  Crop $bmp "$outDir\vt-shade$tag-solar.png" ($o.X + 515) ($o.Y + 125) 90 85 6
+  Crop $bmp "$outDir\vt-shade$tag-commander.png" ($o.X + 430) ($o.Y + 120) 70 90 6
   $bmp.Dispose()
 }
 
