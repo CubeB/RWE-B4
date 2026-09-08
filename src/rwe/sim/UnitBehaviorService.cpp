@@ -768,8 +768,23 @@ namespace rwe
                     }
                 }
             }
-            else if (!weaponDefinition.commandFire && unit.fireOrders == UnitFireOrders::FireAtWill)
+            else if (unit.fireOrders == UnitFireOrders::FireAtWill
+                && (!weaponDefinition.commandFire || sim->getPlayer(unit.owner).type == GamePlayerType::Computer))
             {
+                // A `commandfire` weapon is normally fired by hand and never
+                // acquires a target of its own -- that is what makes the D-gun
+                // a decision rather than a gun. The original makes one
+                // exception, in the auto-acquire scan at 0x4089A0: "commandfire
+                // weapons do not either, **unless the player is of type 2**".
+                // Type 2 is the computer player, the same `player+0x73` byte
+                // that exempts an AI from the ShootMe rule in chooseTarget
+                // below -- so half of that one finding was already implemented
+                // here and this half was not.
+                //
+                // So an AI commander does D-gun what comes at it, and a human's
+                // does not unless told. Reported from a play-test: a commander
+                // stood and died under fire from several units with the one
+                // weapon that would have cleared them unused.
                 if (auto target = chooseTarget(id, weaponIndex))
                 {
                     weapon->state = UnitWeaponStateAttacking(*target);

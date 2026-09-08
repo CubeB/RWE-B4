@@ -8292,6 +8292,19 @@ Palette ranges that turned up:
 
 ## 85. The D-gun: `ATTACKSPECIAL`, and what `commandfire` really costs you
 
+> **A computer player's commander fires it by itself.** `commandfire` keeps a
+> weapon out of the auto-acquire scan, which is what makes the D-gun a decision
+> rather than a gun — but the scan at `0x4089A0` exempts the computer from that
+> rule: "`commandfire` weapons do not either, **unless the player is of type
+> 2**". Type 2 is the same `player+0x73` byte that exempts an AI from the
+> `ShootMe` rule a few tests further down the same scan. So an AI commander
+> engages with its D-gun on its own and a human's does not. RWE implemented the
+> `ShootMe` half of that scan and not this one, until a play-test reported a
+> commander standing and dying under fire with the weapon unused; it now does
+> both (`UnitBehaviorService`, and the `[dgun]` cases). The return-fire path
+> `0x408A90` skips `commandfire` too and **no exemption has been read there** —
+> that is a different routine, and it has not been checked.
+
 `candgun` is capability bit 14, and `0x43F7E8` turns a click in D-gun mode into
 the `ATTACKSPECIAL` mission. That test is the whole eligibility rule: it does
 not look at the target or the position, so a D-gun order is produced for an
