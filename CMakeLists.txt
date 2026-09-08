@@ -301,6 +301,11 @@ set(SOURCE_FILES
     src/rwe/game/GameNetworkService.h
     src/rwe/game/GameScene.cpp
     src/rwe/game/GameScene.h
+    src/rwe/game/GameScene_audio.cpp
+    src/rwe/game/GameScene_commands.cpp
+    src/rwe/game/GameScene_input.cpp
+    src/rwe/game/GameScene_render.cpp
+    src/rwe/game/GameScene_replay.cpp
     src/rwe/game/GameScene_util.cpp
     src/rwe/game/GameScene_util.h
     src/rwe/game/InGameSoundsInfo.cpp

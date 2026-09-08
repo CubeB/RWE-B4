@@ -1,10 +1,17 @@
 #pragma once
 
+#include <rwe/AudioService.h>
 #include <rwe/RenderService.h>
 #include <rwe/collections/VectorMap.h>
+#include <rwe/game/BuilderGuisDatabase.h>
+#include <rwe/game/GameCameraState.h>
 #include <rwe/game/GameMediaDatabase.h>
 #include <rwe/game/Particle.h>
 #include <rwe/game/PlayerColorIndex.h>
+#include <rwe/game/UnitSoundType.h>
+#include <rwe/geometry/Line3f.h>
+#include <rwe/geometry/Rectangle2f.h>
+#include <rwe/io/gui/gui.h>
 #include <rwe/math/Matrix4x.h>
 #include <rwe/pathfinding/AStarPathFinder.h>
 #include <rwe/pathfinding/PathCost.h>
@@ -503,4 +510,40 @@ namespace rwe
      * nanoframe exists, which is what buildOrderUnitId holds.
      */
     std::optional<UnitId> unitOrderTargetUnit(const UnitState& unit);
+
+    // Declared here rather than kept private to GameScene.cpp because the
+    // renderers moved to GameScene_render.cpp still call them; the
+    // definitions stay where they were. See the head of that file for why it
+    // exists at all.
+
+    bool isValidUnitType(const GameSimulation& simulation, const std::string& unitType);
+
+    std::optional<std::reference_wrapper<const std::vector<GuiEntry>>> getBuilderGui(const BuilderGuisDatabase& db, const std::string& unitType, unsigned int page);
+
+    unsigned int getBuildPageCount(const BuilderGuisDatabase& db, const std::string& unitType);
+
+    bool unitIsBuilder(const GameSimulation& sim, UnitId unitId);
+
+    bool unitIsBuilder(const GameSimulation& sim, std::optional<UnitId> singleSelectedUnit);
+
+    bool unitShouldLandOnAirBase(const GameSimulation& sim, UnitId flyer, UnitId target);
+
+    bool unitIsDamaged(const GameSimulation& sim, UnitId unitId);
+
+    /** True for particles drawn among the world's geometry rather than over the finished frame. */
+    bool particleDrawsInWorld(const Particle& particle);
+
+    bool shouldShowAllBuildBoxes(const GameSimulation& sim, PlayerId localPlayerId, std::optional<UnitId> singleSelectedUnit, std::optional<UnitId> hoveredUnit);
+
+    int computeSoundVolume(int soundCount);
+
+    std::optional<AudioService::SoundHandle> getSound(const GameSimulation& sim, const GameMediaDatabase& meshDb, const std::string& unitType, UnitSoundType soundType);
+
+    Rectangle2f computeCameraConstraint(const MapTerrain& terrain, float viewportWidth, float viewportHeight);
+
+    Line3x<SimScalar> floatToSimLine(const Line3f& line);
+
+    Matrix4f computeViewProjectionMatrix(const GameCameraState& cameraState, int screenWidth, int screenHeight);
+
+    Matrix4f computeInverseViewProjectionMatrix(const GameCameraState& cameraState, int screenWidth, int screenHeight);
 }
