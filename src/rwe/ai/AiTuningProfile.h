@@ -423,6 +423,26 @@ namespace rwe
         /** How far a fighter will chase something before it is called home. */
         SimScalar fighterLeash{2400_ss};
         /**
+         * What a bomber will fly into. A bombing run is a trade: an aircraft
+         * for a building. Sent at the dearest thing the enemy owns, it flies
+         * at whatever stands deepest inside their anti-air and is traded for
+         * a fraction of one. It goes instead at what is lightly covered or
+         * not covered at all -- the outlying extractor, the army with a
+         * Crasher or two -- which is also the thing whose loss they feel,
+         * because it is the thing they did not think needed cover.
+         */
+        int bomberMaxAntiAirCover{2};
+        /**
+         * Except when they are at the door. An enemy this close to the base
+         * anchor is bombed whatever is covering it: an aircraft is worth less
+         * than the base is.
+         */
+        SimScalar bomberHomeDefenseRadius{900_ss};
+        /** How near a candidate other enemy units count as the same army. */
+        SimScalar bomberClusterRadius{300_ss};
+        /** How many have to be standing together before an army is worth a sortie. */
+        int bomberMinClusterSize{3};
+        /**
          * Air constructors. One is worth having on any map: it flies, so no
          * ground has to connect for it to reach a patch, and the expansion
          * that a walking constructor cannot get to is exactly the one nobody

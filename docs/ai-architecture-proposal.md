@@ -1922,3 +1922,140 @@ serves every builder rather than the front one, a much larger share of the
 economy than it was when the rule was written. Capping it -- two builders, or
 only once the frame is past halfway -- is the obvious next experiment, and it
 is a knob's worth of work.
+
+## 17 Two more from the same replay (2026-09-08)
+
+## 17.1 A factory planted across another factory's door
+
+One commander built a factory in front of another and the first one never
+produced again. That is not a cosmetic complaint about base layout: it is
+permanent.
+
+The mechanism is in `UnitBehaviorService::handleBuild`. A unit a factory has
+finished is handed a `BuggerOffOrder` carrying the factory's own footprint
+rectangle, and the factory drops to `FactoryBehaviorStateIdle` and starts the
+next one. But the next one is spawned on the pad, and `trySpawnUnit` refuses to
+place a unit on an occupied cell -- `GameSimulation.cpp` logs the refusal and
+sets `UnitCreationStatusFailed`, which sends the factory straight back to
+`Building` to try again. So a finished unit that cannot walk clear of the
+footprint holds the pad for ever, and the factory retries for ever. There is no
+timeout and nothing else that can break the cycle.
+
+The AI's own site search was already trying to prevent this and could not.
+`collectBuildableSites` lays buildings out on square rings around the base
+anchor at a pitch of the footprint plus two tiles, and the comment above it
+says why: two tiles is a lane wide enough for a commander to walk through. The
+flaw is that the pitch is computed from the footprint of *the building being
+placed*. A five-tile factory is laid out on a seven-tile grid and a three-tile
+solar collector on a five-tile grid, both anchored at the same point, so the
+two grids share only every thirty-fifth position. Every ring position is
+checked against `canBeBuiltAt`, which asks whether the footprints overlap, and
+two rectangles one tile apart do not overlap. The lane was never enforced
+against anything but a building of exactly the same size.
+
+It is enforced against what is actually standing now. Every immobile unit
+within reach of the anchor contributes its footprint rectangle and the lane it
+wants -- two tiles for an ordinary building, three for a factory, the wider of
+the two winning when they differ -- and a candidate site that violates one is
+set aside rather than dropped. Set aside and not dropped because a base with
+nowhere left to put anything is worse off refusing to build than it is packed
+tight: the crowded sites are still returned if no clear site exists anywhere in
+the search radius.
+
+Owner is not consulted. A lane blocked by somebody else's building is just as
+blocked, and there is no case where we would rather stall a factory than
+decline a site.
+
+Extractors get the same test against factories only, and for a different
+reason. A mex goes where the metal is, so it is not on the base's grid at all
+and nothing about the ring pitch applies to it; a patch that happens to sit two
+tiles off a factory door will be mined and the factory will stop. Against
+factories only, because holding an extractor off every solar collector in the
+base would refuse patches for no gain -- a solar collector that gets built in
+next to an extractor has cost nothing.
+
+## 17.2 Bombers flew at the best-defended thing on the map
+
+S:16.4 gave the bombers a target: the dearest thing the enemy has built. That
+is the right thing to want and the wrong thing to fly at. The most expensive
+building the enemy owns is, nearly always, the one standing in the middle of
+their base behind everything they have built to stop aircraft, so a rule that
+picks on value alone picks the single worst approach on the map every time and
+keeps picking it as each replacement bomber comes off the pad.
+
+It also could not have known better. The threat map had no anti-air layer at
+all: `antiGround` sums every weapon's damage without asking what it can shoot
+at, so a Crasher and a Peewee were the same fact. And the layer it did have was
+not working. `weaponRange` looked each weapon up by the name written in the
+unit's FBI, against a map the loader keys upper case -- the identical mistake
+the damage lookup had made and that S:15.7 fixed a few lines above it. Every
+lookup missed, every range came back zero, and the threat a unit contributes
+was stamped on the single cell it was standing in instead of over the ground
+its guns cover. The anti-ground layer has been a scatter of points this whole
+time, which also means S:16.3's raid rule -- an outlying building "the threat
+map reads zero at" -- has been reading zero almost everywhere.
+
+There is now an `antiAirCover` layer, and it counts sources rather than summing
+damage. One unit that can reach an aircraft puts a one on every cell within its
+anti-air range, so the layer answers "how many things will be firing at a
+bomber over here", which is the question, and it is the question in the words a
+profile knob can name a limit in: `bomberMaxAntiAirCover`, two.
+
+The target is then chosen by three questions asked in order.
+
+Anything of theirs at our own door is bombed whatever is covering it, nearest
+first. An aircraft is worth less than the base is, and this is the one case
+where flying into the guns is correct.
+
+Otherwise the dearest building of theirs that at most two things cover.
+Buildings first, because reaching the extractor behind the wall of towers is
+the whole reason to own a bomber and nothing else we have can do it.
+
+Otherwise an army, and only one standing together: at least
+`bomberMinClusterSize` known enemies within `bomberClusterRadius` of each
+other, and lightly covered like everything else. A single kbot is not worth a
+sortie -- that is S:16.2's mistake wearing a third uniform -- and a massed army
+under its own anti-air is worth rather less than that.
+
+## 17.3 What it measured, and a metric that could not answer
+
+Sixteen games, Core against Core on Painted Desert, both sides default, the
+same sixteen seeds for every build:
+
+| build | games that ended in a result |
+|---|---|
+| before this round | 7 of 16 |
+| this round, clearance off entirely | 6 of 16 |
+| this round, clearance on factories only | 3 of 16 |
+| this round, as shipped | 4 of 16 |
+
+The first reading of this was that the spacing had cost the decisiveness S:16
+bought, and it was wrong. Two eight-game runs had put the new build at 2 of 8
+against the old build's 4 of 8; that looked like a regression, and the first
+hypothesis for it -- that the anti-ground layer coming alive for the first time
+had made `bestAttackTarget` timid -- was tested and came back flat. Slot 1 with
+`threatAversion=0` scored exactly the record it scored with the term on: two
+wins, no losses, six timeouts. The knob that had never done anything still did
+nothing.
+
+So the runs above were taken to find out which change was responsible, and the
+answer is that none of them is, because the metric cannot resolve a difference
+this size. If the clearance were driving the number then factory-only clearance
+-- strictly less spacing than the shipped version -- would have to sit between
+6 and 4. It came out at 3, below both. Four runs of sixteen games gave 7, 6, 4
+and 3, and they do not order with the change at all.
+
+Worth writing down as a fact about the instrument rather than about the AI.
+"Games that ended in a result" is a coarse binary over a run whose length is
+capped, so a game that was two minutes from a decision counts the same as one
+that was never going anywhere, and the run-to-run spread at sixteen games
+covers a swing of three or four. S:16 quoted a move from 1 of 6 to 4 of 8 on
+this same metric. That was a much larger effect and it was corroborated by
+counts of the behaviour it came from -- 459 reclaims where there had been none
+-- but the confidence interval on the headline number was never as tight as
+quoting it made it sound.
+
+The clearance is kept, on the mechanism rather than on the measurement: a
+walled-in factory is permanently dead, the lane the ring pitch already promised
+was never enforced across sizes, and nothing here shows a cost worth trading
+that for.

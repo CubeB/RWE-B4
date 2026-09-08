@@ -151,6 +151,99 @@ namespace rwe
 
     namespace
     {
+        /**
+         * Tiles of clear ground between buildings. Two is the lane the ring
+         * pitch below already leaves -- wide enough for a commander to walk
+         * through -- but that pitch only spaces a building from others of its
+         * own size: the spacing is computed from the footprint of the thing
+         * being placed, so every size gets a different grid off the same
+         * anchor and a small building can land hard against a large one. This
+         * is the same lane, tested against what is actually standing.
+         */
+        constexpr int buildingClearanceTiles = 2;
+
+        /**
+         * And what a factory wants. A unit a factory finishes is given a
+         * BuggerOffOrder out of the factory's own footprint; until it is out,
+         * the pad is occupied and trySpawnUnit refuses to place the next one,
+         * so the factory does not stall for a moment, it stalls for the rest
+         * of the game. In a play-test one commander planted a factory across
+         * the front of another and stopped it dead.
+         */
+        constexpr int factoryClearanceTiles = 3;
+
+        /** A factory is the immobile thing that builds: the only building whose exit has to stay open. */
+        bool isFactory(const UnitDefinition& def)
+        {
+            return !def.isMobile && def.builder;
+        }
+
+        /** Something already standing or going up, and the lane it wants kept clear around it. */
+        struct PlacementObstacle
+        {
+            DiscreteRect rect;
+            int margin{0};
+        };
+
+        /**
+         * Every building near the anchor, with the lane each wants around it.
+         *
+         * Collected once per site search rather than once per candidate: the
+         * ring scan asks about a few hundred places and this is a few dozen
+         * rectangles. Owner is not consulted -- a lane blocked by somebody
+         * else's building is just as blocked.
+         */
+        std::vector<PlacementObstacle> collectStandingBuildings(
+            const GameSimulation& sim,
+            const AiTuningProfile& profile,
+            const SimVector& anchor)
+        {
+            std::vector<PlacementObstacle> buildings;
+            auto reach = profile.maxMexSearchRadius + profile.maxMexSearchRadius;
+            for (const auto& [_, unit] : sim.units)
+            {
+                if (!unit.isAlive())
+                {
+                    continue;
+                }
+                auto defIt = sim.unitDefinitions.find(unit.unitType);
+                if (defIt == sim.unitDefinitions.end() || defIt->second.isMobile)
+                {
+                    continue;
+                }
+                auto dx = unit.position.x - anchor.x;
+                auto dz = unit.position.z - anchor.z;
+                if (((dx * dx) + (dz * dz)) > (reach * reach))
+                {
+                    continue;
+                }
+                auto rect = sim.computeFootprintRegion(unit.position, defIt->second.movementCollisionInfo);
+                buildings.push_back(PlacementObstacle{rect, isFactory(defIt->second) ? factoryClearanceTiles : buildingClearanceTiles});
+            }
+            return buildings;
+        }
+
+        /**
+         * Does a footprint keep its distance from everything already standing?
+         * The wider of the two lanes wins, so a solar collector next to a
+         * factory is held off at the factory's distance.
+         */
+        bool clearsStandingBuildings(const std::vector<PlacementObstacle>& buildings, const DiscreteRect& rect, int ownMargin)
+        {
+            for (const auto& b : buildings)
+            {
+                auto margin = std::max(b.margin, ownMargin);
+                if (rect.x - margin < b.rect.x + b.rect.width
+                    && b.rect.x - margin < rect.x + rect.width
+                    && rect.y - margin < b.rect.y + b.rect.height
+                    && b.rect.y - margin < rect.y + rect.height)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         /** A site a building fits on, and which ring around the anchor it was found on. */
         struct BuildableSite
         {
@@ -180,7 +273,14 @@ namespace rwe
             const SimScalar radius = profile.maxMexSearchRadius;
             const int ringCount = std::max(1, static_cast<int>(radius.value / spacing.value));
 
+            const auto standing = collectStandingBuildings(sim, profile, anchor);
+            const auto ownMargin = isFactory(def) ? factoryClearanceTiles : buildingClearanceTiles;
+
             std::vector<BuildableSite> sites;
+            // Sites that fit but crowd something already up. Kept only as a
+            // last resort: a base with nowhere left to put anything is worse
+            // off refusing to build than it is packed tight.
+            std::vector<BuildableSite> crowded;
             for (int ring = 1; ring <= ringCount; ++ring)
             {
                 for (int dz = -ring; dz <= ring; ++dz)
@@ -212,6 +312,11 @@ namespace rwe
                         {
                             continue;
                         }
+                        if (!clearsStandingBuildings(standing, rect, ownMargin))
+                        {
+                            crowded.push_back(BuildableSite{candidate, ring});
+                            continue;
+                        }
                         sites.push_back(BuildableSite{candidate, ring});
                     }
                 }
@@ -220,7 +325,7 @@ namespace rwe
                     break;
                 }
             }
-            return sites;
+            return sites.empty() ? crowded : sites;
         }
 
         /** Distance across the ground, ignoring height: sites sit on the terrain and anchors do not. */
@@ -478,6 +583,24 @@ namespace rwe
         const auto& def = defIt->second;
         const auto mc = sim.getAdHocMovementClass(def.movementCollisionInfo);
 
+        // An extractor goes where the metal is, so it never sits on the
+        // base's grid at all and can land squarely across a factory's apron.
+        // A stalled factory costs more than a patch does.
+        std::vector<PlacementObstacle> factories;
+        for (const auto& [_, unit] : sim.units)
+        {
+            if (!unit.isAlive())
+            {
+                continue;
+            }
+            auto factoryDefIt = sim.unitDefinitions.find(unit.unitType);
+            if (factoryDefIt == sim.unitDefinitions.end() || !isFactory(factoryDefIt->second))
+            {
+                continue;
+            }
+            factories.push_back(PlacementObstacle{sim.computeFootprintRegion(unit.position, factoryDefIt->second.movementCollisionInfo), factoryClearanceTiles});
+        }
+
         // Metal under a footprint placed at a cell; only patches count, not the
         // map's ordinary surface metal.
         auto patchMetalUnder = [&](const DiscreteRect& rect) {
@@ -539,6 +662,7 @@ namespace rwe
             {
                 auto rect = sim.computeFootprintRegion(candidate, def.movementCollisionInfo);
                 usable = rect.x >= 0 && rect.y >= 0
+                    && clearsStandingBuildings(factories, rect, 0)
                     && sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y));
                 if (usable)
                 {

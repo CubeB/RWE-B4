@@ -52,8 +52,6 @@ namespace rwe
         AiBlackboard& bb,
         std::vector<PlayerCommand>& outCommands)
     {
-        (void)threatMap;
-
         ++ticksSinceLastUpdate;
         if (ticksSinceLastUpdate < profile.tacticalTickInterval)
         {
@@ -91,37 +89,132 @@ namespace rwe
             }
         }
 
-        // What the bombers are for: the dearest thing the enemy has built,
-        // nearest first among equals. A bomber reaches an extractor behind a
-        // wall of towers, which is the whole reason to own one, and it is
-        // what gives a side that is mining a flank uncontested a reason to
-        // spend metal on cover instead.
+        // Where the bombers go. A bombing run is a trade, and the dearest
+        // thing the enemy owns is also the thing standing deepest inside
+        // their anti-air, so flying at it trades an aircraft for a fraction
+        // of a building. Three questions, asked in order, and none of them
+        // asked at all when we have no bombers -- the last of them walks the
+        // known enemies twice.
         std::optional<UnitId> bomberTarget;
-        float bestValue = -1.0f;
-        SimScalar bestDistanceSquared = 0_ss;
-        for (const auto& [_, enemy] : bb.knownEnemies)
+        if (!bombers.empty())
         {
-            if (!enemy.isBuilding)
+            // One: is anything of theirs at our door that can shoot? Then it
+            // is bombed whatever is covering it, nearest first, because that
+            // is the one about to shoot something of ours. Armed is the whole
+            // test: a tower creeping in on us is armed and qualifies, an
+            // extractor that happens to stand near us does not, and neither
+            // does an unarmed scout wandering past.
+            SimScalar nearestIntruder = 0_ss;
+            for (const auto& [_, enemy] : bb.knownEnemies)
             {
-                continue;
+                if (enemy.isAir || !enemy.isArmed || !bb.baseAnchor)
+                {
+                    continue;
+                }
+                auto enemyRef = sim.tryGetUnitState(enemy.unitId);
+                if (!enemyRef || enemyRef->get().isDead())
+                {
+                    continue;
+                }
+                auto distanceSquared = bb.baseAnchor->distanceSquared(enemy.lastKnownPosition);
+                if (distanceSquared > (profile.bomberHomeDefenseRadius * profile.bomberHomeDefenseRadius))
+                {
+                    continue;
+                }
+                if (!bomberTarget || distanceSquared < nearestIntruder)
+                {
+                    nearestIntruder = distanceSquared;
+                    bomberTarget = enemy.unitId;
+                }
             }
-            auto unitRef = sim.tryGetUnitState(enemy.unitId);
-            if (!unitRef || unitRef->get().isDead())
+
+            // Two: the dearest building of theirs that is lightly covered or
+            // not covered at all. Buildings first because that is what a
+            // bomber is for -- it reaches the extractor behind the wall of
+            // towers, which nothing else of ours can.
+            if (!bomberTarget)
             {
-                continue;
+                float bestValue = -1.0f;
+                SimScalar bestDistanceSquared = 0_ss;
+                for (const auto& [_, enemy] : bb.knownEnemies)
+                {
+                    if (!enemy.isBuilding)
+                    {
+                        continue;
+                    }
+                    auto unitRef = sim.tryGetUnitState(enemy.unitId);
+                    if (!unitRef || unitRef->get().isDead())
+                    {
+                        continue;
+                    }
+                    auto defIt = sim.unitDefinitions.find(enemy.unitType);
+                    if (defIt == sim.unitDefinitions.end())
+                    {
+                        continue;
+                    }
+                    if (threatMap.antiAirCoverAt(enemy.lastKnownPosition) > static_cast<float>(profile.bomberMaxAntiAirCover))
+                    {
+                        continue;
+                    }
+                    auto value = defIt->second.buildCostMetal.value;
+                    auto distanceSquared = bb.baseAnchor ? bb.baseAnchor->distanceSquared(enemy.lastKnownPosition) : 0_ss;
+                    if (value > bestValue || (value == bestValue && bomberTarget && distanceSquared < bestDistanceSquared))
+                    {
+                        bestValue = value;
+                        bestDistanceSquared = distanceSquared;
+                        bomberTarget = enemy.unitId;
+                    }
+                }
             }
-            auto defIt = sim.unitDefinitions.find(enemy.unitType);
-            if (defIt == sim.unitDefinitions.end())
+
+            // Three: nothing standing still worth bombing, so an army
+            // instead -- but only one standing together, and only one that is
+            // lightly covered. A single kbot is not worth the sortie, and a
+            // massed army under its own anti-air is worth less than that.
+            if (!bomberTarget)
             {
-                continue;
-            }
-            auto value = defIt->second.buildCostMetal.value;
-            auto distanceSquared = bb.baseAnchor ? bb.baseAnchor->distanceSquared(enemy.lastKnownPosition) : 0_ss;
-            if (value > bestValue || (value == bestValue && bomberTarget && distanceSquared < bestDistanceSquared))
-            {
-                bestValue = value;
-                bestDistanceSquared = distanceSquared;
-                bomberTarget = enemy.unitId;
+                int bestCount = profile.bomberMinClusterSize - 1;
+                SimScalar bestDistanceSquared = 0_ss;
+                for (const auto& [_, enemy] : bb.knownEnemies)
+                {
+                    if (enemy.isBuilding || enemy.isAir)
+                    {
+                        continue;
+                    }
+                    auto unitRef = sim.tryGetUnitState(enemy.unitId);
+                    if (!unitRef || unitRef->get().isDead())
+                    {
+                        continue;
+                    }
+                    if (threatMap.antiAirCoverAt(enemy.lastKnownPosition) > static_cast<float>(profile.bomberMaxAntiAirCover))
+                    {
+                        continue;
+                    }
+                    int count = 0;
+                    for (const auto& [__, other] : bb.knownEnemies)
+                    {
+                        if (other.isBuilding || other.isAir)
+                        {
+                            continue;
+                        }
+                        auto otherRef = sim.tryGetUnitState(other.unitId);
+                        if (!otherRef || otherRef->get().isDead())
+                        {
+                            continue;
+                        }
+                        if (other.lastKnownPosition.distanceSquared(enemy.lastKnownPosition) <= (profile.bomberClusterRadius * profile.bomberClusterRadius))
+                        {
+                            ++count;
+                        }
+                    }
+                    auto distanceSquared = bb.baseAnchor ? bb.baseAnchor->distanceSquared(enemy.lastKnownPosition) : 0_ss;
+                    if (count > bestCount || (count == bestCount && bomberTarget && distanceSquared < bestDistanceSquared))
+                    {
+                        bestCount = count;
+                        bestDistanceSquared = distanceSquared;
+                        bomberTarget = enemy.unitId;
+                    }
+                }
             }
         }
 

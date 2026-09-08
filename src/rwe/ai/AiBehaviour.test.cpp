@@ -1866,4 +1866,43 @@ namespace rwe
         REQUIRE(!builds.empty());
         REQUIRE((builds.front().unitType == "ARMMOHO" || builds.front().unitType == "ARMARAD"));
     }
+
+    TEST_CASE("a building is not planted across a factory's exit", "[ai]")
+    {
+        // A unit a factory finishes has to walk off the pad before the next
+        // one can be spawned there, so a building hard against the factory
+        // stops it producing for the rest of the game.
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        auto script = makeEmptyCobScript();
+
+        UnitDefinition factoryDef;
+        factoryDef.isMobile = false;
+        factoryDef.builder = true;
+        factoryDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{5u, 5u, 255u, 255u, 0u, 255u};
+        sim.unitDefinitions["FACTORY"] = factoryDef;
+
+        UnitDefinition solarDef;
+        solarDef.isMobile = false;
+        solarDef.builder = false;
+        solarDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 3u, 255u, 255u, 0u, 255u};
+        sim.unitDefinitions["SOLAR"] = solarDef;
+
+        auto anchor = SimVector(0_ss, 0_ss, 0_ss);
+        auto factoryId = addUnitOfType(sim, "FACTORY", ai, anchor, script);
+        auto factoryRect = sim.computeFootprintRegion(sim.getUnitState(factoryId).position, factoryDef.movementCollisionInfo);
+
+        auto profile = makeDefaultStandardProfile();
+        std::minstd_rand rng(1u);
+        BuildManager buildManager;
+
+        auto site = buildManager.chooseBuildSite(sim, profile, "SOLAR", anchor, rng);
+        REQUIRE(site.has_value());
+
+        auto rect = sim.computeFootprintRegion(*site, solarDef.movementCollisionInfo);
+        // Three tiles of lane, the factory's own margin, on at least one axis.
+        auto clearX = (rect.x >= factoryRect.x + factoryRect.width + 3) || (factoryRect.x >= rect.x + rect.width + 3);
+        auto clearZ = (rect.y >= factoryRect.y + factoryRect.height + 3) || (factoryRect.y >= rect.y + rect.height + 3);
+        REQUIRE((clearX || clearZ));
+    }
 }
