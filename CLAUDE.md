@@ -161,7 +161,7 @@ Much of the current work is matching the original's behaviour down to the
 arithmetic. Where a behaviour is meant to match TA, it has usually been read out
 of `TotalA.exe` instead of guessed at.
 
-- `docs/TOTALA-EXE.md` — the findings, now ninety-nine sections: the flight
+- `docs/TOTALA-EXE.md` — the findings, now a hundred sections: the flight
   model, fog of war and line of sight, the damage pipeline, missile flight,
   target selection and eligibility, the economy, the nanolathe and construction
   display, effects and render order, the interface (the minimap detection
@@ -178,7 +178,10 @@ of `TotalA.exe` instead of guessed at.
   sunken wreck (§95) — where capture progress is kept and what sets its clock
   (§96), what `autoreclaimable` actually gates and which sound a reclaim
   plays (§97), and the Resurrect mission nothing in the shipped data can use
-  (§98). §88 and §91 are the ones to read first if
+  (§98), and the `0x1a` unit-table packet builder together with the checksum
+  behind it that got away (§100 — included because it *failed*, and the shape
+  of the failure is what stops the next attempt repeating it). §88 and §91 are
+  the ones to read first if
   you are about to change something — where RWE **deliberately** differs, so
   those do not get "corrected" back, and what is decoded but not ported.
 - `docs/TOTALA-EXE-SHADING.md` — the shaded unit rasterizer in full: the

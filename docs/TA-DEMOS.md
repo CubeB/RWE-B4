@@ -434,22 +434,69 @@ entry of `sub` 2, then every entry of `sub` 3, each sorted ascending by id.
 
 The `sub` 3 block is **exactly the data set's unit count** -- 317 for ProTA 4.8
 and 549 in every TA: Escalation 10.2 demo, both matching each mod's own published
-figure -- and its `value` takes only two values, `0xffff0201` on nearly every
-entry and `0xffff0101` on at most one per game, so it is a class or restriction
-flag and not a second checksum. TA Demo Recorder's `unitid.txt` describes these
-ids as "the number saved in a unit restrictions file", which fits.
+figure. TA Demo Recorder's `unitid.txt` describes these ids as "the number saved
+in a unit restrictions file", which fits.
+
+**`value` is not one number.** The packet builder at `0x46d630` in `TotalA.exe`
+assembles it from three separate places in its source record:
+
+```
+46d650  mov  edx,[eax+0x0]   ; buf[6:10]  = id
+46d656  mov  dl,[eax+0x8]    ; buf[10]    = value's low byte
+46d65d  mov  dl,[eax+0xa]    ; buf[11]    = value's second byte
+46d660  mov  ax,[eax+0xc]    ; buf[12:14] = value's top word
+```
+
+It only looks like a dword because of how it is packed, and that decode exactly
+accounts for what the corpus shows. In the `sub` 3 block the low byte is always
+1, the second byte is a flag, and the top word is a `0xffff` sentinel -- so
+`0xffff0101` on every entry but one, in every demo. `buf[2:6]`, the "zero" field,
+is never written by this routine at all; it is whatever the caller left in the
+scratch buffer.
+
+**The exception is the same id in every demo of both data sets.** Id
+`2455016279` (`0x92549357`) reads `0xffff0001` -- the flag byte cleared -- and it
+is the *only* id ProTA's 317 and Escalation's 549 have in common. An id shared
+between two unrelated data sets cannot be derived from either's unit files, so
+this is a fixed pseudo-entry and not a unit. In demo 14735 its top word reads
+1000 rather than the sentinel, which is the shape of a limit rather than a flag.
 
 The `sub` 2 block is always a **superset**: 550 entries in demos 14727 and 14728
 and 551 in 14732 and 14734, the extra ids being `1235944411` and `410801334` in
 both cases. That difference is not explained.
 
-**The id is content-derived and cannot be named by hashing.** 88 hash and form
-combinations -- crc32 plain and complemented, djb2, djb2-xor, sdbm, FNV-1,
-FNV-1a, java-31, rotate-xor, byte sum and adler32, over upper and lower case,
-with and without a `.fbi` suffix and a `units\` path prefix -- were run against
-the real unit-name sets of both mods and hit **nothing** in either table. The two
-mods share exactly 1 id out of 317 and 549. Naming a type therefore needs TA's
-own routine read out of `TotalA.exe`, and that is a separate piece of work.
+**The id is content-derived and has not been reproduced.** Two passes have now
+failed at it, and between them they have ruled out a lot:
+
+- 88 name-hash combinations -- crc32 plain and complemented, djb2, djb2-xor,
+  sdbm, FNV-1, FNV-1a, java-31, rotate-xor, byte sum and adler32, over upper and
+  lower case, with and without a `.fbi` suffix and a `units\` path prefix --
+  against both mods' real unit-name sets. Nothing.
+- crc32 and adler32 of the **raw FBI bytes** as shipped, with `\r` stripped, and
+  upper- and lower-cased; of a **canonical `key=value;` serialisation** with keys
+  case-folded and sorted and comments stripped, which should survive exactly the
+  cosmetic differences that would otherwise explain a text hash failing; of the
+  **referenced `.3do` and `.cob` files**; and of every 1-, 2- and 3-field
+  permutation of `UnitName`, `Objectname`, the build costs, `MaxDamage`,
+  `BuildTime`, `WorkerTime`, `Side` and `UnitNumber` under four separators.
+  Nothing, against either data set's real table.
+
+`tools/exe/unitsync.py` runs those candidates against a ground-truth CSV so the
+negative is reproducible rather than asserted, and so a new candidate can be
+checked against real data before anyone believes it.
+
+Where the trail stops is specific and worth writing down. The `0x46d630` decode
+above says `id` is a dword at offset 0 of a small per-unit-type record, and that
+record is **not** the 585-byte FBI-parse struct -- the first thing written to a
+freshly indexed one of those is its own table index at `+0x21e`, and nothing in
+the per-unit field-read block writes a checksum-shaped value to offset 0. So the
+source is a separate transient structure built for the lobby exchange, and its
+construction site was not found: `0x46d630` has no call site that either an
+absolute-address search or a grep of the resolved disassembly can see, and
+objdump's linear sweep demonstrably desynchronises on a jump table at `0x46d84c`
+in the same neighbourhood, which is the likely reason. A recursive-descent
+disassembly of `0x455000`-`0x46e000`, or a live breakpoint on the
+restrictions-dialog arrays, is the way in next time.
 
 **But it identifies a data set today, which was the question that mattered.**
 `tad_probe` now prints the table's size and an order-independent fingerprint of

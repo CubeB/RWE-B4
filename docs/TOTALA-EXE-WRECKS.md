@@ -901,12 +901,17 @@ mechanism §22 describes is the one running in the recordings.
   arriving that way either. The trend above is therefore a floor on the
   relationship rather than a measurement of it.
 - **Twelve of the thirteen demos were recorded on a patched engine** (TA:
-  Escalation 10.2 -- see `docs/TA-DEMOS.md`), so the corpus-wide counts should
-  be read as "this engine family" until that patch is classified. The one
-  unpatched demo, 14724 on ProTA 4.8, agrees as far as it goes: all 5 of its
-  cause-5 deaths and all 19 of its cause-9 deaths leave level 0. It contains no
-  cause-4 or cause-7 death at all, so those two rows of the table rest on the
-  patched engine alone.
+  Escalation 10.2), and that patch has since been classified -- see
+  `docs/TA-PATCHES.md`. It touches nothing here: not one of its 211 patched
+  `.text` runs falls within 512 bytes of the wreck spawner `0x486360`, the kill
+  routine and severity computation `0x4864b0`-`0x4865b0`, the feature creation
+  and sink physics `0x423c50` and `0x424214`, or the damage pipeline
+  `0x489bd1`-`0x489e00`. That was checked by byte comparison, not inferred, so
+  the counts above stand for the original engine.
+
+  The one unpatched demo, 14724 on ProTA 4.8, agrees independently as far as it
+  goes: all 5 of its cause-5 deaths and all 19 of its cause-9 deaths leave level
+  0. It contains no cause-4 or cause-7 death at all.
 
 ## NN. Loose ends
 

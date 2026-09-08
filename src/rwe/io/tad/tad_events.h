@@ -273,9 +273,16 @@ namespace rwe
         uint32_t id;
 
         /**
-         * In the sub 3 block this takes only 0xffff0201 and 0xffff0101, the
-         * latter on at most one entry per game, so it is a class or restriction
-         * flag rather than a second checksum. In the sub 2 block it varies.
+         * Three fields, not a number. Decoded from the packet builder at
+         * 0x46d630 in TotalA.exe: the low byte, the second byte and the top word
+         * are read from three separate places in the source record, so the
+         * dword only looks like one value because of how it is packed.
+         *
+         * In the sub 3 block the low byte is always 1, the second byte is 1, and
+         * the top word is the 0xffff sentinel -- 0xffff0101, on every entry but
+         * one. The exception is the same in every demo of both data sets and is
+         * described on TadUnitTable::pseudoEntryId. In the sub 2 block all three
+         * vary.
          */
         uint32_t value;
     };
@@ -292,6 +299,19 @@ namespace rwe
          * longer in four of the thirteen demos, which is not explained.
          */
         std::vector<TadUnitTableEntry> restricted;
+
+        /**
+         * The one id that is not a unit type.
+         *
+         * It appears in both blocks of every demo in the corpus, in *both* data
+         * sets -- it is the single id ProTA's 317 and Escalation's 549 have in
+         * common -- and it is the only entry whose `value` is not 0xffff0101.
+         * Being shared between two unrelated data sets, it cannot be derived
+         * from either's unit files, so it is a fixed pseudo-entry rather than a
+         * unit. In demo 14735 its top word reads 1000 instead of the 0xffff
+         * sentinel, which is what a limit rather than a flag looks like.
+         */
+        static const uint32_t pseudoEntryId = 2455016279u;
 
         /**
          * An order-independent fingerprint of the restricted block, for telling

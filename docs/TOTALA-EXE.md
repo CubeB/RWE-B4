@@ -10185,3 +10185,91 @@ Deliberately different, and recorded in §88 rather than left to be found:
 - **Greying, the caption shadow and the quick-key underline are still not
   ported.** The first is §19's existing note, now with the arithmetic behind
   it; the other two are new and small.
+
+## 100. `0x46d630`, the unit-table packet builder, and the checksum behind it that got away
+
+This one is included because it **failed**, and the shape of the failure is
+worth having written down before someone spends the same two days on it again.
+
+A `.tad` demo carries a `UnitData` record listing every unit type the game
+knew, as 14-byte `0x1a` subpackets (see `docs/TA-DEMOS.md`). The stream then
+refers to unit types by an *index into that table*, so a demo's build events
+cannot be attributed to a named unit without knowing how the table's ids are
+computed. That is the whole reason for looking.
+
+### The packet builder, decoded
+
+`0x46d630`, one of four near-identical siblings at `0x46d500`, `0x46d530`,
+`0x46d5b0` and `0x46d630` laid out contiguously with `nop` padding — apparently
+send-path variants over one payload shape:
+
+```
+46d63a  mov  al,[esp+0x18]      ; the caller's 'sub' argument, 2 or 3
+46d63f  mov  [buf+1],al
+46d643  mov  eax,[esp+0x20]     ; a pointer to a per-unit-type record
+46d64b  movb [buf+0],0x1a
+46d650  mov  edx,[eax+0x0]      ; record+0x0 ...
+46d652  mov  [buf+6],edx        ; ... is the id, buf[6:10]
+46d656  mov  dl,[eax+0x8]
+46d659  mov  [buf+10],dl        ; record+0x8 -> buf[10]
+46d65d  mov  dl,[eax+0xa]
+46d660  mov  ax,[eax+0xc]
+46d664  mov  [buf+11],dl        ; record+0xa -> buf[11]
+46d668  mov  [buf+12],ax        ; record+0xc -> buf[12:14]
+```
+
+Two things fall out, both **VERIFIED** against thirteen real demos:
+
+- **`buf[2:6]` is never written.** The "zero" field of the record layout is
+  whatever the caller left in its scratch buffer, not a field.
+- **`buf[10:14]` is three fields, not one dword.** That is exactly why the
+  corpus shows `0xffff0101` on every restricted-block entry but one: a constant
+  low byte, a flag byte, and a `0xffff` sentinel word. The exception has the
+  flag byte cleared, and is the same id in demos of two entirely unrelated data
+  sets — so it is a fixed pseudo-entry rather than a unit type.
+
+### Where it stopped, and why
+
+The id is a dword at offset 0 of that record, and the record is **not** the
+585-byte FBI-parse struct. That struct was mapped along the way and is worth
+recording: the loader from `0x42aa66` enumerates `units\*.FBI`, writes the file
+count to `globals+0x1438f` and allocates `count * 585` at `globals+0x1439b` —
+the `shl eax,6; add ebx` then `lea ebp,[eax+eax*8]` at `0x42aa72`/`0x42aa7d` is
+`*65` then `*9`, and the restriction dialog at `0x44ca4e` strides by the same
+`0x249`. Confirmed fields: `+0x186` and `+0x18a` are the build costs as floats
+(already at §on the economy), `+0x21e` is the unit's own table index written at
+`0x42ab51`, `+0x241`/`+0x245` are the packed flag words, `+0x15a` is
+initialised to `-1`.
+
+**Nothing in the per-unit FBI read block writes a checksum-shaped value to
+offset 0**, and the first write to a freshly indexed record is `+0x21e`. So
+`0x46d630`'s record is a separate transient structure built for the lobby
+exchange, and its construction site was not found. Two obstacles, both worth
+knowing about generally:
+
+- `0x46d630`, `0x46d530` and `0x46d5b0` have **zero call sites** findable either
+  by `xref.py` (absolute references only, per `tools/exe/README.md`) or by
+  grepping the full objdump listing for their addresses as resolved call
+  targets. Only `0x46d500` has one, from `0x4559b7` inside a large incoming
+  DirectPlay message dispatcher.
+- **objdump's linear sweep desynchronises here.** The switch table at `0x46d84c`
+  is data and disassembles as nonsense (`inc edx`, `fadds`, ...); its five
+  entries had to be read by hand as `0x46d842, 0x46d738, 0x46d748, 0x46d842,
+  0x46d7a5`. A second table nearby whose bytes decode as *plausible*
+  instructions would swallow a real call and give no sign of it. That is the
+  likely reason the caller could not be found — offered as the best explanation,
+  not as a certainty.
+
+### What was ruled out, so nobody repeats it
+
+Against both mods' real shipped data and their real demo tables: 88 name-hash
+and case/suffix/path combinations; crc32 and adler32 of the raw FBI bytes, of
+`\r`-stripped and case-folded forms, and of a canonical sorted `key=value;`
+serialisation with comments stripped; the same over the referenced `.3do` and
+`.cob` files; and every 1-, 2- and 3-field permutation of the obvious FBI fields
+under four separators. Zero matches throughout. `tools/exe/unitsync.py` runs
+these against a ground-truth CSV so the negative is reproducible and a new
+candidate can be checked before it is believed.
+
+Next time: a recursive-descent disassembly of `0x455000`-`0x46e000`, or a live
+breakpoint on the restrictions-dialog arrays at `0x44ca4e`.
