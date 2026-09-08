@@ -64,6 +64,13 @@ if ($phase -eq "shade") {
   # have to know where the commander is.
   $env:RWE_DEBUG_SPAWN = 'ARMSOLAR*1@0:6:0'
 }
+if ($phase -eq "solar") {
+  # The same collector, but this phase turns it ON so the panels open. A
+  # debug-spawned unit is not activated -- spawnCompletedUnit only calls
+  # finishBuilding, which sets hit points and build time and nothing else --
+  # so the panels stay shut until something issues the on/off order.
+  $env:RWE_DEBUG_SPAWN = 'ARMSOLAR*1@0:6:0'
+}
 $p = Start-Process -FilePath "D:\RWE\build-release\rwe.exe" -WorkingDirectory "D:\RWE\build-release" -ArgumentList $launchArgs -PassThru
 # The window can take a while to appear when a build is running alongside, so
 # poll for it rather than trust a fixed wait, and then give the game time to
@@ -306,6 +313,41 @@ if ($phase -eq "ring") {
   $bmp.Dispose()
 }
 
+if ($phase -eq "solar") {
+  # Select the collector, then show what the left panel offers for it, so the
+  # on/off gadget can be found rather than guessed at. The collector lands
+  # about 95 pixels east of the commander at this window size.
+  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Start-Sleep -Seconds 8
+  $o = Origin
+  [W]::SetForegroundWindow($h) | Out-Null
+  Start-Sleep -Milliseconds 300
+  Click ($o.X + 560) ($o.Y + 155)
+  # The on/off gadget, which reads OFF for a spawned collector. Its row sits
+  # at client y 228: the panel's own tabs are at y 141, which the build phase
+  # above already clicks, and the rows below them step at about 27 pixels.
+  Click ($o.X + 62) ($o.Y + 228)
+  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  # The panels are an animation, not a state change, so give the script time
+  # to run them open before the shutter.
+  Start-Sleep -Seconds 4
+  $bmp = Shot
+  Crop $bmp "$outDir\vt-solar$tag-selected.png" $o.X $o.Y 800 600 1
+  Crop $bmp "$outDir\vt-solar$tag-panel.png" $o.X ($o.Y + 100) 130 400 3
+  $bmp.Dispose()
+  # Move the selection onto the commander rather than trying to clear it: a
+  # click on bare ground leaves a building selected, so the box would still be
+  # drawn round the collector in the close-up. Selecting something else puts
+  # it somewhere harmless.
+  Click ($o.X + 465) ($o.Y + 155)
+  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Start-Sleep -Seconds 2
+  $bmp = Shot
+  Crop $bmp "$outDir\vt-solar$tag-full.png" $o.X $o.Y 800 600 1
+  Crop $bmp "$outDir\vt-solar$tag-open.png" ($o.X + 512) ($o.Y + 108) 105 100 6
+  $bmp.Dispose()
+}
+
 if ($phase -eq "shade") {
   # The commander and the collector spawned beside him, both standing still
   # for the camera. The collector is the reference case for the model
@@ -313,12 +355,8 @@ if ($phase -eq "shade") {
   # and its right panel at row 0, solid black, and the skirt between them is
   # where the Gouraud ramp through the middle of the table shows. -tag names
   # the build under test so a before and an after can sit side by side. On
-  # Coast To Coast at this window size the commander stands near (465,155) of
-  # the client area and the collector lands about 90 pixels east of him, so
-  # the collector crop starts at 515. Re-measured 2026-09-08: it had been
-  # written down as 570, which caught the collector's left edge and 80 pixels
-  # of sand. If this phase ever comes back mostly terrain, measure it off the
-  # -full shot again rather than nudging it.
+  # Coast To Coast at this window size the commander starts near (505,165)
+  # of the client area and the collector lands about 110 pixels east.
   [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
   Start-Sleep -Seconds 10
   $o = Origin
@@ -329,8 +367,8 @@ if ($phase -eq "shade") {
   # window is not under test.
   Crop $bmp "$outDir\vt-shade$tag-full.png" $o.X $o.Y 800 600 1
   Crop $bmp "$outDir\vt-shade$tag-scene.png" ($o.X + 400) ($o.Y + 90) 300 160 3
-  Crop $bmp "$outDir\vt-shade$tag-solar.png" ($o.X + 515) ($o.Y + 125) 90 85 6
-  Crop $bmp "$outDir\vt-shade$tag-commander.png" ($o.X + 430) ($o.Y + 120) 70 90 6
+  Crop $bmp "$outDir\vt-shade$tag-solar.png" ($o.X + 570) ($o.Y + 120) 90 90 6
+  Crop $bmp "$outDir\vt-shade$tag-commander.png" ($o.X + 470) ($o.Y + 120) 70 90 6
   $bmp.Dispose()
 }
 
