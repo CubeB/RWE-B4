@@ -9,6 +9,7 @@
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/WeaponDefinition.h>
+#include <rwe/util/rwe_string.h>
 #include <tuple>
 
 namespace rwe
@@ -57,6 +58,64 @@ namespace rwe
         estimate.metal = target.buildCostMetal.value * fraction;
         estimate.seconds = static_cast<float>(remaining) / static_cast<float>(rate) / static_cast<float>(SimTicksPerSecond);
         return estimate;
+    }
+
+    float BuildManager::unitCombatValuePerMetal(const GameSimulation& sim, const std::string& unitType)
+    {
+        if (unitType.empty())
+        {
+            return 0.0f;
+        }
+        auto defIt = sim.unitDefinitions.find(unitType);
+        if (defIt == sim.unitDefinitions.end())
+        {
+            return 0.0f;
+        }
+        const auto& def = defIt->second;
+        auto metal = def.buildCostMetal.value;
+        if (metal <= 0.0f || def.maxHitPoints == 0)
+        {
+            return 0.0f;
+        }
+
+        // The best damage a second any one of its weapons manages, against
+        // the default armour class. Not the sum: a unit rarely brings two
+        // weapons to bear on the same target, and taking the best keeps a
+        // token anti-air gun from flattering a tank.
+        float bestDps = 0.0f;
+        for (const auto& weaponName : {def.weapon1, def.weapon2, def.weapon3})
+        {
+            if (weaponName.empty())
+            {
+                continue;
+            }
+            // Both the weapon table and the damage classes within it are
+            // keyed upper case by the loader, while the FBI's own spelling
+            // is whatever the unit's author typed.
+            auto weaponIt = sim.weaponDefinitions.find(toUpper(weaponName));
+            if (weaponIt == sim.weaponDefinitions.end())
+            {
+                continue;
+            }
+            const auto& weapon = weaponIt->second;
+            auto damageIt = weapon.damage.find("DEFAULT");
+            if (damageIt == weapon.damage.end())
+            {
+                continue;
+            }
+            auto reload = weapon.reloadTime.value;
+            if (reload <= 0.0f)
+            {
+                continue;
+            }
+            auto shots = static_cast<float>(std::max(1, weapon.burst));
+            bestDps = std::max(bestDps, static_cast<float>(damageIt->second) * shots / reload);
+        }
+        if (bestDps <= 0.0f)
+        {
+            return 0.0f;
+        }
+        return static_cast<float>(def.maxHitPoints) * bestDps / metal;
     }
 
     bool BuildManager::canAfford(const AiBlackboard& bb, const BuildEstimate& estimate, int extraSeconds)
@@ -845,6 +904,23 @@ namespace rwe
         {
             want(s.antiAirTower);
         }
+        // The tech step, and it goes above the air plant and the vehicle
+        // plant because for the side that wants it, it is worth more than
+        // either. Below them it was ordered six minutes after the income
+        // could carry it -- minute 18 against minute 12 -- and the Cans it
+        // eventually bought arrived in the last five minutes of the game.
+        //
+        // Whether this side wants it at all is a question about its units,
+        // not about the plan: Core's Can is worth 9.4 times an A.K. per
+        // metal and Arm's Zeus 1.44 times a Peewee, so the same rule techs
+        // for one and declines for the other. §15.7.
+        auto incomeSupportsTech = bb.metalIncome.value >= static_cast<float>(profile.techMinMetalIncome);
+        auto tierWorthIt = bb.advancedArmyValueRatio >= profile.techMinArmyValueRatio;
+        if (profile.techLevelTwo && tierWorthIt && incomeSupportsTech && total(s.lab) >= 1 && total(s.advancedLab) < profile.targetAdvancedLabCount)
+        {
+            want(s.advancedLab);
+        }
+
         // An air plant for scout planes, and for transports when there is
         // ground to reach that no one can walk to. Metal is nearly always
         // short on a poor map, so this is not gated on it: a blind AI is
@@ -909,11 +985,6 @@ namespace rwe
         // been measured sitting on, storage pegged at the cap for a third to
         // two thirds of every game. So this spends the surplus that exists
         // rather than competing for the metal that does not. §15.3.
-        auto incomeSupportsTech = bb.metalIncome.value >= static_cast<float>(profile.techMinMetalIncome);
-        if (profile.techLevelTwo && incomeSupportsTech && total(s.lab) >= 1 && total(s.advancedLab) < profile.targetAdvancedLabCount)
-        {
-            want(s.advancedLab);
-        }
         // What the advanced constructor is for. The radar first at 125 metal
         // for several times the coverage; then the heavy towers, which the
         // level-one constructor can also reach and the AI has never built;
@@ -1206,6 +1277,43 @@ namespace rwe
             savingFor.clear();
             outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(frameId), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
             return;
+        }
+
+        // Everyone lends a hand on the tech step.
+        //
+        // One builder on a 2007-metal frame is the whole reason level two
+        // never arrived. Measured on Core, whose Can is worth nine times an
+        // A.K. per metal and ought to be worth any price: the lab was
+        // started at minute 20 and in three games of four it was STILL a
+        // frame when the game ended half an hour in, the metal sunk and not
+        // one Can ever fielded. A player does not watch a lone constructor
+        // do that; every spare builder piles onto it, which is what a
+        // repair order on a frame means. The commander can help even though
+        // it could not have started the lab itself, which is exactly the
+        // asymmetry that made this so slow. §15.7.
+        if (profile.techLevelTwo && !bb.sideUnits.advancedLab.empty())
+        {
+            for (const auto& [unitId, unit] : sim.units)
+            {
+                if (unit.owner != aiOwner || !unit.isAlive() || unit.unitType != bb.sideUnits.advancedLab)
+                {
+                    continue;
+                }
+                const auto& frameDef = sim.unitDefinitions.at(unit.unitType);
+                if (!unit.isBeingBuilt(frameDef))
+                {
+                    continue;
+                }
+                if (bb.groundReachabilityValid && reachability.isReachable(sim, unit.position) != builderAtBase)
+                {
+                    continue;
+                }
+                LOG_INFO << "AI build: unit " << builderId.value << " assists the " << unit.unitType
+                         << " frame (" << unit.getBuildPercentLeft(frameDef) << "% left)";
+                savingFor.clear();
+                outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(UnitId(unitId)), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                return;
+            }
         }
 
         // Set when the builder is holding off for the stockpile to catch up

@@ -118,6 +118,14 @@ namespace rwe
             field = asBool();
             return true;
         };
+        auto setFloat = [&](const char* name, float& field) {
+            if (knob != name)
+            {
+                return false;
+            }
+            field = std::stof(value);
+            return true;
+        };
         auto setScalar = [&](const char* name, SimScalar& field) {
             if (knob != name)
             {
@@ -146,6 +154,7 @@ namespace rwe
             || setInt("surplusLabCount", p.surplusLabCount)
             || setBool("techLevelTwo", p.techLevelTwo)
             || setInt("techMinMetalIncome", p.techMinMetalIncome)
+            || setFloat("techMinArmyValueRatio", p.techMinArmyValueRatio)
             || setInt("techSaveUpSeconds", p.techSaveUpSeconds)
             || setInt("targetAdvancedLabCount", p.targetAdvancedLabCount)
             || setInt("targetAdvancedConstructorCount", p.targetAdvancedConstructorCount)

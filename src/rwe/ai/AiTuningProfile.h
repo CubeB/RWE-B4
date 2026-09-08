@@ -127,34 +127,29 @@ namespace rwe
 
         // --- Level two ---
         /**
-         * Whether the AI techs at all.
+         * Whether the AI may tech at all. Whether it then does is a separate
+         * question, answered per side by techMinArmyValueRatio -- Arm
+         * declines, Core accepts.
          *
-         * Off, because measured it loses. The machinery below is complete
-         * and correct -- the AI reaches the advanced lab, the advanced
-         * constructor, Zeus or Can, and the advanced radar, in that order --
-         * but the investment does not pay back. An advanced lab is 2007
-         * metal against roughly thirty Peewees, and on Painted Desert it
-         * lands at minute 24 of a thirty-minute game.
+         * Off, and this is a close call rather than a plain one. Everything
+         * about reaching the tier now works: the advanced lab is judged on
+         * what the side's own units are worth, every spare builder assists
+         * the frame (without which it never finished at all), and the tech
+         * step outranks the second factory. Core reaches the Can in every
+         * game where it once reached it in none.
          *
-         * Sixteen thirty-minute mirror games, ARM against ARM, four per slot
-         * ordering per variant, so the slot cannot flatter either side:
+         * But it is a poor bargain in the length of game a person actually
+         * plays. At the thirty-minute cap the teching side finishes with the
+         * smaller army every time. Given ninety minutes it becomes a gamble:
+         * eight mirror games gave four wins, three losses and a draw, the
+         * teching side was eliminated twice and eliminated nobody, and where
+         * it survived it finished with three times the army -- 355 against
+         * 108, 315 against 76. That is a real edge bought with a real risk,
+         * and the risk lands in the first twenty minutes, which is most of a
+         * normal game.
          *
-         * | how the lab was paid for | tech army | level-one army |
-         * |---|---|---|
-         * | save the full price first | 31.0 | 47.2 |
-         * | save, but keep building extractors | 31.0 | 47.2 |
-         * | place it and let it draw | 22.1 | 59.2 |
-         *
-         * And six ninety-minute games, where the games end in elimination
-         * rather than at the cap: the teching side won two of six.
-         *
-         * What would change the answer is landing it by minute twelve to
-         * fifteen, which needs the tech step not to compete with expansion
-         * for the same builder and the same metal -- a builder set aside for
-         * it, or a decision to stop expanding while it goes up. That is the
-         * next thing to try, and until it is tried this stays off rather
-         * than shipping a change measured to make the opponent worse. See
-         * §15.6.
+         * So it stays off until the tier arrives early enough to stop being
+         * a gamble. §15.7 says what is left to try.
          */
         bool techLevelTwo{false};
         /**
@@ -169,6 +164,26 @@ namespace rwe
          * is the honest measure of whether the base can carry the tier.
          */
         int techMinMetalIncome{10};
+        /**
+         * How much better a level-two assault unit must be per metal than
+         * the best level-one one before the tier is worth its factory.
+         *
+         * The two sides are nothing alike here, which is why this is a ratio
+         * read off the unit data rather than a decision baked into the
+         * build order. Hit points times damage a second, over metal: an Arm
+         * Peewee scores 283 and a Zeus 407, so teching buys Arm 1.44 times
+         * the army for a 2007-metal lab and does not repay it inside a
+         * normal game -- measured, sixteen games, and it lost every variant.
+         * A Core A.K. scores 164 and a Can 2800 hit points and 232 damage a
+         * second, 1544, so Core gets 9.4 times the army and repays the lab
+         * before the first Can is finished.
+         *
+         * At 1.5, Arm does not tech and Core does, which is what the
+         * measurements say each of them should do. It is calibrated to those
+         * measurements rather than derived, and a side whose ratio sits near
+         * it deserves its own run before the number is trusted for it.
+         */
+        float techMinArmyValueRatio{1.5f};
         /**
          * How long a builder will save for a level-two building, as against
          * saveUpSeconds for everything else.

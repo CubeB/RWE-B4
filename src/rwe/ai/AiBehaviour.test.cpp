@@ -72,7 +72,9 @@ namespace rwe
             laser.maxRange = 200_ss;
             laser.reloadTime = 1_ss;
             laser.burst = 1;
-            laser.damage["default"] = 30u;
+            // "DEFAULT" upper case, as the loader stores it and the
+            // simulation looks it up (Projectile.cpp).
+            laser.damage["DEFAULT"] = 30u;
             sim.weaponDefinitions["LASER"] = laser;
 
             sim.unitDefinitions["ARMCOM"] = makeDef(true, true, true, "", 300u);
@@ -110,7 +112,12 @@ namespace rwe
             // mobile builder, and the rest are what that constructor puts up.
             sim.unitDefinitions["ARMALAB"] = makeDef(false, true, false, "", 100u);
             sim.unitDefinitions["ARMACK"] = makeDef(false, true, true, "", 100u);
-            sim.unitDefinitions["ARMZEUS"] = makeDef(false, false, true, "LASER", 200u);
+            // Worth teching for: the same price as a raider and four times
+            // the hit points, which is the shape of Core's Can against an
+            // A.K. and the reason teching is a per-side question at all.
+            auto zeus = makeDef(false, false, true, "LASER", 200u);
+            zeus.maxHitPoints = 400;
+            sim.unitDefinitions["ARMZEUS"] = zeus;
             sim.unitDefinitions["ARMHLT"] = makeDef(false, false, false, "LASER", 200u);
             sim.unitDefinitions["ARMGUARD"] = makeDef(false, false, false, "LASER", 200u);
             sim.unitDefinitions["ARMARAD"] = makeDef(false, false, false, "", 200u);
@@ -604,6 +611,21 @@ namespace rwe
             auto kbotBuilds = ordersFor<BuildOrder>(commands, kbotId);
             REQUIRE(!kbotBuilds.empty());
             REQUIRE(kbotBuilds.front().unitType == "ARMALAB");
+        }
+
+        SECTION("a level two that is no better than level one is not worth its factory")
+        {
+            // Same hit points as the raider now, so the lab buys nothing.
+            sim.unitDefinitions["ARMZEUS"].maxHitPoints = sim.unitDefinitions["ARMPW"].maxHitPoints;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(controller.getBlackboard().advancedArmyValueRatio == 1.0f);
+            // Nothing else is left wanting on this base, so the honest test
+            // is that no advanced lab was ordered by anyone -- not that
+            // something cheaper was ordered instead.
+            auto types = buildOrderTypes(commands);
+            REQUIRE(std::find(types.begin(), types.end(), "ARMALAB") == types.end());
         }
 
         SECTION("with teching switched off it builds a level-one tower instead")

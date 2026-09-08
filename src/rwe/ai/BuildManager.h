@@ -53,6 +53,25 @@ namespace rwe
         static BuildEstimate estimateBuild(const UnitDefinition& target, const UnitDefinition& builder, unsigned int alreadyBuilt = 0);
 
         /**
+         * What a combat unit is worth for what it costs: hit points times
+         * damage a second, over its metal price. Zero for anything unarmed
+         * or free.
+         *
+         * Both halves matter and neither alone will do. Judged on hit points
+         * a Zeus is worse than a Peewee; judged on damage it is better; the
+         * product is what says whether a fight between equal metal goes one
+         * way or the other, because a unit that lives twice as long also
+         * fires twice as many times.
+         *
+         * Deliberately crude. It ignores range, speed, and what the damage
+         * lands on, so it cannot tell a siege gun from a brawler. It is
+         * asked only one question -- is this tier worth its factory -- and
+         * for that the answer is not close enough for the details to matter:
+         * see the ratios in §15.7.
+         */
+        static float unitCombatValuePerMetal(const GameSimulation& sim, const std::string& unitType);
+
+        /**
          * Whether the stockpile lasts the build, at income less what our
          * builders are already committed to, given `extraSeconds` of saving
          * beforehand. A stockpile near the cap is always affordable: income

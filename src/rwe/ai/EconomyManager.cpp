@@ -42,13 +42,23 @@ namespace rwe
         {
             bb.sideUnits = resolveAiSideUnits(sim, player.side);
             bb.sideUnitsResolved = true;
+
+            // Is this side's level two worth its factory? Measured against
+            // the best level-one fighter it would otherwise be buying, since
+            // that is what the metal would have gone on.
+            auto advancedValue = BuildManager::unitCombatValuePerMetal(sim, bb.sideUnits.advancedAssault);
+            auto basicValue = std::max(
+                BuildManager::unitCombatValuePerMetal(sim, bb.sideUnits.raider),
+                BuildManager::unitCombatValuePerMetal(sim, bb.sideUnits.rocketKbot));
+            bb.advancedArmyValueRatio = basicValue > 0.0f ? advancedValue / basicValue : 0.0f;
             // Worth a line once: a name the data does not define is cleared
             // rather than reported, so an empty one here is the difference
             // between "the AI chose not to" and "the AI could not".
             LOG_INFO << "AI side " << player.side << ": lab " << bb.sideUnits.lab
                      << ", advanced lab " << (bb.sideUnits.advancedLab.empty() ? "(none)" : bb.sideUnits.advancedLab)
                      << ", advanced constructor " << (bb.sideUnits.advancedConstructor.empty() ? "(none)" : bb.sideUnits.advancedConstructor)
-                     << ", advanced assault " << (bb.sideUnits.advancedAssault.empty() ? "(none)" : bb.sideUnits.advancedAssault);
+                     << ", advanced assault " << (bb.sideUnits.advancedAssault.empty() ? "(none)" : bb.sideUnits.advancedAssault)
+                     << ", level two is worth " << bb.advancedArmyValueRatio << "x level one per metal";
         }
         bb.currentMetal = player.metal;
         bb.currentEnergy = player.energy;

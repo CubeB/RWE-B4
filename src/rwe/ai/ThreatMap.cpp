@@ -5,6 +5,7 @@
 #include <rwe/sim/PlayerVisibility.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/WeaponDefinition.h>
+#include <rwe/util/rwe_string.h>
 
 namespace rwe
 {
@@ -20,13 +21,22 @@ namespace rwe
                 {
                     continue;
                 }
-                auto it = sim.weaponDefinitions.find(weaponName);
+                // Both keyed upper case by the loader, whatever the FBI and
+                // the weapon TDF happen to spell them. This looked up
+                // "default" in lower case and so found nothing in a real
+                // game: every weapon scored zero damage, the whole
+                // anti-ground layer of the influence map was flat, and
+                // bestAttackTarget was choosing on economic value with the
+                // threat term it is weighted against permanently absent.
+                // The unit test that covers it passed because the fixture
+                // spelled the key the same wrong way.
+                auto it = sim.weaponDefinitions.find(toUpper(weaponName));
                 if (it == sim.weaponDefinitions.end())
                 {
                     continue;
                 }
                 const auto& w = it->second;
-                auto defaultDamage = w.damage.find("default");
+                auto defaultDamage = w.damage.find("DEFAULT");
                 float damage = defaultDamage == w.damage.end() ? 0.0f : static_cast<float>(defaultDamage->second);
                 float reload = std::max(0.1f, w.reloadTime.value);
                 total += damage * static_cast<float>(std::max(1, w.burst)) / reload;

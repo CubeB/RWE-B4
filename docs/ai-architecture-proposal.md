@@ -1616,3 +1616,92 @@ not merely present); and let the planner run more than one builder a pass,
 which the counts can now support since a queued build order is counted from
 the moment it is ordered. Until one of those lands, teching stays off rather
 than shipping an opponent measured to be worse.
+
+## 15.7 Teching is a question about the side's units, not about the plan
+
+S:15.6 concluded that level two loses and left "a builder set aside for the
+tech step" as the next thing to try. That was the wrong next thing, and the
+reason is a mistake in §15 itself: it treats teching as one decision. It is
+two different decisions, and the two sides do not face the same one.
+
+**What a tier is worth.** `BuildManager::unitCombatValuePerMetal` scores a
+combat unit as hit points times damage a second, over its metal price. Both
+halves are needed and neither alone will do: on hit points alone a Zeus is
+*worse* than a Peewee, on damage alone it is better, and the product is what
+decides a fight between equal metal, because a unit that lives twice as long
+also fires twice as often. Read off the shipped data:
+
+| unit | metal | hp | damage/s | value per metal |
+|---|---|---|---|---|
+| ARMPW Peewee | 53 | 250 | 60 | 283 |
+| ARMHAM Hammer | 151 | 800 | 44 | 231 |
+| **ARMZEUS Zeus** | 267 | 875 | 124 | **407** |
+| ARMFIDO Fido | 398 | 1000 | 46 | 116 |
+| CORAK A.K. | 56 | 265 | 35 | 164 |
+| CORTHUD Thud | 147 | 800 | 42 | 229 |
+| **CORCAN Can** | 420 | 2800 | 232 | **1544** |
+
+So Arm's level two is worth 1.44 times its level one and Core's is worth
+**9.4 times** — Core's level-one line is the weaker of the two and its Can is
+extraordinary. The AI computes this itself at load, from the unit and weapon
+definitions, and `techMinArmyValueRatio` (1.5) decides on it. Arm declines,
+Core techs. The number is calibrated to the measurements below rather than
+derived, which is worth remembering before trusting it for a third side.
+
+That also names the cause of the standing "Arm beats Core from either slot"
+finding in §14.14. It is not the ground and not the code: Core's level-one
+army is worth 164 a metal against Arm's 283, and Core is meant to answer that
+by teching.
+
+**Then delivery, which took three goes.** With Core teching, the tier was
+still never reached, and each attempt was measured:
+
+| | labs finished | Cans finished | when the lab lands |
+|---|---|---|---|
+| value gate alone | **0 of 4** | 0 | started min 20-26, still a frame at the cap |
+| plus everyone assists the frame | 4 of 4 | 12 | min 23-29 |
+| plus the tech step outranks the second factory | 4 of 4 | **21** | min 18-26 |
+
+The first row is the important one. A 2007-metal frame with one construction
+kbot on it does not finish inside a game: in three games of four the lab was
+still a nanoframe half an hour in, the metal sunk and not one Can ever
+fielded. A player does not watch a lone constructor do that, and neither does
+this now — every spare builder piles onto the frame, the commander included,
+which it can do even though it could never have *started* the lab. That
+asymmetry, that the commander may assist what it cannot order, is exactly why
+this was so slow and is worth remembering elsewhere.
+
+**And a bug that had nothing to do with teching.** Fixing the test fixture's
+damage key exposed that `ThreatMap` looked up its damage under `"default"`
+while the loader stores `"DEFAULT"`. Every weapon therefore scored zero, the
+whole anti-ground layer of the influence map was flat in every real game, and
+`bestAttackTarget` was choosing targets on economic value with the threat term
+it is explicitly weighted against permanently absent. The unit test covering
+it passed because the fixture spelled the key the same wrong way. This is the
+second time a test fixture's invented data has hidden a real fault (see the
+bomber tests in CLAUDE.md), and the same lesson applies: fixtures should carry
+the shipped convention, not a plausible-looking one.
+
+**Where it stands.** Delivery is transformed and the AI now judges the tier
+correctly, but on Painted Desert at thirty minutes the teching side still
+finishes with the smaller army. Some of that gap is an artefact of the
+measure: the arena counts units, and a side whose units are worth nine times
+as much each is undercounted by exactly the thing that makes it good. The
+honest decider is who wins a game that ends, which is what the ninety-minute
+runs are for.
+
+**Ninety minutes, where the games end.** Four per slot ordering, Core against
+Core: the teching side took four, lost three and drew one. It was eliminated
+twice and eliminated nobody; where it survived it finished with three times
+the army, 355 against 108 and 315 against 76. So the tier is worth what the
+arithmetic says once it arrives, and the price is a vulnerable middle game --
+a gamble, not an improvement, and the risk falls in the first twenty minutes,
+which is most of a game anyone actually plays.
+
+`techLevelTwo` therefore stays off. What is left to try, in order: let the
+planner run more than one builder a pass, which the counts have supported
+since queued orders started counting and which is the cheapest way to stop
+the tech step and the expansion competing for the same kbot; and hold the
+army at home while the lab goes up, since the two eliminations were both a
+teching side attacked while its metal was in a building. Neither is a large
+change, and the second is testable with the knobs that already exist.

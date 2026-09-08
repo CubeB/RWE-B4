@@ -106,6 +106,19 @@ namespace rwe
          * game in progress. See AiBuildTree.h.
          */
         AiBuildTree buildTree;
+        /**
+         * How much more a level-two assault unit is worth per metal than the
+         * best of the level-one ones this side builds. Worked out once from
+         * the unit data, beside the side units, because it describes the
+         * game's units rather than the game in progress.
+         *
+         * This is what decides whether teching is worth its factory, and the
+         * two sides are nothing alike: Arm's Zeus is 1.44 times a Peewee,
+         * which does not repay a 2007-metal lab inside a normal game, while
+         * Core's Can is 9.4 times an A.K. and repays it in under one unit.
+         * See §15.7.
+         */
+        float advancedArmyValueRatio{0.0f};
 
         // --- Economy ---
         Metal currentMetal{0};
