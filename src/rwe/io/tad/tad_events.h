@@ -243,9 +243,11 @@ namespace rwe
         float metalCounters[3];
 
         /**
-         * The 17 bytes between the code byte and the floats. Almost all zero;
-         * bytes 1-3 and 5-7 carry two small 16.16-shaped values that grow over a
-         * game. Kept whole rather than split on a guess.
+         * The 17 bytes between the code byte and the floats, kept whole rather
+         * than split on a guess. Mostly zero. Two small values, one around
+         * offset 1 and one around offset 5, grow over the course of a game and
+         * are shaped like 16.16 fractions; bytes further in are usually but not
+         * always zero, so even the field boundaries are not settled.
          */
         uint8_t prefix[17];
     };
