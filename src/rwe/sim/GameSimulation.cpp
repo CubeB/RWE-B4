@@ -3367,11 +3367,6 @@ namespace rwe
             // shipped `Killed` is a three-band ladder that picks a corpse
             // level from it and throws a different amount of the unit about
             // on the way.
-            //
-            // The ladder's answer is still discarded here. Acting on it means
-            // reading a local back out of a COB thread that may be suspended
-            // mid-script, and then walking the corpse feature's `featuredead`
-            // chain one step per level; that is written up as still to do.
             const int severity = computeKilledSeverity(overkill, unitDefinition.maxHitPoints);
             auto killedThread = unit.cobEnvironment->createThread("Killed", {severity, 0});
             runUnitCobScripts(*this, unitId);
