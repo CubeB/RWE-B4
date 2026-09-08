@@ -27,8 +27,17 @@ Demos are NEVER written into the repository. docs/TA-DEMOS.md is explicit that
 the episodes get checked in and the demos do not, so the default output
 directory is outside the tree and you have to pass --dir to change it.
 
+Most of the archive is modded, and that matters in a specific way rather than a
+general one. A mod that is pure data records TotalA.exe's arithmetic just as
+faithfully as vanilla does, so its demos are perfectly good evidence; a mod that
+patches the engine is a different engine and its demos are not. Of the two in
+the corpus so far, ProTA 4.8 (mod 25) ships a byte-identical TotalA.exe and
+TA: Escalation 10.2 (mod 29) ships a patched one. So --mod and --exclude-mod are
+about picking a known engine, not about purity.
+
 Usage:
     uv run tools/fetch-demos.py --dir /tmp/tad --limit 10
+    uv run tools/fetch-demos.py --dir /tmp/tad --exclude-mod 29 --pages 5
 """
 
 import argparse
@@ -95,7 +104,7 @@ def list_demo_ids(pages: int) -> list[str]:
     return ids
 
 
-def fetch_demo(demo_id: str, out_dir: Path) -> bool:
+def fetch_demo(demo_id: str, out_dir: Path, only_mod: str | None, not_mods: set[str]) -> bool:
     """Fetch one demo and its provenance. Returns False if it was already here."""
     sidecar = out_dir / f"{demo_id}.json"
     if sidecar.exists():
@@ -107,14 +116,28 @@ def fetch_demo(demo_id: str, out_dir: Path) -> bool:
     page_url = f"{BASE}/demos/{demo_id}"
     html = get(page_url).decode("utf-8", "replace")
 
+    title_match = TITLE.search(html)
+    mod_match = MOD_LINK.search(html)
+    map_match = MAP_LINK.search(html)
+
+    # The mod filter is applied here, from the demo page, rather than by walking
+    # /ta_mods/<id> as an index. That would be one request instead of one per
+    # demo, but this page is the one whose shape is known -- MOD_LINK is already
+    # proven against it by every sidecar on disk -- and guessing at a page layout
+    # to save requests on a volunteer-run site is the wrong trade. The demo file
+    # itself is still only fetched for a demo that passes.
+    mod_id = mod_match.group(2) if mod_match else None
+    if only_mod is not None and mod_id != only_mod:
+        print(f"{demo_id}: mod {mod_id or 'none'}, wanted {only_mod}, skipping", file=sys.stderr)
+        return False
+    if mod_id is not None and mod_id in not_mods:
+        print(f"{demo_id}: mod {mod_id} excluded, skipping", file=sys.stderr)
+        return False
+
     blob = BLOB_LINK.search(html)
     if not blob:
         print(f"{demo_id}: no download link, skipping", file=sys.stderr)
         return False
-
-    title_match = TITLE.search(html)
-    mod_match = MOD_LINK.search(html)
-    map_match = MAP_LINK.search(html)
 
     blob_url = urllib.parse.urljoin(BASE, blob.group(1))
     name = urllib.parse.unquote(blob_url.rsplit("/", 1)[-1])
@@ -156,7 +179,18 @@ def main() -> int:
     parser.add_argument("--dir", required=True, type=Path, help="where to write demos; must not be inside the repo")
     parser.add_argument("--limit", type=int, default=10, help="how many demos to fetch (default 10)")
     parser.add_argument("--pages", type=int, default=1, help="how many index pages to walk (default 1)")
+    parser.add_argument("--mod", help="fetch only demos the archive tags with this mod id (25 is ProTA 4.8, 29 is TA:Esc 10.2)")
+    parser.add_argument(
+        "--exclude-mod",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="skip demos tagged with this mod id; may be repeated",
+    )
     args = parser.parse_args()
+
+    if args.mod is not None and args.mod in args.exclude_mod:
+        raise SystemExit(f"--mod {args.mod} and --exclude-mod {args.mod} cannot both be asked for")
 
     repo = Path(__file__).resolve().parent.parent
     out_dir = args.dir.resolve()
@@ -179,7 +213,7 @@ def main() -> int:
     for demo_id in ids:
         if fetched >= args.limit:
             break
-        if fetch_demo(demo_id, out_dir):
+        if fetch_demo(demo_id, out_dir, args.mod, set(args.exclude_mod)):
             fetched += 1
 
     print(f"\n{fetched} fetched into {out_dir}", file=sys.stderr)
