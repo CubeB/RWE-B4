@@ -1324,6 +1324,18 @@ namespace rwe
 
             if (!next.empty())
             {
+                // One line per unit a factory takes on. A factory is only
+                // topped up when its queue has emptied -- the guard at the
+                // head of the loop -- so this is one line per unit produced
+                // and not per planning pass.
+                //
+                // Worth having because until it was added there was no record
+                // anywhere of what the factories built. Builder orders are
+                // logged and production was not, so a log could show an
+                // aircraft plant going up and say nothing about whether it
+                // ever produced a bomber, which is exactly the question S:16.4
+                // and S:17.2 were about.
+                LOG_INFO << "AI factory: " << factory.unitType << " " << factoryId.value << " starts " << next;
                 outCommands.emplace_back(PlayerUnitCommand(factoryId, PlayerUnitCommand::ModifyBuildQueue{1, next}));
             }
         }
@@ -1600,7 +1612,17 @@ namespace rwe
 
         // A wall, not a corpse. Four is the smallest number that cannot be
         // walked around by accident.
-        auto fieldWorthClearing = waveCentre.has_value() && wreckCount >= 4;
+        //
+        // Two thresholds and not one, which is what stops the builder being
+        // sent and recalled in the same breath. The count is taken around the
+        // wave's centre, and the wave moves: with a single threshold, a wave
+        // drifting a few hundred units takes the count across four and the
+        // builder is recalled the second after it was dispatched. Measured
+        // over four recorded games, eleven of twenty-seven dispatches were
+        // reversed inside a second. Going out wants a wall; coming back wants
+        // the field to be genuinely finished.
+        auto fieldWorthStarting = waveCentre.has_value() && wreckCount >= 4;
+        auto fieldWorthFinishing = waveCentre.has_value() && wreckCount >= 2;
 
         // The exit condition, which the first version of this rule did not
         // have. A patrol never ends by itself, so a builder left on one is a
@@ -1608,7 +1630,7 @@ namespace rwe
         // guard order swallowed every builder that ever ran out of work in
         // S:16.1. When the wave has moved on or the field is clear, it comes
         // home, and an empty order queue puts it back in the pool.
-        if (fieldPatroller && !fieldWorthClearing)
+        if (fieldPatroller && !fieldWorthFinishing)
         {
             if (bb.baseAnchor)
             {
@@ -1616,7 +1638,7 @@ namespace rwe
                 outCommands.emplace_back(PlayerUnitCommand(*fieldPatroller, PlayerUnitCommand::IssueOrder(MoveOrder(*bb.baseAnchor), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
             }
         }
-        else if (!fieldPatroller && fieldWorthClearing && bb.baseAnchor && builderAtBase && !builderDef.commander && profile.battlefieldReclaimEscortCount > 0)
+        else if (!fieldPatroller && fieldWorthStarting && bb.baseAnchor && builderAtBase && !builderDef.commander && profile.battlefieldReclaimEscortCount > 0)
         {
             // A patrol, not a reclaim order naming one wreck. A builder on
             // patrol reclaims whatever it passes, and that is the original's

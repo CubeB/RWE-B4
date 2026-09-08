@@ -152,9 +152,37 @@ namespace rwe
 
         weaponDefinition.maxRange = SimScalar(tdf.range);
 
-        // Beams pass through wreckage; everything else can blast it apart.
-        // Render types 0 and 7 are the two laser draws, 5 the lightning gun.
-        weaponDefinition.damagesFeatures = tdf.renderType != 0 && tdf.renderType != 5 && tdf.renderType != 7;
+        // Everything that hits a feature can damage it, beams included.
+        //
+        // This used to exclude render types 0, 5 and 7 -- the two laser draws
+        // and the lightning gun -- on the grounds, as the commit that added it
+        // put it, that beam weapons never touch wreckage "as the community has
+        // always known". That is lore rather than a reading of the binary, and
+        // the binary does not support it.
+        //
+        // `rendertype` (`wdef+0x10C`) is a *drawing* attribute: every finding
+        // that touches it is about how the projectile is drawn, and the
+        // head/tail pair it selects is read only in the `rendertype == 0`
+        // branch of the draw (TOTALA-EXE.md, the D-gun sections). `beamweapon`
+        // is not the gate either -- it is bit 3 of `wdef+0x111` with exactly
+        // one reader in the whole executable, which maintains a second point
+        // on the projectile so it draws as a segment. Neither is consulted by
+        // anything that applies damage.
+        //
+        // What the data does say is the other way round. A feature's `damage`
+        // is simply its hit points, and the shipped ship and submarine corpses
+        // declare `damage=24000` -- an absurd number whose only purpose is that
+        // nothing can clear them (TOTALA-EXE-WRECKS.md). Authors would have no
+        // reason to buy immunity that way if ordinary gunfire could not destroy
+        // a corpse in the first place.
+        //
+        // Collision is unaffected and was already right: a shot stops on any
+        // feature in its map square whose top is above it, with no density
+        // roll, which RWE already matched. The old setting therefore had beams
+        // stopping dead on wreckage and unable to mark it -- the worst of both
+        // readings, and the direct cause of two armies firing into a wall of
+        // corpses neither could clear.
+        weaponDefinition.damagesFeatures = true;
         weaponDefinition.reloadTime = SimScalar(tdf.reloadTime);
         weaponDefinition.tolerance = SimAngle(tdf.tolerance);
         weaponDefinition.pitchTolerance = SimAngle(tdf.pitchTolerance);

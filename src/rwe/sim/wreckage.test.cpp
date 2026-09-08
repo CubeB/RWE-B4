@@ -1,6 +1,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/grid/Grid.h>
+#include <rwe/LoadingScene_util.h>
+#include <rwe/io/tdf/tdf.h>
+#include <rwe/io/weapontdf/WeaponTdf.h>
 #include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
@@ -200,10 +203,14 @@ namespace rwe
             REQUIRE(foundRubble);
         }
 
-        SECTION("a beam weapon never touches a feature")
+        SECTION("a weapon whose data exempts it never touches a feature")
         {
-            // Lasers do not damage wreckage -- the community's standing
-            // advice for a blocked assault is to bring anything else.
+            // The flag is still honoured, so a mod can declare a weapon that
+            // leaves scenery alone. Nothing in the shipped data sets it any
+            // more: it used to be derived from the render type, on the lore
+            // that beams cannot hurt wreckage, and that derivation is gone --
+            // see parseWeaponDefinition for why the binary does not support
+            // it, and the case below for what a laser does now.
             auto rockId = sim.addFeature(rockDef, 8, 8).value();
             auto position = sim.getFeature(rockId).position;
 
@@ -213,6 +220,38 @@ namespace rwe
 
             REQUIRE(sim.tryGetFeature(rockId).has_value());
             REQUIRE(sim.getFeature(rockId).hitPoints == 2000u);
+        }
+
+        SECTION("a laser blasts a rock like anything else")
+        {
+            // Render type 0 is one of the two laser draws and used to switch
+            // feature damage off. In the original it is a drawing attribute
+            // and gates nothing about damage, so a laser clears a lane like
+            // any other gun -- which is what stops two armies deadlocking
+            // against a wall of corpses neither can mark.
+            auto tdf = parseTdfFromString("[LASER]\n{\nrendertype=0;\nrange=100;\n}\n");
+            auto block = tdf.findBlock("LASER");
+            REQUIRE(block.has_value());
+            REQUIRE(parseWeaponDefinition(parseWeaponBlock(block->get())).damagesFeatures);
+
+            auto rockId = sim.addFeature(rockDef, 8, 8).value();
+            auto position = sim.getFeature(rockId).position;
+
+            auto shell = makeShell(position, 100000u, 64_ss);
+            sim.doProjectileImpact(shell, ImpactType::Normal);
+
+            // Breaking it down replaces it, so the old id is gone: walk the
+            // list the way the case above does.
+            bool foundRubble = false;
+            for (const auto& [_, feature] : sim.features)
+            {
+                if (feature.featureName == rubbleDef)
+                {
+                    foundRubble = true;
+                }
+                REQUIRE(feature.featureName != rockDef);
+            }
+            REQUIRE(foundRubble);
         }
     }
 

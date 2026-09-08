@@ -2139,6 +2139,53 @@ description implied.
 That is a reason to reclaim rather than to force-fire, so the answer in S:18.1
 stands; but the reasoning behind it was wrong and is now recorded correctly.
 
+### 18.2.1 The laser exemption was invented, and has been removed
+
+The paragraph above accepted `damagesFeatures` as engine behaviour to design
+around. Asked a second time whether gunfire ought to destroy wrecks, the right
+question turned out to be whether that setting was ever right, and it was not.
+
+The commit that introduced it (`f9b0987e`) gives its reason in as many words:
+beam weapons never touch wreckage "as the community has always known". That is
+lore, and this project's rule for TA-facing behaviour is that it gets read out
+of the binary. Read out of the binary, nothing supports it:
+
+- `rendertype` is `wdef+0x10C` and is a **drawing** attribute. Every decoded
+  finding that touches it concerns how the projectile is drawn -- the head/tail
+  pair it selects is read only in the `rendertype == 0` branch of the draw.
+- `beamweapon` is not the gate either. It is bit 3 of `wdef+0x111` with exactly
+  one reader in the whole executable, and what that reader does is maintain a
+  second point on the projectile so it draws as a segment.
+- Neither is consulted anywhere that applies damage.
+
+And the shipped data argues the other way. A feature's `damage` is only its hit
+points, and the ship and submarine corpses declare `damage=24000` -- a number
+whose sole purpose is that nothing can clear them (TOTALA-EXE-WRECKS.md). An
+author has no reason to buy immunity like that if ordinary gunfire could not
+destroy a corpse.
+
+Worst of all, the setting did not even implement what its own comment claimed.
+"Beams pass through wreckage" describes a collision rule, and collision is
+decided elsewhere and was already faithful: a shot stops on any feature in its
+map square whose top is above it, with no density roll (S:90 in TOTALA-EXE.md).
+So beams stopped dead on wreckage *and* could not mark it -- neither passing
+through nor breaking it -- which is a trap the original does not have and is
+the direct cause of the wall two armies grind against.
+
+`damagesFeatures` is now true for everything; the flag stays so a mod can
+exempt a weapon, and the paralyser exclusion is untouched. Measured over sixteen
+games, battlefield patrols fell from 141 to 102 -- fewer walls form, because the
+armies clear their own lanes -- while losses rose from 214 to 240 and the
+surviving armies shrank from 63.7 to 44.7. Units that used to accumulate behind
+a barrier now spend themselves in combat. Decisions went from 3 of 16 to 5,
+which is inside the band S:19.1 established and is corroboration rather than
+proof.
+
+This entry is also the second time in one day that a claim was made because a
+piece of code had the shape of a known bug rather than because the data was
+checked -- see the correction in S:17.2. The pattern is worth naming: a setting
+that *exists* is not evidence that it is *right*.
+
 ## 18.3 Two waves that never met
 
 The complaint was that the armies stream in lines at each other's bases instead

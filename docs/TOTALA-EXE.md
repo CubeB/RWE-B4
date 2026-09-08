@@ -8831,8 +8831,21 @@ there is a regression test for it now.
 - RWE's explored grid is **per-player** rather than the original's one shared
   bitmask with a bit per LOS group. Equivalent until allied vision groups exist.
 - `hitDensity` is parsed (100 for solid things, 5–10 for foliage, 0 for smudges)
-  and is very likely the pass-through chance for projectiles hitting features,
-  but this has not been confirmed in the binary.
+  and does nothing. It was once guessed to be the pass-through chance for
+  projectiles hitting features; that guess is **refuted** — the string does not
+  occur in `TotalA.exe` at all, and the collision test at `0x49B2B3` is purely
+  geometric. This entry survived here after the refutation was written up and
+  is corrected rather than deleted, since the guess is an inviting one to make
+  twice.
+- **Weapons damage features regardless of their kind.** RWE once switched
+  feature damage off for render types 0, 5 and 7 — the laser and lightning
+  draws — on the community belief that beams cannot hurt wreckage. Nothing in
+  the binary gates damage on `rendertype` (a drawing attribute at `wdef+0x10C`)
+  or on `beamweapon` (bit 3 of `wdef+0x111`, one reader, which maintains the
+  draw's tail point), and the shipped naval corpses' `damage=24000` only makes
+  sense as bought immunity from gunfire that would otherwise clear them. The
+  exemption is gone. Collision was always geometric and is unchanged, so a beam
+  still stops on a feature — it can now also break it.
 - The **strafing pass** (`AirToGround`, `0x412710`) is decoded but not ported:
   RWE's fighters still fly the generic attack run. See the missions document §5.
 - **`maneuverleashlength`** is now parsed but not enforced. In the original it
