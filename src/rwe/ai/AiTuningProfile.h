@@ -309,7 +309,6 @@ namespace rwe
          * other side's fifty.
          */
         bool expansionStaysOnOurSide{true};
-        SimScalar buildSiteGridSpacing{16_ss};
         SimScalar defenceDistanceFromBase{160_ss};
         /**
          * How far out from the base anchor the radar's post stands, towards

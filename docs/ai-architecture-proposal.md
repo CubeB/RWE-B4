@@ -1985,15 +1985,33 @@ keeps picking it as each replacement bomber comes off the pad.
 
 It also could not have known better. The threat map had no anti-air layer at
 all: `antiGround` sums every weapon's damage without asking what it can shoot
-at, so a Crasher and a Peewee were the same fact. And the layer it did have was
-not working. `weaponRange` looked each weapon up by the name written in the
-unit's FBI, against a map the loader keys upper case -- the identical mistake
-the damage lookup had made and that S:15.7 fixed a few lines above it. Every
-lookup missed, every range came back zero, and the threat a unit contributes
-was stamped on the single cell it was standing in instead of over the ground
-its guns cover. The anti-ground layer has been a scatter of points this whole
-time, which also means S:16.3's raid rule -- an outlying building "the threat
-map reads zero at" -- has been reading zero almost everywhere.
+at, so a Crasher and a Peewee were the same fact.
+
+**A correction to what this section first said.** It also claimed the
+anti-ground layer had never worked -- that `weaponRange` looked each weapon up
+by the name written in the unit's FBI against a map the loader keys upper case,
+so every range came back zero and each unit's threat landed on the single cell
+it stood in. The reasoning was that this was the same defect S:15.7 found in
+the damage lookup a few lines above it. The code shape is indeed the same, and
+`toUpper` was added for it, but the conclusion was wrong and was drawn without
+checking the data: across the 64 shipped FBIs pulled for this, all 29 `Weapon1`
+values are spelled in upper case already, so the lookup matched every time. The
+`toUpper` is hardening against a mod whose FBI spells a weapon differently, not
+a repair.
+
+Two things follow that were briefly written down the wrong way round. The
+anti-ground layer has been covering the ground its guns reach all along, and
+S:16.3's raid rule -- an outlying building "the threat map reads zero at" --
+has therefore been asking an honest question since it was written. And the
+`threatAversion` A/B in S:17.3 is not, as it was first read, a knob that had
+never been live finally being switched on; it is a live knob measured over
+sixteen games and found not to change the outcome.
+
+The damage-class bug S:15.7 fixed was real -- the map is keyed `"DEFAULT"` and
+the code asked for `"default"`. The neighbouring lookup was assumed to share
+the fault because it had the same shape. The lesson is the one CLAUDE.md
+already gives about this binary and its data: replay it against the real files
+before believing a reading, including a reading of RWE's own code.
 
 There is now an `antiAirCover` layer, and it counts sources rather than summing
 damage. One unit that can reach an aircraft puts a one on every cell within its
@@ -2177,3 +2195,78 @@ The meet-the-army half is unaffected and stays on. It measures at 3 of 16,
 inside the spread, so the honest claim for it is that it addresses the
 behaviour the play-test complained about and costs nothing measurable -- not
 that it has been shown to help.
+
+## 19 Polish, and a metric that was measuring the wrong thing (2026-09-08)
+
+## 19.1 "Games that ended in a result" measures balance, not skill
+
+S:16.6 introduced this metric for a real purpose and it served that purpose:
+the wreck-wall deadlock produced games that ran to the clock with both armies
+alive and stuck, so counting decisions tracked whether the deadlock was
+breaking. It was then used, through S:17 and S:18, as a general quality score,
+which it is not.
+
+Sixteen games a side on the same seeds, before today's work and after:
+
+| | p0 units | p0 army | p0 lost | p0 eliminated | p1 army | p1 eliminated |
+|---|---|---|---|---|---|---|
+| before | 52.1 | 22.2 | 127.8 | 5 | 33.3 | 2 |
+| after | 69.3 | 32.9 | 112.1 | 2 | 30.8 | 1 |
+
+Decisions fell from 7 of 16 to 3 of 16, which reads as a regression and is the
+opposite. The old build carried a heavy slot bias: p0 fielded a third fewer
+units and half again less army than p1, lost more of them, and was wiped out
+five times in sixteen. The changes lifted p0's army by 48% and its unit count
+by a third while leaving p1 almost untouched, and the two slots now sit within
+a couple of per cent of each other on every column. Seven decisions became
+three because the side that used to be crushed stopped being crushed.
+
+In a mirror match this metric is a measure of how *unstable* the matchup is.
+Two evenly matched competent opponents run to the clock; two unevenly matched
+ones decide every game. Strengthening both sides and removing an asymmetry must
+push it down. It cannot separate "better" from "more evenly matched", and it
+was read for three sections as though it could.
+
+The same artifact explains the income column, and S:16.6 had already written
+the explanation down without it being applied here: a winner reclaims the
+loser's base and has the map to itself, so p1's metal rate of 19.2 in the old
+run is partly a dividend of winning, and 11.8 after is what an uncontested
+economy actually earns.
+
+**What to use instead**, for a mirror match: the continuous columns, and the
+gap between the slots. Army size and unit count at the half hour say how well
+each side played; the difference between p0's and p1's says how much of the
+result is the map rather than the AI. Keep decisions for the specific question
+S:16 asked -- whether armies that should be fighting are instead standing still
+-- and pair it with the behaviour counts that explain it.
+
+## 19.2 An audit for rules that never fire
+
+Two of the three faults found today were of one kind: a rule that is never
+reached and fails silently. The builder pool leaked because a `GuardOrder` had
+no exit condition; the battlefield reclaim sat below an unbounded list of wants
+and ran zero times in six games. Neither crashed, and no test caught either.
+So the AI was swept mechanically for the same shapes.
+
+- **Tuning knobs never read.** One, `buildSiteGridSpacing`, superseded by the
+  footprint-derived ring pitch in `collectBuildableSites` and not even wired
+  into `applyAiTuning`. Deleted. (`resourceCheatMultiplier` was flagged and is
+  a false alarm -- it is read in `GameSimulation.cpp`, outside the directory
+  the first sweep looked in. Brutal's resource cheat does work.)
+- **Blackboard fields written but never read, or read but never written.**
+  None. `scoutTargets` looks orphaned to a naive grep because its only write
+  is through `operator[]`.
+- **Definition lookups keyed the wrong way.** One more copy of `weaponRange`
+  in `BuildManager.cpp`, hardened for mod data -- see the correction in S:17.2
+  for why this is hardening and not a repair. Everything else in the sim looks
+  weapons up by the resolved `weaponType` stored on the unit, which is
+  canonical by construction.
+- **Unsafe random draws.** None left in the simulation at all. `CLAUDE.md`
+  still claimed twelve -- ten in `GameSimulation.cpp` and `cob.cpp`, two in
+  `ai/BuildManager.cpp` -- and that cleanup had in fact been finished. Every
+  surviving mention of `uniform_int_distribution` under `src/rwe/` is either a
+  comment warning against it or code outside the sim, and `GameScene` draws
+  from its own `effectsRng` rather than `simulation.rng`, so rendering cannot
+  advance the simulation's sequence. `CLAUDE.md` is corrected, with that last
+  rule written down, because it is the one a future presentation change could
+  quietly break.

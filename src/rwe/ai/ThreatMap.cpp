@@ -47,13 +47,18 @@ namespace rwe
         /**
          * How far the unit's guns reach.
          *
-         * Keyed upper case, for the same reason the damage lookup above is:
-         * the loader upper-cases every weapon name and a unit's FBI does not,
-         * so looking one up as written found nothing in a real game. Every
-         * enemy's range came back zero, which put its threat on the single
-         * cell it stood in instead of over the ground it covers -- so the
-         * whole anti-ground layer was a scatter of points, and a raid target
-         * "the threat map reads zero at" meant almost anywhere.
+         * Keyed upper case because the loader upper-cases every weapon name
+         * while a unit's FBI is spelled however its author typed it. This is
+         * hardening for mod data and not a repair: every one of the 29 weapon
+         * references in the 64 shipped FBIs is already upper case, so the
+         * lookup matched before it was added.
+         *
+         * It was first committed as a fix, on the grounds that the damage
+         * lookup above had exactly this defect and this one had the same
+         * shape. That was assumed rather than checked and it was wrong. The
+         * damage bug was real -- the map is keyed "DEFAULT" and the code
+         * asked for "default" -- but a matching shape is not evidence of a
+         * matching fault.
          */
         float weaponRange(const GameSimulation& sim, const UnitDefinition& def)
         {
