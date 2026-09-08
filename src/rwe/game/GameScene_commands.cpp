@@ -3782,6 +3782,7 @@ namespace rwe
         auto height = worldViewport.height() * worldRenderTextureScale;
         worldFrameBuffer = sceneContext.graphics->createFrameBuffer(width, height);
         dodgeMask = sceneContext.graphics->createEmptyTexture(width, height);
+        buildingMask = sceneContext.graphics->createEmptyTexture(width, height);
         worldRenderTextureSize = {worldViewport.width(), worldViewport.height()};
     }
 

@@ -78,11 +78,23 @@ namespace rwe
         UniformLocation color;
     };
 
+    /** Coverage of a category of model, for finding its silhouette in the post pass. */
+    struct UnitMaskShader
+    {
+        ShaderProgramHandle handle;
+        UniformLocation mvpMatrix;
+    };
+
     struct WorldPostShader
     {
         ShaderProgramHandle handle;
         UniformLocation dodgeMask;
         UniformLocation gamma;
+        UniformLocation buildingMask;
+        UniformLocation haloColor;
+        UniformLocation haloWidth;
+        UniformLocation haloStrength;
+        UniformLocation haloTexelStep;
     };
 
     class ShaderService
@@ -103,6 +115,7 @@ namespace rwe
         UnitShadowShader unitShadow;
         UnitBuildShader unitBuild;
         FlashEffectShader flashEffect;
+        UnitMaskShader unitMask;
         WorldPostShader worldPost;
     };
 }

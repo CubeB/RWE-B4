@@ -10366,3 +10366,93 @@ and brightens monotonically to 1.77x at row 31**, and it never darkens at any
 row. It is a lighten-only ramp, complementary to SHD's 0 to 1.807, and §99's
 interface brightening already uses it. So it is not a candidate for the shadow
 darkening.
+
+---
+
+## 101. The purple halo on buildings, and what stood for transparent
+
+A bug of the original's, reproduced on purpose. Jon Mavor names it as his own in
+the 2012 post that prompted §100: "Ever notice that a lot of the buildings have
+a weird purple halo? Basically the table broke when dealing with the edge and
+transparency because I didn't have a correct way to represent that."
+
+The mechanism he describes is the building anti-aliasing: "for the non-animating
+part of the building I would allocate a buffer that was double the size in each
+dimension. I rendered the building at this larger size and then anti-aliased
+that into the final cache", and the filter is a table, applied twice — "a lookup
+on the top two pixel and the bottom two pixels. The results from those two ops
+were then looked up to give me the final color, so 3 lookups." At the silhouette
+the pairs being averaged are a real colour and whatever stood for transparent,
+and what came back was wrong.
+
+**Which table is INFERRED.** `PALETTE.ALP` is the only 256x256 source-by-
+destination blend table in the shipped data, it is installed at `[display+0xC0]`
+as the anti-alias blend table (`TOTALA-EXE-SHADING.md` §09), and the cloak
+composite already goes through it (`0x4B8500` → `0x4CBF2C`). The anti-aliasing
+code path itself was **not** followed in the binary, so the identification rests
+on there being nothing else it could be.
+
+**Which index stood for transparent is measured, and it is not a close call.**
+Blending every palette entry against each of the 256 possible partners through
+the shipped `PALETTE.ALP`, and scoring each partner by how purple it makes
+ordinary building colours — red and blue both above green, over the entries with
+luminance 40 or more — gives one clear winner:
+
+| partner | the index itself | mean result | purpleness |
+|---|---|---|---|
+| **253** | **(255, 0, 255)** | (158, 109, 171) | **+40.2** |
+| 5 | (128, 0, 128) | (116, 76, 120) | +25.8 |
+| 220 | (103, 59, 127) | (114, 93, 123) | +10.1 |
+| 1 | (128, 0, 0) | (122, 65, 60) | **−8.0** |
+| 0 | (0, 0, 0) | (60, 63, 58) | −21.9 |
+
+Index 253 is plain magenta, the usual colour key, and it wins by a distance.
+Note the two that lose: index 1 is the transparent colour of the *composited
+bitmap* (§24 of the shading document) and comes back reddish rather than purple,
+so the AA table and the composite are not using the same convention; and index 0
+is black, which averages to grey.
+
+Worked values, straight out of the table:
+
+```
+grey  (128,128,128) + 253 -> index  23 = (123, 59, 71)
+white (251,251,251) + 253 -> index  20 = (175,111,127)
+blue  ( 39, 63, 87) + 253 -> index  26 = ( 87, 35, 43)
+green (  0,255,  0) + 253 -> index 167 = ( 47,119, 27)
+```
+
+That is the whole of the bug. The true average of a mid grey with magenta is
+(191, 64, 191), and TA's palette has no entry anywhere near it, so the
+nearest-match that follows the average lands on (123, 59, 71) — a dull rose that
+belongs to no part of the picture. "The table broke" is exactly that: the
+average is fine and the snap has nowhere to go.
+
+### What RWE does with it
+
+Reproduced in `worldPost.frag`, which is the same place in the pipeline: the one
+blit the whole world view passes through, where the supersampled buffer is
+filtered down. The buildings' coverage is drawn into a mask at the supersampled
+size, and a pixel the mask says is on an outline is blended towards the halo
+colour.
+
+Two deliberate departures, both recorded rather than hidden. The colour is the
+**mean** of row 253 rather than the per-entry value, because by the post pass
+the pixel is a blended colour and its palette index is long gone. And the width
+and strength are settings (`building-halo-width`, `building-halo-strength`)
+rather than constants, because the artefact does not survive translation on its
+own: the original's halo is about one pixel of a 640x480 screen, and one pixel
+of a modern screen is a quarter of that, so a faithful one would be correct and
+invisible. It follows the anti-alias setting, since with no supersampling there
+is no downsample for it to have come out of — which is true of the original too.
+
+One artefact is inherent to reproducing this from a screen-space mask, and is
+recorded here so it is not later reported as a bug. The original anti-aliases
+each building's bitmap **in isolation**, so the halo follows the building's own
+outline and anything standing in front is simply painted over the top. RWE's
+mask is drawn depth-tested against the finished world, so the coverage also ends
+where something else occludes the building — and to the post pass a boundary is
+a boundary, so a tank parked in front of a factory picks up a thread of halo
+along the edge that overlaps it. Dropping the depth test trades it for a worse
+one, a building hidden behind a hill drawing its outline over the hill. Neither
+is the original's, and the depth-tested version is the one that never draws a
+halo where there is no building to see.

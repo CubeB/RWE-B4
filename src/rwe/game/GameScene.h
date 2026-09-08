@@ -468,6 +468,9 @@ namespace rwe
          * rwe.cfg only -- see GlobalConfig for why it is not a button.
          */
         bool vehicleShadowsEnabled{true};
+        /** The purple building halo: strength as a percentage, width in output pixels. */
+        unsigned int buildingHaloStrength{55};
+        unsigned int buildingHaloWidth{1};
         unsigned int scrollSpeedSetting{100};
 
         /** What this game was started with, kept for the save-game header. */
@@ -759,6 +762,8 @@ namespace rwe
         FrameBufferInfo worldFrameBuffer;
 
         TextureHandle dodgeMask;
+        /** Coverage of the finished buildings, for the purple halo the post pass draws. */
+        TextureHandle buildingMask;
 
 
     public:

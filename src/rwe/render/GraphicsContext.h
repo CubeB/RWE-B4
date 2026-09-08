@@ -235,6 +235,7 @@ namespace rwe
 
         void setUniformInt(UniformLocation location, int value);
         void setUniformFloat(UniformLocation location, float value);
+        void setUniformVec2(UniformLocation location, float a, float b);
         void setUniformVec3(UniformLocation location, float a, float b, float c);
         void setUniformVec4(UniformLocation location, float a, float b, float c, float d);
         void setUniformMatrix(UniformLocation location, const Matrix4f& matrix);
