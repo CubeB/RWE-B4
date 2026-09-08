@@ -193,6 +193,15 @@ of `TotalA.exe` instead of guessed at.
   changes the simulation in exactly one place (the pathfinding budget, raised
   fifty-fold), which RWE is already past. What is left is a handful of v3.1
   interface features, listed there and in the roadmap.
+- `docs/TA-DEMOS.md` — the `.tad` demo format, and why a demo is a stream of
+  *state and effects* rather than of orders: TA is owner-authoritative, not
+  lockstep, so a demo cannot be fed to `GameSimulation` and playback would
+  have to puppet the units directly. What they are good for instead is a
+  conformance corpus — build timings, economy curves and weapon events pulled
+  out as short bounded episodes with real numbers in them — plus the filters
+  that make such an episode mean anything. Note its provenance warning: the
+  format there is transcribed from a third-party implementation, not read out
+  of the binary, so it is on a weaker footing than the rest of these.
 - `docs/REVERSE-ENGINEERING-PRIORITIES.md` — what is worth reading out of the
   binary next, ranked, with the evidence that each is a real gap and a string
   or offset to pivot on. Most of it is now done; the head of the file says
