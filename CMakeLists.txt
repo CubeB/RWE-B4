@@ -377,6 +377,8 @@ set(SOURCE_FILES
     src/rwe/io/smk/SmkDecoder.h
     src/rwe/io/tad/TadReader.cpp
     src/rwe/io/tad/TadReader.h
+    src/rwe/io/tad/tad_events.cpp
+    src/rwe/io/tad/tad_events.h
     src/rwe/io/tad/tad_headers.h
     src/rwe/io/tad/tad_util.cpp
     src/rwe/io/tad/tad_util.h
@@ -851,6 +853,7 @@ set(TEST_FILES
     src/rwe/io/gui/gui.test.cpp
     src/rwe/io/ota/ota.test.cpp
     src/rwe/io/tad/tad.test.cpp
+    src/rwe/io/tad/tad_events.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
     src/rwe/io/tdf/ListTdfAdapter.test.cpp
     src/rwe/io/tdf/NetSchemaTdfAdapter.test.cpp
@@ -991,6 +994,9 @@ target_link_libraries(solar_probe librwe)
 
 add_executable(tad_probe src/tad_probe.cpp)
 target_link_libraries(tad_probe librwe)
+
+add_executable(tad_episodes src/tad_episodes.cpp)
+target_link_libraries(tad_episodes librwe)
 
 add_executable(battle_test src/battle_test.cpp)
 target_link_libraries(battle_test librwe)

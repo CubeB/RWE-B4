@@ -92,6 +92,19 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
 - **`ui_probe`** — builds the real UI panels from the real game data headlessly, dumps every gadget's hitbox, and delivers clicks the way the scenes deliver them, printing which gadget takes each event and what message comes out. It diagnoses layout and dispatch faults without a window.
 - **`solar_probe <file.3do>`** — replays the engine's own shading pipeline over a model and prints the shade row each polygon would get. This is how the vertex-normal convention was settled, and it takes one command where a play-test took a round trip.
 - **`tad_probe --file <demo.ted>`** — reads Total Annihilation demo recordings (`.tad`/`.ted`) and prints the header, players, extra sectors, tick range and a histogram of subpacket codes, plus a count of anything it could not account for. `--dir` walks a corpus and exits non-zero if any file desynchronises, which is what makes it a check rather than a listing; `--dump-unknown` explains what it could not size. Offline — no SDL, no GL, no VFS. Demos are not checked in; `tools/fetch-demos.py` fetches a small corpus, and read the warning at the top of it before running it.
+- **`tad_episodes`** — mines the same corpus for short bounded episodes with real
+  numbers in them, currently the build-timing ones: `0x09` nanoframe to `0x12`
+  finish, with the filters that make a duration mean anything (speed changes,
+  damage to the frame or its builder, and a stalled owner all disqualify a
+  window, and every rejection is counted rather than dropped). Deliberately not a
+  `tad_probe` mode — that tool's contract is "non-zero if anything walked out of
+  step" and an extractor exits non-zero for different reasons. `--emit-json`
+  writes the episodes; the console summary prints the **modal** duration per unit
+  type, which is the number to consume, since assists shorten a build and missed
+  micro-stalls lengthen it. There is no `--emit-cpp` and no checked-in fixture
+  yet: a `0x09` names its type only as an index into the demo's `0x1a` table, and
+  turning that into a unit name needs TA's own checksum routine read out of
+  `TotalA.exe`. See `docs/TA-DEMOS.md`.
 - **`tools/visual-test.ps1`** — when only the renderer will do. It launches `build-release/rwe.exe`, finds the window, and then *drives* it: real clicks at client-relative coordinates, screenshots cropped and nearest-neighbour magnified around the thing under test. `-phase build|air|ship` are the scripted sequences already written; adding one is a few lines. Prefer this to ad-hoc screenshotting — a scripted click sequence is repeatable and an eyeballed one is not.
 - **`tools/crash-catch.cmd`** runs the Debug build under gdb and writes a backtrace to `crash.txt`. Play normally, reproduce the crash, close the window.
 - Environment switches, all pure observers: `RWE_AI_PROFILE=1` times each AI pass and logs anything over 2 ms; `RWE_DEBUG_SPAWN=ARMPW*12@0:8:1` spawns units on a timer (`<type>*<count>@<owner>:<seconds>[:<near player>]`); `RWE_DEBUG_SELF_DESTRUCT[=_PLAYER]`, `RWE_TRACE_BOMBER`, `RWE_TRACE_GUNSHIP`, `RWE_TRACE_MISSILE`.

@@ -800,15 +800,127 @@ call stack; both are read, in that order.
 
 ---
 
+## NN. What 60,075 recorded deaths say about the severity
+
+Everything above this section was read out of the binary. This one is read out
+of **real games**: the `.tad`/`.ted` demo corpus described in
+`docs/TA-DEMOS.md`, thirteen recordings, decoded by
+`src/rwe/io/tad/tad_events.{h,cpp}`. TA broadcasts a `0x0c` record whenever a
+unit dies, and that record turns out to carry the two numbers this document has
+been reasoning about without ever seeing one.
+
+```
+0c | u16 unit | u32 killer's DirectPlay id | u16 killer | u8 severity | u8 cause<<4 | level
+```
+
+The last two bytes are the finding.
+
+### The high nibble is the death cause, and it confirms §22 exactly
+
+§22 says the kill routine at `0x4864B0` takes the damage type as its cause from
+`unit+0xF5`, that **causes 4, 5 and 9 leave nothing and skip the death script
+outright**, and that **cause 7 forces a wreck**. That was read from the
+disassembly and had never been checked against a running game. Over the corpus,
+with no exceptions at all:
+
+| Cause | Deaths | Corpse level |
+|---|---|---|
+| 4 | 569 | 0, all of them |
+| 5 | 824 | 0, all of them |
+| 9 | 949 | 0, all of them |
+| 7 | 809 | 1, all of them |
+
+3,151 deaths, four causes, zero counter-examples. §22's reading is correct, and
+cause 9 -- named in §92 as a nanoframe decaying out -- reads severity 0 as well,
+which is what "skips the script" has to look like from outside.
+
+### The low nibble is the corpse level the script wrote back
+
+It is the value `0x486375` picks up in `esp+0x18` and walks the `featuredead`
+chain with: 0 leaves nothing, 1 the intact wreck, 2 and 3 further down. Over the
+corpus it tracks the severity at exactly the thresholds the stock `Killed`
+scripts use, and the boundaries are sharp to the unit:
+
+| Severity | Level, for deaths that ran the script |
+|---|---|
+| 1-25 | 1 (10,031) or 2 (6,809) |
+| 26-50 | 2 (7,877 of 7,991) |
+| 51-99 | 3 (8,167 of 8,229) |
+| 100 | 3 (22,022 of 22,871) |
+
+Severity 25 gives level 1 or 2 and severity 26 gives level 2; severity 50 gives
+level 2 and 51 gives 3. Those are the `severity <= 25` and `severity <= 50`
+branches of the standard script, confirmed at the boundary by tens of thousands
+of real deaths. The split within 1-25 between levels 1 and 2 is a difference
+between units' scripts, not a difference in the engine.
+
+### The severity behaves like §22's overkill term
+
+Without unit names -- see the `0x1a` problem in `docs/TA-DEMOS.md` -- the
+formula `clamp(1, 100, (100 * overkill / maxdamage + unit[0xF7]) / 2)` cannot be
+evaluated directly, because `maxdamage` is unknown. But it makes a prediction
+that needs no unit data: a unit killed by one enormous blow while at full health
+has a large overkill and should read near 100, while one whittled down to nothing
+has an overkill near zero and should read near 1. Counting each victim's recorded
+`0x0b` hits before it died, over the 56,913 deaths whose cause runs the script:
+
+| Prior hits recorded | Deaths | Median severity | At 100 |
+|---|---|---|---|
+| 0 | 17,526 | 100 | 88% |
+| 1 | 5,832 | 100 | 56% |
+| 2 | 3,915 | 75 | 38% |
+| 3 | 2,657 | 59 | 29% |
+| 4 | 2,180 | 46 | 18% |
+| 5 | 1,853 | 39 | 15% |
+| 6 | 1,488 | 36 | 12% |
+| 7 | 1,322 | 29 | 8% |
+| 8 | 1,174 | 26 | 8% |
+| 9 | 1,045 | 25 | 8% |
+| 10 or more | 17,921 | 15 | 4% |
+
+Monotone across the whole range. The severity **is** the overkill term, and the
+mechanism §22 describes is the one running in the recordings.
+
+### What this does and does not settle
+
+- **RWE's hard-coded 50 is wrong in a way that matters.** It sits in the middle
+  of a distribution whose two largest masses are at the ends: 22,871 deaths at
+  exactly 100 and a long tail below 25. A unit that RWE kills gently leaves the
+  same corpse as one it blows apart. Since September 2026 RWE derives the
+  severity properly (see the section above) -- these numbers are the check on
+  that port, and the thresholds table is the shape any test of it should assert.
+- **`unit+0xF7` is still unidentified**, and this cannot identify it: the term
+  is additive inside the same clamp as the overkill, so no amount of counting
+  deaths separates them without `maxdamage`. What can be said is that the
+  distribution does not *require* a large `F7` -- 88% of the deaths with no
+  recorded prior damage are pinned at 100, and a single blow bigger than twice a
+  unit's health does that on its own.
+- **A caveat on the counting.** `0x0b` is not a complete damage ledger: 17,526
+  of these deaths have no recorded damage at all, and the corpus holds only ten
+  `0x0e` area-of-effect records in twelve million subpackets, so splash is not
+  arriving that way either. The trend above is therefore a floor on the
+  relationship rather than a measurement of it.
+- **Twelve of the thirteen demos were recorded on a patched engine** (TA:
+  Escalation 10.2 -- see `docs/TA-DEMOS.md`), so the corpus-wide counts should
+  be read as "this engine family" until that patch is classified. The one
+  unpatched demo, 14724 on ProTA 4.8, agrees as far as it goes: all 5 of its
+  cause-5 deaths and all 19 of its cause-9 deaths leave level 0. It contains no
+  cause-4 or cause-7 death at all, so those two rows of the table rest on the
+  patched engine alone.
+
 ## NN. Loose ends
 
 - **`unit+0xF7`**, the second term in the `Killed` severity, is still
   unidentified (§22 already flagged it). It matters here only because it feeds
   the corpse level, which decides whether a naval unit leaves anything at all.
+  The demo corpus cannot separate it from the overkill term -- see the section
+  above for why -- so this still wants a writer found in the binary.
 - **Death causes 4, 5, 7 and 9** are still decoded as a set and not named
   individually. Cause 7 is the one that both forces a wreck and suppresses the
   burning plume, so naming it would settle what "a wreck that does not burn on
-  land" actually is.
+  land" actually is. The demo corpus (section above) now says how *often* each
+  fires -- 569, 824, 949 and 809 deaths -- and confirms what each does, but not
+  what produces it.
 - **`0x4658E0`**, the visibility test `nodrawundergray` gates on, is taken to be
   "is this cell currently seen rather than merely explored" from its use in the
   feature draw. *INFERRED*, not followed into.

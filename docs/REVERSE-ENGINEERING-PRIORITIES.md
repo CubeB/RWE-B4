@@ -33,6 +33,20 @@ over effort, as before.
    prompted the decode. The severity formula is `TOTALA-EXE-WRECKS.md` §22; its
    second term, `unit+0xF7`, is still unidentified, and that is the piece to go
    and find.
+
+   **Update, 2026-09-08.** The severity and the corpse level are both carried in
+   the `0x0c` death record of a `.tad` demo, so 60,075 real deaths are now
+   available as evidence — see the new section in `TOTALA-EXE-WRECKS.md`. Three
+   things came out of it. §22's reading of the death causes is confirmed without
+   a single exception (causes 4, 5 and 9 always leave nothing; cause 7 always
+   forces the wreck). The stock scripts' thresholds are pinned at the boundary:
+   level 2 from severity 26 and level 3 from severity 51. And the severity
+   really is the overkill term — median 100 for a unit killed with no prior
+   damage, 15 for one that took ten hits or more. That is a **check on the
+   port**, not a substitute for it, and it does *not* identify `unit+0xF7`: the
+   term is additive inside the same clamp, so nothing outside the binary can
+   separate it from the overkill without `maxdamage`. Finding its writer is
+   still the piece to go and find.
 2. **Aircraft leave no wreck at all.** Every one of the thirty aircraft FBIs
    omits `Corpse`, so in the original a shot-down aircraft leaves nothing over
    land or water at any severity. RWE spawns one anyway. Decoded, trivial to

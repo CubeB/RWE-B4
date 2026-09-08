@@ -27,6 +27,7 @@
 #include <map>
 #include <optional>
 #include <rwe/io/tad/TadReader.h>
+#include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tad/tad_util.h>
 #include <rwe/util/OpaqueArgs.h>
 #include <sstream>
@@ -149,7 +150,19 @@ namespace rwe
 
             ProbeHandler(bool verbose, bool dumpUnknown) : verbose(verbose), dumpUnknown(dumpUnknown) {}
 
+            /**
+             * What the demo's 0x1a record says about the data set the game was
+             * played on. An unrecognised table is a modded game, which is the
+             * filter docs/TA-DEMOS.md asks for.
+             */
+            std::optional<TadUnitTable> unitTable;
+
             void onHeader(const TadHeader& h) override { header = h; }
+
+            void onUnitData(const TadBytes& record) override
+            {
+                unitTable = tadDecodeUnitTable(record);
+            }
 
             void onExtraSector(const TadExtraSector& s, unsigned int, unsigned int) override
             {
@@ -280,6 +293,21 @@ namespace rwe
                           << " " << describeSide(player.side)
                           << " colour " << unsigned(player.color)
                           << " \"" << player.name << "\"\n";
+            }
+
+            if (handler.unitTable)
+            {
+                const auto& table = *handler.unitTable;
+                auto known = table.knownDataSet();
+                std::cout << "  unit table: " << table.restricted.size() << " types"
+                          << " (" << table.listed.size() << " listed)"
+                          << ", fingerprint 0x" << std::hex << std::setw(8) << std::setfill('0')
+                          << table.fingerprint() << std::dec
+                          << " -- " << (known ? *known : std::string("unrecognised data set")) << "\n";
+            }
+            else
+            {
+                std::cout << "  unit table: could not be split into 14-byte records\n";
             }
 
             std::cout << "  packets " << handler.packetCount

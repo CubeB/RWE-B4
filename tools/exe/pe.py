@@ -1,5 +1,5 @@
-import struct, re, sys
-p=r'D:/Total Annihilation/Total Annihilation/TotalA.exe'
+import os, struct, re, sys
+p=os.environ.get('TOTALA_EXE', r'D:/Total Annihilation/Total Annihilation/TotalA.exe')
 d=open(p,'rb').read()
 e_lfanew=struct.unpack('<I', d[0x3c:0x40])[0]
 assert d[e_lfanew:e_lfanew+4]==b'PE\0\0'

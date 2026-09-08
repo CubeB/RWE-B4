@@ -1,5 +1,5 @@
-import sys, struct, re
-p = r"D:\Total Annihilation\Total Annihilation\TotalA.exe"
+import os, sys, struct, re
+p = os.environ.get('TOTALA_EXE', r'D:/Total Annihilation/Total Annihilation/TotalA.exe')
 d = open(p,'rb').read()
 secs = [(".text",0x401000,0x400,0xfa92a),(".rdata",0x4fc000,0xfae00,0x468c),(".data",0x501000,0xff600,0x10a00),(".tls",0x52c000,0x110000,0x14),(".rsrc",0x52d000,0x110200,0xa58)]
 def f2v(off):

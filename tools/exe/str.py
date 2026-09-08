@@ -1,5 +1,5 @@
-import sys
-d=open(r'D:/Total Annihilation/Total Annihilation/TotalA.exe','rb').read()
+import os,sys
+d=open(os.environ.get('TOTALA_EXE', r'D:/Total Annihilation/Total Annihilation/TotalA.exe'),'rb').read()
 secs=[(0x400,0x401000,0xfa92a),(0xfae00,0x4fc000,0x468c),(0xff600,0x501000,0x10a00)]
 def rd(vma,n):
     for off,base,size in secs:

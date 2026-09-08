@@ -288,6 +288,176 @@ up: across the corpus the serial never once went backwards for a sender, and a
 game's tick span (153,789 ticks over 5,079 wall-clock seconds for the longest)
 is consistent with the 30 Hz simulation once pauses are allowed for.
 
+## What the event subpackets carry
+
+The table above is lengths. This is contents: the payloads of the handful of
+codes an event oracle is built from, decoded in `src/rwe/io/tad/tad_events.{h,cpp}`
+with a test beside it whose every fixture is a real subpacket lifted out of a
+real recording.
+
+None of it comes from the reference implementation, which has no decoder for
+these payloads either, and none of it comes from `TotalA.exe`. It was read off
+the corpus, so each struct in that header says what the evidence was. Fields that
+did not resolve are called `unknown` rather than guessed at, and there are two of
+those.
+
+**Positions are 16.16 fixed point** -- an integer part and a 16-bit fraction, in
+world units, y up -- and **rotations are three 16-bit angles** on TA's usual
+scale where 65536 is a full turn, the same one the COB machine uses. Both are
+kept raw rather than converted on the way in: a 16.16 value has up to 32
+significant bits and a `float` has 24.
+
+### `0x09`, build started -- all 23 bytes
+
+| Offset | Size | Field |
+|---|---|---|
+| 1 | u16 | type index into the `0x1a` table |
+| 3 | u16 | **the new unit's id**, not the builder's |
+| 5 | 3 x s32 | position of the nanoframe, 16.16 |
+| 17 | 3 x s16 | its rotation |
+
+The second id is the one to be careful about. It is the *nanoframe*: over demo
+14724, 781 of the 790 distinct values of that field reappear as the **finished
+unit** of a `0x12`, and only 63 of them as a `0x12`'s **builder**. The builder is
+not in this packet at all, so learning who built what means pairing the `0x09`
+with its `0x12`.
+
+What made the last six bytes legible was the contrast between two kinds of
+record. A building placed on flat ground has whole-number coordinates and a
+rotation of exactly zero; a unit rolling out of a factory that stands on a slope
+has a fractional position and a non-zero pitch and roll with no yaw. Those are
+terrain-derived, which is what identifies the field.
+
+That also explains a shape that looks wrong at first: one factory emits the same
+type at the *same* position 144 times over a game, from 144 different second ids.
+That is not a hundred assists on one nanoframe, it is a factory, and it is the
+observation that settled which id is which.
+
+### `0x12`, build finished -- all 5 bytes
+
+`u16` finished unit at offset 1, `u16` builder at offset 3.
+
+### `0x0b`, damage -- 9 bytes, 7 of them read
+
+`u16` victim, `u16` attacker (zero where there is no attacking unit), `u16`
+damage, and a trailing `u16` that is **not remaining health**. Tracked across
+successive hits on one victim it neither falls monotonically nor falls by the
+damage figure: unit 1523 in demo 14724, hit repeatedly for 30 by unit 8, reads
+322, 320, 318, 319, 318, 319. It moves by ones and it goes back up, so whatever
+it counts is not being spent by the hits.
+
+The damage field is constant per attacker over a run of hits and takes small
+values -- 30, 40, 41, 45, 46, 180 in that demo -- which is what a weapon's damage
+figure looks like. Confirming it against a weapon definition needs the unit-type
+names, so it waits on the checksum work.
+
+**`0x0b` is not a complete damage ledger.** 17,526 of the 56,913 script-driven
+deaths in the corpus have *no* recorded damage on the victim at all, and the
+corpus contains only ten `0x0e` area-of-effect records in twelve million
+subpackets, so splash damage is not arriving by that route either. Any oracle
+that wants total damage absorbed has to treat the absence as unknown rather than
+as zero.
+
+### `0x0c`, death -- all 11 bytes, and this one confirms the disassembly
+
+| Offset | Size | Field |
+|---|---|---|
+| 1 | u16 | the unit that died |
+| 3 | u32 | DirectPlay id of the killing player, matching offset 0x91 of a status message |
+| 7 | u16 | the killing unit |
+| 9 | u8 | corpse **severity** |
+| 10 | u8 | death **cause** in the high nibble, corpse **level** in the low one |
+
+See the wrecks section below; this is the largest single finding of the pass.
+
+### `0x0d`, shot fired -- all 36 bytes
+
+Two 16.16 position triples -- where the shot came from and where it was aimed,
+and the second is far enough from the first that it cannot be a velocity -- then
+a rotation triple, then `u16` target (zero if the shot was not aimed at a unit),
+`u16` shooter, and one byte that is 0, 1 or 2 and is dominated by 0.
+
+### `0x10`, script call -- all 22 bytes
+
+`u16` unit, `u16` script index into that unit's own COB, `u8` argument count,
+then four `s32` argument slots. This is the record `TOTALA-EXE.md` decodes from
+the emitting side at `0x451DF0`, so the layout is transcription rather than a
+reading, and the corpus agrees with it.
+
+### `0x28`, resource statistics -- 58 bytes, 40 of them read
+
+Seventeen bytes, then ten IEEE-754 floats, emitted about every 120 ticks per
+player. The first four are settled by watching them move over whole games:
+
+| Slot | Field | Why |
+|---|---|---|
+| 0 | metal stored | bounded above by slot 2, and it is the one that sits at zero for long stretches |
+| 1 | energy stored | bounded above by slot 3 |
+| 2 | metal storage | moves in building-sized steps: 1000, 1450, 1950 |
+| 3 | energy storage | likewise: 1000, 1650, 1950 |
+
+The remaining six are two monotonically increasing triples, **energy first and
+then metal**. That order is not a guess: over a game's opening the first of each
+triple grows at 50 a second and 2 a second respectively, which is the shape of a
+commander's output and not the other way about. They are cumulative counters of
+something, and which of the recorder's own `lastshared`/`shared`/`income`/
+`lasttotal` names each carries is not settled, so they keep positional names.
+
+A watcher's record is a useful control and a trap. In demo 14733 the `WATCH`
+side's 972 samples read zero in every field except the last of each triple, both
+exactly 1000.0 -- which fits no reading taken from a playing peer. Treat a
+watcher's record as uninitialised and filter it out rather than averaging it in.
+
+**So the standing question is half answered.** There is enough here for
+storage-cap and stall episodes, which need only slots 0-3, and enough to see
+production and consumption diverge. Recovering expenditure by difference still
+waits on naming the last six.
+
+### Owner blocks, which are the cheap filter
+
+Unit ids partition into contiguous blocks of `maxUnits`, numbered from zero, with
+id zero meaning no unit -- so `(id - 1) / maxUnits` is the owner. Verified over
+the corpus: in every demo each sender's units fall in exactly one block and no
+two senders share one, including the ten-player demo 14727, which uses all ten.
+
+Two cautions. `maxUnits` really does vary -- demo 14724 is a 1500-unit game, so
+the arithmetic cannot be hardcoded to 1000. And the block is **not** the player
+number: in demo 14733, sender 1 owns block 2 and sender 3 owns block 1. It is a
+stable per-player key, which is all the filters need -- "is this event about one
+of the recording peer's own units" is a comparison of blocks.
+
+## The `0x1a` unit table, and what it can and cannot tell you
+
+The `UnitData` record between the player status records and the packet stream is
+a flat array of 14-byte entries, `1a <sub> <u32 zero> <u32 id> <u32 value>`: every
+entry of `sub` 2, then every entry of `sub` 3, each sorted ascending by id.
+
+The `sub` 3 block is **exactly the data set's unit count** -- 317 for ProTA 4.8
+and 549 in every TA: Escalation 10.2 demo, both matching each mod's own published
+figure -- and its `value` takes only two values, `0xffff0201` on nearly every
+entry and `0xffff0101` on at most one per game, so it is a class or restriction
+flag and not a second checksum. TA Demo Recorder's `unitid.txt` describes these
+ids as "the number saved in a unit restrictions file", which fits.
+
+The `sub` 2 block is always a **superset**: 550 entries in demos 14727 and 14728
+and 551 in 14732 and 14734, the extra ids being `1235944411` and `410801334` in
+both cases. That difference is not explained.
+
+**The id is content-derived and cannot be named by hashing.** 88 hash and form
+combinations -- crc32 plain and complemented, djb2, djb2-xor, sdbm, FNV-1,
+FNV-1a, java-31, rotate-xor, byte sum and adler32, over upper and lower case,
+with and without a `.fbi` suffix and a `units\` path prefix -- were run against
+the real unit-name sets of both mods and hit **nothing** in either table. The two
+mods share exactly 1 id out of 317 and 549. Naming a type therefore needs TA's
+own routine read out of `TotalA.exe`, and that is a separate piece of work.
+
+**But it identifies a data set today, which was the question that mattered.**
+`tad_probe` now prints the table's size and an order-independent fingerprint of
+the `sub` 3 block, and one fingerprint covers all twelve Escalation demos while
+another covers the ProTA one. That is the mod filter the corpus section below
+asks for, arrived at without the checksum: a table whose fingerprint is not
+recognised is a data set we do not hold, and its episodes are not usable.
+
 ## What the stream is, and why that settles the playback question
 
 TA is not lockstep. Each machine simulates the units it owns and broadcasts
@@ -415,15 +585,30 @@ Reject an episode if any of these hold inside its window:
 - the terrain class under the subject changes, unless the terrain response is
   what is being measured;
 - the subject is being built, is building, or is transported;
-- the demo is not vanilla TA or Core Contingency. **Most of that archive is
-  TA:Esc and other mods**, whose unit data RWE does not have. This is harder
-  than it looked: `ExtraSector` type 7 is a mod id, but no demo in the corpus
-  carried one, so the filter has to come from the `0x1a` unit-type checksum
-  table in the `UnitData` record (still undecoded, see the open questions) or
-  from the archive's own per-demo mod tag, which `tools/fetch-demos.py` records
-  in a sidecar at fetch time. Do not trust the map name: the bracketed prefixes
-  in the corpus (`[Diox]`, `[L]`, `[Metal]`, `[Bully]`, `[Pro]`) are map-pack markers,
+- the data set is one RWE does not hold. **Most of that archive is TA:Esc and
+  other mods.** `ExtraSector` type 7 is a mod id but no demo in the corpus
+  carried one, so the filter comes instead from the `0x1a` table's fingerprint,
+  which `tad_probe` now prints and which does separate the two data sets in the
+  corpus cleanly -- see the section on that table above. The archive's own
+  per-demo mod tag, recorded in a sidecar by `tools/fetch-demos.py` at fetch
+  time, is the cross-check. Do not trust the map name: the bracketed prefixes in
+  the corpus (`[Diox]`, `[L]`, `[Metal]`, `[Bully]`, `[Pro]`) are map-pack markers,
   not mod markers;
+
+  Note that a mod being present is **not** on its own a reason to reject an
+  episode. What is under test is `TotalA.exe`'s arithmetic, and a mod that is
+  pure data records that arithmetic as faithfully as vanilla does -- the episode
+  transcribes the FBI values inline and never cares where they came from. What
+  does disqualify a demo is a mod that patches the **engine**, and one of the two
+  in this corpus does: ProTA 4.8 ships a `TotalA.exe` byte-identical to the GOG
+  one (md5 `8e74a1dffa1f5988624c52048f5b20cd`), while TA: Escalation 10.2 ships
+  one of identical size but md5 `1e677a7f92c79b5ab35440853d822c17` -- 4,425
+  patched bytes over 103 runs, 71 of those runs and 3,185 of those bytes inside
+  `.text`. So the single ProTA demo is the clean reference case and the twelve
+  Escalation ones are quarantined until those runs are classified against the
+  routines `TOTALA-EXE.md` names. The patched DLLs both mods ship (`tplayx.dll`,
+  `tdraw.dll`, `win32.dll`, and Escalation's `eplayx.dll` and `ddraw.dll`) are
+  network, render and platform shims and do not bear on the simulation;
 - the subject is not one of the **recording peer's own units**. Enemy state
   is intermittent by construction, since a demo only contains what was sent
   to that peer, so enemy trajectories have holes wherever fog of war closed.
@@ -469,11 +654,20 @@ They catch different things and should not share machinery.
    1,913,709 packets, 12,236,992 subpackets, nothing unaccounted for. The one
    real finding was `0x20`'s length.
 2. Build the event oracles that need no `0x2c`: build timing, economy curves,
-   weapon events. Roughly a week beyond the parser, and it is real
-   conformance coverage against thousands of real games. The counts in the
-   table above say what a corpus this size gives you to work with: 66,079
-   build starts and 105,617 build finishes, 469,842 resource samples, 631,578
-   shots against 824,844 damage events and 60,075 deaths.
+   weapon events. The counts in the table above say what a corpus this size
+   gives you to work with: 66,079 build starts and 105,617 build finishes,
+   469,842 resource samples, 631,578 shots against 824,844 damage events and
+   60,075 deaths.
+
+   **Partly done.** The payloads are decoded (`tad_events.{h,cpp}`, sections
+   above) and the death oracle landed a finding that goes into
+   `TOTALA-EXE-WRECKS.md` rather than into a test. The economy has slots 0-3,
+   which is enough for storage-cap and stall episodes. The **checked-in
+   episodes are blocked**, and on one thing only: an episode fixture has to
+   transcribe the unit's real FBI values inline, and turning a `0x09`'s type
+   index into a unit name needs TA's own checksum routine read out of
+   `TotalA.exe`. Until that lands, every oracle here is keyed on an anonymous
+   type index.
 3. Decide on `0x2c` once the stream has been stared at. If the decode falls
    out of the binary in a day or two of probing -- pivot on `0x44F4A0`, the
    three-waypoint bit-serialiser, and on the emitter `0x451DF0` -- the
@@ -486,27 +680,26 @@ They catch different things and should not share machinery.
 - The `0x2c` layout: field order, bit widths, coordinate scaling, and what
   fraction of a unit's state it actually carries. Bytes 1-2 are its length and
   3-6 its serial; the rest is unread.
-- What `0x10` carries. It is the second most common code in the corpus at
-  1,729,546 -- more frequent than damage, deaths and shots put together -- and
-  the reference sizes it at 22 bytes and calls it a script call. `TOTALA-EXE.md`
-  §on `AimPrimary` decodes the emitter side of exactly this record (unit id,
-  script, two arguments, packed by `0x451DF0`), so this one is probably cheap.
 - What `0x07` (30,577) and `0x0a` (94,445) are. Both are common enough to be
   something ordinary and both are `UNK_` in the reference.
 - The length of `0x13`, which the reference never had, and which nothing in the
   corpus exercises.
-- The `0x1a` unit-type table: what the 14 bytes are, and whether the checksum
-  in it can identify a mod. It is carried once per demo in its own record and
-  never appeared in the packet stream, so it has to be read out of that record.
-  It matters more now than it did: `ExtraSector` type 7 (mod id) turned out to
-  be absent from every demo in the corpus, so it is not the free filter it
-  looked like.
-- Whether `0x28`'s 58 bytes carry enough to reconstruct income separately
-  from expenditure, which decides how sharp the economy oracle can be. The
-  recorder's own notes name the fields it packs -- `lastshared` metal and
-  energy, `shared` metal and energy, `income` metal and energy, `lasttotal`
-  metal and energy -- so there is income in there; the question is the layout
-  and whether expenditure can be recovered by difference.
+- **What computes a `0x1a` id.** The layout of the record is settled and the
+  fingerprint does the filtering job, but the id itself is content-derived and
+  resists every name hash tried against it, so a type index still cannot be
+  turned into a unit name. This is now the single thing blocking checked-in
+  episodes.
+- **The last six floats of `0x28`.** Stored and storage are identified for both
+  resources; the two cumulative triples are not, so expenditure still cannot be
+  recovered by difference.
+- **The trailing `u16` of `0x0b`.** Not remaining health, and not identified.
+- **Why the `0x1a` `sub` 2 block is one or two entries longer than `sub` 3 in
+  four of the thirteen demos.**
+
+Answered by the event-payload pass: what `0x09`, `0x0c`, `0x0d`, `0x10` and
+`0x12` carry, the first four floats of `0x28`, the layout of the `0x1a` record
+and whether it can identify a mod (it can identify one it has seen before), and
+how unit ids partition by owner. All in the sections above.
 
 Answered since this document was written: the `ExtraSector` types (all seven
 named, in the container section), and whether the `decrypt` checksum is
