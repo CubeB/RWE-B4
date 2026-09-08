@@ -91,6 +91,7 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
 - **`battle_test`** — a standing battle. Spawns a fixed number of units for each of two players at opposite start positions, walks them at each other, and replaces them as they die, with a live unit-count slider in the F10 debug panel so the fight can be pushed until something gives without restarting. It goes through `GameLaunch::run`, so it is the same renderer, simulation and scene loop as `rwe.exe`, which is the only way its numbers mean anything. `battle_test --map "Coast To Coast" --units 200 --unit-type CORAK`; `--list-maps` and `--list-units` say what is available. Writes `battle_test.log` in the local data directory, flushed a line at a time, because these runs normally end under `taskkill`.
 - **`ui_probe`** — builds the real UI panels from the real game data headlessly, dumps every gadget's hitbox, and delivers clicks the way the scenes deliver them, printing which gadget takes each event and what message comes out. It diagnoses layout and dispatch faults without a window.
 - **`solar_probe <file.3do>`** — replays the engine's own shading pipeline over a model and prints the shade row each polygon would get. This is how the vertex-normal convention was settled, and it takes one command where a play-test took a round trip.
+- **`tad_probe --file <demo.ted>`** — reads Total Annihilation demo recordings (`.tad`/`.ted`) and prints the header, players, extra sectors, tick range and a histogram of subpacket codes, plus a count of anything it could not account for. `--dir` walks a corpus and exits non-zero if any file desynchronises, which is what makes it a check rather than a listing; `--dump-unknown` explains what it could not size. Offline — no SDL, no GL, no VFS. Demos are not checked in; `tools/fetch-demos.py` fetches a small corpus, and read the warning at the top of it before running it.
 - **`tools/visual-test.ps1`** — when only the renderer will do. It launches `build-release/rwe.exe`, finds the window, and then *drives* it: real clicks at client-relative coordinates, screenshots cropped and nearest-neighbour magnified around the thing under test. `-phase build|air|ship` are the scripted sequences already written; adding one is a few lines. Prefer this to ad-hoc screenshotting — a scripted click sequence is repeatable and an eyeballed one is not.
 - **`tools/crash-catch.cmd`** runs the Debug build under gdb and writes a backtrace to `crash.txt`. Play normally, reproduce the crash, close the window.
 - Environment switches, all pure observers: `RWE_AI_PROFILE=1` times each AI pass and logs anything over 2 ms; `RWE_DEBUG_SPAWN=ARMPW*12@0:8:1` spawns units on a timer (`<type>*<count>@<owner>:<seconds>[:<near player>]`); `RWE_DEBUG_SELF_DESTRUCT[=_PLAYER]`, `RWE_TRACE_BOMBER`, `RWE_TRACE_GUNSHIP`, `RWE_TRACE_MISSILE`.
@@ -193,15 +194,20 @@ of `TotalA.exe` instead of guessed at.
   changes the simulation in exactly one place (the pathfinding budget, raised
   fifty-fold), which RWE is already past. What is left is a handful of v3.1
   interface features, listed there and in the roadmap.
-- `docs/TA-DEMOS.md` — the `.tad` demo format, and why a demo is a stream of
-  *state and effects* rather than of orders: TA is owner-authoritative, not
+- `docs/TA-DEMOS.md` — the `.tad`/`.ted` demo format, and why a demo is a stream
+  of *state and effects* rather than of orders: TA is owner-authoritative, not
   lockstep, so a demo cannot be fed to `GameSimulation` and playback would
   have to puppet the units directly. What they are good for instead is a
   conformance corpus — build timings, economy curves and weapon events pulled
   out as short bounded episodes with real numbers in them — plus the filters
-  that make such an episode mean anything. Note its provenance warning: the
-  format there is transcribed from a third-party implementation, not read out
-  of the binary, so it is on a weaker footing than the rest of these.
+  that make such an episode mean anything. The container and the three
+  transforms are ported (`src/rwe/io/tad/`) and verified over thirteen real games,
+  so the format sections are no longer the bare transcription they were; the
+  *interpretation* of most subpacket payloads still is, and none of it comes
+  out of `TotalA.exe`. The correction worth knowing about is that `0x20` is 186
+  bytes in the packet stream and 192 in the header's status record — the
+  reference has the second number in the table it walks the first with, which
+  silently swallows nine tenths of the alliance records.
 - `docs/REVERSE-ENGINEERING-PRIORITIES.md` — what is worth reading out of the
   binary next, ranked, with the evidence that each is a real gap and a string
   or offset to pivot on. Most of it is now done; the head of the file says
