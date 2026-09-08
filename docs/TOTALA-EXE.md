@@ -10231,3 +10231,116 @@ Deliberately different, and recorded in §88 rather than left to be found:
 - **Greying, the caption shadow and the quick-key underline are still not
   ported.** The first is §19's existing note, now with the arithmetic behind
   it; the other two are new and small.
+
+---
+
+## 100. Two shadow passes: a unit's shadow is a copy of its own sprite, a building's is a projection
+
+Prompted by Jon Mavor's 2012 account of the engine he wrote
+(`mavorsrants.blogspot.com`, "Total Annihilation graphics engine"), which says
+unit shadows "simply took the cached texture and rendered it offset from the
+unit ... that used a darkening palette lookup", while for buildings, "due to
+their tall spires and general complexity I decided to go ahead and properly
+project the shadows". Recollection fifteen years after the fact is not evidence,
+so this section is what the binary says. **It says he remembered it right.**
+
+### The two passes and how a unit is sorted into one
+
+`0x459288` opens the pass on the global options word, `WORD [0x511DE8]+0x37F06`:
+
+```
+459288  mov  ecx,[0x511de8]
+45928e  mov  ax,WORD PTR [ecx+0x37f06]
+459295  test al,0x4                     ; bit 2, Shadows
+459297  je   0x45935c                   ; ... off: nothing at all
+4592a0  mov  ecx,[ecx+0x92]             ; the unit definition
+4592a6  mov  ecx,[ecx+0x241]            ; flags word A
+4592ac  test ecx,0x2000000              ; bit 25, noshadow
+4592b6  jne  0x45935c
+4592bc  test BYTE PTR [ebp-...+0x113],0x20   ; unit+0x113 bit 5 picks the path
+4592c6  je   0x459324                        ; ... clear: the vehicle path
+```
+
+The clear branch gates again, on a **second** option bit:
+
+```
+459324  shr  al,0x3 / test al,0x1       ; bit 3, VehicleShadows
+459329  je   0x45935c
+45932b  test DWORD PTR [esp+0x10],0x81000    ; flags A bits 12 and 19
+459333  jne  0x45935c
+459338  call 0x45a470
+```
+
+So the original has **two** shadow switches where RWE has one, and §78's
+registry table already listed them: bit 2 `Shadows`, bit 3 `VehicleShadows`,
+bit 4 `FeatureShadows`. Turning vehicle shadows off leaves the buildings
+casting. All VERIFIED.
+
+### `0x45A470`, the vehicle path: it copies the unit's own bitmap
+
+The routine copies the source drawable's header — width at `+0`, height at
+`+2`, then `+4`, `+6` and the byte at `+8` — and then moves the pixel plane
+across wholesale:
+
+```
+45a4ae  mov  cx,WORD PTR [eax]          ; width
+45a4b3  mov  dx,WORD PTR [eax+0x2]      ; height
+45a4b7  mov  esi,[eax+0x10]             ; source pixels
+45a4ba  imul ecx,edx
+45a4c0  mov  edi,[edx+0x10]             ; destination pixels
+45a4c8  rep movsd                       ; width*height bytes, verbatim
+45a4cf  rep movsb
+```
+
+There is no transform anywhere in it. **A unit's shadow is a byte-for-byte copy
+of the bitmap the unit was already cached into**, drawn at an offset — which is
+exactly the "offset the cached texture" account, and it means a vehicle's shadow
+is its own silhouette, undistorted, whatever the unit's height. VERIFIED.
+
+### `0x45A790`, the building path: an extent, filled flat
+
+The other branch computes a size through `0x45A510` — four pointer arguments,
+whose results are written straight into the new drawable's width, height, x and
+y words — and then fills it:
+
+```
+45a7f2  imul ecx,[esp+0x14]             ; width * height
+45a7f7  mov  al,[edx+0x8]               ; the drawable's own byte
+45a7fd  mov  bl,al / mov bh,bl          ; replicated into all four bytes
+45a805  shl  eax,0x10
+45a80d  rep stos DWORD                  ; fill the pixel plane
+45a815  rep stos BYTE
+45a82d  rep stos DWORD (eax = 0)        ; and clear the height plane at +0x14
+45a834  rep stos BYTE
+```
+
+**A building's shadow is a projected rectangle filled with a single palette
+index** — one value, which is why Mavor could RLE it "since it's all the same
+intensity", and why cutting the building's own shape out of it was worth doing
+separately. Both paths then composite through `0x4B8500`, the recursive drawable
+blitter, at a Y biased by `+0x85`. VERIFIED.
+
+### What RWE does instead
+
+`shaders/unitShadow.vert` has **one** path for both: every vertex is flattened
+onto the ground plane at `groundHeight` and sheared by `(y - groundHeight) *
+0.25` in +x and -z. That is the building treatment, applied to everything — so
+RWE gives a tank the shadow the original reserves for a factory, and a tall unit's
+shadow stretches where the original's would not. The darkening is a screen fill
+of black at 70% alpha through a stencil, where the original's is a palette
+lookup on a single fill index.
+
+Two things this does **not** settle, and they are not guessed at here: which
+table the darkening lookup uses (`0x4B8500` is a tree walk, and the blit it
+reaches was not followed), and what `unit+0x113` bit 5 actually means — it
+sorts units into the two paths and "is a building" is only the obvious reading.
+
+### And a measurement of the third palette table
+
+`PALETTE.LHT`, `[display+0xC8]`, the `LIGHT TABLE` that §09 of
+`TOTALA-EXE-SHADING.md` records as not used by the shading path: measured
+against `PALETTE.PAL` the same way `PALETTE.SHD` was, it is **identity at row 0
+and brightens monotonically to 1.77x at row 31**, and it never darkens at any
+row. It is a lighten-only ramp, complementary to SHD's 0 to 1.807, and §99's
+interface brightening already uses it. So it is not a candidate for the shadow
+darkening.
