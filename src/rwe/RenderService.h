@@ -105,6 +105,13 @@ namespace rwe
         Matrix4f vpMatrix;
         TextureIdentifier texture;
         float groundHeight;
+        /**
+         * True for the projected shadow a building casts, false for the offset
+         * copy of its own silhouette a unit casts. See TOTALA-EXE.md S:100.
+         */
+        bool projected;
+        /** The one height an offset shadow takes its displacement from; unused when projected. */
+        float shadowOriginY;
     };
 
     struct UnitMeshBatch

@@ -53,6 +53,8 @@ namespace rwe
         s.unitShadow.vpMatrix = graphics.getUniformLocation(s.unitShadow.handle.get(), "vpMatrix");
         s.unitShadow.modelMatrix = graphics.getUniformLocation(s.unitShadow.handle.get(), "modelMatrix");
         s.unitShadow.groundHeight = graphics.getUniformLocation(s.unitShadow.handle.get(), "groundHeight");
+        s.unitShadow.projected = graphics.getUniformLocation(s.unitShadow.handle.get(), "projected");
+        s.unitShadow.shadowOriginY = graphics.getUniformLocation(s.unitShadow.handle.get(), "shadowOriginY");
 
         s.unitBuild.handle = loadShader(graphics, "shaders/unitBuild.vert", "shaders/unitBuild.frag", texturedNormalVertexAttribs);
         s.unitBuild.mvpMatrix = graphics.getUniformLocation(s.unitBuild.handle.get(), "mvpMatrix");

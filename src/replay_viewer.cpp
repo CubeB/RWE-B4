@@ -175,14 +175,15 @@ int main(int argc, char* argv[])
         config.musicVolume = args.getUint("music-volume", 100);
         config.musicEnabled = args.getString("music", "true") != "false";
         config.shadows = args.getString("shadows", "true") != "false";
+        config.vehicleShadows = args.getString("vehicle-shadows", "true") != "false";
         config.scrollSpeed = std::clamp(args.getUint("scroll-speed", 100), 25u, 200u);
         config.soundMode = std::min(2u, args.getUint("sound-mode", 2));
         config.unitSpeech = std::min(2u, args.getUint("unit-speech", 2));
         config.gamma = std::clamp(args.getUint("gamma", 100), 50u, 133u);
         auto shadingWasOn = args.getString("shading", "true") != "false";
         config.shadingMode = std::min(3u, args.getUint("shading-mode", shadingWasOn ? 3u : 0u));
-        config.shadingStrengthUnits = std::min(100u, args.getUint("shading-strength-units", 25));
-        config.shadingStrengthBuildings = std::min(100u, args.getUint("shading-strength-buildings", 40));
+        config.shadingStrengthUnits = std::min(100u, args.getUint("shading-strength-units", 100));
+        config.shadingStrengthBuildings = std::min(100u, args.getUint("shading-strength-buildings", 100));
         config.antiAlias = args.getString("anti-alias", "true") != "false";
 
         auto windowMode = rwe::WindowMode::Bordered;

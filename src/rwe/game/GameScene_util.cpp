@@ -425,17 +425,17 @@ namespace rwe
         const Matrix4f& viewProjectionMatrix,
         const ShaderMesh& mesh,
         const Matrix4f& matrix,
-        float groundHeight,
+        const ShadowProjection& shadow,
         const UnitTextureAtlases& atlases,
         std::vector<UnitTextureShadowMeshRenderInfo>& batch)
     {
         if (mesh.vertices)
         {
-            batch.push_back(UnitTextureShadowMeshRenderInfo{&*mesh.vertices, matrix, viewProjectionMatrix, atlases.atlas, groundHeight});
+            batch.push_back(UnitTextureShadowMeshRenderInfo{&*mesh.vertices, matrix, viewProjectionMatrix, atlases.atlas, shadow.groundHeight, shadow.projected, shadow.originY});
         }
         if (mesh.teamVertices)
         {
-            batch.push_back(UnitTextureShadowMeshRenderInfo{&*mesh.teamVertices, matrix, viewProjectionMatrix, atlases.teamAtlases->at(0).get(), groundHeight});
+            batch.push_back(UnitTextureShadowMeshRenderInfo{&*mesh.teamVertices, matrix, viewProjectionMatrix, atlases.teamAtlases->at(0).get(), shadow.groundHeight, shadow.projected, shadow.originY});
         }
     }
 
@@ -487,7 +487,7 @@ namespace rwe
         const std::vector<UnitMesh>& meshes,
         const Matrix4f& modelMatrix,
         float frac,
-        float groundHeight,
+        const ShadowProjection& shadow,
         const UnitTextureAtlases& atlases,
         UnitShadowMeshBatch& batch)
     {
@@ -502,7 +502,7 @@ namespace rwe
                 continue;
             }
 
-            drawShaderMeshShadow(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], groundHeight, atlases, batch.meshes);
+            drawShaderMeshShadow(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], shadow, atlases, batch.meshes);
         }
     }
 
@@ -512,7 +512,7 @@ namespace rwe
         const std::string& objectName,
         const UnitModelDefinition& modelDefinition,
         const Matrix4f& modelMatrix,
-        float groundHeight,
+        const ShadowProjection& shadow,
         const UnitTextureAtlases& atlases,
         UnitShadowMeshBatch& batch)
     {
@@ -520,7 +520,7 @@ namespace rwe
 
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
-            drawShaderMeshShadow(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * renderInfo.restTransforms[i], groundHeight, atlases, batch.meshes);
+            drawShaderMeshShadow(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * renderInfo.restTransforms[i], shadow, atlases, batch.meshes);
         }
     }
 
@@ -677,7 +677,23 @@ namespace rwe
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
         auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
 
-        drawUnitShadowMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, frac, groundHeight, atlases, batch);
+        // Which of the original's two shadow passes this unit belongs to. It
+        // sorts on unit+0x113 bit 5, whose meaning is not established -- "is a
+        // building" is the obvious reading, and is what mobility stands in for
+        // here (TOTALA-EXE.md S:100).
+        //
+        // A mobile unit's shadow is a copy of its own silhouette under one
+        // displacement. The height that displacement is taken at is RWE's
+        // choice, the original's not being decoded, and it is the model's full
+        // height rather than its middle: the shadow the projection used to
+        // cast reached that far at the top of the model, and the unit is drawn
+        // over its own shadow afterwards, so taking it at the middle leaves
+        // little more than a crescent showing.
+        auto shadow = unitDefinition.isMobile
+            ? ShadowProjection{groundHeight, false, position.y + simScalarToFloat(modelDefinition.height)}
+            : ShadowProjection{groundHeight, true, 0.0f};
+
+        drawUnitShadowMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, frac, shadow, atlases, batch);
     }
 
     void drawFeatureMeshShadow(
@@ -702,7 +718,8 @@ namespace rwe
         const auto& position = feature.position;
         auto matrix = Matrix4f::translation(simVectorToFloat(position)) * Matrix4f::rotationY(toRadians(feature.rotation).value);
 
-        drawUnitShadowMeshNoPieces(gameMediaDatabase, viewProjectionMatrix, objectInfo->objectName, modelDefinition, matrix, groundHeight, atlases, batch);
+        // Scenery never moves, so it takes the projected pass with the buildings.
+        drawUnitShadowMeshNoPieces(gameMediaDatabase, viewProjectionMatrix, objectInfo->objectName, modelDefinition, matrix, ShadowProjection{groundHeight, true, 0.0f}, atlases, batch);
     }
 
     void drawFeature(

@@ -191,6 +191,23 @@ namespace rwe
         const std::vector<SharedTextureHandle>* teamPaletteIndexAtlases;
     };
 
+    /**
+     * How a model's shadow is cast. The original has two passes and sorts each
+     * model into one of them: a building's shadow is genuinely projected onto
+     * the ground, while a unit's is a byte-for-byte copy of the sprite it was
+     * already cached into, blitted at an offset -- so a unit's shadow is its
+     * own silhouette moved across the screen and does not stretch with the
+     * unit's height. See TOTALA-EXE.md S:100.
+     */
+    struct ShadowProjection
+    {
+        float groundHeight;
+        /** True for the projected kind. */
+        bool projected;
+        /** For the offset kind, the one height the displacement is taken from. */
+        float originY;
+    };
+
     void drawUnit(
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,

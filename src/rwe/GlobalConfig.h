@@ -74,6 +74,21 @@ namespace rwe
         /** Unit shadows on or off -- the VISUALS page's Shadows toggle. */
         bool shadows{true};
 
+        /**
+         * Shadows for mobile units specifically, under the master above.
+         *
+         * The original keeps three shadow bits in its display-options word,
+         * not one: bit 2 Shadows, bit 3 VehicleShadows, bit 4 FeatureShadows
+         * (S:76's registry table), and the vehicle bit gates only the vehicle
+         * pass, so buildings go on casting with it off. It is deliberately not
+         * on the options screen: VISUALRT has exactly one shadow gadget,
+         * BSHADOWS, which RWE already wires to the master, and the GUI files
+         * are read-only game data -- so adding a second button would make the
+         * panel less like TA's, not more. It is an rwe.cfg key,
+         * vehicle-shadows, like the shading strengths above.
+         */
+        bool vehicleShadows{true};
+
         /** Screen scroll speed percentage, 25 to 200; 100 is the old fixed rate. */
         unsigned int scrollSpeed{100};
 
@@ -112,8 +127,8 @@ namespace rwe
          * shading-strength-buildings) for anyone who does want it softer.
          * See TOTALA-EXE.md S:88.
          */
-        unsigned int shadingStrengthUnits{25};
-        unsigned int shadingStrengthBuildings{40};
+        unsigned int shadingStrengthUnits{100};
+        unsigned int shadingStrengthBuildings{100};
 
         /** Edge anti-aliasing: the original supersamples the unit and box-filters it down. */
         bool antiAlias{true};

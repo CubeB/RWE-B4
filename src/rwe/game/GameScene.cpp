@@ -313,6 +313,7 @@ namespace rwe
           shadingMode(static_cast<ShadingMode>(sceneContext.globalConfig->shadingMode)),
           antiAliasEnabled(sceneContext.globalConfig->antiAlias),
           shadowsEnabled(sceneContext.globalConfig->shadows),
+          vehicleShadowsEnabled(sceneContext.globalConfig->vehicleShadows),
           scrollSpeedSetting(sceneContext.globalConfig->scrollSpeed),
           gameParameters(gameParameters),
           audioLookup(audioLookup),

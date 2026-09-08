@@ -47,6 +47,8 @@ namespace rwe
         UniformLocation vpMatrix;
         UniformLocation modelMatrix;
         UniformLocation groundHeight;
+        UniformLocation projected;
+        UniformLocation shadowOriginY;
     };
 
     struct UnitBuildShader

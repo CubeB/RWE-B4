@@ -2706,9 +2706,12 @@ too.
 
 ### Not ported
 
-- **`digger`.** RWE has one shadow path and no projection constant to swap, so
-  there is nothing for the flag to select. It has no global shadows option
-  either, which is why `unitCastsShadow` is only ever asked about the unit.
+- **`digger`.** RWE has both shadow passes now (§100), but the constant the
+  flag swaps is not a projection constant at all: 50 and 125 are the height
+  buffer's bias, `height = modelY + (digger ? 125 : 50)`, which
+  `TOTALA-EXE-SHADING.md` §22 reads out of the span filler. RWE has no
+  per-drawable height buffer — it has a real depth buffer — so there is still
+  nothing for the flag to select.
 - **`upright`.** RWE does not conform anything to the ground: `UnitState`
   carries a `roll` for the aircraft bank and no pitch at all. The flag chooses
   between two ground-placement routines neither of which RWE has, so honouring
@@ -10322,13 +10325,32 @@ blitter, at a Y biased by `+0x85`. VERIFIED.
 
 ### What RWE does instead
 
-`shaders/unitShadow.vert` has **one** path for both: every vertex is flattened
-onto the ground plane at `groundHeight` and sheared by `(y - groundHeight) *
-0.25` in +x and -z. That is the building treatment, applied to everything — so
-RWE gives a tank the shadow the original reserves for a factory, and a tall unit's
-shadow stretches where the original's would not. The darkening is a screen fill
-of black at 70% alpha through a stencil, where the original's is a palette
-lookup on a single fill index.
+`shaders/unitShadow.vert` used to have **one** path for both: every vertex
+flattened onto the ground plane at `groundHeight` and sheared by
+`(y - groundHeight) * 0.25` in +x and -z. That is the building treatment applied
+to everything — RWE gave a tank the shadow the original reserves for a factory,
+and a tall unit's shadow stretched where the original's would not.
+
+**It has both passes now.** A model that is not mobile keeps that projection;
+a mobile one is displaced by a single vector instead, which carries its
+silhouette across unchanged because the world projection is orthographic, so a
+constant translation in world space is a constant translation on screen — which
+is what blitting the cached bitmap amounts to. The pass already ran with the
+depth buffer off and wrote only the stencil, so nothing else had to agree about
+where the geometry sits. The gate is the unit's mobility, standing in for
+`unit+0x113` bit 5, and that substitution is recorded here rather than hidden
+because the bit's meaning is not established. The second option bit is in too,
+as the `vehicle-shadows` key in `rwe.cfg` — not as a button, because VISUALRT
+has exactly one shadow gadget and RWE already wires it to the master.
+
+Two things are still RWE's own. The **offset** is: the original's is not
+decoded, so RWE takes the displacement at the unit's base plus its full model
+height. That is how far the old projection reached at the top of the model, and
+it has to be about that far: the unit is drawn over its own shadow afterwards,
+so a displacement taken at the middle of the model leaves little more than a
+crescent showing. It still rises with an aircraft as it climbs. And the
+**darkening** is: a screen fill of black at 70% alpha through the stencil,
+where the original's is a palette lookup on a single fill index.
 
 Two things this does **not** settle, and they are not guessed at here: which
 table the darkening lookup uses (`0x4B8500` is a tree walk, and the blit it

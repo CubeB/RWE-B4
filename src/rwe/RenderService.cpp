@@ -324,6 +324,8 @@ namespace rwe
         for (const auto& m : batch.meshes)
         {
             graphics->setUniformFloat(shader.groundHeight, m.groundHeight);
+            graphics->setUniformBool(shader.projected, m.projected);
+            graphics->setUniformFloat(shader.shadowOriginY, m.shadowOriginY);
             graphics->setUniformMatrix(shader.vpMatrix, m.vpMatrix);
             graphics->setUniformMatrix(shader.modelMatrix, m.modelMatrix);
 

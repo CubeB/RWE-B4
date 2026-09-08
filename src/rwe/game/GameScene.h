@@ -462,6 +462,12 @@ namespace rwe
 
         /** Live copies of the display settings the options pages edit. */
         bool shadowsEnabled{true};
+        /**
+         * The original's second shadow bit, under the master above: with it
+         * clear, buildings and scenery go on casting and mobile units do not.
+         * rwe.cfg only -- see GlobalConfig for why it is not a button.
+         */
+        bool vehicleShadowsEnabled{true};
         unsigned int scrollSpeedSetting{100};
 
         /** What this game was started with, kept for the save-game header. */

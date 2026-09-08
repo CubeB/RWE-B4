@@ -1393,6 +1393,12 @@ namespace rwe
                 {
                     continue;
                 }
+                // The original's second shadow bit gates the vehicle pass on
+                // its own, so buildings keep casting when it is clear.
+                if (unitDefinition.isMobile && !vehicleShadowsEnabled)
+                {
+                    continue;
+                }
                 const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
 
                 auto groundHeight = simulation.terrain.getHeightAt(unit.position.x, unit.position.z);
