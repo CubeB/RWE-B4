@@ -44,6 +44,14 @@ namespace rwe
             auto move = std::get_if<MoveOrder>(&unit.orders.front());
             return move != nullptr && move->destination.distanceSquared(destination) < (64_ss * 64_ss);
         }
+
+        /** Distance across the ground, ignoring height: units stand on terrain and targets are flat points. */
+        SimScalar flatDistance(const SimVector& a, const SimVector& b)
+        {
+            auto dx = a.x - b.x;
+            auto dz = a.z - b.z;
+            return rweSqrt((dx * dx) + (dz * dz));
+        }
     }
 
     void ArmyManager::updateRallyPoint(const AiTuningProfile& profile, AiBlackboard& bb) const
@@ -383,6 +391,69 @@ namespace rwe
             }
         }
 
+        // Where the wave is, taken as one thing. Every member is handed the
+        // same destination and paths to it alone, so without this the wave is
+        // a column sorted by speed and the enemy meets it three at a time.
+        std::optional<SimVector> waveCentre;
+        {
+            float sumX = 0.0f;
+            float sumZ = 0.0f;
+            int counted = 0;
+            for (auto id : bb.combatUnits)
+            {
+                if (bb.attackGroup.count(id.value) == 0)
+                {
+                    continue;
+                }
+                const auto& p = sim.getUnitState(id).position;
+                sumX += p.x.value;
+                sumZ += p.z.value;
+                ++counted;
+            }
+            if (counted > 0)
+            {
+                auto divisor = static_cast<float>(counted);
+                waveCentre = SimVector(SimScalar(sumX / divisor), 0_ss, SimScalar(sumZ / divisor));
+            }
+        }
+
+        // What the wave walks at. Normally the place the threat map picked,
+        // but an army standing in front of us is the thing to fight: both
+        // sides pick the other's base and set off, and two waves that pass
+        // each other on the road trade bases instead of meeting.
+        auto waveObjective = bb.attackTarget;
+        if (waveCentre && profile.waveMeetEnemyCount > 0)
+        {
+            float sumX = 0.0f;
+            float sumZ = 0.0f;
+            int counted = 0;
+            auto radiusSquared = profile.waveMeetEnemyRadius * profile.waveMeetEnemyRadius;
+            for (const auto& [_, enemy] : bb.knownEnemies)
+            {
+                if (enemy.isBuilding || enemy.isAir || !enemy.isArmed)
+                {
+                    continue;
+                }
+                auto enemyRef = sim.tryGetUnitState(enemy.unitId);
+                if (!enemyRef || enemyRef->get().isDead())
+                {
+                    continue;
+                }
+                if (waveCentre->distanceSquared(enemy.lastKnownPosition) >= radiusSquared)
+                {
+                    continue;
+                }
+                sumX += enemy.lastKnownPosition.x.value;
+                sumZ += enemy.lastKnownPosition.z.value;
+                ++counted;
+            }
+            if (counted >= profile.waveMeetEnemyCount)
+            {
+                auto divisor = static_cast<float>(counted);
+                waveObjective = SimVector(SimScalar(sumX / divisor), 0_ss, SimScalar(sumZ / divisor));
+            }
+        }
+
         for (auto unitId : bb.combatUnits)
         {
             if (bb.scoutUnitId && *bb.scoutUnitId == unitId)
@@ -430,11 +501,35 @@ namespace rwe
                         break;
                     }
                     auto inWave = !profile.attackInWaves || bb.attackGroup.count(unitId.value) != 0;
-                    if (bb.phase == GamePhase::Attack && bb.attackTarget && inWave)
+                    if (bb.phase == GamePhase::Attack && waveObjective && inWave)
                     {
-                        if (!isMovingTo(unit, *bb.attackTarget))
+                        // A unit that has outrun the wave waits where it
+                        // stands until the rest close up.
+                        //
+                        // The first version of this walked it back to the
+                        // wave's centre, and that does not converge. The
+                        // centre is dragged by whoever is furthest behind, so
+                        // the leaders turn round, which moves the centre
+                        // forward a little, which turns them round again: the
+                        // wave grinds back and forth and never arrives.
+                        // Measured over sixteen games it decided one of them,
+                        // against three to seven for every other build tried.
+                        // Standing still shapes the wave the same way and does
+                        // converge, because then the only thing moving is the
+                        // rest of the wave closing the gap.
+                        auto destination = *waveObjective;
+                        if (waveCentre && profile.waveCohesionRadius > 0_ss)
                         {
-                            outCommands.push_back(moveCommand(unitId, *bb.attackTarget));
+                            auto unitToObjective = flatDistance(unit.position, *waveObjective);
+                            auto centreToObjective = flatDistance(*waveCentre, *waveObjective);
+                            if (unitToObjective + profile.waveCohesionRadius < centreToObjective)
+                            {
+                                destination = unit.position;
+                            }
+                        }
+                        if (!isMovingTo(unit, destination))
+                        {
+                            outCommands.push_back(moveCommand(unitId, destination));
                         }
                         break;
                     }

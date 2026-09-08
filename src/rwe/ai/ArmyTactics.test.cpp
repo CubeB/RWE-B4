@@ -194,4 +194,138 @@ namespace rwe
             REQUIRE_FALSE(bb.raidTarget.has_value());
         }
     }
+
+    TEST_CASE("a unit that has outrun the wave waits for it", "[ai]")
+    {
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai");
+        UnitDefinition kbotDef{};
+        kbotDef.isMobile = true;
+        sim.unitDefinitions["KBOT"] = kbotDef;
+        auto script = makeEmptyCobScript();
+
+        std::vector<UnitId> units;
+        units.push_back(addUnitOfType(sim, "KBOT", ai, SimVector(0_ss, 0_ss, 0_ss), script));
+        units.push_back(addUnitOfType(sim, "KBOT", ai, SimVector(40_ss, 0_ss, 0_ss), script));
+        units.push_back(addUnitOfType(sim, "KBOT", ai, SimVector(1200_ss, 0_ss, 0_ss), script));
+        units = ascendingIds(units);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.tacticalTickInterval = 1;
+        // The rule ships off -- it was measured harmful, see S:18.3 -- so the
+        // case that covers it has to switch it on.
+        profile.waveCohesionRadius = 400_ss;
+
+        ThreatMap threatMap(64, 64);
+        ArmyManager army;
+        std::vector<PlayerCommand> commands;
+
+        AiBlackboard bb;
+        bb.phase = GamePhase::Attack;
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+        // update() resets bb.attackTarget and recomputes it itself from the
+        // (empty) threat map, falling back to enemyBasePosition -- so that,
+        // not attackTarget directly, is what puts the wave's objective at
+        // 2000.
+        bb.enemyBasePosition = SimVector(2000_ss, 0_ss, 0_ss);
+        bb.combatUnits = units;
+        for (auto unitId : units)
+        {
+            bb.attackGroup.insert(unitId.value);
+        }
+        // knownEnemies stays empty: nothing to trigger the meet-the-army
+        // rule, and nothing within engageRadius either.
+
+        army.update(sim, ai, profile, threatMap, bb, commands);
+
+        // The far-ahead unit holds where it stands instead of carrying on
+        // alone to the objective. It is told to stand rather than to walk
+        // back: walking back does not converge, because the centre it would
+        // walk to is itself dragged along behind by whoever is last.
+        auto farAheadMoves = ordersFor<MoveOrder>(commands, units[2]);
+        REQUIRE(!farAheadMoves.empty());
+        REQUIRE(farAheadMoves.front().destination.x > 1100_ss);
+        REQUIRE(farAheadMoves.front().destination.x < 1300_ss);
+
+        // One of the rear units is still walking to the objective itself.
+        auto rearMoves = ordersFor<MoveOrder>(commands, units[0]);
+        REQUIRE(!rearMoves.empty());
+        REQUIRE(rearMoves.front().destination.x > 1900_ss);
+    }
+
+    TEST_CASE("the wave turns on an army it meets instead of walking on", "[ai]")
+    {
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai");
+        auto enemy = addPlayer(sim, "enemy");
+        UnitDefinition kbotDef{};
+        kbotDef.isMobile = true;
+        sim.unitDefinitions["KBOT"] = kbotDef;
+        auto script = makeEmptyCobScript();
+
+        std::vector<UnitId> units;
+        units.push_back(addUnitOfType(sim, "KBOT", ai, SimVector(0_ss, 0_ss, 0_ss), script));
+        units.push_back(addUnitOfType(sim, "KBOT", ai, SimVector(20_ss, 0_ss, 0_ss), script));
+        units.push_back(addUnitOfType(sim, "KBOT", ai, SimVector(40_ss, 0_ss, 0_ss), script));
+        units = ascendingIds(units);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.tacticalTickInterval = 1;
+        // Otherwise the per-unit "anything within reach gets shot at" rule
+        // that sits above the phase switch fires first and masks the
+        // behaviour under test.
+        profile.engageRadius = 50_ss;
+
+        ThreatMap threatMap(64, 64);
+        ArmyManager army;
+        std::vector<PlayerCommand> commands;
+
+        AiBlackboard bb;
+        bb.phase = GamePhase::Attack;
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+        // As in the test above: update() rebuilds bb.attackTarget from
+        // enemyBasePosition rather than from anything set on attackTarget
+        // directly.
+        bb.enemyBasePosition = SimVector(3000_ss, 0_ss, 0_ss);
+        bb.combatUnits = units;
+        for (auto unitId : units)
+        {
+            bb.attackGroup.insert(unitId.value);
+        }
+
+        // Four armed enemy ground units standing together well short of the
+        // objective: real units in the sim, not just knownEnemies entries,
+        // because the rule under test calls sim.tryGetUnitState on each.
+        std::vector<SimVector> enemyPositions{
+            SimVector(300_ss, 0_ss, 0_ss),
+            SimVector(330_ss, 0_ss, 0_ss),
+            SimVector(360_ss, 0_ss, 0_ss),
+            SimVector(390_ss, 0_ss, 0_ss),
+        };
+        for (const auto& pos : enemyPositions)
+        {
+            auto enemyUnitId = addUnitOfType(sim, "KBOT", enemy, pos, script);
+            KnownEnemy known{};
+            known.unitId = enemyUnitId;
+            known.unitType = "KBOT";
+            known.lastKnownPosition = pos;
+            known.lastSeen = GameTime(0u);
+            known.isBuilding = false;
+            known.isArmed = true;
+            known.isAir = false;
+            bb.knownEnemies[enemyUnitId.value] = known;
+        }
+
+        army.update(sim, ai, profile, threatMap, bb, commands);
+
+        // The whole wave turns on the enemy army's centre rather than
+        // walking on towards the base at 3000.
+        for (auto unitId : units)
+        {
+            auto moves = ordersFor<MoveOrder>(commands, unitId);
+            REQUIRE(!moves.empty());
+            REQUIRE(moves.front().destination.x > 250_ss);
+            REQUIRE(moves.front().destination.x < 450_ss);
+        }
+    }
 }

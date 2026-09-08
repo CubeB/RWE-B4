@@ -461,6 +461,33 @@ namespace rwe
         SimScalar battlefieldReclaimRadius{700_ss};
         /** Our combat units that must be near the wreck before a builder is sent to it. */
         int battlefieldReclaimEscortCount{4};
+        /**
+         * How far ahead of the wave's own centre a unit may get before it is
+         * sent back to it. Every member of a wave is given the same
+         * destination and paths to it alone, so a wave of mixed speeds
+         * arrives as a column: the fastest three walk into the enemy army by
+         * themselves and die, then the next three. Arriving as one body is
+         * what makes two armies meet head on rather than feed each other a
+         * unit at a time.
+         */
+        SimScalar waveCohesionRadius{0_ss};
+        // Ships off. Measured over two sixteen-game runs it decided one game
+        // of sixteen either way it was written -- walking the leader back to
+        // the wave, and standing it still -- against three with the rule off
+        // and three to seven for every other build tried. A wave member that
+        // cannot advance at all, blocked by the wreck wall or by a path that
+        // failed, holds the centre back for good and the rest wait for a unit
+        // that never arrives. Kept as a knob and off by default, the way
+        // techLevelTwo is.
+        /**
+         * An enemy army this near the wave's centre is what the wave fights,
+         * instead of walking past it to the base it was pointed at. Both
+         * sides choose the other's base and set off, so without this they can
+         * trade bases without ever having met.
+         */
+        SimScalar waveMeetEnemyRadius{900_ss};
+        /** How many standing together count as an army worth turning for. */
+        int waveMeetEnemyCount{3};
         /** Enemies this close to the base anchor trigger a defence. */
         SimScalar defendRadius{900_ss};
         /** How far from a known enemy an army unit will pick a fight. */

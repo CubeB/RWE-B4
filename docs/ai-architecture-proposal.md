@@ -2059,3 +2059,121 @@ The clearance is kept, on the mechanism rather than on the measurement: a
 walled-in factory is permanently dead, the lane the ring pitch already promised
 was never enforced across sizes, and nothing here shows a cost worth trading
 that for.
+
+## 18 Three more from the same replay, two of them already in the engine
+
+## 18.1 The builder should have been on patrol all along
+
+S:16.5 answered the wall of wrecks by having a builder reclaim it, and picked
+the wrong instrument. It issued a `ReclaimOrder` naming one wreck, chosen by
+the planner, reconsidered on the next planning pass -- a hand-rolled
+substitute for a mechanism the engine already had and reproduces faithfully.
+
+A builder on patrol reclaims what it passes. That is the original's *only*
+automatic reclaim: the area scan at `0x47EA40` that reads the `autoreclaimable`
+bit has exactly two callers, the ground RepairPatrol and its VTOL counterpart,
+and there is no area-reclaim command and no idle-builder sweep anywhere in the
+binary (§97). `handlePatrolOrder` reproduces it, including the part that
+matters most here -- the job, once begun, belongs to the unit until the feature
+is gone, because the original builds a real RECLAIM mission and pushes it in
+front of the patrol rather than re-deciding every tick.
+
+So the builder now gets a two-leg patrol instead. One order clears a field and
+goes on clearing it, where a `ReclaimOrder` names a single corpse and has to be
+reissued for the next one, which the planner reaches once a pass at best.
+
+The route runs *across* the wall, not at it. Wreckage lies in a band athwart
+the approach, so the legs are set square to the base-to-field axis: a line
+drawn that way sweeps along the band, and a line drawn along the axis pokes
+through it and comes out the far side.
+
+It also needs an exit, and this is the part worth writing down. **A patrol
+never ends by itself.** A builder left on one is a builder gone from the
+economy permanently -- which is, exactly, how the factory guard order swallowed
+every builder that ever ran out of work in S:16.1, a fault this document has
+now committed twice in two different costumes. The rule that sends a builder
+out is therefore paired with one that calls it home the moment the wave moves
+on or the field falls below the four wrecks that made it a wall. That check
+runs whether or not the planner is currently looking at the patrolling builder,
+because it is about a unit the planner did not pick.
+
+## 18.2 Wrecks are destroyable, and it does not help
+
+S:16.5 said the wall could not be shot away and left it there. That was half
+right in a way worth correcting, because the half that is wrong is the
+interesting half.
+
+Wrecks *can* be destroyed by weapons. `GameSimulation` gates blast damage on
+the weapon's `damagesFeatures`, a feature's own `damage` key is its hit points,
+and a wreck blown to nothing breaks down to its `featureDead` form the way a
+burnt one does. Force-attacking a wreck field to clear a lane is a standing
+part of play and the engine supports it.
+
+But `LoadingScene_util` sets `damagesFeatures` false for render types 0, 5 and
+7, and type 0 is the laser. The early armies on both sides are almost entirely
+laser-armed. So a Peewee or an AK firing into the wall is in the worst possible
+position: the projectile *does* collide with the wreck, stops there, and cannot
+mark it. The deadlock is not "no line-of-fire test" alone. It is no
+line-of-fire test plus a weapon class that stops on the obstacle without
+damaging it, which is a stricter and more permanent trap than the first
+description implied.
+
+That is a reason to reclaim rather than to force-fire, so the answer in S:18.1
+stands; but the reasoning behind it was wrong and is now recorded correctly.
+
+## 18.3 Two waves that never met
+
+The complaint was that the armies stream in lines at each other's bases instead
+of meeting head on, and both halves of that are in the code.
+
+Every member of a wave is handed the same destination and paths to it alone.
+A wave of mixed speeds therefore arrives as a column sorted by speed: the
+fastest three walk into the enemy army by themselves and die, then the next
+three. The engage rule that makes a unit fight what is near it is per-unit, at
+`engageRadius` of *its own* position, so a column engages one unit at a time by
+construction. A unit that has outrun the wave is now sent back to the wave's
+own centre. Sent back rather than halted, deliberately: halting leaves the
+column strung out along the road, and the point is to arrive as one body.
+
+And the destination itself was always the enemy's base, on both sides at once.
+Two waves pointed at each other's bases do not have to meet; on a map with more
+than one approach they can cross and trade bases without ever having fought.
+A wave that finds at least `waveMeetEnemyCount` armed enemy ground units within
+`waveMeetEnemyRadius` of its own centre now takes their centre as its objective
+instead. An army standing in front of you is the thing to fight.
+
+### 18.3.1 The cohesion half was measured harmful and ships off
+
+Sixteen games a side on Painted Desert, both sides default, against the 3-to-7
+spread every other build in S:17.3 produced:
+
+| build | decided |
+|---|---|
+| cohesion on, leader walks back to the wave | 1 of 16 |
+| cohesion on, leader stands still | 1 of 16 |
+| cohesion off, meet-the-army on | 3 of 16 |
+| cohesion on, meet-the-army off | 1 of 16 |
+
+The first version walked a unit that had outrun the wave back to the wave's
+centre, and the reasoning for why that could not converge -- the centre is
+dragged by whoever is furthest behind, so the leaders turn round, which moves
+the centre forward, which turns them round again -- was sound, and rewriting it
+to stand still instead changed nothing at all. Two runs, same number.
+
+Which says the fault is not the oscillation. It is that a wave member which
+cannot advance *at all* holds the centre back for good: one unit stuck against
+the wreck wall of S:16.5, or on a path that failed, and every other unit in the
+wave is permanently "ahead" of a centre that will never move again. Standing
+still turns a noisy deadlock into a clean one. Both are deadlocks.
+
+`waveCohesionRadius` therefore ships at zero -- the code and the knob stay, the
+default does not -- which is the treatment `techLevelTwo` got in S:15.7 and for
+the same reason: a rule worth keeping legible and a measurement that says not
+to switch it on. Any future attempt at it needs a way to drop a member that has
+stopped making progress, which is a piece of bookkeeping the wave does not
+currently have.
+
+The meet-the-army half is unaffected and stays on. It measures at 3 of 16,
+inside the spread, so the honest claim for it is that it addresses the
+behaviour the play-test complained about and costs nothing measurable -- not
+that it has been shown to help.
