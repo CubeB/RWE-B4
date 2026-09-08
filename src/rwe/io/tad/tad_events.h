@@ -73,7 +73,26 @@ namespace rwe
      */
     struct TadBuildStarted
     {
-        /** An index into the demo's 0x1a unit table. Not a name; see stage 4. */
+        /**
+         * Which unit type, as a dense index -- but NOT an index into the demo's
+         * 0x1a table, which is the reading this started from and which the
+         * corpus refutes.
+         *
+         * The 0x1a table is sorted by a content-derived id, so its order is
+         * effectively random with respect to which side a unit belongs to. The
+         * indices in this field are not: in demo 14724 the ARM player's 19
+         * indices all fall in 4..152 and the CORE player's 27 in 159..310, in
+         * 14733 the split is 7..258 against 268..525, and in the ten-player
+         * 14727 the blocks fall into a low group and a high group the same way.
+         * A random permutation gives that for one demo with probability about
+         * 4e-13.
+         *
+         * So it is a load-order index -- TA's FBI loader assigns each unit type
+         * its own index and stores it at record+0x21e (docs/TOTALA-EXE.md
+         * section 100). Which order that enumeration produces is not settled;
+         * plain alphabetical, which is also the HPI directory order, scores
+         * better than chance against the corpus but is not it.
+         */
         uint16_t typeIndex;
 
         /** The id of the nanoframe, which becomes the id of the finished unit. */

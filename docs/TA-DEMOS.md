@@ -311,10 +311,26 @@ significant bits and a `float` has 24.
 
 | Offset | Size | Field |
 |---|---|---|
-| 1 | u16 | type index into the `0x1a` table |
+| 1 | u16 | which unit type, as a dense index -- but not into the `0x1a` table, see below |
 | 3 | u16 | **the new unit's id**, not the builder's |
 | 5 | 3 x s32 | position of the nanoframe, 16.16 |
 | 17 | 3 x s16 | its rotation |
+
+**The type index is not an index into the `0x1a` table.** That was the reading
+this work started from, and the corpus refutes it. The table is sorted by a
+content-derived id, so its order is effectively random with respect to which
+side a unit belongs to -- and these indices are not. In demo 14724 the ARM
+player's 19 distinct indices all fall in 4..152 and the CORE player's 27 in
+159..310; in 14733 the split is 7..258 against 268..525; and in the ten-player
+14727 the blocks fall into a low group and a high group the same way. A random
+permutation produces the two-player case with probability about 4e-13.
+
+So it is a **load-order index** -- TA's FBI loader assigns each unit type its own
+index and stores it at `record+0x21e` (`TOTALA-EXE.md` §100). That reframes the
+naming problem: it is not the checksum, and solving the checksum would not
+answer it. What is needed is the order TA's `units\*.FBI` enumeration produces.
+Plain alphabetical, which is also the HPI directory order, is not that order,
+though it scores better than chance.
 
 The second id is the one to be careful about. It is the *nanoframe*: over demo
 14724, 781 of the 790 distinct values of that field reappear as the **finished
