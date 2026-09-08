@@ -391,6 +391,56 @@ namespace rwe
          * enemy turned round and walked home.
          */
         bool reserveAnswersIntruders{true};
+        /**
+         * Units built while a wave is out join it once this many have
+         * gathered, rather than waiting for the wave to be spent. This keeps
+         * what attackInWaves was for -- a lone kbot does not walk to the
+         * front by itself -- without its cost: the wave is only over when it
+         * has fallen below retreatArmySize, so until then every unit built
+         * stood at the rally point while the wave died at the enemy's towers.
+         */
+        int reinforcementGroupSize{3};
+        /**
+         * Send a detachment at the enemy's undefended expansion instead of at
+         * the main target. An AI that only ever walks at one place leaves the
+         * enemy free to mine a whole flank of the map uncontested, and gives
+         * it no reason to keep anything at home.
+         */
+        bool raidingParties{true};
+        /** How many units go on a raid. */
+        int raidPartySize{3};
+        /** A raid target must be at least this far from the enemy's base. */
+        SimScalar raidAvoidBaseRadius{900_ss};
+        /**
+         * Fighters and bombers the air plant keeps on hand. The plant has
+         * only ever built one 40-metal scout and then stood idle for the rest
+         * of the game, which is 850 metal of factory doing nothing; a bomber
+         * is the cheapest thing either side owns that can reach an extractor
+         * behind a wall of towers.
+         */
+        int targetFighterCount{2};
+        int targetBomberCount{4};
+        /** How far a fighter will chase something before it is called home. */
+        SimScalar fighterLeash{2400_ss};
+        /**
+         * Air constructors. One is worth having on any map: it flies, so no
+         * ground has to connect for it to reach a patch, and the expansion
+         * that a walking constructor cannot get to is exactly the one nobody
+         * is contesting.
+         */
+        int targetAirConstructorCount{1};
+        /**
+         * How far from our own units a builder will go to reclaim wreckage.
+         * The base's own rubble is already worked; this is the battlefield,
+         * where the wrecks of the last two waves stand in a wall that blocks
+         * movement and absorbs every shot fired at the enemy behind it. A
+         * player clears that wall and takes the metal; measured, the AI stood
+         * and fired into it instead. Only where enough of our own army is
+         * standing, which is what makes it survivable.
+         */
+        SimScalar battlefieldReclaimRadius{700_ss};
+        /** Our combat units that must be near the wreck before a builder is sent to it. */
+        int battlefieldReclaimEscortCount{4};
         /** Enemies this close to the base anchor trigger a defence. */
         SimScalar defendRadius{900_ss};
         /** How far from a known enemy an army unit will pick a fight. */

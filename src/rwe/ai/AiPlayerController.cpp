@@ -206,6 +206,7 @@ namespace rwe
         timed("scout", [&] { scout.update(sim, profile, threatMap, reachability, blackboard, outCommands); });
         timed("transport", [&] { transport.update(sim, playerId, profile, reachability, build, blackboard, rng, outCommands); });
         timed("army", [&] { army.update(sim, playerId, profile, threatMap, blackboard, outCommands); });
+        timed("air", [&] { air.update(sim, playerId, profile, threatMap, blackboard, outCommands); });
 
         if (profiling && sim.gameTime.value % AiProfileReportIntervalTicks == 0)
         {

@@ -179,6 +179,7 @@ set(SOURCE_FILES
     src/rwe/ai/AiTuningProfile.cpp
     src/rwe/ai/AiTuningProfile.h
     src/rwe/ai/ArmyManager.cpp
+    src/rwe/ai/AirManager.cpp
     src/rwe/ai/ArmyManager.h
     src/rwe/ai/BuildManager.cpp
     src/rwe/ai/BuildManager.h
@@ -824,6 +825,8 @@ set(TEST_FILES
     src/rwe/ai/AiBehaviour.test.cpp
     src/rwe/ai/MapIntel.test.cpp
     src/rwe/ai/AiBuildTree.test.cpp
+    src/rwe/ai/ArmyTactics.test.cpp
+    src/rwe/ai/AirTactics.test.cpp
     src/rwe/BoxTreeSplit.test.cpp
     src/rwe/GlobalConfig.test.cpp
     src/rwe/Viewport.test.cpp

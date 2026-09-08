@@ -1705,3 +1705,220 @@ the tech step and the expansion competing for the same kbot; and hold the
 army at home while the lab goes up, since the two eliminations were both a
 teching side attacked while its metal was in a building. Neither is a large
 change, and the second is testable with the knobs that already exist.
+
+## 16 Four faults from one replay (2026-09-08)
+
+A play-test of arena_4, Core against Core on Painted Desert, produced four
+complaints at once, and they turned out to be four separate faults with one
+thing in common: each is a rule that was right when it was written and whose
+exit condition was never supplied.
+
+## 16.1 The builder pool leaked
+
+An advanced constructor was built and did nothing with it for the rest of the
+game. S:15 had assumed the difficulty was getting the tier bought; the
+difficulty was that the tier, once bought, could not be spent. Three things
+were wrong at once.
+
+**A builder that runs out of work never comes back.** When the planner has
+nothing for a builder it sends it to lend a hand at a factory, which is a
+`GuardOrder`, and nothing anywhere ever takes that order off again.
+`idleBuilders` holds only builders whose order queue is empty. So every builder
+that ever ran out of work left the planning pool permanently -- and the
+advanced constructor, built late, when the base is finished and the planner
+most often has nothing to say, went straight into that hole and nanolathed
+Peewees until the game ended. `EconomyManager` now offers a builder guarding
+one of our own factories back to the planner, behind the genuinely idle ones,
+and the factory fallback no longer re-issues an order the builder is already
+carrying out.
+
+**Only the front of the list was ever planned for.** `idleBuilders` is in unit
+id order, so its front is the commander or the oldest constructor, and with
+assisting builders back in the pool that would have been the same low id every
+pass for ever. `BuildManager` keeps a cursor now and takes each available
+builder in turn. This is the first item S:15.7 left for next time, and it
+arrived for a different reason than the one predicted there.
+
+**The level-two rules were gated on the tech knob.** `techLevelTwo` ships off,
+so every rule that spends the tier was switched off with it -- including for a
+side that already owns an advanced lab. Whether to tech and how to spend a tier
+already bought are two different questions and only the first is policy; the
+block now asks only whether an advanced lab stands. The same applies to the
+rule that puts every spare builder on an advanced lab frame.
+
+The tier is now spent in the order a player spends it: a heavy tower when
+something is actually coming, then the moho extractor, then the advanced radar,
+then fusion, then the standing defences. The radar sits above fusion
+deliberately. An item that is unaffordable but nearly affordable sets `saving`
+and suppresses everything cheaper below it, so 5130 metal of reactor placed
+above 125 metal of radar means the radar is never built at all.
+
+## 16.2 Reinforcements waited for the army to die
+
+The complaint was that units built during a fight were not released until the
+previous army had been destroyed, and that is exactly what the code said.
+`attackInWaves` exists because the army used to send each new kbot to the front
+by itself; the cure was to freeze the wave's membership at the moment the
+attack was called. But a wave is only declared spent once it has fallen below
+`retreatArmySize`, and between those two points every unit built stood at the
+rally point and watched. It compounds S:16.5 below: two armies deadlocked at a
+wreck wall kill each other very slowly, so the wave stays alive, so the reserve
+never moves.
+
+Reinforcements now join a wave that is still out, in batches of
+`reinforcementGroupSize` (three). A batch and not each unit as it appears,
+because the dribble of single units walking to the front is the thing
+`attackInWaves` was written to prevent: the fix keeps that and drops only the
+part of it that was never intended.
+
+## 16.3 Nobody was ever sent at the expansion
+
+One side mined an entire flank of the map uncontested. The army walks at
+whatever `ThreatMap::bestAttackTarget` picks out, which is one place and nearly
+always the enemy base, so an extractor field with nothing covering it was never
+a target of anything, and the enemy had no reason to keep a single unit at
+home.
+
+A raiding party of `raidPartySize` (three) now goes at the enemy's nearest
+outlying building that has nothing covering it -- outlying meaning at least
+`raidAvoidBaseRadius` from their base, uncovered meaning the threat map reads
+zero there, which is a question that only began returning honest answers when
+the `"default"`/`"DEFAULT"` damage-key bug was fixed in S:15.7. The raid is
+drawn from the units gathering for the next wave and never from the wave
+itself, and it will not form until a wave is already out: taken any earlier it
+would come out of the first attack the AI ever makes, and `attackArmySize`
+would quietly mean three fewer than it says.
+
+## 16.4 The air plant built one scout and stood idle
+
+`planFactories` gave the air plant a scout, a transport when there was water to
+cross, and nothing else. That is 850 metal of factory producing one 40-metal
+unarmed aeroplane -- the AI's entire air force, for the whole game, against an
+enemy whose expansion sat behind a wall of towers that only an aircraft could
+pass.
+
+The plant now builds, in order: the scout, the transport when it is wanted, an
+air constructor, fighters once something of theirs is actually flying, and then
+bombers. `AirManager` commands the two armed types, and it finds them by type
+rather than from a list because the economy sweep deliberately excludes
+everything that flies from `combatUnits` -- an escort that leaves with the army
+is not cover -- which meant fighters and bombers belonged to no manager at all.
+Fighters take what flies and nothing else, and stand over the base when the sky
+is clear. Bombers go at the dearest thing the enemy has built, and go in pairs:
+sent out one at a time, each new bomber flies at the most valuable thing the
+enemy owns, which is the thing deepest inside their anti-air, and is traded for
+a fraction of a building. That is S:16.2's mistake wearing a different uniform.
+
+The air constructor has the widest reach of the three. It is a builder, so it
+was already in the planning pool -- but the site search asks whether a patch is
+reachable *on foot*, which for a flier is exactly backwards: it confined the one
+builder that can cross water to the patches everything else could already walk
+to, and refused the island patch that is the whole reason to own one. A builder
+that flies is no longer held to the ground's shape.
+
+## 16.5 The wall of wrecks
+
+The most visible complaint was armies standing and firing into the wrecks of
+previous armies, apparently unable to stop. The simulation is behaving
+correctly and deliberately: projectiles collide with blocking features, a
+corpse is a blocking feature, and there is no line-of-fire test anywhere in the
+engine. The original has none either, which is why a unit will happily empty
+itself into a rock. So the deadlock is real and it feeds itself -- a wave walks
+up to the wall, cannot path through it, stops, and fires into it; so does the
+wave on the other side; both die there and thicken the wall for the next pair.
+
+The answer is not a change to the simulation but the one a player uses: reclaim
+the field, which takes the wall down and pays for the next wave twice over. The
+AI has always reclaimed wreckage -- within 1200 of its own base anchor, which is
+precisely where the battlefield is not. A non-commander builder will now work
+wrecks within `battlefieldReclaimRadius` of the wave's own centre of mass, and
+only where at least `battlefieldReclaimEscortCount` of our units are already
+standing, which is what makes the walk survivable. The centre is taken from the
+wave rather than from every combat unit we own, because the reserve stands at
+the rally point and a centroid dragged halfway home names a place where nothing
+is happening.
+
+## 16.6 What it measured
+
+Eight games, Core against Core on Painted Desert, both sides on the default
+profile, against the six-game run of the same shape taken before the change:
+
+| | before | after |
+|---|---|---|
+| games that ended in a result | 1 of 6 | **4 of 8** |
+| battlefield reclaims ordered | 0 | 459 |
+| raids sent | -- | 68 |
+| reinforcement batches joining a wave | -- | 485 |
+
+The first row is the one that matters, and the others explain it. Half the
+games now reach a decision instead of running to the clock with two armies
+grinding at a wall of corpses.
+
+The averaged unit and army counts are not worth quoting against the earlier
+run and are left out deliberately: a game that ends puts one side at zero and
+leaves the winner reclaiming the loser's base, so the same change that made
+the games decisive also made the averages a measure of how often somebody won
+rather than of how well either played. One winner finished on 87 metal a
+second. Per game the two sides are close -- three wins to one, and the four
+timeouts split two and two.
+
+**A measurement mistake worth recording.** The first attempt at the level-two
+question ran `techLevelTwo` on slot 0 and compared it against slot 1, and slot
+0 came out with half the income and two eliminations. That looked decisive and
+it was not: the both-default run above puts slot 0 at three eliminations with
+no teching at all. The A/B had measured the slot. An A/B on a mirror match has
+to hold the slot fixed and vary only the knob, which is what
+`ai-arena.ps1 -tuneB` is for -- the same trap S:14 walked into from the other
+direction when a mirror match was used to judge a change both sides received.
+
+## 16.7 The battlefield reclaim had to go above the priorities, not below
+
+Worth recording because the first version looked right and did nothing. The
+rule was written where the AI's other reclaiming lives: at the bottom of the
+planner, reached by a builder with nothing to build. Across six games it never
+ran once. Every status line in every log said `idle builders 0`, and the reason
+is a rule from S:14.14 -- growth has no ceiling, so there is always another
+extractor to want, and a builder is never out of work. A fallback below an
+infinite list of wants is unreachable code with extra steps.
+
+It sits above the priorities now, gated three ways instead: a wave has to be
+out and standing there, which is what makes the walk survivable; there have to
+be at least four reclaimable wrecks inside the radius, so it answers a wall and
+not a single corpse; and no other builder of ours may already be reclaiming, so
+it costs one builder rather than all of them.
+
+## 16.8 Level two, asked again and answered the same way
+
+S:15.7 shipped `techLevelTwo` off because the tier was never reached. S:16.1
+removed three separate reasons it could not be spent once reached, so the
+question was worth asking again -- properly this time, on the slot that wins
+by default, varying nothing but the knob.
+
+Delivery is transformed. The previous attempt managed two Cans in eight games;
+this one reaches seven, and the moho extractor now gets built at all, which it
+never had.
+
+The outcome is not. Against the same slot's own record without the knob, over
+eight games each on Painted Desert:
+
+| slot 1 | without teching | with teching |
+|---|---|---|
+| games won of those decided | 3 of 4 | 1 of 3 |
+| eliminated | 1 | 2 |
+| army at the half hour, games it survived | about 35 | about 27 |
+
+So the tier arrives, and the side that buys it is still smaller and still loses
+more. That is the same answer S:15.6 and S:15.7 gave, now for a different
+reason: it is no longer that the metal is sunk in a frame that never finishes,
+it is that 2007 metal for the lab and 300 for the constructor is an army the
+other side has and this one does not, for the twenty minutes it takes to turn
+into Cans.
+
+`techLevelTwo` stays off, and the honest description of it is a knob a player
+can switch on rather than an unfinished feature. What is left to try, and it is
+narrower than before: the assist rule puts *every* spare builder on the lab
+frame, which is what made the lab finish and is also, now that the planner
+serves every builder rather than the front one, a much larger share of the
+economy than it was when the rule was written. Capping it -- two builders, or
+only once the frame is past halfway -- is the obvious next experiment, and it
+is a knob's worth of work.

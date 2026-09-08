@@ -43,5 +43,11 @@ namespace rwe
             const AiTuningProfile& profile,
             AiBlackboard& bb,
             std::vector<PlayerCommand>& outCommands) const;
+
+        /**
+         * The enemy's outlying economy: a building of theirs away from their
+         * base with nothing covering it. Nothing to raid returns nothing.
+         */
+        std::optional<UnitId> chooseRaidTarget(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const ThreatMap& threatMap) const;
     };
 }

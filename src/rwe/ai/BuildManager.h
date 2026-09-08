@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <random>
@@ -198,6 +199,15 @@ namespace rwe
 
     private:
         int ticksSinceLastPlanning{0};
+
+        /**
+         * Which of the available builders is planned for this pass. In id
+         * order the commander is first and was always the one served; with
+         * builders assisting a factory back in the pool the same low id would
+         * win every pass and the ones behind it would never be planned for at
+         * all. This is why the advanced constructor gets a turn.
+         */
+        std::size_t plannerCursor{0};
 
         /** The last build order handed to each builder, by raw unit id, so a dropped one can be noticed. */
         struct IssuedOrder

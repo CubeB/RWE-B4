@@ -266,5 +266,13 @@ namespace rwe
          * formed yet.
          */
         bool waveSpent{false};
+        /**
+         * A detachment sent at the enemy's outlying economy rather than at
+         * the main target, by raw id. Drawn from the units gathering for the
+         * next wave, never from the wave that is already out.
+         */
+        std::set<unsigned int> raidGroup;
+        /** Where the raid is headed, if one is out. */
+        std::optional<SimVector> raidTarget;
     };
 }

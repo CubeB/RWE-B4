@@ -3,6 +3,8 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
+#include <rwe/util/SimpleLogger.h>
+#include <vector>
 
 namespace rwe
 {
@@ -133,6 +135,56 @@ namespace rwe
         }
     }
 
+    std::optional<UnitId> ArmyManager::chooseRaidTarget(
+        const GameSimulation& sim,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        const ThreatMap& threatMap) const
+    {
+        // A building of theirs that is not beside their base and has nothing
+        // covering it; of those, the nearest to us, because a raid that walks
+        // the length of the map is a raid that arrives to find a tower.
+        //
+        // This is the answer to a side mining a whole flank uncontested. The
+        // wave goes at whatever value the threat map picks out, which is
+        // nearly always the base, so nothing was ever sent at the extractors
+        // and the enemy had no reason to keep anything at home.
+        if (!bb.baseAnchor)
+        {
+            return std::nullopt;
+        }
+        std::optional<UnitId> best;
+        SimScalar bestDistanceSquared = 0_ss;
+        auto avoidSquared = profile.raidAvoidBaseRadius * profile.raidAvoidBaseRadius;
+        for (const auto& [_, enemy] : bb.knownEnemies)
+        {
+            if (!enemy.isBuilding)
+            {
+                continue;
+            }
+            auto unitRef = sim.tryGetUnitState(enemy.unitId);
+            if (!unitRef || unitRef->get().isDead())
+            {
+                continue;
+            }
+            if (bb.enemyBasePosition && bb.enemyBasePosition->distanceSquared(enemy.lastKnownPosition) < avoidSquared)
+            {
+                continue;
+            }
+            if (threatMap.antiGroundAt(enemy.lastKnownPosition) > 0.0f)
+            {
+                continue;
+            }
+            auto d = bb.baseAnchor->distanceSquared(enemy.lastKnownPosition);
+            if (!best || d < bestDistanceSquared)
+            {
+                bestDistanceSquared = d;
+                best = enemy.unitId;
+            }
+        }
+        return best;
+    }
+
     void ArmyManager::update(
         const GameSimulation& sim,
         PlayerId aiOwner,
@@ -168,14 +220,80 @@ namespace rwe
 
         updateAntiAir(sim, profile, bb, outCommands);
 
-        // Who is in the wave. Formed once, when the attack is called, from
-        // everyone then in the army; pruned as they die; and declared spent
-        // when it has shrunk to the retreat size. Anything built after the
-        // call is not in it and gathers at the rally point instead of
-        // walking to the front alone, which is what the army used to do:
-        // measured, a side that had lost its wave sent each new kbot out
-        // by itself and stayed at an army of one to four for the rest of
-        // the game.
+        // A detachment for the enemy's outlying economy, drawn from the units
+        // gathering for the next wave and never from the wave that is out.
+        // Not while the base itself is under attack: the reserve has a job
+        // then, and it is at home.
+        bb.raidTarget.reset();
+        if (profile.raidingParties && profile.raidPartySize > 0 && bb.phase == GamePhase::Attack && bb.enemiesNearBase.empty())
+        {
+            for (auto it = bb.raidGroup.begin(); it != bb.raidGroup.end();)
+            {
+                auto alive = std::binary_search(bb.combatUnits.begin(), bb.combatUnits.end(), UnitId(*it), [](UnitId a, UnitId b) { return a.value < b.value; });
+                it = alive ? std::next(it) : bb.raidGroup.erase(it);
+            }
+            if (auto target = chooseRaidTarget(sim, profile, bb, threatMap))
+            {
+                auto known = bb.knownEnemies.find(target->value);
+                if (known != bb.knownEnemies.end())
+                {
+                    bb.raidTarget = known->second.lastKnownPosition;
+                }
+                // Only once a wave is already out. Formed before that, the
+                // raid comes out of the first attack the AI ever makes and
+                // attackArmySize quietly means three fewer than it says; the
+                // raiders are meant to be the surplus that gathers behind a
+                // wave, not a piece of it.
+                if (bb.raidGroup.empty() && !bb.attackGroup.empty())
+                {
+                    for (auto unitId : bb.combatUnits)
+                    {
+                        if (static_cast<int>(bb.raidGroup.size()) >= profile.raidPartySize)
+                        {
+                            break;
+                        }
+                        if (bb.scoutUnitId && *bb.scoutUnitId == unitId)
+                        {
+                            continue;
+                        }
+                        if (bb.attackGroup.count(unitId.value) != 0)
+                        {
+                            continue;
+                        }
+                        bb.raidGroup.insert(unitId.value);
+                    }
+                    if (static_cast<int>(bb.raidGroup.size()) < profile.raidPartySize)
+                    {
+                        // Not enough to spare. A raid of one is a gift.
+                        bb.raidGroup.clear();
+                    }
+                    else if (bb.raidTarget)
+                    {
+                        LOG_INFO << "AI army: raid of " << bb.raidGroup.size() << " sent at unit " << target->value
+                                 << " at " << static_cast<int>(bb.raidTarget->x.value) << "," << static_cast<int>(bb.raidTarget->z.value)
+                                 << ", wave of " << bb.attackGroup.size() << " carries on";
+                    }
+                }
+            }
+            else
+            {
+                bb.raidGroup.clear();
+            }
+        }
+        else
+        {
+            bb.raidGroup.clear();
+        }
+
+        // Who is in the wave. Formed when the attack is called, from everyone
+        // then in the army; pruned as they die; reinforced in batches while
+        // it is still out; and declared spent once it has shrunk to the
+        // retreat size. A unit built after the call does not walk to the
+        // front by itself -- that is what the army used to do, and measured,
+        // a side that had lost its wave sent each new kbot out alone and
+        // stayed at an army of one to four for the rest of the game -- but
+        // nor does it wait for the whole wave to die, which is what it used
+        // to do instead.
         if (bb.phase == GamePhase::Attack && profile.attackInWaves)
         {
             for (auto it = bb.attackGroup.begin(); it != bb.attackGroup.end();)
@@ -187,10 +305,42 @@ namespace rwe
             {
                 for (auto unitId : bb.combatUnits)
                 {
-                    if (!(bb.scoutUnitId && *bb.scoutUnitId == unitId))
+                    if (!(bb.scoutUnitId && *bb.scoutUnitId == unitId) && bb.raidGroup.count(unitId.value) == 0)
                     {
                         bb.attackGroup.insert(unitId.value);
                     }
+                }
+            }
+            // Reinforcements, in batches. The wave is only over when it has
+            // fallen below the retreat size, so without this every unit built
+            // during an attack stood at the rally point until the wave that
+            // set out had been ground down -- a side with a full reserve at
+            // home while a handful died at the front. A batch rather than
+            // each unit as it appears, because the dribble of one kbot at a
+            // time walking to the front alone is what attackInWaves exists to
+            // stop.
+            if (!bb.attackGroup.empty() && !bb.waveSpent && profile.reinforcementGroupSize > 0)
+            {
+                std::vector<UnitId> reserve;
+                for (auto unitId : bb.combatUnits)
+                {
+                    if (bb.scoutUnitId && *bb.scoutUnitId == unitId)
+                    {
+                        continue;
+                    }
+                    if (bb.attackGroup.count(unitId.value) != 0 || bb.raidGroup.count(unitId.value) != 0)
+                    {
+                        continue;
+                    }
+                    reserve.push_back(unitId);
+                }
+                if (static_cast<int>(reserve.size()) >= profile.reinforcementGroupSize)
+                {
+                    for (auto unitId : reserve)
+                    {
+                        bb.attackGroup.insert(unitId.value);
+                    }
+                    LOG_INFO << "AI army: " << reserve.size() << " reinforcements join the wave, now " << bb.attackGroup.size();
                 }
             }
             if (static_cast<int>(bb.attackGroup.size()) < profile.retreatArmySize)
@@ -268,6 +418,17 @@ namespace rwe
                 }
                 case GamePhase::Attack:
                 {
+                    // Raiders have their own errand and do not join the wave.
+                    // Anything within reach is still shot at first -- that
+                    // rule is above the switch and applies to them too.
+                    if (bb.raidGroup.count(unitId.value) != 0 && bb.raidTarget)
+                    {
+                        if (!isMovingTo(unit, *bb.raidTarget))
+                        {
+                            outCommands.push_back(moveCommand(unitId, *bb.raidTarget));
+                        }
+                        break;
+                    }
                     auto inWave = !profile.attackInWaves || bb.attackGroup.count(unitId.value) != 0;
                     if (bb.phase == GamePhase::Attack && bb.attackTarget && inWave)
                     {

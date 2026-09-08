@@ -23,6 +23,12 @@ namespace rwe
         std::string airPlant;
         std::string scoutPlane;
         std::string airTransport;
+        /** Level-one fighter: Freedom Fighter, Avenger. The answer to what flies. */
+        std::string fighter;
+        /** Level-one bomber: Thunder, Shadow. 130 metal that reaches an extractor behind a wall of towers. */
+        std::string bomber;
+        /** Air constructor: it flies, so no ground has to connect for it to reach a site. */
+        std::string airConstructor;
         std::string vehiclePlant;
         std::string scoutVehicle;
         std::string tank;

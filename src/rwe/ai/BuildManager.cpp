@@ -11,6 +11,7 @@
 #include <rwe/sim/WeaponDefinition.h>
 #include <rwe/util/rwe_string.h>
 #include <tuple>
+#include <variant>
 
 namespace rwe
 {
@@ -985,17 +986,46 @@ namespace rwe
         // been measured sitting on, storage pegged at the cap for a third to
         // two thirds of every game. So this spends the surplus that exists
         // rather than competing for the metal that does not. §15.3.
-        // What the advanced constructor is for. The radar first at 125 metal
-        // for several times the coverage; then the heavy towers, which the
-        // level-one constructor can also reach and the AI has never built;
-        // then a moho on any patch still going spare. Fusion last and rarely:
-        // 5130 metal is several minutes of the whole economy, so it waits
-        // until energy is genuinely the thing running out. §15.5.
-        if (profile.techLevelTwo && total(s.advancedLab) >= 1)
+        // What the tier is for, and in the order a player spends it: the
+        // extractor upgrade first, since a moho is three times the yield of
+        // the extractor beside it and is the whole reason the tier pays for
+        // itself; then the reactor; then the standing defences. Something
+        // actually coming outranks all three.
+        //
+        // This asks only whether an advanced lab stands, not whether the tech
+        // knob is on. Deciding to tech is one question and spending a tier
+        // already bought is another, and gating the second on the first is
+        // how a finished advanced constructor was left with an empty list and
+        // sent to nanolathe Peewees for the rest of the game.
+        if (total(s.advancedLab) >= 1)
         {
+            auto energyBinding = bb.energyStalled
+                || (bb.energyStorage.value > 0.0f && bb.currentEnergy.value < bb.energyStorage.value * 0.25f);
+            // Imminent, meaning armed enemies at the base now or buildings
+            // lost lately -- not the standing garrison, which is further down.
+            auto underAttack = !bb.enemiesNearBase.empty() || !bb.recentLosses.empty();
+            if (underAttack && total(s.heavyLaserTower) < profile.heavyDefenceCount)
+            {
+                want(s.heavyLaserTower);
+            }
+            if (incomeSupportsTech)
+            {
+                want(s.mohoExtractor);
+            }
             if (total(s.advancedRadar) < profile.targetAdvancedRadarCount)
             {
                 want(s.advancedRadar);
+            }
+            // 5130 metal is several minutes of the whole economy, so this
+            // wants a reason: energy is genuinely the thing running out, or
+            // the metal store is full and the income is being thrown away --
+            // and it sits below the advanced radar because 125 metal that is
+            // affordable now beats 5130 that is not -- above it, saving for
+            // the reactor suppresses everything cheaper and the radar never
+            // gets built.
+            if ((energyBinding || metalFull) && total(s.fusion) < profile.targetFusionCount)
+            {
+                want(s.fusion);
             }
             if (!metalShort && total(s.heavyLaserTower) < profile.heavyDefenceCount)
             {
@@ -1004,16 +1034,6 @@ namespace rwe
             if (incomeSupportsTech && total(s.heavyPlasmaTower) < profile.heavyDefenceCount)
             {
                 want(s.heavyPlasmaTower);
-            }
-            if (incomeSupportsTech)
-            {
-                want(s.mohoExtractor);
-            }
-            auto energyBinding = bb.energyStalled
-                || (bb.energyStorage.value > 0.0f && bb.currentEnergy.value < bb.energyStorage.value * 0.25f);
-            if (energyBinding && metalFull && total(s.fusion) < profile.targetFusionCount)
-            {
-                want(s.fusion);
             }
         }
 
@@ -1079,7 +1099,20 @@ namespace rwe
             std::string next;
             if (!s.airPlant.empty() && factory.unitType == s.airPlant)
             {
-                // Eyes first, then lift when it is needed. Otherwise the plant waits.
+                // Eyes first, then lift when it is needed, and then the
+                // reason the plant is worth 850 metal at all.
+                //
+                // Before this it built one 40-metal scout and stood idle for
+                // the rest of the game: the AI's entire air force was a
+                // single unarmed aeroplane, and a side quietly mining a whole
+                // flank behind a wall of towers was never troubled by
+                // anything, because nothing the AI owned could reach past the
+                // wall.
+                //
+                // The air constructor comes before the aircraft because it is
+                // the one builder the ground cannot stop, and the patch a
+                // walking constructor cannot get to is exactly the patch
+                // nobody is contesting.
                 if (!s.scoutPlane.empty() && total(s.scoutPlane) < profile.targetScoutPlaneCount)
                 {
                     next = s.scoutPlane;
@@ -1087,6 +1120,22 @@ namespace rwe
                 else if (!s.airTransport.empty() && bb.wantsTransport && total(s.airTransport) < profile.targetTransportCount)
                 {
                     next = s.airTransport;
+                }
+                else if (!s.airConstructor.empty() && total(s.airConstructor) < profile.targetAirConstructorCount)
+                {
+                    next = s.airConstructor;
+                }
+                else if (bb.enemyAirThreat && !s.fighter.empty() && total(s.fighter) < profile.targetFighterCount)
+                {
+                    // Fighters only once something of theirs is actually
+                    // flying, for the same reason the anti-air kbot waits:
+                    // cover built against nothing is metal not spent on the
+                    // army.
+                    next = s.fighter;
+                }
+                else if (!s.bomber.empty() && total(s.bomber) < profile.targetBomberCount)
+                {
+                    next = s.bomber;
                 }
             }
             else if (!s.vehiclePlant.empty() && factory.unitType == s.vehiclePlant)
@@ -1182,11 +1231,18 @@ namespace rwe
 
         // One job per planning pass keeps counts honest: the next pass sees
         // the nanoframe in ownedTotalCounts and moves on to the next need.
+        // Whose job it is rotates, rather than always falling to the front of
+        // the list, which in id order means the commander.
         if (bb.idleBuilders.empty())
         {
             return;
         }
-        auto builderId = bb.idleBuilders.front();
+        if (plannerCursor >= bb.idleBuilders.size())
+        {
+            plannerCursor = 0;
+        }
+        auto builderId = bb.idleBuilders[plannerCursor];
+        ++plannerCursor;
         const auto& builder = sim.getUnitState(builderId);
         const auto& builderDef = sim.unitDefinitions.at(builder.unitType);
 
@@ -1244,8 +1300,10 @@ namespace rwe
             it = (bb.now.value - it->second.value > raidTicks) ? raidedSites.erase(it) : std::next(it);
         }
 
-        // A builder that cannot walk home is running an outpost: it builds around itself.
-        bool builderAtBase = !bb.groundReachabilityValid || reachability.isReachable(sim, builder.position);
+        // A builder that cannot walk home is running an outpost: it builds
+        // around itself. One that flies is always at home, because the ground
+        // it happens to be over decides nothing about where it can go next.
+        bool builderAtBase = builderDef.canFly || !bb.groundReachabilityValid || reachability.isReachable(sim, builder.position);
         auto anchor = builderAtBase ? *bb.baseAnchor : builder.position;
 
         // Extractors and makers are exempt from the affordability test
@@ -1291,7 +1349,7 @@ namespace rwe
         // repair order on a frame means. The commander can help even though
         // it could not have started the lab itself, which is exactly the
         // asymmetry that made this so slow. §15.7.
-        if (profile.techLevelTwo && !bb.sideUnits.advancedLab.empty())
+        if (!bb.sideUnits.advancedLab.empty())
         {
             for (const auto& [unitId, unit] : sim.units)
             {
@@ -1313,6 +1371,104 @@ namespace rwe
                 savingFor.clear();
                 outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(UnitId(unitId)), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
                 return;
+            }
+        }
+
+        // The wall of wrecks the last few waves left behind.
+        //
+        // A corpse blocks movement and absorbs every shot fired at whatever
+        // stands behind it, so an army that reaches one stops at it and fires
+        // into it -- and so does the army on the other side. Neither can
+        // advance, the wall thickens with every wave, and both sides spend
+        // the rest of the game shooting rubbish while their factories fill
+        // the rally points behind them. That is the original's behaviour and
+        // not something to correct in the simulation: projectiles collide
+        // with blocking features and there is no line-of-fire test anywhere,
+        // deliberately. What a player does is reclaim the field, which takes
+        // the wall down and pays for the next wave twice over.
+        //
+        // This has to sit above the build priorities rather than below them,
+        // where it was first put. Below, it is reached only by a builder with
+        // nothing to build, and there is always another extractor to want:
+        // measured over six games the AI logged "idle builders 0" in every
+        // status line and the fallback never once ran.
+        //
+        // Three gates keep the dose right. A wave has to be out and standing
+        // there, which is what makes the walk survivable; there has to be a
+        // wall rather than a single corpse; and no other builder of ours may
+        // already be reclaiming, so this takes one builder off the economy
+        // and not all of them.
+        if (builderAtBase && !builderDef.commander && profile.battlefieldReclaimEscortCount > 0 && !bb.attackGroup.empty())
+        {
+            float sumX = 0.0f;
+            float sumZ = 0.0f;
+            int counted = 0;
+            for (auto id : bb.combatUnits)
+            {
+                if (bb.attackGroup.count(id.value) == 0)
+                {
+                    continue;
+                }
+                const auto& p = sim.getUnitState(id).position;
+                sumX += p.x.value;
+                sumZ += p.z.value;
+                ++counted;
+            }
+            bool alreadyWorking = false;
+            for (const auto& [otherId, other] : sim.units)
+            {
+                if (other.owner != aiOwner || !other.isAlive() || other.orders.empty())
+                {
+                    continue;
+                }
+                if (std::get_if<ReclaimOrder>(&other.orders.front()) != nullptr)
+                {
+                    alreadyWorking = true;
+                    break;
+                }
+            }
+            if (counted >= profile.battlefieldReclaimEscortCount && !alreadyWorking)
+            {
+                auto divisor = static_cast<float>(counted);
+                SimVector centre(SimScalar(sumX / divisor), 0_ss, SimScalar(sumZ / divisor));
+                auto radiusSquared = profile.battlefieldReclaimRadius * profile.battlefieldReclaimRadius;
+                std::optional<FeatureId> best;
+                auto bestDistanceSquared = radiusSquared;
+                int wreckCount = 0;
+                for (const auto& [featureId, feature] : sim.features)
+                {
+                    const auto& featureDefinition = sim.getFeatureDefinition(feature.featureName);
+                    if (!featureDefinition.reclaimable || !(featureDefinition.metal > 0))
+                    {
+                        continue;
+                    }
+                    if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, feature.position))
+                    {
+                        continue;
+                    }
+                    auto distanceSquared = centre.distanceSquared(feature.position);
+                    if (distanceSquared >= radiusSquared)
+                    {
+                        continue;
+                    }
+                    ++wreckCount;
+                    if (distanceSquared < bestDistanceSquared)
+                    {
+                        bestDistanceSquared = distanceSquared;
+                        best = featureId;
+                    }
+                }
+                // A wall, not a corpse. Four is the smallest number that
+                // cannot be walked around by accident.
+                if (best && wreckCount >= 4)
+                {
+                    LOG_INFO << "AI build: unit " << builderId.value << " works the battlefield at "
+                             << static_cast<int>(centre.x.value) << "," << static_cast<int>(centre.z.value)
+                             << " (" << wreckCount << " reclaimable within " << profile.battlefieldReclaimRadius.value << ")";
+                    savingFor.clear();
+                    outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(ReclaimOrder(*best), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                    return;
+                }
             }
         }
 
@@ -1396,8 +1552,14 @@ namespace rwe
             {
                 // Nearby patches first; further afield if there are none.
                 // Only patches the builder can walk to: islands are for the transport.
+                // A builder that flies is not held to the ground's shape.
+                // Applied to an air constructor this test is exactly
+                // backwards: it would confine the one builder that can cross
+                // water to the patches everything else can already walk to,
+                // and leave the island patch -- the one nobody is contesting,
+                // and the reason to own an air constructor at all -- refused.
                 std::function<bool(const SimVector&)> reachable;
-                if (bb.groundReachabilityValid)
+                if (bb.groundReachabilityValid && !builderDef.canFly)
                 {
                     reachable = [&](const SimVector& p) { return reachability.isReachable(sim, p) == builderAtBase; };
                 }
@@ -1632,10 +1794,17 @@ namespace rwe
         // Otherwise lend a hand at the factory.
         if (!bb.factories.empty() && builderAtBase && !saving)
         {
-            const auto& factory = sim.getUnitState(bb.factories.front());
-            if (!factory.buildQueue.empty())
+            auto factoryId = bb.factories.front();
+            const auto& factory = sim.getUnitState(factoryId);
+            // Already helping there. Now that an assisting builder is offered
+            // to the planner again, re-issuing the order every pass would
+            // restart the walk and put a command on the wire for nothing.
+            auto alreadyGuarding = !builder.orders.empty()
+                && std::holds_alternative<GuardOrder>(builder.orders.front())
+                && std::get<GuardOrder>(builder.orders.front()).target == factoryId;
+            if (!factory.buildQueue.empty() && !alreadyGuarding)
             {
-                outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(GuardOrder(bb.factories.front()), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(GuardOrder(factoryId), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
             }
         }
     }

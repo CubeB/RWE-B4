@@ -8,6 +8,7 @@
 #include <rwe/sim/UnitState.h>
 #include <rwe/util/SimpleLogger.h>
 #include <set>
+#include <variant>
 
 namespace rwe
 {
@@ -104,6 +105,10 @@ namespace rwe
         };
 
         // VectorMap iterates in id order, which keeps everything below deterministic.
+        // Builders already helping at a factory, offered to the planner
+        // behind the genuinely idle ones: something useful is the last thing
+        // to interrupt.
+        std::vector<UnitId> assistingBuilders;
         for (const auto& [unitId, unit] : sim.units)
         {
             if (unit.owner != aiOwner || !unit.isAlive())
@@ -233,6 +238,20 @@ namespace rwe
                     ++bb.idleBuilderCount;
                     bb.idleBuilders.push_back(unitId);
                 }
+                else if (!isFerryPassenger && unit.orders.size() == 1 && std::holds_alternative<GuardOrder>(unit.orders.front()))
+                {
+                    // Lending a hand at a factory is what a builder does when
+                    // the planner had nothing for it, and nothing ever took
+                    // that order off again: a guard order does not end, so
+                    // every builder that once ran out of work was out of the
+                    // pool for the rest of the game. That is where the
+                    // advanced constructor went -- built, sent to help at the
+                    // level-one factory, and never planned for again, so the
+                    // tier it was bought to spend was never spent. It is
+                    // available; the planner leaves it where it is if it
+                    // still has nothing better.
+                    assistingBuilders.push_back(unitId);
+                }
             }
             else if (def.isMobile && isAiAntiAirType(bb.sideUnits, unit.unitType) && !isFerryPassenger)
             {
@@ -246,6 +265,8 @@ namespace rwe
                 bb.combatUnits.push_back(unitId);
             }
         }
+
+        bb.idleBuilders.insert(bb.idleBuilders.end(), assistingBuilders.begin(), assistingBuilders.end());
 
         for (auto frameId : frames)
         {

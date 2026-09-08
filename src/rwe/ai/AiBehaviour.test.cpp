@@ -1743,4 +1743,127 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a builder assisting a factory is offered to the planner again", "[ai]")
+    {
+        // The bug this pins: a builder sent to lend a hand at a factory
+        // carries a GuardOrder that nothing ever takes off, and idleBuilders
+        // used to require an empty order queue -- so a builder that once ran
+        // out of work was gone from the planning pool for the rest of the
+        // game. It should still be offered to the planner, just behind the
+        // genuinely idle ones, and it should not be double-counted as idle.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto factoryId = addUnit(sim, "ARMLAB", ai, SimVector(200_ss, 0_ss, 200_ss), script);
+        auto kbotId = addUnit(sim, "ARMCK", ai, SimVector(40_ss, 0_ss, 40_ss), script);
+        sim.getUnitState(kbotId).orders.push_back(GuardOrder(factoryId));
+
+        AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 2, commands);
+
+        const auto& bb = controller.getBlackboard();
+        REQUIRE(bb.idleBuilders == std::vector<UnitId>{kbotId});
+        REQUIRE(bb.idleBuilderCount == 0);
+    }
+
+    TEST_CASE("the planner takes each available builder in turn", "[ai]")
+    {
+        // Before plannerCursor the planner always read idleBuilders.front(),
+        // which in id order is whichever builder exists longest -- so with
+        // more than one idle builder, only the first was ever served and the
+        // rest sat unplanned for no matter how long the game went on.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        // Only a commander sets bb.homePosition/baseAnchor; without one
+        // BuildManager::update has nowhere to anchor the plan and returns
+        // before looking at either builder. Sent walking so it does not
+        // itself become the one idle builder served.
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(commanderId).addOrder(MoveOrder(SimVector(600_ss, 0_ss, 600_ss)));
+        addUnit(sim, "ARMCK", ai, SimVector(40_ss, 0_ss, 40_ss), script);
+        addUnit(sim, "ARMCK", ai, SimVector(-40_ss, 0_ss, -40_ss), script);
+
+        AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+
+        std::vector<PlayerCommand> firstPass;
+        runTicks(sim, controller, 30, firstPass);
+        std::optional<UnitId> firstBuilder;
+        for (const auto& c : firstPass)
+        {
+            if (auto unitCommand = std::get_if<PlayerUnitCommand>(&c))
+            {
+                firstBuilder = unitCommand->unit;
+                break;
+            }
+        }
+        REQUIRE(firstBuilder.has_value());
+
+        std::vector<PlayerCommand> secondPass;
+        runTicks(sim, controller, 30, secondPass);
+        std::optional<UnitId> secondBuilder;
+        for (const auto& c : secondPass)
+        {
+            if (auto unitCommand = std::get_if<PlayerUnitCommand>(&c))
+            {
+                secondBuilder = unitCommand->unit;
+                break;
+            }
+        }
+        REQUIRE(secondBuilder.has_value());
+
+        REQUIRE(*firstBuilder != *secondBuilder);
+    }
+
+    TEST_CASE("an advanced constructor spends the tier even with teching off", "[ai]")
+    {
+        // The level-two spending rules ask only whether an advanced lab
+        // stands, not whether the tech knob is on: deciding to tech is one
+        // question and spending a tier already bought is another. Before
+        // this, gating both on the same knob meant a finished advanced
+        // constructor was left with an empty list -- and sent to nanolathe
+        // Peewees instead -- the moment teching was switched off, even with
+        // the lab already paid for.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.techLevelTwo = false;
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        // Out of the way, so the idle advanced constructor is the one the
+        // planner reaches.
+        sim.getUnitState(commanderId).addOrder(MoveOrder(SimVector(600_ss, 0_ss, 600_ss)));
+
+        addUnit(sim, "ARMLAB", ai, SimVector(200_ss, 0_ss, 200_ss), script);
+        addUnit(sim, "ARMALAB", ai, SimVector(-200_ss, 0_ss, -200_ss), script);
+        auto advancedId = addUnit(sim, "ARMACK", ai, SimVector(-240_ss, 0_ss, -240_ss), script);
+
+        // Income clears techMinMetalIncome comfortably. The stockpile is
+        // plentiful but kept well under the cap, so a fusion plant is not
+        // also in the running -- this is about the moho and the radar.
+        sim.unitDefinitions["ARMMEX"].metalMake = Metal(2.0f);
+        for (int i = 0; i < profile.targetMetalExtractorCount; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(0_ss, 0_ss, SimScalar(100.0f + i * 40.0f)), script);
+        }
+        sim.getPlayer(ai).metal = Metal(500.0f);
+        sim.getPlayer(ai).maxMetal = Metal(2000.0f);
+
+        AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 31, commands);
+
+        auto builds = ordersFor<BuildOrder>(commands, advancedId);
+        REQUIRE(!builds.empty());
+        REQUIRE((builds.front().unitType == "ARMMOHO" || builds.front().unitType == "ARMARAD"));
+    }
 }

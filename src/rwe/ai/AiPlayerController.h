@@ -5,6 +5,7 @@
 #include <random>
 #include <rwe/ai/AiBlackboard.h>
 #include <rwe/ai/AiTuningProfile.h>
+#include <rwe/ai/AirManager.h>
 #include <rwe/ai/ArmyManager.h>
 #include <rwe/ai/BuildManager.h>
 #include <rwe/ai/EconomyManager.h>
@@ -102,6 +103,7 @@ namespace rwe
         ScoutManager scout;
         TransportManager transport;
         ArmyManager army;
+        AirManager air;
 
         AiProfiler profiler;
     };
