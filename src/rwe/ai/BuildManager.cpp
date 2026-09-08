@@ -1557,7 +1557,7 @@ namespace rwe
             {
                 continue;
             }
-            if (std::get_if<PatrolOrder>(&other.orders.front()) != nullptr)
+            if (std::get_if<ReclaimOrder>(&other.orders.front()) != nullptr)
             {
                 fieldPatroller = UnitId(otherId);
                 break;
@@ -1640,31 +1640,70 @@ namespace rwe
         }
         else if (!fieldPatroller && fieldWorthStarting && bb.baseAnchor && builderAtBase && !builderDef.commander && profile.battlefieldReclaimEscortCount > 0)
         {
-            // A patrol, not a reclaim order naming one wreck. A builder on
-            // patrol reclaims whatever it passes, and that is the original's
-            // only automatic reclaim -- the area scan behind RepairPatrol,
-            // which handlePatrolOrder reproduces. One order clears a field
-            // and goes on clearing it; a ReclaimOrder names a single corpse
-            // and has to be reissued for the next, which the planner reaches
-            // once a pass at best.
+            // A queue of reclaim orders, one per wreck, and deliberately not a
+            // patrol.
             //
-            // The route runs across the wall rather than at it. Wreckage
-            // lies in a band athwart the approach, so a line square to the
-            // base-to-field axis sweeps along the band instead of poking
-            // through it.
-            auto axis = *waveCentre - *bb.baseAnchor;
-            auto along = SimVector(axis.x, 0_ss, axis.z).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
-            SimVector across(along.z, 0_ss, -along.x);
-            auto reach = profile.battlefieldReclaimRadius / 2_ss;
-            auto legA = *waveCentre + (across * reach);
-            auto legB = *waveCentre - (across * reach);
-            LOG_INFO << "AI build: unit " << builderId.value << " patrols the battlefield at "
-                     << static_cast<int>(waveCentre->x.value) << "," << static_cast<int>(waveCentre->z.value)
-                     << " (" << wreckCount << " reclaimable within " << profile.battlefieldReclaimRadius.value << ")";
-            savingFor.clear();
-            outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(PatrolOrder(legA), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
-            outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(PatrolOrder(legB), PlayerUnitCommand::IssueOrder::IssueKind::Queued)));
-            return;
+            // The patrol was tried first, on the reasoning that a builder on
+            // patrol reclaims what it passes and that this is the original's
+            // only automatic reclaim. Both halves of that are true and the
+            // conclusion still did not hold, because of the gate at the top of
+            // findFeatureToAutoReclaim: the scan does not run at all unless one
+            // of the player's two stores is under a fifth of its capacity
+            // (0x405B18-0x405B54). That is faithful and stays -- but it is an
+            // economy heuristic, and a builder sent to take down a wall is not
+            // there for the metal. With healthy stores the patrol walked back
+            // and forth over the wreckage and reclaimed none of it: measured
+            // across one game, successive dispatches found 7, then 17, then
+            // 43, then 95 reclaimable wrecks inside the same radius. The field
+            // grew the whole time.
+            //
+            // A ReclaimOrder names a feature and is obeyed whatever the stores
+            // say, which is what a player does when the wall is the problem
+            // rather than the economy. Naming several at once answers the
+            // objection that cost the patrol its place -- that one order clears
+            // one corpse and the planner only comes back once a pass. The queue
+            // also ends by itself, which the patrol never did: when the last
+            // one is done the builder is idle and back in the pool, so the
+            // recall above is a safety net rather than the only way out.
+            std::vector<std::pair<SimScalar, FeatureId>> spoil;
+            auto radiusSquared = profile.battlefieldReclaimRadius * profile.battlefieldReclaimRadius;
+            for (const auto& [featureId, feature] : sim.features)
+            {
+                const auto& featureDefinition = sim.getFeatureDefinition(feature.featureName);
+                if (!featureDefinition.reclaimable || !(featureDefinition.metal > 0))
+                {
+                    continue;
+                }
+                if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, feature.position))
+                {
+                    continue;
+                }
+                auto d = waveCentre->distanceSquared(feature.position);
+                if (d < radiusSquared)
+                {
+                    spoil.emplace_back(d, featureId);
+                }
+            }
+            // Nearest the wave first, and ties by feature id, so every peer
+            // builds the same queue.
+            std::sort(spoil.begin(), spoil.end(), [](const auto& a, const auto& b) {
+                return std::tie(a.first, a.second) < std::tie(b.first, b.second);
+            });
+
+            auto taken = std::min(spoil.size(), static_cast<std::size_t>(profile.battlefieldReclaimBatch));
+            if (taken > 0)
+            {
+                LOG_INFO << "AI build: unit " << builderId.value << " works the battlefield at "
+                         << static_cast<int>(waveCentre->x.value) << "," << static_cast<int>(waveCentre->z.value)
+                         << " (" << taken << " of " << wreckCount << " reclaimable within " << profile.battlefieldReclaimRadius.value << ")";
+                savingFor.clear();
+                for (std::size_t i = 0; i < taken; ++i)
+                {
+                    auto kind = i == 0 ? PlayerUnitCommand::IssueOrder::IssueKind::Immediate : PlayerUnitCommand::IssueOrder::IssueKind::Queued;
+                    outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(ReclaimOrder(spoil[i].second), kind)));
+                }
+                return;
+            }
         }
 
         // Set when the builder is holding off for the stockpile to catch up

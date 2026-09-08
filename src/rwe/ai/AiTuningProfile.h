@@ -460,6 +460,8 @@ namespace rwe
         SimScalar battlefieldReclaimRadius{700_ss};
         /** Our combat units that must be near the wreck before a builder is sent to it. */
         int battlefieldReclaimEscortCount{4};
+        /** How many wrecks a builder is given at once when it is sent to clear a field. */
+        int battlefieldReclaimBatch{6};
         /**
          * How far ahead of the wave's own centre a unit may get before it is
          * sent back to it. Every member of a wave is given the same

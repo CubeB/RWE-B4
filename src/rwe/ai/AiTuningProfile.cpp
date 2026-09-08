@@ -187,6 +187,7 @@ namespace rwe
             || setInt("targetAirConstructorCount", p.targetAirConstructorCount)
             || setScalar("battlefieldReclaimRadius", p.battlefieldReclaimRadius)
             || setInt("battlefieldReclaimEscortCount", p.battlefieldReclaimEscortCount)
+            || setInt("battlefieldReclaimBatch", p.battlefieldReclaimBatch)
             || setScalar("waveCohesionRadius", p.waveCohesionRadius)
             || setScalar("waveMeetEnemyRadius", p.waveMeetEnemyRadius)
             || setInt("waveMeetEnemyCount", p.waveMeetEnemyCount)

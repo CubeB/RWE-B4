@@ -2080,7 +2080,7 @@ that for.
 
 ## 18 Three more from the same replay, two of them already in the engine
 
-## 18.1 The builder should have been on patrol all along
+## 18.1 The builder on patrol -- which turned out not to reclaim (see 18.1.1)
 
 S:16.5 answered the wall of wrecks by having a builder reclaim it, and picked
 the wrong instrument. It issued a `ReclaimOrder` naming one wreck, chosen by
@@ -2317,3 +2317,44 @@ So the AI was swept mechanically for the same shapes.
   advance the simulation's sequence. `CLAUDE.md` is corrected, with that last
   rule written down, because it is the one a future presentation change could
   quietly break.
+
+### 18.1.1 The patrol reclaimed nothing, and the evidence was already in the log
+
+S:18.1 replaced a single-target `ReclaimOrder` with a two-leg patrol, on the
+reasoning that a builder on patrol reclaims what it passes and that this is the
+original's only automatic reclaim. Both halves of that are true. The conclusion
+was still wrong, and a play-test found it: a construction aircraft on patrol was
+reclaiming nothing at all.
+
+The gate is the first thing `findFeatureToAutoReclaim` does, and it is faithful:
+the scan does not run *at all* unless one of the player's two stores is under a
+fifth of its capacity (`0x405B18`-`0x405B54`, the fifth being the double at
+`0x4FC950`). That is an economy heuristic -- reclaim when short -- and a builder
+sent to take a wall down is not there for the metal. With healthy stores the
+patrol walks back and forth across the wreckage and touches none of it.
+
+**The evidence was in the logs when S:18.1 was written and it went unread.**
+Successive dispatches in one game reported 7, then 17, then 43, then 95
+reclaimable wrecks inside the same radius. The field grew the whole time. What
+was quoted instead was 121 patrols and 78 recalls -- how many builders were
+*sent*, not whether any wreckage went away. That is the same fault as S:19.1's:
+a proxy counted in place of the effect, twice in one day.
+
+The rule now issues a queue of explicit `ReclaimOrder`s, nearest the wave first,
+`battlefieldReclaimBatch` of them at a time. A named feature is reclaimed
+whatever the stores say, which is what a player does when the wall is the
+problem. The queue also answers the objection that displaced the original
+version -- that one order clears one corpse and the planner returns once a pass
+-- and it ends by itself, so the builder goes back in the pool without needing
+the recall, which is now a safety net rather than the only way out.
+
+Measured over four games, and this time on the number that matters: the counts
+now fall as well as rise. One game peaks at 31 and ends at 6, another peaks at
+45 and ends at 15, where under the patrol they only ever climbed. Dispatches
+roughly tripled, which is the queue completing and handing the builder back.
+
+It does not keep up everywhere -- one game ends near 55 and still climbing,
+because one builder taking six at a time cannot match a late-game battlefield.
+That is a knob (`battlefieldReclaimBatch`, or letting a second builder join)
+and not a broken mechanism, and it is recorded as an open question rather than
+quietly left out.
