@@ -238,11 +238,12 @@ namespace rwe
             panel->setDrawSolidPlate(true);
 
             // Not a flat rectangle: the original fills a plate like this with
-            // BackTile out of commongui.gaf -- the same 64x64 tile the front
-            // end sits on -- which is where the texture in the confirmation
-            // and exit boxes comes from. A data set without it still gets the
-            // flat plate rather than nothing.
-            if (auto tile = textureService->getGuiTexture(name, "BackTile"))
+            // a 64x64 tile out of commongui.gaf. Which tile depends on where
+            // the dialog is: `BackTile` is the front end's, `igpatch` the one
+            // the in-game interface is filled with, and the scene says which
+            // it wants. A data set without the tile still gets the flat plate
+            // rather than nothing.
+            if (auto tile = textureService->getGuiTexture(name, plateTileName))
             {
                 panel->setPlateTile((*tile)->sprites.at(0));
             }

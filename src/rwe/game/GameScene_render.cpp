@@ -1277,6 +1277,15 @@ namespace rwe
         // it. See unitTexture.frag.
         auto haloWanted = antiAliasEnabled && buildingHaloEnabled && buildingHaloStrength > 0;
 
+        // The mask has a second reader now, and it does not care whether
+        // there is a building anywhere: the resolve uses the ground flag to
+        // keep the terrain out of the supersample's box filter (see
+        // sharpTerrain in worldPost.frag), which is wanted on every frame
+        // that is supersampled at all. So the mask rides along with
+        // anti-aliasing rather than with the halo, and the scan below now
+        // decides only whether the halo's own arithmetic runs.
+        auto maskWanted = antiAliasEnabled;
+
         // ...and only if a finished building is actually on screen. Writing
         // the mask is nearly free now, but "nearly" is not "entirely": the
         // second target is a full-size write for every solid pixel, and on a
@@ -1306,7 +1315,7 @@ namespace rwe
             }
         }
 
-        if (haloWanted)
+        if (maskWanted)
         {
             sceneContext.graphics->useDualDrawBuffers();
         }
@@ -1332,7 +1341,7 @@ namespace rwe
             RWE_RENDERPROF("w.terrain");
             // The ground is an occluder for the halo: a building standing
             // behind a cliff must not be fringed along the cliff's edge.
-            if (haloWanted)
+            if (maskWanted)
             {
                 sceneContext.graphics->useDualDrawBuffers();
             }
@@ -1560,7 +1569,7 @@ namespace rwe
             // carries the value to write, 1 for a cached piece of a finished
             // building and 0.5 for anything else solid. It is the whole of
             // what used to be a second pass over the world.
-            if (haloWanted)
+            if (maskWanted)
             {
                 sceneContext.graphics->useDualDrawBuffers();
             }
@@ -1721,6 +1730,12 @@ namespace rwe
             sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloStrength, haloWanted ? static_cast<float>(buildingHaloStrength) / 100.0f : 0.0f);
             sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloSaturation, static_cast<float>(buildingHaloSaturation) / 100.0f);
             sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloRedShift, static_cast<float>(buildingHaloRedShift) / 100.0f);
+            // Same condition as the mask that feeds it, for the same reason
+            // the halo's is the same as its own: with anti-aliasing off there
+            // is no 2x buffer to take one sample of instead of four, and the
+            // mask is neither written nor cleared, so reading it would be
+            // reading whatever it last held.
+            sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.sharpTerrain, maskWanted ? 1.0f : 0.0f);
             sceneContext.graphics->bindTexture(worldFrameBuffer.texture.get());
             sceneContext.graphics->setActiveTextureSlot1();
             sceneContext.graphics->bindTexture(dodgeMask.get());

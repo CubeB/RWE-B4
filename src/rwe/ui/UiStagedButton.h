@@ -74,6 +74,16 @@ namespace rwe
 
         Subject<ButtonClickEvent> clickSubject;
 
+        /**
+         * True as the pointer arrives, false as it leaves.
+         *
+         * Separate from the pressed state the two handlers already keep,
+         * because a caller can want to know the pointer is over a control
+         * without wanting it to look pressed -- the skirmish screen's help
+         * line, which describes the option under the pointer.
+         */
+        Subject<bool> hoverSubject;
+
     public:
         UiStagedButton(
             int posX,
@@ -99,6 +109,8 @@ namespace rwe
         void keyDown(KeyEvent event) override;
 
         Observable<ButtonClickEvent>& onClick();
+
+        Observable<bool>& onHover();
 
         void setStage(unsigned int newStage);
 

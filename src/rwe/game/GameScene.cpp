@@ -661,6 +661,12 @@ namespace rwe
     {
         setCrashScene("GameScene");
         setCrashMap(gameParameters.mapName.c_str());
+
+        // A dialog raised over the battlefield that ships no art of its own --
+        // YESORNO and EXITMENU are the two -- is filled with the in-game
+        // patch rather than the front end's tile. See UiFactory::plateTileName.
+        uiFactory.setPlateTileName("igpatch");
+
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
         currentPanel = uiFactory.panelFromGuiFile(sidePrefix + "MAIN2");
 

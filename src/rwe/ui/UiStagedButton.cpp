@@ -139,6 +139,8 @@ namespace rwe
 
     void UiStagedButton::mouseEnter()
     {
+        hoverSubject.next(true);
+
         switch (behaviorMode)
         {
             case BehaviorMode::Button:
@@ -156,6 +158,8 @@ namespace rwe
 
     void UiStagedButton::mouseLeave()
     {
+        hoverSubject.next(false);
+
         switch (behaviorMode)
         {
             case BehaviorMode::Button:
@@ -186,6 +190,11 @@ namespace rwe
     Observable<ButtonClickEvent>& UiStagedButton::onClick()
     {
         return clickSubject;
+    }
+
+    Observable<bool>& UiStagedButton::onHover()
+    {
+        return hoverSubject;
     }
 
     void UiStagedButton::keyDown(KeyEvent event)

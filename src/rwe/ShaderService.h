@@ -90,6 +90,7 @@ namespace rwe
         UniformLocation haloStrength;
         UniformLocation haloSaturation;
         UniformLocation haloRedShift;
+        UniformLocation sharpTerrain;
     };
 
     class ShaderService

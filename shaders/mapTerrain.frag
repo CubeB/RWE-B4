@@ -50,5 +50,11 @@ void main(void)
     }
 
     outColor = color;
-    outMask = vec4(0.0, 0.0, 0.0, 0.5);
+    // Green flags the ground. The resolve reads it to leave the terrain out
+    // of the supersample's box filter: TA's ground is a palette-indexed
+    // texture through PALETTE.SHD, and averaging four of its samples names
+    // colours the palette does not contain, which reads as a blurred map
+    // rather than as anti-aliasing. Alpha is the occluder level and is what
+    // the halo reads; it is unchanged.
+    outMask = vec4(0.0, 1.0, 0.0, 0.5);
 }

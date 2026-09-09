@@ -177,6 +177,13 @@ namespace rwe
          * Hooks the staged option buttons on the right of the skirmish
          * screen up to the model so that clicking them cycles the stage.
          */
+        /**
+         * Which skirmish option the pointer is over, and so whose description
+         * the help line under the setup box is currently showing. Empty when
+         * it is over none of them, which is when the line is blank.
+         */
+        std::string hoveredSkirmishOption;
+
         void attachSkirmishOptionComponents(UiPanel& panel);
 
         void attachPlayerSelectionComponents(const std::string& guiName, UiPanel& panel);

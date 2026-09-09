@@ -112,6 +112,26 @@ uniform float haloSaturation;
 // most look like a stray highlighter mark.
 uniform float haloRedShift;
 
+// Whether the ground is kept out of the supersample's box filter.
+//
+// Anti-aliasing here means rendering the world into a buffer of twice the
+// size and averaging each 2x2 block down, which is what the original did to
+// its buildings and what the halo below is a consequence of. Averaging is
+// the right thing for a silhouette and the wrong thing for TA's ground: the
+// map is a palette-indexed texture read through PALETTE.SHD, and the mean of
+// four of its samples names a colour that is nowhere in the palette, so a
+// filtered map comes out soft and slightly washed where the original is
+// crisp. Reported from play as "the terrain just looks blurry", which is
+// exactly what it is.
+//
+// So a block that is ground all the way across takes one sample instead of
+// four, which is the same pixel a render at native size would have produced.
+// A block that is only partly ground is a unit or a building against the
+// map -- the edge anti-aliasing is for -- and is still averaged. Nothing
+// else about the pass changes, and with anti-aliasing off the buffer is not
+// supersampled at all and there is nothing here to do.
+uniform float sharpTerrain;
+
 // What the original's table found where a building's edge met nothing.
 const int TransparentIndex = 253;
 
@@ -148,24 +168,47 @@ int maskIndex(vec4 texel)
     return solid(texel) ? int((texel.r * 255.0) + 0.5) : TransparentIndex;
 }
 
+// The ground wrote this sample. Only mapTerrain.frag sets green.
+bool terrain(vec4 texel)
+{
+    return texel.g > 0.5;
+}
+
 void main(void)
 {
     vec4 screenValue = texture(screenTexture, fragTexCoord);
+
+    // The 2x2 block of the supersampled buffer this output pixel came from,
+    // and its four mask samples. Both features below want them, so they are
+    // read once. texelFetch and not texture(): the red channel is a palette
+    // index, and the mean of two palette indices names a third colour that is
+    // nowhere between them, so nothing here may be filtered.
+    ivec2 block = ivec2(0, 0);
+    vec4 s00 = vec4(0.0);
+    vec4 s10 = vec4(0.0);
+    vec4 s01 = vec4(0.0);
+    vec4 s11 = vec4(0.0);
+    if (sharpTerrain > 0.0 || haloStrength > 0.0)
+    {
+        block = (ivec2(fragTexCoord * vec2(textureSize(buildingMask, 0))) / 2) * 2;
+        s00 = texelFetch(buildingMask, block + ivec2(0, 0), 0);
+        s10 = texelFetch(buildingMask, block + ivec2(1, 0), 0);
+        s01 = texelFetch(buildingMask, block + ivec2(0, 1), 0);
+        s11 = texelFetch(buildingMask, block + ivec2(1, 1), 0);
+    }
+
+    // Ground all the way across takes one sample rather than the average of
+    // four. A block with anything else in it is an edge and keeps the filter.
+    if (sharpTerrain > 0.0 && terrain(s00) && terrain(s10) && terrain(s01) && terrain(s11))
+    {
+        screenValue = texelFetch(screenTexture, block, 0);
+    }
+
     vec4 dodgeMaskValue = texture(dodgeMask, fragTexCoord);
     vec3 dodged = screenValue.rgb / (vec3(1.0, 1.0, 1.0) - dodgeMaskValue.rgb);
 
     if (haloStrength > 0.0)
     {
-        // The 2x2 block of the supersampled buffer this output pixel came
-        // from. texelFetch and not texture(): these are palette indices, and
-        // the mean of two palette indices names a third colour that is nowhere
-        // between them, so nothing here may be filtered.
-        ivec2 block = (ivec2(fragTexCoord * vec2(textureSize(buildingMask, 0))) / 2) * 2;
-        vec4 s00 = texelFetch(buildingMask, block + ivec2(0, 0), 0);
-        vec4 s10 = texelFetch(buildingMask, block + ivec2(1, 0), 0);
-        vec4 s01 = texelFetch(buildingMask, block + ivec2(0, 1), 0);
-        vec4 s11 = texelFetch(buildingMask, block + ivec2(1, 1), 0);
-
         // Mixed against the WORLD, not against the building: the block has to
         // straddle the outer edge of everything solid. Counting only the
         // cached samples instead would find a boundary wherever an occluder

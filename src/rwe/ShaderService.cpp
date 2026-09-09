@@ -86,6 +86,7 @@ namespace rwe
         s.worldPost.haloStrength = graphics.getUniformLocation(s.worldPost.handle.get(), "haloStrength");
         s.worldPost.haloSaturation = graphics.getUniformLocation(s.worldPost.handle.get(), "haloSaturation");
         s.worldPost.haloRedShift = graphics.getUniformLocation(s.worldPost.handle.get(), "haloRedShift");
+        s.worldPost.sharpTerrain = graphics.getUniformLocation(s.worldPost.handle.get(), "sharpTerrain");
 
 
         return s;

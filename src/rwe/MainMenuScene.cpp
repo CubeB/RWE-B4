@@ -1050,21 +1050,52 @@ namespace rwe
         auto helpText = panel.find<UiLabel>("HELPTEXT");
         auto* helpLabel = helpText ? &helpText->get() : nullptr;
 
-        auto attach = [&panel, helpLabel](const std::string& name, BehaviorSubject<unsigned int>& option) {
+        // The line describes the option the pointer is over, and is empty
+        // when it is over none of them. It used to describe whichever option
+        // was changed last and keep describing it afterwards, which read as a
+        // caption for the whole box rather than for one button.
+        auto attach = [this, &panel, helpLabel](const std::string& name, BehaviorSubject<unsigned int>& option) {
             auto button = panel.find<UiStagedButton>(name);
             if (!button)
             {
                 return;
             }
 
-            auto sub = option.subscribe([b = &button->get(), helpLabel, name](unsigned int stage) {
+            auto sub = option.subscribe([this, b = &button->get(), helpLabel, name](unsigned int stage) {
                 b->setStage(stage);
-                if (helpLabel != nullptr)
+                // Cycling an option under the pointer should re-read: the
+                // text describes the stage, not just the button. Cycling one
+                // the pointer is not over -- which the keyboard can do --
+                // leaves the line alone.
+                if (helpLabel != nullptr && hoveredSkirmishOption == name)
                 {
                     helpLabel->setText(describeSkirmishOption(name, stage));
                 }
             });
             button->get().addSubscription(std::move(sub));
+
+            auto hoverSub = button->get().onHover().subscribe([this, helpLabel, name, opt = &option](bool entered) {
+                if (helpLabel == nullptr)
+                {
+                    return;
+                }
+
+                if (entered)
+                {
+                    hoveredSkirmishOption = name;
+                    helpLabel->setText(describeSkirmishOption(name, opt->getValue()));
+                }
+                else if (hoveredSkirmishOption == name)
+                {
+                    // Only the button that claimed the line may clear it. The
+                    // pointer can arrive at the next button before it leaves
+                    // the last, and without this the arrival would be undone
+                    // by the departure that follows it.
+                    hoveredSkirmishOption.clear();
+                    helpLabel->setText(std::string());
+                }
+            });
+            button->get().addSubscription(std::move(hoverSub));
         };
 
         attach("CommanderDeath", model.skirmishOptions.commanderDeath);
@@ -1073,12 +1104,13 @@ namespace rwe
         attach("LineOfSight", model.skirmishOptions.lineOfSight);
         attach("Difficulty", model.skirmishOptions.difficulty);
 
-        // Subscribing fires each callback once, so the field would otherwise
-        // open showing whichever option was attached last. Start it on the
-        // button at the top of the column instead.
+        // Subscribing fires each callback once, and each of those ran with
+        // nothing hovered, so the line is already empty. It stays that way
+        // until the pointer is over one of the buttons.
+        hoveredSkirmishOption.clear();
         if (helpLabel != nullptr)
         {
-            helpLabel->setText(describeSkirmishOption("CommanderDeath", model.skirmishOptions.commanderDeath.getValue()));
+            helpLabel->setText(std::string());
         }
     }
 

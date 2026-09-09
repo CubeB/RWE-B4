@@ -10450,6 +10450,25 @@ were then looked up to give me the final color, so 3 lookups." At the silhouette
 the pairs being averaged are a real colour and whatever stood for transparent,
 and what came back was wrong.
 
+**And note what it is applied to: a building's cached bitmap, and nothing
+else.** Not the map. The original has no supersampled world buffer at all --
+the double-size buffer is allocated per building, filtered once, and cached,
+which is the whole reason a DONT_CACHE piece never gets a halo (§12a of
+`TOTALA-EXE-SHADING.md`, and the arms of a metal extractor in practice). RWE
+reaches the same arithmetic from the other end: it renders the *whole world*
+at twice the size and filters the lot down, which gives buildings the
+original's filter for free and gives the ground a filter the original never
+applied to it. That was reported from play as "the terrain just looks blurry",
+and it is a fair description of what averaging four samples of a
+palette-indexed map does -- the mean of four `PALETTE.SHD` reads names a
+colour the palette does not contain, so the crispness the ground is drawn
+with goes. As of 2026-09-09 the resolve leaves it out: a 2x2 block that is
+ground all the way across takes one sample instead of four, and a block with
+anything else in it is an edge and keeps the filter. The flag is green in the
+same mask the halo reads. So this is not a divergence but the removal of one,
+and the anti-aliasing now covers what the original's covered -- units aside,
+which the original did not cache and RWE still supersamples.
+
 **Which table is INFERRED.** `PALETTE.ALP` is the only 256x256 source-by-
 destination blend table in the shipped data, it is installed at `[display+0xC0]`
 as the anti-alias blend table (`TOTALA-EXE-SHADING.md` §09), and the cloak

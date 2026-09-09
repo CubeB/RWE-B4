@@ -35,6 +35,17 @@ namespace rwe
         int screenWidth;
         int screenHeight;
 
+        /**
+         * The 64x64 tile a dialog with no art of its own is filled with.
+         *
+         * commongui.gaf carries two, and which is right depends on where the
+         * dialog is: `BackTile` is the front end's, and `igpatch` -- the name
+         * says it -- is the patch the in-game interface is made of. A
+         * confirmation raised over the battlefield wearing the front end's
+         * tile was reported from play as the wrong texture, and it was.
+         */
+        std::string plateTileName{"BackTile"};
+
     public:
         UiFactory(TextureService* textureService, AudioService* audioService, TdfBlock* soundLookup, AbstractVirtualFileSystem* vfs, const PathMapping* const pathMapping, int screenWidth, int screenHeight);
 
@@ -43,6 +54,9 @@ namespace rwe
         std::unique_ptr<UiPanel> panelFromGuiFile(const std::string& name);
 
         std::unique_ptr<UiPanel> panelFromGuiFile(const std::string& name, const std::vector<GuiEntry>& entries);
+
+        /** See plateTileName. GameScene asks for the in-game one. */
+        void setPlateTileName(std::string name) { plateTileName = std::move(name); }
 
         std::unique_ptr<UiPanel> createPanel(int x, int y, int width, int height, const std::string& name);
         std::unique_ptr<UiPanel> createPanel(int x, int y, int width, int height, const std::string& name, const std::optional<std::string>& background);
