@@ -472,6 +472,8 @@ namespace rwe
         bool vehicleShadowsEnabled{true};
         /** The purple building halo: strength as a percentage, width in output pixels. */
         unsigned int buildingHaloStrength{100};
+        unsigned int buildingHaloSaturation{65};
+        unsigned int buildingHaloRedShift{50};
         unsigned int scrollSpeedSetting{100};
 
         /** What this game was started with, kept for the save-game header. */

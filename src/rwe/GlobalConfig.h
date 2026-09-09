@@ -174,6 +174,33 @@ namespace rwe
          * rwe.cfg key building-halo-strength.
          */
         unsigned int buildingHaloStrength{100};
+
+        /**
+         * Two corrections applied on top of what the table returns, and they
+         * are RWE's rather than the original's.
+         *
+         * They exist because a play-test of the exact colours asked for
+         * something less saturated and redder, and that is a fair thing to
+         * ask. A palette index is not a colour until something displays it,
+         * and TA's were displayed on a 1997 CRT through a hardware LUT --
+         * phosphor, a warmer white point and the gamma of that path all pull a
+         * saturated blue-purple towards a duller red-magenta, and none of it
+         * is in the data. The arithmetic upstream stays exact; the correction
+         * lives in one place and is switched off by setting these to 100 and
+         * 0, which is what to do to see what PALETTE.ALP actually says.
+         *
+         * Saturation is a percentage of the table's own, pulling each pixel
+         * towards its own luminance so the hue does not move. Red shift pulls
+         * blue down towards green, rotating the hue from purple round towards
+         * red-magenta; at 100 blue meets green and nothing magenta is left, so
+         * the middle of the range is the useful part. It never raises blue, so
+         * a blend that already leans green -- the plain grey a green edge
+         * returns -- comes through untouched.
+         *
+         * rwe.cfg keys building-halo-saturation and building-halo-red-shift.
+         */
+        unsigned int buildingHaloSaturation{65};
+        unsigned int buildingHaloRedShift{50};
     };
 
     /**

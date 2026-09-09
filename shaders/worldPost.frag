@@ -80,6 +80,38 @@ uniform float gamma;
 // what was there, because in TA this WAS the pixel.
 uniform float haloStrength;
 
+// Two adjustments applied to what the table returns, and they are RWE's, not
+// the original's -- they are here because a play-test of the exact colours
+// asked for something less saturated and redder than the table gives, and the
+// person asking is the one who remembers what it looked like on a CRT.
+//
+// A word on why that is a reasonable thing to want rather than a fudge. The
+// table's answers are correct as palette indices, but a palette index is not a
+// colour until something displays it, and TA's were displayed on a 1997 CRT
+// through a 256 entry LUT. Phosphor, a warmer white point and the gamma of
+// that path all pull a saturated blue-purple towards a duller red-magenta, and
+// none of that is in the data. So the arithmetic is left exact and the
+// correction sits here, in one place, switched off by setting both to 100 and
+// 0 -- which is the setting to use if you want to see what the table actually
+// says.
+//
+// 1.0 saturation keeps the table's own; lower pulls each pixel towards its own
+// luminance, so it desaturates without shifting hue.
+uniform float haloSaturation;
+// Pulls blue down towards green, which rotates the hue round from purple
+// towards red-magenta. 0 leaves the table's hue alone; 1 brings blue all the
+// way to green and leaves nothing magenta at all, so the useful range is the
+// middle. It never RAISES blue, so a blend that is already green-leaning --
+// the grey a green edge returns, for one -- is untouched.
+//
+// It has to work on the channels rather than by reordering them. The obvious
+// version, sending the larger of red and blue into red, does nothing at all to
+// the two harshest colours here, because they come out of the table with red
+// and blue exactly equal: black blended with magenta is (128,0,128) and
+// magenta blended with itself is (255,0,255), and those are the pixels that
+// most look like a stray highlighter mark.
+uniform float haloRedShift;
+
 // What the original's table found where a building's edge met nothing.
 const int TransparentIndex = 253;
 
@@ -128,6 +160,10 @@ void main(void)
             int top = indexOf(blend(maskIndex(s00), maskIndex(s10)));
             int bottom = indexOf(blend(maskIndex(s01), maskIndex(s11)));
             vec3 halo = blend(top, bottom).rgb;
+
+            // RWE's two corrections, below the line where the arithmetic ends.
+            halo.b = mix(halo.b, min(halo.b, halo.g), haloRedShift);
+            halo = mix(vec3(dot(halo, vec3(0.299, 0.587, 0.114))), halo, haloSaturation);
 
             dodged = mix(dodged, halo, haloStrength);
         }

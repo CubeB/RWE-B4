@@ -450,6 +450,7 @@ namespace rwe
         float frac,
         float shadeStrength,
         const UnitTextureAtlases& atlases,
+        bool cachedPiecesOnly,
         std::vector<UnitTextureMeshRenderInfo>& out)
     {
         const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
@@ -459,6 +460,18 @@ namespace rwe
         {
             const auto& mesh = meshes[i];
             if (!mesh.visible)
+            {
+                continue;
+            }
+
+            // For the building halo. The original's halo comes out of the
+            // cached bitmap's anti-aliasing, and a DONT_CACHE piece is not in
+            // that bitmap -- it is drawn straight to the screen each frame by
+            // the unshaded rasterizer (TOTALA-EXE-SHADING.md S:12a), never
+            // touching the table that produces the artefact. So a metal
+            // extractor's spinning top has no halo in the original while its
+            // base does, which is exactly what a play-test reported here.
+            if (cachedPiecesOnly && !mesh.cached)
             {
                 continue;
             }
@@ -639,7 +652,7 @@ namespace rwe
             // go unshaded with the rest, a difference on nine faces of the
             // Weasel and one of the truck.)
             auto finishedShadeStrength = unitDefinition.zBuffer ? shadeStrength : 0.0f;
-            drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, playerColorIndex, frac, finishedShadeStrength, atlases, out);
+            drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, playerColorIndex, frac, finishedShadeStrength, atlases, false, out);
         }
     }
 
@@ -950,13 +963,14 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         float frac,
         const UnitTextureAtlases& atlases,
+        bool cachedPiecesOnly,
         std::vector<UnitTextureMeshRenderInfo>& out)
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
         auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
 
-        drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, 0.0f, atlases, out);
+        drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, 0.0f, atlases, cachedPiecesOnly, out);
     }
 
     /**

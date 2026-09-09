@@ -83,6 +83,8 @@ namespace rwe
         s.worldPost.buildingMask = graphics.getUniformLocation(s.worldPost.handle.get(), "buildingMask");
         s.worldPost.alphaTable = graphics.getUniformLocation(s.worldPost.handle.get(), "alphaTable");
         s.worldPost.haloStrength = graphics.getUniformLocation(s.worldPost.handle.get(), "haloStrength");
+        s.worldPost.haloSaturation = graphics.getUniformLocation(s.worldPost.handle.get(), "haloSaturation");
+        s.worldPost.haloRedShift = graphics.getUniformLocation(s.worldPost.handle.get(), "haloRedShift");
 
         s.unitMask.handle = loadShader(graphics, "shaders/unitMask.vert", "shaders/unitMask.frag", texturedVertexAttribs);
         s.unitMask.mvpMatrix = graphics.getUniformLocation(s.unitMask.handle.get(), "mvpMatrix");

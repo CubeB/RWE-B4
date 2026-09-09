@@ -97,6 +97,8 @@ namespace rwe
         UniformLocation buildingMask;
         UniformLocation alphaTable;
         UniformLocation haloStrength;
+        UniformLocation haloSaturation;
+        UniformLocation haloRedShift;
     };
 
     class ShaderService

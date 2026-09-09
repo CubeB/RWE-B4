@@ -71,6 +71,18 @@ if ($phase -eq "solar") {
   # so the panels stay shut until something issues the on/off order.
   $env:RWE_DEBUG_SPAWN = 'ARMSOLAR*1@0:6:0'
 }
+if ($phase -eq "mex") {
+  # A metal extractor beside the commander, for the building halo.
+  #
+  # This phase exists to check one thing. TA's purple halo is an artefact of
+  # the CACHED bitmap's anti-aliasing, and a piece the script marks DONT_CACHE
+  # is not in that bitmap -- it is drawn straight to the screen each frame and
+  # never goes through the table that produces the halo. The extractor's top
+  # is such a piece. So the halo must appear along the base and stop at the
+  # top, and a run where the whole extractor is fringed is the regression this
+  # phase catches.
+  $env:RWE_DEBUG_SPAWN = 'ARMMEX*1@0:6:0'
+}
 $p = Start-Process -FilePath "D:\RWE\build-release\rwe.exe" -WorkingDirectory "D:\RWE\build-release" -ArgumentList $launchArgs -PassThru
 # The window can take a while to appear when a build is running alongside, so
 # poll for it rather than trust a fixed wait, and then give the game time to
@@ -345,6 +357,21 @@ if ($phase -eq "solar") {
   $bmp = Shot
   Crop $bmp "$outDir\vt-solar$tag-full.png" $o.X $o.Y 800 600 1
   Crop $bmp "$outDir\vt-solar$tag-open.png" ($o.X + 512) ($o.Y + 108) 105 100 6
+  $bmp.Dispose()
+}
+
+if ($phase -eq "mex") {
+  # Nothing to click: the extractor is spawned standing still, and the whole
+  # question is what its edges look like. The mouse is parked out of the way
+  # so no hover highlight lands on it.
+  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Start-Sleep -Seconds 8
+  $o = Origin
+  $bmp = Shot
+  Crop $bmp "$outDir\vt-mex$tag-full.png" $o.X $o.Y 800 600 1
+  # Tight and magnified on the extractor: the halo is one output pixel, so it
+  # cannot be judged at 1:1.
+  Crop $bmp "$outDir\vt-mex$tag-zoom.png" ($o.X + 520) ($o.Y + 110) 90 90 8
   $bmp.Dispose()
 }
 

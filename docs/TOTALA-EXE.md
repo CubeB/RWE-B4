@@ -10472,10 +10472,40 @@ Two consequences, and both are how you tell this apart from an approximation:
   four samples covered. An all-covered block is ordinary anti-aliasing, which
   RWE's supersample already does, and an all-uncovered block is terrain. So the
   artefact sits on the building's outermost pixels the way the original's sat
-  in the building's cached bitmap, instead of bleeding outward onto the ground.
+### Which pieces get it: "the non-animating part of the building"
 
-Three things remain RWE's rather than the original's, and are recorded rather
-than hidden.
+Mavor's sentence is precise and it names a mechanism RWE had already decoded
+under another heading. He anti-aliased **"the non-animating part of the
+building"** — and the thing that decides which part that is, is the COB
+`CACHE` / `DONT_CACHE` state (`TOTALA-EXE-SHADING.md` §12a, §15 item 8). The
+original keeps a finished unit in a cached bitmap rendered by the shaded
+rasterizer; a piece the script has marked `DONT_CACHE` is left out of that
+bitmap and drawn straight to the screen each frame by the unshaded twin. 137 of
+the shipped scripts use it, mostly on the pieces that move — turrets, lab arms,
+radar dishes.
+
+So the anti-aliasing and the halo it produces are properties **of the cache**,
+not of the building. A piece that is not in the cache never passes through the
+table and therefore never acquires a halo, no matter how hard its edge contrasts
+with what is behind it.
+
+That is directly observable, and it is what caught the divergence: a metal
+extractor in the original has the fringe along its base and pad and **not** on
+the arm and counterweights on top, which are exactly the pieces its script keeps
+out of the cache. RWE haloed the whole model until 2026-09-09 and now passes
+`cachedPiecesOnly` when it builds the halo mask, skipping any piece whose
+`UnitMesh::cached` is false. `tools/visual-test.ps1 -phase mex` is the
+regression test: base fringed, top clean.
+
+The pleasing part is that no new decoding was needed. `DONT_CACHE` was read out
+of the binary for the *shading* — a dont-cache piece is not shaded, because the
+unshaded rasterizer draws it — and the same flag turns out to answer "which part
+is the non-animating part" exactly. Two of Mavor's sentences, three years of
+his engine apart, describing one list of pieces.
+
+### What is RWE's own
+
+Three things, recorded rather than hidden.
 
 The first is a strength setting, `building-halo-strength`. 100 is the original,
 where the filtered pixel simply is the pixel; lower values blend back towards
@@ -10487,8 +10517,20 @@ share of a building then than it is now, and the effect is correspondingly
 subtler here than it was on a 640x480 screen. Matching the *proportion* instead
 would mean a wider rim and a less faithful mechanism; the mechanism was chosen.
 
-The second is that RWE haloes the whole model where Mavor describes anti-
-aliasing "the non-animating part of the building".
+The second is a colour correction, `building-halo-saturation` (65) and
+`building-halo-red-shift` (50), applied to what the table returns. A play-test
+of the exact colours asked for something less saturated and redder, and that is
+a fair thing to want rather than a fudge: a palette index is not a colour until
+something displays it, and TA's were displayed on a 1997 CRT through a hardware
+LUT, where phosphor, a warmer white point and the gamma of that path all pull a
+saturated blue-purple towards a duller red-magenta. None of that is in the data.
+So the arithmetic above stays exact and the correction sits in one place, off at
+100 and 0. The red shift pulls blue down towards green rather than reordering
+the channels, and that detail matters: the two harshest colours the table
+returns are black-with-magenta (128,0,128) and magenta-with-itself (255,0,255),
+and both have red and blue *exactly equal*, so any correction phrased as "send
+the larger of red and blue into red" leaves precisely the pixels that most need
+it untouched.
 
 The third is inherent to reproducing this from a screen-space mask, and is
 recorded here so it is not later reported as a bug. The original anti-aliases

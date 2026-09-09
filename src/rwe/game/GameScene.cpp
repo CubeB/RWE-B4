@@ -317,6 +317,8 @@ namespace rwe
           shadowsEnabled(sceneContext.globalConfig->shadows),
           vehicleShadowsEnabled(sceneContext.globalConfig->vehicleShadows),
           buildingHaloStrength(sceneContext.globalConfig->buildingHaloStrength),
+          buildingHaloSaturation(sceneContext.globalConfig->buildingHaloSaturation),
+          buildingHaloRedShift(sceneContext.globalConfig->buildingHaloRedShift),
           scrollSpeedSetting(sceneContext.globalConfig->scrollSpeed),
           gameParameters(gameParameters),
           audioLookup(audioLookup),

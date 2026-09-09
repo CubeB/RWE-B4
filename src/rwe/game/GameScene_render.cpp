@@ -1424,7 +1424,7 @@ namespace rwe
                     // The frame is see-through while it is built, so the shadow
                     // would show through it. Keep only the part cast outside the
                     // model's own outline.
-                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitAtlases, unitShadowMeshBatch.cutouts);
+                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitAtlases, false, unitShadowMeshBatch.cutouts);
                 }
             }
             for (const auto& [_, feature] : simulation.features)
@@ -1486,7 +1486,7 @@ namespace rwe
 
                 if (haloWanted && !unitDefinition.isMobile && !unit.isBeingBuilt(unitDefinition))
                 {
-                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, interpolationFraction, unitAtlases, buildingSilhouettes);
+                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, interpolationFraction, unitAtlases, true, buildingSilhouettes);
                 }
             }
             for (const auto& [_, feature] : simulation.features)
@@ -1689,6 +1689,8 @@ namespace rwe
             // for the halo to have come out of, which is exactly why the
             // original's went away with its own anti-aliasing switched off.
             sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloStrength, antiAliasEnabled ? static_cast<float>(buildingHaloStrength) / 100.0f : 0.0f);
+            sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloSaturation, static_cast<float>(buildingHaloSaturation) / 100.0f);
+            sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloRedShift, static_cast<float>(buildingHaloRedShift) / 100.0f);
             sceneContext.graphics->bindTexture(worldFrameBuffer.texture.get());
             sceneContext.graphics->setActiveTextureSlot1();
             sceneContext.graphics->bindTexture(dodgeMask.get());

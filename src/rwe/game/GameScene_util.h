@@ -334,7 +334,15 @@ namespace rwe
         const Vector3f& color,
         ColoredMeshBatch& batch);
 
-    /** The unit's model as the camera sees it, for stencil cut-outs. */
+    /**
+     * The unit's model as the camera sees it, for stencil cut-outs.
+     *
+     * cachedPiecesOnly leaves out the pieces the script has marked DONT_CACHE.
+     * The shadow cut-outs want the whole unit and pass false; the building halo
+     * passes true, because the original's halo is an artefact of the cached
+     * bitmap and a piece that is not in the cache never went through the table
+     * that produced it. See drawUnitMesh and TOTALA-EXE.md S:101.
+     */
     void drawUnitSilhouette(
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,
@@ -343,6 +351,7 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         float frac,
         const UnitTextureAtlases& atlases,
+        bool cachedPiecesOnly,
         std::vector<UnitTextureMeshRenderInfo>& out);
 
     void drawSpriteParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, SpriteBatch& batch);
