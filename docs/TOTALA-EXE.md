@@ -8934,6 +8934,15 @@ there is a regression test for it now.
   disintegrators are `rendertype=3` and declare no `duration`, so for them the
   original computes the tail and throws it away. Anything that wanted it would
   have to be a mod.
+- **The purple building halo is decoded and deliberately *not* reproduced** —
+  §101. What stood for transparent in the anti-aliasing table is measured rather
+  than guessed (index 253, plain magenta, well clear of the field), so the bug
+  itself is explained. It was built anyway on 2026-09-08 and removed on
+  2026-09-09: the original's halo is about one pixel of a 640x480 screen, and a
+  faithful one on a modern display could not be seen at a play-test, while
+  anything wide enough to see is no longer the measurement. A bug whose whole
+  character is that it is one pixel wide does not survive the change of
+  resolution.
 
 ## 92. The D-gun's projectile: `noexplode`, the full-range flight, and who gets hurt
 
@@ -10371,8 +10380,9 @@ darkening.
 
 ## 101. The purple halo on buildings, and what stood for transparent
 
-A bug of the original's, reproduced on purpose. Jon Mavor names it as his own in
-the 2012 post that prompted §100: "Ever notice that a lot of the buildings have
+A bug of the original's, decoded but deliberately not reproduced — see the end
+of this section for why. Jon Mavor names it as his own in the 2012 post that
+prompted §100: "Ever notice that a lot of the buildings have
 a weird purple halo? Basically the table broke when dealing with the edge and
 transparency because I didn't have a correct way to represent that."
 
@@ -10427,32 +10437,38 @@ nearest-match that follows the average lands on (123, 59, 71) — a dull rose th
 belongs to no part of the picture. "The table broke" is exactly that: the
 average is fine and the snap has nowhere to go.
 
-### What RWE does with it
+### Decoded, tried, and deliberately not shipped
 
-Reproduced in `worldPost.frag`, which is the same place in the pipeline: the one
-blit the whole world view passes through, where the supersampled buffer is
-filtered down. The buildings' coverage is drawn into a mask at the supersampled
-size, and a pixel the mask says is on an outline is blended towards the halo
-colour.
+The decode above stands; the reproduction does not, and it is worth saying why
+so that nobody builds it a second time from the same evidence.
 
-Two deliberate departures, both recorded rather than hidden. The colour is the
-**mean** of row 253 rather than the per-entry value, because by the post pass
-the pixel is a blended colour and its palette index is long gone. And the width
-and strength are settings (`building-halo-width`, `building-halo-strength`)
-rather than constants, because the artefact does not survive translation on its
-own: the original's halo is about one pixel of a 640x480 screen, and one pixel
-of a modern screen is a quarter of that, so a faithful one would be correct and
-invisible. It follows the anti-alias setting, since with no supersampling there
-is no downsample for it to have come out of — which is true of the original too.
+It was implemented on 2026-09-08 and removed on 2026-09-09. It went in the same
+place the original's comes from: `worldPost.frag`, the one blit the whole world
+view passes through, where the supersampled buffer is filtered down. The
+buildings' coverage went into a mask at the supersampled size and any pixel the
+mask said was on an outline was blended towards the mean of row 253. It worked
+as designed. It was taken out because at a play-test it could not be seen at
+all, which is the outcome the departures below were already warning about.
 
-One artefact is inherent to reproducing this from a screen-space mask, and is
-recorded here so it is not later reported as a bug. The original anti-aliases
-each building's bitmap **in isolation**, so the halo follows the building's own
-outline and anything standing in front is simply painted over the top. RWE's
-mask is drawn depth-tested against the finished world, so the coverage also ends
-where something else occludes the building — and to the post pass a boundary is
-a boundary, so a tank parked in front of a factory picks up a thread of halo
-along the edge that overlaps it. Dropping the depth test trades it for a worse
-one, a building hidden behind a hill drawing its outline over the hill. Neither
-is the original's, and the depth-tested version is the one that never draws a
-halo where there is no building to see.
+Three departures were needed to reproduce it here, and the third is the one that
+killed it. The colour has to be the **mean** of row 253 rather than the
+per-entry value, because by the post pass the pixel is a blended colour and its
+palette index is long gone. The mask has to be depth-tested against the finished
+world where the original anti-aliases each building's bitmap **in isolation**,
+so a tank parked in front of a factory picks up a thread of halo along the edge
+that overlaps it — and the alternative, dropping the depth test, is worse: a
+building hidden behind a hill draws its outline over the hill. And the width and
+strength have to be settings rather than constants, because **the artefact does
+not survive the change of resolution**. The original's halo is about one pixel
+of a 640x480 screen. One pixel of a modern screen is a quarter of that area and
+a much smaller share of the building, so a faithful reproduction is
+simultaneously correct and invisible, and anything visible is no longer the
+measurement — it is a one-pixel artefact scaled up until it can be seen, which
+is a different picture from the one TA drew.
+
+That is the general shape of the thing, and it is why this sits with §88 and §91
+rather than in the shipped renderer: a bug whose whole character is that it is
+one pixel wide does not port to a screen where one pixel means something else.
+The decode is kept because it is sound and independently useful — index 253 is
+measured, not guessed, and the "table broke" is now explained rather than
+quoted.

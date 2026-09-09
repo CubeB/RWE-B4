@@ -1457,16 +1457,6 @@ namespace rwe
 
         sceneContext.graphics->enableDepthBuffer();
 
-        // The buildings on their own, for the halo the post pass puts round
-        // them. Only the finished ones: a nanoframe is a see-through display
-        // rather than a solid model, and the original anti-aliased the
-        // non-animating part of a building, which is the part that is there.
-        // With anti-aliasing off there is no downsample for the halo to have
-        // come out of, so neither the mask nor the meshes that fill it are
-        // worth building.
-        auto haloWanted = antiAliasEnabled && buildingHaloStrength > 0;
-        std::vector<UnitTextureMeshRenderInfo> buildingSilhouettes;
-
         UnitMeshBatch unitMeshBatch;
         {
             RWE_RENDERPROF("w.unit.build");
@@ -1483,11 +1473,6 @@ namespace rwe
                 const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
                 const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
                 drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, simulation.gameTime.value, interpolationFraction, shadeStrengthFor(!unitDefinition.isMobile), unitAtlases, unitMeshBatch);
-
-                if (haloWanted && !unitDefinition.isMobile && !unit.isBeingBuilt(unitDefinition))
-                {
-                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, interpolationFraction, unitAtlases, buildingSilhouettes);
-                }
             }
             for (const auto& [_, feature] : simulation.features)
             {
@@ -1632,21 +1617,6 @@ namespace rwe
             worldRenderService.drawBatch(nanoParticlesBatch, viewProjectionMatrix);
         }
 
-        // The buildings' coverage, for the halo. Depth testing is still on and
-        // the depth buffer still holds the world, so a building behind a hill
-        // marks nothing and gets no halo; depth writes are off because the
-        // world is finished with and the flashes pass below shares the buffer.
-        if (haloWanted)
-        {
-            RWE_RENDERPROF("w.halomask");
-            sceneContext.graphics->disableDepthWrites();
-            sceneContext.graphics->bindFrameBufferColorBuffer(buildingMask.get());
-            sceneContext.graphics->clearColor();
-            worldRenderService.drawUnitMaskBatch(buildingSilhouettes);
-            sceneContext.graphics->bindFrameBufferColorBuffer(worldFrameBuffer.texture.get());
-            sceneContext.graphics->enableDepthWrites();
-        }
-
         sceneContext.graphics->disableDepthTest();
 
         {
@@ -1671,20 +1641,10 @@ namespace rwe
             auto quadMesh = sceneContext.graphics->createUnitTexturedQuadFlipped(Rectangle2f::fromTLBR(1.0f, 0.0f, 0.0f, 1.0f));
             sceneContext.graphics->bindShader(sceneContext.shaders->worldPost.handle.get());
             sceneContext.graphics->setUniformInt(sceneContext.shaders->worldPost.dodgeMask, 1);
-            sceneContext.graphics->setUniformInt(sceneContext.shaders->worldPost.buildingMask, 2);
             sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.gamma, static_cast<float>(gammaSetting) / 100.0f);
-            // The mean of PALETTE.ALP's row 253 -- see worldPost.frag. With no
-            // supersampling there is no downsample and so nothing for the halo
-            // to have come from, which is where the original's comes from too.
-            sceneContext.graphics->setUniformVec3(sceneContext.shaders->worldPost.haloColor, 158.0f / 255.0f, 109.0f / 255.0f, 171.0f / 255.0f);
-            sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloWidth, static_cast<float>(buildingHaloWidth));
-            sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloStrength, antiAliasEnabled ? static_cast<float>(buildingHaloStrength) / 100.0f : 0.0f);
-            sceneContext.graphics->setUniformVec2(sceneContext.shaders->worldPost.haloTexelStep, 1.0f / static_cast<float>(worldViewport.width()), 1.0f / static_cast<float>(worldViewport.height()));
             sceneContext.graphics->bindTexture(worldFrameBuffer.texture.get());
             sceneContext.graphics->setActiveTextureSlot1();
             sceneContext.graphics->bindTexture(dodgeMask.get());
-            sceneContext.graphics->setActiveTextureSlot2();
-            sceneContext.graphics->bindTexture(buildingMask.get());
             sceneContext.graphics->setActiveTextureSlot0();
             sceneContext.graphics->drawTriangles(quadMesh);
 

@@ -136,27 +136,6 @@ namespace rwe
 
         /** Edge anti-aliasing: the original supersamples the unit and box-filters it down. */
         bool antiAlias{true};
-
-        /**
-         * The purple halo on building edges, reproduced deliberately.
-         *
-         * It is a bug of the original's, and its author says so: the table he
-         * box-filtered a building's double-size buffer down through "broke
-         * when dealing with the edge and transparency". What stood for
-         * transparent measures out of the shipped PALETTE.ALP as index 253,
-         * plain magenta, and the colour is that row's mean. The width is in
-         * output pixels and the strength is a percentage, because the artefact
-         * does not survive translation on its own -- the original's is about
-         * one pixel of a 640x480 screen, so at a modern resolution a faithful
-         * one pixel would be invisible. 0 strength leaves it out.
-         *
-         * rwe.cfg keys building-halo-strength and building-halo-width; it
-         * follows the anti-alias setting, since with no supersampling there is
-         * no downsample for it to have come from. See worldPost.frag and
-         * TOTALA-EXE.md S:101.
-         */
-        unsigned int buildingHaloStrength{55};
-        unsigned int buildingHaloWidth{1};
     };
 
     /**

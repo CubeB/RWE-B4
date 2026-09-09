@@ -656,11 +656,6 @@ namespace rwe
         glUniform1f(location.value, value);
     }
 
-    void GraphicsContext::setUniformVec2(UniformLocation location, float a, float b)
-    {
-        glUniform2f(location.value, a, b);
-    }
-
     void GraphicsContext::setUniformVec3(UniformLocation location, float a, float b, float c)
     {
         glUniform3f(location.value, a, b, c);
