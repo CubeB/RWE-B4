@@ -55,6 +55,10 @@ namespace rwe
 
     public:
         UiListBox(int posX, int posY, unsigned int sizeX, unsigned int sizeY, std::shared_ptr<SpriteSeries> font);
+
+        /** Hands back this component's subscriptions while its own subjects are still alive; see UiComponent::releaseSubscriptions. */
+        ~UiListBox() override { releaseSubscriptions(); }
+
         void appendItem(std::string item);
 
         void setSelectedItem(const std::string& item);

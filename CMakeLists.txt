@@ -963,6 +963,7 @@ set(TEST_FILES
     src/rwe/util/SimpleLogger.test.cpp
     src/rwe/util/SpanStream.test.cpp
     src/rwe/util/rwe_string.test.cpp
+    src/rwe/ui/UiComponent.test.cpp
     src/rwe/ui/UiTextBox.test.cpp
     src/rwe/UiRenderService.test.cpp
     )

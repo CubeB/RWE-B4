@@ -40,7 +40,8 @@ namespace rwe
 
         UiPanel& operator=(UiPanel&& panel) noexcept;
 
-        ~UiPanel() override = default;
+        /** Hands back this panel's subscriptions while groupMessagesSubject is still alive; see UiComponent::releaseSubscriptions. */
+        ~UiPanel() override { releaseSubscriptions(); }
 
         void render(UiRenderService& graphics) const override;
 

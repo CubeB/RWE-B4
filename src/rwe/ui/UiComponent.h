@@ -44,6 +44,23 @@ namespace rwe
 
         virtual ~UiComponent();
 
+        /**
+         * Hands every stored subscription back and forgets it. Idempotent, and
+         * ~UiComponent calls it, so a component with no subjects of its own
+         * need do nothing.
+         *
+         * A component that *owns* a Subject must call this in its own
+         * destructor. ~UiComponent is the base's, and a base destructor runs
+         * after the derived class's members are already gone -- so a
+         * subscription to one of those members would be handed back to a
+         * destroyed Subject, and Subject::unsubscribe walks and erases a
+         * vector that no longer exists. This is the mirror image of the rule
+         * in CLAUDE.md: that one is a subscriber outliving nothing and
+         * failing to hand its subscription back, this one is handing it back
+         * too late. Both crash, and both do it a scene later than the mistake.
+         */
+        void releaseSubscriptions();
+
         unsigned int getWidth() { return sizeX; }
 
         unsigned int getHeight() { return sizeY; }

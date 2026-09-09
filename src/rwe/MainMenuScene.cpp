@@ -1115,7 +1115,16 @@ namespace rwe
                     helpLabel->setText(std::string());
                 }
             });
-            button->get().addSubscription(std::move(hoverSub));
+            // Not handed to addSubscription, where its sibling above goes.
+            // That store is for subscriptions to subjects that will outlive
+            // the component; this one is to the button's own subject, which
+            // dies with it, so there is nothing to hand back. Letting the
+            // handle go without unsubscribing is exactly what CLAUDE.md says
+            // it does. (Storing it is safe too, now that UiStagedButton
+            // releases in its own destructor -- it was not, and cost a crash
+            // on entering a skirmish, the menu's panels being destroyed on
+            // the way in.)
+            hoverSub.reset();
         };
 
         attach("CommanderDeath", model.skirmishOptions.commanderDeath);

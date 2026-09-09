@@ -94,6 +94,9 @@ namespace rwe
             std::shared_ptr<Sprite> pressedSprite,
             std::shared_ptr<SpriteSeries> labelFont);
 
+        /** Hands back this component's subscriptions while its own subjects are still alive; see UiComponent::releaseSubscriptions. */
+        ~UiStagedButton() override { releaseSubscriptions(); }
+
         void render(UiRenderService& graphics) const override;
 
         void mouseDown(MouseButtonEvent event) override;
