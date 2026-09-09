@@ -5,10 +5,16 @@ out vec4 outColor;
 
 uniform sampler2D screenTexture;
 uniform sampler2D dodgeMask;
-// Coverage of the buildings, 1 inside and 0 outside, drawn at the supersampled
-// size and read back here through the same linear filter that does the
-// downsample. See the halo comment below.
+// The buildings' own pixels as PALETTE INDICES, drawn at the supersampled
+// size: red is the index, alpha is 1 where a building covered the sample and
+// 0 where the buffer was cleared. See unitMask.frag, and the halo below for
+// why it carries indices rather than coverage.
 uniform sampler2D buildingMask;
+// palettes/PALETTE.ALP as a 256x256 image: rgb is the colour of the blend of
+// the two entries, and alpha is that blend's own palette index, so a result
+// can be fed straight back in as the operand of another lookup. See
+// AlphaTable.h.
+uniform sampler2D alphaTable;
 // The options screen's gamma. The original is not a gamma curve at all: it
 // rewrites the palette as min(255, c * m) with m = 0.5 + v/24 over a slider
 // of 20 steps, so it runs 0.5x to 1.333x and 1.0 is untouched. A straight
@@ -16,45 +22,48 @@ uniform sampler2D buildingMask;
 // the whole world view passes through.
 uniform float gamma;
 
-// The purple halo, reproduced on purpose.
+// The purple halo on buildings, reproduced by running the original's own
+// arithmetic rather than by painting on an impression of the result.
 //
 // It is a bug, and it is the original's. Jon Mavor, who wrote the engine:
 // "Ever notice that a lot of the buildings have a weird purple halo? Basically
 // the table broke when dealing with the edge and transparency because I didn't
-// have a correct way to represent that." He anti-aliased the non-animating part
-// of a building by rendering it into a buffer of twice the size in each
-// dimension and box-filtering it down through a lookup table -- "a lookup on
-// the top two pixel and the bottom two pixels. The results from those two ops
-// were then looked up to give me the final color, so 3 lookups." At the
-// silhouette the pairs being averaged are a real colour and whatever stood for
-// transparent, and the answer that came back was wrong.
+// have a correct way to represent that." He anti-aliased the non-animating
+// part of a building by rendering it into a buffer of twice the size in each
+// dimension and filtering it down through a lookup table -- "a lookup on the
+// top two pixel and the bottom two pixels. The results from those two ops were
+// then looked up to give me the final color, so 3 lookups."
 //
-// What stood for transparent is measurable rather than guessable. Blending
-// every palette entry against each of the 256 possible partners through the
-// shipped PALETTE.ALP and asking which partner turns ordinary building colours
-// purple gives one clear winner: index 253, which is (255, 0, 255) -- plain
-// magenta, the usual colour key. Nothing else is close; the runner-up is index
-// 5, (128, 0, 128), and the composited bitmap's own transparent index 1 comes
-// back reddish instead. Averaged with magenta and snapped to the nearest entry
-// the palette actually has, a mid grey lands on (123, 59, 71) and white on
-// (175, 111, 127). The mean over the row is the colour below.
+// That is what happens below, literally. RWE already renders the world into a
+// buffer of exactly twice the size when anti-aliasing is on, so each output
+// pixel is one 2x2 block of it, which is the same shape the original filtered.
+// The two top samples go through the table, the two bottom samples go through
+// the table, and those two results go through the table again. Where a sample
+// was not covered by a building it stands in as index 253 -- plain magenta,
+// measured out of PALETTE.ALP as what the original's table found at the edge,
+// beating the runner-up by more than half again (S:101). At the silhouette the
+// pairs really are a real colour and whatever stood for transparent, exactly
+// as they were in 1997, and the wrong colour falls out of the shipped table on
+// its own.
 //
-// RWE takes the row's mean rather than the per-entry value, because by this
-// point in the frame the pixel is a blended colour and its palette index is
-// long gone. Width and strength are settings because the artefact does not
-// survive translation on its own: the original's halo is about one pixel of a
-// 640x480 screen, and one pixel of a modern one is a quarter of the size, so
-// left alone it would be technically faithful and very subtle indeed, which is
-// why the defaults are 3 and 75 rather than 1 and something smaller.
+// Two things follow from doing it this way rather than with a colour constant,
+// and both are the point:
 //
-// Beware the trap those two numbers sit next to. The halo was twice reported
-// invisible and twice the width was blamed, because "one pixel of a 640x480
-// screen is nothing here" is a ready explanation and it fits. It was wrong
-// both times: the coverage mask was empty, because the pass that fills it
-// redraws geometry the world pass has already drawn and was running under
-// GL_LESS, which rejects a fragment sitting at exactly the stored depth. The
-// numbers here were never the reason nothing showed up. See the halo mask pass
-// in GameScene_render.cpp for the fix and the reasoning.
+//   * The colour is per pixel and depends on the building's own edge. Read out
+//     of the shipped table, a grey edge (128,128,128) comes back as index 148,
+//     (167,123,179), a light purple; a near white edge comes back (211,171,215);
+//     a pure green edge comes back (128,128,128), grey, not purple at all. The
+//     "purple halo" is what that lookup averages to over the greys and metals
+//     buildings are actually painted in -- an emergent property, not a fixed
+//     colour, and painting one colour on every edge is a caricature of it.
+//
+//   * It lands where the original's lands. Only a MIXED block gets it: 1, 2 or
+//     3 of the four samples covered. A block entirely inside the building is
+//     ordinary anti-aliasing, which RWE's own supersample already does, and a
+//     block entirely outside is terrain. So the artefact sits on the
+//     building's own outermost pixels, the way the original's sat in the
+//     building's cached bitmap -- a discoloured rim, not a glow thrown onto
+//     the ground around it.
 //
 // One artefact is inherent to doing this from a screen-space mask and is worth
 // knowing about before it is reported as a bug. The original anti-aliases each
@@ -66,37 +75,32 @@ uniform float gamma;
 // that overlaps it. Dropping the depth test trades that for the worse one: a
 // building completely hidden behind a hill would draw its outline over the
 // hill.
-uniform vec3 haloColor;
-// How far from the outline the halo reaches, in output pixels.
-uniform float haloWidth;
-// 0 leaves it out entirely.
+//
+// 0 strength leaves it out. 1 is the original: the filtered pixel replaces
+// what was there, because in TA this WAS the pixel.
 uniform float haloStrength;
-uniform vec2 haloTexelStep;
 
-// How much of an outline is near this pixel: the spread of the coverage over a
-// small ring, which is zero well inside the building and well outside it and
-// rises to 1 across the edge. Reaching for the spread rather than for the
-// single sample is what lets the width be more than the one pixel the
-// downsample would give on its own.
-float outlineNearness()
+// What the original's table found where a building's edge met nothing.
+const int TransparentIndex = 253;
+
+// One entry of PALETTE.ALP. The table is symmetric in all 65536 pairs, so
+// which operand is "source" and which is "destination" does not arise.
+vec4 blend(int a, int b)
 {
-    float here = texture(buildingMask, fragTexCoord).r;
-    float low = here;
-    float high = here;
+    return texelFetch(alphaTable, ivec2(a, b), 0);
+}
 
-    vec2 reach = haloTexelStep * haloWidth;
-    for (int i = 0; i < 4; ++i)
-    {
-        vec2 offset = (i == 0) ? vec2(reach.x, 0.0)
-            : (i == 1) ? vec2(-reach.x, 0.0)
-            : (i == 2) ? vec2(0.0, reach.y)
-            : vec2(0.0, -reach.y);
-        float neighbour = texture(buildingMask, fragTexCoord + offset).r;
-        low = min(low, neighbour);
-        high = max(high, neighbour);
-    }
+// Alpha carries a blended entry's own index, for chaining into another lookup.
+int indexOf(vec4 entry)
+{
+    return int((entry.a * 255.0) + 0.5);
+}
 
-    return high - low;
+// A mask sample: red is the index, and an uncovered sample stands in as the
+// transparent one, which is where the bug comes from.
+int maskIndex(vec4 texel)
+{
+    return texel.a < 0.5 ? TransparentIndex : int((texel.r * 255.0) + 0.5);
 }
 
 void main(void)
@@ -107,7 +111,26 @@ void main(void)
 
     if (haloStrength > 0.0)
     {
-        dodged = mix(dodged, haloColor, outlineNearness() * haloStrength);
+        // The 2x2 block of the supersampled buffer this output pixel came
+        // from. texelFetch and not texture(): these are palette indices, and
+        // the mean of two palette indices names a third colour that is nowhere
+        // between them, so nothing here may be filtered.
+        ivec2 block = (ivec2(fragTexCoord * vec2(textureSize(buildingMask, 0))) / 2) * 2;
+        vec4 s00 = texelFetch(buildingMask, block + ivec2(0, 0), 0);
+        vec4 s10 = texelFetch(buildingMask, block + ivec2(1, 0), 0);
+        vec4 s01 = texelFetch(buildingMask, block + ivec2(0, 1), 0);
+        vec4 s11 = texelFetch(buildingMask, block + ivec2(1, 1), 0);
+
+        float covered = s00.a + s10.a + s01.a + s11.a;
+        if (covered > 0.5 && covered < 3.5)
+        {
+            // The original's three lookups, in the original's order.
+            int top = indexOf(blend(maskIndex(s00), maskIndex(s10)));
+            int bottom = indexOf(blend(maskIndex(s01), maskIndex(s11)));
+            vec3 halo = blend(top, bottom).rgb;
+
+            dodged = mix(dodged, halo, haloStrength);
+        }
     }
 
     outColor = vec4(clamp(dodged * gamma, 0.0, 1.0), 1.0);

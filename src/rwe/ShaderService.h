@@ -78,11 +78,15 @@ namespace rwe
         UniformLocation color;
     };
 
-    /** Coverage of a category of model, for finding its silhouette in the post pass. */
+    /**
+     * A category of model drawn as palette indices, for the post pass to run
+     * the original's anti-alias table over. See unitMask.frag.
+     */
     struct UnitMaskShader
     {
         ShaderProgramHandle handle;
         UniformLocation mvpMatrix;
+        UniformLocation paletteIndexSampler;
     };
 
     struct WorldPostShader
@@ -91,10 +95,8 @@ namespace rwe
         UniformLocation dodgeMask;
         UniformLocation gamma;
         UniformLocation buildingMask;
-        UniformLocation haloColor;
-        UniformLocation haloWidth;
+        UniformLocation alphaTable;
         UniformLocation haloStrength;
-        UniformLocation haloTexelStep;
     };
 
     class ShaderService

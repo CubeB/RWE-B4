@@ -136,45 +136,44 @@ namespace rwe
 
         /** Edge anti-aliasing: the original supersamples the unit and box-filters it down. */
         bool antiAlias{true};
-
         /**
-         * The purple halo on building edges, reproduced deliberately.
+         * The purple halo on building edges, reproduced by running the
+         * original's own arithmetic.
          *
          * It is a bug of the original's, and its author says so: the table he
          * box-filtered a building's double-size buffer down through "broke
-         * when dealing with the edge and transparency". What stood for
-         * transparent measures out of the shipped PALETTE.ALP as index 253,
-         * plain magenta, and the colour is that row's mean. The width is in
-         * output pixels and the strength is a percentage, because the artefact
-         * does not survive translation on its own -- the original's is about
-         * one pixel of a 640x480 screen, and one pixel of a modern display is a
-         * far smaller share of a building. 0 strength leaves it out.
+         * when dealing with the edge and transparency". RWE does not paint an
+         * approximation of the result on; it renders the buildings' PALETTE
+         * INDICES into a mask at the supersampled size and filters that down
+         * through the shipped palettes/PALETTE.ALP with three chained lookups,
+         * which is what the original did and in the order it did it. The wrong
+         * colour then falls out of the table rather than being chosen. See
+         * worldPost.frag, AlphaTable.h and TOTALA-EXE.md S:101.
          *
-         * **Do not read the defaults as a measurement.** The halo was reported
-         * invisible twice, on 2026-09-08 and again on 2026-09-09, and both
-         * times the width looked like the culprit -- the original's artefact is
-         * one pixel of a 640x480 screen, so "too small to see" was the
-         * available explanation and it was wrong. It was not being drawn at
-         * all: the mask pass redraws geometry the world pass has already
-         * drawn, and it ran under GL_LESS, which rejects a fragment at exactly
-         * the depth already stored. Every fragment was, so the mask was empty
-         * at every width and every strength. See GameScene_render.cpp.
+         * There is no width setting, and that absence is the point. The
+         * artefact is one output pixel wide because it is a 2x2 downsample,
+         * exactly as it was in 1997; widening it would mean inventing pixels
+         * the original never drew. What is left is a strength: 100 is the
+         * original, where the filtered pixel simply IS the pixel, and lower
+         * values blend it back towards RWE's own rendering for anyone who
+         * finds it too strong. 0 leaves it out.
          *
-         * 3 and 75 are therefore what was chosen once the thing actually
-         * rendered, not a compensation for anything. 1 is the arithmetically
-         * faithful width and is a legitimate setting; it is simply far subtler
-         * than TA's, because one pixel of this screen is not one pixel of that
-         * one. The lesson is the one this file keeps learning: an invisible
-         * feature is a broken feature until proven otherwise, and turning the
-         * number up is not the way to find out which.
+         * **Two warnings, both paid for.** The first: this follows the
+         * anti-alias setting, because with no supersampling there is no 2x
+         * buffer and so no downsample for the halo to have come out of --
+         * which is why the original's went away with its anti-aliasing off
+         * too. The second, and the expensive one: the halo was twice reported
+         * invisible and twice the width was blamed, on the entirely reasonable
+         * ground that one pixel of a 640x480 screen is a much larger share of
+         * a building than one pixel here. That was wrong both times. It was
+         * not being drawn at all, because the mask pass ran under GL_LESS over
+         * geometry already at that exact depth. An invisible effect is a
+         * broken effect until proven otherwise, and turning the number up is
+         * not how you find out which.
          *
-         * rwe.cfg keys building-halo-strength and building-halo-width; it
-         * follows the anti-alias setting, since with no supersampling there is
-         * no downsample for it to have come from. See worldPost.frag and
-         * TOTALA-EXE.md S:101.
+         * rwe.cfg key building-halo-strength.
          */
-        unsigned int buildingHaloStrength{75};
-        unsigned int buildingHaloWidth{3};
+        unsigned int buildingHaloStrength{100};
     };
 
     /**

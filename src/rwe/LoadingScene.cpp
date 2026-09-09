@@ -472,6 +472,7 @@ namespace rwe
             atlasInfo.paletteIndexAtlas,
             std::move(atlasInfo.teamPaletteIndexAtlases),
             atlasInfo.shadeTableTexture,
+            atlasInfo.alphaTableTexture,
             std::move(simulation),
             std::move(mapInfo.terrainGraphics),
             std::move(dataMaps.builderGuisDatabase),

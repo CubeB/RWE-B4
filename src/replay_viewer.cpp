@@ -185,8 +185,7 @@ int main(int argc, char* argv[])
         config.shadingStrengthUnits = std::min(100u, args.getUint("shading-strength-units", 25));
         config.shadingStrengthBuildings = std::min(100u, args.getUint("shading-strength-buildings", 40));
         config.antiAlias = args.getString("anti-alias", "true") != "false";
-        config.buildingHaloStrength = std::min(100u, args.getUint("building-halo-strength", 75));
-        config.buildingHaloWidth = std::clamp(args.getUint("building-halo-width", 3), 1u, 8u);
+        config.buildingHaloStrength = std::min(100u, args.getUint("building-halo-strength", 100));
 
         auto windowMode = rwe::WindowMode::Bordered;
         auto windowModeString = args.getString("window-mode", "");

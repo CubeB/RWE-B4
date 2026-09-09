@@ -4,6 +4,7 @@
 #include <rwe/util/SpanStream.h>
 #include <rwe/BoxTreeSplit.h>
 #include <rwe/io/gaf/GafArchive.h>
+#include <rwe/AlphaTable.h>
 #include <rwe/ShadeTable.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/match.h>
@@ -390,6 +391,32 @@ namespace rwe
 
         SharedTextureHandle shadeTableTexture(graphics->createTexture(shadeTableToImage(shadeTable, *palette)));
 
+        // The same story as the shade table, with one difference worth
+        // knowing: the generator here is a reconstruction rather than a
+        // transcription, because the routine that built the shipped file was
+        // never found in the binary. See AlphaTable.h.
+        auto alphaTable = [&]() {
+            auto bytes = vfs->readFile("palettes/PALETTE.ALP");
+            if (bytes)
+            {
+                if (auto table = readAlphaTable(*bytes); table)
+                {
+                    LOG_INFO << "Loaded alpha table from palettes/PALETTE.ALP";
+                    return *table;
+                }
+
+                LOG_WARN << "palettes/PALETTE.ALP is not " << (AlphaTableEntries * AlphaTableEntries) << " bytes, generating an approximate alpha table from the palette instead";
+            }
+            else
+            {
+                LOG_WARN << "palettes/PALETTE.ALP could not be read, generating an approximate alpha table from the palette instead";
+            }
+
+            return generateAlphaTable(*palette);
+        }();
+
+        SharedTextureHandle alphaTableTexture(graphics->createTexture(alphaTableToImage(alphaTable, *palette)));
+
         auto teamColorInfo = createTeamColorAtlases(*vfs, *graphics, *palette);
 
         return TextureAtlasInfo{
@@ -400,7 +427,8 @@ namespace rwe
             std::move(teamColorInfo.atlasMap),
             std::move(paletteIndexAtlasTexture),
             std::move(teamColorInfo.paletteIndexAtlases),
-            std::move(shadeTableTexture)};
+            std::move(shadeTableTexture),
+            std::move(alphaTableTexture)};
     }
 
 }

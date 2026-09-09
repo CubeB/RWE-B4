@@ -10392,77 +10392,105 @@ composite already goes through it (`0x4B8500` → `0x4CBF2C`). The anti-aliasing
 code path itself was **not** followed in the binary, so the identification rests
 on there being nothing else it could be.
 
-**Which index stood for transparent is measured, and it is not a close call.**
-Blending every palette entry against each of the 256 possible partners through
-the shipped `PALETTE.ALP`, and scoring each partner by how purple it makes
-ordinary building colours — red and blue both above green, over the entries with
-luminance 40 or more — gives one clear winner:
+**Which index stood for transparent is measured.** Blending every palette entry
+against each of the 256 possible partners through the shipped `PALETTE.ALP`, and
+scoring each partner by how purple it makes ordinary building colours — the mean
+of `(R + B) / 2 − G` over every entry of luminance 40 or more — ranks them:
 
 | partner | the index itself | mean result | purpleness |
 |---|---|---|---|
-| **253** | **(255, 0, 255)** | (158, 109, 171) | **+40.2** |
-| 5 | (128, 0, 128) | (116, 76, 120) | +25.8 |
-| 220 | (103, 59, 127) | (114, 93, 123) | +10.1 |
-| 1 | (128, 0, 0) | (122, 65, 60) | **−8.0** |
-| 0 | (0, 0, 0) | (60, 63, 58) | −21.9 |
+| **253** | **(255, 0, 255)** | (158, 108, 169) | **+55.2** |
+| 252 | (0, 0, 255) | (55, 70, 186) | +50.7 |
+| 5 | (128, 0, 128) | (117, 76, 119) | +41.6 |
+| 249 | (255, 0, 0) | (172, 76, 58) | +39.2 |
+| 1 | (128, 0, 0) | (123, 65, 58) | +24.9 |
+| 0 | (0, 0, 0) | (61, 64, 56) | −5.9 |
 
-Index 253 is plain magenta, the usual colour key, and it wins by a distance.
-Note the two that lose: index 1 is the transparent colour of the *composited
-bitmap* (§24 of the shading document) and comes back reddish rather than purple,
-so the AA table and the composite are not using the same convention; and index 0
-is black, which averages to grey.
+**253 wins, but be honest about the margin: pure blue is close behind it.** The
+score alone would not settle this. What settles it is that 253 is (255, 0, 255),
+plain magenta, which is the conventional colour key and is not a colour any of
+the artwork uses, while 252 is pure blue and appears in the artwork all over the
+place. A transparency sentinel has to be a colour nothing legitimately is.
+Index 0 is black and averages to grey, which is what a sentinel of 0 would have
+produced and is not what anybody saw.
 
-Worked values, straight out of the table:
+An earlier version of this section put 253 at +40.2 against a runner-up of
++25.8, and put index 1 at −8.0 — "comes back reddish rather than purple". Those
+figures came from a reconstruction of the table rather than from the shipped
+file and are withdrawn; index 1 is quite purple, at +24.9. The identification of
+253 survives, on the argument above rather than on the gap.
+
+Worked values, read straight out of `palettes/PALETTE.ALP`:
 
 ```
-grey  (128,128,128) + 253 -> index  23 = (123, 59, 71)
-white (251,251,251) + 253 -> index  20 = (175,111,127)
-blue  ( 39, 63, 87) + 253 -> index  26 = ( 87, 35, 43)
-green (  0,255,  0) + 253 -> index 167 = ( 47,119, 27)
+grey  (128,128,128) idx   7 + 253 -> index 148 = (167,123,179)   light purple
+white (251,251,251) idx  80 + 253 -> index 146 = (211,171,215)   pale lilac
+blue  ( 39, 63, 87) idx 120 + 253 -> index 150 = (119, 75,143)   violet
+green (  0,255,  0) idx 250 + 253 -> index 248 = (128,128,128)   grey, not purple
 ```
 
-That is the whole of the bug. The true average of a mid grey with magenta is
-(191, 64, 191), and TA's palette has no entry anywhere near it, so the
-nearest-match that follows the average lands on (123, 59, 71) — a dull rose that
-belongs to no part of the picture. "The table broke" is exactly that: the
-average is fine and the snap has nowhere to go.
+That is the whole of the bug, and it is subtler than "the snap has nowhere to
+go". The table's answers are perfectly reasonable *blends* — a grey averaged
+with magenta really is about (167,123,179). They are simply the wrong thing to
+put there, because nothing at that edge was magenta; magenta was the absence of
+the building. So the building acquires a rim of plausible-looking purples it has
+no business having, and because most buildings are painted in greys and metals,
+most of those rims land in the same part of the palette. That is why it reads as
+one effect — "a weird purple halo" — rather than as random noise. The green row
+is the tell: a green edge comes back plain grey, so this is not a purple filter,
+it is an average with a colour that should never have been in the average.
 
 ### What RWE does with it
 
-Reproduced in `worldPost.frag`, which is the same place in the pipeline: the one
-blit the whole world view passes through, where the supersampled buffer is
-filtered down. The buildings' coverage is drawn into a mask at the supersampled
-size, and a pixel the mask says is on an outline is blended towards the halo
-colour.
+Runs the same arithmetic, rather than painting on an impression of the result.
 
-Two deliberate departures, both recorded rather than hidden. The colour is the
-**mean** of row 253 rather than the per-entry value, because by the post pass
-the pixel is a blended colour and its palette index is long gone. And the width
-and strength are settings (`building-halo-width`, `building-halo-strength`)
-rather than constants, because the artefact does not survive translation on its
-own: the original's halo is about one pixel of a 640x480 screen, and one pixel
-of a modern screen is a quarter of that, so a faithful one would be correct and
-subtle. The defaults are a width of 3 and a strength of 75, chosen by looking at
-a solar collector once the effect actually rendered; 1 is the arithmetically
-faithful width and remains a legitimate setting for anyone who wants it.
+RWE already renders the world into a buffer of exactly twice the size in each
+dimension when anti-aliasing is on (`worldRenderTextureScale`), which is the
+same shape as the original's "buffer that was double the size in each
+dimension". So every output pixel is one 2x2 block of a supersampled buffer,
+and the original's filter applies to it directly.
 
-**A warning attached to those numbers, because it cost two days.** The halo was
-reported invisible twice, and both times the width was the obvious suspect — the
-original's artefact is about one pixel of a 640x480 screen, one pixel of a
-modern display is a far smaller share of a building, and "too faithful to see"
-is an explanation that fits the evidence perfectly. It was wrong. Nothing was
-being drawn at all. The coverage mask is filled by a second pass over geometry
-the world pass has already drawn, and it ran with the ordinary depth test,
-`GL_LESS`; `unitMask.vert` computes `gl_Position` with the same expression and
-the same matrix as `unitTexture.vert`, so every fragment landed at exactly the
-depth already in the buffer and `GL_LESS` rejected all of them. The mask was
-empty at every width and every strength, and turning the numbers up could never
-have revealed it. The fix is `GL_EQUAL` for that pass — the same idiom the cloak
-pass in `RenderService.cpp` already uses for the same reason — and the general
-lesson is that an invisible effect is a broken effect until proven otherwise.
-It follows the anti-alias setting, since with no supersampling there
+What was missing was the palette. A second pass draws the finished buildings
+into a mask at the supersampled size — but writing each fragment's **palette
+index**, not coverage (`unitMask.frag`; the index atlas it reads already exists
+for the `PALETTE.SHD` shade lookup, so this costs nothing new). `worldPost.frag`
+then filters that 2x2 block down with three chained lookups through
+`PALETTE.ALP`, in the original's order: the top pair, the bottom pair, and then
+those two results. Any sample the mask says was uncovered stands in as index
+253. At the silhouette the pairs being averaged really are a real colour and
+whatever stood for transparent, so the wrong colour falls out of the shipped
+table instead of being chosen — the same wrong colour, from the same table, by
+the same three operations.
 
-One artefact is inherent to reproducing this from a screen-space mask, and is
+Two consequences, and both are how you tell this apart from an approximation:
+
+- **The colour is per pixel.** A dark panel edge comes back near-black purple,
+  a lit edge comes back magenta, a pale edge comes back lilac, and a green edge
+  comes back grey. A single averaged constant — which is what RWE painted on
+  before, (158,109,171), the mean of the row — is right only for the greys.
+- **It is a rim, not a glow.** Only a *mixed* block gets it: 1, 2 or 3 of the
+  four samples covered. An all-covered block is ordinary anti-aliasing, which
+  RWE's supersample already does, and an all-uncovered block is terrain. So the
+  artefact sits on the building's outermost pixels the way the original's sat
+  in the building's cached bitmap, instead of bleeding outward onto the ground.
+
+Three things remain RWE's rather than the original's, and are recorded rather
+than hidden.
+
+The first is a strength setting, `building-halo-strength`. 100 is the original,
+where the filtered pixel simply is the pixel; lower values blend back towards
+RWE's own rendering. There is deliberately **no width setting**: the artefact is
+one output pixel wide because it is a 2x2 downsample, and widening it would mean
+inventing pixels the original never drew. What that costs is honest to state —
+TA drew its buildings smaller in pixels than RWE does, so one pixel was a larger
+share of a building then than it is now, and the effect is correspondingly
+subtler here than it was on a 640x480 screen. Matching the *proportion* instead
+would mean a wider rim and a less faithful mechanism; the mechanism was chosen.
+
+The second is that RWE haloes the whole model where Mavor describes anti-
+aliasing "the non-animating part of the building".
+
+The third is inherent to reproducing this from a screen-space mask, and is
 recorded here so it is not later reported as a bug. The original anti-aliases
 each building's bitmap **in isolation**, so the halo follows the building's own
 outline and anything standing in front is simply painted over the top. RWE's
@@ -10473,3 +10501,13 @@ along the edge that overlaps it. Dropping the depth test trades it for a worse
 one, a building hidden behind a hill drawing its outline over the hill. Neither
 is the original's, and the depth-tested version is the one that never draws a
 halo where there is no building to see.
+
+**One trap, recorded because it cost two days.** That mask pass redraws geometry
+the world pass has already drawn, so it must run under `GL_EQUAL` and not
+`GL_LESS`: `unitMask.vert` transforms with the same expression and the same
+matrix as `unitTexture.vert`, so every fragment lands at exactly the depth
+already stored, and `GL_LESS` rejects all of them. It did, and the halo was
+invisible at every setting because it was never drawn at all — while "the
+original's is one pixel of a 640x480 screen, so of course it is too small to
+see" sat there as a ready and completely wrong explanation. An invisible effect
+is a broken effect until proven otherwise.

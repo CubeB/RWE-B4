@@ -1683,19 +1683,19 @@ namespace rwe
             sceneContext.graphics->bindShader(sceneContext.shaders->worldPost.handle.get());
             sceneContext.graphics->setUniformInt(sceneContext.shaders->worldPost.dodgeMask, 1);
             sceneContext.graphics->setUniformInt(sceneContext.shaders->worldPost.buildingMask, 2);
+            sceneContext.graphics->setUniformInt(sceneContext.shaders->worldPost.alphaTable, 3);
             sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.gamma, static_cast<float>(gammaSetting) / 100.0f);
-            // The mean of PALETTE.ALP's row 253 -- see worldPost.frag. With no
-            // supersampling there is no downsample and so nothing for the halo
-            // to have come from, which is where the original's comes from too.
-            sceneContext.graphics->setUniformVec3(sceneContext.shaders->worldPost.haloColor, 158.0f / 255.0f, 109.0f / 255.0f, 171.0f / 255.0f);
-            sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloWidth, static_cast<float>(buildingHaloWidth));
+            // With no supersampling there is no 2x buffer and so no downsample
+            // for the halo to have come out of, which is exactly why the
+            // original's went away with its own anti-aliasing switched off.
             sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloStrength, antiAliasEnabled ? static_cast<float>(buildingHaloStrength) / 100.0f : 0.0f);
-            sceneContext.graphics->setUniformVec2(sceneContext.shaders->worldPost.haloTexelStep, 1.0f / static_cast<float>(worldViewport.width()), 1.0f / static_cast<float>(worldViewport.height()));
             sceneContext.graphics->bindTexture(worldFrameBuffer.texture.get());
             sceneContext.graphics->setActiveTextureSlot1();
             sceneContext.graphics->bindTexture(dodgeMask.get());
             sceneContext.graphics->setActiveTextureSlot2();
             sceneContext.graphics->bindTexture(buildingMask.get());
+            sceneContext.graphics->setActiveTextureSlot3();
+            sceneContext.graphics->bindTexture(alphaTableTexture.get());
             sceneContext.graphics->setActiveTextureSlot0();
             sceneContext.graphics->drawTriangles(quadMesh);
 

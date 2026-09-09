@@ -243,6 +243,8 @@ set(SOURCE_FILES
     src/rwe/RenderService.h
     src/rwe/SceneContext.h
     src/rwe/SelectionMesh.h
+    src/rwe/AlphaTable.cpp
+    src/rwe/AlphaTable.h
     src/rwe/ShadeTable.cpp
     src/rwe/ShadeTable.h
     src/rwe/ShaderService.cpp
@@ -835,6 +837,7 @@ set(TEST_FILES
     src/rwe/ai/ArmyTactics.test.cpp
     src/rwe/ai/AirTactics.test.cpp
     src/rwe/BoxTreeSplit.test.cpp
+    src/rwe/AlphaTable.test.cpp
     src/rwe/ShadeTable.test.cpp
     src/rwe/GlobalConfig.test.cpp
     src/rwe/Viewport.test.cpp

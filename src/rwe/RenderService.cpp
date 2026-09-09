@@ -315,10 +315,16 @@ namespace rwe
 
         const auto& shader = shaders->unitMask;
         graphics->bindShader(shader.handle.get());
+        graphics->setUniformInt(shader.paletteIndexSampler, 1);
 
         for (const auto& m : meshes)
         {
             graphics->setUniformMatrix(shader.mvpMatrix, m.mvpMatrix);
+            // Slot 1 is the index atlas, slot 0 the colour atlas the alpha
+            // test reads. Same pairing the unit shader uses.
+            graphics->setActiveTextureSlot1();
+            graphics->bindTexture(m.paletteIndexTexture);
+            graphics->setActiveTextureSlot0();
             graphics->bindTexture(m.texture);
             graphics->drawTriangles(*m.mesh);
         }

@@ -252,6 +252,8 @@ namespace rwe
         SharedTextureHandle unitPaletteIndexAtlas;
         std::vector<SharedTextureHandle> unitTeamPaletteIndexAtlases;
         SharedTextureHandle shadeTableTexture;
+        /** palettes/PALETTE.ALP; the building halo in worldPost.frag reads it. */
+        SharedTextureHandle alphaTableTexture;
 
         UiRenderService worldUiRenderService;
         UiRenderService chromeUiRenderService;
@@ -469,8 +471,7 @@ namespace rwe
          */
         bool vehicleShadowsEnabled{true};
         /** The purple building halo: strength as a percentage, width in output pixels. */
-        unsigned int buildingHaloStrength{75};
-        unsigned int buildingHaloWidth{3};
+        unsigned int buildingHaloStrength{100};
         unsigned int scrollSpeedSetting{100};
 
         /** What this game was started with, kept for the save-game header. */
@@ -777,6 +778,7 @@ namespace rwe
             SharedTextureHandle unitPaletteIndexAtlas,
             std::vector<SharedTextureHandle>&& unitTeamPaletteIndexAtlases,
             SharedTextureHandle shadeTableTexture,
+            SharedTextureHandle alphaTableTexture,
             GameSimulation&& simulation,
             MapTerrainGraphics&& terrainGraphics,
             BuilderGuisDatabase&& builderGuisDatabase,

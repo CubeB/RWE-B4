@@ -31,6 +31,12 @@ namespace rwe
         std::vector<SharedTextureHandle> teamPaletteIndexAtlases;
         /** palettes/PALETTE.SHD as a 256x32 image; see ShadeTable.h. */
         SharedTextureHandle shadeTableTexture;
+        /**
+         * palettes/PALETTE.ALP as a 256x256 image, rgb the blended colour and
+         * alpha the blended index so lookups can be chained; see AlphaTable.h.
+         * The building halo in worldPost.frag is its only reader.
+         */
+        SharedTextureHandle alphaTableTexture;
     };
 
     TextureAtlasInfo createTextureAtlases(AbstractVirtualFileSystem* vfs, GraphicsContext* graphics, const ColorPalette* palette);
