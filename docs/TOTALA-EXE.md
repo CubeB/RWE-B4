@@ -10532,17 +10532,78 @@ and both have red and blue *exactly equal*, so any correction phrased as "send
 the larger of red and blue into red" leaves precisely the pixels that most need
 it untouched.
 
-The third is inherent to reproducing this from a screen-space mask, and is
-recorded here so it is not later reported as a bug. The original anti-aliases
-each building's bitmap **in isolation**, so the halo follows the building's own
-outline and anything standing in front is simply painted over the top. RWE's
-mask is drawn depth-tested against the finished world, so the coverage also ends
-where something else occludes the building — and to the post pass a boundary is
-a boundary, so a tank parked in front of a factory picks up a thread of halo
-along the edge that overlaps it. Dropping the depth test trades it for a worse
-one, a building hidden behind a hill drawing its outline over the hill. Neither
-is the original's, and the depth-tested version is the one that never draws a
-halo where there is no building to see.
+The third is inherent to reproducing this from a screen-space mask, and is the
+one that took a second pass to get right.
+
+The original anti-aliases each building's bitmap **in isolation** — nothing else
+is in the buffer when the filter runs — and then paints whatever stands in front
+over the top. RWE's mask is drawn depth-tested against the finished world, so
+anything in front of a building *removes* the building's samples where it
+covers it. The rim of that gap is a boundary, and a boundary is all the post
+pass can see, so it drew a fringe there: a line **inside** the model, along the
+outline of whatever was in front.
+
+That is not a corner case. A unit's own dont-cache pieces are in front of its
+own cached ones, so a metal extractor drew a purple line where its rotating arm
+crossed its base, and the line crawled as the arm turned. It was reported from a
+play-test within a day of the halo first working.
+
+The fix is to give the mask a third state. Every sample is now one of: nothing
+(cleared, alpha 0), an **occluder** (alpha 0.5), or a cached building piece
+(alpha 1). A block gets a halo only when it straddles the outer edge of
+everything solid — 1, 2 or 3 of its four samples solid — **and** every solid
+sample in it is a cached piece. So:
+
+- an arm crossing its own base is four solid samples, no boundary, no halo;
+- the arm's own outer edge against the ground is a real boundary, but its
+  samples are not cached, so it gets nothing, which is also what the original
+  does;
+- the building's own outer edge is unchanged.
+
+What goes in as an occluder: every dont-cache piece of a haloed building, every
+mobile unit and nanoframe entire, and every modelled map feature. **Two things
+still do not**, and they are the remaining way to see a fringe inside a model:
+a *billboard* feature is a sprite with no mesh to walk, and the terrain is not
+drawn into the mask at all, so a building partly hidden by a cliff would be
+fringed along the cliff line. Neither has been seen in play; both are fixable
+the same way, by drawing them in at 0.5.
+
+**And the occluders have to actually land, which took a second attempt.** They
+were written correctly and then thrown away, because `GameLaunch` enables
+blending once for the whole program with
+`GL_SRC_ALPHA`/`GL_ONE_MINUS_SRC_ALPHA` and nothing in the render path ever
+turns it off. The mask is data, not a picture, and compositing it is nonsense —
+but the failure is quiet and, worse, *selective*: a cached piece asks for alpha
+1 and blends to 1, so it comes through perfectly, while an occluder asks for 0.5
+and lands as `0.5*0.5 + 0.5*0 = 0.25`, which fails the "is this sample solid"
+threshold. Every occluder was discarded, every hole stayed open, and the fringe
+went on crawling inside the model exactly as before — with the fix apparently
+in. The red channel was being halved too, and half of a palette index is a
+different colour rather than a darker one. `disableBlending` around the pass is
+the whole of it. The general lesson is the one about `GL_LESS` again in a
+different suit: this pass writes *values*, not pixels, and every piece of
+pipeline state that quietly interpolates or combines them has to be turned off
+deliberately rather than left as whatever the last draw wanted.
+
+**How to test it, since no single frame can.** A still cannot show a crawling
+line. `tools/visual-test.ps1 -phase mex` takes two frames three seconds apart of
+a metal extractor that does not move but whose arm does, and the test is the
+diff: a halo pixel present in one frame and absent in the other, inside the
+model, is the bug. Beware two false positives that will otherwise convince you
+it is still broken. The map's own sand carries pink speckle whose colour is
+genuinely indistinguishable from the halo, and the counterweights throw a shadow
+that sweeps as the arm turns; both move or match on colour and neither is the
+halo. Marking the differing pixels onto a magnified frame and looking at where
+they fall separates them in one glance, where counting them does not.
+
+The cost is honest to state: with the halo on, the mask pass walks the pieces of
+every visible unit and modelled feature a second time, so `w.halomask` is not
+free in a large battle. It is skipped entirely when anti-aliasing is off or the
+strength is 0.
+
+Dropping the depth test instead would trade all of this for something worse — a
+building hidden behind a hill drawing its outline across the hill — so the
+depth-tested mask with occluders is the version that keeps.
 
 **One trap, recorded because it cost two days.** That mask pass redraws geometry
 the world pass has already drawn, so it must run under `GL_EQUAL` and not

@@ -87,6 +87,8 @@ namespace rwe
         ShaderProgramHandle handle;
         UniformLocation mvpMatrix;
         UniformLocation paletteIndexSampler;
+        /** 1 for a cached building piece, 0.5 for an occluder. See unitMask.frag. */
+        UniformLocation maskAlpha;
     };
 
     struct WorldPostShader

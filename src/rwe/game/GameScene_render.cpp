@@ -1424,7 +1424,7 @@ namespace rwe
                     // The frame is see-through while it is built, so the shadow
                     // would show through it. Keep only the part cast outside the
                     // model's own outline.
-                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitAtlases, false, unitShadowMeshBatch.cutouts);
+                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitAtlases, PieceCacheFilter::All, unitShadowMeshBatch.cutouts);
                 }
             }
             for (const auto& [_, feature] : simulation.features)
@@ -1465,7 +1465,18 @@ namespace rwe
         // come out of, so neither the mask nor the meshes that fill it are
         // worth building.
         auto haloWanted = antiAliasEnabled && buildingHaloStrength > 0;
+        // The pieces that can carry the halo: the cached pieces of finished
+        // buildings, and nothing else.
         std::vector<UnitTextureMeshRenderInfo> buildingSilhouettes;
+        // Everything else solid, drawn into the same mask at half alpha so it
+        // is coverage without being a halo source. This is not decoration. The
+        // mask is depth tested, so anything in front of a building removes the
+        // building's samples there and leaves a hole whose rim the post pass
+        // cannot tell from the model's own outline -- a purple line inside the
+        // model. A metal extractor makes the point: its arm is a dont-cache
+        // piece, so it is not in the batch above, and without it here its own
+        // base would be fringed along a hole that crawls as the arm turns.
+        std::vector<UnitTextureMeshRenderInfo> occluderSilhouettes;
 
         UnitMeshBatch unitMeshBatch;
         {
@@ -1484,9 +1495,22 @@ namespace rwe
                 const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
                 drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, simulation.gameTime.value, interpolationFraction, shadeStrengthFor(!unitDefinition.isMobile), unitAtlases, unitMeshBatch);
 
-                if (haloWanted && !unitDefinition.isMobile && !unit.isBeingBuilt(unitDefinition))
+                if (haloWanted)
                 {
-                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, interpolationFraction, unitAtlases, true, buildingSilhouettes);
+                    // A finished building splits: its cached pieces can carry
+                    // the halo, its dont-cache pieces are occluders. Anything
+                    // else -- a mobile unit, a nanoframe -- is an occluder
+                    // entire, because the original's halo lives in a finished
+                    // building's cached bitmap and nowhere else.
+                    if (!unitDefinition.isMobile && !unit.isBeingBuilt(unitDefinition))
+                    {
+                        drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, interpolationFraction, unitAtlases, PieceCacheFilter::CachedOnly, buildingSilhouettes);
+                        drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, interpolationFraction, unitAtlases, PieceCacheFilter::UncachedOnly, occluderSilhouettes);
+                    }
+                    else
+                    {
+                        drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, interpolationFraction, unitAtlases, PieceCacheFilter::All, occluderSilhouettes);
+                    }
                 }
             }
             for (const auto& [_, feature] : simulation.features)
@@ -1500,6 +1524,11 @@ namespace rwe
                     continue;
                 }
                 drawMeshFeature(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, shadeStrengthFor(true), unitAtlases, unitMeshBatch);
+
+                if (haloWanted)
+                {
+                    drawFeatureSilhouette(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, unitAtlases, occluderSilhouettes);
+                }
             }
             for (const auto& d : debris)
             {
@@ -1648,14 +1677,33 @@ namespace rwe
         if (haloWanted)
         {
             RWE_RENDERPROF("w.halomask");
+            // Blending OFF, and this is not a precaution. GameLaunch enables
+            // blending once for the whole program with
+            // GL_SRC_ALPHA/GL_ONE_MINUS_SRC_ALPHA and nothing ever turns it
+            // off, so without this the mask is composited instead of written.
+            // What that does here is quiet and total: an occluder asks for
+            // alpha 0.5 and lands as 0.5*0.5 + 0.5*0 = 0.25, which is below
+            // the threshold that counts a sample as solid, so every occluder
+            // is discarded while the cached pieces -- alpha 1, which blends to
+            // 1 -- come through perfectly. The holes the occluders exist to
+            // fill stay open and the fringe crawls inside the model again.
+            // The red channel is a palette index, too, and half of an index is
+            // a different colour, not a darker one.
+            sceneContext.graphics->disableBlending();
             sceneContext.graphics->useDepthTestEqual();
             sceneContext.graphics->disableDepthWrites();
             sceneContext.graphics->bindFrameBufferColorBuffer(buildingMask.get());
             sceneContext.graphics->clearColor();
-            worldRenderService.drawUnitMaskBatch(buildingSilhouettes);
+            // Occluders first, so a cached piece in front of one still writes
+            // its own index over the top -- the depth test settles which of
+            // them is actually there, and this order only decides who wins a
+            // tie, where the cached piece is the one that should.
+            worldRenderService.drawUnitMaskBatch(occluderSilhouettes, 0.5f);
+            worldRenderService.drawUnitMaskBatch(buildingSilhouettes, 1.0f);
             sceneContext.graphics->bindFrameBufferColorBuffer(worldFrameBuffer.texture.get());
             sceneContext.graphics->enableDepthWrites();
             sceneContext.graphics->enableDepthTest();
+            sceneContext.graphics->enableBlending();
         }
 
         sceneContext.graphics->disableDepthTest();

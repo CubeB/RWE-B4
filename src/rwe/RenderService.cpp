@@ -306,7 +306,7 @@ namespace rwe
         }
     }
 
-    void RenderService::drawUnitMaskBatch(const std::vector<UnitTextureMeshRenderInfo>& meshes)
+    void RenderService::drawUnitMaskBatch(const std::vector<UnitTextureMeshRenderInfo>& meshes, float maskAlpha)
     {
         if (meshes.empty())
         {
@@ -316,6 +316,7 @@ namespace rwe
         const auto& shader = shaders->unitMask;
         graphics->bindShader(shader.handle.get());
         graphics->setUniformInt(shader.paletteIndexSampler, 1);
+        graphics->setUniformFloat(shader.maskAlpha, maskAlpha);
 
         for (const auto& m : meshes)
         {

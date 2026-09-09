@@ -335,13 +335,28 @@ namespace rwe
         ColoredMeshBatch& batch);
 
     /**
-     * The unit's model as the camera sees it, for stencil cut-outs.
+     * Which pieces of a model to emit, by their COB CACHE / DONT_CACHE state.
      *
-     * cachedPiecesOnly leaves out the pieces the script has marked DONT_CACHE.
-     * The shadow cut-outs want the whole unit and pass false; the building halo
-     * passes true, because the original's halo is an artefact of the cached
-     * bitmap and a piece that is not in the cache never went through the table
-     * that produced it. See drawUnitMesh and TOTALA-EXE.md S:101.
+     * The building halo needs both halves separately and for different
+     * reasons. Only a cached piece can carry the halo, because the artefact
+     * comes out of the cached bitmap's anti-aliasing and a dont-cache piece is
+     * never in it. But the dont-cache pieces still have to be drawn into the
+     * mask, as occluders, or they punch holes in the cached pieces' coverage
+     * and the post pass reads the rim of each hole as a silhouette -- which is
+     * a purple line *inside* the model that crawls as the piece moves. See
+     * worldPost.frag and TOTALA-EXE.md S:101.
+     */
+    enum class PieceCacheFilter
+    {
+        All,
+        CachedOnly,
+        UncachedOnly,
+    };
+
+    /**
+     * The unit's model as the camera sees it, for stencil cut-outs and for the
+     * building halo's coverage mask. The shadow cut-outs want the whole unit
+     * and pass All.
      */
     void drawUnitSilhouette(
         const GameMediaDatabase& gameMediaDatabase,
@@ -351,7 +366,16 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         float frac,
         const UnitTextureAtlases& atlases,
-        bool cachedPiecesOnly,
+        PieceCacheFilter filter,
+        std::vector<UnitTextureMeshRenderInfo>& out);
+
+    /** The same for a modelled map feature, as an occluder for the halo mask. */
+    void drawFeatureSilhouette(
+        const std::unordered_map<std::string, UnitModelDefinition>& modelDefinitions,
+        const GameMediaDatabase& gameMediaDatabase,
+        const Matrix4f& viewProjectionMatrix,
+        const MapFeature& feature,
+        const UnitTextureAtlases& atlases,
         std::vector<UnitTextureMeshRenderInfo>& out);
 
     void drawSpriteParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, SpriteBatch& batch);

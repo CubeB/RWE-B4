@@ -128,11 +128,24 @@ int indexOf(vec4 entry)
     return int((entry.a * 255.0) + 0.5);
 }
 
-// A mask sample: red is the index, and an uncovered sample stands in as the
-// transparent one, which is where the bug comes from.
+// Anything at all was drawn here: a cached building piece or an occluder.
+bool solid(vec4 texel)
+{
+    return texel.a > 0.25;
+}
+
+// ...and it was a cached piece of a finished building, the only thing that can
+// carry the halo.
+bool cached(vec4 texel)
+{
+    return texel.a > 0.75;
+}
+
+// A mask sample: red is the index, and a sample with nothing in it stands in as
+// the transparent one, which is where the bug comes from.
 int maskIndex(vec4 texel)
 {
-    return texel.a < 0.5 ? TransparentIndex : int((texel.r * 255.0) + 0.5);
+    return solid(texel) ? int((texel.r * 255.0) + 0.5) : TransparentIndex;
 }
 
 void main(void)
@@ -153,8 +166,21 @@ void main(void)
         vec4 s01 = texelFetch(buildingMask, block + ivec2(0, 1), 0);
         vec4 s11 = texelFetch(buildingMask, block + ivec2(1, 1), 0);
 
-        float covered = s00.a + s10.a + s01.a + s11.a;
-        if (covered > 0.5 && covered < 3.5)
+        // Mixed against the WORLD, not against the building: the block has to
+        // straddle the outer edge of everything solid. Counting only the
+        // cached samples instead would find a boundary wherever an occluder
+        // crosses a building -- a rotating arm over its own base, a tank in
+        // front of a factory -- and paint a line there, inside the model.
+        int solidCount = (solid(s00) ? 1 : 0) + (solid(s10) ? 1 : 0) + (solid(s01) ? 1 : 0) + (solid(s11) ? 1 : 0);
+        // And every solid sample in it has to be a cached building piece. An
+        // occluder's own outer edge is a real silhouette, but it is not one
+        // the original's table ever saw, so it gets nothing.
+        bool allCached = (!solid(s00) || cached(s00))
+            && (!solid(s10) || cached(s10))
+            && (!solid(s01) || cached(s01))
+            && (!solid(s11) || cached(s11));
+
+        if (solidCount > 0 && solidCount < 4 && allCached)
         {
             // The original's three lookups, in the original's order.
             int top = indexOf(blend(maskIndex(s00), maskIndex(s10)));

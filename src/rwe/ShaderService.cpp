@@ -89,6 +89,7 @@ namespace rwe
         s.unitMask.handle = loadShader(graphics, "shaders/unitMask.vert", "shaders/unitMask.frag", texturedVertexAttribs);
         s.unitMask.mvpMatrix = graphics.getUniformLocation(s.unitMask.handle.get(), "mvpMatrix");
         s.unitMask.paletteIndexSampler = graphics.getUniformLocation(s.unitMask.handle.get(), "paletteIndexSampler");
+        s.unitMask.maskAlpha = graphics.getUniformLocation(s.unitMask.handle.get(), "maskAlpha");
 
         return s;
     }

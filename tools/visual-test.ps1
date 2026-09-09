@@ -369,11 +369,19 @@ if ($phase -eq "mex") {
   $o = Origin
   $bmp = Shot
   Crop $bmp "$outDir\vt-mex$tag-full.png" $o.X $o.Y 800 600 1
-  # Tight and magnified on the extractor: the halo is one output pixel, so it
-  # cannot be judged at 1:1.
-  Crop $bmp "$outDir\vt-mex$tag-zoom.png" ($o.X + 520) ($o.Y + 110) 90 90 8
+  $bmp.Dispose()
+  # A second frame with the arm somewhere else, and this pair is the actual
+  # test. The extractor does not move; only its arm turns. So a halo pixel
+  # that is present in one frame and gone in the other, at a coordinate the
+  # arm has swept across, is the fringe crawling about inside the model --
+  # which is the bug this phase exists to catch, and which no single frame can
+  # show. Compare the two with the checker in the halo section of S:101.
+  Start-Sleep -Seconds 3
+  $bmp = Shot
+  Crop $bmp "$outDir\vt-mex$tag-full-b.png" $o.X $o.Y 800 600 1
   $bmp.Dispose()
 }
+
 
 if ($phase -eq "shade") {
   # The commander and the collector spawned beside him, both standing still
