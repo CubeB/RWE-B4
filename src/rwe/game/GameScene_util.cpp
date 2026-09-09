@@ -114,12 +114,12 @@ namespace rwe
     {
         for (const auto& item : pathInfo.closedVertices)
         {
-            if (!item.second.predecessor)
+            if (item.second.predecessor < 0)
             {
                 continue;
             }
 
-            auto start = (*item.second.predecessor)->vertex;
+            auto start = pathInfo.closedVertices[item.second.predecessor].second.vertex;
             auto end = item.second.vertex;
             drawTerrainArrow(terrain, start, end, Color(255, 0, 0), batch);
         }

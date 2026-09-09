@@ -11,27 +11,32 @@
 
 namespace rwe
 {
-    /**
-     * The maximum number of elements in the open list to expand
-     * before giving up on a path search.
-     */
-    const unsigned int MaxOpenListQueries = 1000;
-
     /** The most successors a vertex on an eight-connected grid can have. */
     const unsigned int MaxSuccessors = 8;
 
-    // AStarScratch keeps both of a cell's positions in an int16, which these
-    // bounds are what make safe. The search closes one vertex per pop, and
-    // pushes at most MaxSuccessors per pop plus the start.
-    static_assert(MaxOpenListQueries < 32767, "closed list index must fit an int16");
-    static_assert((MaxOpenListQueries * MaxSuccessors) + 1 < 32767, "open heap index must fit an int16");
+    /**
+     * How much of a search one uninterrupted call will do. It is not a cap on
+     * a search -- a search has none -- it is what findPath passes when the
+     * caller wants an answer now rather than a slice of one.
+     */
+    const unsigned int UnlimitedExpansions = ~0u;
 
     template <typename T, typename Cost = float>
     struct AStarVertexInfo
     {
         Cost costToReach;
         T vertex;
-        std::optional<const AStarVertexInfo<T, Cost>*> predecessor;
+        /**
+         * Where this vertex was reached from, as a position in the closed
+         * list, or -1 for the vertex the search started at.
+         *
+         * It used to be a pointer into that list, kept valid by reserving the
+         * per-search cap up front so the vector could never reallocate. With
+         * the cap gone there is no size to reserve -- a search runs until it
+         * finds the goal or empties its open list -- so the link is an index
+         * and the list is free to grow.
+         */
+        int32_t predecessor{-1};
     };
 
     enum class AStarPathType
@@ -114,6 +119,27 @@ namespace rwe
         std::unique_ptr<AStarScratch> ownedScratch;
         std::vector<OpenNode> openHeap;
 
+        /**
+         * Everything a half-finished search has to keep hold of.
+         *
+         * These were locals of findPath while a search began and ended inside
+         * one call. They are members now because a search is sliced: the
+         * scheduler gives it what is left of the tick's budget, and if that
+         * runs out before the goal is found the search stays exactly here and
+         * is carried on next tick. The scratch grid holds the rest of the
+         * state, which is why nothing else may start a search on the same
+         * scratch while one is suspended -- beginSearch would stamp every one
+         * of these cells stale.
+         */
+        std::vector<std::pair<T, VertexInfo>> closedVertices;
+        std::optional<Cost> closestCost;
+        int32_t closestIndex{-1};
+        bool searchActive{false};
+        bool searchFinished{false};
+        bool searchExhausted{false};
+        AStarPathType resultType{AStarPathType::Partial};
+        int32_t resultIndex{-1};
+
     public:
         /**
          * Searches share the caller's scratch when it supplies one, which is
@@ -132,56 +158,103 @@ namespace rwe
 
         virtual ~AStarPathFinder() = default;
 
+        /**
+         * Runs a whole search and hands back the answer, for every caller
+         * that has no budget to spend and no tick to be interrupted by.
+         */
         AStarPathInfo<T, Cost> findPath(const T& start)
+        {
+            beginSearch(start);
+            stepSearch(UnlimitedExpansions);
+            return takeResult();
+        }
+
+        /**
+         * Seeds a search at start. Stamps the scratch, which invalidates any
+         * search still suspended on it, so the caller owes it to whoever is
+         * holding one not to call this until that one is done.
+         */
+        void beginSearch(const T& start)
         {
             scratch->beginSearch();
 
             openHeap.clear();
+            closedVertices.clear();
+            // The finished search's list is moved out rather than reused, so
+            // its capacity goes with it. A thousand is what the old cap used
+            // to reserve and is still about what a typical search closes, so
+            // most searches get their one allocation and no growth after it.
+            closedVertices.reserve(1024);
+            closestCost.reset();
+            closestIndex = -1;
+            searchActive = true;
+            searchFinished = false;
+            searchExhausted = false;
+            resultType = AStarPathType::Partial;
+            resultIndex = -1;
 
-            std::vector<std::pair<T, VertexInfo>> closedVertices;
-            // The search closes at most one vertex per pop, so this is enough
-            // for the whole search and the predecessor pointers below can
-            // never be invalidated by a reallocation.
-            closedVertices.reserve(MaxOpenListQueries);
+            OpenNode startNode;
+            startNode.priority = estimateCostToGoal(start).heapKey();
+            startNode.costToReach = Cost();
+            startNode.vertex = start;
+            startNode.predecessor = -1;
+            startNode.cellIndex = scratch->toIndex(start.x, start.y);
+            heapPushOrDecrease(startNode);
+        }
 
-            {
-                OpenNode startNode;
-                startNode.priority = estimateCostToGoal(start).heapKey();
-                startNode.costToReach = Cost();
-                startNode.vertex = start;
-                startNode.predecessor = -1;
-                startNode.cellIndex = scratch->toIndex(start.x, start.y);
-                heapPushOrDecrease(startNode);
-            }
-
-            std::optional<Cost> closestCost;
-            int32_t closestIndex = -1;
+        /**
+         * Expands at most maxExpansions vertices and returns how many it
+         * actually did, which is what the caller deducts from its budget.
+         *
+         * There is no cap of the search's own. It stops when it reaches the
+         * goal, when the open list empties -- which is what proves a goal
+         * unreachable rather than merely unfound -- or when the slice runs
+         * out, and only the last of those leaves it resumable. This is the
+         * structural piece the original has and RWE did not: 0x40EEAF slices
+         * its A* at a hundred expansions a tick and carries the same search
+         * on next tick, so a long route completes over several ticks and
+         * "nothing is ever truncated" (TOTALA-EXE.md S:87). RWE truncated at
+         * a thousand expansions and handed back a partial path the unit
+         * walked and then re-requested from.
+         */
+        unsigned int stepSearch(unsigned int maxExpansions)
+        {
+            assert(searchActive);
 
             Successor successors[MaxSuccessors];
+            unsigned int expansions = 0;
 
-            unsigned int openListPopsPerformed = 0;
-
-            while (!openHeap.empty() && openListPopsPerformed < MaxOpenListQueries)
+            while (!searchFinished && expansions < maxExpansions)
             {
+                if (openHeap.empty())
+                {
+                    // Nowhere left to look: the goal cannot be reached at all.
+                    assert(closestIndex >= 0);
+                    searchFinished = true;
+                    searchExhausted = true;
+                    resultType = AStarPathType::Partial;
+                    resultIndex = closestIndex;
+                    break;
+                }
+
                 auto current = openHeap.front();
                 heapPop();
-                openListPopsPerformed += 1;
+                expansions += 1;
 
                 auto currentIndex = static_cast<int32_t>(closedVertices.size());
-                std::optional<const VertexInfo*> predecessor;
-                if (current.predecessor >= 0)
-                {
-                    predecessor = &closedVertices[current.predecessor].second;
-                }
-                closedVertices.push_back({current.vertex, VertexInfo{current.costToReach, current.vertex, predecessor}});
+                closedVertices.push_back({current.vertex, VertexInfo{current.costToReach, current.vertex, current.predecessor}});
                 if (current.cellIndex >= 0)
                 {
-                    scratch->at(current.cellIndex).closedIndex = static_cast<int16_t>(currentIndex);
+                    scratch->at(current.cellIndex).closedIndex = currentIndex;
                 }
 
                 if (isGoal(current.vertex))
                 {
-                    return AStarPathInfo<T, Cost>{AStarPathType::Complete, walkPath(closedVertices.back().second), std::move(closedVertices), false};
+                    searchFinished = true;
+                    searchExhausted = false;
+                    resultType = AStarPathType::Complete;
+                    resultIndex = currentIndex;
+                    break;
                 }
 
                 auto estimatedCostToGoal = estimateCostToGoal(current.vertex);
@@ -192,9 +265,9 @@ namespace rwe
                 }
 
                 std::optional<T> predecessorVertex;
-                if (predecessor)
+                if (current.predecessor >= 0)
                 {
-                    predecessorVertex = (*predecessor)->vertex;
+                    predecessorVertex = closedVertices[current.predecessor].second.vertex;
                 }
 
                 auto successorCount = getSuccessors(current.vertex, predecessorVertex, current.costToReach, successors);
@@ -217,9 +290,62 @@ namespace rwe
                 }
             }
 
-            assert(closestIndex >= 0);
-            auto exhausted = openHeap.empty();
-            return AStarPathInfo<T, Cost>{AStarPathType::Partial, walkPath(closedVertices[closestIndex].second), std::move(closedVertices), exhausted};
+            return expansions;
+        }
+
+        /** True once the search has an answer and wants no more budget. */
+        bool isSearchFinished() const
+        {
+            return searchFinished;
+        }
+
+        bool isSearchActive() const
+        {
+            return searchActive;
+        }
+
+        /**
+         * Vertices expanded so far, which is exactly the size of the closed
+         * list. A save writes this down and a load steps the rebuilt search
+         * that far to land back where it was.
+         */
+        std::size_t expansionsSoFar() const
+        {
+            return closedVertices.size();
+        }
+
+        /** Takes the finished search's answer, leaving the finder idle. */
+        AStarPathInfo<T, Cost> takeResult()
+        {
+            assert(searchFinished);
+            assert(resultIndex >= 0);
+
+            auto path = walkPath(resultIndex);
+            AStarPathInfo<T, Cost> info{resultType, std::move(path), std::move(closedVertices), searchExhausted};
+
+            // closedVertices was moved from, so it is unspecified rather than
+            // empty; say what it is before the next search asks.
+            closedVertices.clear();
+            openHeap.clear();
+            searchActive = false;
+            searchFinished = false;
+
+            return info;
+        }
+
+        /**
+         * Throws a half-finished search away. The scratch keeps whatever it
+         * stamped, which costs nothing: the next beginSearch stamps over it.
+         */
+        void abandonSearch()
+        {
+            openHeap.clear();
+            closedVertices.clear();
+            closestCost.reset();
+            closestIndex = -1;
+            searchActive = false;
+            searchFinished = false;
+            resultIndex = -1;
         }
 
     protected:
@@ -245,7 +371,7 @@ namespace rwe
         {
             if (node.cellIndex >= 0)
             {
-                scratch->at(node.cellIndex).openIndex = static_cast<int16_t>(position);
+                scratch->at(node.cellIndex).openIndex = static_cast<int32_t>(position);
             }
         }
 
@@ -337,14 +463,12 @@ namespace rwe
             heapSiftUp(static_cast<std::size_t>(existingPosition), item);
         }
 
-        std::vector<T> walkPath(const VertexInfo& info)
+        std::vector<T> walkPath(int32_t index)
         {
             std::vector<T> items;
-            std::optional<const VertexInfo*> v = &info;
-            while (v)
+            for (auto i = index; i >= 0; i = closedVertices[i].second.predecessor)
             {
-                items.push_back((*v)->vertex);
-                v = (*v)->predecessor;
+                items.push_back(closedVertices[i].second.vertex);
             }
 
             std::reverse(items.begin(), items.end());

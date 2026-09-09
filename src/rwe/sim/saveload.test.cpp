@@ -327,6 +327,59 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a path search suspended when the game is saved is restored exactly", "[saveload][pathing]")
+    {
+        // A search no longer has to finish inside the tick that started it,
+        // so a save can land in the middle of one. That half-finished A* is
+        // not in the document and cannot be, but it does not have to be: the
+        // search is a pure function of the world, the goal and the cell it
+        // started from, and only the last of those is lost, because the unit
+        // keeps walking its straight-line stand-in while it waits. The save
+        // writes that footprint and the number of expansions already done,
+        // and the load runs the search forward that far.
+        //
+        // Dropping the search on both sides instead would pass this test and
+        // break replays, where keyframes go through the same path during
+        // playback and the recording they are compared against dropped
+        // nothing.
+        const int tinyBudget = 20;
+
+        auto simA = makeBaseSim();
+        simA.pathFindingService.expansionBudgetPerTick = tinyBudget;
+        buildScenario(simA);
+
+        int ticks = 0;
+        while (!simA.pathFindingService.suspendedSearchStart() && ticks < 200)
+        {
+            simA.tick();
+            ++ticks;
+        }
+        REQUIRE(simA.pathFindingService.suspendedSearchStart().has_value());
+        REQUIRE(simA.pathFindingService.suspendedSearchExpansions() > 0);
+
+        auto saved = saveSimulationToJson(simA);
+
+        auto simB = makeBaseSim();
+        simB.pathFindingService.expansionBudgetPerTick = tinyBudget;
+        loadSimulationFromJson(saved, simB);
+
+        REQUIRE(simB.pathFindingService.suspendedSearchStart() == simA.pathFindingService.suspendedSearchStart());
+        REQUIRE(simB.pathFindingService.suspendedSearchExpansions() == simA.pathFindingService.suspendedSearchExpansions());
+        REQUIRE(computeHashOf(simA) == computeHashOf(simB));
+        REQUIRE(saveSimulationToJson(simB) == saved);
+
+        // Where a dropped search would show: the two would path the same
+        // route but land it on different ticks, and the units would be
+        // somewhere different by the time it arrived.
+        for (int i = 0; i < 200; ++i)
+        {
+            simA.tick();
+            simB.tick();
+            INFO("tick " << i << " after the save");
+            REQUIRE(computeHashOf(simA) == computeHashOf(simB));
+        }
+    }
+
     TEST_CASE("the save carries state nothing hashes", "[saveload]")
     {
         // The round trip above compares the whole save byte for byte, which

@@ -113,6 +113,8 @@ is the failure mode this rule exists to catch.
 
 Derived state is the exception and should say so. `UnitSpatialIndex` is rebuilt from the unit list every tick, is never saved and never hashed, and returns a deliberate *superset* of each query so that the exact test still runs against live positions — which is what makes it incapable of changing an outcome.
 
+**Derived state that can change an outcome is not exempt, and there is one.** A path search is sliced across ticks now, so at the end of any tick the pathfinder may be holding a half-finished A\*. That is not hashed — every peer suspends at the same point, so there is nothing to disagree about — but it *is* serialized, because when the path lands changes where a unit is. It goes into the save as five integers rather than as a search: the footprint the search began from and how many vertices it had expanded, which is enough to rebuild it exactly (`PathFindingService::suspendedSearchStart`, and `TOTALA-EXE.md` §87 for why dropping it instead would pass the saved-game test and break replays). The rule to take from it: ask whether a piece of derived state can move the simulation's future, not whether it is derived.
+
 ## Other hazards
 
 **Destroying a `Subscription` handle does not unsubscribe.** A subscriber that dies before the `Subject` it listens to must hand its subscription back by hand — call `unsubscribe()` in the destructor — or the subject will deliver into freed memory. Getting this wrong crashed the second game of any session, which is a slow thing to find. `src/rwe/observable/Subject.test.cpp` pins both halves of the rule.
@@ -143,9 +145,9 @@ serialization, hash-validated round trip — see `sim/saveload.test.cpp`) and
 `src/rwe/game/SaveFile.*` (the on-disk container with the map/players header
 and the skirmish options). Saves are `<name>.rwesave` under the local data
 path. See the determinism section above for what a new piece of sim state
-obliges you to touch. One known gap: the `SaveFile` header's `PlayerInfo` carries no `teamId` (the
-simulation's own player table does, and is what a load restores, so alliances
-do survive; the header is simply thinner than the sim).
+obliges you to touch. The `SaveFile` header's `PlayerInfo` now carries `teamId`
+alongside the simulation's own player table, which is what a load actually
+restores.
 
 ## Matching Total Annihilation
 

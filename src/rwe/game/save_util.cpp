@@ -2060,6 +2060,20 @@ namespace rwe
         }
         j["pathRequests"] = pathRequests;
 
+        // A path search part way through, if there is one. It belongs to the
+        // request at the head of the queue above, so it needs no name of its
+        // own -- only the footprint it started from, because the unit has
+        // been walking its straight-line stand-in since and is no longer
+        // standing there, and how far it had got. See
+        // PathFindingService::suspendedSearchStart for why that is enough and
+        // why dropping the search instead would break a replay.
+        if (auto searchStart = sim.pathFindingService.suspendedSearchStart())
+        {
+            j["pathSearch"] = json{
+                {"start", saveDiscreteRect(*searchStart)},
+                {"expansions", sim.pathFindingService.suspendedSearchExpansions()}};
+        }
+
         // Empty between ticks (spawnNewUnits drains it), but carried along so
         // a mid-tick snapshot would not lose anything.
         json unitCreationRequests = json::array();
@@ -2245,6 +2259,7 @@ namespace rwe
             restoreUnitOccupancy(sim, id, unit);
         }
 
+        sim.pathFindingService.abandonSearch();
         sim.pathRequests.clear();
         for (const auto& rj : j.at("pathRequests"))
         {
@@ -2280,6 +2295,20 @@ namespace rwe
                 loadExploredGrid(exploredJson[i], sim.playerVisibility[i].explored);
             }
         }
+
+        // Last of all, because rebuilding a suspended path search runs the
+        // search, and the search reads the terrain, the occupancy grid and
+        // the unit it belongs to -- all of which are only now in place.
+        // Older saves carry no such key and simply start the search again,
+        // as they did before any of this was written.
+        if (j.contains("pathSearch"))
+        {
+            const auto& searchJson = j.at("pathSearch");
+            sim.pathFindingService.restoreSuspendedSearch(
+                sim,
+                loadDiscreteRect(searchJson.at("start")),
+                searchJson.at("expansions").get<std::size_t>());
+        }
     }
 
     void clearSimulationForLoad(GameSimulation& sim)
@@ -2302,6 +2331,7 @@ namespace rwe
         // longer there. The spatial index is stamped with the game time it
         // was built at and a restore can land on that very tick.
         sim.invalidateUnitSpatialIndex();
+        sim.pathFindingService.abandonSearch();
         sim.pathRequests.clear();
         sim.unitCreationRequests.clear();
         sim.events.clear();

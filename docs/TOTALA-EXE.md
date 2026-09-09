@@ -8566,14 +8566,79 @@ consequences follow, and only the first is a real cost:
   - The walk takes a **step limit** where the original has none. Running out
     of it costs a less relaxed goal and nothing else.
 
+**The slicing is ported too, as of 2026-09-09.** RWE used to stop a search
+dead at a thousand expansions and hand back whatever partial route it had,
+which the unit walked before asking again; the original has no per-search cap
+at all and slices its A\* instead, carrying the same search on next tick
+(`0x40EEAF`). RWE now does the same. `AStarPathFinder` is a state machine --
+`beginSearch`, `stepSearch(n)`, `takeResult` -- and `PathFindingService` gives
+the search whatever is left of the tick's expansion budget and keeps it
+exactly where it stopped if that runs out. A search therefore ends at the
+goal or at an empty open list and nowhere else, so a partial result now means
+one thing only: the place genuinely cannot be reached. The remaining bound is
+the map, which is the same bound the original has.
+
+Three things follow, and they are the shape of the original's scheduler
+rather than a coincidence:
+
+  - **One search at a time**, because the scratch grid stamps its cells with
+    the search they belong to and starting a second search would stamp the
+    first one's cells stale. The original is under the same constraint from
+    the other end: its pathfinder is a singleton at `gm+0x14207` holding one
+    set of map entries, which is why it can slice at all.
+  - **A suspended search is checked before it is resumed.** A unit that has
+    died, or been given a different order while its search was part way
+    through, has no use for the answer, so the search is thrown away and the
+    request started again against what the unit wants now.
+  - **A save carries it, in five integers.** A half-finished A\* cannot be
+    serialised and does not have to be: a search is a pure function of the
+    world, the goal, and the cell it started from. The first two are in the
+    save already -- the world because it *is* the save, the goal because it
+    hangs off the unit's navigation state -- and only the third is lost,
+    because a unit whose search is suspended keeps walking its straight-line
+    stand-in and is no longer standing where the search began. So the save
+    writes down that footprint and how many expansions had been done, and the
+    load rebuilds the search from the footprint and runs it forward that far.
+    A\* is deterministic, so what comes out is the state that was suspended
+    and not an approximation of it. The request needs no name: the search
+    always belongs to the one at the head of the queue.
+
+    The obvious alternative -- drop the search on both sides of a save, so
+    both timelines start it again from nothing -- is wrong, and it is worth
+    saying why, because it looks right. It works for a saved game, where
+    nobody can watch both timelines. It breaks a **replay**: keyframes go
+    through the same `saveSimulationToJson` during playback, and the
+    recording they are being compared against dropped nothing, so every
+    keyframe taken while a search happened to be in flight would put the
+    playback a few ticks out from the game it is replaying. Measured on
+    `path_bench` at 400 units, a search is in flight on about a third of all
+    ticks, so that is not a rare case.
+
+The scratch grid's two per-cell indices went from int16 to int32 to pay for
+this -- a cell is twelve bytes now rather than eight -- because the static
+asserts that made int16 safe were bounded by the thousand-expansion cap, and
+a search that can close every cell of a 512x512 map needs more than an int16
+addresses.
+
+One number is deliberately not changed with it: the budget stays at 4000
+expansions a tick, forty times the original's hundred. Raising or lowering it
+is its own question with its own roadmap entry, and doing both at once would
+make neither measurable.
+
 Still not ported: the adaptive heuristic weight (it would have to be hashed
 simulation state, since RWE is lockstep and the original is not), the
 restricted successor fan, the turn and straight-run costs, unexplored ground
 reading as free, the 60-tick per-unit cooldown, and the 20-waypoint clamp. RWE
-keeps an admissible octile heuristic, an eight-way fan, and a 1000-expansion
-cap that truncates a search rather than suspending and resuming it -- which is
-the one structural piece of the original's scheduler that RWE still has no
-equivalent for.
+keeps an admissible octile heuristic and an eight-way fan.
+
+**And a warning about the benchmark, found while measuring this.**
+`path_bench`'s obstacles were an immobile unit definition with no yard map,
+which is an assert in a Debug build and an empty-optional dereference in a
+Release one. Every `path_bench` figure recorded before 2026-09-09 was
+therefore measured with obstacles that did not reliably obstruct, and none of
+them is a valid baseline -- including the "116 units arrive where 96 did"
+line the bug-walk entry in the roadmap carries. The definition has a yard map
+now.
 
 ## 88. Where RWE deliberately differs
 
