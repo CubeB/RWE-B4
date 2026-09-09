@@ -1465,6 +1465,39 @@ namespace rwe
         // come out of, so neither the mask nor the meshes that fill it are
         // worth building.
         auto haloWanted = antiAliasEnabled && buildingHaloStrength > 0;
+
+        // ...but only if there is something on screen that could carry one.
+        //
+        // Only a finished building can, and the mask costs the same whether or
+        // not one is there: every visible unit and modelled feature gets its
+        // pieces walked a second time and drawn again. Measured on a 200 v 200
+        // battle_test with no buildings anywhere, that was 3299 extra draw
+        // calls and about 740us a frame -- an 81% rise in w.unit.build and 46%
+        // more draws -- to fill a mask that could not produce a single pixel.
+        // This scan is position and bounding-box tests only, no mesh work, and
+        // it takes that whole case to nothing.
+        if (haloWanted)
+        {
+            haloWanted = false;
+            for (const auto& [unitId, unit] : simulation.units)
+            {
+                const auto& def = simulation.unitDefinitions.at(unit.unitType);
+                if (def.isMobile || unit.isBeingBuilt(def))
+                {
+                    continue;
+                }
+                if (!unitIsVisibleToLocalPlayer(unitId, unit))
+                {
+                    continue;
+                }
+                if (!viewCull.couldBeVisible(simVectorToFloat(unit.position), ViewCullModelRadius))
+                {
+                    continue;
+                }
+                haloWanted = true;
+                break;
+            }
+        }
         // The pieces that can carry the halo: the cached pieces of finished
         // buildings, and nothing else.
         std::vector<UnitTextureMeshRenderInfo> buildingSilhouettes;
@@ -1677,6 +1710,7 @@ namespace rwe
         if (haloWanted)
         {
             RWE_RENDERPROF("w.halomask");
+            RWE_RENDERPROF_COUNT("n.halomask", buildingSilhouettes.size() + occluderSilhouettes.size());
             // Blending OFF, and this is not a precaution. GameLaunch enables
             // blending once for the whole program with
             // GL_SRC_ALPHA/GL_ONE_MINUS_SRC_ALPHA and nothing ever turns it

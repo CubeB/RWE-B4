@@ -10596,10 +10596,46 @@ that sweeps as the arm turns; both move or match on colour and neither is the
 halo. Marking the differing pixels onto a magnified frame and looking at where
 they fall separates them in one glance, where counting them does not.
 
-The cost is honest to state: with the halo on, the mask pass walks the pieces of
-every visible unit and modelled feature a second time, so `w.halomask` is not
-free in a large battle. It is skipped entirely when anti-aliasing is off or the
-strength is 0.
+### What it costs, measured
+
+The mask pass walks the pieces of every visible unit and modelled feature a
+second time and draws them again, so its cost scales with **everything on
+screen**, not with the number of buildings that could show a halo. That
+distinction is the whole of this section.
+
+Measured with `RWE_ENABLE_RENDERPROF` on `battle_test --map "Coast To Coast"
+--units 200 --unit-type CORAK`, which has no buildings in it at all. Compare per
+mesh, because a battle_test run drifts and the two runs saw 3299 and 3625
+meshes:
+
+| per unit mesh | halo on | halo off |
+|---|---|---|
+| `w.unit.build` | 0.443 us | 0.245 us |
+| draw calls | 3.19 | 2.18 |
+| `world` | 2.65 us | 2.05 us |
+
+That is about **740 us a frame and 3300 extra draw calls to fill a mask that
+could not produce a single pixel** — an 81% rise in the unit build phase and 46%
+more draws, for nothing, because the scene contains no building.
+
+So the pass is now gated on a scan for a visible finished building, which is
+position and bounding-box tests only and no mesh work. With it, the same run
+gives 0.231 us and 2.20 draws per mesh: the no-halo baseline to within noise,
+and `w.halomask` does not appear in the profile at all.
+
+**What is left is the real inefficiency, and it is architectural.** Even with a
+base on screen, the mask is a second geometry pass over the whole world to
+recover information the first pass already had: `unitTexture.frag` samples the
+very palette index the mask wants, for the shade lookup, and the depth test has
+already resolved which surface is in front. Writing the mask as a second colour
+attachment of the main unit pass -- MRT, with `glDrawBuffers` enabling the
+second target only for that pass and `glDisablei(GL_BLEND, 1)` keeping it
+unblended -- would make the mask nearly free: no extra CPU transform work, no
+extra draw calls, and terrain and billboard features would become occluders for
+nothing, closing the two gaps named above. The cost is that every shader drawing
+into the world framebuffer during that pass needs a second output, and it means
+surgery on the main render path rather than on a pass of its own. Not done, and
+recorded here so it does not have to be rediscovered.
 
 Dropping the depth test instead would trade all of this for something worse — a
 building hidden behind a hill drawing its outline across the hill — so the
