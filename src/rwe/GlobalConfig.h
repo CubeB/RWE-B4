@@ -150,20 +150,30 @@ namespace rwe
          * one pixel of a 640x480 screen, and one pixel of a modern display is a
          * far smaller share of a building. 0 strength leaves it out.
          *
-         * **The width defaults to 3, not to the faithful 1.** At 1 it was
-         * play-tested on 2026-09-09 and could not be seen at all, which is the
-         * whole difficulty with this artefact: the faithful setting is
-         * invisible and the visible setting is wider than the original's. 3 is
-         * the width at which it reads as the halo people remember rather than
-         * as a stray pixel; set it to 1 for the arithmetically faithful one and
-         * expect to have to look for it.
+         * **Do not read the defaults as a measurement.** The halo was reported
+         * invisible twice, on 2026-09-08 and again on 2026-09-09, and both
+         * times the width looked like the culprit -- the original's artefact is
+         * one pixel of a 640x480 screen, so "too small to see" was the
+         * available explanation and it was wrong. It was not being drawn at
+         * all: the mask pass redraws geometry the world pass has already
+         * drawn, and it ran under GL_LESS, which rejects a fragment at exactly
+         * the depth already stored. Every fragment was, so the mask was empty
+         * at every width and every strength. See GameScene_render.cpp.
+         *
+         * 3 and 75 are therefore what was chosen once the thing actually
+         * rendered, not a compensation for anything. 1 is the arithmetically
+         * faithful width and is a legitimate setting; it is simply far subtler
+         * than TA's, because one pixel of this screen is not one pixel of that
+         * one. The lesson is the one this file keeps learning: an invisible
+         * feature is a broken feature until proven otherwise, and turning the
+         * number up is not the way to find out which.
          *
          * rwe.cfg keys building-halo-strength and building-halo-width; it
          * follows the anti-alias setting, since with no supersampling there is
          * no downsample for it to have come from. See worldPost.frag and
          * TOTALA-EXE.md S:101.
          */
-        unsigned int buildingHaloStrength{55};
+        unsigned int buildingHaloStrength{75};
         unsigned int buildingHaloWidth{3};
     };
 

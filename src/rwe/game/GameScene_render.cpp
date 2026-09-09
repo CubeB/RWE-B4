@@ -1632,19 +1632,30 @@ namespace rwe
             worldRenderService.drawBatch(nanoParticlesBatch, viewProjectionMatrix);
         }
 
-        // The buildings' coverage, for the halo. Depth testing is still on and
-        // the depth buffer still holds the world, so a building behind a hill
-        // marks nothing and gets no halo; depth writes are off because the
-        // world is finished with and the flashes pass below shares the buffer.
+        // The buildings' coverage, for the halo. This redraws geometry the
+        // world pass has already drawn, so it needs GL_EQUAL and not GL_LESS:
+        // unitMask.vert computes gl_Position with the same expression and the
+        // same mvpMatrix as unitTexture.vert, so every fragment lands at
+        // exactly the depth already stored, and under GL_LESS every one of
+        // them is rejected and the mask comes out empty. It did, for a day --
+        // the halo was invisible at every width and strength because it was
+        // never drawn at all. Same idiom as the cloak pass in RenderService.
+        //
+        // Keeping the depth test (rather than turning it off) is what makes a
+        // building behind a hill mark nothing and get no halo. Depth writes
+        // are off because the world is finished with and the flashes pass
+        // below shares the buffer.
         if (haloWanted)
         {
             RWE_RENDERPROF("w.halomask");
+            sceneContext.graphics->useDepthTestEqual();
             sceneContext.graphics->disableDepthWrites();
             sceneContext.graphics->bindFrameBufferColorBuffer(buildingMask.get());
             sceneContext.graphics->clearColor();
             worldRenderService.drawUnitMaskBatch(buildingSilhouettes);
             sceneContext.graphics->bindFrameBufferColorBuffer(worldFrameBuffer.texture.get());
             sceneContext.graphics->enableDepthWrites();
+            sceneContext.graphics->enableDepthTest();
         }
 
         sceneContext.graphics->disableDepthTest();

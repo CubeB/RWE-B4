@@ -44,9 +44,17 @@ uniform float gamma;
 // long gone. Width and strength are settings because the artefact does not
 // survive translation on its own: the original's halo is about one pixel of a
 // 640x480 screen, and one pixel of a modern one is a quarter of the size, so
-// left alone it would be technically faithful and invisible. That is not a
-// theory: a width of 1 was play-tested on 2026-09-09 and could not be seen at
-// all, so the default width is 3.
+// left alone it would be technically faithful and very subtle indeed, which is
+// why the defaults are 3 and 75 rather than 1 and something smaller.
+//
+// Beware the trap those two numbers sit next to. The halo was twice reported
+// invisible and twice the width was blamed, because "one pixel of a 640x480
+// screen is nothing here" is a ready explanation and it fits. It was wrong
+// both times: the coverage mask was empty, because the pass that fills it
+// redraws geometry the world pass has already drawn and was running under
+// GL_LESS, which rejects a fragment sitting at exactly the stored depth. The
+// numbers here were never the reason nothing showed up. See the halo mask pass
+// in GameScene_render.cpp for the fix and the reasoning.
 //
 // One artefact is inherent to doing this from a screen-space mask and is worth
 // knowing about before it is reported as a bug. The original anti-aliases each

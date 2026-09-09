@@ -469,7 +469,7 @@ namespace rwe
          */
         bool vehicleShadowsEnabled{true};
         /** The purple building halo: strength as a percentage, width in output pixels. */
-        unsigned int buildingHaloStrength{55};
+        unsigned int buildingHaloStrength{75};
         unsigned int buildingHaloWidth{3};
         unsigned int scrollSpeedSetting{100};
 

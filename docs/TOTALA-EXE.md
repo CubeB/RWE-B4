@@ -10442,13 +10442,25 @@ and strength are settings (`building-halo-width`, `building-halo-strength`)
 rather than constants, because the artefact does not survive translation on its
 own: the original's halo is about one pixel of a 640x480 screen, and one pixel
 of a modern screen is a quarter of that, so a faithful one would be correct and
-invisible. That is not a theory: the width shipped at 1, was play-tested on
-2026-09-09, and could not be seen at all, so **the default width is 3** — the
-point at which it reads as the halo people remember rather than as a stray
-pixel. 1 remains the arithmetically faithful setting and is worth knowing about,
-but it is not what ships, and this is the honest shape of the departure: the
-faithful width is invisible here and the visible width is wider than the
-original's. It follows the anti-alias setting, since with no supersampling there
+subtle. The defaults are a width of 3 and a strength of 75, chosen by looking at
+a solar collector once the effect actually rendered; 1 is the arithmetically
+faithful width and remains a legitimate setting for anyone who wants it.
+
+**A warning attached to those numbers, because it cost two days.** The halo was
+reported invisible twice, and both times the width was the obvious suspect — the
+original's artefact is about one pixel of a 640x480 screen, one pixel of a
+modern display is a far smaller share of a building, and "too faithful to see"
+is an explanation that fits the evidence perfectly. It was wrong. Nothing was
+being drawn at all. The coverage mask is filled by a second pass over geometry
+the world pass has already drawn, and it ran with the ordinary depth test,
+`GL_LESS`; `unitMask.vert` computes `gl_Position` with the same expression and
+the same matrix as `unitTexture.vert`, so every fragment landed at exactly the
+depth already in the buffer and `GL_LESS` rejected all of them. The mask was
+empty at every width and every strength, and turning the numbers up could never
+have revealed it. The fix is `GL_EQUAL` for that pass — the same idiom the cloak
+pass in `RenderService.cpp` already uses for the same reason — and the general
+lesson is that an invisible effect is a broken effect until proven otherwise.
+It follows the anti-alias setting, since with no supersampling there
 
 One artefact is inherent to reproducing this from a screen-space mask, and is
 recorded here so it is not later reported as a bug. The original anti-aliases
