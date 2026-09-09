@@ -7,6 +7,7 @@
 #include <rwe/GlobalConfig.h>
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuScene.h>
+#include <rwe/MovieScene.h>
 #include <rwe/PathMapping.h>
 #include <rwe/game/SaveFile.h>
 #include <rwe/SceneContext.h>
@@ -371,12 +372,45 @@ namespace rwe
         else
         {
             LOG_INFO << "Launching into the main menu";
-            auto scene = std::make_unique<MainMenuScene>(
-                sceneContext,
-                &allSoundTdf,
-                viewport.width(),
-                viewport.height());
-            sceneManager.setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+
+            // The startup logo. 0x4271FE is what separates the films: 1.zrb
+            // is the one the original plays on the way to the menu, before
+            // anything else is on screen, where 2.zrb -- the intro -- is what
+            // the menu's own button plays. Any key or click skips it, which
+            // MovieScene already does for every film.
+            //
+            // Only on the way to the menu. Launching straight into a game
+            // (the --map path every harness takes) never reaches this branch,
+            // and neither does quitting a game back to the menu, which builds
+            // its MainMenuScene itself.
+            auto logoBytes = vfs.readFile("movies/1.zrb");
+            if (logoBytes)
+            {
+                auto context = sceneContext;
+                auto* soundTdf = &allSoundTdf;
+                auto* viewportPtr = &viewport;
+                auto logo = std::make_shared<MovieScene>(
+                    sceneContext,
+                    std::move(*logoBytes),
+                    [context, soundTdf, viewportPtr]() {
+                        auto menu = std::make_shared<MainMenuScene>(
+                            context,
+                            soundTdf,
+                            viewportPtr->width(),
+                            viewportPtr->height());
+                        context.sceneManager->setNextScene(menu);
+                    });
+                sceneManager.setNextScene(logo);
+            }
+            else
+            {
+                auto scene = std::make_unique<MainMenuScene>(
+                    sceneContext,
+                    &allSoundTdf,
+                    viewport.width(),
+                    viewport.height());
+                sceneManager.setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+            }
         }
 
         LOG_INFO << "Entering main loop";
