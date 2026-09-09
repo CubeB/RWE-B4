@@ -148,6 +148,24 @@ namespace rwe
          * bug. rwe.cfg key building-halo.
          */
         bool buildingHalo{true};
+
+        /**
+         * Whether the box filter reaches past the buildings, off by default.
+         *
+         * RWE renders the world into a buffer twice the size and filters each
+         * 2x2 block down, which is how it reproduces the original's
+         * anti-aliasing. The original only ever did that to a building's
+         * cached bitmap: never the ground, never a mobile unit, because
+         * nothing else had a cached bitmap for it to be done to. So the
+         * filter is restricted the same way, and off is the faithful setting.
+         *
+         * On extends it back over units and everything else solid, for anyone
+         * who would rather have smooth edges on them than the edges the
+         * original drew. It is a preference, not a fidelity fix, which is why
+         * it defaults the way it does. rwe.cfg key anti-alias-units.
+         */
+        bool antiAliasUnits{false};
+
         /**
          * The purple halo on building edges, reproduced by running the
          * original's own arithmetic.
@@ -237,6 +255,7 @@ namespace rwe
         ShadingMode shading{ShadingMode::Both};
         bool antiAlias{true};
         bool buildingHalo{true};
+        bool antiAliasUnits{false};
     };
 
     /** The settings as the config file last left them. */

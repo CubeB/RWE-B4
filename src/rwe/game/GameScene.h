@@ -424,6 +424,8 @@ namespace rwe
         bool antiAliasEnabled{true};
         /** The purple building fringe; see GlobalConfig and TOTALA-EXE.md S:101. */
         bool buildingHaloEnabled{true};
+        /** Whether the 2x2 filter reaches past the buildings; see GlobalConfig. */
+        bool antiAliasUnitsEnabled{false};
 
         void applyGamma();
 
@@ -449,6 +451,7 @@ namespace rwe
          */
         void widenShadingButton();
         void addBuildingHaloButton(UiPanel& panel);
+        void addAntiAliasUnitsButton(UiPanel& panel);
 
         /** Finds a control by name across every open menu panel. */
         template <typename T>

@@ -139,7 +139,8 @@ namespace rwe
             pendingGamma,
             pendingShading,
             pendingAntiAlias,
-            pendingBuildingHalo};
+            pendingBuildingHalo,
+            pendingAntiAliasUnits};
     }
 
     void MainMenuScene::applyOptions(const GameOptions& state)
@@ -157,6 +158,7 @@ namespace rwe
         pendingShading = state.shading;
         pendingAntiAlias = state.antiAlias;
         pendingBuildingHalo = state.buildingHalo;
+        pendingAntiAliasUnits = state.antiAliasUnits;
         audio->setSoundEnabled(state.soundMode != SoundMode::Off);
     }
 
@@ -183,6 +185,7 @@ namespace rwe
             pendingShading = static_cast<ShadingMode>(sceneContext.globalConfig->shadingMode);
             pendingAntiAlias = sceneContext.globalConfig->antiAlias;
             pendingBuildingHalo = sceneContext.globalConfig->buildingHalo;
+            pendingAntiAliasUnits = sceneContext.globalConfig->antiAliasUnits;
         }
         optionsUndo = currentOptions();
         currentOptionsPage.clear();
@@ -259,6 +262,11 @@ namespace rwe
         // in-game one. It also does nothing on the pages that have no shadows
         // toggle, which is what keeps it off the sound and interface pages.
         uiFactory.addStagedButtonBelow(active, "STARTOPT", "BSHADOWS", "HALO", "BSHADOWS", "ANTI", {"Fringe Off", "Fringe On"}, pendingBuildingHalo ? 1 : 0);
+        // ...and how far the 2x2 filter reaches, which the original never let
+        // past a building's cached bitmap. Anchored to the fringe toggle put
+        // there a line ago, so it lands one row under it on whichever page it
+        // finds them, and is absent from the pages that carry neither.
+        uiFactory.addStagedButtonBelow(active, "STARTOPT", "BSHADOWS", "AAUNITS", "HALO", "BSHADOWS", {"Units Sharp", "Units Smooth"}, pendingAntiAliasUnits ? 1 : 0);
 
         auto state = currentOptions();
 
@@ -358,6 +366,10 @@ namespace rwe
         if (auto toggle = active.find<UiStagedButton>("HALO"))
         {
             toggle->get().setStage(pendingBuildingHalo ? 1 : 0);
+        }
+        if (auto toggle = active.find<UiStagedButton>("AAUNITS"))
+        {
+            toggle->get().setStage(pendingAntiAliasUnits ? 1 : 0);
         }
 
         for (const auto* name : {"LEFTCLICK", "UNITCHAT", "TXTSCROL", "MAXLINES", "GAME"})
@@ -736,6 +748,10 @@ namespace rwe
             {
                 pendingBuildingHalo = !pendingBuildingHalo;
             }
+            else if (message == "AAUNITS")
+            {
+                pendingAntiAliasUnits = !pendingAntiAliasUnits;
+            }
             else if (message == "UNDO")
             {
                 applyOptions(optionsUndo);
@@ -891,6 +907,10 @@ namespace rwe
         if (auto toggle = active.find<UiStagedButton>("HALO"))
         {
             toggle->get().setStage(pendingBuildingHalo ? 1 : 0);
+        }
+        if (auto toggle = active.find<UiStagedButton>("AAUNITS"))
+        {
+            toggle->get().setStage(pendingAntiAliasUnits ? 1 : 0);
         }
         if (auto bar = active.find<UiScrollBar>("FXVOL"))
         {

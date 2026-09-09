@@ -112,25 +112,41 @@ uniform float haloSaturation;
 // most look like a stray highlighter mark.
 uniform float haloRedShift;
 
-// Whether the ground is kept out of the supersample's box filter.
+// Whether the box filter is applied only to what the original applied it to.
 //
 // Anti-aliasing here means rendering the world into a buffer of twice the
-// size and averaging each 2x2 block down, which is what the original did to
-// its buildings and what the halo below is a consequence of. Averaging is
-// the right thing for a silhouette and the wrong thing for TA's ground: the
-// map is a palette-indexed texture read through PALETTE.SHD, and the mean of
-// four of its samples names a colour that is nowhere in the palette, so a
-// filtered map comes out soft and slightly washed where the original is
-// crisp. Reported from play as "the terrain just looks blurry", which is
-// exactly what it is.
+// size and averaging each 2x2 block down. That is the original's arithmetic,
+// and the halo below is a consequence of it -- but the original applied it to
+// exactly one thing: a **building's cached bitmap**. There is no supersampled
+// world buffer in TA at all. The double-size buffer is allocated per
+// building, filtered once and cached, which is precisely why a DONT_CACHE
+// piece never carries a halo. The ground was never filtered, and neither was
+// a moving unit.
 //
-// So a block that is ground all the way across takes one sample instead of
-// four, which is the same pixel a render at native size would have produced.
-// A block that is only partly ground is a unit or a building against the
-// map -- the edge anti-aliasing is for -- and is still averaged. Nothing
-// else about the pass changes, and with anti-aliasing off the buffer is not
-// supersampled at all and there is nothing here to do.
-uniform float sharpTerrain;
+// RWE reaches the same arithmetic from the other end, by supersampling the
+// whole frame, so without this it filtered everything. That was reported from
+// play twice: the ground first ("the terrain just looks blurry", which is a
+// fair description of what averaging four reads of a palette-indexed map
+// does -- the mean of four PALETTE.SHD samples names a colour the palette
+// does not contain), and then the rest.
+//
+// So the filter is now selective. A 2x2 block is averaged if a cached
+// building piece covers any of it, and otherwise takes a single sample --
+// which is the pixel a render at native size would have produced. That gives
+// buildings the original's treatment, silhouette included, and leaves the map
+// and the units alone.
+//
+// Zero when there is nothing to select between: with anti-aliasing off the
+// buffer is not supersampled, and the mask this reads is neither written nor
+// cleared.
+uniform float selectiveAntiAlias;
+
+// ...and the one place a player can put back what the original did not do.
+// Some people want smooth edges on their units more than they want 1997, and
+// the map is not up for discussion either way -- the blur there was never
+// anti-aliasing, it was a filter applied to a texture that cannot survive
+// one. rwe.cfg key anti-alias-units, and a switch on the VISUALS page.
+uniform float antiAliasUnits;
 
 // What the original's table found where a building's edge met nothing.
 const int TransparentIndex = 253;
@@ -174,6 +190,14 @@ bool terrain(vec4 texel)
     return texel.g > 0.5;
 }
 
+// Solid, and not the ground: a unit, a nanoframe, a modelled feature, or a
+// dont-cache piece of a building. Everything the original drew straight to
+// the screen without a double-size buffer anywhere near it.
+bool unfiltered(vec4 texel)
+{
+    return solid(texel) && !terrain(texel) && !cached(texel);
+}
+
 void main(void)
 {
     vec4 screenValue = texture(screenTexture, fragTexCoord);
@@ -188,7 +212,7 @@ void main(void)
     vec4 s10 = vec4(0.0);
     vec4 s01 = vec4(0.0);
     vec4 s11 = vec4(0.0);
-    if (sharpTerrain > 0.0 || haloStrength > 0.0)
+    if (selectiveAntiAlias > 0.0 || haloStrength > 0.0)
     {
         block = (ivec2(fragTexCoord * vec2(textureSize(buildingMask, 0))) / 2) * 2;
         s00 = texelFetch(buildingMask, block + ivec2(0, 0), 0);
@@ -197,11 +221,25 @@ void main(void)
         s11 = texelFetch(buildingMask, block + ivec2(1, 1), 0);
     }
 
-    // Ground all the way across takes one sample rather than the average of
-    // four. A block with anything else in it is an edge and keeps the filter.
-    if (sharpTerrain > 0.0 && terrain(s00) && terrain(s10) && terrain(s01) && terrain(s11))
+    if (selectiveAntiAlias > 0.0)
     {
-        screenValue = texelFetch(screenTexture, block, 0);
+        // A cached building piece anywhere in the block is what the original
+        // filtered, and the block is averaged for it -- its silhouette
+        // included, which is where the halo comes from and why the two have
+        // to agree about which blocks those are.
+        bool filterThis = cached(s00) || cached(s10) || cached(s01) || cached(s11);
+
+        // And the player's own answer to the question the original never
+        // asked, for everything solid that is not the ground.
+        if (antiAliasUnits > 0.0)
+        {
+            filterThis = filterThis || unfiltered(s00) || unfiltered(s10) || unfiltered(s01) || unfiltered(s11);
+        }
+
+        if (!filterThis)
+        {
+            screenValue = texelFetch(screenTexture, block, 0);
+        }
     }
 
     vec4 dodgeMaskValue = texture(dodgeMask, fragTexCoord);

@@ -10462,12 +10462,27 @@ applied to it. That was reported from play as "the terrain just looks blurry",
 and it is a fair description of what averaging four samples of a
 palette-indexed map does -- the mean of four `PALETTE.SHD` reads names a
 colour the palette does not contain, so the crispness the ground is drawn
-with goes. As of 2026-09-09 the resolve leaves it out: a 2x2 block that is
-ground all the way across takes one sample instead of four, and a block with
-anything else in it is an edge and keeps the filter. The flag is green in the
-same mask the halo reads. So this is not a divergence but the removal of one,
-and the anti-aliasing now covers what the original's covered -- units aside,
-which the original did not cache and RWE still supersamples.
+with goes.
+
+As of 2026-09-09 the filter is **selective, and selects what the original
+selected**. A 2x2 block is averaged if a cached building piece covers any of
+it -- its silhouette included, which is where the halo comes from, so the two
+features necessarily agree about which blocks those are -- and otherwise the
+block takes a single sample, which is the pixel a render at native size would
+have produced. The ground and the units are therefore left alone, as they
+were in 1997. The mask the halo already reads carries the flags: alpha is the
+occluder level it always was, and green is the ground.
+
+One switch sits on top of it, `anti-alias-units` (VISUALS page, off by
+default), which puts units, nanoframes, features and dont-cache pieces back
+into the filter for anyone who wants smooth edges on them more than they want
+the original. The ground stays out either way: the blur there was never
+anti-aliasing, it was a box filter over a texture that cannot survive one.
+
+So the direction of travel is worth stating plainly, because it is the
+opposite of what it looks like: **this removed a divergence rather than
+adding one.** RWE was anti-aliasing three things the original anti-aliased
+none of, and it now anti-aliases the one thing it did.
 
 **Which table is INFERRED.** `PALETTE.ALP` is the only 256x256 source-by-
 destination blend table in the shipped data, it is installed at `[display+0xC0]`

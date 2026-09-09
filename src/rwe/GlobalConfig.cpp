@@ -94,6 +94,7 @@ namespace rwe
         options.shading = static_cast<ShadingMode>(config.shadingMode);
         options.antiAlias = config.antiAlias;
         options.buildingHalo = config.buildingHalo;
+        options.antiAliasUnits = config.antiAliasUnits;
         return options;
     }
 
@@ -125,6 +126,7 @@ namespace rwe
                                          {"shading-mode", std::to_string(static_cast<unsigned int>(options.shading))},
                                          {"anti-alias", options.antiAlias ? "true" : "false"},
                                          {"building-halo", options.buildingHalo ? "true" : "false"},
+                                         {"anti-alias-units", options.antiAliasUnits ? "true" : "false"},
                                      });
     }
 }

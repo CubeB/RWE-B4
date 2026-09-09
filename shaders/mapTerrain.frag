@@ -50,11 +50,13 @@ void main(void)
     }
 
     outColor = color;
-    // Green flags the ground. The resolve reads it to leave the terrain out
-    // of the supersample's box filter: TA's ground is a palette-indexed
-    // texture through PALETTE.SHD, and averaging four of its samples names
-    // colours the palette does not contain, which reads as a blurred map
-    // rather than as anti-aliasing. Alpha is the occluder level and is what
-    // the halo reads; it is unchanged.
+    // Green flags the ground, and keeps it out of the supersample's box
+    // filter for good. The filter is the original's building anti-aliasing
+    // and the ground was never in it; averaging four reads of a
+    // palette-indexed texture names colours PALETTE.SHD does not contain,
+    // which is a blurred map rather than a smoothed edge. This flag is also
+    // what keeps the map out when the anti-alias-units switch puts everything
+    // else solid back in. Alpha is the occluder level, which is what the halo
+    // reads, and is unchanged.
     outMask = vec4(0.0, 1.0, 0.0, 0.5);
 }

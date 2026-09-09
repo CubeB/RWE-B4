@@ -1735,7 +1735,8 @@ namespace rwe
             // is no 2x buffer to take one sample of instead of four, and the
             // mask is neither written nor cleared, so reading it would be
             // reading whatever it last held.
-            sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.sharpTerrain, maskWanted ? 1.0f : 0.0f);
+            sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.selectiveAntiAlias, maskWanted ? 1.0f : 0.0f);
+            sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.antiAliasUnits, antiAliasUnitsEnabled ? 1.0f : 0.0f);
             sceneContext.graphics->bindTexture(worldFrameBuffer.texture.get());
             sceneContext.graphics->setActiveTextureSlot1();
             sceneContext.graphics->bindTexture(dodgeMask.get());

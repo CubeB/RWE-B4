@@ -894,6 +894,7 @@ namespace rwe
         {
             uiFactory.replaceStagedButton(*panel, "VISUALRT", "SHADING", "SHADINGMODE", shadingModeLabels(), static_cast<unsigned int>(shadingMode));
             addBuildingHaloButton(*panel);
+            addAntiAliasUnitsButton(*panel);
         }
     }
 
@@ -912,6 +913,21 @@ namespace rwe
         // spare. It borrows BSHADOWS's artwork so it looks like the toggles
         // either side of it rather than like an addition.
         uiFactory.addStagedButtonBelow(panel, "VISUALRT", "BSHADOWS", "HALO", "BSHADOWS", "ANTI", {"Fringe Off", "Fringe On"}, buildingHaloEnabled ? 1 : 0);
+    }
+
+    void GameScene::addAntiAliasUnitsButton(UiPanel& panel)
+    {
+        // How far the 2x2 box filter reaches, and another gadget VISUALRT has
+        // no entry for. The original anti-aliased a building's cached bitmap
+        // and nothing else, so RWE stops the filter there too and this switch
+        // is what puts it back over the units for anyone who wants it -- a
+        // preference, which is why it is a separate control rather than more
+        // stages on ANTI.
+        //
+        // It anchors to HALO, which addBuildingHaloButton added a moment ago,
+        // with BSHADOWS above it: the same 44-pixel step one row further down,
+        // landing at 240 with RESTORE still clear at 269.
+        uiFactory.addStagedButtonBelow(panel, "VISUALRT", "BSHADOWS", "AAUNITS", "HALO", "BSHADOWS", {"Units Sharp", "Units Smooth"}, antiAliasUnitsEnabled ? 1 : 0);
     }
 
     void GameScene::wireInGameOptionControls()
@@ -1037,6 +1053,11 @@ namespace rwe
             toggle->setStage(buildingHaloEnabled ? 1 : 0);
         }
 
+        if (auto toggle = findInGameMenu<UiStagedButton>("AAUNITS"))
+        {
+            toggle->setStage(antiAliasUnitsEnabled ? 1 : 0);
+        }
+
         for (const auto* name : {"LEFTCLICK", "UNITCHAT", "TXTSCROL", "MAXLINES"})
         {
             if (auto button = findInGameMenu<UiStagedButton>(name))
@@ -1067,7 +1088,8 @@ namespace rwe
             gammaSetting,
             shadingMode,
             antiAliasEnabled,
-            buildingHaloEnabled};
+            buildingHaloEnabled,
+            antiAliasUnitsEnabled};
     }
 
     void GameScene::applyInGameOptions(const GameOptions& state)
@@ -1086,6 +1108,7 @@ namespace rwe
         applyGamma();
         shadingMode = state.shading;
         buildingHaloEnabled = state.buildingHalo;
+        antiAliasUnitsEnabled = state.antiAliasUnits;
         if (antiAliasEnabled != state.antiAlias)
         {
             antiAliasEnabled = state.antiAlias;
@@ -1395,6 +1418,10 @@ namespace rwe
             {
                 buildingHaloEnabled = !buildingHaloEnabled;
             }
+            else if (control == "AAUNITS")
+            {
+                antiAliasUnitsEnabled = !antiAliasUnitsEnabled;
+            }
             else if (control == "MODE")
             {
                 // Off | Mono | 3D, cycled by the button itself.
@@ -1464,6 +1491,10 @@ namespace rwe
         if (auto toggle = findInGameMenu<UiStagedButton>("HALO"))
         {
             toggle->setStage(buildingHaloEnabled ? 1 : 0);
+        }
+        if (auto toggle = findInGameMenu<UiStagedButton>("AAUNITS"))
+        {
+            toggle->setStage(antiAliasUnitsEnabled ? 1 : 0);
         }
         if (auto bar = findInGameMenu<UiScrollBar>("FXVOL"))
         {
