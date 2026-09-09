@@ -191,6 +191,12 @@ namespace rwe
 
         void drawUnitShadowMeshBatch(const UnitShadowMeshBatch& batch);
 
+        /**
+         * Fills the models' silhouettes with white, for a coverage mask the
+         * post pass can find an outline in. See shaders/unitMask.frag.
+         */
+        void drawUnitMaskBatch(const std::vector<UnitTextureMeshRenderInfo>& meshes);
+
         void drawSpriteBatch(const SpriteBatch& batch);
 
         void drawLineLoopsBatch(const ColoredMeshesBatch& batch);

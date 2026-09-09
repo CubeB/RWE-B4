@@ -314,6 +314,8 @@ namespace rwe
           antiAliasEnabled(sceneContext.globalConfig->antiAlias),
           shadowsEnabled(sceneContext.globalConfig->shadows),
           vehicleShadowsEnabled(sceneContext.globalConfig->vehicleShadows),
+          buildingHaloStrength(sceneContext.globalConfig->buildingHaloStrength),
+          buildingHaloWidth(sceneContext.globalConfig->buildingHaloWidth),
           scrollSpeedSetting(sceneContext.globalConfig->scrollSpeed),
           gameParameters(gameParameters),
           audioLookup(audioLookup),

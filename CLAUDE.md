@@ -173,12 +173,11 @@ of `TotalA.exe` instead of guessed at.
   (§98), and the two shadow passes — a unit's shadow is a byte-for-byte copy
   of its own cached sprite drawn at an offset, where a building's is a
   projected rectangle filled flat (§100), and the purple halo on building
-  edges, which is a bug of the original's — what stood for transparent
-  measures out of `PALETTE.ALP` as index 253, plain magenta, and RWE
-  deliberately does not reproduce it (§101). §88 and §91 are the ones to read
-  first if you are about to change something — where RWE **deliberately**
-  differs, so those do not get "corrected" back, and what is decoded but not
-  ported.
+  edges, which is a bug of the original's that RWE reproduces on purpose —
+  what stood for transparent measures out of `PALETTE.ALP` as index 253,
+  plain magenta (§101). §88 and §91 are the ones to read first if
+  you are about to change something — where RWE **deliberately** differs, so
+  those do not get "corrected" back, and what is decoded but not ported.
 - `docs/TOTALA-EXE-SHADING.md` — the shaded unit rasterizer in full, in two
   halves. Part one is the geometry: the 16-byte vertex record, the per-vertex
   shade level and its `& 0x1F`, the averaged (and deliberately unnormalised)

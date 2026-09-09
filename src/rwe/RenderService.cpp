@@ -306,6 +306,24 @@ namespace rwe
         }
     }
 
+    void RenderService::drawUnitMaskBatch(const std::vector<UnitTextureMeshRenderInfo>& meshes)
+    {
+        if (meshes.empty())
+        {
+            return;
+        }
+
+        const auto& shader = shaders->unitMask;
+        graphics->bindShader(shader.handle.get());
+
+        for (const auto& m : meshes)
+        {
+            graphics->setUniformMatrix(shader.mvpMatrix, m.mvpMatrix);
+            graphics->bindTexture(m.texture);
+            graphics->drawTriangles(*m.mesh);
+        }
+    }
+
     void RenderService::drawUnitShadowMeshBatch(const UnitShadowMeshBatch& batch)
     {
         if (batch.meshes.empty())
