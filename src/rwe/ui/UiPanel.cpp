@@ -1,5 +1,6 @@
 #include "UiPanel.h"
 #include <algorithm>
+#include <cmath>
 #include <rwe/util/rwe_string.h>
 
 namespace rwe

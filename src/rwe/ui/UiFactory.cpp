@@ -1,5 +1,6 @@
 #include "UiFactory.h"
 #include <cctype>
+#include <cstdlib>
 #include <rwe/ui/UiSlider.h>
 #include <rwe/ui/UiTextBox.h>
 #include <algorithm>
