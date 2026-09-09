@@ -1119,6 +1119,16 @@ namespace rwe
         void toggleGameMenu();
         void openGameMenuRoot();
         void openGameExitMenu();
+
+        /**
+         * TotalA's YESORNO.GUI, built fresh for whichever question is being
+         * asked and dropped in as the whole menu stack so CHOICE2/Cancel has
+         * a clean panel to land back on. onYes and onNo are copy-then-cleared
+         * before being called, because either one is free to replace the
+         * whole scene (exiting to Windows, tearing down to the main menu) and
+         * a member read after that point would be reading freed state.
+         */
+        void openConfirmDialog(const std::string& title, std::function<void()> onYes, std::function<void()> onNo);
         void openInGameOptions(const std::string& page);
         void closeGameMenu();
         void setGameMenuPanel(std::unique_ptr<UiPanel>&& panel);
@@ -1133,6 +1143,12 @@ namespace rwe
          * lands here and runs at the top of the next update.
          */
         std::vector<std::function<void()>> pendingMenuActions;
+
+        /** What CHOICE1/CHOICE2 on the open YESORNO panel run; see openConfirmDialog. */
+        std::function<void()> pendingConfirmAction;
+        /** What CHOICE2 runs instead, or nothing to fall back to openGameMenuRoot(). */
+        std::function<void()> pendingConfirmCancel;
+
         void exitToMainMenu();
         GameOptions currentInGameOptions() const;
         void applyInGameOptions(const GameOptions& state);
@@ -1142,6 +1158,10 @@ namespace rwe
         void openLoadDialog();
         void saveCurrentGame(const std::string& name);
         void loadSavedGame(const std::string& name);
+        /** RESTART.GUI, opened from the exit menu in skirmish; see TOTALA-EXE.md S:63. */
+        void openRestartMenu();
+        /** Reloads the current map and players from scratch, the way a fresh game starts. */
+        void restartGame();
         /** Pause the sim for the menu, through the same command path the Pause key uses. */
         void setMenuPause(bool wantPaused);
 

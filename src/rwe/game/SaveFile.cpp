@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <fstream>
 #include <rwe/util.h>
 #include <rwe/util/match.h>
@@ -29,6 +30,10 @@ namespace rwe
             j["color"] = p.color.value;
             j["metal"] = p.metal.value;
             j["energy"] = p.energy.value;
+            if (p.teamId)
+            {
+                j["teamId"] = *p.teamId;
+            }
             return j;
         }
 
@@ -49,6 +54,10 @@ namespace rwe
             if (controller == "computer")
             {
                 p.controller = PlayerControllerTypeComputer();
+            }
+            if (j.contains("teamId"))
+            {
+                p.teamId = j.at("teamId").get<int>();
             }
             return p;
         }
@@ -205,6 +214,10 @@ namespace rwe
         {
             players.push_back(p ? playerToJson(*p) : nlohmann::json());
         }
+        if (save.gameTimeSeconds)
+        {
+            header["gameTimeSeconds"] = *save.gameTimeSeconds;
+        }
         j["camera"] = {{"x", save.cameraPosition.x}, {"y", save.cameraPosition.y}, {"z", save.cameraPosition.z}};
         j["sim"] = save.simulation;
 
@@ -242,9 +255,26 @@ namespace rwe
         }
 
         SaveFile save(parameters);
+        if (header.contains("gameTimeSeconds"))
+        {
+            save.gameTimeSeconds = header.at("gameTimeSeconds").get<unsigned int>();
+        }
         const auto& camera = j.at("camera");
         save.cameraPosition = Vector3f(camera.at("x").get<float>(), camera.at("y").get<float>(), camera.at("z").get<float>());
         save.simulation = j.at("sim");
         return save;
+    }
+
+    std::string aiDifficultyDisplayName(AiDifficulty d)
+    {
+        // Built on the save format's own spelling rather than a second
+        // switch, so the two cannot drift apart: this is the same word with
+        // its first letter capitalised for the save list's caption style.
+        std::string s = aiDifficultyToString(d);
+        if (!s.empty())
+        {
+            s[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(s[0])));
+        }
+        return s;
     }
 }

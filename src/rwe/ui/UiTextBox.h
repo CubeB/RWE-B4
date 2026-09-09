@@ -1,9 +1,18 @@
 #pragma once
 
+#include <optional>
 #include <rwe/ui/UiComponent.h>
 
 namespace rwe
 {
+    /**
+     * What keyDown types into the box for a given keycode and modifier
+     * state (an SDL_Keymod bitmask), split out from keyDown so it can be
+     * tested without a live SDL modifier state to read. Returns nullopt for
+     * anything the box does not accept.
+     */
+    std::optional<char> textBoxCharacterFor(int keyCode, unsigned short modState);
+
     /**
      * The gui files' gadget type 3: a single line of editable text. The
      * original uses it for the save-game name; this one accepts letters,

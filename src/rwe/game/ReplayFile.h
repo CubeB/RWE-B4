@@ -18,13 +18,14 @@ namespace rwe
      * determined by the conditions it started under and the commands issued
      * into it: this is the first half, and the record stream is the second.
      *
-     * It carries the same lobby fields as SaveFile's header, plus the two
-     * that a replay cannot do without. The seed, because a game started with
+     * It carries the same lobby fields as SaveFile's header, plus the one
+     * that a replay cannot do without: the seed, because a game started with
      * one and replayed without it deals different start positions and diverges
-     * on the first tick. And teamId, which SaveFile's header drops -- it gets
-     * away with that because a save also restores the simulation's own player
-     * table, where the alliances live; a replay has no such second copy, so a
-     * team lost here is a team lost.
+     * on the first tick. SaveFile's header carries teamId too, but only
+     * because it can afford a second copy -- a save also restores the
+     * simulation's own player table, where the alliances actually live. A
+     * replay has no such second copy, so its own teamId field is the only
+     * one there is.
      */
     struct ReplayHeader
     {

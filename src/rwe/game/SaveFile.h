@@ -20,6 +20,13 @@ namespace rwe
     {
         GameParameters parameters;
         Vector3f cameraPosition{0.0f, 0.0f, 0.0f};
+        /**
+         * The simulation's elapsed game time when the save was written, for
+         * the save list's TIME column. Nothing but the list reads it, so a
+         * save written before this field existed loads with it empty rather
+         * than failing.
+         */
+        std::optional<unsigned int> gameTimeSeconds;
         nlohmann::json simulation;
 
         explicit SaveFile(const GameParameters& parameters) : parameters(parameters) {}
@@ -36,4 +43,7 @@ namespace rwe
     void writeSaveFile(const std::filesystem::path& path, const SaveFile& save);
 
     std::optional<SaveFile> readSaveFile(const std::filesystem::path& path);
+
+    /** The AI difficulty as a word in sentence case ("Standard"), for the save list's DIFF column -- not the save format's own lowercase spelling. */
+    std::string aiDifficultyDisplayName(AiDifficulty d);
 }

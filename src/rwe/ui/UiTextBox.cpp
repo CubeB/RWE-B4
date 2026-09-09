@@ -45,6 +45,75 @@ namespace rwe
         focused = false;
     }
 
+    namespace
+    {
+        struct ShiftPair
+        {
+            int keyCode;
+            char unshifted;
+            char shifted;
+        };
+
+        // A US layout mapping, done by hand keycode-by-keycode rather than
+        // through SDL's text-input events. The project's key events are
+        // broadcast to every child of a panel rather than routed to a
+        // focused one (see the comment in
+        // GameScene_commands.cpp::openSaveDialog), so there is no
+        // SDL_TEXTINPUT plumbing to hang this off; wiring that up is a
+        // separate job. This covers the digits and the punctuation row a
+        // save name is likely to use, and no more.
+        constexpr ShiftPair shiftTable[] = {
+            {SDLK_1, '1', '!'},
+            {SDLK_2, '2', '@'},
+            {SDLK_3, '3', '#'},
+            {SDLK_4, '4', '$'},
+            {SDLK_5, '5', '%'},
+            {SDLK_6, '6', '^'},
+            {SDLK_7, '7', '&'},
+            {SDLK_8, '8', '*'},
+            {SDLK_9, '9', '('},
+            {SDLK_0, '0', ')'},
+            {SDLK_MINUS, '-', '_'},
+            {SDLK_EQUALS, '=', '+'},
+            {SDLK_LEFTBRACKET, '[', '{'},
+            {SDLK_RIGHTBRACKET, ']', '}'},
+            {SDLK_BACKSLASH, '\\', '|'},
+            {SDLK_SEMICOLON, ';', ':'},
+            {SDLK_APOSTROPHE, '\'', '"'},
+            {SDLK_COMMA, ',', '<'},
+            {SDLK_PERIOD, '.', '>'},
+            {SDLK_SLASH, '/', '?'},
+            {SDLK_GRAVE, '`', '~'},
+            {SDLK_SPACE, ' ', ' '},
+        };
+    }
+
+    std::optional<char> textBoxCharacterFor(int keyCode, unsigned short modState)
+    {
+        bool shift = (modState & SDL_KMOD_SHIFT) != 0;
+
+        if (keyCode >= SDLK_A && keyCode <= SDLK_Z)
+        {
+            // Caps lock inverts the shift result for letters only -- it does
+            // not touch the digit/punctuation row, the way a real text field
+            // behaves.
+            bool caps = (modState & SDL_KMOD_CAPS) != 0;
+            bool upper = shift != caps;
+            char base = static_cast<char>('a' + (keyCode - SDLK_A));
+            return upper ? static_cast<char>(base - 'a' + 'A') : base;
+        }
+
+        for (const auto& pair : shiftTable)
+        {
+            if (pair.keyCode == keyCode)
+            {
+                return shift ? pair.shifted : pair.unshifted;
+            }
+        }
+
+        return std::nullopt;
+    }
+
     void UiTextBox::keyDown(KeyEvent event)
     {
         auto key = event.keyCode;
@@ -62,20 +131,9 @@ namespace rwe
             return;
         }
 
-        // Letters, digits and a few separators, which is everything a save
-        // name needs. There is no text-input event plumbing to draw on, so
-        // shifted characters are out; names come out lowercase.
-        if (key >= SDLK_A && key <= SDLK_Z)
+        if (auto c = textBoxCharacterFor(key, SDL_GetModState()))
         {
-            text.push_back(static_cast<char>('a' + (key - SDLK_A)));
-        }
-        else if (key >= SDLK_0 && key <= SDLK_9)
-        {
-            text.push_back(static_cast<char>('0' + (key - SDLK_0)));
-        }
-        else if (key == SDLK_SPACE || key == SDLK_MINUS || key == SDLK_PERIOD)
-        {
-            text.push_back(key == SDLK_SPACE ? ' ' : static_cast<char>(key));
+            text.push_back(*c);
         }
     }
 

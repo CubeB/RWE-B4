@@ -496,7 +496,28 @@ namespace rwe
 
     namespace
     {
-        /** Fills the GAMES listbox and mirrors clicks into the name box. */
+        /** H:MM:SS, the way DIFF's neighbours read -- no leading zero on the hour, one always on the rest. */
+        std::string formatSaveGameTime(unsigned int totalSeconds)
+        {
+            auto hours = totalSeconds / 3600u;
+            auto minutes = (totalSeconds % 3600u) / 60u;
+            auto seconds = totalSeconds % 60u;
+            auto pad2 = [](unsigned int v) {
+                auto s = std::to_string(v);
+                return s.size() < 2 ? std::string("0") + s : s;
+            };
+            return std::to_string(hours) + ":" + pad2(minutes) + ":" + pad2(seconds);
+        }
+
+        void setSaveListLabel(UiPanel& panel, const char* gadget, const std::string& text)
+        {
+            if (auto label = panel.find<UiLabel>(gadget))
+            {
+                label->get().setText(text);
+            }
+        }
+
+        /** Fills the GAMES listbox and mirrors clicks into the name box and the metadata labels. */
         void wireSaveList(UiPanel& panel)
         {
             // The metadata gadgets default to their caption text, doubling
@@ -504,10 +525,7 @@ namespace rwe
             // selected save can fill them in.
             for (const auto* name : {"GAMETYPE", "SIDE", "MISSION", "DIFF", "TIME"})
             {
-                if (auto label = panel.find<UiLabel>(name))
-                {
-                    label->get().setText(std::string());
-                }
+                setSaveListLabel(panel, name, std::string());
             }
 
             auto games = panel.find<UiListBox>("GAMES");
@@ -526,10 +544,51 @@ namespace rwe
                 }
                 auto games = panel.find<UiListBox>("GAMES");
                 auto box = panel.find<UiTextBox>("GAMENAME");
-                if (games && box && *index < games->get().getItems().size())
+                if (!games || !box || *index >= games->get().getItems().size())
                 {
-                    box->get().setText(games->get().getItems()[*index]);
+                    return;
                 }
+                auto name = games->get().getItems()[*index];
+                box->get().setText(name);
+
+                // One file read per click, not the whole list -- this only
+                // has to answer for the entry that was just clicked, and
+                // reading every save's header to populate a listbox would
+                // mean opening every file on disk on every dialog open.
+                auto save = readSaveFile(savePathForName(name));
+                if (!save)
+                {
+                    for (const auto* gadget : {"GAMETYPE", "SIDE", "MISSION", "DIFF", "TIME"})
+                    {
+                        setSaveListLabel(panel, gadget, std::string());
+                    }
+                    return;
+                }
+
+                setSaveListLabel(panel, "MISSION", save->parameters.mapName);
+
+                auto isNetwork = std::any_of(save->parameters.players.begin(), save->parameters.players.end(), [](const auto& p) {
+                    return p && std::holds_alternative<PlayerControllerTypeNetwork>(p->controller);
+                });
+                setSaveListLabel(panel, "GAMETYPE", isNetwork ? "Network" : "Skirmish");
+
+                // No slot in GameParameters says which player is local, so
+                // (per LoadingScene's own reading of a fresh game) the first
+                // human controller stands in for it.
+                std::string side;
+                for (const auto& p : save->parameters.players)
+                {
+                    if (p && std::visit(IsHumanVisitor(), p->controller))
+                    {
+                        side = p->side;
+                        break;
+                    }
+                }
+                setSaveListLabel(panel, "SIDE", side);
+
+                setSaveListLabel(panel, "DIFF", aiDifficultyDisplayName(save->parameters.aiDifficulty));
+
+                setSaveListLabel(panel, "TIME", save->gameTimeSeconds ? formatSaveGameTime(*save->gameTimeSeconds) : std::string());
             });
             games->get().addSubscription(std::move(sub));
         }
@@ -573,6 +632,7 @@ namespace rwe
     {
         SaveFile save(gameParameters);
         save.cameraPosition = worldCameraState.position;
+        save.gameTimeSeconds = simulation.gameTime.value / static_cast<unsigned int>(SimTicksPerSecond);
         save.simulation = saveSimulationToJson(simulation);
         writeSaveFile(savePathForName(name), save);
         printConsole("Game saved: " + name);
@@ -686,8 +746,51 @@ namespace rwe
         auto panel = uiFactory.panelFromGuiFile("EXITMENU");
         if (auto button = panel->find<UiStagedButton>("RESTART"))
         {
-            button->get().setEnabled(false);
+            // TOTALA-EXE.md S:63: campaign/skirmish gets this enabled with
+            // the fixed text "Restart"; only multiplayer keeps it blank and
+            // dead, and RWE has no multiplayer game in progress to gate it
+            // on here yet.
+            button->get().setEnabled(true);
+            button->get().setLabel("Restart");
         }
+        setGameMenuPanel(std::move(panel));
+    }
+
+    void GameScene::openRestartMenu()
+    {
+        // RESTART.GUI, ui_probe'd against the shipped data: its buttons are
+        // named CANCEL and RESTART, same as the panel's own topic.
+        setGameMenuPanel(uiFactory.panelFromGuiFile("RESTART"));
+    }
+
+    void GameScene::restartGame()
+    {
+        // Same pipeline loadSavedGame hands a save to, minus the save: a
+        // fresh LoadingScene over the game's own parameters spawns the
+        // starting commanders exactly as the first load did.
+        sceneContext.audioService->stopMusic();
+        auto scene = std::make_shared<LoadingScene>(
+            sceneContext,
+            audioLookup,
+            AudioService::LoopToken(),
+            gameParameters);
+        sceneContext.sceneManager->setNextScene(scene);
+    }
+
+    void GameScene::openConfirmDialog(const std::string& title, std::function<void()> onYes, std::function<void()> onNo)
+    {
+        // YESORNO.GUI is the original's one confirmation dialog, reused for
+        // both exit prompts and (below) the save-list overwrite/delete
+        // prompts: TOTALA-EXE.md S:63 has it asking under CHOICE1/CHOICE2
+        // with the TITLE gadget set per use, and nothing else about it
+        // changes between call sites.
+        auto panel = uiFactory.panelFromGuiFile("YESORNO");
+        if (auto label = panel->find<UiLabel>("TITLE"))
+        {
+            label->get().setText(title);
+        }
+        pendingConfirmAction = std::move(onYes);
+        pendingConfirmCancel = std::move(onNo);
         setGameMenuPanel(std::move(panel));
     }
 
@@ -1053,15 +1156,29 @@ namespace rwe
             }
             else if (control == "DELETE")
             {
+                std::string name;
                 if (!gameMenuPanels.empty())
                 {
                     if (auto box = gameMenuPanels.front()->find<UiTextBox>("GAMENAME"); box && !box->get().getText().empty())
                     {
-                        std::error_code ec;
-                        std::filesystem::remove(savePathForName(box->get().getText()), ec);
+                        name = box->get().getText();
                     }
                 }
-                openSaveDialog();
+                if (!name.empty())
+                {
+                    openConfirmDialog(
+                        "Delete the saved game?",
+                        [this, name]() {
+                            std::error_code ec;
+                            std::filesystem::remove(savePathForName(name), ec);
+                            openSaveDialog();
+                        },
+                        [this]() { openSaveDialog(); });
+                }
+                else
+                {
+                    openSaveDialog();
+                }
             }
             // The gadget is named LOAD in the shared dialog gui; its label
             // is what says OK.
@@ -1075,8 +1192,21 @@ namespace rwe
                         name = box->get().getText();
                     }
                 }
-                saveCurrentGame(name);
-                openGameMenuRoot();
+                if (std::filesystem::exists(savePathForName(name)))
+                {
+                    openConfirmDialog(
+                        "Overwrite the saved game?",
+                        [this, name]() {
+                            saveCurrentGame(name);
+                            openGameMenuRoot();
+                        },
+                        [this]() { openSaveDialog(); });
+                }
+                else
+                {
+                    saveCurrentGame(name);
+                    openGameMenuRoot();
+                }
             }
         }
         else if (topic == "LOADGAME")
@@ -1087,15 +1217,29 @@ namespace rwe
             }
             else if (control == "DELETE")
             {
+                std::string name;
                 if (!gameMenuPanels.empty())
                 {
                     if (auto box = gameMenuPanels.front()->find<UiTextBox>("GAMENAME"); box && !box->get().getText().empty())
                     {
-                        std::error_code ec;
-                        std::filesystem::remove(savePathForName(box->get().getText()), ec);
+                        name = box->get().getText();
                     }
                 }
-                openLoadDialog();
+                if (!name.empty())
+                {
+                    openConfirmDialog(
+                        "Delete the saved game?",
+                        [this, name]() {
+                            std::error_code ec;
+                            std::filesystem::remove(savePathForName(name), ec);
+                            openLoadDialog();
+                        },
+                        [this]() { openLoadDialog(); });
+                }
+                else
+                {
+                    openLoadDialog();
+                }
             }
             else if (control == "LOAD")
             {
@@ -1114,13 +1258,63 @@ namespace rwe
             {
                 openGameMenuRoot();
             }
+            else if (control == "RESTART")
+            {
+                openRestartMenu();
+            }
             else if (control == "EXITGAME")
             {
-                sceneContext.sceneManager->requestExit();
+                // TOTALA-EXE.md S:63, mode 2: "Surrender this battle and exit to Windows?"
+                openConfirmDialog(
+                    "Surrender this battle and exit to Windows?",
+                    [this]() { sceneContext.sceneManager->requestExit(); },
+                    [this]() { openGameExitMenu(); });
             }
             else if (control == "MAINMENU")
             {
-                exitToMainMenu();
+                // TOTALA-EXE.md S:63, mode 0: "Surrender this battle and return to main menu?"
+                openConfirmDialog(
+                    "Surrender this battle and return to main menu?",
+                    [this]() { exitToMainMenu(); },
+                    [this]() { openGameExitMenu(); });
+            }
+        }
+        else if (topic == "RESTART")
+        {
+            if (control == "CANCEL")
+            {
+                openGameExitMenu();
+            }
+            else if (control == "RESTART")
+            {
+                restartGame();
+            }
+        }
+        else if (topic == "YESORNO")
+        {
+            if (control == "CHOICE1")
+            {
+                auto action = pendingConfirmAction;
+                pendingConfirmAction = nullptr;
+                pendingConfirmCancel = nullptr;
+                if (action)
+                {
+                    action();
+                }
+            }
+            else if (control == "CHOICE2")
+            {
+                auto cancel = pendingConfirmCancel;
+                pendingConfirmAction = nullptr;
+                pendingConfirmCancel = nullptr;
+                if (cancel)
+                {
+                    cancel();
+                }
+                else
+                {
+                    openGameMenuRoot();
+                }
             }
         }
         else if (topic == "PREFS" || topic == "SOUNDSRT" || topic == "MUSICRT" || topic == "VISUALRT" || topic == "SPEEDSRT")

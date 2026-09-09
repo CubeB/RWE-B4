@@ -854,6 +854,7 @@ set(TEST_FILES
     src/rwe/game/exploredgrid.test.cpp
     src/rwe/game/ReplayFile.test.cpp
     src/rwe/game/replaykeyframe.test.cpp
+    src/rwe/game/savefileheader.test.cpp
     src/rwe/game/hoveredfeature.test.cpp
     src/rwe/game/infopanel.test.cpp
     src/rwe/game/orderbuttons.test.cpp
@@ -960,6 +961,7 @@ set(TEST_FILES
     src/rwe/util/SimpleLogger.test.cpp
     src/rwe/util/SpanStream.test.cpp
     src/rwe/util/rwe_string.test.cpp
+    src/rwe/ui/UiTextBox.test.cpp
     )
 
 add_executable(rwe_test ${TEST_FILES})
