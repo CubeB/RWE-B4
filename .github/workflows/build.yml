@@ -92,10 +92,20 @@ jobs:
           fetch-depth: 0
       - name: init submodules (shallow)
         run: git submodule update --init --recursive --depth 1
+      # The runner image ships apt sources for Google Chrome and Microsoft
+      # that nothing here installs from -- everything in the next step comes
+      # out of Ubuntu's own archive. On 2026-09-09 Google published a
+      # Packages.gz whose hash did not match the one in its own Release file,
+      # `apt-get update` exited 100, and all four Linux jobs went down with it
+      # while nothing in the repository had changed. They are removed rather
+      # than left able to fail the build, and the update retries transient
+      # fetch errors on the sources that are left.
       - name: update apt package list
-        run: sudo apt-get update -y
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.* /etc/apt/sources.list.d/microsoft-prod.*
+          sudo apt-get update -y -o Acquire::Retries=3
       - name: install apt packages
-        run: sudo apt-get install -y
+        run: sudo apt-get install -y -o Acquire::Retries=3
           gcc-14
           g++-14
           clang-18
