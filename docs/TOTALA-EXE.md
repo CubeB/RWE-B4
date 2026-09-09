@@ -10596,57 +10596,52 @@ that sweeps as the arm turns; both move or match on colour and neither is the
 halo. Marking the differing pixels onto a magnified frame and looking at where
 they fall separates them in one glance, where counting them does not.
 
-### What it costs, measured
+### How the mask is filled, and what it costs
 
-The mask pass walks the pieces of every visible unit and modelled feature a
-second time and draws them again, so its cost scales with **everything on
-screen**, not with the number of buildings that could show a halo. That
-distinction is the whole of this section.
+The mask is a **second render target of the passes that already draw the
+world**, not a pass of its own. `unitTexture.frag` writes it alongside the
+colour it was writing anyway; `mapTerrain.frag` and `unitBuild.frag` write an
+occluder value the same way. `glDrawBuffers` turns the second target on for
+exactly those passes and off for everything else, because a particle or a flash
+must not touch coverage and its shader does not declare that output at all.
 
-Measured with `RWE_ENABLE_RENDERPROF` on `battle_test --map "Coast To Coast"
---units 200 --unit-type CORAK`, which has no buildings in it at all. Compare per
-mesh, because a battle_test run drifts and the two runs saw 3299 and 3625
-meshes:
+That arrangement fell out of noticing that a separate pass was re-deriving two
+things the first pass already had in hand: the texel's palette index, which
+`unitTexture.frag` samples anyway for the shade lookup, and which surface is in
+front, which the depth test had already settled. It also disposes of two whole
+classes of bug at once -- there is no second set of matrices to disagree with
+the first, so `GL_EQUAL` is not needed and cannot be forgotten, and blending is
+disabled once for that attachment with `glDisablei(GL_BLEND, 1)` rather than
+around each pass, so a pass that forgets cannot write quarter-alpha samples that
+read as empty. Both of those had already cost a day each.
 
-| per unit mesh | halo on | halo off |
-|---|---|---|
-| `w.unit.build` | 0.443 us | 0.245 us |
-| draw calls | 3.19 | 2.18 |
-| `world` | 2.65 us | 2.05 us |
+Measured on `battle_test --map "Coast To Coast" --units 200 --unit-type CORAK`,
+per unit mesh, because a run drifts and the runs saw 3299, 3625 and 3000 meshes:
 
-That is about **740 us a frame and 3300 extra draw calls to fill a mask that
-could not produce a single pixel** — an 81% rise in the unit build phase and 46%
-more draws, for nothing, because the scene contains no building.
+| per unit mesh | separate pass | halo off | second render target |
+|---|---|---|---|
+| draw calls | 3.19 | 2.18 | **2.21** |
+| `w.unit.build` | 0.443 us | 0.245 us | **0.232 us** |
 
-So the pass is now gated on a scan for a visible finished building, which is
-position and bounding-box tests only and no mesh work. With it, the same run
-gives 0.231 us and 2.20 draws per mesh: the no-halo baseline to within noise,
-and `w.halomask` does not appear in the profile at all.
+The separate pass cost about 740 us a frame and 3300 extra draw calls -- an 81%
+rise in the unit build phase and 46% more draws. As a render target it costs no
+CPU work and no draw calls at all: both figures are the halo-off baseline.
 
-**What is left is the real inefficiency, and it is architectural.** Even with a
-base on screen, the mask is a second geometry pass over the whole world to
-recover information the first pass already had: `unitTexture.frag` samples the
-very palette index the mask wants, for the shade lookup, and the depth test has
-already resolved which surface is in front. Writing the mask as a second colour
-attachment of the main unit pass -- MRT, with `glDrawBuffers` enabling the
-second target only for that pass and `glDisablei(GL_BLEND, 1)` keeping it
-unblended -- would make the mask nearly free: no extra CPU transform work, no
-extra draw calls, and terrain and billboard features would become occluders for
-nothing, closing the two gaps named above. The cost is that every shader drawing
-into the world framebuffer during that pass needs a second output, and it means
-surgery on the main render path rather than on a pass of its own. Not done, and
-recorded here so it does not have to be rediscovered.
+**What the remaining cost is, and why it is not quoted.** Writing a second
+target is real GPU bandwidth, and it is below what this harness can resolve. A
+battle_test run drifts by a third in how much is on screen, and two runs
+measured `world` per mesh *lower* with the effect on than with it off, which is
+impossible and says plainly that the timing noise exceeds the difference. The
+draw counts are trustworthy where the microseconds are not: a count does not
+drift with load, and 2.21 against 2.18 is the whole story. Anyone wanting the
+GPU figure needs a fixed camera on a fixed scene, not battle_test.
+
+It is still gated on a visible finished building -- a scan of positions and
+bounding boxes, no mesh work -- so a field battle away from a base pays nothing
+at all rather than paying a little.
 
 Dropping the depth test instead would trade all of this for something worse — a
 building hidden behind a hill drawing its outline across the hill — so the
 depth-tested mask with occluders is the version that keeps.
 
-**One trap, recorded because it cost two days.** That mask pass redraws geometry
-the world pass has already drawn, so it must run under `GL_EQUAL` and not
-`GL_LESS`: `unitMask.vert` transforms with the same expression and the same
-matrix as `unitTexture.vert`, so every fragment lands at exactly the depth
-already stored, and `GL_LESS` rejects all of them. It did, and the halo was
-invisible at every setting because it was never drawn at all — while "the
-original's is one pixel of a 640x480 screen, so of course it is too small to
-see" sat there as a ready and completely wrong explanation. An invisible effect
-is a broken effect until proven otherwise.
+**One trap, recorded because it cost two days, and now designed out.** When the mask was a separate pass it redrew geometry the world pass had already drawn, so it had to run under `GL_EQUAL` and not `GL_LESS`: the two shaders transformed with the same expression and the same matrix, so every fragment landed at exactly the depth already stored and `GL_LESS` rejected all of them. It did, and the halo was invisible at every setting because it was never drawn at all -- while "the original's is one pixel of a 640x480 screen, so of course it is too small to see" sat there as a ready and completely wrong explanation. An invisible effect is a broken effect until proven otherwise. Filling the mask from the world passes themselves removes the hazard rather than documenting it: there is no second set of matrices to agree with the first.

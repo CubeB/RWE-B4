@@ -778,7 +778,25 @@ namespace rwe
         for (auto& panel : gameMenuPanels)
         {
             uiFactory.replaceStagedButton(*panel, "VISUALRT", "SHADING", "SHADINGMODE", shadingModeLabels(), static_cast<unsigned int>(shadingMode));
+            addBuildingHaloButton(*panel);
         }
+    }
+
+    void GameScene::addBuildingHaloButton(UiPanel& panel)
+    {
+        // VISUALRT has no gadget for the purple building fringe, and the GUI
+        // files are read-only game data with no override directory, so the
+        // button is built here -- the same reasoning that rebuilds SHADING
+        // above, one step further because this one does not exist at all.
+        //
+        // Where it goes is derived, not guessed: one row below the shadows
+        // toggle, with the row step taken from the gap between that and the
+        // anti-alias toggle above it. On this panel ui_probe measures SHADING
+        // at y=63, ANTI at 108 and BSHADOWS at 152, and the next gadget down
+        // is RESTORE at 269 -- so a 44-pixel step lands at 196 with room to
+        // spare. It borrows BSHADOWS's artwork so it looks like the toggles
+        // either side of it rather than like an addition.
+        uiFactory.addStagedButtonBelow(panel, "VISUALRT", "BSHADOWS", "HALO", "BSHADOWS", "ANTI", {"Fringe Off", "Fringe On"}, buildingHaloEnabled ? 1 : 0);
     }
 
     void GameScene::wireInGameOptionControls()
@@ -899,6 +917,11 @@ namespace rwe
             toggle->setStage(antiAliasEnabled ? 1 : 0);
         }
 
+        if (auto toggle = findInGameMenu<UiStagedButton>("HALO"))
+        {
+            toggle->setStage(buildingHaloEnabled ? 1 : 0);
+        }
+
         for (const auto* name : {"LEFTCLICK", "UNITCHAT", "TXTSCROL", "MAXLINES"})
         {
             if (auto button = findInGameMenu<UiStagedButton>(name))
@@ -928,7 +951,8 @@ namespace rwe
             unitSpeechSetting,
             gammaSetting,
             shadingMode,
-            antiAliasEnabled};
+            antiAliasEnabled,
+            buildingHaloEnabled};
     }
 
     void GameScene::applyInGameOptions(const GameOptions& state)
@@ -946,6 +970,7 @@ namespace rwe
         gammaSetting = state.gamma;
         applyGamma();
         shadingMode = state.shading;
+        buildingHaloEnabled = state.buildingHalo;
         if (antiAliasEnabled != state.antiAlias)
         {
             antiAliasEnabled = state.antiAlias;
@@ -1160,6 +1185,10 @@ namespace rwe
                 antiAliasEnabled = !antiAliasEnabled;
                 recreateWorldRenderTextures();
             }
+            else if (control == "HALO")
+            {
+                buildingHaloEnabled = !buildingHaloEnabled;
+            }
             else if (control == "MODE")
             {
                 // Off | Mono | 3D, cycled by the button itself.
@@ -1224,6 +1253,11 @@ namespace rwe
         if (auto toggle = findInGameMenu<UiStagedButton>("ANTI"))
         {
             toggle->setStage(antiAliasEnabled ? 1 : 0);
+        }
+
+        if (auto toggle = findInGameMenu<UiStagedButton>("HALO"))
+        {
+            toggle->setStage(buildingHaloEnabled ? 1 : 0);
         }
         if (auto bar = findInGameMenu<UiScrollBar>("FXVOL"))
         {
@@ -3783,6 +3817,9 @@ namespace rwe
         worldFrameBuffer = sceneContext.graphics->createFrameBuffer(width, height);
         dodgeMask = sceneContext.graphics->createEmptyTexture(width, height);
         buildingMask = sceneContext.graphics->createEmptyTexture(width, height);
+        // Attached as a second colour target of the world framebuffer, so the
+        // passes that draw the world fill it as they go. See unitTexture.frag.
+        sceneContext.graphics->attachFrameBufferMaskBuffer(worldFrameBuffer.frameBuffer.get(), buildingMask.get());
         worldRenderTextureSize = {worldViewport.width(), worldViewport.height()};
     }
 

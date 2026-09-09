@@ -214,6 +214,7 @@ namespace rwe
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
+                graphics->setUniformFloat(textureShader.maskValue, m.maskValue);
                 graphics->setActiveTextureSlot1();
                 graphics->bindTexture(m.paletteIndexTexture);
                 graphics->setActiveTextureSlot0();
@@ -278,6 +279,7 @@ namespace rwe
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
+                graphics->setUniformFloat(textureShader.maskValue, m.maskValue);
                 graphics->setActiveTextureSlot1();
                 graphics->bindTexture(m.paletteIndexTexture);
                 graphics->setActiveTextureSlot0();
@@ -294,6 +296,7 @@ namespace rwe
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
+                graphics->setUniformFloat(textureShader.maskValue, m.maskValue);
                 graphics->setActiveTextureSlot1();
                 graphics->bindTexture(m.paletteIndexTexture);
                 graphics->setActiveTextureSlot0();
@@ -306,30 +309,6 @@ namespace rwe
         }
     }
 
-    void RenderService::drawUnitMaskBatch(const std::vector<UnitTextureMeshRenderInfo>& meshes, float maskAlpha)
-    {
-        if (meshes.empty())
-        {
-            return;
-        }
-
-        const auto& shader = shaders->unitMask;
-        graphics->bindShader(shader.handle.get());
-        graphics->setUniformInt(shader.paletteIndexSampler, 1);
-        graphics->setUniformFloat(shader.maskAlpha, maskAlpha);
-
-        for (const auto& m : meshes)
-        {
-            graphics->setUniformMatrix(shader.mvpMatrix, m.mvpMatrix);
-            // Slot 1 is the index atlas, slot 0 the colour atlas the alpha
-            // test reads. Same pairing the unit shader uses.
-            graphics->setActiveTextureSlot1();
-            graphics->bindTexture(m.paletteIndexTexture);
-            graphics->setActiveTextureSlot0();
-            graphics->bindTexture(m.texture);
-            graphics->drawTriangles(*m.mesh);
-        }
-    }
 
     void RenderService::drawUnitShadowMeshBatch(const UnitShadowMeshBatch& batch)
     {

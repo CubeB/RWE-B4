@@ -333,6 +333,57 @@ namespace rwe
         panel.appendChild(std::move(replacement));
     }
 
+    void UiFactory::addStagedButtonBelow(UiPanel& panel, const std::string& guiName, const std::string& artName, const std::string& name, const std::string& anchorName, const std::string& aboveAnchorName, const std::vector<std::string>& labels, unsigned int stage)
+    {
+        // A gadget the GUI data does not have at all, added one row under an
+        // existing one.
+        //
+        // Two things here are deliberate. The position is DERIVED rather than
+        // written down: the row step comes from the gap between the two
+        // gadgets named, so the same call places the button correctly on the
+        // in-game VISUALRT page (rows 44 apart) and the front end's VISUALS
+        // page (rows 68 apart) without either number appearing in the code.
+        //
+        // And it does nothing unless both anchors are present, which is the
+        // guard that matters. The caller loops over every panel of the options
+        // screen, because replaceStagedButton is a no-op on a panel that has
+        // no such gadget -- so an unconditional add put a second copy of this
+        // button on the left-hand PREFS column, floating over the menu
+        // buttons. Requiring the anchors makes this behave the way every other
+        // panel edit here behaves: it applies to the page it belongs on and
+        // ignores the rest.
+        auto anchor = panel.find<UiStagedButton>(anchorName);
+        auto above = panel.find<UiStagedButton>(aboveAnchorName);
+        if (!anchor || !above)
+        {
+            return;
+        }
+
+        // Idempotent: the panels are rebuilt whenever the options screen is
+        // opened, but a second copy would sit invisibly on the first and eat
+        // every other click, so this is worth being certain about.
+        if (panel.find<UiStagedButton>(name))
+        {
+            return;
+        }
+
+        auto& anchorButton = anchor->get();
+        auto rowStep = anchorButton.getY() - above->get().getY();
+
+        auto button = createStagedButton(
+            anchorButton.getX(),
+            anchorButton.getY() + rowStep,
+            static_cast<int>(anchorButton.getWidth()),
+            static_cast<int>(anchorButton.getHeight()),
+            guiName,
+            artName,
+            labels,
+            static_cast<unsigned int>(labels.size()));
+        button->setName(name);
+        button->setStage(stage);
+        panel.appendChild(std::move(button));
+    }
+
     std::unique_ptr<UiStagedButton>
     UiFactory::createStagedButton(int x, int y, int width, int height, const std::string& guiName, const std::string& name, const std::vector<std::string>& labels, unsigned int stages)
     {

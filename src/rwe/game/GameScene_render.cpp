@@ -1261,9 +1261,58 @@ namespace rwe
             worldViewport.width() * worldRenderTextureScale,
             worldViewport.height() * worldRenderTextureScale);
 
-        sceneContext.graphics->clear();
-
+        // The view matrix and its cull test are wanted before the clear, to
+        // decide whether the halo's mask is worth attaching to it. Both are
+        // pure functions of the camera and the viewport, so computing them
+        // here rather than after costs nothing and nothing depends on the
+        // order.
         const auto& viewProjectionMatrix = computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+        auto viewCull = makeViewCullTest(viewProjectionMatrix);
+
+        // Clear with the halo's coverage mask attached, so it starts the frame
+        // empty, then go back to one target. Only the passes that draw solid
+        // world geometry write the mask; a particle or a flash must not, and
+        // the shaders they use do not declare that output at all, so leaving
+        // the second target enabled for them would write undefined values into
+        // it. See unitTexture.frag.
+        auto haloWanted = antiAliasEnabled && buildingHaloEnabled && buildingHaloStrength > 0;
+
+        // ...and only if a finished building is actually on screen. Writing
+        // the mask is nearly free now, but "nearly" is not "entirely": the
+        // second target is a full-size write for every solid pixel, and on a
+        // 200 v 200 battle_test with no buildings anywhere it put w.terrain up
+        // from 320us to 561us for a mask that could not produce one pixel.
+        // This scan is position and bounding-box tests only, no mesh work.
+        if (haloWanted)
+        {
+            haloWanted = false;
+            for (const auto& [unitId, unit] : simulation.units)
+            {
+                const auto& def = simulation.unitDefinitions.at(unit.unitType);
+                if (def.isMobile || unit.isBeingBuilt(def))
+                {
+                    continue;
+                }
+                if (!unitIsVisibleToLocalPlayer(unitId, unit))
+                {
+                    continue;
+                }
+                if (!viewCull.couldBeVisible(simVectorToFloat(unit.position), ViewCullModelRadius))
+                {
+                    continue;
+                }
+                haloWanted = true;
+                break;
+            }
+        }
+
+        if (haloWanted)
+        {
+            sceneContext.graphics->useDualDrawBuffers();
+        }
+        sceneContext.graphics->clear();
+        sceneContext.graphics->useSingleDrawBuffer();
+
         RenderService worldRenderService(sceneContext.graphics, sceneContext.shaders, &viewProjectionMatrix);
 
         sceneContext.graphics->disableDepthBuffer();
@@ -1281,7 +1330,14 @@ namespace rwe
         }
         {
             RWE_RENDERPROF("w.terrain");
+            // The ground is an occluder for the halo: a building standing
+            // behind a cliff must not be fringed along the cliff's edge.
+            if (haloWanted)
+            {
+                sceneContext.graphics->useDualDrawBuffers();
+            }
             worldRenderService.drawMapTerrain(terrainGraphics, worldCameraState.getRoundedPosition(), worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()), fogOverlay);
+            sceneContext.graphics->useSingleDrawBuffer();
         }
 
         SpriteBatch flatFeatureBatch;
@@ -1373,7 +1429,6 @@ namespace rwe
         // transform of every piece of every unit on the map, and handing the
         // driver a draw call for each, was the largest cost in the frame at
         // eight hundred units, and a screenful is a fraction of them.
-        auto viewCull = makeViewCullTest(viewProjectionMatrix);
 
         // Everything below that draws a model draws it from the same four
         // atlases, so they are gathered once rather than named at each call.
@@ -1424,7 +1479,7 @@ namespace rwe
                     // The frame is see-through while it is built, so the shadow
                     // would show through it. Keep only the part cast outside the
                     // model's own outline.
-                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitAtlases, PieceCacheFilter::All, unitShadowMeshBatch.cutouts);
+                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitAtlases, unitShadowMeshBatch.cutouts);
                 }
             }
             for (const auto& [_, feature] : simulation.features)
@@ -1457,60 +1512,6 @@ namespace rwe
 
         sceneContext.graphics->enableDepthBuffer();
 
-        // The buildings on their own, for the halo the post pass puts round
-        // them. Only the finished ones: a nanoframe is a see-through display
-        // rather than a solid model, and the original anti-aliased the
-        // non-animating part of a building, which is the part that is there.
-        // With anti-aliasing off there is no downsample for the halo to have
-        // come out of, so neither the mask nor the meshes that fill it are
-        // worth building.
-        auto haloWanted = antiAliasEnabled && buildingHaloStrength > 0;
-
-        // ...but only if there is something on screen that could carry one.
-        //
-        // Only a finished building can, and the mask costs the same whether or
-        // not one is there: every visible unit and modelled feature gets its
-        // pieces walked a second time and drawn again. Measured on a 200 v 200
-        // battle_test with no buildings anywhere, that was 3299 extra draw
-        // calls and about 740us a frame -- an 81% rise in w.unit.build and 46%
-        // more draws -- to fill a mask that could not produce a single pixel.
-        // This scan is position and bounding-box tests only, no mesh work, and
-        // it takes that whole case to nothing.
-        if (haloWanted)
-        {
-            haloWanted = false;
-            for (const auto& [unitId, unit] : simulation.units)
-            {
-                const auto& def = simulation.unitDefinitions.at(unit.unitType);
-                if (def.isMobile || unit.isBeingBuilt(def))
-                {
-                    continue;
-                }
-                if (!unitIsVisibleToLocalPlayer(unitId, unit))
-                {
-                    continue;
-                }
-                if (!viewCull.couldBeVisible(simVectorToFloat(unit.position), ViewCullModelRadius))
-                {
-                    continue;
-                }
-                haloWanted = true;
-                break;
-            }
-        }
-        // The pieces that can carry the halo: the cached pieces of finished
-        // buildings, and nothing else.
-        std::vector<UnitTextureMeshRenderInfo> buildingSilhouettes;
-        // Everything else solid, drawn into the same mask at half alpha so it
-        // is coverage without being a halo source. This is not decoration. The
-        // mask is depth tested, so anything in front of a building removes the
-        // building's samples there and leaves a hole whose rim the post pass
-        // cannot tell from the model's own outline -- a purple line inside the
-        // model. A metal extractor makes the point: its arm is a dont-cache
-        // piece, so it is not in the batch above, and without it here its own
-        // base would be fringed along a hole that crawls as the arm turns.
-        std::vector<UnitTextureMeshRenderInfo> occluderSilhouettes;
-
         UnitMeshBatch unitMeshBatch;
         {
             RWE_RENDERPROF("w.unit.build");
@@ -1527,24 +1528,6 @@ namespace rwe
                 const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
                 const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
                 drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, simulation.gameTime.value, interpolationFraction, shadeStrengthFor(!unitDefinition.isMobile), unitAtlases, unitMeshBatch);
-
-                if (haloWanted)
-                {
-                    // A finished building splits: its cached pieces can carry
-                    // the halo, its dont-cache pieces are occluders. Anything
-                    // else -- a mobile unit, a nanoframe -- is an occluder
-                    // entire, because the original's halo lives in a finished
-                    // building's cached bitmap and nowhere else.
-                    if (!unitDefinition.isMobile && !unit.isBeingBuilt(unitDefinition))
-                    {
-                        drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, interpolationFraction, unitAtlases, PieceCacheFilter::CachedOnly, buildingSilhouettes);
-                        drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, interpolationFraction, unitAtlases, PieceCacheFilter::UncachedOnly, occluderSilhouettes);
-                    }
-                    else
-                    {
-                        drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, interpolationFraction, unitAtlases, PieceCacheFilter::All, occluderSilhouettes);
-                    }
-                }
             }
             for (const auto& [_, feature] : simulation.features)
             {
@@ -1557,11 +1540,6 @@ namespace rwe
                     continue;
                 }
                 drawMeshFeature(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, shadeStrengthFor(true), unitAtlases, unitMeshBatch);
-
-                if (haloWanted)
-                {
-                    drawFeatureSilhouette(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, unitAtlases, occluderSilhouettes);
-                }
             }
             for (const auto& d : debris)
             {
@@ -1578,7 +1556,16 @@ namespace rwe
         {
             RWE_RENDERPROF("w.unit.draw");
             RWE_RENDERPROF_COUNT("n.unitmesh", unitMeshBatch.meshes.size() + unitMeshBatch.buildingMeshes.size() + unitMeshBatch.cloakedMeshes.size());
+            // This pass fills the halo's coverage mask as it goes: every mesh
+            // carries the value to write, 1 for a cached piece of a finished
+            // building and 0.5 for anything else solid. It is the whole of
+            // what used to be a second pass over the world.
+            if (haloWanted)
+            {
+                sceneContext.graphics->useDualDrawBuffers();
+            }
             worldRenderService.drawUnitMeshBatch(unitMeshBatch, simScalarToFloat(seaLevel), shadeTableTexture.get());
+            sceneContext.graphics->useSingleDrawBuffer();
         }
 
         // Construction wireframe: the visible polygon edges of each nanoframe,
@@ -1694,52 +1681,6 @@ namespace rwe
             worldRenderService.drawBatch(nanoParticlesBatch, viewProjectionMatrix);
         }
 
-        // The buildings' coverage, for the halo. This redraws geometry the
-        // world pass has already drawn, so it needs GL_EQUAL and not GL_LESS:
-        // unitMask.vert computes gl_Position with the same expression and the
-        // same mvpMatrix as unitTexture.vert, so every fragment lands at
-        // exactly the depth already stored, and under GL_LESS every one of
-        // them is rejected and the mask comes out empty. It did, for a day --
-        // the halo was invisible at every width and strength because it was
-        // never drawn at all. Same idiom as the cloak pass in RenderService.
-        //
-        // Keeping the depth test (rather than turning it off) is what makes a
-        // building behind a hill mark nothing and get no halo. Depth writes
-        // are off because the world is finished with and the flashes pass
-        // below shares the buffer.
-        if (haloWanted)
-        {
-            RWE_RENDERPROF("w.halomask");
-            RWE_RENDERPROF_COUNT("n.halomask", buildingSilhouettes.size() + occluderSilhouettes.size());
-            // Blending OFF, and this is not a precaution. GameLaunch enables
-            // blending once for the whole program with
-            // GL_SRC_ALPHA/GL_ONE_MINUS_SRC_ALPHA and nothing ever turns it
-            // off, so without this the mask is composited instead of written.
-            // What that does here is quiet and total: an occluder asks for
-            // alpha 0.5 and lands as 0.5*0.5 + 0.5*0 = 0.25, which is below
-            // the threshold that counts a sample as solid, so every occluder
-            // is discarded while the cached pieces -- alpha 1, which blends to
-            // 1 -- come through perfectly. The holes the occluders exist to
-            // fill stay open and the fringe crawls inside the model again.
-            // The red channel is a palette index, too, and half of an index is
-            // a different colour, not a darker one.
-            sceneContext.graphics->disableBlending();
-            sceneContext.graphics->useDepthTestEqual();
-            sceneContext.graphics->disableDepthWrites();
-            sceneContext.graphics->bindFrameBufferColorBuffer(buildingMask.get());
-            sceneContext.graphics->clearColor();
-            // Occluders first, so a cached piece in front of one still writes
-            // its own index over the top -- the depth test settles which of
-            // them is actually there, and this order only decides who wins a
-            // tie, where the cached piece is the one that should.
-            worldRenderService.drawUnitMaskBatch(occluderSilhouettes, 0.5f);
-            worldRenderService.drawUnitMaskBatch(buildingSilhouettes, 1.0f);
-            sceneContext.graphics->bindFrameBufferColorBuffer(worldFrameBuffer.texture.get());
-            sceneContext.graphics->enableDepthWrites();
-            sceneContext.graphics->enableDepthTest();
-            sceneContext.graphics->enableBlending();
-        }
-
         sceneContext.graphics->disableDepthTest();
 
         {
@@ -1770,7 +1711,14 @@ namespace rwe
             // With no supersampling there is no 2x buffer and so no downsample
             // for the halo to have come out of, which is exactly why the
             // original's went away with its own anti-aliasing switched off.
-            sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloStrength, antiAliasEnabled ? static_cast<float>(buildingHaloStrength) / 100.0f : 0.0f);
+            // haloWanted, not antiAliasEnabled: the two have to agree, and
+            // when they did not the effect did something worse than staying
+            // on. With the fringe switched off the mask is neither written
+            // nor cleared, so it holds whatever it last had; a post pass that
+            // still believed in it went on blending that stale image every
+            // frame, and the fringe froze on the screen as an outline of
+            // wherever the buildings happened to be when it was turned off.
+            sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloStrength, haloWanted ? static_cast<float>(buildingHaloStrength) / 100.0f : 0.0f);
             sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloSaturation, static_cast<float>(buildingHaloSaturation) / 100.0f);
             sceneContext.graphics->setUniformFloat(sceneContext.shaders->worldPost.haloRedShift, static_cast<float>(buildingHaloRedShift) / 100.0f);
             sceneContext.graphics->bindTexture(worldFrameBuffer.texture.get());

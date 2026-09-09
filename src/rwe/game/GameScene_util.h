@@ -334,30 +334,7 @@ namespace rwe
         const Vector3f& color,
         ColoredMeshBatch& batch);
 
-    /**
-     * Which pieces of a model to emit, by their COB CACHE / DONT_CACHE state.
-     *
-     * The building halo needs both halves separately and for different
-     * reasons. Only a cached piece can carry the halo, because the artefact
-     * comes out of the cached bitmap's anti-aliasing and a dont-cache piece is
-     * never in it. But the dont-cache pieces still have to be drawn into the
-     * mask, as occluders, or they punch holes in the cached pieces' coverage
-     * and the post pass reads the rim of each hole as a silhouette -- which is
-     * a purple line *inside* the model that crawls as the piece moves. See
-     * worldPost.frag and TOTALA-EXE.md S:101.
-     */
-    enum class PieceCacheFilter
-    {
-        All,
-        CachedOnly,
-        UncachedOnly,
-    };
-
-    /**
-     * The unit's model as the camera sees it, for stencil cut-outs and for the
-     * building halo's coverage mask. The shadow cut-outs want the whole unit
-     * and pass All.
-     */
+    /** The unit's model as the camera sees it, for stencil cut-outs. */
     void drawUnitSilhouette(
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,
@@ -365,16 +342,6 @@ namespace rwe
         const UnitDefinition& unitDefinition,
         const UnitModelDefinition& modelDefinition,
         float frac,
-        const UnitTextureAtlases& atlases,
-        PieceCacheFilter filter,
-        std::vector<UnitTextureMeshRenderInfo>& out);
-
-    /** The same for a modelled map feature, as an occluder for the halo mask. */
-    void drawFeatureSilhouette(
-        const std::unordered_map<std::string, UnitModelDefinition>& modelDefinitions,
-        const GameMediaDatabase& gameMediaDatabase,
-        const Matrix4f& viewProjectionMatrix,
-        const MapFeature& feature,
         const UnitTextureAtlases& atlases,
         std::vector<UnitTextureMeshRenderInfo>& out);
 

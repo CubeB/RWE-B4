@@ -3,6 +3,10 @@
 in vec3 fragTexCoord;
 in vec2 fragWorldPos;
 out vec4 outColor;
+// Coverage for the building halo: the ground is an occluder, never a source.
+// Without it a building standing behind a cliff would be fringed along the
+// cliff line. See unitTexture.frag and worldPost.frag.
+out vec4 outMask;
 
 uniform sampler2DArray textureArraySampler;
 
@@ -46,4 +50,5 @@ void main(void)
     }
 
     outColor = color;
+    outMask = vec4(0.0, 0.0, 0.0, 0.5);
 }

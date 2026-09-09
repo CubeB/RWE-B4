@@ -93,6 +93,7 @@ namespace rwe
         options.gamma = config.gamma;
         options.shading = static_cast<ShadingMode>(config.shadingMode);
         options.antiAlias = config.antiAlias;
+        options.buildingHalo = config.buildingHalo;
         return options;
     }
 
@@ -123,6 +124,7 @@ namespace rwe
                                          {"gamma", std::to_string(options.gamma)},
                                          {"shading-mode", std::to_string(static_cast<unsigned int>(options.shading))},
                                          {"anti-alias", options.antiAlias ? "true" : "false"},
+                                         {"building-halo", options.buildingHalo ? "true" : "false"},
                                      });
     }
 }

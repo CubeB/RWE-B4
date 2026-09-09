@@ -422,6 +422,8 @@ namespace rwe
         unsigned int gammaSetting{100};
         ShadingMode shadingMode{ShadingMode::Both};
         bool antiAliasEnabled{true};
+        /** The purple building fringe; see GlobalConfig and TOTALA-EXE.md S:101. */
+        bool buildingHaloEnabled{true};
 
         void applyGamma();
 
@@ -446,6 +448,7 @@ namespace rwe
          * does not have has to be made in code.
          */
         void widenShadingButton();
+        void addBuildingHaloButton(UiPanel& panel);
 
         /** Finds a control by name across every open menu panel. */
         template <typename T>

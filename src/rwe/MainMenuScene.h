@@ -28,6 +28,7 @@ namespace rwe
         unsigned int pendingGamma{100};
         ShadingMode pendingShading{ShadingMode::Both};
         bool pendingAntiAlias{true};
+        bool pendingBuildingHalo{true};
 
         /** Pushes the current settings back into the menu widgets: a staged button does not advance its own display. */
         void refreshOptionControls();

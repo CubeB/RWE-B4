@@ -257,6 +257,22 @@ namespace rwe
 
         void bindFrameBufferColorBuffer(TextureIdentifier texture);
 
+        /**
+         * Attaches the building halo's coverage mask as a second render
+         * target, so the passes that draw the world fill it as they go rather
+         * than a second pass re-deriving it. Also disables blending for that
+         * attachment alone, permanently. See worldPost.frag.
+         */
+        void attachFrameBufferMaskBuffer(FrameBufferIdentifier frameBuffer, TextureIdentifier texture);
+
+        /**
+         * Which of those two targets subsequent draws write. Passes that draw
+         * solid world geometry use both; everything else uses one, so a
+         * particle or a flash cannot punch a hole in the coverage.
+         */
+        void useSingleDrawBuffer();
+        void useDualDrawBuffers();
+
         void setActiveTextureSlot0();
         void setActiveTextureSlot1();
         void setActiveTextureSlot2();

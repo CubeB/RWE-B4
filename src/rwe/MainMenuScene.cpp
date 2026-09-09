@@ -138,7 +138,8 @@ namespace rwe
             pendingUnitSpeech,
             pendingGamma,
             pendingShading,
-            pendingAntiAlias};
+            pendingAntiAlias,
+            pendingBuildingHalo};
     }
 
     void MainMenuScene::applyOptions(const GameOptions& state)
@@ -155,6 +156,7 @@ namespace rwe
         pendingGamma = state.gamma;
         pendingShading = state.shading;
         pendingAntiAlias = state.antiAlias;
+        pendingBuildingHalo = state.buildingHalo;
         audio->setSoundEnabled(state.soundMode != SoundMode::Off);
     }
 
@@ -180,6 +182,7 @@ namespace rwe
             pendingGamma = sceneContext.globalConfig->gamma;
             pendingShading = static_cast<ShadingMode>(sceneContext.globalConfig->shadingMode);
             pendingAntiAlias = sceneContext.globalConfig->antiAlias;
+            pendingBuildingHalo = sceneContext.globalConfig->buildingHalo;
         }
         optionsUndo = currentOptions();
         currentOptionsPage.clear();
@@ -249,6 +252,13 @@ namespace rwe
         // The same four-state Shading switch the in-game options page has;
         // see GameScene::widenShadingButton for why it is built in code.
         uiFactory.replaceStagedButton(active, "STARTOPT", "SHADING", "SHADINGMODE", shadingModeLabels(), static_cast<unsigned int>(pendingShading));
+        // ...and the fringe toggle, which no GUI file has at all. The front
+        // end spaces its VISUALS controls 68 pixels apart where the in-game
+        // panel uses 44, so the position is derived from this panel's own
+        // gadgets rather than written down, and the call is identical to the
+        // in-game one. It also does nothing on the pages that have no shadows
+        // toggle, which is what keeps it off the sound and interface pages.
+        uiFactory.addStagedButtonBelow(active, "STARTOPT", "BSHADOWS", "HALO", "BSHADOWS", "ANTI", {"Fringe Off", "Fringe On"}, pendingBuildingHalo ? 1 : 0);
 
         auto state = currentOptions();
 
@@ -344,6 +354,10 @@ namespace rwe
         if (auto toggle = active.find<UiStagedButton>("ANTI"))
         {
             toggle->get().setStage(pendingAntiAlias ? 1 : 0);
+        }
+        if (auto toggle = active.find<UiStagedButton>("HALO"))
+        {
+            toggle->get().setStage(pendingBuildingHalo ? 1 : 0);
         }
 
         for (const auto* name : {"LEFTCLICK", "UNITCHAT", "TXTSCROL", "MAXLINES", "GAME"})
@@ -718,6 +732,10 @@ namespace rwe
             {
                 pendingAntiAlias = !pendingAntiAlias;
             }
+            else if (message == "HALO")
+            {
+                pendingBuildingHalo = !pendingBuildingHalo;
+            }
             else if (message == "UNDO")
             {
                 applyOptions(optionsUndo);
@@ -869,6 +887,10 @@ namespace rwe
         if (auto toggle = active.find<UiStagedButton>("ANTI"))
         {
             toggle->get().setStage(pendingAntiAlias ? 1 : 0);
+        }
+        if (auto toggle = active.find<UiStagedButton>("HALO"))
+        {
+            toggle->get().setStage(pendingBuildingHalo ? 1 : 0);
         }
         if (auto bar = active.find<UiScrollBar>("FXVOL"))
         {

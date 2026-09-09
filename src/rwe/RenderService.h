@@ -41,6 +41,13 @@ namespace rwe
         TextureIdentifier texture;
         /** The same atlas again, one byte a texel: that texel's palette index. */
         TextureIdentifier paletteIndexTexture;
+        /**
+         * What this mesh writes into the building halo's coverage mask: 1 for
+         * a cached piece of a finished building, which is the only thing that
+         * can carry a halo, and 0.5 for anything else solid. See
+         * unitTexture.frag and TOTALA-EXE.md S:101.
+         */
+        float maskValue;
     };
 
     /**
@@ -190,12 +197,6 @@ namespace rwe
         void drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel, TextureIdentifier shadeTableTexture);
 
         void drawUnitShadowMeshBatch(const UnitShadowMeshBatch& batch);
-
-        /**
-         * Fills the models' silhouettes with white, for a coverage mask the
-         * post pass can find an outline in. See shaders/unitMask.frag.
-         */
-        void drawUnitMaskBatch(const std::vector<UnitTextureMeshRenderInfo>& meshes, float maskAlpha);
 
         void drawSpriteBatch(const SpriteBatch& batch);
 

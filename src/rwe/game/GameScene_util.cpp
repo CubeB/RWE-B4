@@ -407,17 +407,18 @@ namespace rwe
         float shadeStrength,
         PlayerColorIndex playerColorIndex,
         const UnitTextureAtlases& atlases,
+        float maskValue,
         std::vector<UnitTextureMeshRenderInfo>& batch)
     {
         auto mvpMatrix = viewProjectionMatrix * matrix;
 
         if (mesh.vertices)
         {
-            batch.push_back(UnitTextureMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shadeStrength, atlases.atlas, atlases.paletteIndexAtlas});
+            batch.push_back(UnitTextureMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shadeStrength, atlases.atlas, atlases.paletteIndexAtlas, maskValue});
         }
         if (mesh.teamVertices)
         {
-            batch.push_back(UnitTextureMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shadeStrength, atlases.teamAtlases->at(playerColorIndex.value).get(), atlases.teamPaletteIndexAtlases->at(playerColorIndex.value).get()});
+            batch.push_back(UnitTextureMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shadeStrength, atlases.teamAtlases->at(playerColorIndex.value).get(), atlases.teamPaletteIndexAtlases->at(playerColorIndex.value).get(), maskValue});
         }
     }
 
@@ -450,7 +451,7 @@ namespace rwe
         float frac,
         float shadeStrength,
         const UnitTextureAtlases& atlases,
-        PieceCacheFilter filter,
+        bool isFinishedBuilding,
         std::vector<UnitTextureMeshRenderInfo>& out)
     {
         const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
@@ -464,22 +465,6 @@ namespace rwe
                 continue;
             }
 
-            // For the building halo. The original's halo comes out of the
-            // cached bitmap's anti-aliasing, and a DONT_CACHE piece is not in
-            // that bitmap -- it is drawn straight to the screen each frame by
-            // the unshaded rasterizer (TOTALA-EXE-SHADING.md S:12a), never
-            // touching the table that produces the artefact. So a metal
-            // extractor's spinning top has no halo in the original while its
-            // base does, which is exactly what a play-test reported here.
-            if (filter == PieceCacheFilter::CachedOnly && !mesh.cached)
-            {
-                continue;
-            }
-            if (filter == PieceCacheFilter::UncachedOnly && mesh.cached)
-            {
-                continue;
-            }
-
             // A dont-cache piece is left out of the original's cached bitmap
             // and drawn to the screen by the unshaded rasterizer instead
             // (TOTALA-EXE-SHADING.md S:12a) -- but only once the unit is
@@ -487,7 +472,18 @@ namespace rwe
             // nanoframe path shades every piece the script has not said
             // DONT_SHADE on, as the construction pass does.
             auto pieceShadeStrength = mesh.shaded && mesh.cached ? shadeStrength : 0.0f;
-            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], pieceShadeStrength, playerColorIndex, atlases, out);
+
+            // The same flag decides the building halo, for the same reason.
+            // The halo is an artefact of the cached bitmap's anti-aliasing, so
+            // a piece that is not in that bitmap never met the table that
+            // produces it: a metal extractor's spinning top has no fringe in
+            // the original while its base does. Everything else solid still
+            // goes in at 0.5 as an OCCLUDER -- coverage without being a source
+            // -- because a gap in the coverage is a boundary, and the post
+            // pass cannot tell a gap from an outline. See unitTexture.frag.
+            auto maskValue = isFinishedBuilding && mesh.cached ? 1.0f : 0.5f;
+
+            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], pieceShadeStrength, playerColorIndex, atlases, maskValue, out);
         }
     }
 
@@ -538,38 +534,6 @@ namespace rwe
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
             drawShaderMeshShadow(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * renderInfo.restTransforms[i], shadow, atlases, batch.meshes);
-        }
-    }
-
-    void drawFeatureSilhouette(
-        const std::unordered_map<std::string, UnitModelDefinition>& modelDefinitions,
-        const GameMediaDatabase& gameMediaDatabase,
-        const Matrix4f& viewProjectionMatrix,
-        const MapFeature& feature,
-        const UnitTextureAtlases& atlases,
-        std::vector<UnitTextureMeshRenderInfo>& out)
-    {
-        // Scenery as an occluder for the building halo's mask. A tree standing
-        // in front of a factory removes the factory's samples where it covers
-        // it, and without something solid put back the post pass reads the rim
-        // of that gap as an outline and draws a fringe up the tree. Only the
-        // modelled features can do this; a billboard feature is a sprite and
-        // has no mesh to walk, which is recorded in S:101 as a known gap.
-        const auto& featureMediaInfo = gameMediaDatabase.getFeature(feature.featureName);
-
-        auto objectInfo = std::get_if<FeatureObjectInfo>(&featureMediaInfo.renderInfo);
-        if (objectInfo == nullptr)
-        {
-            return;
-        }
-
-        const auto& modelDefinition = modelDefinitions.at(objectInfo->objectName);
-        const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectInfo->objectName, modelDefinition);
-        auto matrix = Matrix4f::translation(simVectorToFloat(feature.position)) * Matrix4f::rotationY(toRadians(feature.rotation).value);
-
-        for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
-        {
-            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, matrix * renderInfo.restTransforms[i], 0.0f, PlayerColorIndex(0), atlases, out);
         }
     }
 
@@ -641,7 +605,7 @@ namespace rwe
 
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
-            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * renderInfo.restTransforms[i], shadeStrength, playerColorIndex, atlases, batch.meshes);
+            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * renderInfo.restTransforms[i], shadeStrength, playerColorIndex, atlases, 0.5f, batch.meshes);
         }
     }
 
@@ -688,7 +652,12 @@ namespace rwe
             // go unshaded with the rest, a difference on nine faces of the
             // Weasel and one of the truck.)
             auto finishedShadeStrength = unitDefinition.zBuffer ? shadeStrength : 0.0f;
-            drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, playerColorIndex, frac, finishedShadeStrength, atlases, PieceCacheFilter::All, out);
+            // Only an immobile unit can carry the building halo. This branch
+            // is already the finished one -- a nanoframe went the other way
+            // above -- so immobility is the whole of the test, and getting it
+            // wrong here puts a purple fringe round every tank and aircraft
+            // on the map.
+            drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, playerColorIndex, frac, finishedShadeStrength, atlases, !unitDefinition.isMobile, out);
         }
     }
 
@@ -903,7 +872,7 @@ namespace rwe
         {
             return;
         }
-        drawShaderMesh(viewProjectionMatrix, *pieceMesh->get().mesh, matrix, shadeStrength, playerColorIndex, atlases, batch.meshes);
+        drawShaderMesh(viewProjectionMatrix, *pieceMesh->get().mesh, matrix, shadeStrength, playerColorIndex, atlases, 0.5f, batch.meshes);
     }
 
     void drawDebrisShard(const Vector3f& position, ColoredMeshBatch& batch)
@@ -999,14 +968,13 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         float frac,
         const UnitTextureAtlases& atlases,
-        PieceCacheFilter filter,
         std::vector<UnitTextureMeshRenderInfo>& out)
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
         auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
 
-        drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, 0.0f, atlases, filter, out);
+        drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, 0.0f, atlases, false, out);
     }
 
     /**

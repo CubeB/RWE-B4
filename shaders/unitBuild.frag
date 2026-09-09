@@ -4,6 +4,8 @@ in vec2 fragTexCoord;
 in float height;
 in float shadeLevel;
 out vec4 outColor;
+// Coverage for the building halo; see unitTexture.frag and worldPost.frag.
+out vec4 outMask;
 
 uniform sampler2D textureSampler;
 // The same atlas again, one byte a texel: that texel's raw palette index.
@@ -94,17 +96,29 @@ void main(void)
     {
         // Erased: this part of the model has not been laid down yet.
         outColor = vec4(0.0, 0.0, 0.0, 0.0);
-    }
-    else if (mode == 1)
-    {
-        outColor = vec4(buildColorA, 1.0);
-    }
-    else if (mode == 2)
-    {
-        outColor = vec4(buildColorB, 1.0);
+        // ...so it is not coverage either. Writing an occluder here would let
+        // a nanoframe's unbuilt half block the halo of a finished building
+        // standing behind it.
+        outMask = vec4(0.0, 0.0, 0.0, 0.0);
     }
     else
     {
-        outColor = vec4(shadeNormal(), 1.0);
+        if (mode == 1)
+        {
+            outColor = vec4(buildColorA, 1.0);
+        }
+        else if (mode == 2)
+        {
+            outColor = vec4(buildColorB, 1.0);
+        }
+        else
+        {
+            outColor = vec4(shadeNormal(), 1.0);
+        }
+
+        // An occluder, never a halo source: the original's halo comes out of a
+        // FINISHED building's cached bitmap, and a thing under construction
+        // has no cached bitmap yet.
+        outMask = vec4(0.0, 0.0, 0.0, 0.5);
     }
 }

@@ -4,6 +4,22 @@ in vec2 fragTexCoord;
 in float height;
 in float shadeLevel;
 out vec4 outColor;
+// The building halo's coverage mask, filled as a second render target while
+// this pass draws. It used to be a separate pass over the whole world, which
+// was a second walk of every model's pieces and a second draw call each to
+// recover two things this shader already has in hand: the texel's palette
+// index, which it samples below for the shade lookup, and which surface is in
+// front, which the depth test has already settled. Measured on a 200 v 200
+// battle_test that cost about 740us a frame and 3300 draw calls. Here it is a
+// register write. See worldPost.frag and TOTALA-EXE.md S:101.
+//
+// Red is the palette index. Alpha says what kind of sample it is: 1 for a
+// cached piece of a finished building, the only thing that can carry a halo,
+// and 0.5 for anything else solid, which is coverage without being a source.
+// Cleared 0 means nothing is there.
+out vec4 outMask;
+// 1.0 or 0.5 as above, set per mesh. See RenderService::drawUnitMeshBatch.
+uniform float maskValue;
 
 uniform sampler2D textureSampler;
 // The same atlas again at the same coordinates, one byte a texel: that texel's
@@ -100,4 +116,5 @@ void main(void)
 
     vec3 lit = shadeTexel(vec3(baseColor)) * (height > seaLevel ? normalTint : waterTint);
     outColor = vec4(min(lit, vec3(1.0)), alpha);
+    outMask = vec4(texture(paletteIndexSampler, fragTexCoord).r, 0.0, 0.0, maskValue);
 }

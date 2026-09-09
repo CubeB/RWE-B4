@@ -48,6 +48,7 @@ namespace rwe
         s.unitTexture.alpha = graphics.getUniformLocation(s.unitTexture.handle.get(), "alpha");
         s.unitTexture.paletteIndexSampler = graphics.getUniformLocation(s.unitTexture.handle.get(), "paletteIndexSampler");
         s.unitTexture.shadeTableSampler = graphics.getUniformLocation(s.unitTexture.handle.get(), "shadeTableSampler");
+        s.unitTexture.maskValue = graphics.getUniformLocation(s.unitTexture.handle.get(), "maskValue");
 
         s.unitShadow.handle = loadShader(graphics, "shaders/unitShadow.vert", "shaders/unitShadow.frag", texturedVertexAttribs);
         s.unitShadow.vpMatrix = graphics.getUniformLocation(s.unitShadow.handle.get(), "vpMatrix");
@@ -86,10 +87,6 @@ namespace rwe
         s.worldPost.haloSaturation = graphics.getUniformLocation(s.worldPost.handle.get(), "haloSaturation");
         s.worldPost.haloRedShift = graphics.getUniformLocation(s.worldPost.handle.get(), "haloRedShift");
 
-        s.unitMask.handle = loadShader(graphics, "shaders/unitMask.vert", "shaders/unitMask.frag", texturedVertexAttribs);
-        s.unitMask.mvpMatrix = graphics.getUniformLocation(s.unitMask.handle.get(), "mvpMatrix");
-        s.unitMask.paletteIndexSampler = graphics.getUniformLocation(s.unitMask.handle.get(), "paletteIndexSampler");
-        s.unitMask.maskAlpha = graphics.getUniformLocation(s.unitMask.handle.get(), "maskAlpha");
 
         return s;
     }

@@ -71,6 +71,16 @@ namespace rwe
          */
         void replaceStagedButton(UiPanel& panel, const std::string& guiName, const std::string& name, const std::string& artName, const std::vector<std::string>& labels, unsigned int stage);
 
+        /**
+         * Adds a staged button the GUI data does not contain, one row below
+         * anchorName, taking the row step from the gap between anchorName and
+         * aboveAnchorName so no coordinate has to be written down. Does
+         * nothing unless the panel has both, which is what keeps it off the
+         * pages it does not belong on. For settings TA never had a gadget
+         * for; see GameScene::addBuildingHaloButton.
+         */
+        void addStagedButtonBelow(UiPanel& panel, const std::string& guiName, const std::string& artName, const std::string& name, const std::string& anchorName, const std::string& aboveAnchorName, const std::vector<std::string>& labels, unsigned int stage);
+
     private:
         std::unique_ptr<UiComponent> componentFromGuiEntry(const std::string& guiName, const GuiEntry& entry);
 

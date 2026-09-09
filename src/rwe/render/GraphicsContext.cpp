@@ -338,6 +338,12 @@ namespace rwe
         }
 
         glBindFragDataLocation(program.get().value, 0, "outColor");
+        // The building halo's coverage mask, written as a second render target
+        // by the same passes that draw the world. GLSL 150 has no layout
+        // qualifier for fragment outputs, so the location has to be bound here
+        // or the linker assigns the two outputs in whatever order it likes.
+        // Naming an output a program does not declare is harmless.
+        glBindFragDataLocation(program.get().value, 1, "outMask");
         glLinkProgram(program.get().value);
 
         glDetachShader(program.get().value, vertexShader.value);
@@ -847,6 +853,42 @@ namespace rwe
     void GraphicsContext::bindFrameBufferColorBuffer(TextureIdentifier texture)
     {
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture.value, 0);
+    }
+
+    void GraphicsContext::attachFrameBufferMaskBuffer(FrameBufferIdentifier frameBuffer, TextureIdentifier texture)
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, frameBuffer.value);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, texture.value, 0);
+
+        GLenum status;
+        if ((status = glCheckFramebufferStatus(GL_FRAMEBUFFER)) != GL_FRAMEBUFFER_COMPLETE)
+        {
+            throw GraphicsException("glCheckFrameBufferStatus error attaching mask buffer:" + std::to_string(status));
+        }
+
+        // Blending is switched off for this attachment alone, once, and left
+        // that way. It carries palette indices and a coverage level, not
+        // colour, and compositing either of them is meaningless -- half of a
+        // palette index is a different colour rather than a darker one. Doing
+        // it per attachment rather than around each pass is what makes it
+        // impossible to get wrong later: GameLaunch enables blending globally
+        // and nothing in the render path turns it off, so a pass that forgot
+        // would silently write quarter-alpha samples that read as empty.
+        glDisablei(GL_BLEND, 1);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+
+    void GraphicsContext::useSingleDrawBuffer()
+    {
+        GLenum buffers[] = {GL_COLOR_ATTACHMENT0};
+        glDrawBuffers(1, buffers);
+    }
+
+    void GraphicsContext::useDualDrawBuffers()
+    {
+        GLenum buffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+        glDrawBuffers(2, buffers);
     }
 
     void GraphicsContext::setActiveTextureSlot0()

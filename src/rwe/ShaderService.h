@@ -39,6 +39,8 @@ namespace rwe
         UniformLocation alpha;
         UniformLocation paletteIndexSampler;
         UniformLocation shadeTableSampler;
+        /** 1 for a cached piece of a finished building, 0.5 otherwise. */
+        UniformLocation maskValue;
     };
 
     struct UnitShadowShader
@@ -78,19 +80,6 @@ namespace rwe
         UniformLocation color;
     };
 
-    /**
-     * A category of model drawn as palette indices, for the post pass to run
-     * the original's anti-alias table over. See unitMask.frag.
-     */
-    struct UnitMaskShader
-    {
-        ShaderProgramHandle handle;
-        UniformLocation mvpMatrix;
-        UniformLocation paletteIndexSampler;
-        /** 1 for a cached building piece, 0.5 for an occluder. See unitMask.frag. */
-        UniformLocation maskAlpha;
-    };
-
     struct WorldPostShader
     {
         ShaderProgramHandle handle;
@@ -121,7 +110,6 @@ namespace rwe
         UnitShadowShader unitShadow;
         UnitBuildShader unitBuild;
         FlashEffectShader flashEffect;
-        UnitMaskShader unitMask;
         WorldPostShader worldPost;
     };
 }

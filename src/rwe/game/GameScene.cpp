@@ -314,6 +314,7 @@ namespace rwe
           gammaSetting(sceneContext.globalConfig->gamma),
           shadingMode(static_cast<ShadingMode>(sceneContext.globalConfig->shadingMode)),
           antiAliasEnabled(sceneContext.globalConfig->antiAlias),
+          buildingHaloEnabled(sceneContext.globalConfig->buildingHalo),
           shadowsEnabled(sceneContext.globalConfig->shadows),
           vehicleShadowsEnabled(sceneContext.globalConfig->vehicleShadows),
           buildingHaloStrength(sceneContext.globalConfig->buildingHaloStrength),

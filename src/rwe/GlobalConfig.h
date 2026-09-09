@@ -136,6 +136,18 @@ namespace rwe
 
         /** Edge anti-aliasing: the original supersamples the unit and box-filters it down. */
         bool antiAlias{true};
+
+        /**
+         * The purple building fringe, on by default. VISUALRT has no gadget
+         * for it -- the GUI files are read-only game data -- so RWE builds one
+         * in code and puts it on the VISUALS page under the shadows toggle,
+         * the way the Shading switch is rebuilt there with four stages. It is
+         * separate from anti-alias deliberately: the artefact needs the
+         * supersample to exist, so turning anti-aliasing off takes the fringe
+         * with it, but plenty of people will want the crisp edges and not the
+         * bug. rwe.cfg key building-halo.
+         */
+        bool buildingHalo{true};
         /**
          * The purple halo on building edges, reproduced by running the
          * original's own arithmetic.
@@ -224,6 +236,7 @@ namespace rwe
         unsigned int gamma{100};
         ShadingMode shading{ShadingMode::Both};
         bool antiAlias{true};
+        bool buildingHalo{true};
     };
 
     /** The settings as the config file last left them. */
