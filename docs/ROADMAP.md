@@ -188,6 +188,7 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 - [x] **A unit ordered to move sets off at once** (2026-09-04, `TOTALA-EXE.md` §87). This was written down as a budget problem — four searches a tick, all at their cap, a couple of hundred requests backlogged — and the budget turned out to be the wrong suspect. `Navigator::SetGoal` (`0x44F2A0`) installs a two-point path, the unit's own position and then the goal, raises "I have a path" alongside "I want a path", and the unit is walking on the tick it was ordered; the real route overwrites the straight line whenever the round robin reaches that unit. RWE installed `std::nullopt` and stood still. With four hundred a side that was seconds of an army not moving, and it made every truncated path worse than it had to be. `path_bench` was written first to measure the budget properly (the sweep is in the commit), and what it showed was that raising it buys a 25% shorter queue for double the worst-case tick — a bad trade for a problem that was not the budget. Pinned by `pathfinding/walkwhilewaiting.test.cpp`, which sets the budget to zero so nothing but the stand-in can be moving the unit.
 - [x] **The goal is relaxed instead of the map exhausted** (2026-09-04, §87). The original runs a cheap walk before it searches — greedy towards the target, following walls it meets — and then treats any cell at least as close as the walk managed as arrival (`0x40DCA8`). A search for somewhere unreachable therefore costs one walk, where RWE walked its whole open list to prove the obvious. That was the expensive case in practice and not the far-away one: with units a footprint apart in a crowd, two thirds of all searches were ending by exhaustion. Measured on one build with the pass switched on and off: exhausted searches 443 → 6, expansions over 600 ticks 149,199 → 32,292, and over 3000 ticks 116 units of 200 reach their destination where 96 did. **Those four figures are withdrawn** (2026-09-09): `path_bench`'s obstacles were an immobile unit definition with no yard map, so they did not reliably obstruct, and every number the bench produced before that date was measured on a map with far less in the way than it reported. The conclusion stands on the reasoning and on the tests; the numbers do not, and the comparison has not been re-run. `BugWalk.{h,cpp}` with its own tests; the walk relaxes the goal but never refuses a search, and §87 says why and what that costs.
 - [x] **A search is sliced now, not truncated** (2026-09-09, §87). The original has no per-search cap at all: it slices its A\* at a hundred expansions a tick (`0x40EEAF`) and resumes the same search on the next one, so a long route completes over several ticks. RWE capped at 1000 and handed back a partial path the unit walked and then re-requested from — the one structural piece of the original's scheduler with no equivalent here. `AStarPathFinder` is a state machine now (`beginSearch` / `stepSearch(n)` / `takeResult`), `PathFindingService` gives a search whatever is left of the tick's budget and keeps it exactly where it stopped if that runs out, and there is no per-search cap left: a search ends at the goal or at an empty open list, so a partial result means the place genuinely cannot be reached and nothing else. One search runs at a time, because the scratch grid stamps its cells with the search they belong to — which is the same constraint the original works under from the other end, its pathfinder being a singleton with one set of map entries. A suspended search is re-checked against the unit before it is resumed and dropped if the unit died or was given a different order. A save **carries** it, in five integers: a search is a pure function of the world, the goal and the cell it started from, and only the last is lost (the unit keeps walking its straight-line stand-in while it waits), so the save writes that footprint and the expansion count and the load rebuilds the search and runs it forward that far — exactly, because A\* is deterministic. Dropping it on both sides instead would have passed the saved-game test and broken replays, whose keyframes go through the same path during playback against a recording that dropped nothing. The scratch cell went from eight bytes to twelve: the static asserts that made its int16 indices safe were bounded by the cap that is gone. Two new cases in `pathing.test.cpp` pin it — a search cut into one-expansion slices returns the route an uninterrupted search returns, and a goal walled off on a 64×64 map comes back exhausted after four thousand expansions where it used to stop at a thousand with the open list still full. **The budget is deliberately left at 4000 a tick**; raising it is the separate entry in Phase 5, and moving both at once would make neither measurable. **And `path_bench`'s obstacles were broken all along** — an immobile unit definition with no yard map, an assert in Debug and an empty-optional dereference in Release — so every figure it produced before this date was measured with obstacles that did not reliably obstruct, and none of them is a valid baseline. It has a yard map now.
+- [ ] **A unit that overshoots a waypoint turns round and goes back for it** (#36, added to this roadmap 2026-09-09). Path *following* has not been touched by any of the pathfinding work above, which is all about how a route is found rather than how it is walked: `PathFollowingInfo` still holds an iterator into the waypoint list and aims the unit at each point in turn, so a unit going too fast to make the corner loops back to collect a point it has already passed instead of carrying on down the route it can see. The issue proposes Craig Reynolds' path-following steering — treat the path as a corridor with a width, look ahead along it, and only correct when the projected position leaves the corridor. Two things to settle before writing any of it: whether the original does anything of the kind (§87 decodes the pathfinder and its scheduler but says nothing about the follower, and `0x44F0BC`'s twenty-waypoint clamp hints the original simply re-requests instead), and that any tolerance introduced is fixed-point and hashed like everything else in the simulation, since where a unit turns decides where it ends up.
 - [x] **`explored` is saved** (2026-09-06). `loadSimulationFromJson` used to end in `updateVisibility()`, which rebuilds every player's grids from where their units are standing, so a resumed game forgot the whole map it had walked. The explored grid is serialized beside the players now. (`teamId` was already saved, in the simulation's own player table, so alliances always did survive a load; the `SaveFile` header's own `PlayerInfo` still carries no team, which is harmless only because the load replaces the sim's player table wholesale.)
 - [x] **AirToAir is ported** (2026-09-05, §90). A fighter sent at another aircraft used to fly the bomber’s attack run with the strafing overshoot switched off, because that was the closest thing RWE had. It is a pursuit: weapon 0 goes on the bandit and stays there, and each decision either leads him by forty-five ticks of his own velocity, extends straight ahead for a second when it has overshot, holds station inside 160 units, or breaks ninety degrees to a random side for one weapon range and then twice that. The entry this replaces described it as hopping around the target in twenty-unit steps, which both findings documents said and which is wrong — that constant is the length of two probe vectors in a facing test, and nothing in the mission moves twenty units. Two crashes came out of the porting, both real and both about an aircraft dying off the map: an assertion on a dead unit’s footprint, and a dead aircraft left in `flyingUnitsSet` for the projectile pass to trip over. `sim/dogfight.test.cpp`.
 
@@ -319,10 +320,46 @@ The simulation half of this phase was brought forward and largely done — see "
 
 ## Issue-to-phase map (open upstream issues)
 
+Re-audited against the code on 2026-09-09, all 57 then open on `MHeasell/rwe`.
+Three were in no bucket at all (#36, #125, #126) and seven had been left in
+Phase 1 after the work that closed them, so the table below is a fair bit
+shorter on the open side than the one it replaces. "Done" here means done in
+this fork; nothing is reported upstream.
+
 | Phase | Issues |
 |---|---|
-| Closed by merged work | #131–#152 (Ctrl hotkeys), #153 (pause), #175 (speed), #176 (energyPerShot), #178 (SDL3 done upstream) |
-| 1 | #5 #6 #28 #30 #33 #40 #42 #44 #45 #154 #155 #173 |
+| Done | #28 #30 #33 #40 #44 #45 (pathfinding and movement, all with tests) · #125 (control groups) · #131–#152 (Ctrl hotkeys — see below) · #153 (pause) · #154 (F2 menu) · #175 (speed) · #176 (energyPerShot) · #178 (SDL3 done upstream) |
+| Refuted | #126 — see below |
+| 1 | #5 #6 #36 #42 #155 #173 |
 | 3 | #60 #166 #167 |
 | 4 | #7 #14 #38 #49 #52 #70 #82 #93 #25 |
 | 5 | #11 #16 #35 #62 #66 #111 #24 (obsolete — Boost gone, close) #108 (superseded — close) |
+
+**The Ctrl hotkey block is done by one mechanism, not twenty features.** Most
+of #131–#152 ask for a specific letter to select a specific kind of unit —
+Ctrl+K for kbots, Ctrl+N for naval, Ctrl+Y for torpedo bombers. The original
+does not have twenty selections: `0x4963e0` formats `"CTRL_%c"` and matches it
+against the unit's FBI **Category** field (§74), and the shipped data defines
+exactly six such tokens — `CTRL_W`, `CTRL_V`, `CTRL_F`, `CTRL_B`, `CTRL_R`,
+`CTRL_P` — plus `CTRL_C` for the Commander. "Every other Ctrl+letter looks up
+a category that no shipped unit has and selects nothing. A mod can invent
+`CTRL_X` and the key springs to life." RWE implements the mechanism, so every
+one of those letters already works for any data set that defines the token,
+and none of them needs code. #131 (Ctrl+A), #145 (Ctrl+S), #152 (Ctrl+Z) and
+#132 (Ctrl+D self-destruct) are separate features and are each implemented in
+their own right.
+
+**#126 (Ctrl+B cycles idle construction units) is refused, not deferred.** The
+issue says so itself: "Functionality of modified OTA / demo recorder". In the
+original Ctrl+B is the `CTRL_B` category selection — *all* construction units
+at once — and that is what RWE does. Implementing the cycle would mean giving
+a key a behaviour the original does not have and taking away one it does.
+Recorded here rather than in §88 because it is a divergence from an *issue*
+rather than from the binary. #133 (Ctrl+F cycles idle factories) is the same
+mistake about the same mechanism and has the same answer.
+
+**#125 is done in the part that is the original's.** Control groups are
+implemented on the digits, the arrangement §75 decodes. The rest of that issue
+is ProTA's rather than TA's — a sound on assignment, the squad number drawn
+under the health bar, a factory adding what it builds to its own squad — and
+is not planned.
