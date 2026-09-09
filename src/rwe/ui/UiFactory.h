@@ -81,6 +81,18 @@ namespace rwe
          */
         void addStagedButtonBelow(UiPanel& panel, const std::string& guiName, const std::string& artName, const std::string& name, const std::string& anchorName, const std::string& aboveAnchorName, const std::vector<std::string>& labels, unsigned int stage);
 
+        /**
+         * A label the gui data does not declare, in the same font every label
+         * read out of a gui file gets.
+         *
+         * YESORNO.GUI is the reason it exists. The dialog is three gadgets --
+         * the panel and the two buttons -- and carries no gadget for the
+         * question it is asking, because the original writes that text into
+         * the panel itself at runtime (0x4605c0). RWE's panels have no text,
+         * so the question needs somewhere to live.
+         */
+        std::unique_ptr<UiLabel> createLabel(int x, int y, int width, int height, const std::string& text, UiLabel::Alignment alignment);
+
     private:
         std::unique_ptr<UiComponent> componentFromGuiEntry(const std::string& guiName, const GuiEntry& entry);
 

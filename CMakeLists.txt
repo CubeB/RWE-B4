@@ -962,6 +962,7 @@ set(TEST_FILES
     src/rwe/util/SpanStream.test.cpp
     src/rwe/util/rwe_string.test.cpp
     src/rwe/ui/UiTextBox.test.cpp
+    src/rwe/UiRenderService.test.cpp
     )
 
 add_executable(rwe_test ${TEST_FILES})

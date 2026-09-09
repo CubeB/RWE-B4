@@ -8,6 +8,26 @@
 
 namespace rwe
 {
+    struct UiOrthoBounds
+    {
+        float left;
+        float right;
+        float bottom;
+        float top;
+    };
+
+    /**
+     * The orthographic box a fixed-size UI is drawn through, widened on
+     * whichever axis has room to spare so that the UI keeps its proportions
+     * in a window that is not its shape.
+     *
+     * A window at the content's own aspect gets the content's own box back,
+     * so this is identity for everything that was already the right shape.
+     * A window of zero height (minimised, on Windows) gets the same, rather
+     * than a division by zero.
+     */
+    UiOrthoBounds computeUiOrthoBounds(float contentWidth, float contentHeight, float windowWidth, float windowHeight);
+
     class UiRenderService
     {
     private:
@@ -15,10 +35,35 @@ namespace rwe
         ShaderService* shaders;
         const AbstractViewport* viewport;
 
+        /**
+         * The window the fixed-size UI above lands in, when it is not the
+         * same shape as that UI.
+         *
+         * The menus are laid out at 640x480 because that is what the original
+         * laid them out at and what its GUI files carry, and the projection
+         * used to map that box onto the whole window whatever shape the
+         * window was -- so a 16:9 display stretched every button, dial and
+         * piece of art by a third. With this set, the projection is widened
+         * on whichever axis has room to spare instead, so the 640x480 keeps
+         * its proportions and sits in the middle with the slack showing as
+         * bars. MovieScene has done the same for its films since they landed;
+         * this is that, for the menus.
+         *
+         * Null for a UI already drawn at the window's own size, where there
+         * is nothing to reconcile -- the in-game HUD, which is native by
+         * design so that a bigger window means more world and not a bigger
+         * interface.
+         */
+        const AbstractViewport* aspectViewport{nullptr};
+
         std::stack<Matrix4f> matrixStack{{Matrix4f::identity()}};
 
     public:
+        UiOrthoBounds getOrthoBounds() const;
+
+    public:
         UiRenderService(GraphicsContext* graphics, ShaderService* shaders, const AbstractViewport* viewport);
+        UiRenderService(GraphicsContext* graphics, ShaderService* shaders, const AbstractViewport* viewport, const AbstractViewport* aspectViewport);
 
         void fillScreen(const Color& color);
 

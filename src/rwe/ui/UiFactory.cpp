@@ -236,6 +236,16 @@ namespace rwe
         if (!backgroundSprite)
         {
             panel->setDrawSolidPlate(true);
+
+            // Not a flat rectangle: the original fills a plate like this with
+            // BackTile out of commongui.gaf -- the same 64x64 tile the front
+            // end sits on -- which is where the texture in the confirmation
+            // and exit boxes comes from. A data set without it still gets the
+            // flat plate rather than nothing.
+            if (auto tile = textureService->getGuiTexture(name, "BackTile"))
+            {
+                panel->setPlateTile((*tile)->sprites.at(0));
+            }
         }
 
         return panel;
@@ -537,6 +547,14 @@ namespace rwe
         return button;
     }
 
+    std::unique_ptr<UiLabel> UiFactory::createLabel(int x, int y, int width, int height, const std::string& text, UiLabel::Alignment alignment)
+    {
+        auto font = textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+        auto label = std::make_unique<UiLabel>(x, y, width, height, text, font);
+        label->setAlignment(alignment);
+        return label;
+    }
+
     std::unique_ptr<UiLabel> UiFactory::labelFromGuiEntry(const std::string& /*guiName*/, const GuiEntry& entry)
     {
         auto font = textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
@@ -697,6 +715,39 @@ namespace rwe
                 [width, height](const std::shared_ptr<Sprite>& s) {
                     return s->bounds.width() == width && s->bounds.height() == height;
                 });
+
+            // An exact match is the usual case and the one the gui files
+            // were authored for, but not always. BUTTONS0 ships faces at
+            // 16x16 and 80, 96, 112, 120 and 321 by 20, and YESORNO.GUI --
+            // the confirmation the original puts in front of leaving a
+            // battle -- asks for **95** by 20. One pixel narrower than a
+            // face that is right there, and the search walked past it and
+            // fell through to the blank default sprite, so the two buttons
+            // came out as bare text on the plate while EXITMENU next door,
+            // whose buttons are 120x20, wore its art perfectly. So: settle
+            // for the nearest face of the same height, within a few pixels.
+            // Drawn at its own size, which is what the art expects; a pixel
+            // of overhang on a 95-pixel gadget is not visible and a button
+            // with no face on it is.
+            if (it == (*sprites)->sprites.end())
+            {
+                const int tolerance = 8;
+                int bestDistance = tolerance + 1;
+                for (auto candidate = (*sprites)->sprites.begin(); candidate != (*sprites)->sprites.end(); ++candidate)
+                {
+                    if (static_cast<int>((*candidate)->bounds.height()) != height)
+                    {
+                        continue;
+                    }
+
+                    auto distance = std::abs(static_cast<int>((*candidate)->bounds.width()) - width);
+                    if (distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        it = candidate;
+                    }
+                }
+            }
 
             if (it != (*sprites)->sprites.end())
             {

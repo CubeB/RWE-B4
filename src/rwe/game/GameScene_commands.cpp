@@ -781,13 +781,25 @@ namespace rwe
     {
         // YESORNO.GUI is the original's one confirmation dialog, reused for
         // both exit prompts and (below) the save-list overwrite/delete
-        // prompts: TOTALA-EXE.md S:63 has it asking under CHOICE1/CHOICE2
-        // with the TITLE gadget set per use, and nothing else about it
-        // changes between call sites.
+        // prompts: TOTALA-EXE.md S:63 has it asking under CHOICE1/CHOICE2,
+        // and nothing else about it changes between call sites.
         auto panel = uiFactory.panelFromGuiFile("YESORNO");
+
+        // S:63 says the question goes into a TITLE gadget. The shipped file
+        // has no such gadget: it is three entries, the panel and the two
+        // buttons, and the original writes the question into the panel's own
+        // text at 0x4605c0. A UiPanel has no text, so the question gets a
+        // label of its own, centred across the panel above the buttons --
+        // which sit at y=55, 20 tall, in a box 400x100. Without this the
+        // dialog asked nothing at all and offered Yes and No to a blank
+        // plate.
         if (auto label = panel->find<UiLabel>("TITLE"))
         {
             label->get().setText(title);
+        }
+        else
+        {
+            panel->appendChild(uiFactory.createLabel(0, 20, panel->getWidth(), 20, title, UiLabel::Alignment::Center));
         }
         pendingConfirmAction = std::move(onYes);
         pendingConfirmCancel = std::move(onNo);

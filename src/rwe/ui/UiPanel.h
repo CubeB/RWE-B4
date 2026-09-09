@@ -17,6 +17,17 @@ namespace rwe
 
         bool drawSolidPlate{false};
 
+        /**
+         * The 64x64 tile the plate is filled with, when there is one.
+         *
+         * A dialog whose gui says panel=NULL and ships no bitmap of its own
+         * -- YESORNO and EXITMENU are the two -- is not meant to be a flat
+         * rectangle. The original fills it with `BackTile` out of
+         * commongui.gaf, the same tile the front end sits on, which is where
+         * the texture in those boxes comes from.
+         */
+        std::optional<std::shared_ptr<Sprite>> plateTile;
+
     public:
         UiPanel(int posX, int posY, unsigned int sizeX, unsigned int sizeY);
         UiPanel(int posX, int posY, unsigned int sizeX, unsigned int sizeY, std::shared_ptr<Sprite> background);
@@ -57,6 +68,8 @@ namespace rwe
 
         /** Draw a solid plate behind the children; for dialogs whose gui declares no art of its own. */
         void setDrawSolidPlate(bool draw) { drawSolidPlate = draw; }
+
+        void setPlateTile(std::shared_ptr<Sprite> tile) { plateTile = std::move(tile); }
 
         void removeChildrenWithPrefix(const std::string& prefix);
 

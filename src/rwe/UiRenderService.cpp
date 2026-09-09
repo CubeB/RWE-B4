@@ -9,6 +9,11 @@ namespace rwe
     {
     }
 
+    UiRenderService::UiRenderService(GraphicsContext* graphics, ShaderService* shaders, const AbstractViewport* viewport, const AbstractViewport* aspectViewport)
+        : graphics(graphics), shaders(shaders), viewport(viewport), aspectViewport(aspectViewport)
+    {
+    }
+
     void UiRenderService::fillScreen(const Color& color)
     {
         fillColor(0.0f, 0.0f, viewport->width(), viewport->height(), color);
@@ -370,13 +375,66 @@ namespace rwe
         graphics->drawLines(mesh);
     }
 
+    UiOrthoBounds computeUiOrthoBounds(float contentWidth, float contentHeight, float windowWidth, float windowHeight)
+    {
+        UiOrthoBounds bounds{0.0f, contentWidth, contentHeight, 0.0f};
+
+        if (contentWidth <= 0.0f || contentHeight <= 0.0f || windowWidth <= 0.0f || windowHeight <= 0.0f)
+        {
+            return bounds;
+        }
+
+        // Widen the box rather than scale the content: everything inside it
+        // keeps the coordinates the GUI files gave it, and the slack falls
+        // outside 0..640 / 0..480, where nothing is drawn.
+        auto windowAspect = windowWidth / windowHeight;
+        auto contentAspect = contentWidth / contentHeight;
+
+        if (windowAspect > contentAspect)
+        {
+            auto pad = ((contentHeight * windowAspect) - contentWidth) / 2.0f;
+            bounds.left -= pad;
+            bounds.right += pad;
+        }
+        else if (windowAspect < contentAspect)
+        {
+            auto pad = ((contentWidth / windowAspect) - contentHeight) / 2.0f;
+            bounds.top -= pad;
+            bounds.bottom += pad;
+        }
+
+        return bounds;
+    }
+
+    UiOrthoBounds UiRenderService::getOrthoBounds() const
+    {
+        auto contentWidth = static_cast<float>(viewport->width());
+        auto contentHeight = static_cast<float>(viewport->height());
+
+        if (aspectViewport == nullptr)
+        {
+            return UiOrthoBounds{0.0f, contentWidth, contentHeight, 0.0f};
+        }
+
+        return computeUiOrthoBounds(
+            contentWidth,
+            contentHeight,
+            static_cast<float>(aspectViewport->width()),
+            static_cast<float>(aspectViewport->height()));
+    }
+
     Matrix4f UiRenderService::getViewProjectionMatrix() const
     {
-        return Matrix4f::orthographicProjection(0.0f, viewport->width(), viewport->height(), 0.0f, 100.0f, -100.0f);
+        auto b = getOrthoBounds();
+        return Matrix4f::orthographicProjection(b.left, b.right, b.bottom, b.top, 100.0f, -100.0f);
     }
 
     Matrix4f UiRenderService::getInverseViewProjectionMatrix() const
     {
-        return Matrix4f::inverseOrthographicProjection(0.0f, viewport->width(), viewport->height(), 0.0f, 100.0f, -100.0f);
+        // The same box as above, which is what keeps the mouse on the buttons:
+        // a click is turned into UI coordinates by inverting this projection,
+        // so the padding has to be in both or in neither.
+        auto b = getOrthoBounds();
+        return Matrix4f::inverseOrthographicProjection(b.left, b.right, b.bottom, b.top, 100.0f, -100.0f);
     }
 }

@@ -31,7 +31,7 @@ namespace rwe
         float height)
         : sceneContext(sceneContext),
           soundLookup(audioLookup),
-          scaledUiRenderService(sceneContext.graphics, sceneContext.shaders, &MainMenuViewport),
+          scaledUiRenderService(sceneContext.graphics, sceneContext.shaders, &MainMenuViewport, sceneContext.viewport),
           nativeUiRenderService(sceneContext.graphics, sceneContext.shaders, sceneContext.viewport),
           model(),
           uiFactory(sceneContext.textureService, sceneContext.audioService, soundLookup, sceneContext.vfs, sceneContext.pathMapping, 640, 480),

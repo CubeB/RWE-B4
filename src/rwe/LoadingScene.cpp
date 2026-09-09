@@ -78,7 +78,7 @@ namespace rwe
         AudioService::LoopToken&& bgm,
         GameParameters gameParameters)
         : sceneContext(sceneContext),
-          scaledUiRenderService(sceneContext.graphics, sceneContext.shaders, &MenuUiViewport),
+          scaledUiRenderService(sceneContext.graphics, sceneContext.shaders, &MenuUiViewport, sceneContext.viewport),
           nativeUiRenderService(sceneContext.graphics, sceneContext.shaders, sceneContext.viewport),
           audioLookup(audioLookup),
           bgm(std::move(bgm)),
