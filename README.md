@@ -69,10 +69,19 @@ Total Annihilation is Cavedog Entertainment's. This fork ships no game data
 
 ## Download
 
-There is no binary release. Build from source with the instructions below; the
-MSYS2/MinGW64 route is the one this fork is developed and tested against daily,
-and CI covers Linux (gcc/clang) and Windows (MSVC and MinGW64) in both Debug
-and Release.
+Pre-release builds live on the releases page:
+
+https://github.com/CubeB/RWE-B4/releases
+
+Every tag there carries three things: a Windows installer, a Windows zip and a
+Linux AppImage. They are pre-releases in the plain sense of the word — cut from
+`revival` when a tag goes up rather than off a stable line — so take them as
+somewhere between the roadmap and a finished game. Either way you supply your
+own copy of Total Annihilation; see below.
+
+Building from source is the other route, and the MSYS2/MinGW64 one is what this
+fork is developed and tested against daily; CI covers Linux (gcc/clang) and
+Windows (MSVC and MinGW64) in both Debug and Release.
 
 Source code:
 
