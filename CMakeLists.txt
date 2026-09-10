@@ -922,6 +922,7 @@ set(TEST_FILES
     src/rwe/sim/kamikaze.test.cpp
     src/rwe/sim/paralyzer.test.cpp
     src/rwe/sim/moverate.test.cpp
+    src/rwe/sim/pathfollowing.test.cpp
     src/rwe/sim/transport.test.cpp
     src/rwe/sim/bomber.test.cpp
     src/rwe/sim/bomberpatrol.test.cpp

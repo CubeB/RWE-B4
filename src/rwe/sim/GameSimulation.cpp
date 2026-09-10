@@ -805,6 +805,18 @@ namespace rwe
         unit.clearWeaponTargets();
         unit.behaviourState = UnitBehaviorStateIdle();
         unit.navigationState = NavigationStateInfo{};
+
+        // And it stops. A unit picked up mid-stride kept the speed it was
+        // walking at, and since nothing on board runs its physics the number
+        // was still sitting there when it was set down again -- so it coasted
+        // a world unit or two away from where the transport put it, in
+        // whatever direction the transport happened to be facing.
+        if (auto* ground = std::get_if<UnitPhysicsInfoGround>(&unit.physics); ground != nullptr)
+        {
+            ground->currentSpeed = 0_ss;
+            ground->steeringInfo = SteeringInfo{unit.rotation, 0_ss};
+        }
+
         transport.carriedUnits.push_back(unitId);
         return true;
     }

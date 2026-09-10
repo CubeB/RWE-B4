@@ -30,9 +30,30 @@ namespace rwe
     {
         UnitPath path;
         GameTime pathCreationTime;
+
+        /**
+         * The corner the unit is heading for. The one behind it is
+         * `*(currentWaypoint - 1)`, and the segment between the two is what
+         * the follower steers along -- so this never points at the first
+         * entry. That layout is the original's waypoint array exactly: wp[0]
+         * is where the unit came from and wp[1] where it is going
+         * (TOTALA-EXE.md section 102).
+         */
         std::vector<SimVector>::const_iterator currentWaypoint;
+
         explicit PathFollowingInfo(UnitPath&& path, GameTime creationTime)
-            : path(std::move(path)), pathCreationTime(creationTime), currentWaypoint(this->path.waypoints.begin()) {}
+            : path(std::move(path)), pathCreationTime(creationTime), currentWaypoint(this->path.waypoints.begin())
+        {
+            // Every path is built with the corner behind the unit at the
+            // front, including the two-point straight-line stand-in. A
+            // one-point path would have no segment at all; there is no such
+            // path, and if one ever appeared this leaves the iterator
+            // somewhere valid rather than at the end.
+            if (this->path.waypoints.size() > 1)
+            {
+                ++currentWaypoint;
+            }
+        }
     };
 
     struct NavigationGoalLandingLocation

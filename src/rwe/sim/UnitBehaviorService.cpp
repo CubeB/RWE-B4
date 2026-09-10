@@ -636,33 +636,63 @@ namespace rwe
         moveTo(unitInfo, *resolvedGoal);
     }
 
+    /**
+     * The ground path follower, TotalA.exe 0x43CD20, written up as
+     * TOTALA-EXE.md section 102. Only ground units come here: the original
+     * branches on canfly at 0x43DD3E and so does moveTo.
+     *
+     * waypoints[currentWaypoint - 1] is the corner the unit has left and
+     * waypoints[currentWaypoint] the one it is heading for, which is the
+     * navigator's wp[0] and wp[1].
+     */
     bool followPath(UnitInfo unitInfo, UnitPhysicsInfoGround& physics, PathFollowingInfo& path)
     {
-        const auto& destination = *path.currentWaypoint;
         SimVector xzPosition(unitInfo.state->position.x, 0_ss, unitInfo.state->position.z);
-        SimVector xzDestination(destination.x, 0_ss, destination.z);
-        auto distanceSquared = xzPosition.distanceSquared(xzDestination);
 
-        auto isFinalDestination = path.currentWaypoint == (path.path.waypoints.end() - 1);
-
-        if (isFinalDestination)
+        // Navigator::Update (0x44F1A0) runs before the follower every tick and
+        // retires the corner behind the unit as soon as it is close enough to
+        // the one ahead. Exactly one goes per tick -- there is no loop there,
+        // so however fast a unit is travelling it cannot skip two corners in a
+        // tick. The radius is RWE's rather than the original's five; see
+        // PathWaypointAdvanceDistance for the measurement that decided it.
         {
-            if (distanceSquared < (8_ss * 8_ss))
+            const auto& next = *path.currentWaypoint;
+            SimVector xzNext(next.x, 0_ss, next.z);
+            auto isFinal = path.currentWaypoint == (path.path.waypoints.end() - 1);
+            auto radius = isFinal ? PathFinalWaypointAdvanceDistance : PathWaypointAdvanceDistance;
+            if (xzPosition.distanceSquared(xzNext) <= (radius * radius))
             {
-                return true;
+                if (isFinal)
+                {
+                    // The list has run out. 0x43CD36: a unit with no path
+                    // brakes at brakerate and does not turn. Whether the
+                    // *order* is finished is the goal test's business, not
+                    // the follower's -- see hasReachedGoal.
+                    physics.steeringInfo = SteeringInfo{unitInfo.state->rotation, 0_ss};
+                    return true;
+                }
+
+                ++path.currentWaypoint;
             }
-
-            physics.steeringInfo = arrive(*unitInfo.state, *unitInfo.definition, physics, destination);
-            return false;
         }
 
-        if (distanceSquared < (16_ss * 16_ss))
+        // GetWaypoints asks for three and clamps the index it reads with
+        // min(i, count - 1) (0x44F16A), so on a path of three points or fewer
+        // the third repeats the goal -- which is what turns the arrival test
+        // into the brake into the destination.
+        auto afterNext = path.currentWaypoint + 1;
+        if (afterNext == path.path.waypoints.end())
         {
-            ++path.currentWaypoint;
-            return false;
+            afterNext = path.currentWaypoint;
         }
 
-        physics.steeringInfo = seek(*unitInfo.state, *unitInfo.definition, destination);
+        physics.steeringInfo = followSegment(
+            *unitInfo.state,
+            *unitInfo.definition,
+            physics,
+            *(path.currentWaypoint - 1),
+            *path.currentWaypoint,
+            *afterNext);
         return false;
     }
 
@@ -4402,6 +4432,11 @@ namespace rwe
             // matter of walking an inelegant line rather than not walking.
             auto destination = resolvePathDestination(*unitInfo.state, goal);
             UnitPath straightLine;
+            // Two points, where the unit is standing and then the goal, which
+            // is what 0x44F3F2 writes. The first is the segment the follower
+            // steers along; it costs nothing on a straight run and is there
+            // for the tick the unit stops being on the line.
+            straightLine.waypoints.push_back(unitInfo.state->position);
             straightLine.waypoints.push_back(match(
                 destination,
                 [&](const SimVector& v) { return v; },
@@ -4422,32 +4457,40 @@ namespace rwe
                 PathFollowingInfo(std::move(straightLine), sim->gameTime),
                 true};
             sim->requestPath(unitInfo.id);
-            return;
-        }
 
-        // check to see if our goal has moved from its original location
-        auto resolvedDestination = resolvePathDestination(*unitInfo.state, goal);
-        if (resolvedDestination != movingState->pathDestination)
-        {
-            // The resolved position of our goal has changed.
-            // We'll assume that this change isn't too big
-            // i.e. we don't need to throw away our previous path,
-            // we can still continue following it
-            // while we wait for a new path to be computed.
-            movingState->pathDestination = resolvedDestination;
-            sim->requestPath(unitInfo.id);
-            movingState->pathRequested = true;
+            // And walk it now, not next tick. Mover::Update calls
+            // Navigator::Update and then the follower (0x43DD28), so a unit
+            // whose goal was set this frame is already moving when the frame
+            // ends. Falling through rather than returning is what makes the
+            // stand-in worth having on the tick the order arrives.
+            movingState = std::get_if<NavigationStateMoving>(&unitInfo.state->navigationState.state);
         }
-
-        // if we are colliding, request a new path
-        if (unitInfo.state->inCollision && !movingState->pathRequested)
+        else
         {
-            // only request a new path if we don't have one yet,
-            // or we've already had our current one for a bit
-            if (!movingState->path || (sim->gameTime - movingState->path->pathCreationTime) >= GameTime(30))
+            // check to see if our goal has moved from its original location
+            auto resolvedDestination = resolvePathDestination(*unitInfo.state, goal);
+            if (resolvedDestination != movingState->pathDestination)
             {
+                // The resolved position of our goal has changed.
+                // We'll assume that this change isn't too big
+                // i.e. we don't need to throw away our previous path,
+                // we can still continue following it
+                // while we wait for a new path to be computed.
+                movingState->pathDestination = resolvedDestination;
                 sim->requestPath(unitInfo.id);
                 movingState->pathRequested = true;
+            }
+
+            // if we are colliding, request a new path
+            if (unitInfo.state->inCollision && !movingState->pathRequested)
+            {
+                // only request a new path if we don't have one yet,
+                // or we've already had our current one for a bit
+                if (!movingState->path || (sim->gameTime - movingState->path->pathCreationTime) >= GameTime(30))
+                {
+                    sim->requestPath(unitInfo.id);
+                    movingState->pathRequested = true;
+                }
             }
         }
 
