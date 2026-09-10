@@ -448,3 +448,8 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
+          # A -preN tag is a pre-release, so GitHub should say so and should
+          # not move the "Latest" badge onto it. The tag name is the caller's:
+          # a called workflow's github context is the caller's throughout, so
+          # github.ref_name here is the tag release.yml was pushed for.
+          prerelease: ${{ contains(github.ref_name, '-pre') }}
