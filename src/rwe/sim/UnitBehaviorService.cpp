@@ -4047,6 +4047,18 @@ namespace rwe
 
                 buildingState.nanoParticleOrigin = getNanoPoint(unitInfo.id);
 
+                // Sound slot 11, `working`. The original's Capture handler
+                // plays it at 0x404568, alongside the two reclaim handlers
+                // that play the same slot, once as work actually starts --
+                // which is here, on the first tick of progress, and not when
+                // the order was given or when the arm went up. The progress
+                // count lives on the order, so a job dropped and retaken
+                // announces itself again. See TOTALA-EXE.md §97.
+                if (captureOrder.progress == 0)
+                {
+                    sim->events.push_back(UnitStartedReclaimingEvent{unitInfo.id});
+                }
+
                 // One tick of progress a tick, for every captor alike: the
                 // mission adds two every two ticks (0x404698) and consults no
                 // worker time anywhere. The count lives on the order, so
@@ -4057,7 +4069,7 @@ namespace rwe
                     return false;
                 }
 
-                auto finished = sim->captureUnit(targetUnitId, unitInfo.state->owner);
+                auto finished = sim->captureUnit(targetUnitId, unitInfo.state->owner, unitInfo.id);
                 if (finished)
                 {
                     changeState(*unitInfo.state, UnitBehaviorStateIdle());
@@ -4767,6 +4779,21 @@ namespace rwe
                 {
                     // We are not in the correct stance to build the unit yet, wait.
                     return false;
+                }
+
+                // Sound slot 11, `working` -- `reclaim1` for every shipped
+                // construction category. Both of the original's reclaim
+                // handlers play it once as work actually starts (Reclaim at
+                // 0x404C69, ReclaimUnit at 0x4048B5), which is this tick: the
+                // builder is in reach and the arm is out. An empty
+                // nanoParticleOrigin is what says no work has been done on
+                // this job yet -- it is set just below and only ever
+                // refreshed thereafter, and a new job arrives through
+                // UnitBehaviorStateIdle with a fresh one. See TOTALA-EXE.md
+                // §97.
+                if (!reclaimingState.nanoParticleOrigin)
+                {
+                    sim->events.push_back(UnitStartedReclaimingEvent{unitInfo.id});
                 }
 
                 reclaimingState.nanoParticleOrigin = getNanoPoint(unitInfo.id);

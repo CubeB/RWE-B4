@@ -1408,11 +1408,36 @@ namespace rwe
                         playUnitNotificationSound(unit->get().owner, unit->get().unitType, UnitSoundType::Build);
                     }
                 },
+                [&](const UnitStartedReclaimingEvent& e) {
+                    // Sound slot 11, `working` -- `reclaim1` in every shipped
+                    // construction unit's category. The original plays it
+                    // once as work actually starts, from all three of
+                    // Reclaim, ReclaimUnit and Capture. TOTALA-EXE.md §97.
+                    auto unit = tryGetUnit(e.unitId);
+                    if (unit)
+                    {
+                        playUnitNotificationSound(unit->get().owner, unit->get().unitType, UnitSoundType::Working);
+                    }
+                },
                 [&](const UnitCapturedEvent& e) {
                     // A unit we lost must not linger in our selection.
                     if (e.previousOwner == localPlayerId)
                     {
                         deselectUnit(e.unitId);
+                    }
+
+                    // Sound slot 16, `capture`, played by the captor when the
+                    // job lands (the Capture mission's state 5, 0x4046cc). No
+                    // shipped category sets the slot, so this is silent on the
+                    // shipped data and is here for a mod that sets it.
+                    // TOTALA-EXE.md §97.
+                    if (e.captorUnitId)
+                    {
+                        auto captor = tryGetUnit(*e.captorUnitId);
+                        if (captor)
+                        {
+                            playUnitNotificationSound(captor->get().owner, captor->get().unitType, UnitSoundType::Capture);
+                        }
                     }
                 },
                 [&](const ProjectileDetonatedEvent& e) {

@@ -8984,11 +8984,15 @@ there is a regression test for it now.
   neither changes what is passable. Left alone because a change to path cost
   moves every route, and that deserves its own pass with `path_bench` and the
   pathing tests watched.
-- **The work sounds are decoded but not played.** Sound slot 11, `working`
-  (`reclaim1` in every construction unit's category), is played once when
-  reclaim or capture work starts, and slot 16 `capture` when a capture
-  finishes -- S:97. RWE parses both and raises no simulation event either could
-  hang off; the scene already knows how to play them.
+- **The work sounds are played. Ported, 2026-09-10.** Sound slot 11,
+  `working` (`reclaim1` in every construction unit's category), is played once
+  when reclaim or capture work starts, and slot 16 `capture` when a capture
+  finishes -- S:97. Both now have a simulation event to hang off: a new
+  `UnitStartedReclaimingEvent` raised on the first tick of actual work by
+  feature reclaim, unit reclaim and capture alike, and the `UnitCapturedEvent`
+  that already existed, which now carries the captor so slot 16 is the
+  captor's sound. Slot 16 stays silent on the shipped data, no category
+  setting it.
 - **`Resurrect` is decoded and not implemented** -- S:98. No shipped FBI sets
   `canresurrect`, so it would be a mod-only capability, and a new `UnitOrder`
   alternative cannot be added from inside `src/rwe/sim` alone.
@@ -9929,16 +9933,22 @@ the player's units every second and so is not a fixture's to invent.
 The feature's `seqnamereclamate` swirl was already implemented (it plays on
 `FeatureReclaimedEvent`); the roadmap entry asking for it was stale.
 
-**The reclaim sound is not implemented.** It needs a scene-side change:
-`GameScene` already knows how to play `UnitSoundType::Working`, and already
-plays `UnitSoundType::Build` off `UnitStartedBuildingEvent`, but nothing in the
-simulation raises an event when reclaim or capture work begins. The shape of
-the fix is a `UnitStartedReclaimingEvent` beside `UnitStartedBuildingEvent`,
-emitted where `UnitBehaviorStateReclaiming` is first entered and where a
-capture first reaches its target, with a scene handler that calls
-`playUnitNotificationSound(..., UnitSoundType::Working)`. Adding an alternative
-to the `GameEvent` variant obliges every `match` over it to grow an arm, which
-is why it was left for whoever owns the scene.
+> **Ported, 2026-09-10.** Both work sounds now play.
+> `UnitStartedReclaimingEvent` sits beside `UnitStartedBuildingEvent` in the
+> `GameEvent` variant and is raised on the first tick of actual work by all
+> three jobs the original plays slot 11 from: feature reclaim and unit
+> reclaim, in `deployReclaimArm`, and capture, in `deployCaptureArm`.
+> `GameScene::processSimEvents` plays `UnitSoundType::Working` off it. Slot 16
+> hangs off the `UnitCapturedEvent` that already marked the end of a capture,
+> which now carries the captor as well as the two owners, so the sound is the
+> captor's and not the taken unit's; no shipped category sets the slot, so it
+> is silent until a mod sets it. Neither needed a new piece of simulation
+> state: "work has started on this job" is the reclaiming state's empty
+> `nanoParticleOrigin` on one side and a `CaptureOrder::progress` of zero on
+> the other, both of which already exist, are already hashed, and are already
+> reset when a job ends. `src/rwe/sim/worksounds.test.cpp` pins the *once* and
+> the *when* -- in particular that a builder sent to a wreck it must walk to
+> announces nothing until it arrives.
 
 ---
 

@@ -1070,7 +1070,7 @@ namespace rwe
         return static_cast<unsigned int>(std::max<std::uint64_t>(1, ticks));
     }
 
-    bool GameSimulation::captureUnit(UnitId targetId, PlayerId captor)
+    bool GameSimulation::captureUnit(UnitId targetId, PlayerId captor, std::optional<UnitId> captorUnitId)
     {
         auto unitRef = tryGetUnitState(targetId);
         if (!unitRef || unitRef->get().isDead())
@@ -1099,7 +1099,7 @@ namespace rwe
         unit.behaviourState = UnitBehaviorStateIdle();
         unit.clearWeaponTargets();
 
-        events.push_back(UnitCapturedEvent{targetId, previousOwner, captor});
+        events.push_back(UnitCapturedEvent{targetId, previousOwner, captor, captorUnitId});
         return true;
     }
 
