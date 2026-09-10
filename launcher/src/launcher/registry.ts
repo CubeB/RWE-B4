@@ -39,8 +39,6 @@ export type RegistryNumberEntry = {
 };
 export type RegistryValue = RegistryStringEntry | RegistryNumberEntry;
 
-const ItemPattern = /^(.*)\s(REG_SZ|REG_MULTI_SZ|REG_EXPAND_SZ|REG_DWORD|REG_QWORD|REG_BINARY|REG_NONE)\s+([^\s].*)?$/;
-
 function mapRegType(input: string): RegistryValueType | undefined {
   switch (input) {
     case "REG_BINARY":
