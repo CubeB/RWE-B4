@@ -217,6 +217,28 @@ namespace rwe
         }
     }
 
+    TEST_CASE("loading is asymmetric: the transport loads the unit, never the reverse", "[transport]")
+    {
+        // The roadmap once listed "units ordering themselves aboard (select
+        // units, click transport)" as work to do. The original has no such
+        // order -- all five CanLoadUnit (0x489A90) call sites pass the
+        // ordering unit as the transport -- so this pins the asymmetry the
+        // sim already has, so nobody adds a passenger-side path later
+        // thinking it is TA.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim, "hauler");
+        sim.unitDefinitions["transport"] = makeTransportDef();
+        sim.unitDefinitions["kbot"] = makeMobileDef(2u);
+        registerModel(sim, "model");
+
+        auto transportId = spawnUnit(sim, "transport", player, SimVector(-200_ss, 0_ss, 0_ss), script);
+        auto kbotId = spawnUnit(sim, "kbot", player, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        REQUIRE(sim.canLoadUnitIntoTransport(transportId, kbotId));
+        REQUIRE_FALSE(sim.canLoadUnitIntoTransport(kbotId, transportId));
+    }
+
     TEST_CASE("a ship sends the unit it is collecting towards itself", "[transport]")
     {
         // A ship cannot come ashore, so the unit walks down to meet it. The
