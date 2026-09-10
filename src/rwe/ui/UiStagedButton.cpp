@@ -1,5 +1,7 @@
 #include "UiStagedButton.h"
 
+#include <cmath>
+
 namespace rwe
 {
     ButtonClickEvent::Source mouseButtonToSource(MouseButtonEvent::MouseButton btn)
@@ -26,49 +28,66 @@ namespace rwe
 
         graphics.drawSpriteAbs(posX, posY, sprite);
 
+        if (textAlign == TextAlign::Hidden)
+        {
+            return;
+        }
+
         const auto& label = stages[currentStage].label;
+
+        // Where the caption's own origin lands, settled once so that the drop
+        // shadow, the caption and the quick-key underline all follow the same
+        // alignment. The two centred cases work out here what
+        // drawTextCentered and drawTextCenteredX would work out internally,
+        // rounding included -- and the pressed shift stays exact through
+        // that, round(a + 1) being round(a) + 1 for any a.
+        float textX;
+        float textY;
         switch (textAlign)
         {
-            case TextAlign::Hidden:
-                break;
             case TextAlign::Left:
-            {
-                float textX = posX + 6.0f;
-                float textY = posY + (sizeY / 2.0f) + 6.0f;
-                if (pressed)
-                {
-                    textX += 1.0f;
-                    textY += 1.0f;
-                }
-                graphics.drawText(textX, textY, label, *labelFont);
+                textX = posX + 6.0f;
+                textY = posY + (sizeY / 2.0f) + 6.0f;
                 break;
-            }
             case TextAlign::Center:
-            {
-                float textX = posX + (sizeX / 2.0f);
-                float textY = posY + (sizeY / 2.0f);
-                if (pressed)
-                {
-                    textX += 1.0f;
-                    textY += 1.0f;
-                }
-                graphics.drawTextCentered(textX, textY, label, *labelFont);
+                textX = std::round((posX + (sizeX / 2.0f)) - (graphics.getTextWidth(label, *labelFont) / 2.0f));
+                textY = std::round(posY + (sizeY / 2.0f) + 5.0f);
                 break;
-            }
             case TextAlign::BottomCenter:
-            {
-                float textX = posX + (sizeX / 2.0f);
-                float textY = posY + sizeY - 7;
-                if (pressed)
-                {
-                    textX += 1.0f;
-                    textY += 1.0f;
-                }
-                graphics.drawTextCenteredX(textX, textY, label, *labelFont);
+                textX = std::round((posX + (sizeX / 2.0f)) - (graphics.getTextWidth(label, *labelFont) / 2.0f));
+                textY = posY + sizeY - 7;
                 break;
-            }
             default:
                 throw std::logic_error("Invalid TextAlign value");
+        }
+
+        if (pressed)
+        {
+            textX += 1.0f;
+            textY += 1.0f;
+        }
+
+        // S:99: the caption is drawn twice (0x4A59A4-0x4A59E3), once at
+        // (x+1, y+3) in interface colour 0 as a drop shadow and then in the
+        // gadget's own colorf. Interface colour 0 is GUIPAL's black; RWE has
+        // no runtime interface-colour table, so it is a literal here with the
+        // slot named, as the minimap rings are in GameScene_render.
+        graphics.drawText(textX + 1.0f, textY + 3.0f, label, *labelFont, Color(0, 0, 0));
+        graphics.drawText(textX, textY, label, *labelFont);
+
+        // S:99, 0x4A5B2C onward: where the gadget's quickkey character
+        // appears in its caption, that character is underlined. In the
+        // caption's own colour, which is what drawText above defaults to.
+        //
+        // A pixel below the glyph cell, which the font's frames put at
+        // y+1: hattfont12's glyphs are 12 rows with posY=11, so the cell
+        // runs from y-11 to y, and its last row is blank.
+        if (quickKey)
+        {
+            if (auto span = findCharacterInText(label, *quickKey, *labelFont))
+            {
+                graphics.fillColor(textX + span->x, textY + 1.0f, span->width, 1.0f, Color(255, 255, 255));
+            }
         }
     }
 

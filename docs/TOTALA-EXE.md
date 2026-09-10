@@ -3515,12 +3515,29 @@ units in the shipped data, but not the same rule), and gated nothing at all on
 It now builds the list of selected definitions and applies
 `selectionOffersOrderButton`, which is the OR above.
 
+> **Ported, 2026-09-02** ("Buttons can be greyed out, and the order panel
+> greys instead of hiding", `3f1a6c12`). This list used to open with a bullet
+> saying RWE had no disabled state for a `UiStagedButton` and removed a button
+> the selection could not use instead of drawing it dim. It has one now:
+> `UiStagedButton::setEnabled(false)` draws the button's greyed face and makes
+> it ignore every event, `UiFactory` honours a gui file's `grayedout=1`, and
+> `GameScene::applyOrderButtonGating` greys everything and hides only LOAD and
+> BLAST, which is exactly the split above (`0x41A412`, `0x41A471`).
+>
+> **The greyed face is not the original's arithmetic, and does not need to
+> be.** The original darkens the gadget's whole rectangle in place, running it
+> through SHADE row 12 at level -20 — a measured 0.82x on luminance (§99).
+> RWE draws the frame the artists put in the button's own GAF one past the
+> pressed frame; every shipped button carries one, and the factory had been
+> extracting it and throwing it away all along. So the two agree because the
+> artwork was drawn to agree, not because the code does the same sum: what
+> the original computes at run time, the artists had already painted. A mod
+> whose GAF has no such frame gets no dimming at all here, where the original
+> would still have darkened it — the one case where the two can be told
+> apart.
+
 ### Deliberately not ported
 
-- **Greying.** RWE has no disabled state for a `UiStagedButton`, so a button
-  the selection cannot use is removed rather than drawn dim. Recorded here so
-  it is not mistaken for the original's behaviour: the original greys
-  everything except LOAD and BLAST, which it hides because they overlap.
 - **The cloak accumulator's disagreement bug** at `0x41B485`.
 - **`canresurrect`, `wacky` and `selfdestructcountdown`.** No shipped unit
   names any of them and RWE has no resurrect order.
@@ -10289,7 +10306,9 @@ for a launcher, which is now a restoration rather than an addition. The
 minimap coverage ring is drawn, dashed while the launcher has a round, and
 both it and the four detection rings are clipped to the minimap. The text box
 draws the blue caret only when it has the focus, and a list box's selected row
-is brightened rather than washed with 12% white.
+is brightened rather than washed with 12% white. A button's caption carries
+its drop shadow and its quick-key underline, and a greyed control is drawn
+greyed rather than removed — see the note below the list.
 
 Deliberately different, and recorded in §88 rather than left to be found:
 
@@ -10306,9 +10325,41 @@ Deliberately different, and recorded in §88 rather than left to be found:
 - **A builder walking to its site already says `Nanolathing`.** The original
   would be running a move mission and saying `Moving`; RWE has one
   `BuildOrder` covering the walk and the work.
-- **Greying, the caption shadow and the quick-key underline are still not
-  ported.** The first is §19's existing note, now with the arithmetic behind
-  it; the other two are new and small.
+> **Ported, 2026-09-10.** This list used to end with a bullet saying greying,
+> the caption shadow and the quick-key underline were all still unported. All
+> three are in.
+>
+> Greying went in on 2026-09-02 and the bullet was stale when it was written;
+> §19 now carries the note, including why RWE's greyed face is the artwork's
+> own frame rather than SHADE row 12.
+>
+> The other two are `UiStagedButton::render`. The caption is drawn twice, once
+> at (+1, +3) in black — interface colour 0, as a literal with the slot named,
+> RWE having no runtime interface-colour table — and then in its own colour.
+> The quick-key underline is a one-pixel `fillColor` under the first
+> occurrence of the gadget's `quickkey` character in the caption, measured
+> with `findCharacterInText` in the font's own per-glyph advances so that it
+> lands under the character `drawText` actually drew, and placed at the row
+> below the glyph cell (hattfont12's frames are 12 rows with `posY=11`, so the
+> cell runs from y-11 to y and its last row is blank).
+>
+> Two things had to be settled that the finding does not record. **The
+> alignment**: RWE's button draws its caption through three paths (left,
+> centred, bottom-centred), and the shadow and the underline have to follow
+> whichever one the gadget uses, so `render` now works out the caption's
+> origin once — reproducing what `drawTextCentered` and `drawTextCenteredX`
+> compute internally, rounding included — and all three draws go from that.
+> The pressed shift survives the move, `round(a + 1)` being `round(a) + 1`.
+> **The case**: the original compares the `quickkey` byte against the caption
+> as it stands, and the shipped gui files are authored to suit — SKIRMISH.GUI's
+> `SelectMap` carries a lowercase `e` for `Select Map`. RWE has folded the
+> quickkey to an SDL keycode by the time a button holds it, so the original's
+> case is gone and the match is case-insensitive. That is not only the
+> available reading but the better one: four shipped gadgets are authored in
+> the *other* case and would lose their underline to an exact test —
+> MISSION.GUI's `SELECT`, whose key is `L` against `Select Mission`, and the
+> `UNDO` buttons on MUSICRT, SOUNDSRT and VISUALRT, whose key is `c` against
+> `Undo Changes`.
 
 ---
 

@@ -638,6 +638,17 @@ namespace rwe
             {
                 playMovie("movies/2.zrb");
             }
+            else if (message == "Credits")
+            {
+                // MAINMENU.GUI's sixth gadget: a captionless 80x40 button at
+                // (280,440), sitting under the logo where nothing else is,
+                // and named `Credits` in the gui's own mixed case. The GOG
+                // release ships the films as movies/1.zrb..5.zrb, and 5 is
+                // the credits reel -- so this is the intro's own path with a
+                // different number, and a data set without the file gets the
+                // same no-op the intro gets.
+                playMovie("movies/5.zrb");
+            }
         }
         else if (topic == "SINGLE")
         {
