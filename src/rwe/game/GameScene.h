@@ -19,6 +19,7 @@
 #include <rwe/UiRenderService.h>
 #include <rwe/Viewport.h>
 #include <rwe/game/BuilderGuisDatabase.h>
+#include <rwe/game/DefaultAction.h>
 #include <rwe/game/GameCameraState.h>
 #include <rwe/game/GameMediaDatabase.h>
 #include <rwe/game/GameNetworkService.h>
@@ -938,6 +939,23 @@ namespace rwe
         void localPlayerIssueUnitOrder(UnitId unitId, const UnitOrder& order);
 
         void localPlayerEnqueueUnitOrder(UnitId unitId, const UnitOrder& order);
+
+        /**
+         * What one selected unit does about a click on the world, run through
+         * the ladder in DefaultAction.h and issued or queued according to the
+         * shift key. Returns whether anything was ordered.
+         *
+         * A select is not handled here: the selection is not per unit, and
+         * the caller has already dealt with it.
+         */
+        bool issueDefaultAction(UnitId selectedUnit, DefaultActionScheme scheme);
+
+        /**
+         * The cursor the whole selection shows for the current hover under
+         * one scheme -- the lowest-numbered cursor any selected unit asks
+         * for, which is what the original's chooser loop keeps (0x48D3E9).
+         */
+        CursorType selectionDefaultCursor(DefaultActionScheme scheme) const;
 
         void localPlayerStopUnit(UnitId unitId);
 

@@ -293,6 +293,8 @@ set(SOURCE_FILES
     src/rwe/float_math.h
     src/rwe/game/BuilderGuisDatabase.cpp
     src/rwe/game/BuilderGuisDatabase.h
+    src/rwe/game/DefaultAction.cpp
+    src/rwe/game/DefaultAction.h
     src/rwe/game/FeatureMediaInfo.cpp
     src/rwe/game/FeatureMediaInfo.h
     src/rwe/game/FlashEffect.cpp
@@ -847,6 +849,7 @@ set(TEST_FILES
     src/rwe/collections/MinHeap.test.cpp
     src/rwe/observable/Subject.test.cpp
     src/rwe/collections/VectorMap.test.cpp
+    src/rwe/game/DefaultAction.test.cpp
     src/rwe/game/GameScene_audio.test.cpp
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/cloakdisplay.test.cpp

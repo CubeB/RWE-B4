@@ -76,34 +76,6 @@ namespace rwe
         return pages->get().size();
     }
 
-    bool unitCanAttack(const GameSimulation& sim, UnitId unitId)
-    {
-        const auto& unit = sim.getUnitState(unitId);
-        const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
-        return unitDefinition.canAttack;
-    }
-
-    bool unitCanMove(const GameSimulation& sim, UnitId unitId)
-    {
-        const auto& unit = sim.getUnitState(unitId);
-        const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
-        return unitDefinition.canMove;
-    }
-
-    bool unitCanGuard(const GameSimulation& sim, UnitId unitId)
-    {
-        const auto& unit = sim.getUnitState(unitId);
-        const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
-        return unitDefinition.canGuard;
-    }
-
-    bool unitIsBuilder(const GameSimulation& sim, UnitId unitId)
-    {
-        const auto& unit = sim.getUnitState(unitId);
-        const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
-        return unitDefinition.builder;
-    }
-
     bool unitIsBuilder(const GameSimulation& sim, std::optional<UnitId> singleSelectedUnit)
     {
         if (!singleSelectedUnit)
@@ -113,51 +85,6 @@ namespace rwe
         const auto& unit = sim.getUnitState(*singleSelectedUnit);
         const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
         return unitDefinition.builder;
-    }
-
-    /**
-     * Whether clicking `target` with `flyer` selected should send the
-     * aircraft down onto a repair pad rather than merely moving it there.
-     *
-     * Three arms of the original's order dispatcher -- 0x43F735, 0x43F959
-     * and 0x43FAEF -- test the same pair, the mover being `canfly` and the
-     * thing under the cursor being `isairbase`, and all three jump to the
-     * same place: 0x43FB1B, the VTOL_LANDING mission. The cursor agrees
-     * (0x43EA83 gives cursor 13 for exactly that pair), and the FAQ's
-     * account of it is the same gesture from the player's side: "Select the
-     * plane, click on Move and then click on the repair pad."
-     */
-    bool unitShouldLandOnAirBase(const GameSimulation& sim, UnitId flyer, UnitId target)
-    {
-        if (flyer == target)
-        {
-            return false;
-        }
-        const auto& flyerState = sim.getUnitState(flyer);
-        if (!sim.unitDefinitions.at(flyerState.unitType).canFly)
-        {
-            return false;
-        }
-        const auto& targetState = sim.getUnitState(target);
-        if (!targetState.isOwnedBy(flyerState.owner))
-        {
-            return false;
-        }
-        return unitIsAnUsableAirBase(targetState, sim.unitDefinitions.at(targetState.unitType));
-    }
-
-    bool unitIsBeingBuilt(const GameSimulation& sim, UnitId unitId)
-    {
-        const auto& unit = sim.getUnitState(unitId);
-        const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
-        return unit.isBeingBuilt(unitDefinition);
-    }
-
-    bool unitIsDamaged(const GameSimulation& sim, UnitId unitId)
-    {
-        const auto& unit = sim.getUnitState(unitId);
-        const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
-        return unit.isAlive() && !unit.isBeingBuilt(unitDefinition) && unit.hitPoints < unitDefinition.maxHitPoints;
     }
 
     bool unitIsSelectableBy(const GameSimulation& sim, UnitId unitId, PlayerId playerId)
@@ -595,7 +522,11 @@ namespace rwe
                     sceneContext.cursor->useCursor(CursorType::Attack);
                 },
                 [&](const MoveCursorMode&) {
-                    sceneContext.cursor->useCursor(CursorType::Move);
+                    // The MOVE button is not a plain move. Command 2's cursor
+                    // arm (0x43E8BB) is the whole context ladder, and it is
+                    // the only armed command that can show a pickup without
+                    // the LOAD button. See TOTALA-EXE.md S:103.
+                    sceneContext.cursor->useCursor(selectionDefaultCursor(DefaultActionScheme::MoveButton));
                 },
                 [&](const GuardCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Guard);
@@ -613,7 +544,25 @@ namespace rwe
                     sceneContext.cursor->useCursor(CursorType::Capture);
                 },
                 [&](const LoadCursorMode&) {
-                    sceneContext.cursor->useCursor(CursorType::Load);
+                    // Command 6's cursor arm, 0x43E7D3: the plain arrow
+                    // unless the unit under the cursor could actually be
+                    // taken aboard, and then the air/crane split -- an
+                    // aircraft shows cursorpickup, a crane cursorload.
+                    auto cursor = CursorType::Normal;
+                    if (hoveredUnit && isFriendly(*hoveredUnit))
+                    {
+                        for (const auto& selectedUnit : selectedUnits)
+                        {
+                            if (!simulation.canLoadUnitIntoTransport(selectedUnit, *hoveredUnit))
+                            {
+                                continue;
+                            }
+                            const auto& selected = getUnit(selectedUnit);
+                            auto canFly = simulation.unitDefinitions.at(selected.unitType).canFly;
+                            cursor = preferredCursor(cursor, canFly ? CursorType::Pickup : CursorType::Load);
+                        }
+                    }
+                    sceneContext.cursor->useCursor(cursor);
                 },
                 [&](const UnloadCursorMode&) {
                     sceneContext.cursor->useCursor(CursorType::Unload);
@@ -622,65 +571,30 @@ namespace rwe
                     sceneContext.cursor->useCursor(CursorType::Normal);
                 },
                 [&](const NormalCursorMode&) {
-                    if (leftClickMode())
+                    // One ladder, the same one the click handlers run, so the
+                    // cursor cannot promise something the click will not do.
+                    // The two schemes differ in kind as well as in arms: in
+                    // "Left Click" the cursor *is* the decision (0x498F70
+                    // dispatches on the displayed id), while in "Right Click"
+                    // it is feedback only -- 0x43EB02 answers select, red or
+                    // green, and the right button issues without consulting
+                    // it at all. See TOTALA-EXE.md S:103.
+                    auto scheme = leftClickMode()
+                        ? DefaultActionScheme::LeftClickDefault
+                        : DefaultActionScheme::RightClickDefault;
+                    auto cursor = selectionDefaultCursor(scheme);
+
+                    if (selectedUnits.empty() && hoveredUnit && unitIsSelectableBy(simulation, *hoveredUnit, localPlayerId))
                     {
-                        if (hoveredUnit && unitIsSelectableBy(simulation, *hoveredUnit, localPlayerId))
-                        {
-                            sceneContext.cursor->useCursor(CursorType::Select);
-                        }
-                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitCanAttack(simulation, id); })
-                            && hoveredUnit && isEnemy(*hoveredUnit))
-                        {
-                            sceneContext.cursor->useCursor(CursorType::Attack);
-                        }
-                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id); })
-                            && hoveredUnit && isFriendly(*hoveredUnit) && (unitIsBeingBuilt(simulation, *hoveredUnit) || unitIsDamaged(simulation, *hoveredUnit)))
-                        {
-                            sceneContext.cursor->useCursor(CursorType::Repair);
-                        }
-                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id); }) && hoveredFeature && featureCanBeReclaimed(simulation, *hoveredFeature))
-                        {
-                            sceneContext.cursor->useCursor(CursorType::Reclaim);
-                        }
-                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitCanMove(simulation, id); }))
-                        {
-                            sceneContext.cursor->useCursor(CursorType::Move);
-                        }
-                        else
-                        {
-                            sceneContext.cursor->useCursor(CursorType::Normal);
-                        }
+                        // An empty selection contributes no cursor at all --
+                        // the original's chooser loops over selected units
+                        // and returns its sentinel -- but hovering one of
+                        // your own units still has to say it can be picked
+                        // up, so RWE keeps the select cursor here.
+                        cursor = CursorType::Select;
                     }
-                    else
-                    {
-                        if (hoveredUnit && unitIsSelectableBy(simulation, *hoveredUnit, localPlayerId))
-                        {
-                            sceneContext.cursor->useCursor(CursorType::Select);
-                        }
-                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitCanAttack(simulation, id); })
-                            && hoveredUnit && isEnemy(*hoveredUnit))
-                        {
-                            sceneContext.cursor->useCursor(CursorType::Red);
-                        }
-                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id); })
-                            && hoveredUnit && isFriendly(*hoveredUnit) && unitIsBeingBuilt(simulation, *hoveredUnit))
-                        {
-                            sceneContext.cursor->useCursor(CursorType::Green);
-                        }
-                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitCanGuard(simulation, id); })
-                            && hoveredUnit && isFriendly(*hoveredUnit))
-                        {
-                            sceneContext.cursor->useCursor(CursorType::Green);
-                        }
-                        else if (std::any_of(selectedUnits.begin(), selectedUnits.end(), [&](const auto& id) { return unitIsBuilder(simulation, id); }) && hoveredFeature && featureCanBeReclaimed(simulation, *hoveredFeature))
-                        {
-                            sceneContext.cursor->useCursor(CursorType::Green);
-                        }
-                        else
-                        {
-                            sceneContext.cursor->useCursor(CursorType::Normal);
-                        }
-                    }
+
+                    sceneContext.cursor->useCursor(cursor);
                 });
         }
 

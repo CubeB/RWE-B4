@@ -548,13 +548,7 @@ namespace rwe
 
     unsigned int getBuildPageCount(const BuilderGuisDatabase& db, const std::string& unitType);
 
-    bool unitIsBuilder(const GameSimulation& sim, UnitId unitId);
-
     bool unitIsBuilder(const GameSimulation& sim, std::optional<UnitId> singleSelectedUnit);
-
-    bool unitShouldLandOnAirBase(const GameSimulation& sim, UnitId flyer, UnitId target);
-
-    bool unitIsDamaged(const GameSimulation& sim, UnitId unitId);
 
     /** True for particles drawn among the world's geometry rather than over the finished frame. */
     bool particleDrawsInWorld(const Particle& particle);
