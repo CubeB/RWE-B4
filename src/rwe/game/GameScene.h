@@ -1152,6 +1152,20 @@ namespace rwe
         /** What CHOICE2 runs instead, or nothing to fall back to openGameMenuRoot(). */
         std::function<void()> pendingConfirmCancel;
 
+        /**
+         * Set the moment this scene has handed the scene manager its
+         * successor, and never cleared: the scene is on its way out.
+         *
+         * The swap is not immediate. SceneManager::execute takes the next
+         * scene at the top of the loop, so a scene that calls setNextScene
+         * from inside its own update -- which every exit here does, by way of
+         * pendingMenuActions -- still owns the audio service for the rest of
+         * that update and for the render that follows it. Anything that would
+         * start a sound the incoming scene has to live with has to know not
+         * to; the situational music driver is the one that did.
+         */
+        bool leavingScene{false};
+
         void exitToMainMenu();
         GameOptions currentInGameOptions() const;
         void applyInGameOptions(const GameOptions& state);

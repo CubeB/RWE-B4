@@ -282,6 +282,7 @@ namespace rwe
         // somewhere else.
         auto parameters = gameParametersFromReplayHeader(replay->header);
         parameters.replayFile = path.string();
+        leavingScene = true;
         sceneContext.audioService->stopMusic();
         auto scene = std::make_shared<LoadingScene>(
             sceneContext,
@@ -295,6 +296,7 @@ namespace rwe
     {
         auto parameters = gameParameters;
         parameters.replaySeekToTick = tick;
+        leavingScene = true;
         sceneContext.audioService->stopMusic();
         auto scene = std::make_shared<LoadingScene>(
             sceneContext,

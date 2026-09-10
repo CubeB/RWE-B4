@@ -559,6 +559,18 @@ namespace rwe
     /** True for particles drawn among the world's geometry rather than over the finished frame. */
     bool particleDrawsInWorld(const Particle& particle);
 
+    /**
+     * Whether the situational music driver should put the next track on.
+     *
+     * leavingScene is the one that is not about music at all. A scene that
+     * has stopped its music and handed the scene manager its successor is
+     * still the current scene for the rest of the frame, so it still gets an
+     * update; without this it would see a silent audio service, conclude that
+     * a track had ended, and start another one over the top of whatever the
+     * incoming scene starts. See GameScene::leavingScene.
+     */
+    bool shouldStartNextMusicTrack(bool leavingScene, bool musicPlaying, GameTime gameTime, GameTime holdOffUntil);
+
     bool shouldShowAllBuildBoxes(const GameSimulation& sim, PlayerId localPlayerId, std::optional<UnitId> singleSelectedUnit, std::optional<UnitId> hoveredUnit);
 
     int computeSoundVolume(int soundCount);

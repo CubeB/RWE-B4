@@ -847,6 +847,7 @@ set(TEST_FILES
     src/rwe/collections/MinHeap.test.cpp
     src/rwe/observable/Subject.test.cpp
     src/rwe/collections/VectorMap.test.cpp
+    src/rwe/game/GameScene_audio.test.cpp
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/cloakdisplay.test.cpp
     src/rwe/game/damagesmoke.test.cpp

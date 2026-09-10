@@ -337,6 +337,17 @@ namespace rwe
 
     void GameScene::updateMusic()
     {
+        // A game on its way out does not touch the music again -- not a new
+        // track, not a fade, not a gain change on a service the next scene is
+        // about to take over. Every exit from here stops the music and then
+        // hands the scene manager its successor, but the swap does not happen
+        // until the top of the next frame, so this still runs afterwards; see
+        // GameScene::leavingScene.
+        if (leavingScene)
+        {
+            return;
+        }
+
         if (!musicPlaylistBuilt)
         {
             musicPlaylistBuilt = true;
@@ -445,7 +456,7 @@ namespace rwe
             return;
         }
 
-        if (sceneContext.audioService->musicPlaying() || simulation.gameTime < musicHoldOffUntil)
+        if (!shouldStartNextMusicTrack(leavingScene, sceneContext.audioService->musicPlaying(), simulation.gameTime, musicHoldOffUntil))
         {
             return;
         }

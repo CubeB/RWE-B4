@@ -191,6 +191,7 @@ namespace rwe
         // spawning the starting commanders.
         auto parameters = save->parameters;
         parameters.loadFromSaveFile = path.string();
+        leavingScene = true;
         sceneContext.audioService->stopMusic();
         auto scene = std::make_shared<LoadingScene>(
             sceneContext,
@@ -306,6 +307,7 @@ namespace rwe
         // Same pipeline loadSavedGame hands a save to, minus the save: a
         // fresh LoadingScene over the game's own parameters spawns the
         // starting commanders exactly as the first load did.
+        leavingScene = true;
         sceneContext.audioService->stopMusic();
         auto scene = std::make_shared<LoadingScene>(
             sceneContext,
@@ -673,6 +675,7 @@ namespace rwe
 
     void GameScene::exitToMainMenu()
     {
+        leavingScene = true;
         sceneContext.audioService->stopMusic();
         auto menu = std::make_shared<MainMenuScene>(
             sceneContext,
@@ -840,7 +843,14 @@ namespace rwe
                 // TOTALA-EXE.md S:63, mode 2: "Surrender this battle and exit to Windows?"
                 openConfirmDialog(
                     "Surrender this battle and exit to Windows?",
-                    [this]() { sceneContext.sceneManager->requestExit(); },
+                    [this]() {
+                        // Exiting to Windows leaves the same window open as
+                        // the other exits do -- the loop only notices at the
+                        // top of the next frame -- so the music driver is
+                        // told to stand down here too.
+                        leavingScene = true;
+                        sceneContext.sceneManager->requestExit();
+                    },
                     [this]() { openGameExitMenu(); });
             }
             else if (control == "MAINMENU")
@@ -1097,6 +1107,11 @@ namespace rwe
     void GameScene::returnToMainMenu()
     {
         LOG_INFO << "Returning to the main menu";
+        // The front end has no music of its own -- see MainMenuScene::init --
+        // so a track left running here plays over the whole menu. The same
+        // stop exitToMainMenu does, for the same reason.
+        leavingScene = true;
+        sceneContext.audioService->stopMusic();
         auto scene = std::make_unique<MainMenuScene>(
             sceneContext,
             audioLookup,

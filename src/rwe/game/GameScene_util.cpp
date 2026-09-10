@@ -1778,6 +1778,11 @@ namespace rwe
         return simulation.tryGetFeature(*hoveredFeature);
     }
 
+    bool shouldStartNextMusicTrack(bool leavingScene, bool musicPlaying, GameTime gameTime, GameTime holdOffUntil)
+    {
+        return !leavingScene && !musicPlaying && gameTime >= holdOffUntil;
+    }
+
     bool featureCanBeReclaimed(const GameSimulation& sim, FeatureId featureId)
     {
         auto feature = sim.tryGetFeature(featureId);
