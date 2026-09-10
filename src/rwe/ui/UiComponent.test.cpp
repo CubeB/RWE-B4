@@ -1,6 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
+#include <optional>
 #include <rwe/ui/UiListBox.h>
 #include <rwe/ui/UiStagedButton.h>
+#include <string>
+#include <vector>
 
 namespace rwe
 {

@@ -10,6 +10,9 @@
 // merely *long* does not help.
 #include "GameScene.h"
 #include <algorithm>
+#include <optional>
+#include <string>
+#include <vector>
 #include <rwe/ImGuiContext.h>
 #include <rwe/game/GameScene_util.h>
 #include <rwe/util/Index.h>

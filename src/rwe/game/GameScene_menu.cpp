@@ -10,6 +10,10 @@
 // every gadget lookup is a template instantiation and every caption a string.
 #include "GameScene.h"
 #include <algorithm>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
 #include <rwe/GlobalConfig.h>
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuScene.h>
