@@ -1,13 +1,13 @@
 # Robot War Engine — Revival Roadmap
 
-_Last updated: 2026-09-09. Status of the codebase is as of the `revival` integration branch (upstream `master` @ b2d8a31 + merged fork work, see Phase 0). Run `rwe_test` for the current suite size -- see CLAUDE.md for why it is not recorded here._
+_Last updated: 2026-09-10. Status of the codebase is as of the `revival` integration branch (upstream `master` @ b2d8a31 + merged fork work, see Phase 0). Run `rwe_test` for the current suite size -- see CLAUDE.md for why it is not recorded here._
 
 ## Where the project stands
 
 - **Engine:** ~93k lines of C++20 under `src/` (~49k when this branch started), deterministic sim at 30 ticks/s, OpenGL 3 renderer, COB VM, A* pathfinding, lockstep multiplayer over the internet. Loads original TA data (HPI/GAF/3DO/COB/TDF/TNT/OTA) and the GOG release's Smacker movies.
 - **Launcher:** Electron 22 / React 16 / Redux lobby + master server + `rwe_bridge` IPC.
 - **History:** Michael Heasell (2017–2023, ~1,950 commits) — the engine, the format parsers, the COB VM and the deterministic simulation. Kevin Hake modernised the build in March 2026 (Boost removed, C++20, SDL3, CI green). Taylor Gunnoe added hotkeys / speed / pause / Phase‑1 AI in April 2026 (unmerged upstream until now).
-- **Never had a public release.** Upstream's only tag is `v0.1.0` (2017); this branch tags `v1.0.0` ("Bot bot boom boom v1.0", under the main-menu title — B4 for short, being four B’s), locally. The CMake version is derived from git tags.
+- **Never had a public release.** Upstream's only tag is `v0.1.0` (2017); this branch tags `v1.0.0` ("Bot bot boom boom v1.0", under the main-menu title — B4 for short, being four B’s) and `v1.1.0-pre1`, both of them on the fork as well as locally — pushed, but neither with a release behind it (see Phase 0). The CMake version is derived from git tags.
 
 ## Guiding principles
 
@@ -33,10 +33,10 @@ Goal: a fork with green CI, a reproducible local build, and a tagged pre-release
 - [x] Release build (`build-release/`, 40 MB `rwe.exe` vs 192 MB Debug): tests pass, AI skirmish clean. Use this one to play.
 - [x] Pushed to `CubeB/RWE-B4`, a public fork of `MHeasell/rwe`, with `revival` as its default branch. The remote `b4` is the only push target; `origin` stays pointed at upstream and is never pushed to.
 - [x] The CI matrix is green, 2026-09-06: all eight jobs -- Linux gcc-14 and clang-18, Windows MSVC 2026 and MinGW64, Debug and Release -- plus the AppImage. `revival` and `workflow_dispatch` are triggers now. Two real portability bugs had to be fixed to get there, both invisible to MinGW: `std::max(long long&, long&)` in `path_bench` (chrono's rep differs by platform), and the AppImage icon calling `convert`, which the ubuntu-24.04 image no longer ships. Note the release job is gated on `refs/tags/v*`, so a branch push builds without publishing.
-- [ ] Tag `v0.2.0-pre1` and let Kevin's release job produce Windows zip/installer + Linux AppImage.
+- [ ] Tag `v1.1.0-pre2` and let Kevin's release job produce Windows zip/installer + Linux AppImage. Two tags are on the fork already with no release behind either: `v1.0.0` (ee384214, 2026-09-02) and `v1.1.0-pre1` (1a63da67, 2026-09-06) were both pushed on 2026-09-06, before `release.yml` existed — the `v1.0.0` Build run failed at the AppImage step alone (the `convert` bug, fixed later the same day) and the `v1.1.0-pre1` run was cancelled by the concurrency group, which exempts tags now.
 - [x] `README.md` rewritten around B4: what the fork is, what has been done and how it is checked, upstream credited for the engine, the dead AppVeyor badge and download link replaced, and the install section replaced by `rwe_setup`. (`CLAUDE.md` is current: C++20, the CI matrix, the reference docs, the diagnostic executables, the determinism rules, and both profilers.)
-- [ ] Decide on `experimental/sdl-gpu` (Kevin's SDL_gpu + HLSL/SPIR‑V PoC): keep as a branch, do not merge yet.
-- [ ] Decide on upstream `update-protobuf` (protobuf 25.1; needs a CMake-based `build-protobuf.sh` since autotools is gone in 22+). Defer to Phase 5.
+- [x] Decide on `experimental/sdl-gpu` (Kevin's SDL_gpu + HLSL/SPIR‑V PoC): keep as a branch, do not merge yet. (decided 2026-09-10)
+- [x] Decide on upstream `update-protobuf` (protobuf 25.1; needs a CMake-based `build-protobuf.sh` since autotools is gone in 22+). Defer to Phase 5. (decided 2026-09-10)
 
 ## Phase 1 — Playable single-player skirmish loop (≈ 2–3 months)
 
@@ -200,6 +200,7 @@ Goal: a full game vs. no opponent feels like TA — every basic order works, UI 
 - [ ] Transports still to do: units ordering themselves aboard (select units, click transport), `TransportPickup` boom animation timing tied to the actual attach, sea transports for the AI.
 - [x] **Projectiles stopping on features — checked, nothing to do.** This entry used to claim shots pass through scenery and guess that `hitDensity` was the pass-through chance. Both halves were wrong: the string `hitdensity` does not occur anywhere in `TotalA.exe`, so the key has no reader in that build at all, and the projectile-versus-feature collision at `0x49B2B3` is purely geometric — same map square, shot below `squareGroundHeight + feature height`. RWE already did exactly that, so no code changed; `src/rwe/sim/hitdensity.test.cpp` fires the same shot at the same rock at each of the four densities the shipped data uses and requires it to stop every time, so nobody implements the guess later.
 - [ ] Sound completeness: unit sound types are defined and many are still unwired. (Music itself is done — see the playlist and situational-music entries above.)
+- [x] **Play-test sign-off, 2026-09-10.** Everything that had been waiting on a look in the game was looked at and passed: the cloak radius ring, the D-gun's point-blank blast on the commander, the shade table beside the original, the new unit shadows, the startup logo and the confirmations, sharp ground against smooth buildings, the menus at 16:9, the Atlas hover height and the crane reach, the AI's scouting and ferrying on island maps, and a save/load round trip mid-battle. The pathfinding budget stays at four searches a tick; the play-test found nothing that wanted more.
 
 ## Phase 2 — AI opponent (≈ 2 months, overlaps Phase 1)
 
@@ -289,7 +290,7 @@ The simulation half of this phase was brought forward and largely done — see "
   - `updateParticles` asked `MapTerrain::getHeightAt` — a vertical ray cast against up to sixteen heightmap triangles — whether each wake dot had reached the shore. Every height that query can return lies between the lowest and highest corner of the cells it looks at, so a dot over water is settled by sixteen byte comparisons and the ray is only cast near a shore. 10 ms a tick → 3.6 ms.
   - Net: 800 ground units 34.0 ms → 16.7 ms a frame (29 → 60 fps, now on the 60 Hz vsync cap, with the world render itself down from 28.1 ms to 5.1 ms); 800 hover units 84.9 ms → 26.4 ms (11 → 38 fps).
 - [ ] What the profiler names next, at 800 hover units on a 26 ms frame: the wake batch at 4.0 ms (still 260,000 vertices a frame — a persistent VBO instead of a fresh one, or point sprites, is the next step), the stencil shadow pass at 3.0 ms, `MapTerrain::getHeightAt` itself (the ray cast is the wrong algorithm for a height sample, but it is sim code and a desync risk, so it wants its own pass), and the muzzle-flash pass at 1.6 ms, which is not culled at all. Batching unit meshes by texture (#16) is still not done and is worth doing once something other than draw-call count is the limit — at 2,750 piece draws the unit pass measures 0.17 ms, so it is not the limit today.
-- [ ] Raise the pathfinding budget past four searches a tick (see Phase 1) once a play-test says what it does to how units behave.
+- [x] Raise the pathfinding budget past four searches a tick (see Phase 1) once a play-test says what it does to how units behave. (2026-09-10: the play-test was done and it stays at four; reopen only if a melee jams)
 - [ ] TDF parser speed in MSVC Debug (#66) — Kevin's `optimize-tdfparse` was merged; re-measure.
 - [ ] SDL_gpu backend (from `experimental/sdl-gpu`) once the GL renderer is feature-complete; this is the path to Vulkan/Metal/D3D12 and to WebAssembly (#178's motivation).
 - [ ] Protobuf upgrade (from `update-protobuf` branch) with a CMake build; or replace protobuf with a hand-rolled binary codec — the schema is ~15 messages.

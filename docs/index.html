@@ -73,8 +73,8 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
     <span>branch <b>revival</b></span>
     <span>base <b>upstream master b2d8a31 · 25 Mar 2026</b></span>
     <span>version <b>Bot bot boom boom v1.0</b> <span title="four B's">(B4)</span></span>
-    <span>updated <b>9 Sep 2026</b></span>
-    <span>tests <b>524 cases · 70,991 assertions</b></span>
+    <span>updated <b>10 Sep 2026</b></span>
+    <span>tests <b>527 cases · 70,997 assertions</b></span>
   </div>
 </header>
 <nav aria-label="Sections">
@@ -277,24 +277,9 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 
 <h2 id="todo">To do<small>Everything else, grouped by phase. Items with issue numbers refer to the upstream tracker.</small></h2>
 
-<h3>Needs checking in‑game</h3>
-<ul>
-  <li><b>The cloak radius ring.</b> Written and building, never seen — hold <kbd>SHIFT</kbd> with the cursor over a cloaked unit and check the white ring sits on the ground at the right size</li>
-  <li><b>Whether the D‑gun still hurts the commander.</b> The beam itself provably never touches its firer; what does is the death explosion of whatever it just killed, which is spawned with no attacker and so exempts nobody. At point‑blank that blast lands on the commander’s own bounding box at full strength. Worth confirming that is what you were seeing</li>
-  <li>The exact shade table against the original, side by side. The fitted curve and its hand‑chosen dark floor are both gone — every shaded pixel is now a palette entry the original itself would have picked — so what wants looking at is the saturation, where the difference bites hardest: a brightly painted unit turned into the sun, which the table barely brightens at all, beside a grey one, which it brightens by 80%</li>
-  <li>The new unit shadows, against the original. A tank's shadow should now be its own outline offset from it rather than a stretched projection, and it should stop changing shape as the unit turns. The offset itself is RWE's own choice — the original's is not decoded — so it is the one number here worth an opinion: <code>vehicle-shadows=false</code> in rwe.cfg turns mobile units' shadows off entirely while buildings keep theirs, which is the quickest way to see which is which</li>
-  <li><b>The startup logo, and the confirmations.</b> <code>1.zrb</code> should play on the way to the main menu and drop out on any key or click; the exit, overwrite and delete dialogs should be wearing <code>igpatch</code> with their question sitting above the buttons — <code>YESORNO.GUI</code> ships no gadget for that text, so where it lands is RWE's choice and worth an opinion</li>
-  <li><b>Sharp ground against smooth building edges.</b> The terrain is no longer filtered and cached buildings still are, which is the split the original had; worth a side-by-side, along with the Units Sharp / Units Smooth button now on the VISUALS page</li>
-  <li><b>The menus at 16:9.</b> Buttons and dials should keep their proportions with the slack showing as bars rather than stretching to fill the window, and the mouse should still land where it looks like it will</li>
-  <li>Raising the pathfinding budget past four searches a tick. The thousand-expansion cap is gone and a search resumes across ticks now, so what is left to judge is the tick budget itself — raising it changes <em>when</em> units get paths, which no pinning test can guard</li>
-  <li>Atlas hover height, transport ship crane reach (200 units is an estimate), AI scout routes and ferry trips on island maps</li>
-  <li>A save/load round trip in a real battle, and how the AI recovers its plan after a load</li>
-</ul>
-
 <h3>Phase 0</h3>
 <ul>
-  <li>Tag <code>v0.2.0‑pre1</code>; let the release job produce Windows and AppImage builds</li>
-  <li>Decide on <code>experimental/sdl-gpu</code> and the protobuf upgrade branch</li>
+  <li>Tag <code>v1.1.0‑pre2</code>; let the release job produce Windows and AppImage builds. Two tags sit on the fork already with no release behind either: <code>v1.0.0</code> and <code>v1.1.0‑pre1</code> both went up on 6 September, before <code>release.yml</code> existed — the first one's build failed at the AppImage step alone (the <code>convert</code> bug, fixed later that day) and the second was cancelled by the concurrency group, which exempts tags now</li>
 </ul>
 
 <h3>Phase 1</h3>
