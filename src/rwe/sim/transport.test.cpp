@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
+#include <rwe/cob/CobOpCode.h>
+#include <rwe/cob/CobPosition.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
@@ -64,6 +66,66 @@ namespace rwe
             unit.previousPosition = pos;
             unit.hitPoints = 100;
             return sim.tryAddUnit(std::move(unit)).value();
+        }
+
+        void push(CobScript& script, OpCode op)
+        {
+            script.instructions.push_back(static_cast<uint32_t>(op));
+        }
+
+        void push(CobScript& script, uint32_t operand)
+        {
+            script.instructions.push_back(operand);
+        }
+
+        void beginFunction(CobScript& script, const std::string& name)
+        {
+            script.functions.push_back(CobFunctionInfo{name, static_cast<unsigned int>(script.instructions.size())});
+        }
+
+        void endFunction(CobScript& script)
+        {
+            push(script, OpCode::PUSH_CONSTANT);
+            push(script, 0u);
+            push(script, OpCode::RETURN);
+        }
+
+        constexpr unsigned int StaticQueried = 0;
+        constexpr unsigned int StaticHookDrop = 1;
+
+        /**
+         * An Atlas in miniature. `QueryTransport` files the fact that it was
+         * asked and hands back piece 0 -- the Atlas hands back `link` -- and
+         * `BeginTransport` files the height it was told to lower the hook by,
+         * which is all the shipped script does with it (§39: one move-now to
+         * y = -h). A test can then read both back out of the statics and see
+         * when each happened relative to the attach.
+         */
+        std::shared_ptr<CobScript> makeAirTransportScript()
+        {
+            auto script = std::make_shared<CobScript>();
+            script->staticVariableCount = 2;
+            script->pieces.push_back("base");
+
+            beginFunction(*script, "QueryTransport");
+            push(*script, OpCode::PUSH_CONSTANT);
+            push(*script, 1u);
+            push(*script, OpCode::POP_STATIC);
+            push(*script, StaticQueried);
+            push(*script, OpCode::PUSH_CONSTANT);
+            push(*script, 0u); // the piece the cargo hangs from
+            push(*script, OpCode::POP_LOCAL_VAR);
+            push(*script, 0u);
+            endFunction(*script);
+
+            beginFunction(*script, "BeginTransport");
+            push(*script, OpCode::PUSH_LOCAL_VAR);
+            push(*script, 0u);
+            push(*script, OpCode::POP_STATIC);
+            push(*script, StaticHookDrop);
+            endFunction(*script);
+
+            return script;
         }
 
         bool cellHolds(const GameSimulation& sim, const SimVector& position, UnitId unitId)
@@ -388,5 +450,74 @@ namespace rwe
             sim.unitDefinitions["kbot"].movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 2u, 255u, 255u, 0u, 0u};
             REQUIRE_FALSE(sim.canLoadUnitIntoTransport(transportId, kbotId));
         }
+    }
+
+    TEST_CASE("an air transport lowers its hook before it descends", "[transport]")
+    {
+        // VTOL_Pickup states 2 to 4 (§36, §39, §103). The Atlas arrives over
+        // the cargo at cruise altitude, asks the script for the hook piece
+        // (QueryTransport), tells the script how far to drop it
+        // (BeginTransport(height(u))) and only then descends -- to
+        // height(u), the altitude that leaves the lowered hook on the unit.
+        // RWE used to descend first, attach, and animate afterwards.
+        auto script = makeAirTransportScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim, "hauler");
+
+        auto airDef = makeTransportDef();
+        airDef.canFly = true;
+        airDef.cruiseAltitude = 200_ss;
+        sim.unitDefinitions["airtransport"] = airDef;
+        sim.unitDefinitions["kbot"] = makeMobileDef(2u);
+        registerModel(sim, "model");
+        const auto cargoHeight = sim.unitModelDefinitions.at("model").height;
+
+        auto airId = spawnUnit(sim, "airtransport", player, SimVector(-200_ss, 200_ss, 0_ss), script);
+        sim.getUnitState(airId).physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+        sim.flyingUnitsSet.insert(airId);
+        auto kbotId = spawnUnit(sim, "kbot", player, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto kbotGroundY = sim.getUnitState(kbotId).position.y;
+
+        sim.getUnitState(airId).orders.push_back(LoadOrder(kbotId));
+
+        // Sampled before each tick, so what these hold when the attach lands
+        // is the state at the end of the tick *before* it.
+        bool queriedBeforeAttach = false;
+        bool hookDroppedBeforeAttach = false;
+        std::optional<SimScalar> attachAltitude;
+        for (int i = 0; i < 1800; ++i)
+        {
+            const auto& env = *sim.getUnitState(airId).cobEnvironment;
+            auto queried = env._statics[StaticQueried] != 0;
+            auto hookDropped = env._statics[StaticHookDrop] != 0;
+            sim.tick();
+            if (sim.getUnitState(kbotId).carriedBy.has_value())
+            {
+                queriedBeforeAttach = queried;
+                hookDroppedBeforeAttach = hookDropped;
+                attachAltitude = sim.getUnitState(airId).position.y;
+                break;
+            }
+        }
+
+        REQUIRE(attachAltitude.has_value());
+        REQUIRE(*sim.getUnitState(kbotId).carriedBy == airId);
+
+        // Both calls are behind it by the time it takes the unit aboard.
+        REQUIRE(queriedBeforeAttach);
+        REQUIRE(hookDroppedBeforeAttach);
+
+        // And the hook was dropped by the cargo's own model height, in the
+        // 16.16 units a script reads from UNIT_HEIGHT -- the original hands
+        // over the whole dword at targetdef+0x16E, not its integer part.
+        REQUIRE(sim.getUnitState(airId).cobEnvironment->_statics[StaticHookDrop] == CobPosition::fromFloat(simScalarToFloat(cargoHeight)).value);
+
+        // It attached at the cargo-height altitude, not the cruise altitude
+        // it flew in at. The arrival tolerance for the hover is 24 units.
+        REQUIRE(*attachAltitude <= kbotGroundY + cargoHeight + 24_ss);
+        REQUIRE(*attachAltitude < airDef.cruiseAltitude);
+
+        // The piece the script named is the piece the cargo hangs from.
+        REQUIRE(sim.getUnitState(kbotId).carriedPiece == "base");
     }
 }

@@ -2214,6 +2214,18 @@ namespace rwe
             return true;
         }
 
+        // An air transport that has already told its script to lower the hook
+        // for this pickup folds the arms back when it gives up on it: the
+        // abort arm of VTOL_Pickup state 4 (§36). Nothing is owed on the
+        // crane path, whose scripts do not define EndTransport at all (§39).
+        auto abandonPickup = [&]() {
+            if (unitInfo.definition->canFly && unitInfo.state->transportScriptTarget)
+            {
+                unitInfo.state->cobEnvironment->createThread("EndTransport");
+            }
+            unitInfo.state->transportScriptTarget = std::nullopt;
+        };
+
         auto targetRef = sim->tryGetUnitState(loadOrder.target);
         if (targetRef && targetRef->get().carriedBy == unitInfo.id)
         {
@@ -2228,7 +2240,7 @@ namespace rwe
         }
         if (!targetRef || !targetRef->get().isAlive() || !targetRef->get().isOwnedBy(unitInfo.state->owner) || targetRef->get().carriedBy || loadOrder.target == unitInfo.id)
         {
-            unitInfo.state->transportScriptTarget = std::nullopt;
+            abandonPickup();
             return true;
         }
         auto& target = targetRef->get();
@@ -2239,6 +2251,7 @@ namespace rwe
         auto [footprintX, footprintZ] = sim->getFootprintXZ(targetDefinition.movementCollisionInfo);
         if (!sim->canLoadUnitIntoTransport(unitInfo.id, loadOrder.target))
         {
+            abandonPickup();
             return true;
         }
 
@@ -2276,7 +2289,7 @@ namespace rwe
             return false;
         }
 
-        auto targetHeight = simScalarToFloat(sim->unitModelDefinitions.at(targetDefinition.objectName).height);
+        auto cargoHeight = sim->unitModelDefinitions.at(targetDefinition.objectName).height;
 
         if (isShip)
         {
@@ -2319,17 +2332,19 @@ namespace rwe
             return false;
         }
 
-        // An air transport drops down until it hovers just above the unit before lifting it.
-        if (unitInfo.definition->canFly)
-        {
-            SimVector hoverPoint(target.position.x, target.position.y + SimScalar(targetHeight + HoverClearance), target.position.z);
-            if (!hoverTowards(unitInfo, hoverPoint))
-            {
-                return false;
-            }
-        }
+        // An air transport: VTOL_Pickup states 2 to 4 (§36, and §39's "Air
+        // transports (canFly)"). Having arrived over the cargo at cruise
+        // altitude it asks the script which piece the unit will hang from,
+        // tells the script how far to lower that piece, and only then
+        // descends -- to the altitude that leaves the lowered hook on the
+        // unit. RWE ran the two calls the other way round until now: it
+        // dropped to the unit, attached it, and started the animation
+        // afterwards, so the Atlas reached down for cargo it was already
+        // holding, and the hook came down on an empty patch of ground.
 
-        // The script says which piece the unit hangs from and does its own animation.
+        // QueryTransport returns a piece id and nothing else, so asking again
+        // on the tick of the attach is cheaper than carrying the answer
+        // across ticks in unit state.
         std::string piece;
         if (auto pieceId = runCobQuery(unitInfo.id, "QueryTransport"))
         {
@@ -2340,11 +2355,35 @@ namespace rwe
             }
         }
 
-        if (sim->loadUnitIntoTransport(unitInfo.id, loadOrder.target, piece))
+        // BeginTransport(h) goes out once for the pickup. The Atlas's is a
+        // single move-now that puts the hook at y = -h, and h is the cargo's
+        // model height: the original hands over the whole 16.16 dword at
+        // targetdef+0x16E, which is the scaling a script also sees from
+        // UNIT_HEIGHT. transportScriptTarget is what remembers the call has
+        // gone out, the same way it does for the crane's TransportPickup.
+        if (unitInfo.state->transportScriptTarget != loadOrder.target)
         {
-            // Air transports (Atlas) animate their grip with BeginTransport(height).
-            unitInfo.state->cobEnvironment->createThread("BeginTransport", {static_cast<int>(targetHeight)});
+            unitInfo.state->transportScriptTarget = loadOrder.target;
+            unitInfo.state->transportScriptStartedAt = sim->gameTime;
+            auto thread = unitInfo.state->cobEnvironment->createThread("BeginTransport", {CobPosition::fromFloat(simScalarToFloat(cargoHeight)).value});
+            LOG_DEBUG << "Transport " << unitInfo.id.value << " BeginTransport(" << simScalarToFloat(cargoHeight) << ") " << (thread ? "started" : "not in script");
         }
+
+        // Then the descent. The original's goal altitude is the negated
+        // y-offset of the piece the script has just moved, which after
+        // BeginTransport(h) lowered it by h is the cargo's own height above
+        // the ground -- the hook comes to rest on the unit rather than the
+        // hull coming down to it.
+        SimVector hoverPoint(target.position.x, target.position.y + cargoHeight, target.position.z);
+        if (!hoverTowards(unitInfo, hoverPoint))
+        {
+            return false;
+        }
+
+        // State 4: the engine does this attach itself, at the piece the
+        // script named.
+        sim->loadUnitIntoTransport(unitInfo.id, loadOrder.target, piece);
+        unitInfo.state->transportScriptTarget = std::nullopt;
         return true;
     }
 
