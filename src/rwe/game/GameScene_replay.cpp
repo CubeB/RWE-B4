@@ -282,28 +282,24 @@ namespace rwe
         // somewhere else.
         auto parameters = gameParametersFromReplayHeader(replay->header);
         parameters.replayFile = path.string();
-        leavingScene = true;
-        sceneContext.audioService->stopMusic();
         auto scene = std::make_shared<LoadingScene>(
             sceneContext,
             audioLookup,
             AudioService::LoopToken(),
             parameters);
-        sceneContext.sceneManager->setNextScene(scene);
+        leaveFor(scene);
     }
 
     void GameScene::restartReplayAt(unsigned int tick)
     {
         auto parameters = gameParameters;
         parameters.replaySeekToTick = tick;
-        leavingScene = true;
-        sceneContext.audioService->stopMusic();
         auto scene = std::make_shared<LoadingScene>(
             sceneContext,
             audioLookup,
             AudioService::LoopToken(),
             parameters);
-        sceneContext.sceneManager->setNextScene(scene);
+        leaveFor(scene);
     }
 
     void GameScene::takeReplayKeyframe()

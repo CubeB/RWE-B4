@@ -1191,6 +1191,13 @@ namespace rwe
         bool leavingScene{false};
 
         void exitToMainMenu();
+        /**
+         * Hands the game to another scene. Every exit from GameScene goes
+         * through here: it stops the music this scene was playing and marks
+         * the scene as leaving, so the frame's remaining update does not
+         * start another track for the next scene to inherit.
+         */
+        void leaveFor(std::shared_ptr<Scene> scene);
         GameOptions currentInGameOptions() const;
         void applyInGameOptions(const GameOptions& state);
         void saveInGameOptions();

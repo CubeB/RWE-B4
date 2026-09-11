@@ -191,14 +191,12 @@ namespace rwe
         // spawning the starting commanders.
         auto parameters = save->parameters;
         parameters.loadFromSaveFile = path.string();
-        leavingScene = true;
-        sceneContext.audioService->stopMusic();
         auto scene = std::make_shared<LoadingScene>(
             sceneContext,
             audioLookup,
             AudioService::LoopToken(),
             parameters);
-        sceneContext.sceneManager->setNextScene(scene);
+        leaveFor(scene);
     }
 
     void GameScene::applyLoadedGame(const SaveFile& save)
@@ -307,14 +305,12 @@ namespace rwe
         // Same pipeline loadSavedGame hands a save to, minus the save: a
         // fresh LoadingScene over the game's own parameters spawns the
         // starting commanders exactly as the first load did.
-        leavingScene = true;
-        sceneContext.audioService->stopMusic();
         auto scene = std::make_shared<LoadingScene>(
             sceneContext,
             audioLookup,
             AudioService::LoopToken(),
             gameParameters);
-        sceneContext.sceneManager->setNextScene(scene);
+        leaveFor(scene);
     }
 
     void GameScene::openConfirmDialog(const std::string& title, std::function<void()> onYes, std::function<void()> onNo)
@@ -682,14 +678,19 @@ namespace rwe
 
     void GameScene::exitToMainMenu()
     {
-        leavingScene = true;
-        sceneContext.audioService->stopMusic();
         auto menu = std::make_shared<MainMenuScene>(
             sceneContext,
             audioLookup,
             sceneContext.viewport->width(),
             sceneContext.viewport->height());
-        sceneContext.sceneManager->setNextScene(menu);
+        leaveFor(menu);
+    }
+
+    void GameScene::leaveFor(std::shared_ptr<Scene> scene)
+    {
+        sceneContext.audioService->stopMusic();
+        leavingScene = true;
+        sceneContext.sceneManager->setNextScene(std::move(scene));
     }
 
     void GameScene::gameMenuMessage(const std::string& topic, const std::string& control)
@@ -1131,13 +1132,11 @@ namespace rwe
         // The front end has no music of its own -- see MainMenuScene::init --
         // so a track left running here plays over the whole menu. The same
         // stop exitToMainMenu does, for the same reason.
-        leavingScene = true;
-        sceneContext.audioService->stopMusic();
         auto scene = std::make_unique<MainMenuScene>(
             sceneContext,
             audioLookup,
             static_cast<float>(sceneContext.viewport->width()),
             static_cast<float>(sceneContext.viewport->height()));
-        sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+        leaveFor(std::shared_ptr<Scene>(std::move(scene)));
     }
 }
