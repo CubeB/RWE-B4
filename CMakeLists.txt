@@ -315,6 +315,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_render.cpp
     src/rwe/game/GameScene_replay.cpp
     src/rwe/game/GameScene_util.cpp
+    src/rwe/game/featureplacement.cpp
     src/rwe/game/GameScene_util.h
     src/rwe/game/InGameSoundsInfo.cpp
     src/rwe/game/InGameSoundsInfo.h
@@ -858,6 +859,7 @@ set(TEST_FILES
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/cloakdisplay.test.cpp
     src/rwe/game/damagesmoke.test.cpp
+    src/rwe/game/featureplacement.test.cpp
     src/rwe/game/fogeffects.test.cpp
     src/rwe/test_announce.cpp
     src/rwe/test_crt_silence.cpp
