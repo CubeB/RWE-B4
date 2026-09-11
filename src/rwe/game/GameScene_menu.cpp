@@ -511,6 +511,11 @@ namespace rwe
             toggle->setStage(static_cast<unsigned int>(state.unitSpeech));
         }
 
+        if (auto toggle = findInGameMenu<UiStagedButton>("TRACKMODE"))
+        {
+            toggle->setStage(static_cast<unsigned int>(state.musicTrackMode));
+        }
+
         if (auto toggle = findInGameMenu<UiStagedButton>("BSHADOWS"))
         {
             toggle->setStage(state.shadows ? 1 : 0);
@@ -625,6 +630,7 @@ namespace rwe
             scrollSpeedSetting,
             soundModeSetting,
             unitSpeechSetting,
+            musicTrackModeSetting,
             gammaSetting,
             shadingMode,
             antiAliasEnabled,
@@ -643,6 +649,7 @@ namespace rwe
         scrollSpeedSetting = state.scrollSpeed;
         soundModeSetting = state.soundMode;
         unitSpeechSetting = state.unitSpeech;
+        musicTrackModeSetting = state.musicTrackMode;
         audio->setSoundEnabled(state.soundMode != SoundMode::Off);
         gammaSetting = state.gamma;
         applyGamma();
@@ -981,6 +988,13 @@ namespace rwe
                 // Off | Medium | Full: how much of the unit chatter plays.
                 unitSpeechSetting = nextStage(unitSpeechSetting);
             }
+            else if (control == "TRACKMODE")
+            {
+                // Play All | Random | Repeat | Custom, cycled by the button
+                // itself. The new mode takes over at the next track; the one
+                // playing is left to finish (TOTALA-EXE.md S:68).
+                musicTrackModeSetting = nextStage(musicTrackModeSetting);
+            }
             else if (control == "CDPLAY")
             {
                 sceneContext.audioService->setMusicEnabled(true);
@@ -992,7 +1006,10 @@ namespace rwe
             else if (control == "CDNEXT" || control == "CDPREV")
             {
                 // The in-game rotation picks its own next track; stopping the
-                // current one is what asks it for another.
+                // current one is what asks it for another. Play All and Repeat
+                // step through the album from the track that was playing, so
+                // they are told which way.
+                pendingMusicStep = control == "CDNEXT" ? 1 : -1;
                 sceneContext.audioService->stopMusic();
             }
             else if (control == "TEST")
@@ -1022,6 +1039,10 @@ namespace rwe
         if (auto toggle = findInGameMenu<UiStagedButton>("SPEECH"))
         {
             toggle->setStage(static_cast<unsigned int>(unitSpeechSetting));
+        }
+        if (auto toggle = findInGameMenu<UiStagedButton>("TRACKMODE"))
+        {
+            toggle->setStage(static_cast<unsigned int>(musicTrackModeSetting));
         }
         if (auto toggle = findInGameMenu<UiStagedButton>("BSHADOWS"))
         {

@@ -420,6 +420,8 @@ namespace rwe
 
         SoundMode soundModeSetting{SoundMode::Stereo};
         UnitSpeechLevel unitSpeechSetting{UnitSpeechLevel::Full};
+        /** MUSICRT's TRACKMODE, TOTALA-EXE.md S:68. Only Custom lets the situational music choose. */
+        MusicTrackMode musicTrackModeSetting{MusicTrackMode::Custom};
         unsigned int gammaSetting{100};
         ShadingMode shadingMode{ShadingMode::Both};
         bool antiAliasEnabled{true};
@@ -726,6 +728,10 @@ namespace rwe
         std::vector<std::string> battleTracks;
         std::vector<std::string> musicBag;
         std::string lastMusicTrack;
+        /** Every track but the title theme, in album order, for Play All, Random and Repeat. */
+        std::vector<std::string> allMusicTracks;
+        /** +1 or -1 after CDNEXT or CDPREV, used up by the next pick in Play All and Repeat. */
+        int pendingMusicStep{0};
         bool musicPlaylistBuilt{false};
 
         MusicSituation musicSituation{MusicSituation::Building};

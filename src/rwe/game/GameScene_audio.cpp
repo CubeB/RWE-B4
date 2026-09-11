@@ -359,6 +359,7 @@ namespace rwe
                 {
                     continue;
                 }
+                allMusicTracks.push_back(path);
                 (isBattleTrackName(lower) ? battleTracks : buildingTracks).push_back(path);
             }
             // A one-sided soundtrack plays whatever it has in both moods.
@@ -395,7 +396,9 @@ namespace rwe
                 sum5 += battlePointsRing[(battleRingCursor + battlePointsRing.size() - i) % battlePointsRing.size()];
             }
 
-            if (!musicFadeTarget && simulation.gameTime >= musicLockoutUntil)
+            // The evaluator keeps its ring in every mode, but only Custom
+            // acts on it (TOTALA-EXE.md S:68).
+            if (!musicFadeTarget && simulation.gameTime >= musicLockoutUntil && musicTrackModeSetting == MusicTrackMode::Custom)
             {
                 if (musicSituation == MusicSituation::Building)
                 {
@@ -461,6 +464,31 @@ namespace rwe
             return;
         }
 
+        // Play All, Random and Repeat ignore the mood and walk the whole
+        // album (TOTALA-EXE.md S:68).
+        if (musicTrackModeSetting != MusicTrackMode::Custom)
+        {
+            if (allMusicTracks.empty())
+            {
+                return;
+            }
+            auto index = nextMusicTrackIndex(musicTrackModeSetting, allMusicTracks, lastMusicTrack, pendingMusicStep, static_cast<unsigned int>(effectsRng()));
+            pendingMusicStep = 0;
+            auto next = allMusicTracks[index];
+            if (sceneContext.audioService->playMusic(next, false))
+            {
+                lastMusicTrack = next;
+            }
+            else
+            {
+                allMusicTracks.erase(std::remove(allMusicTracks.begin(), allMusicTracks.end(), next), allMusicTracks.end());
+                buildingTracks.erase(std::remove(buildingTracks.begin(), buildingTracks.end(), next), buildingTracks.end());
+                battleTracks.erase(std::remove(battleTracks.begin(), battleTracks.end(), next), battleTracks.end());
+            }
+            return;
+        }
+        pendingMusicStep = 0;
+
         // Draw the next track of the current mood from a bag, so everything
         // of that type plays before anything repeats.
         const auto& tracks = musicSituation == MusicSituation::Battle ? battleTracks : buildingTracks;
@@ -489,6 +517,7 @@ namespace rwe
         }
         else
         {
+            allMusicTracks.erase(std::remove(allMusicTracks.begin(), allMusicTracks.end(), next), allMusicTracks.end());
             buildingTracks.erase(std::remove(buildingTracks.begin(), buildingTracks.end(), next), buildingTracks.end());
             battleTracks.erase(std::remove(battleTracks.begin(), battleTracks.end(), next), battleTracks.end());
         }

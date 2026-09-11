@@ -23,6 +23,20 @@ namespace rwe
     };
 
     /**
+     * MUSICRT's TRACKMODE: Play All | Random | Repeat | Custom (TOTALA-EXE.md
+     * S:68). The original keeps it 1-4 at [game+0x37f16]; RWE keeps 0-3 in
+     * the same order. Custom is the default, and the only mode in which the
+     * situational Building/Battle music chooses the track.
+     */
+    enum class MusicTrackMode
+    {
+        PlayAll = 0,
+        Random = 1,
+        Repeat = 2,
+        Custom = 3,
+    };
+
+    /**
      * VISUALRT's Shading switch, widened from the original's Off|On.
      *
      * The original has two states because it has two whole rasterizer chains
@@ -46,6 +60,7 @@ namespace rwe
     /** All three buttons cycle through their stages and wrap, as the original's do. */
     SoundMode nextStage(SoundMode mode);
     UnitSpeechLevel nextStage(UnitSpeechLevel level);
+    MusicTrackMode nextStage(MusicTrackMode mode);
     ShadingMode nextStage(ShadingMode mode);
 
     /** The label the Shading button shows for each stage. */
@@ -97,6 +112,9 @@ namespace rwe
 
         /** Unit voice acknowledgements: 0 off, 1 medium, 2 full. */
         unsigned int unitSpeech{2};
+
+        /** MUSICRT's track mode: 0 Play All, 1 Random, 2 Repeat, 3 Custom. */
+        unsigned int musicTrackMode{3};
 
         /** Screen gamma percentage, 50 to 133 (the original's own range); 100 is untouched. */
         unsigned int gamma{100};
@@ -251,6 +269,7 @@ namespace rwe
         unsigned int scrollSpeed{100};
         SoundMode soundMode{SoundMode::Stereo};
         UnitSpeechLevel unitSpeech{UnitSpeechLevel::Full};
+        MusicTrackMode musicTrackMode{MusicTrackMode::Custom};
         unsigned int gamma{100};
         ShadingMode shading{ShadingMode::Both};
         bool antiAlias{true};

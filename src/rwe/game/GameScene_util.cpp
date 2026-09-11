@@ -1783,6 +1783,37 @@ namespace rwe
         return !leavingScene && !musicPlaying && gameTime >= holdOffUntil;
     }
 
+    std::size_t nextMusicTrackIndex(MusicTrackMode mode, const std::vector<std::string>& tracks, const std::string& last, int step, unsigned int randomValue)
+    {
+        const auto count = tracks.size();
+        if (mode == MusicTrackMode::Random)
+        {
+            return randomValue % count;
+        }
+
+        auto it = std::find(tracks.begin(), tracks.end(), last);
+        if (it == tracks.end())
+        {
+            return 0;
+        }
+        auto index = static_cast<std::size_t>(it - tracks.begin());
+
+        auto move = step;
+        if (mode == MusicTrackMode::PlayAll && move == 0)
+        {
+            move = 1;
+        }
+        if (move > 0)
+        {
+            return (index + 1) % count;
+        }
+        if (move < 0)
+        {
+            return (index + count - 1) % count;
+        }
+        return index;
+    }
+
     bool featureCanBeReclaimed(const GameSimulation& sim, FeatureId featureId)
     {
         auto feature = sim.tryGetFeature(featureId);

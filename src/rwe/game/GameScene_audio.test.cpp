@@ -36,4 +36,39 @@ namespace rwe
         // hold-off that has long since expired.
         REQUIRE(!shouldStartNextMusicTrack(true, false, GameTime(4000u), GameTime(120u)));
     }
+
+    TEST_CASE("the track modes pick from the whole album", "[music]")
+    {
+        const std::vector<std::string> album{"music/02.mp3", "music/03.mp3", "music/04.mp3"};
+
+        SECTION("Play All goes one on and wraps")
+        {
+            CHECK(nextMusicTrackIndex(MusicTrackMode::PlayAll, album, "", 0, 0) == 0u);
+            CHECK(nextMusicTrackIndex(MusicTrackMode::PlayAll, album, "music/02.mp3", 0, 0) == 1u);
+            CHECK(nextMusicTrackIndex(MusicTrackMode::PlayAll, album, "music/04.mp3", 0, 0) == 0u);
+            CHECK(nextMusicTrackIndex(MusicTrackMode::PlayAll, album, "music/02.mp3", -1, 0) == 2u);
+        }
+
+        SECTION("Repeat stays on the track unless stepped")
+        {
+            CHECK(nextMusicTrackIndex(MusicTrackMode::Repeat, album, "music/03.mp3", 0, 0) == 1u);
+            CHECK(nextMusicTrackIndex(MusicTrackMode::Repeat, album, "music/03.mp3", 1, 0) == 2u);
+            CHECK(nextMusicTrackIndex(MusicTrackMode::Repeat, album, "music/02.mp3", -1, 0) == 2u);
+            CHECK(nextMusicTrackIndex(MusicTrackMode::Repeat, album, "", 0, 0) == 0u);
+        }
+
+        SECTION("Random takes any track")
+        {
+            CHECK(nextMusicTrackIndex(MusicTrackMode::Random, album, "music/02.mp3", 0, 7) == 1u);
+            CHECK(nextMusicTrackIndex(MusicTrackMode::Random, album, "", 0, 9) == 0u);
+        }
+    }
+
+    TEST_CASE("the track mode button cycles Play All, Random, Repeat, Custom", "[music]")
+    {
+        CHECK(nextStage(MusicTrackMode::PlayAll) == MusicTrackMode::Random);
+        CHECK(nextStage(MusicTrackMode::Random) == MusicTrackMode::Repeat);
+        CHECK(nextStage(MusicTrackMode::Repeat) == MusicTrackMode::Custom);
+        CHECK(nextStage(MusicTrackMode::Custom) == MusicTrackMode::PlayAll);
+    }
 }

@@ -238,6 +238,7 @@ namespace rwe
           uiFactory(sceneContext.textureService, sceneContext.audioService, audioLookup, sceneContext.vfs, sceneContext.pathMapping, sceneContext.viewport->width(), sceneContext.viewport->height()),
           soundModeSetting(static_cast<SoundMode>(sceneContext.globalConfig->soundMode)),
           unitSpeechSetting(static_cast<UnitSpeechLevel>(sceneContext.globalConfig->unitSpeech)),
+          musicTrackModeSetting(static_cast<MusicTrackMode>(sceneContext.globalConfig->musicTrackMode)),
           gammaSetting(sceneContext.globalConfig->gamma),
           shadingMode(static_cast<ShadingMode>(sceneContext.globalConfig->shadingMode)),
           antiAliasEnabled(sceneContext.globalConfig->antiAlias),
