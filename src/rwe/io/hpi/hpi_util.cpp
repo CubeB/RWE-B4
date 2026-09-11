@@ -157,13 +157,24 @@ namespace rwe
         stream.avail_out = static_cast<uInt>(maxBytes);
         stream.next_out = reinterpret_cast<unsigned char*>(out);
 
-        if (inflate(&stream, Z_NO_FLUSH) != Z_STREAM_END)
-        {
-            inflateEnd(&stream);
-            throw HpiException("ZLib decompress failed");
-        }
+        auto result = inflate(&stream, Z_NO_FLUSH);
+
+        // A chunk is complete when the stream ends, and also when every
+        // input byte has been consumed and exactly the declared number of
+        // output bytes came out. The second case is a stream with no
+        // adler32 trailer: HPIZ Archiver wrote thousands of those into the
+        // V Maps pack, and the original engine, which only ever asks for
+        // its bytes, reads them without complaint. The chunk's own checksum
+        // still covers the compressed data, so nothing is taken on trust.
+        auto complete = result == Z_STREAM_END
+            || ((result == Z_OK || result == Z_BUF_ERROR) && stream.avail_in == 0 && stream.total_out == maxBytes);
 
         inflateEnd(&stream);
+
+        if (!complete)
+        {
+            throw HpiException("ZLib decompress failed");
+        }
     }
 
     std::optional<std::size_t> stringSize(const char* begin, const char* end)

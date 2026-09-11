@@ -1305,7 +1305,21 @@ namespace rwe
 
         std::string otaStr(otaRaw->begin(), otaRaw->end());
 
-        auto ota = parseOta(parseTdfFromString(otaStr));
+        // A community map with a malformed OTA used to take the game down
+        // from this line with a Critical Error box (upstream #38, "Expected
+        // property name"). The parser says where it gave up; show that and
+        // leave the previous selection standing.
+        OtaRecord ota;
+        try
+        {
+            ota = parseOta(parseTdfFromString(otaStr));
+        }
+        catch (const std::exception& e)
+        {
+            LOG_ERROR << "Could not read map " << mapName << ": " << e.what();
+            openMessageBox("Could not read " + mapName + ": " + e.what());
+            return;
+        }
 
         auto minimap = sceneContext.textureService->getMinimap(mapName);
 
