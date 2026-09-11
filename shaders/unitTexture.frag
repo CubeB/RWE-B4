@@ -45,8 +45,9 @@ const vec3 normalTint = vec3(1.0, 1.0, 1.0);
 // renderer decoded earlier -- no normals, no sun, texels copied unmodified --
 // is the one that runs with SHADING switched OFF, and the one every mobile
 // unit gets regardless: 0x4586A0 sends only a building (bmcode 0) to the
-// shaded chain, and only with SHADING on (TOTALA-EXE-SHADING.md S:11). RWE
-// shades units as well, on its Shading switch. The shaded chain averages the
+// shaded chain, and only with SHADING on (TOTALA-EXE-SHADING.md S:11). RWE's
+// Shading switch defaults to that, Buildings, and can shade units as well.
+// The shaded chain averages the
 // unit normals of the polygons meeting at a vertex and takes
 //
 //     level = (int)(5.0 * dot(n, (-0.8, 1.0, 0.25))) & 0x1F

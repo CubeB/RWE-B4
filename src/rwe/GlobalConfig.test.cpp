@@ -64,9 +64,9 @@ namespace rwe
             REQUIRE(optionsFromConfig(config).shading == ShadingMode::Off);
         }
 
-        SECTION("defaults to shading everything, as the original does")
+        SECTION("defaults to shading buildings only, as the original does")
         {
-            REQUIRE(optionsFromConfig(GlobalConfig()).shading == ShadingMode::Both);
+            REQUIRE(optionsFromConfig(GlobalConfig()).shading == ShadingMode::BuildingsOnly);
         }
     }
 }

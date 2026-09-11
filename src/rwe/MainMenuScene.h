@@ -28,7 +28,7 @@ namespace rwe
         UnitSpeechLevel pendingUnitSpeech{UnitSpeechLevel::Full};
         MusicTrackMode pendingMusicTrackMode{MusicTrackMode::Custom};
         unsigned int pendingGamma{100};
-        ShadingMode pendingShading{ShadingMode::Both};
+        ShadingMode pendingShading{ShadingMode::BuildingsOnly};
         bool pendingAntiAlias{true};
         bool pendingBuildingHalo{true};
         bool pendingAntiAliasUnits{true};

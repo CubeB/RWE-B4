@@ -40,14 +40,12 @@ namespace rwe
      * VISUALRT's Shading switch, widened from the original's Off|On.
      *
      * The original has two states because it has two whole rasterizer chains
-     * and picks between them on one bit (0x458744); it draws no distinction
-     * between a building and a mobile unit anywhere in the shaded path --
-     * 0x459C70 never reads a "is a building" flag (TOTALA-EXE-SHADING.md
-     * S:11, NOT FOUND). Splitting the switch by category is therefore a
-     * deliberate divergence, recorded in TOTALA-EXE.md S:88, and it exists
-     * because the two look different enough on screen to want separate
-     * control: a building is a big slab that carries the banding well, and a
-     * unit is small and moving and carries it badly.
+     * and picks between them on one bit (0x458744). Its On is this switch's
+     * BuildingsOnly: the cache renderer sends only a building or a feature to
+     * the shaded chain (0x45873C) and caches every mobile unit unshaded
+     * whatever the option says (TOTALA-EXE-SHADING.md S:11). So BuildingsOnly
+     * is the default, and the two stages that shade units are RWE's own,
+     * recorded as a divergence in TOTALA-EXE.md S:88.
      */
     enum class ShadingMode
     {
@@ -121,9 +119,9 @@ namespace rwe
 
         /**
          * Model lighting, the VISUALS page's Shading switch: 0 off, 1 units
-         * only, 2 buildings only, 3 both. On for everything in the original.
+         * only, 2 buildings only, 3 both. 2 is the original's On.
          */
-        unsigned int shadingMode{3};
+        unsigned int shadingMode{2};
 
         /**
          * How much of the measured PALETTE.SHD ramp each kind of model gets,
@@ -280,7 +278,7 @@ namespace rwe
         UnitSpeechLevel unitSpeech{UnitSpeechLevel::Full};
         MusicTrackMode musicTrackMode{MusicTrackMode::Custom};
         unsigned int gamma{100};
-        ShadingMode shading{ShadingMode::Both};
+        ShadingMode shading{ShadingMode::BuildingsOnly};
         bool antiAlias{true};
         bool buildingHalo{true};
         bool antiAliasUnits{true};

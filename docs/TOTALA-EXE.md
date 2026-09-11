@@ -8809,7 +8809,7 @@ original:
   RWE's radar and sonar contacts therefore reach the minimap (`canDetectUnit`)
   and nothing else; every simulation decision goes through `canSeeUnit`.
 
-- **Mobile units are shaded, and shading can be switched off by category.**
+- **Mobile units can be shaded, and shading can be switched off by category.**
   The original shades buildings and features and never a mobile unit. The
   shaded rasterizer `0x459C70` itself branches on nothing but the piece's COB
   `SHADE` bit, which is why this entry used to say the original shades
@@ -8818,8 +8818,10 @@ original:
   building, or the Feature Unit -- to it, and only with SHADING on
   (`0x45873C`, `0x45874A`). Everything else, every tank, aircraft, ship and
   commander, is cached by the unshaded twin `0x459830` (`0x45878B`), whatever
-  the option says. Found 2026-09-11. RWE shades units anyway, by default, and
-  that is now a divergence rather than a fix. RWE's VISUALS page carries a four-state Shading switch -- Off, Units,
+  the option says. Found 2026-09-11. RWE shaded units by default until the
+  same day; the default is now Buildings, which is the original's On, and
+  the Units and Both stages that shade units are the divergence. RWE's
+  VISUALS page carries a four-state Shading switch -- Off, Units,
   Buildings, Both -- and two rwe.cfg keys, `shading-strength-units` and
   `shading-strength-buildings`, blend the measured `PALETTE.SHD` ramp towards
   the unshaded colour. Both default to 40. The shape of the ramp is the

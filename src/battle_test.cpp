@@ -224,7 +224,7 @@ int main(int argc, char* argv[])
         // "shading-mode" then overrides -- otherwise upgrading would silently
         // turn shading back on for someone who had switched it off.
         auto shadingWasOn = args.getString("shading", "true") != "false";
-        config.shadingMode = std::min(3u, args.getUint("shading-mode", shadingWasOn ? 3u : 0u));
+        config.shadingMode = std::min(3u, args.getUint("shading-mode", shadingWasOn ? 2u : 0u));
         config.shadingStrengthUnits = std::min(100u, args.getUint("shading-strength-units", 40));
         config.shadingStrengthBuildings = std::min(100u, args.getUint("shading-strength-buildings", 40));
         config.antiAlias = args.getString("anti-alias", "true") != "false";

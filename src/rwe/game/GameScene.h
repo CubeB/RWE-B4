@@ -423,7 +423,7 @@ namespace rwe
         /** MUSICRT's TRACKMODE, TOTALA-EXE.md S:68. Only Custom lets the situational music choose. */
         MusicTrackMode musicTrackModeSetting{MusicTrackMode::Custom};
         unsigned int gammaSetting{100};
-        ShadingMode shadingMode{ShadingMode::Both};
+        ShadingMode shadingMode{ShadingMode::BuildingsOnly};
         bool antiAliasEnabled{true};
         /** The purple building fringe; see GlobalConfig and TOTALA-EXE.md S:101. */
         bool buildingHaloEnabled{true};

@@ -716,8 +716,9 @@ features (`0x421FD3`). **So the original shades buildings and features and
 never a mobile unit**, whatever SHADING says; the "0x458744 picks between two
 complete rasterizer chains" reading above is right about the option and missed
 the test in front of it. Everything this document says about the shaded
-chain is still right; it just never runs for a tank. RWE shades mobile units
-too, on its Shading switch, which makes that a divergence (TOTALA-EXE.md §88).
+chain is still right; it just never runs for a tank. RWE's Shading switch
+defaults to Buildings, which is this; its Units and Both stages shade mobile
+units too, which makes those a divergence (TOTALA-EXE.md §88).
 
 **Under construction: no separate path here either.** NOT FOUND in `0x459C70`.
 The construction look comes from the height plane (`+0x14`), which this routine
