@@ -7,6 +7,7 @@
 #include <rwe/ai/AiBuildTree.h>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/game/ReplayFile.h>
+#include <rwe/game/featureplacement.h>
 #include <set>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/atlas_util.h>
@@ -208,10 +209,32 @@ namespace rwe
         simulation.featureNameIndex = std::move(dataMaps.featureNameIndex);
         simulation.losTables = std::move(dataMaps.losTables);
 
-        for (const auto& [pos, featureName] : mapInfo.features)
+        // Two features drawn on one cell: the original keeps the later one
+        // unless the earlier is indestructible, and never places anything
+        // on the attribute grid's last row or column. Settled here, in the
+        // order the map lists them, so addFeature below never has to refuse
+        // one -- when it refused, it kept the earlier feature, which on
+        // twenty-seven of the official maps is the wrong one.
+        const auto& heightmap = simulation.terrain.getHeightMap();
+        auto placement = resolveFeatureOverlaps(
+            mapInfo.features,
+            heightmap.getWidth() - 1,
+            heightmap.getHeight() - 1,
+            [&](const std::string& name) {
+                const auto& d = simulation.getFeatureDefinition(simulation.tryGetFeatureDefinitionId(name).value());
+                return FeaturePlacementInfo{d.footprintX, d.footprintZ, d.indestructible};
+            });
+        LOG_INFO << "Map features: " << placement.placed.size() << " placed, "
+                 << placement.replaced << " replaced by a later feature, "
+                 << placement.dropped << " dropped";
+
+        for (const auto& [pos, featureName] : placement.placed)
         {
             auto featureId = simulation.tryGetFeatureDefinitionId(featureName).value();
-            simulation.addFeature(featureId, pos.x, pos.y);
+            if (!simulation.addFeature(featureId, pos.x, pos.y))
+            {
+                LOG_WARN << "Map feature " << featureName << " at " << pos.x << "," << pos.y << " could not be placed";
+            }
         }
 
         auto seedSeq = seedFromGameParameters(gameParameters);
