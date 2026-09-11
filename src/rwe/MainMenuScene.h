@@ -6,6 +6,7 @@
 #include <rwe/RenderService.h>
 #include <rwe/SceneContext.h>
 #include <rwe/TextureService.h>
+#include <rwe/game/GameParameters.h>
 #include <rwe/io/sidedatatdf/SideData.h>
 #include <rwe/io/tdf/TdfBlock.h>
 #include <rwe/scene/Scene.h>
@@ -161,6 +162,12 @@ namespace rwe
 
     private:
         AudioService::LoopToken startBgm();
+
+        /**
+         * Why the selected map cannot seat the filled slots, or nothing if
+         * it can. Slot n needs the map's StartPos n; see startGame.
+         */
+        std::optional<std::string> startPositionProblem(const GameParameters& params);
 
         UiPanel& topPanel();
 
