@@ -2,6 +2,7 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <rwe/CursorService.h>
 #include <rwe/GlobalConfig.h>
 #include <rwe/ImGuiContext.h>
@@ -42,6 +43,19 @@ namespace rwe
          * scene has drawn the frame (TOTALA-EXE.md S:77).
          */
         bool screenshotRequested{false};
+
+        /**
+         * GlobalConfig::screenScale, and what it needs: the window's own
+         * size in pixels, which the viewport the scenes read no longer
+         * holds at a scale above 1, and the buffer the frame is drawn into
+         * before it is blown up onto the window.
+         */
+        unsigned int screenScale{1};
+        int windowWidth{0};
+        int windowHeight{0};
+        std::optional<FrameBufferInfo> presentationBuffer;
+        int presentationBufferWidth{0};
+        int presentationBufferHeight{0};
 
         unsigned int lastFrameStartTime{0};
 

@@ -102,6 +102,20 @@ namespace rwe
          */
         bool vehicleShadows{true};
 
+        /**
+         * How many screen pixels one game pixel is drawn as, 1 to 4. The
+         * original ran at 640x480 and, stretched across a modern display,
+         * shows each of its pixels about two screen pixels wide; RWE draws
+         * one to one, so its one-pixel wireframe and selection box read as
+         * thinner than TA's. At 2 the whole frame -- world, interface and
+         * cursor -- is rendered at half the window size and blown up with
+         * nearest-neighbour sampling, and mouse input is mapped back
+         * through the same factor. The world's own 2x supersample and the
+         * building halo filter happen inside that frame, so they look the
+         * same as at 1, only larger. An rwe.cfg key, screen-scale.
+         */
+        unsigned int screenScale{1};
+
         /** Screen scroll speed percentage, 25 to 200; 100 is the old fixed rate. */
         unsigned int scrollSpeed{100};
 

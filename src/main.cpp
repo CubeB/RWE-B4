@@ -148,6 +148,7 @@ int main(int argc, char* argv[])
             config.musicEnabled = args.getString("music", "true") != "false";
             config.shadows = args.getString("shadows", "true") != "false";
             config.vehicleShadows = args.getString("vehicle-shadows", "true") != "false";
+            config.screenScale = std::clamp(args.getUint("screen-scale", 1), 1u, 4u);
             config.scrollSpeed = std::clamp(args.getUint("scroll-speed", 100), 25u, 200u);
             config.soundMode = std::min(2u, args.getUint("sound-mode", 2));
             config.unitSpeech = std::min(2u, args.getUint("unit-speech", 2));
