@@ -387,6 +387,61 @@ established. RWE used to cast the frame's shadow from the start and then cut
 the frame's outline out of the whole stencil, which hid every other unit's
 shadow behind it too.
 
+**The three leads, followed (B4 #40, 2026-09-11).** None of them is it.
+
+1. *Is the shadow built from a drawable that is mostly transparent key?*
+   No. The projected shadow `0x45A790` never reads the bitmap. Its extent
+   `0x45A510` walks the 54-byte piece records from `[obj+0x22]`, keeps a
+   piece on `[piece+0x28]` bit 0 (SHOW) and a positive vertex count at
+   `[[piece]+0x4]`, and takes the cached transformed corners from
+   `[piece+0x22]`. It tests no CACHE bit and nothing about construction.
+2. *Is the cache at `[obj+0x14]` left empty during construction?* No. It is
+   filled on demand at `0x4592FE` and `0x45955B` whenever it is null, and
+   cleared only when the bitmap is rebuilt (`0x458905`).
+3. *Does anything clear a nanoframe piece's SHOW bit?* No. The only writers
+   of the piece flag byte are `0x45AF21` (SHOW on, when the piece has three
+   or more vertices) and `0x45AF27`/`0x45AF31`, in the piece set-up.
+
+**What the cached bitmap does carry is a height plane.** The cache renderer
+`0x4586A0` renders a clean, finished unit (`[unit+0x114]` bit 0 clear and
+`float unit+0x104 == 0`) through `0x437B50`, which allocates `w*h + 0x18`
+bytes, and everything else through `0x437BE0`, which allocates `2*w*h +
+0x18`: pixels and a height plane. The construction display needs that plane
+(`0x458DDA` returns at once without one). And the draw routine tests it
+first: at `0x459271`-`0x459282`, a bitmap with a plane goes to the shadow
+block at `0x45949D`, one without to the block at `0x459288`. **Both blocks
+draw the shadow.** They are the same sequence of gates -- option bit 2,
+`noshadow`, the building bit with its water test, the projected shadow, else
+the copied shadow under option bit 3 and the hover/floater exclusion -- and
+differ only in `digger`: with a plane a digger's copy is cut at height
+`0x32 + 0x4B` (`0x4594D8`-`0x459503`), without one it takes the plain copy.
+So the plane is not a gate either; it only changes how a digger is cut.
+
+**So the code draws a nanoframe's shadow, and the play observation says it
+does not.** Two places are left where they could still be reconciled, and
+the listing does not settle either:
+
+- the blit. Both shadows go through `0x4B8500` at `x + 0x85`, before the
+  unit image, and the image is the display's scratch copy with its erased
+  pixels written as the transparent key (`0x458DA8`). If the key is what the
+  shadow is filled with as well, or the blitter treats the shadow's single
+  index as key against the frame, the shadow would vanish exactly where the
+  frame is erased; the projected rectangle sits mostly under the building's
+  own footprint, so that could read as "no shadow" from above.
+- the observation. It was made from above on a building. A wide, low
+  building (ARMSOLAR) during the erase phases would show any shadow that
+  reaches beyond its footprint; a tall one (ARMFUS) would show it to the
+  south-east where the projection sticks out. Whether anything shows there
+  is the one look that decides between "not drawn" and "drawn under the
+  frame and hidden".
+
+Until one of those is settled RWE keeps its own gate, which matches the look
+as observed. The mobile case the issue asked about goes the same way: a unit
+under construction on a factory pad has a bitmap with a plane, takes the
+`0x45949D` block, and gets the copied shadow like any other mobile unit; the
+copy is of the cached bitmap, not of the display's scratch copy, so by the
+code it would be the whole silhouette from the first frame.
+
 ---
 
 ## 4. Effects a script asks for: `emit-sfx`
