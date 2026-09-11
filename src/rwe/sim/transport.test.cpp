@@ -520,4 +520,144 @@ namespace rwe
         // The piece the script named is the piece the cargo hangs from.
         REQUIRE(sim.getUnitState(kbotId).carriedPiece == "base");
     }
+
+    TEST_CASE("an air transport carrying a unit does not sink into the sea", "[transport]")
+    {
+        // A play-test on 2026-09-11: an Atlas that had just picked up a unit
+        // sank into the sea as it flew out over it. It took the cargo while
+        // still coming down at over a unit a tick, turned for the water, and
+        // with height steered out of the same 0.04 of Acceleration as the
+        // turn it could not stop: it bottomed out fifty units under the
+        // ground. The original sets vertical velocity outright
+        // (0x43D4D0-0x43D502), which cannot overshoot.
+        //
+        // The Atlas's own numbers, from rev31.gp3. Land at height 100 on the
+        // west side of the map, the sea at 60 over a flat bed at 0 to the
+        // east; it picks the unit up facing west and has to turn right round.
+        auto script = makeAirTransportScript();
+        Grid<unsigned char> heights(128, 128, static_cast<unsigned char>(0));
+        for (int z = 0; z < 128; ++z)
+        {
+            for (int x = 0; x < 40; ++x)
+            {
+                heights.get(x, z) = 100;
+            }
+        }
+        GameSimulation sim(MapTerrain(std::move(heights), 60_ss), 0u, 0, 0);
+        auto player = addPlayer(sim, "hauler");
+
+        auto airDef = makeTransportDef();
+        airDef.canFly = true;
+        airDef.maxVelocity = 7_ss;
+        airDef.brakeRate = 1_ss;
+        airDef.acceleration = 0.04_ssf;
+        airDef.turnRate = 128_ss;
+        airDef.cruiseAltitude = 90_ss;
+        airDef.transportSize = 3;
+        sim.unitDefinitions["airtransport"] = airDef;
+        sim.unitDefinitions["kbot"] = makeMobileDef(2u);
+        registerModel(sim, "model");
+
+        auto airId = spawnUnit(sim, "airtransport", player, SimVector(-450_ss, 190_ss, 0_ss), script);
+        sim.getUnitState(airId).physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+        sim.flyingUnitsSet.insert(airId);
+        auto kbotId = spawnUnit(sim, "kbot", player, SimVector(-800_ss, 100_ss, 0_ss), script);
+
+        sim.getUnitState(airId).orders.push_back(LoadOrder(kbotId));
+        REQUIRE(tickUntil(sim, 3000, [&]() { return sim.getUnitState(kbotId).carriedBy.has_value(); }));
+
+        auto destination = SimVector(700_ss, 0_ss, 300_ss);
+        sim.getUnitState(airId).orders.push_back(createMoveOrder(destination));
+        auto lowest = std::numeric_limits<float>::max();
+        for (int i = 0; i < 1500; ++i)
+        {
+            sim.tick();
+            const auto& p = sim.getUnitState(airId).position;
+            auto surface = rweMax(sim.terrain.getHeightAt(p.x, p.z), sim.terrain.getSeaLevel());
+            lowest = std::min(lowest, simScalarToFloat(p.y - surface));
+        }
+
+        // Never under the ground or the water, and it still gets there with
+        // the cargo aboard.
+        INFO("lowest clearance " << lowest);
+        REQUIRE(lowest > 0.0f);
+        const auto& transport = sim.getUnitState(airId);
+        REQUIRE(transport.position.x > 600_ss);
+        REQUIRE(sim.getUnitState(kbotId).carriedBy == std::optional<UnitId>(airId));
+    }
+
+    TEST_CASE("an air transport asks before it goes down to unload", "[transport]")
+    {
+        // VTOL_Unload runs the drop-legality test before it descends and
+        // again as it lets go; refused, it says "Unable to unload unit" and
+        // parks for rand(30)+30 ticks (S:36). RWE went down first, to the
+        // seabed plus the cargo's height when the point was at sea.
+        //
+        // Land at height 100 in the west, a sea 60 deep in the east, and a
+        // kbot that may stand in no water at all.
+        auto script = makeAirTransportScript();
+        Grid<unsigned char> heights(128, 128, static_cast<unsigned char>(0));
+        for (int z = 0; z < 128; ++z)
+        {
+            for (int x = 0; x < 40; ++x)
+            {
+                heights.get(x, z) = 100;
+            }
+        }
+        GameSimulation sim(MapTerrain(std::move(heights), 60_ss), 0u, 0, 0);
+        auto player = addPlayer(sim, "hauler");
+
+        auto airDef = makeTransportDef();
+        airDef.canFly = true;
+        airDef.maxVelocity = 7_ss;
+        airDef.brakeRate = 1_ss;
+        airDef.acceleration = 0.04_ssf;
+        airDef.turnRate = 128_ss;
+        airDef.cruiseAltitude = 90_ss;
+        airDef.transportSize = 3;
+        sim.unitDefinitions["airtransport"] = airDef;
+        sim.unitDefinitions["kbot"] = makeMobileDef(2u);
+        registerModel(sim, "model");
+
+        auto airId = spawnUnit(sim, "airtransport", player, SimVector(-300_ss, 190_ss, 0_ss), script);
+        sim.getUnitState(airId).physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+        sim.flyingUnitsSet.insert(airId);
+        auto kbotId = spawnUnit(sim, "kbot", player, SimVector(-700_ss, 100_ss, 0_ss), script);
+        REQUIRE(sim.loadUnitIntoTransport(airId, kbotId, "base"));
+
+        SECTION("over deep water it stays up, says so, and keeps the order")
+        {
+            sim.getUnitState(airId).orders.push_back(UnloadOrder(SimVector(500_ss, 60_ss, 0_ss)));
+            auto lowest = std::numeric_limits<float>::max();
+            for (int i = 0; i < 900; ++i)
+            {
+                sim.tick();
+                const auto& p = sim.getUnitState(airId).position;
+                lowest = std::min(lowest, simScalarToFloat(p.y - sim.terrain.getSeaLevel()));
+            }
+
+            INFO("lowest height over the sea " << lowest);
+            REQUIRE(lowest > 60.0f);
+            REQUIRE(sim.getUnitState(kbotId).carriedBy == std::optional<UnitId>(airId));
+            REQUIRE(sim.getUnitState(airId).orders.size() == 1);
+            auto refusals = std::count_if(sim.events.begin(), sim.events.end(), [&](const GameEvent& e) {
+                const auto* refusal = std::get_if<UnitCannotComplyEvent>(&e);
+                return refusal != nullptr && refusal->unitId == airId && refusal->message == "Unable to unload unit";
+            });
+            // Refused on arrival, then again after each park of 30 to 59
+            // ticks, not every tick.
+            REQUIRE(refusals >= 2);
+            REQUIRE(refusals < 30);
+        }
+
+        SECTION("over land it goes down and sets the unit on the ground")
+        {
+            sim.getUnitState(airId).orders.push_back(UnloadOrder(SimVector(-700_ss, 100_ss, 200_ss)));
+            REQUIRE(tickUntil(sim, 1500, [&]() { return !sim.getUnitState(kbotId).carriedBy.has_value(); }));
+            const auto& kbot = sim.getUnitState(kbotId);
+            REQUIRE(kbot.position.y == 100_ss);
+            REQUIRE(rweAbs(kbot.position.x - -700_ss) < 32_ss);
+            REQUIRE(rweAbs(kbot.position.z - 200_ss) < 32_ss);
+        }
+    }
 }

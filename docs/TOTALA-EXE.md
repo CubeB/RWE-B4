@@ -54,17 +54,35 @@ three separate ways and each turned out to have a different cause.
 
 ### The per-tick air movement, `0x43D290`
 
-Six steps, in this order. The order matters: bank is fed the *total* change in
+Seven steps, in this order. The order matters: bank is fed the *total* change in
 velocity for the tick, after everything else has had its say.
 
 | Step | Address range | What it does |
 |---|---|---|
 | Drag | `0x43D2FB`–`0x43D38B` | `vel *= 1 − Acceleration/MaxVelocity` |
 | Brake | `0x43D38E`–`0x43D47D` | if horizontal speed > `BrakeRate`, scale it back to `BrakeRate` and re-inject the excess along the nose |
+| Height | `0x43D4D0`–`0x43D502` | `vel.y = clamp(goalY − y, −r, r)`, set outright, where `r` is a quarter of the speed stored at the end of the last tick, or 1 below a speed of 4 |
 | Turn | `0x43D520`–`0x43D585` | heading steps toward the desired heading, limited by `TurnRate` |
-| Profile | `0x43D58B`–`0x43D5EA` | `desiredVel = toTarget × sqrt(2 × Acceleration / max(distance, 8))` |
-| Clamp | `0x43D60A` | the change in velocity is limited to one `Acceleration` |
+| Profile | `0x43D58B`–`0x43D5EA` | `desiredVel = toTarget × sqrt(2 × Acceleration / max(distance, 8))`, in x and z only |
+| Clamp | `0x43D60A` | the horizontal change in velocity is limited to one `Acceleration` |
 | Bank | `0x43D68B`–`0x43D6B3` | roll from the tick's total velocity change |
+
+**Height is not steered.** Found 2026-09-11, and missed by the six-step
+reading above until then. The profile and the clamp are flat: the distance
+is the hypot of x and z (`0x43D51B`), the clamp tests the hypot of the two
+horizontal deltas (`0x43D605`), and the result is added to `vel.x` and
+`vel.z` alone (`0x43D653`, `0x43D65A`). Height has its own step, which
+does not accelerate at all. It takes the goal altitude less the unit's
+height and writes it straight into `vel.y`, clamped to ±`r`. Here `r` is
+`[mover+0x20] >> 2`, a quarter of the `|vel|` that `0x43D688` stores at
+the end of each tick, and a flat 1.0 when that speed is under 4
+(`0x43D4D8`). The step is skipped only for a unit in the off-map bucket
+(`unit+0x82 == [gs+0x142B7]`, `0x43D4C8`). An aircraft therefore closes
+on its altitude as fast as that limit allows and stops on it, and it
+cannot overshoot. RWE had height inside the profile, sharing the one
+`Acceleration` with the turn. An Atlas (0.04) that took its cargo while
+still coming down at a unit a tick, then turned for home, sank fifty
+units under the ground and the sea before it climbed back.
 
 **There is no throttle/brake mode switch.** This is the single most important
 finding in this section. RWE had a two-branch law — full acceleration toward

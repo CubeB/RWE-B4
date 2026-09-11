@@ -820,17 +820,14 @@ namespace rwe
         return true;
     }
 
-    bool GameSimulation::unloadUnitFromTransport(UnitId transportId, UnitId unitId, const SimVector& position)
+    std::optional<UnloadSpot> GameSimulation::findUnloadSpot(UnitId unitId, const SimVector& position) const
     {
-        auto transportRef = tryGetUnitState(transportId);
         auto unitRef = tryGetUnitState(unitId);
-        if (!transportRef || !unitRef || unitRef->get().carriedBy != transportId)
+        if (!unitRef)
         {
-            return false;
+            return std::nullopt;
         }
-        auto& transport = transportRef->get();
-        auto& unit = unitRef->get();
-        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        const auto& unitDefinition = unitDefinitions.at(unitRef->get().unitType);
         auto mc = getAdHocMovementClass(unitDefinition.movementCollisionInfo);
 
         // Nearest clear footprint to the drop point, searching outwards ring by ring.
@@ -863,7 +860,7 @@ namespace rwe
         }
         if (!spot)
         {
-            return false;
+            return std::nullopt;
         }
 
         auto corner = terrain.heightmapIndexToWorldCorner(spot->x, spot->y);
@@ -876,14 +873,33 @@ namespace rwe
         {
             newPosition.y = rweMax(newPosition.y, terrain.getSeaLevel());
         }
+        return UnloadSpot{*spot, newPosition};
+    }
 
-        if (auto region = occupiedGrid.tryToRegion(*spot))
+    bool GameSimulation::unloadUnitFromTransport(UnitId transportId, UnitId unitId, const SimVector& position)
+    {
+        auto transportRef = tryGetUnitState(transportId);
+        auto unitRef = tryGetUnitState(unitId);
+        if (!transportRef || !unitRef || unitRef->get().carriedBy != transportId)
+        {
+            return false;
+        }
+        auto& transport = transportRef->get();
+        auto& unit = unitRef->get();
+
+        auto spot = findUnloadSpot(unitId, position);
+        if (!spot)
+        {
+            return false;
+        }
+
+        if (auto region = occupiedGrid.tryToRegion(spot->footprint))
         {
             occupiedGrid.forEach(*region, [unitId](auto& cell) { cell.mobileUnitId = unitId; });
         }
 
-        unit.position = newPosition;
-        unit.previousPosition = newPosition;
+        unit.position = spot->position;
+        unit.previousPosition = spot->position;
         unit.rotation = transport.rotation;
         unit.previousRotation = transport.rotation;
         unit.carriedBy = std::nullopt;

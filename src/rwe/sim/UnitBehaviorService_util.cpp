@@ -813,15 +813,38 @@ namespace rwe
         // measured.
         currentVelocity = applyBrakeRateNoseReaim(currentVelocity, UnitState::toDirection(unit.rotation), unitDefinition.brakeRate);
 
+        // Height is not steered at all. The original sets the vertical
+        // velocity outright each tick to whatever closes the gap to the goal
+        // altitude, limited to a quarter of the speed the aircraft finished
+        // the last tick at, and never less than one unit a tick
+        // (0x43D4D0-0x43D502; the speed is the |vel| stored at 0x43D688).
+        // It skips this only for a unit off the map (unit+0x82 is the
+        // off-map bucket), which RWE does not model.
+        //
+        // RWE used to fold height into the profile below and spend the one
+        // Acceleration on all three axes at once. With the transports'
+        // Acceleration of 0.04 that could not stop a descent: an Atlas that
+        // took its cargo while still coming down at a unit a tick, then
+        // turned for home, sank fifty units under the ground and the sea
+        // before it climbed, with the cargo hanging below it.
+        auto lastSpeed = physics.currentVelocity.length();
+        auto climbLimit = lastSpeed < 4_ss ? 1_ss : lastSpeed / 4_ss;
+        auto heightError = physics.targetPosition->y - unit.position.y;
+        currentVelocity.y = rweMax(-climbLimit, rweMin(heightError, climbLimit));
+
         // The original's arrival profile: steer for sqrt(2 * Acceleration *
         // distance) towards the target, so the aircraft is always travelling
         // exactly as fast as it can still shed before it gets there. Holding
         // the range at a floor of AirArrivalTaperDistance turns the last few
         // units into a straight run-down to a stop, instead of a curve that
-        // would demand ever harder braking the closer it came.
-        auto toTarget = *physics.targetPosition - unit.position;
+        // would demand ever harder braking the closer it came. Both the
+        // distance and the steering are flat, x and z only: the hypot at
+        // 0x43D51B is of those two, and so is the one the clamp below tests
+        // (0x43D605).
+        SimVector toTarget(physics.targetPosition->x - unit.position.x, 0_ss, physics.targetPosition->z - unit.position.z);
         auto profileRange = rweMax(toTarget.length(), AirArrivalTaperDistance);
         auto targetVelocity = toTarget * rweSqrt((2_ss * unitDefinition.acceleration) / profileRange);
+        targetVelocity.y = currentVelocity.y;
 
         // Move at most one tick's acceleration towards the profile. Once the
         // aircraft is on the profile this step goes slack of its own accord,

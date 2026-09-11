@@ -1928,7 +1928,7 @@ namespace rwe
             [&](const LoadOrder& o) {
                 return handleLoadOrder(unitInfo, o);
             },
-            [&](const UnloadOrder& o) {
+            [&](UnloadOrder& o) {
                 return handleUnloadOrder(unitInfo, o);
             },
             [&](const DgunOrder& o) {
@@ -2395,7 +2395,7 @@ namespace rwe
         return true;
     }
 
-    bool UnitBehaviorService::handleUnloadOrder(UnitInfo unitInfo, const UnloadOrder& unloadOrder)
+    bool UnitBehaviorService::handleUnloadOrder(UnitInfo unitInfo, UnloadOrder& unloadOrder)
     {
         LOG_DEBUG << "Transport " << unitInfo.id.value << " unload order: carrying " << unitInfo.state->carriedUnits.size() << ", floater " << unitInfo.definition->floater;
         if (unitInfo.state->carriedUnits.empty())
@@ -2407,6 +2407,12 @@ namespace rwe
         // Every non-flying transport unloads with the crane, hover ones
         // included -- their scripts are copies of the sea transports'.
         bool crane = !unitInfo.definition->canFly;
+
+        // A refused air drop waits out its park before trying again (below).
+        if (!crane && sim->gameTime < unloadOrder.parkedUntil)
+        {
+            return false;
+        }
 
         auto dx = unitInfo.state->position.x - unloadOrder.destination.x;
         auto dz = unitInfo.state->position.z - unloadOrder.destination.z;
@@ -2469,33 +2475,51 @@ namespace rwe
             return false;
         }
 
-        // An air transport settles low over the spot before letting go.
-        if (unitInfo.definition->canFly)
+        // An air transport asks whether its cargo can be set down before it
+        // goes anywhere near the ground, and asks again as it lets go:
+        // VTOL_Unload states 1 and 2 run the drop-legality test first
+        // (0x411635, 0x4116F2, TOTALA-EXE.md S:36 and S:39). Refused, the
+        // original says "Unable to unload unit" and parks the mission for
+        // rand(30)+30 ticks before starting over (return 9), and it never
+        // leaves cruise height for a drop it cannot make. RWE used to go down
+        // first and ask only as it let go, and it went down to the ground
+        // under the point -- the seabed, over water -- so an Atlas told to
+        // unload a tank over the sea dived under it.
+        //
+        // RWE's test is the nearest clear footprint within twelve cells
+        // rather than the original's one footprint on the point, and the
+        // transport settles over the spot it found.
+        auto carriedId = unitInfo.state->carriedUnits.front();
+        auto refuse = [&]() {
+            sim->events.push_back(UnitCannotComplyEvent{unitInfo.id, "Unable to unload unit"});
+            unloadOrder.parkedUntil = sim->gameTime + GameTime(30u + randomBelow(sim->rng, 30u));
+            return false;
+        };
+
+        auto spot = sim->findUnloadSpot(carriedId, unloadOrder.destination);
+        if (!spot)
         {
-            float tallest = 0.0f;
-            for (auto carriedId : unitInfo.state->carriedUnits)
-            {
-                if (auto carried = sim->tryGetUnitState(carriedId))
-                {
-                    tallest = std::max(tallest, simScalarToFloat(sim->unitModelDefinitions.at(sim->unitDefinitions.at(carried->get().unitType).objectName).height));
-                }
-            }
-            auto ground = sim->terrain.getHeightAt(unloadOrder.destination.x, unloadOrder.destination.z);
-            SimVector hoverPoint(unloadOrder.destination.x, ground + SimScalar(tallest + HoverClearance), unloadOrder.destination.z);
-            if (!hoverTowards(unitInfo, hoverPoint))
-            {
-                return false;
-            }
+            return refuse();
+        }
+
+        // Low over the spot, with the cargo's height between the transport
+        // and the surface -- the water's, where the spot is under it, since
+        // an amphibian is let go from above the sea and not carried down.
+        auto cargoHeight = simScalarToFloat(sim->unitModelDefinitions.at(sim->unitDefinitions.at(sim->getUnitState(carriedId).unitType).objectName).height);
+        auto surface = rweMax(spot->position.y, sim->terrain.getSeaLevel());
+        SimVector hoverPoint(spot->position.x, surface + SimScalar(cargoHeight + HoverClearance), spot->position.z);
+        if (!hoverTowards(unitInfo, hoverPoint))
+        {
+            return false;
         }
 
         // One unload order sets down one unit; the rest stay aboard until
         // they are ordered out in turn.
-        auto carriedId = unitInfo.state->carriedUnits.front();
-        if (sim->unloadUnitFromTransport(unitInfo.id, carriedId, unloadOrder.destination))
+        if (!sim->unloadUnitFromTransport(unitInfo.id, carriedId, unloadOrder.destination))
         {
-            unitInfo.state->cobEnvironment->createThread("EndTransport");
+            return refuse();
         }
-        // If it found no room it stays aboard; the order is done either way.
+        unitInfo.state->cobEnvironment->createThread("EndTransport");
         return true;
     }
 

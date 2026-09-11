@@ -2,6 +2,7 @@
 
 #include <rwe/grid/DiscreteRect.h>
 #include <rwe/sim/FeatureId.h>
+#include <rwe/sim/GameTime.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitId.h>
 #include <optional>
@@ -194,6 +195,17 @@ namespace rwe
     struct UnloadOrder
     {
         SimVector destination;
+
+        /**
+         * Until when an air transport's unload is parked. When the drop is
+         * refused, VTOL_Unload says "Unable to unload unit" and returns 9,
+         * which parks the mission for rand(30)+30 ticks and then starts it
+         * again from the top (TOTALA-EXE.md S:36). The timer lives on the
+         * order because the original keeps it on the mission, as it does
+         * capture progress.
+         */
+        GameTime parkedUntil{0};
+
         explicit UnloadOrder(const SimVector& destination) : destination(destination) {}
     };
 

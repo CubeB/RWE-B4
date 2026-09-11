@@ -156,7 +156,7 @@ namespace rwe
     }
 
     GameHash computeHashOf(const LoadOrder& o) { return computeHashOf(o.target); }
-    GameHash computeHashOf(const UnloadOrder& o) { return computeHashOf(o.destination); }
+    GameHash computeHashOf(const UnloadOrder& o) { return combineHashes(o.destination, o.parkedUntil); }
     GameHash computeHashOf(const DgunOrder& o) { return computeHashOf(o.target); }
     GameHash computeHashOf(const LandOnAirBaseOrder& o) { return computeHashOf(o.target); }
     GameHash computeHashOf(const ResurrectOrder& o) { return computeHashOf(o.target); }

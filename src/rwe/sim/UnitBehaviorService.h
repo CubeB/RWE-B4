@@ -122,7 +122,7 @@ namespace rwe
 
         bool handleLoadOrder(UnitInfo unitInfo, const LoadOrder& loadOrder);
 
-        bool handleUnloadOrder(UnitInfo unitInfo, const UnloadOrder& unloadOrder);
+        bool handleUnloadOrder(UnitInfo unitInfo, UnloadOrder& unloadOrder);
 
         /** Steers an air unit to a point that may be below cruise height; true once it hovers there. */
         bool hoverTowards(UnitInfo unitInfo, const SimVector& point);

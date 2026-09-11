@@ -908,7 +908,7 @@ namespace rwe
                     return j;
                 },
                 [&](const LoadOrder& l) { return json{{"kind", "load"}, {"target", saveUnitIdRef(l.target, ctx)}}; },
-                [](const UnloadOrder& u) { return json{{"kind", "unload"}, {"destination", saveSimVector(u.destination)}}; },
+                [](const UnloadOrder& u) { return json{{"kind", "unload"}, {"destination", saveSimVector(u.destination)}, {"parkedUntil", saveGameTime(u.parkedUntil)}}; },
                 [&](const DgunOrder& d) { return json{{"kind", "dgun"}, {"target", saveAttackTarget(d.target, ctx)}}; },
                 [&](const LandOnAirBaseOrder& l) { return json{{"kind", "landOnAirBase"}, {"target", saveUnitIdRef(l.target, ctx)}}; });
         }
@@ -995,7 +995,12 @@ namespace rwe
             }
             if (kind == "unload")
             {
-                return UnloadOrder(loadSimVector(j.at("destination")));
+                auto order = UnloadOrder(loadSimVector(j.at("destination")));
+                if (j.contains("parkedUntil"))
+                {
+                    order.parkedUntil = loadGameTime(j.at("parkedUntil"));
+                }
+                return order;
             }
             if (kind == "landOnAirBase")
             {

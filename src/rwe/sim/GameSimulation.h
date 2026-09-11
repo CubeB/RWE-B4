@@ -212,6 +212,13 @@ namespace rwe
         bool operator!=(const PathRequest& rhs) const;
     };
 
+    /** Where a carried unit would be set down: the cells it takes, and the point at their centre. */
+    struct UnloadSpot
+    {
+        DiscreteRect footprint;
+        SimVector position;
+    };
+
     struct WinStatusWon
     {
         PlayerId winner;
@@ -1018,6 +1025,16 @@ namespace rwe
          * either unit is missing, dead, or the unit is already carried.
          */
         bool loadUnitIntoTransport(UnitId transportId, UnitId unitId, const std::string& piece);
+
+        /**
+         * Where a carried unit would be set down if let go at position: the
+         * nearest footprint its movement class may stand on, searching
+         * outwards ring by ring up to twelve cells, with the point on the
+         * ground at its centre (on the surface, for a floater or a
+         * hovercraft). Empty if there is nowhere. An air transport asks
+         * this before it descends; unloadUnitFromTransport lets go there.
+         */
+        std::optional<UnloadSpot> findUnloadSpot(UnitId unitId, const SimVector& position) const;
 
         /**
          * Sets a carried unit down on the nearest clear ground to position.
