@@ -1,15 +1,15 @@
 #pragma once
 
+#include <array>
 #include <rwe/geometry/CollisionMesh.h>
-#include <rwe/render/GlMesh.h>
-#include <rwe/render/VaoHandle.h>
-#include <rwe/render/VboHandle.h>
+#include <rwe/math/Vector3f.h>
 
 namespace rwe
 {
     struct SelectionMesh
     {
         CollisionMesh collisionMesh;
-        GlMesh visualMesh;
+        /** The selection plate's four corners, model space, in the file's order: the box drawn round a selected unit. */
+        std::array<Vector3f, 4> corners;
     };
 }

@@ -301,7 +301,7 @@ namespace rwe
         return m;
     }
 
-    SelectionMesh selectionMeshFrom3do(GraphicsContext& graphics, const _3do::Object& o)
+    SelectionMesh selectionMeshFrom3do(const _3do::Object& o)
     {
         auto index = o.selectionPrimitiveIndex.value_or(0u);
         auto p = o.primitives.at(index);
@@ -314,23 +314,7 @@ namespace rwe
         auto c = offset + vertexToVector(o.vertices[p.vertices[2]]);
         auto d = offset + vertexToVector(o.vertices[p.vertices[3]]);
 
-        auto collisionMesh = CollisionMesh::fromQuad(a, b, c, d);
-        auto selectionMesh = createSelectionMesh(graphics, a, b, c, d);
-
-        return SelectionMesh{std::move(collisionMesh), std::move(selectionMesh)};
-    }
-
-    GlMesh createSelectionMesh(GraphicsContext& graphics, const Vector3f& a, const Vector3f& b, const Vector3f& c, const Vector3f& d)
-    {
-        const Vector3f color(0.325f, 0.875f, 0.310f);
-
-        std::vector<GlColoredVertex> buffer{
-            {a, color},
-            {b, color},
-            {c, color},
-            {d, color}};
-
-        return graphics.createColoredMesh(buffer, GL_STATIC_DRAW);
+        return SelectionMesh{CollisionMesh::fromQuad(a, b, c, d), {a, b, c, d}};
     }
 
     ShaderMesh convertMesh(GraphicsContext& graphics, const Mesh& mesh)

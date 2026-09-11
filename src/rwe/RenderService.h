@@ -15,17 +15,6 @@ namespace rwe
         std::vector<GlColoredVertex> triangles;
     };
 
-    struct ColoredMeshRenderInfo
-    {
-        const GlMesh* mesh;
-        Matrix4f mvpMatrix;
-    };
-
-    struct ColoredMeshesBatch
-    {
-        std::vector<ColoredMeshRenderInfo> meshes;
-    };
-
     struct UnitTextureMeshRenderInfo
     {
         const GlMesh* mesh;
@@ -196,7 +185,5 @@ namespace rwe
         void drawUnitShadowMeshBatch(const UnitShadowMeshBatch& batch);
 
         void drawSpriteBatch(const SpriteBatch& batch);
-
-        void drawLineLoopsBatch(const ColoredMeshesBatch& batch);
     };
 }

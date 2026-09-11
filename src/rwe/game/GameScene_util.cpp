@@ -896,6 +896,16 @@ namespace rwe
 
     namespace
     {
+        /** How far, in world units, a wireframe or selection pixel is lifted towards the camera. */
+        constexpr float WireframeDepthLift = 2.0f;
+
+        /** Where a world-space point lands on screen, in output pixels, y down. */
+        Vector2f toScreenPixels(const WireframeScreen& screen, const Vector3f& world)
+        {
+            auto clip = screen.viewProjection * world;
+            return Vector2f((clip.x + 1.0f) * 0.5f * screen.width, (1.0f - clip.y) * 0.5f * screen.height);
+        }
+
         /**
          * One output pixel of wireframe, centred on centre. The camera is
          * orthographic, so a pixel's width and height are the same two
@@ -933,12 +943,16 @@ namespace rwe
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
         auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
 
-        // Lift each pixel slightly towards the camera so it passes the depth
-        // test against the surface it lies on, while anything the model
-        // itself hides stays hidden. That stands in for the original's
-        // height test, which keeps a wireframe pixel only where no higher
-        // surface of the model covers it (0x4C0A90).
-        auto bias = toCamera * 0.75f;
+        // Lift each pixel towards the camera so it passes the depth test
+        // against the surface it lies on, while anything the model itself
+        // hides stays hidden. That stands in for the original's height test,
+        // which keeps a wireframe pixel only where no higher surface of the
+        // model covers it (0x4C0A90). The pixel is a flat square facing the
+        // camera, and a surface seen at a slant falls away across it, so the
+        // lift has to clear that slope as well as the surface: at 0.75 part
+        // of a pixel could sink behind the face it outlines, which reads as a
+        // thinner, broken line.
+        auto bias = toCamera * WireframeDepthLift;
 
         const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(unitDefinition.objectName, modelDefinition);
         const auto& transforms = computePieceTransformsForRender(modelDefinition, renderInfo, unit.pieces, frac);
@@ -969,9 +983,8 @@ namespace rwe
                 for (const auto& corner : polygon.vertices)
                 {
                     auto w = matrix * corner;
-                    auto clip = screen.viewProjection * w;
                     world.push_back(w);
-                    onScreen.emplace_back((clip.x + 1.0f) * 0.5f * screen.width, (1.0f - clip.y) * 0.5f * screen.height);
+                    onScreen.push_back(toScreenPixels(screen, w));
                 }
 
                 pixels.clear();
@@ -1501,25 +1514,53 @@ namespace rwe
         }
     }
 
-    void drawSelectionRect(const GameMediaDatabase& gameMediaDatabase, const Matrix4f& viewProjectionMatrix, const UnitState& unit, const UnitDefinition& unitDefinition, float frac, ColoredMeshesBatch& batch)
+    void drawSelectionRect(const GameMediaDatabase& gameMediaDatabase, const WireframeScreen& screen, const Vector3f& toCamera, const UnitState& unit, const UnitDefinition& unitDefinition, float frac, ColoredMeshBatch& batch)
     {
-        auto selectionMesh = gameMediaDatabase.getSelectionMesh(unitDefinition.objectName);
+        auto quad = gameMediaDatabase.getSelectionQuad(unitDefinition.objectName);
+        if (!quad)
+        {
+            return;
+        }
 
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
-
-        // try to ensure that the selection rectangle vertices
-        // are aligned with the middle of pixels,
-        // to prevent discontinuities in the drawn lines.
-        Vector3f snappedPosition(
-            snapToInterval(position.x, 1.0f) + 0.5f,
-            snapToInterval(position.y, 2.0f),
-            snapToInterval(position.z, 1.0f) + 0.5f);
-
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto matrix = Matrix4f::translation(snappedPosition) * Matrix4f::rotationY(rotation);
-        auto mvpMatrix = viewProjectionMatrix * matrix;
+        auto matrix = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
 
-        batch.meshes.push_back(ColoredMeshRenderInfo{selectionMesh.value().get(), mvpMatrix});
+        // The selection plate's outline in green, one output pixel wide and
+        // solid. It was a GL line loop, which the double-size world buffer
+        // made half a pixel wide, and where the ground sat under a line the
+        // resolve's one sample of each block could miss it altogether.
+        const Vector3f color(0.325f, 0.875f, 0.310f);
+        auto bias = toCamera * WireframeDepthLift;
+
+        std::array<Vector3f, 4> world;
+        std::array<Vector2f, 4> onScreen;
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            world[i] = matrix * (*quad)[i];
+            onScreen[i] = toScreenPixels(screen, world[i]);
+        }
+
+        std::vector<LinePixel> pixels;
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            auto j = (i + 1) % 4;
+            pixels.clear();
+            scanLine(onScreen[i], onScreen[j], pixels);
+            for (const auto& p : pixels)
+            {
+                // The point on the line this pixel came from, moved in the
+                // image plane to the pixel's centre so its depth is kept.
+                auto onLine = lerp(world[i], world[j], p.t);
+                auto exactX = onScreen[i].x + (p.t * (onScreen[j].x - onScreen[i].x));
+                auto exactY = onScreen[i].y + (p.t * (onScreen[j].y - onScreen[i].y));
+                auto centre = onLine
+                    + (screen.pixelRight * ((static_cast<float>(p.x) + 0.5f) - exactX))
+                    - (screen.pixelUp * ((static_cast<float>(p.y) + 0.5f) - exactY))
+                    + bias;
+                pushWireframePixel(screen, centre, color, batch.triangles);
+            }
+        }
     }
 
     WakeEmission computeWakeEmission(const Vector3f& firstVertex, const Vector3f& secondVertex, bool reverse, unsigned int rampPeriod)

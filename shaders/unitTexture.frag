@@ -41,10 +41,12 @@ uniform float alpha;
 const vec3 waterTint = vec3(0.5, 0.5, 1.0);
 const vec3 normalTint = vec3(1.0, 1.0, 1.0);
 
-// TA lights its models after all. The renderer decoded earlier -- no normals,
-// no sun, texels copied unmodified -- is the one that runs with SHADING
-// switched OFF; the option defaults ON, and 0x458744 picks between two
-// complete rasterizer chains on that one bit. The shaded chain averages the
+// TA lights its models after all -- its buildings and features, that is. The
+// renderer decoded earlier -- no normals, no sun, texels copied unmodified --
+// is the one that runs with SHADING switched OFF, and the one every mobile
+// unit gets regardless: 0x4586A0 sends only a building (bmcode 0) to the
+// shaded chain, and only with SHADING on (TOTALA-EXE-SHADING.md S:11). RWE
+// shades units as well, on its Shading switch. The shaded chain averages the
 // unit normals of the polygons meeting at a vertex and takes
 //
 //     level = (int)(5.0 * dot(n, (-0.8, 1.0, 0.25))) & 0x1F

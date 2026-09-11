@@ -346,17 +346,46 @@ selection-plate row).
 
 ### The nanoframe's shadow
 
-A bare wireframe casts **no shadow of its own**, and what lies under the
-frame shows through it, other units' shadows included. Its own shadow starts
-with the solid green silhouette, the phase where the display stops erasing
-below its line. That is from play, 2026-09-11, not from the binary: the
-unit draw routine `0x459200` has no build-progress test anywhere on its
-shadow paths (`0x4592A0`-`0x45935C` and the height-plane twin at
-`0x45949D`-`0x4595E9`; the one extra test there, `[unit+0xA6]` against the
-byte at `[globals+0x1427F]`, keeps a building below the water line from
-casting), so how the original arrives at it is not established. RWE used to
-cast the frame's shadow from the start and then cut the frame's outline out
-of the whole stencil, which hid every other unit's shadow behind it too.
+**What the original decides, decoded 2026-09-11.** The shadow is drawn by the
+unit draw routine `0x459200`, every frame, before the unit's own image, and
+the construction display is applied afterwards to a scratch copy of the
+unit's cached bitmap (`0x4589C0` → `0x458DD0`), never to the bitmap the
+shadow is taken from. The shadow pass tests, in order:
+
+- the master shadow option, bit 2 of the options word `[globals+0x37F06]`;
+- `noshadow`, bit 25 of `def+0x241`;
+- `digger`, bit 30: a copied shadow cut at height 125 (`0x4BA1B0`), for
+  ARMAMB and CORTOAST only;
+- **`unit+0x110` bit 29, which is `bmcode == 0`** — set at unit creation,
+  `0x485A8B`-`0x485A9E`, from `def+0x22F`, and on the "Feature Unit" that
+  draws map features (`0x421FD3`) — so it is "is a building or a feature".
+  That takes the **projected** shadow: built once by `0x45A790` from the
+  pieces that are both shown and cached, each corner at `x + y/4`,
+  `-z - y/4`, and cached on the unit until its bitmap is re-rendered. A
+  building below the water line casts none unless `[unit+0xA6]` is set;
+- anything else — every mobile unit — takes the **copied** shadow if the
+  second option bit (bit 3) is set and it neither hovers nor floats
+  (`def+0x241 & 0x81000`, canhover and floater: so hovercraft and ships have
+  no shadow). The cached bitmap is copied (`0x45A470`), every opaque pixel
+  becomes index 0 (`0x4B96A0`), anything below the water line is cut away
+  (`0x4BA1B0`), and it goes down five pixels right at ground level (§100).
+
+**There is no build-progress test anywhere in it.** A nanoframe's cached
+bitmap is the whole model — the display's erasing happens on the copy — and
+a building's projected shadow is built from every shown, cached piece, which
+is all of them from the first frame. So by the code a frame's own shadow is
+there from the start, and the erased parts of the frame, which are written
+transparent (`0x458DA8`), would let it show through.
+
+**That is not what the original looks like in play.** Watched on 2026-09-11,
+a nanoframe casts no shadow of its own until the solid green layer has
+finished climbing it, and until then what lies under the frame, other units'
+shadows included, shows through. RWE matches that: the frame's shadow starts
+at the phase where nothing of it is erased any more, when the texture starts
+up from the base. What in the original makes it look that way is not
+established. RWE used to cast the frame's shadow from the start and then cut
+the frame's outline out of the whole stencil, which hid every other unit's
+shadow behind it too.
 
 ---
 
@@ -8780,11 +8809,17 @@ original:
   RWE's radar and sonar contacts therefore reach the minimap (`canDetectUnit`)
   and nothing else; every simulation decision goes through `canSeeUnit`.
 
-- **Model shading can be switched off by category.** The original shades
-  every unit and every feature through one routine and never reads a "is a
-  building" flag: `0x459C70` branches on the piece's COB `SHADE` bit and on
-  nothing else (TOTALA-EXE-SHADING.md S:11, NOT FOUND for a building test).
-  RWE's VISUALS page carries a four-state Shading switch -- Off, Units,
+- **Mobile units are shaded, and shading can be switched off by category.**
+  The original shades buildings and features and never a mobile unit. The
+  shaded rasterizer `0x459C70` itself branches on nothing but the piece's COB
+  `SHADE` bit, which is why this entry used to say the original shades
+  everything; but it has one caller, the cache renderer `0x4586A0`, and that
+  sends only an object with `unit+0x110` bit 29 set -- `bmcode == 0`, a
+  building, or the Feature Unit -- to it, and only with SHADING on
+  (`0x45873C`, `0x45874A`). Everything else, every tank, aircraft, ship and
+  commander, is cached by the unshaded twin `0x459830` (`0x45878B`), whatever
+  the option says. Found 2026-09-11. RWE shades units anyway, by default, and
+  that is now a divergence rather than a fix. RWE's VISUALS page carries a four-state Shading switch -- Off, Units,
   Buildings, Both -- and two rwe.cfg keys, `shading-strength-units` and
   `shading-strength-buildings`, blend the measured `PALETTE.SHD` ramp towards
   the unshaded colour. Both default to 40. The shape of the ramp is the
@@ -10622,9 +10657,11 @@ silhouette across unchanged because the world projection is orthographic, so a
 constant translation in world space is a constant translation on screen — which
 is what blitting the cached bitmap amounts to. The pass already ran with the
 depth buffer off and wrote only the stencil, so nothing else had to agree about
-where the geometry sits. The gate is the unit's mobility, standing in for
-`unit+0x113` bit 5, and that substitution is recorded here rather than hidden
-because the bit's meaning is not established. The second option bit is in too,
+where the geometry sits. The gate is the unit's mobility, which is exactly
+`unit+0x113` bit 5: that bit is `bmcode == 0`, set at unit creation from
+`def+0x22F` (`0x485A8B`), and on the Feature Unit that draws map features
+(§3, "The nanoframe's shadow", has the whole pass). A mobile unit that hovers
+or floats casts no shadow at all. The second option bit is in too,
 as the `vehicle-shadows` key in `rwe.cfg` — not as a button, because VISUALRT
 has exactly one shadow gadget and RWE already wires it to the master.
 
@@ -10653,10 +10690,10 @@ One thing is still RWE's own: the **darkening**, a screen fill of black at 70%
 alpha through the stencil, where the original's is a palette lookup on a single
 fill index.
 
-Two things this does **not** settle, and they are not guessed at here: which
-table the darkening lookup uses (`0x4B8500` is a tree walk, and the blit it
-reaches was not followed), and what `unit+0x113` bit 5 actually means — it
-sorts units into the two paths and "is a building" is only the obvious reading.
+One thing this does **not** settle, and it is not guessed at here: which table
+the darkening lookup uses (`0x4B8500` is a tree walk, and the blit it reaches
+was not followed). What `unit+0x113` bit 5 means, left open here until
+2026-09-11, is settled: it is "is a building or a feature".
 
 ### And a measurement of the third palette table
 

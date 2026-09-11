@@ -33,7 +33,7 @@ namespace rwe
         rwe::SpanStream s(bytes->data(), bytes->size());
         auto objects = parse3doObjects(s, s.tellg());
         assert(objects.size() == 1);
-        auto selectionMesh = selectionMeshFrom3do(*graphics, objects.front());
+        auto selectionMesh = selectionMeshFrom3do(objects.front());
 
         auto d = createUnitModelDefinition(
             simScalarFromFixed(findHighestVertex(objects.front()).y),

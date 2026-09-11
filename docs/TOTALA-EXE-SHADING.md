@@ -693,11 +693,31 @@ both times for the same purpose:
 shade. VERIFIED -- those are the only two reads of `+0x241` in `0x459C70`, and
 the unshaded twin does the identical thing at `0x459A29`/`0x459A56`.
 
-**Buildings versus mobile units: no separate path.** NOT FOUND. `0x459C70`
-never reads a "is a building" flag, never branches on footprint or on
-`unitdef`, and never reads the unit's world position, terrain height, or
-current build fraction. Every unit and every feature with the `0x20000000`
-drawable bit goes down the same code.
+**Buildings versus mobile units: no separate path inside this routine** —
+`0x459C70` never reads a "is a building" flag, never branches on footprint or
+on `unitdef`, and never reads the unit's world position, terrain height, or
+current build fraction. **But a mobile unit never reaches it.** Corrected
+2026-09-11: its only caller is the cache renderer `0x4586A0`, which tests the
+unit's `0x20000000` bit first and the SHADING option second:
+
+```
+458736:  mov  ecx,[ebp+0x110]              ; the unit's flags
+45873c:  test ecx,0x20000000               ; bmcode == 0: a building (or the Feature Unit)
+458742:  je   0x458779                     ; anything mobile: unshaded
+45874a:  test byte [globals+0x37f06],0x20  ; SHADING
+458751:  je   0x458779
+458765:  call 0x459C70                     ; the shaded chain
+45878b:  call 0x459830                     ; the unshaded chain
+```
+
+The bit is set at unit creation from `bmcode` (`0x485A8B`-`0x485A9E`, `def+0x22F
+== 0`), so it is "is a building", and on the stand-in unit that draws map
+features (`0x421FD3`). **So the original shades buildings and features and
+never a mobile unit**, whatever SHADING says; the "0x458744 picks between two
+complete rasterizer chains" reading above is right about the option and missed
+the test in front of it. Everything this document says about the shaded
+chain is still right; it just never runs for a tank. RWE shades mobile units
+too, on its Shading switch, which makes that a divergence (TOTALA-EXE.md §88).
 
 **Under construction: no separate path here either.** NOT FOUND in `0x459C70`.
 The construction look comes from the height plane (`+0x14`), which this routine

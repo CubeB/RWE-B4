@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <memory>
 #include <rwe/AudioService.h>
 #include <rwe/util/hash_combine.h>
@@ -91,7 +92,7 @@ namespace rwe
 
     private:
         std::unordered_map<std::pair<std::string, std::string>, UnitPieceMeshInfo, CaseInsensitivePairHash, CaseInsensitivePairEquals> unitPieceMeshesMap;
-        std::unordered_map<std::string, std::shared_ptr<GlMesh>, CaseInsensitiveHash, CaseInsensitiveEquals> selectionMeshesMap;
+        std::unordered_map<std::string, std::array<Vector3f, 4>, CaseInsensitiveHash, CaseInsensitiveEquals> selectionQuadsMap;
 
         std::unordered_map<std::pair<std::string, std::string>, std::shared_ptr<SpriteSeries>, CaseInsensitivePairHash, CaseInsensitivePairEquals> spritesMap;
 
@@ -121,9 +122,10 @@ namespace rwe
         /** The model's hierarchy and meshes, resolved once. See UnitModelRenderInfo. */
         const UnitModelRenderInfo& getUnitModelRenderInfo(const std::string& objectName, const UnitModelDefinition& modelDefinition) const;
 
-        std::optional<std::shared_ptr<GlMesh>> getSelectionMesh(const std::string& objectName) const;
+        /** The corners of the model's selection plate, model space. */
+        std::optional<std::array<Vector3f, 4>> getSelectionQuad(const std::string& objectName) const;
 
-        void addSelectionMesh(const std::string& objectName, std::shared_ptr<GlMesh> mesh);
+        void addSelectionQuad(const std::string& objectName, const std::array<Vector3f, 4>& corners);
 
         void addSpriteSeries(const std::string& gafName, const std::string& animName, std::shared_ptr<SpriteSeries> sprite);
 

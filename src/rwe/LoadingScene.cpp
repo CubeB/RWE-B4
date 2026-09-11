@@ -1029,7 +1029,7 @@ namespace rwe
                 }
 
                 dataMaps.gameMediaDatabase.addSelectionCollisionMesh(fbi.objectName, std::make_shared<CollisionMesh>(std::move(meshInfo.selectionMesh.collisionMesh)));
-                dataMaps.gameMediaDatabase.addSelectionMesh(fbi.objectName, std::make_shared<GlMesh>(std::move(meshInfo.selectionMesh.visualMesh)));
+                dataMaps.gameMediaDatabase.addSelectionQuad(fbi.objectName, meshInfo.selectionMesh.corners);
 
                 if (!fbi.corpse.empty())
                 {

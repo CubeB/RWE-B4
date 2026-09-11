@@ -81,4 +81,44 @@ namespace rwe
             REQUIRE(pixels.empty());
         }
     }
+
+    TEST_CASE("scanLine draws a line one pixel wide and unbroken", "[wireframe]")
+    {
+        auto line = [](Vector2f a, Vector2f b) {
+            std::vector<LinePixel> pixels;
+            scanLine(a, b, pixels);
+            return pixels;
+        };
+
+        SECTION("a shallow line has one pixel in each column it crosses")
+        {
+            auto pixels = line(Vector2f(0.5f, 0.5f), Vector2f(8.5f, 2.5f));
+            REQUIRE(pixels.size() == 9);
+            for (int i = 0; i < 9; ++i)
+            {
+                REQUIRE(pixels[i].x == i);
+            }
+            REQUIRE(pixels.front().y == 0);
+            REQUIRE(pixels.back().y == 2);
+            REQUIRE(pixels.back().t == 1.0f);
+        }
+
+        SECTION("a steep line has one pixel in each row")
+        {
+            auto pixels = line(Vector2f(3.5f, 0.5f), Vector2f(4.5f, 6.5f));
+            REQUIRE(pixels.size() == 7);
+            for (int i = 0; i < 7; ++i)
+            {
+                REQUIRE(pixels[i].y == i);
+            }
+        }
+
+        SECTION("a point is one pixel")
+        {
+            auto pixels = line(Vector2f(2.25f, 3.75f), Vector2f(2.25f, 3.75f));
+            REQUIRE(pixels.size() == 1);
+            REQUIRE(pixels[0].x == 2);
+            REQUIRE(pixels[0].y == 3);
+        }
+    }
 }

@@ -107,4 +107,21 @@ namespace rwe
             out.push_back(WireframePixel{x1, row, r.from, r.to, r.t, r.x});
         }
     }
+
+    void scanLine(const Vector2f& a, const Vector2f& b, std::vector<LinePixel>& out)
+    {
+        auto dx = b.x - a.x;
+        auto dy = b.y - a.y;
+        auto steps = static_cast<int>(std::ceil(std::max(std::abs(dx), std::abs(dy))));
+        if (steps == 0)
+        {
+            out.push_back(LinePixel{static_cast<int>(std::floor(a.x)), static_cast<int>(std::floor(a.y)), 0.0f});
+            return;
+        }
+        for (int i = 0; i <= steps; ++i)
+        {
+            auto t = static_cast<float>(i) / static_cast<float>(steps);
+            out.push_back(LinePixel{static_cast<int>(std::floor(a.x + (t * dx))), static_cast<int>(std::floor(a.y + (t * dy))), t});
+        }
+    }
 }

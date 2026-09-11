@@ -43,4 +43,19 @@ namespace rwe
      * the edge.
      */
     void scanWireframePolygon(const std::vector<Vector2f>& corners, std::vector<WireframePixel>& out);
+
+    /** One pixel of a line, and how far along the line its centre was taken. */
+    struct LinePixel
+    {
+        int x;
+        int y;
+        float t;
+    };
+
+    /**
+     * A line one pixel wide from a to b, both ends included, in screen
+     * pixels: one pixel for each step along its longer axis, the way a
+     * software line routine draws one, so it is unbroken at any angle.
+     */
+    void scanLine(const Vector2f& a, const Vector2f& b, std::vector<LinePixel>& out);
 }

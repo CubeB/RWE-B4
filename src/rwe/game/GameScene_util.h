@@ -422,7 +422,8 @@ namespace rwe
         SpriteBatch& spriteBatch,
         UnitMeshBatch& unitMeshBatch);
 
-    void drawSelectionRect(const GameMediaDatabase& gameMediaDatabase, const Matrix4f& viewProjectionMatrix, const UnitState& unit, const UnitDefinition& unitDefinition, float frac, ColoredMeshesBatch& batch);
+    /** The selection plate of a selected unit, outlined one output pixel wide. */
+    void drawSelectionRect(const GameMediaDatabase& gameMediaDatabase, const WireframeScreen& screen, const Vector3f& toCamera, const UnitState& unit, const UnitDefinition& unitDefinition, float frac, ColoredMeshBatch& batch);
 
     /**
      * Where a wake dot starts, which way it drifts and how long it lasts.

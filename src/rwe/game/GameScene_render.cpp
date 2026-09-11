@@ -1420,16 +1420,33 @@ namespace rwe
         }
 
         auto interpolationFraction = static_cast<float>(millisecondsBuffer) / static_cast<float>(SimMillisecondsPerTick);
-        ColoredMeshesBatch selectionRectBatch;
+
+        // The direction from the scene towards the camera, in world space, and
+        // what one output pixel is in world space across and up the screen:
+        // what the selection boxes and the construction wireframe need to be
+        // drawn a pixel wide and lifted clear of the surface they sit on.
+        auto inverseViewProjection = computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+        auto clipOrigin = inverseViewProjection * Vector3f(0.0f, 0.0f, 0.0f);
+        auto toCamera = ((inverseViewProjection * Vector3f(0.0f, 0.0f, -1.0f)) - clipOrigin).normalized();
+        auto viewportWidth = static_cast<float>(worldViewport.width());
+        auto viewportHeight = static_cast<float>(worldViewport.height());
+        WireframeScreen wireframeScreen{
+            viewProjectionMatrix,
+            (inverseViewProjection * Vector3f(2.0f / viewportWidth, 0.0f, 0.0f)) - clipOrigin,
+            (inverseViewProjection * Vector3f(0.0f, 2.0f / viewportHeight, 0.0f)) - clipOrigin,
+            viewportWidth,
+            viewportHeight};
+
         {
             RWE_RENDERPROF("w.selection");
+            ColoredMeshBatch selectionRectBatch;
             for (const auto& selectedUnitId : selectedUnits)
             {
                 const auto& unit = getUnit(selectedUnitId);
                 const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
-                drawSelectionRect(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, interpolationFraction, selectionRectBatch);
+                drawSelectionRect(gameMediaDatabase, wireframeScreen, toCamera, unit, unitDefinition, interpolationFraction, selectionRectBatch);
             }
-            worldRenderService.drawLineLoopsBatch(selectionRectBatch);
+            worldRenderService.drawBatch(selectionRectBatch, viewProjectionMatrix, 1.0f);
         }
 
         auto seaLevel = simulation.terrain.getSeaLevel();
@@ -1463,6 +1480,15 @@ namespace rwe
                 {
                     continue;
                 }
+                // Nor does a mobile unit that hovers or floats cast one: the
+                // copied shadow is skipped for canhover and floater alike
+                // (0x45957F, def+0x241 & 0x81000), so hovercraft and ships have
+                // none. A floating building takes the projected pass, which
+                // has no such test, and keeps its shadow.
+                if (unitDefinition.isMobile && (unitDefinition.canHover || unitDefinition.floater))
+                {
+                    continue;
+                }
                 const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
 
                 auto groundHeight = simulation.terrain.getHeightAt(unit.position.x, unit.position.z);
@@ -1481,18 +1507,22 @@ namespace rwe
                     continue;
                 }
 
-                // A bare wireframe casts no shadow of its own: a nanoframe's
-                // shadow starts with the solid green silhouette, the phase
-                // where the build display stops erasing below its line. What
-                // lies under the frame before then, other units' shadows
-                // included, shows through it. That is what the original shows
-                // (seen in play, 2026-09-11); RWE used to cast the frame's
-                // shadow from the start and then cut the frame's outline out
-                // of every shadow on the stencil, anyone else's with it.
+                // A nanoframe casts no shadow of its own until the solid green
+                // layer has finished climbing it: nothing of the frame is
+                // erased any more, the phase where the texture starts up from
+                // the base. Until then what lies under the frame, other units'
+                // shadows included, shows through it. That is what the
+                // original shows in play (2026-09-11). The binary has no such
+                // test on its shadow pass, which draws a frame's shadow from
+                // its first frame (TOTALA-EXE.md S:3), so how the original
+                // comes to look this way is not established; RWE matches the
+                // look. RWE used to cast the frame's shadow from the start and
+                // then cut the frame's outline out of every shadow on the
+                // stencil, anyone else's with it.
                 if (unit.isBeingBuilt(unitDefinition))
                 {
                     auto phase = computeBuildPhase(unit.getPreciseCompletePercent(unitDefinition), unitId.value, simulation.gameTime.value);
-                    if (phase.belowMode == BuildFillMode::Erase)
+                    if (phase.aboveMode == BuildFillMode::Erase || phase.belowMode == BuildFillMode::Erase)
                     {
                         continue;
                     }
@@ -1594,22 +1624,6 @@ namespace rwe
         // every half second, offset per unit.
         {
             RWE_RENDERPROF("w.wireframe");
-            // The direction from the scene towards the camera, in world space.
-            auto inverseViewProjection = computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
-            auto clipOrigin = inverseViewProjection * Vector3f(0.0f, 0.0f, 0.0f);
-            auto toCamera = ((inverseViewProjection * Vector3f(0.0f, 0.0f, -1.0f)) - clipOrigin).normalized();
-
-            // And what one output pixel is in world space, across and up the
-            // screen, so each edge can be drawn a pixel wide.
-            auto viewportWidth = static_cast<float>(worldViewport.width());
-            auto viewportHeight = static_cast<float>(worldViewport.height());
-            WireframeScreen wireframeScreen{
-                viewProjectionMatrix,
-                (inverseViewProjection * Vector3f(2.0f / viewportWidth, 0.0f, 0.0f)) - clipOrigin,
-                (inverseViewProjection * Vector3f(0.0f, 2.0f / viewportHeight, 0.0f)) - clipOrigin,
-                viewportWidth,
-                viewportHeight};
-
             ColoredMeshBatch wireframeBatch;
             for (const auto& [unitId, unit] : simulation.units)
             {
