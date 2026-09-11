@@ -15,10 +15,11 @@ out vec4 outColor;
 //
 // Red is the palette index. Alpha says what kind of sample it is: 1 for a
 // cached piece of a finished building, the only thing that can carry a halo,
-// and 0.5 for anything else solid, which is coverage without being a source.
-// Cleared 0 means nothing is there.
+// 0.7 for a finished building's dont-cache piece, which is anti-aliased with
+// its building but carries no halo, and 0.5 for anything else solid, which is
+// coverage without being a source. Cleared 0 means nothing is there.
 out vec4 outMask;
-// 1.0 or 0.5 as above, set per mesh. See RenderService::drawUnitMeshBatch.
+// 1.0, 0.7 or 0.5 as above, set per mesh. See RenderService::drawUnitMeshBatch.
 uniform float maskValue;
 
 uniform sampler2D textureSampler;

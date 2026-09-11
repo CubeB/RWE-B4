@@ -143,13 +143,20 @@ namespace rwe
          * unshaded -- and they are what looks like the original on a screen
          * far larger than the one it was drawn for.
          *
+         * Units started at 25 and were raised to 40 on 2026-09-11, when a
+         * play-test found shading had no visible effect on a commander or a
+         * tank at 25. Nothing was wrong with the pipeline: none of ARMCOM,
+         * CORCOM, ARMPW or ARMSTUMP's scripts has a CACHE, DONT_CACHE or SHADE
+         * opcode, so every piece of them is shaded. A quarter of the ramp was
+         * simply too faint to read on a moving model.
+         *
          * These are deliberately not on the options screen: VISUALRT has no
          * gadget for them and the GUI files are read-only game data. They
          * are rwe.cfg keys (shading-strength-units,
          * shading-strength-buildings) for anyone who does want it softer.
          * See TOTALA-EXE.md S:88.
          */
-        unsigned int shadingStrengthUnits{25};
+        unsigned int shadingStrengthUnits{40};
         unsigned int shadingStrengthBuildings{40};
 
         /** Edge anti-aliasing: the original supersamples the unit and box-filters it down. */
@@ -168,7 +175,7 @@ namespace rwe
         bool buildingHalo{true};
 
         /**
-         * Whether the box filter reaches past the buildings, off by default.
+         * Whether the box filter reaches past the buildings, on by default.
          *
          * RWE renders the world into a buffer twice the size and filters each
          * 2x2 block down, which is how it reproduces the original's
@@ -179,10 +186,12 @@ namespace rwe
          *
          * On extends it back over units and everything else solid, for anyone
          * who would rather have smooth edges on them than the edges the
-         * original drew. It is a preference, not a fidelity fix, which is why
-         * it defaults the way it does. rwe.cfg key anti-alias-units.
+         * original drew. It is a preference, not a fidelity fix -- and the
+         * preference, play-tested 2026-09-11, is on: sharp units beside
+         * smoothed buildings looked like a fault, not like 1997. Off is still
+         * one click away on the VISUALS page. rwe.cfg key anti-alias-units.
          */
-        bool antiAliasUnits{false};
+        bool antiAliasUnits{true};
 
         /**
          * The purple halo on building edges, reproduced by running the
@@ -274,7 +283,7 @@ namespace rwe
         ShadingMode shading{ShadingMode::Both};
         bool antiAlias{true};
         bool buildingHalo{true};
-        bool antiAliasUnits{false};
+        bool antiAliasUnits{true};
     };
 
     /** The settings as the config file last left them. */

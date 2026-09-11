@@ -428,7 +428,7 @@ namespace rwe
         /** The purple building fringe; see GlobalConfig and TOTALA-EXE.md S:101. */
         bool buildingHaloEnabled{true};
         /** Whether the 2x2 filter reaches past the buildings; see GlobalConfig. */
-        bool antiAliasUnitsEnabled{false};
+        bool antiAliasUnitsEnabled{true};
 
         void applyGamma();
 

@@ -23,17 +23,21 @@ uniform float groundHeight;
 // has to agree about where the geometry sits.
 uniform bool projected;
 
-// For the offset kind, the one height the displacement is taken from. The
-// projected kind takes it per vertex and ignores this.
+// For the offset kind, the unit's base: how far it sits above groundHeight is
+// how far its shadow drops. The projected kind takes height per vertex and
+// ignores this.
 //
-// The original's offset is not decoded -- 0x4B8500 is a tree walk and the blit
-// it reaches was not followed -- so this is RWE's own choice, made to keep the
-// shadow where the eye already expects it: the unit's base plus half its model
-// height is about where the mean of the old per-vertex shear fell, so the
-// change reads as the shadow no longer stretching rather than as it jumping
-// somewhere new. It rises with the unit, so an aircraft's shadow still walks
-// away from it as it climbs.
+// The offset is decoded (TOTALA-EXE.md S:100). The unit is drawn at its
+// screen x plus 0x80 (0x4597BA) and the copy of its bitmap at plus 0x85
+// (0x45933D), so the shadow sits five pixels to the right. Its screen y is
+// the ground's under the unit, not the unit's, so it drops by the unit's
+// height above the ground: nothing for anything that drives, and an
+// aircraft's shadow lands on the ground below it and walks away as it climbs.
 uniform float shadowOriginY;
+
+// The original's five pixels: at its scale, one world unit is one pixel across
+// the screen, so a zoomed view scales the shadow with everything else.
+const float ShadowShiftX = 5.0;
 
 in vec3 position;
 in vec2 texCoord;
@@ -57,19 +61,15 @@ void main(void)
     }
     else
     {
-        // Note the sign on z, which is not the projected branch's. This camera
-        // puts screen-up at 0.5y - z, so the projected branch gets its downward
-        // component from flattening y to the ground and its sideways one from
-        // -z, netting a displacement of (+s, +s) down and to the right. Keeping
-        // y means that first component is gone, and -z alone would carry the
-        // shadow UP the screen. +z restores it: with y held, (x + s, y, z + s)
-        // is the same (+s, +s) on screen, so both kinds of shadow fall the same
-        // way and only their shape differs.
-        float shadowOffset = (shadowOriginY - groundHeight) * 0.25;
+        // This camera puts screen-up at 0.5y - z, so lowering every vertex by
+        // the unit's height above the ground moves the silhouette down the
+        // screen by half that -- the original's ground-y minus unit-y, whose
+        // halving is the same projection's. z is left alone: moving it as
+        // well would move the shadow a second time.
         shadowPosition = vec4(
-            worldPosition.x + shadowOffset,
-            worldPosition.y,
-            worldPosition.z + shadowOffset,
+            worldPosition.x + ShadowShiftX,
+            worldPosition.y - (shadowOriginY - groundHeight),
+            worldPosition.z,
             1.0);
     }
 

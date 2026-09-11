@@ -205,7 +205,7 @@ namespace rwe
         float groundHeight;
         /** True for the projected kind. */
         bool projected;
-        /** For the offset kind, the one height the displacement is taken from. */
+        /** For the offset kind, the unit's base: its height above groundHeight is how far the shadow drops. */
         float originY;
     };
 

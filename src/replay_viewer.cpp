@@ -183,11 +183,11 @@ int main(int argc, char* argv[])
         config.gamma = std::clamp(args.getUint("gamma", 100), 50u, 133u);
         auto shadingWasOn = args.getString("shading", "true") != "false";
         config.shadingMode = std::min(3u, args.getUint("shading-mode", shadingWasOn ? 3u : 0u));
-        config.shadingStrengthUnits = std::min(100u, args.getUint("shading-strength-units", 25));
+        config.shadingStrengthUnits = std::min(100u, args.getUint("shading-strength-units", 40));
         config.shadingStrengthBuildings = std::min(100u, args.getUint("shading-strength-buildings", 40));
         config.antiAlias = args.getString("anti-alias", "true") != "false";
         config.buildingHalo = args.getString("building-halo", "true") != "false";
-        config.antiAliasUnits = args.getString("anti-alias-units", "false") == "true";
+        config.antiAliasUnits = args.getString("anti-alias-units", "true") != "false";
         config.buildingHaloStrength = std::min(100u, args.getUint("building-halo-strength", 100));
         config.buildingHaloSaturation = std::min(100u, args.getUint("building-halo-saturation", 65));
         config.buildingHaloRedShift = std::min(100u, args.getUint("building-halo-red-shift", 50));

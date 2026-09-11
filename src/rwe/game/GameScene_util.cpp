@@ -481,7 +481,12 @@ namespace rwe
             // goes in at 0.5 as an OCCLUDER -- coverage without being a source
             // -- because a gap in the coverage is a boundary, and the post
             // pass cannot tell a gap from an outline. See unitTexture.frag.
-            auto maskValue = isFinishedBuilding && mesh.cached ? 1.0f : 0.5f;
+            //
+            // A finished building's dont-cache piece is the one in between, at
+            // 0.7: no halo, for the reason above, but anti-aliased with the
+            // building it belongs to. Left at 0.5 it went sharp or smooth with
+            // the units switch, and an extractor's top is part of a building.
+            auto maskValue = isFinishedBuilding ? (mesh.cached ? 1.0f : 0.7f) : 0.5f;
 
             drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], pieceShadeStrength, playerColorIndex, atlases, maskValue, out);
         }
@@ -701,14 +706,16 @@ namespace rwe
         // here (TOTALA-EXE.md S:100).
         //
         // A mobile unit's shadow is a copy of its own silhouette under one
-        // displacement. The height that displacement is taken at is RWE's
-        // choice, the original's not being decoded, and it is the model's full
-        // height rather than its middle: the shadow the projection used to
-        // cast reached that far at the top of the model, and the unit is drawn
-        // over its own shadow afterwards, so taking it at the middle leaves
-        // little more than a crescent showing.
+        // displacement, and the displacement is decoded (TOTALA-EXE.md S:100):
+        // 0x45933D blits the copy at the unit's screen x plus 0x85 where
+        // 0x4597BA draws the unit itself at plus 0x80, and at the screen y of
+        // the ground under it rather than of the unit. So five pixels right,
+        // and down by however far the unit is above the ground -- nothing, for
+        // anything that drives. The height it is taken from is the unit's
+        // base. RWE used to take it from the top of the model, which is what
+        // made a commander look as if it were floating over its own shadow.
         auto shadow = unitDefinition.isMobile
-            ? ShadowProjection{groundHeight, false, position.y + simScalarToFloat(modelDefinition.height)}
+            ? ShadowProjection{groundHeight, false, position.y}
             : ShadowProjection{groundHeight, true, 0.0f};
 
         drawUnitShadowMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, frac, shadow, atlases, batch);

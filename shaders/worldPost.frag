@@ -164,17 +164,25 @@ int indexOf(vec4 entry)
     return int((entry.a * 255.0) + 0.5);
 }
 
-// Anything at all was drawn here: a cached building piece or an occluder.
+// Anything at all was drawn here: a building piece or an occluder.
 bool solid(vec4 texel)
 {
     return texel.a > 0.25;
 }
 
-// ...and it was a cached piece of a finished building, the only thing that can
-// carry the halo.
+// ...and it was part of a finished building, cached or not (1.0 or 0.7), which
+// is what decides the anti-aliasing: an extractor's spinning top is smoothed
+// with the rest of the extractor, whatever the units switch says.
+bool building(vec4 texel)
+{
+    return texel.a > 0.6;
+}
+
+// ...and it was a cached piece of a finished building (1.0), the only thing
+// that can carry the halo.
 bool cached(vec4 texel)
 {
-    return texel.a > 0.75;
+    return texel.a > 0.85;
 }
 
 // A mask sample: red is the index, and a sample with nothing in it stands in as
@@ -190,12 +198,11 @@ bool terrain(vec4 texel)
     return texel.g > 0.5;
 }
 
-// Solid, and not the ground: a unit, a nanoframe, a modelled feature, or a
-// dont-cache piece of a building. Everything the original drew straight to
-// the screen without a double-size buffer anywhere near it.
+// Solid, and neither the ground nor a building: a unit, a nanoframe or a
+// modelled feature. What the units switch governs.
 bool unfiltered(vec4 texel)
 {
-    return solid(texel) && !terrain(texel) && !cached(texel);
+    return solid(texel) && !terrain(texel) && !building(texel);
 }
 
 void main(void)
@@ -223,11 +230,12 @@ void main(void)
 
     if (selectiveAntiAlias > 0.0)
     {
-        // A cached building piece anywhere in the block is what the original
+        // A building piece anywhere in the block is what the original
         // filtered, and the block is averaged for it -- its silhouette
-        // included, which is where the halo comes from and why the two have
-        // to agree about which blocks those are.
-        bool filterThis = cached(s00) || cached(s10) || cached(s01) || cached(s11);
+        // included, which is where the halo comes from. The halo's own test
+        // below is narrower, cached pieces only, so a dont-cache piece is
+        // smoothed with its building but never fringed.
+        bool filterThis = building(s00) || building(s10) || building(s01) || building(s11);
 
         // And the player's own answer to the question the original never
         // asked, for everything solid that is not the ground.

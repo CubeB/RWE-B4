@@ -8709,13 +8709,24 @@ original:
   RWE's VISUALS page carries a four-state Shading switch -- Off, Units,
   Buildings, Both -- and two rwe.cfg keys, `shading-strength-units` and
   `shading-strength-buildings`, blend the measured `PALETTE.SHD` ramp towards
-  the unshaded colour. Both strengths default to 100, so what ships is the
-  original's arithmetic in full: the per-vertex level, the wrap, the
-  unnormalised normals and sun, the row truncated per pixel. (They shipped
-  at 40 and 25 for a while, because the level is computed in world space and
-  a unit's banding slides across it as it turns, which reads as flicker
-  rather than form on something small and moving; that softening is now
-  opt-in.)
+  the unshaded colour. Both default to 40. The shape of the ramp is the
+  original's in full -- the per-vertex level, the wrap, the unnormalised
+  normals and sun, the row truncated per pixel -- and only its depth is pulled
+  in: at 100 the table's snap to the nearest palette entry reads as banding on
+  a modern screen and row 0 is a true black, which was tried on 2026-09-08 and
+  rejected on sight. Units sat at 25 until 2026-09-11, when a play-test found
+  it too faint to see on a commander at all; they went to 40 with the
+  buildings. (An earlier version of this entry said both defaulted to 100.
+  They never shipped that way; see the comment on `shadingStrengthUnits` in
+  `GlobalConfig.h`.)
+- **Units are anti-aliased by default, and so is a building's dont-cache
+  piece.** The original box-filters a building's cached bitmap and nothing
+  else (§101). RWE filters the same, plus two things it did not: everything
+  solid that is not the ground, while `anti-alias-units` is on, which it is
+  by default since 2026-09-11; and a finished building's dont-cache pieces,
+  such as a metal extractor's top, always, because in play they read as part
+  of the building. Neither gets the halo, which stays on the cached pieces
+  the original's table actually saw.
 - **A finished `ZBuffer=0` unit's flat-coloured faces are unshaded.** The
   original leaves such a unit's textured quads raw but still shades its
   flat-colour n-gons (TOTALA-EXE-SHADING.md S:23). RWE draws the whole model
@@ -10515,7 +10526,9 @@ y words — and then fills it:
 index** — one value, which is why Mavor could RLE it "since it's all the same
 intensity", and why cutting the building's own shape out of it was worth doing
 separately. Both paths then composite through `0x4B8500`, the recursive drawable
-blitter, at a Y biased by `+0x85`. VERIFIED.
+blitter, at a screen x biased by `+0x85`. That is an x and not a y: the unit
+itself is drawn by the same blitter at `+0x80` (`0x4597BA`), which is the
+128-pixel side panel, and its y carries the `+32` of the top bar. VERIFIED.
 
 ### What RWE does instead
 
@@ -10537,14 +10550,30 @@ because the bit's meaning is not established. The second option bit is in too,
 as the `vehicle-shadows` key in `rwe.cfg` — not as a button, because VISUALRT
 has exactly one shadow gadget and RWE already wires it to the master.
 
-Two things are still RWE's own. The **offset** is: the original's is not
-decoded, so RWE takes the displacement at the unit's base plus its full model
-height. That is how far the old projection reached at the top of the model, and
-it has to be about that far: the unit is drawn over its own shadow afterwards,
-so a displacement taken at the middle of the model leaves little more than a
-crescent showing. It still rises with an aircraft as it climbs. And the
-**darkening** is: a screen fill of black at 70% alpha through the stencil,
-where the original's is a palette lookup on a single fill index.
+**The offset is decoded, as of 2026-09-11.** The unit's own bitmap goes to
+`0x4B8500` at `(sx + 0x80, syUnit)` from `0x4597BA`, and the vehicle shadow's
+copy at `(sx + 0x85, syGround)` from `0x45933D`, where
+
+```
+sx       = int(unit.x - camX)
+syUnit   = int(dz) - int(unit.y) / 2 + 32
+syGround = int(dz) - h / 2 + 32          ; h = 0x485070(&unit.pos), the ground
+```
+
+So a unit's shadow is its silhouette **five pixels to the right**, at the
+height of the ground under it: nothing more for anything that drives, and for
+an aircraft the silhouette lands on the ground below it and walks away as it
+climbs, which is the behaviour everyone remembers. RWE lowers every vertex by
+the unit's height above the ground (the camera's own `y / 2` does the halving)
+and adds 5 to x. It used to take the displacement from the top of the model
+instead, down-right by a quarter of the model's height, which looked plausible
+on paper and in play made a commander look as if it were floating. That
+reading had been chosen before this decode, to keep a visible crescent past
+the unit; the original shows much less of its unit shadows than that.
+
+One thing is still RWE's own: the **darkening**, a screen fill of black at 70%
+alpha through the stencil, where the original's is a palette lookup on a single
+fill index.
 
 Two things this does **not** settle, and they are not guessed at here: which
 table the darkening lookup uses (`0x4B8500` is a tree walk, and the blit it
@@ -10602,11 +10631,23 @@ have produced. The ground and the units are therefore left alone, as they
 were in 1997. The mask the halo already reads carries the flags: alpha is the
 occluder level it always was, and green is the ground.
 
-One switch sits on top of it, `anti-alias-units` (VISUALS page, off by
-default), which puts units, nanoframes, features and dont-cache pieces back
-into the filter for anyone who wants smooth edges on them more than they want
-the original. The ground stays out either way: the blur there was never
-anti-aliasing, it was a box filter over a texture that cannot survive one.
+One switch sits on top of it, `anti-alias-units` (VISUALS page), which puts
+units, nanoframes and features back into the filter for anyone who wants
+smooth edges on them more than they want the original. It shipped off, the
+faithful setting, and was turned on by default on 2026-09-11: in play, sharp
+units beside smoothed buildings looked like a fault rather than like 1997. The
+ground stays out either way: the blur there was never anti-aliasing, it was a
+box filter over a texture that cannot survive one.
+
+**A finished building's dont-cache piece follows the building, not the
+switch** (2026-09-11). It used to go into the mask as an ordinary occluder, at
+0.5, so a metal extractor's spinning top went sharp or smooth with the units.
+It has a level of its own now, 0.7: `building()` in `worldPost.frag` (above
+0.6) decides the filter and `cached()` (above 0.85) still decides the halo, so
+the top is smoothed with its extractor and still carries no fringe. Strictly
+the original drew that piece straight to the screen unfiltered, so this is a
+second deliberate divergence beside the switch; the player's reading, that an
+extractor's top is part of a building, is the one kept.
 
 So the direction of travel is worth stating plainly, because it is the
 opposite of what it looks like: **this removed a divergence rather than
