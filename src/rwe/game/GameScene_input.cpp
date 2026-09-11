@@ -530,41 +530,22 @@ namespace rwe
                     }
                 },
                 [&](const MoveCursorMode&) {
+                    // The MOVE button is not a plain move: command 2 is the
+                    // original's full context ladder (0x43F845), and it is
+                    // the only armed command that can produce a pickup, a
+                    // capture or a landing without its own button. A move
+                    // onto one of our own repair pads has always come out of
+                    // it as VTOL_LANDING (0x43FB1B), which is the gesture the
+                    // FAQ describes: "Select the plane, click on Move and
+                    // then click on the repair pad." See TOTALA-EXE.md S:103.
+                    auto issued = false;
                     for (const auto& selectedUnit : selectedUnits)
                     {
-                        // A move onto one of our own repair pads is a landing,
-                        // not a move. The original's order dispatcher turns the
-                        // same click into VTOL_LANDING (0x43FB1B), and the FAQ
-                        // describes this exact gesture from the other side:
-                        // "Select the plane, click on Move and then click on
-                        // the repair pad."
-                        if (hoveredUnit && unitShouldLandOnAirBase(simulation, selectedUnit, *hoveredUnit))
-                        {
-                            if (isShiftDown())
-                            {
-                                localPlayerEnqueueUnitOrder(selectedUnit, LandOnAirBaseOrder(*hoveredUnit));
-                            }
-                            else
-                            {
-                                localPlayerIssueUnitOrder(selectedUnit, LandOnAirBaseOrder(*hoveredUnit));
-                                cursorMode.next(NormalCursorMode());
-                            }
-                            continue;
-                        }
-
-                        auto coord = getMouseTerrainCoordinate();
-                        if (coord)
-                        {
-                            if (isShiftDown())
-                            {
-                                localPlayerEnqueueUnitOrder(selectedUnit, MoveOrder(*coord));
-                            }
-                            else
-                            {
-                                localPlayerIssueUnitOrder(selectedUnit, MoveOrder(*coord));
-                                cursorMode.next(NormalCursorMode());
-                            }
-                        }
+                        issued = issueDefaultAction(selectedUnit, DefaultActionScheme::MoveButton) || issued;
+                    }
+                    if (issued && !isShiftDown())
+                    {
+                        cursorMode.next(NormalCursorMode());
                     }
                 },
                 [&](const GuardCursorMode&) {
@@ -769,49 +750,7 @@ namespace rwe
                         {
                             for (const auto& selectedUnit : selectedUnits)
                             {
-                                if (hoveredUnit)
-                                {
-                                    if (isEnemy(*hoveredUnit))
-                                    {
-                                        if (isShiftDown())
-                                        {
-                                            localPlayerEnqueueUnitOrder(selectedUnit, AttackOrder(*hoveredUnit));
-                                        }
-                                        else
-                                        {
-                                            localPlayerIssueUnitOrder(selectedUnit, AttackOrder(*hoveredUnit));
-                                        }
-                                    }
-                                    else
-                                    {
-                                        if (const auto& u = getUnit(*hoveredUnit); u.isBeingBuilt(simulation.unitDefinitions.at(u.unitType)))
-                                        {
-                                            if (isShiftDown())
-                                            {
-                                                localPlayerEnqueueUnitOrder(selectedUnit, CompleteBuildOrder(*hoveredUnit));
-                                            }
-                                            else
-                                            {
-                                                localPlayerIssueUnitOrder(selectedUnit, CompleteBuildOrder(*hoveredUnit));
-                                            }
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    auto coord = getMouseTerrainCoordinate();
-                                    if (coord)
-                                    {
-                                        if (isShiftDown())
-                                        {
-                                            localPlayerEnqueueUnitOrder(selectedUnit, MoveOrder(*coord));
-                                        }
-                                        else
-                                        {
-                                            localPlayerIssueUnitOrder(selectedUnit, MoveOrder(*coord));
-                                        }
-                                    }
-                                }
+                                issueDefaultAction(selectedUnit, DefaultActionScheme::LeftClickDefault);
                             }
                         }
                         else
@@ -880,62 +819,17 @@ namespace rwe
                     }
                     else
                     {
+                        // "Right Click" mode issues the default action on the
+                        // right button (0x4991D5), and it is the longer of
+                        // the two ladders -- capture, reclaim, repair, land
+                        // on a pad, pick up, guard, and a move at the end of
+                        // it. This click used to fall through and issue
+                        // nothing at all on a friendly unit. The cursor is
+                        // not consulted here, and the original does not
+                        // consult it either. See TOTALA-EXE.md S:103.
                         for (const auto& selectedUnit : selectedUnits)
                         {
-                            if (hoveredUnit)
-                            {
-                                if (isEnemy(*hoveredUnit))
-                                {
-                                    if (isShiftDown())
-                                    {
-                                        localPlayerEnqueueUnitOrder(selectedUnit, AttackOrder(*hoveredUnit));
-                                    }
-                                    else
-                                    {
-                                        localPlayerIssueUnitOrder(selectedUnit, AttackOrder(*hoveredUnit));
-                                    }
-                                }
-                                else
-                                {
-                                    if (const auto& u = getUnit(*hoveredUnit); u.isBeingBuilt(simulation.unitDefinitions.at(u.unitType)))
-                                    {
-                                        if (isShiftDown())
-                                        {
-                                            localPlayerEnqueueUnitOrder(selectedUnit, CompleteBuildOrder(*hoveredUnit));
-                                        }
-                                        else
-                                        {
-                                            localPlayerIssueUnitOrder(selectedUnit, CompleteBuildOrder(*hoveredUnit));
-                                        }
-                                    }
-                                }
-                            }
-                            else if (hoveredFeature && featureCanBeReclaimed(simulation, *hoveredFeature))
-                            {
-                                if (isShiftDown())
-                                {
-                                    localPlayerEnqueueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
-                                }
-                                else
-                                {
-                                    localPlayerIssueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
-                                }
-                            }
-                            else
-                            {
-                                auto coord = getMouseTerrainCoordinate();
-                                if (coord)
-                                {
-                                    if (isShiftDown())
-                                    {
-                                        localPlayerEnqueueUnitOrder(selectedUnit, MoveOrder(*coord));
-                                    }
-                                    else
-                                    {
-                                        localPlayerIssueUnitOrder(selectedUnit, MoveOrder(*coord));
-                                    }
-                                }
-                            }
+                            issueDefaultAction(selectedUnit, DefaultActionScheme::RightClickDefault);
                         }
                     }
                 });
@@ -985,88 +879,20 @@ namespace rwe
                                         replaceUnitSelection(*hoveredUnit);
                                     }
                                 }
-                                else if (leftClickMode() && hoveredUnit)
-                                {
-                                    if (isEnemy(*hoveredUnit))
-                                    {
-                                        for (const auto& selectedUnit : selectedUnits)
-                                        {
-                                            if (isShiftDown())
-                                            {
-                                                localPlayerEnqueueUnitOrder(selectedUnit, AttackOrder(*hoveredUnit));
-                                            }
-                                            else
-                                            {
-                                                localPlayerIssueUnitOrder(selectedUnit, AttackOrder(*hoveredUnit));
-                                            }
-                                        }
-                                    }
-                                    else
-                                    {
-                                        if (const auto& u = getUnit(*hoveredUnit); u.isBeingBuilt(simulation.unitDefinitions.at(u.unitType)))
-                                        {
-                                            for (const auto& selectedUnit : selectedUnits)
-                                            {
-                                                if (isShiftDown())
-                                                {
-                                                    localPlayerEnqueueUnitOrder(selectedUnit, CompleteBuildOrder(*hoveredUnit));
-                                                }
-                                                else
-                                                {
-                                                    localPlayerIssueUnitOrder(selectedUnit, CompleteBuildOrder(*hoveredUnit));
-                                                }
-                                            }
-                                        }
-                                        else if (unitIsDamaged(simulation, *hoveredUnit))
-                                        {
-                                            for (const auto& selectedUnit : selectedUnits)
-                                            {
-                                                if (!unitIsBuilder(simulation, selectedUnit))
-                                                {
-                                                    continue;
-                                                }
-                                                if (isShiftDown())
-                                                {
-                                                    localPlayerEnqueueUnitOrder(selectedUnit, RepairOrder(*hoveredUnit));
-                                                }
-                                                else
-                                                {
-                                                    localPlayerIssueUnitOrder(selectedUnit, RepairOrder(*hoveredUnit));
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                else if (leftClickMode() && hoveredFeature && featureCanBeReclaimed(simulation, *hoveredFeature))
-                                {
-                                    for (const auto& selectedUnit : selectedUnits)
-                                    {
-                                        if (isShiftDown())
-                                        {
-                                            localPlayerEnqueueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
-                                        }
-                                        else
-                                        {
-                                            localPlayerIssueUnitOrder(selectedUnit, ReclaimOrder(*hoveredFeature));
-                                        }
-                                    }
-                                }
                                 else if (leftClickMode())
                                 {
-                                    auto coord = getMouseTerrainCoordinate();
-                                    if (coord)
+                                    // The shipped scheme's shorter ladder,
+                                    // 0x43FE35 for the order and 0x43E512
+                                    // for the cursor that gates it. The
+                                    // select arm above is the ladder's
+                                    // fourth, lifted out because a selection
+                                    // is not made per selected unit and
+                                    // because shift toggles it rather than
+                                    // queueing anything. See TOTALA-EXE.md
+                                    // S:103.
+                                    for (const auto& selectedUnit : selectedUnits)
                                     {
-                                        for (const auto& selectedUnit : selectedUnits)
-                                        {
-                                            if (isShiftDown())
-                                            {
-                                                localPlayerEnqueueUnitOrder(selectedUnit, MoveOrder(*coord));
-                                            }
-                                            else
-                                            {
-                                                localPlayerIssueUnitOrder(selectedUnit, MoveOrder(*coord));
-                                            }
-                                        }
+                                        issueDefaultAction(selectedUnit, DefaultActionScheme::LeftClickDefault);
                                     }
                                 }
                                 else
@@ -1115,6 +941,52 @@ namespace rwe
                 cameraControlState = CameraControlStateFree();
             }
         }
+    }
+
+    bool GameScene::issueDefaultAction(UnitId selectedUnit, DefaultActionScheme scheme)
+    {
+        auto action = computeDefaultAction(simulation, scheme, selectedUnit, hoveredUnit, hoveredFeature);
+
+        std::optional<UnitOrder> order;
+        if (auto o = std::get_if<DefaultActionOrder>(&action.action); o != nullptr)
+        {
+            order = o->order;
+        }
+        else if (std::holds_alternative<DefaultActionMove>(action.action))
+        {
+            // The ladder says "go there" without knowing where there is; the
+            // point comes from the same place every other move order's does.
+            if (auto coord = getMouseTerrainCoordinate(); coord)
+            {
+                order = MoveOrder(*coord);
+            }
+        }
+
+        if (!order)
+        {
+            return false;
+        }
+
+        if (isShiftDown())
+        {
+            localPlayerEnqueueUnitOrder(selectedUnit, *order);
+        }
+        else
+        {
+            localPlayerIssueUnitOrder(selectedUnit, *order);
+        }
+
+        return true;
+    }
+
+    CursorType GameScene::selectionDefaultCursor(DefaultActionScheme scheme) const
+    {
+        auto cursor = CursorType::Normal;
+        for (const auto& selectedUnit : selectedUnits)
+        {
+            cursor = preferredCursor(cursor, computeDefaultAction(simulation, scheme, selectedUnit, hoveredUnit, hoveredFeature).cursor);
+        }
+        return cursor;
     }
 
     Rectangle2f computeCameraConstraint(const MapTerrain& terrain, float viewportWidth, float viewportHeight)

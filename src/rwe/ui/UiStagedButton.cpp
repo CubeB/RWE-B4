@@ -1,5 +1,7 @@
 #include "UiStagedButton.h"
 
+#include <cmath>
+
 namespace rwe
 {
     ButtonClickEvent::Source mouseButtonToSource(MouseButtonEvent::MouseButton btn)
@@ -26,49 +28,77 @@ namespace rwe
 
         graphics.drawSpriteAbs(posX, posY, sprite);
 
+        if (textAlign == TextAlign::Hidden)
+        {
+            return;
+        }
+
         const auto& label = stages[currentStage].label;
+
+        // Where the caption's own origin lands, settled once so that the drop
+        // shadow, the caption and the quick-key underline all follow the same
+        // alignment. The two centred cases work out here what
+        // drawTextCentered and drawTextCenteredX would work out internally,
+        // rounding included -- and the pressed shift stays exact through
+        // that, round(a + 1) being round(a) + 1 for any a.
+        float textX;
+        float textY;
         switch (textAlign)
         {
-            case TextAlign::Hidden:
-                break;
             case TextAlign::Left:
-            {
-                float textX = posX + 6.0f;
-                float textY = posY + (sizeY / 2.0f) + 6.0f;
-                if (pressed)
-                {
-                    textX += 1.0f;
-                    textY += 1.0f;
-                }
-                graphics.drawText(textX, textY, label, *labelFont);
+                textX = posX + 6.0f;
+                textY = posY + (sizeY / 2.0f) + 6.0f;
                 break;
-            }
             case TextAlign::Center:
-            {
-                float textX = posX + (sizeX / 2.0f);
-                float textY = posY + (sizeY / 2.0f);
-                if (pressed)
-                {
-                    textX += 1.0f;
-                    textY += 1.0f;
-                }
-                graphics.drawTextCentered(textX, textY, label, *labelFont);
+                textX = std::round((posX + (sizeX / 2.0f)) - (graphics.getTextWidth(label, *labelFont) / 2.0f));
+                textY = std::round(posY + (sizeY / 2.0f) + 5.0f);
                 break;
-            }
             case TextAlign::BottomCenter:
-            {
-                float textX = posX + (sizeX / 2.0f);
-                float textY = posY + sizeY - 7;
-                if (pressed)
-                {
-                    textX += 1.0f;
-                    textY += 1.0f;
-                }
-                graphics.drawTextCenteredX(textX, textY, label, *labelFont);
+                textX = std::round((posX + (sizeX / 2.0f)) - (graphics.getTextWidth(label, *labelFont) / 2.0f));
+                textY = posY + sizeY - 7;
                 break;
-            }
             default:
                 throw std::logic_error("Invalid TextAlign value");
+        }
+
+        if (pressed)
+        {
+            textX += 1.0f;
+            textY += 1.0f;
+        }
+
+        // S:99: the drop shadow, at (x+1, y+3) in interface colour 0, is
+        // drawn only for a gadget whose attribs carry bit 3 -- 0x4A59A4
+        // tests it before 0x4A59A9-0x4A59E3 draw anything. The shipped menu
+        // buttons do not set it, so the original shows them without one.
+        // Interface colour 0 is GUIPAL's black; RWE has no runtime
+        // interface-colour table, so it is a literal with the slot named, as
+        // the minimap rings are in GameScene_render.
+        if (captionShadow)
+        {
+            graphics.drawText(textX + 1.0f, textY + 3.0f, label, *labelFont, Color(0, 0, 0));
+        }
+        graphics.drawText(textX, textY, label, *labelFont);
+
+        // S:99, 0x4A5B2C-0x4A5CFC: where the gadget's quickkey character
+        // appears in its caption, the original draws a line under it with its
+        // line routine 0x4BE950, in interface colour 2 ([cfg+0x8B4]) -- GUIPAL
+        // green, palette index 2 on screen, (0, 128, 0) -- not in the
+        // caption's colour. The line runs the character's advance, and sits
+        // one row below the height of the font's 'I': 0x4A5CB7 measures that
+        // glyph and draws at y + height + 1. The glyph's bottom edge is its
+        // top plus its height, so here that is textY + bottom + 1.
+        if (quickKey)
+        {
+            if (auto span = findCharacterInText(label, *quickKey, *labelFont))
+            {
+                auto lineY = textY + 1.0f;
+                if (static_cast<std::size_t>('I') < labelFont->sprites.size())
+                {
+                    lineY = textY + labelFont->sprites['I']->bounds.bottom() + 1.0f;
+                }
+                graphics.fillColor(textX + span->x, lineY, span->width, 1.0f, Color(0, 128, 0));
+            }
         }
     }
 
@@ -281,6 +311,11 @@ namespace rwe
     void UiStagedButton::setQuickKey(int quickKey)
     {
         this->quickKey = quickKey;
+    }
+
+    void UiStagedButton::setCaptionShadow(bool shadow)
+    {
+        captionShadow = shadow;
     }
 
     void UiStagedButton::nextStage()

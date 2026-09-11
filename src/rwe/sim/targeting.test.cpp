@@ -126,7 +126,17 @@ namespace rwe
 
         void putInTheAir(GameSimulation& sim, UnitId id)
         {
-            sim.getUnitState(id).physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            auto& unit = sim.getUnitState(id);
+
+            // Whatever this is, it is an aircraft now. Handing a unit air
+            // physics while its definition still says canfly=0 is a state the
+            // game cannot produce, and moveTo sends such a unit down the
+            // ground path, where the follower asserts on the physics it finds
+            // -- which is exactly the invariant the assertion is there to
+            // protect.
+            sim.unitDefinitions.at(unit.unitType).canFly = true;
+
+            unit.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
             sim.flyingUnitsSet.insert(id);
         }
 

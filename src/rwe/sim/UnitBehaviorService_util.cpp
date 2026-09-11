@@ -577,57 +577,98 @@ namespace rwe
             static_cast<int>((-shot.x * rockAngle).value)};
     }
 
-    SteeringInfo seek(const UnitState& unit, const UnitDefinition& unitDefinition, const SimVector& destination)
+    SteeringInfo followSegment(
+        const UnitState& unit,
+        const UnitDefinition& unitDefinition,
+        const UnitPhysicsInfoGround& physics,
+        const SimVector& previousWaypoint,
+        const SimVector& nextWaypoint,
+        const SimVector& afterNextWaypoint)
     {
         SimVector xzPosition(unit.position.x, 0_ss, unit.position.z);
-        SimVector xzDestination(destination.x, 0_ss, destination.z);
-        auto xzDirection = xzDestination - xzPosition;
+        SimVector xzNext(nextWaypoint.x, 0_ss, nextWaypoint.z);
+        SimVector xzPrevious(previousWaypoint.x, 0_ss, previousWaypoint.z);
+        SimVector xzAfterNext(afterNextWaypoint.x, 0_ss, afterNextWaypoint.z);
 
-        // Already at destination horizontally — hold heading and stop.
-        // Reaches here when an aircraft is ordered to attack the ground
-        // directly below it, or when a unit is exactly on its target.
-        if (xzDirection.lengthSquared() == 0_ss)
+        auto toNext = xzNext - xzPosition;
+        auto distanceToNext = toNext.length();
+
+        // The aim point, 0x43CDB4 to 0x43CE99. A unit does not steer at the
+        // corner ahead of it: it steers at the point on the segment it is
+        // walking that is eighty world units closer to that corner than the
+        // unit itself is, and never further back than the corner behind it.
+        //
+        // On the line that is plain pure pursuit with an eighty-unit
+        // look-ahead. Off the line it is a corridor: the further sideways a
+        // unit has drifted the further back along the segment it aims, so it
+        // is steered onto the line rather than at the end of it. Inside
+        // eighty units the projection stops and the unit homes on the corner.
+        auto aimPoint = xzNext;
+        if (distanceToNext > PathLookAheadDistance)
+        {
+            auto segment = xzNext - xzPrevious;
+            auto segmentLength = segment.length();
+            if (segmentLength >= PathMinSegmentLength)
+            {
+                auto back = rweMin(distanceToNext - PathLookAheadDistance, segmentLength);
+                aimPoint = xzNext - ((segment / segmentLength) * back);
+            }
+        }
+
+        auto toAim = aimPoint - xzPosition;
+
+        // Standing exactly on the aim point: hold the heading and stop, the
+        // way the turn half of 0x43CD20 does nothing when the error is zero.
+        if (toAim.lengthSquared() == 0_ss)
         {
             return SteeringInfo{unit.rotation, 0_ss};
         }
 
-        // scale desired speed proportionally to how aligned we are
-        // with the target direction
-        auto normalizedUnitDirection = UnitState::toDirection(unit.rotation);
-        auto normalizedXzDirection = xzDirection.normalized();
-        auto speedFactor = rweMax(0_ss, normalizedUnitDirection.dot(normalizedXzDirection));
+        auto targetAngle = UnitState::toRotation(toAim);
+        auto headingError = angleBetween(unit.rotation, targetAngle);
 
-        // Bias the speed factor towards zero if we are within our turn radius of the goal.
-        // This is to try and discourage units from orbiting their destination.
-        auto turnRadius = getTurnRadius(unitDefinition.maxVelocity, unitDefinition.turnRate);
-        if (xzDirection.lengthSquared() <= turnRadius * turnRadius)
+        // The two brake tests, 0x43D000 to 0x43D0C0. Both are written the way
+        // the original writes them -- divide first, square afterwards --
+        // rather than cross-multiplied into a division-free form. The
+        // original divides with 64-bit intermediates and the truncation of
+        // that first division is part of the arithmetic: rearranging it moves
+        // the tick a unit starts braking on. A SimScalar division is one IEEE
+        // operation with one correctly rounded result, so it gives every peer
+        // the same answer and there is no determinism reason to reshape it.
+        //
+        // The corner test: accelerate only while the aim point is further
+        // away than twice the distance the unit would cover in the ticks it
+        // still needs to finish turning. It is a turn-radius test in
+        // disguise, and it is what slows a unit for a corner in proportion to
+        // how sharp the corner is. A unit already pointing at its aim point
+        // always passes it.
+        //
+        // The arrival test: the textbook stopping distance, measured to the
+        // waypoint after next. On a path of three points or fewer that is the
+        // final waypoint, so this is the brake into the destination; on a
+        // longer path it is a mild look-ahead of its own.
+        //
+        // Failing either brakes at brakerate. There is no partial throttle:
+        // every tick the unit either adds acceleration or subtracts
+        // brakerate, and the speed cap does the rest.
+        auto cornerTestPassed = true;
+        if (unitDefinition.turnRate > 0_ss)
         {
-            speedFactor = speedFactor * speedFactor;
+            auto turnDistance = (SimScalar(static_cast<float>(headingError.value)) * physics.currentSpeed) / unitDefinition.turnRate;
+            auto cornerBrakeDistance = 2_ss * turnDistance;
+            cornerTestPassed = toAim.lengthSquared() > (cornerBrakeDistance * cornerBrakeDistance);
+        }
+
+        auto arrivalTestPassed = true;
+        if (unitDefinition.brakeRate > 0_ss)
+        {
+            auto stoppingDistance = (physics.currentSpeed * physics.currentSpeed) / (2_ss * unitDefinition.brakeRate);
+            arrivalTestPassed = xzPosition.distanceSquared(xzAfterNext) > (stoppingDistance * stoppingDistance);
         }
 
         return SteeringInfo{
-            UnitState::toRotation(xzDirection),
-            unitDefinition.maxVelocity * speedFactor,
-        };
-    }
-
-    SteeringInfo arrive(const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoGround& physics, const SimVector& destination)
-    {
-        SimVector xzPosition(unit.position.x, 0_ss, unit.position.z);
-        SimVector xzDestination(destination.x, 0_ss, destination.z);
-        auto distanceSquared = xzPosition.distanceSquared(xzDestination);
-        auto brakingDistance = (physics.currentSpeed * physics.currentSpeed) / (2_ss * unitDefinition.brakeRate);
-
-        if (distanceSquared > (brakingDistance * brakingDistance))
-        {
-            return seek(unit, unitDefinition, destination);
-        }
-
-        // slow down when approaching the destination
-        auto xzDirection = xzDestination - xzPosition;
-        return SteeringInfo{
-            UnitState::toRotation(xzDirection),
-            0_ss,
+            targetAngle,
+            (cornerTestPassed && arrivalTestPassed) ? unitDefinition.maxVelocity : 0_ss,
         };
     }
 

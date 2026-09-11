@@ -25,6 +25,7 @@ namespace rwe
         unsigned int pendingScrollSpeed{100};
         SoundMode pendingSoundMode{SoundMode::Stereo};
         UnitSpeechLevel pendingUnitSpeech{UnitSpeechLevel::Full};
+        MusicTrackMode pendingMusicTrackMode{MusicTrackMode::Custom};
         unsigned int pendingGamma{100};
         ShadingMode pendingShading{ShadingMode::Both};
         bool pendingAntiAlias{true};

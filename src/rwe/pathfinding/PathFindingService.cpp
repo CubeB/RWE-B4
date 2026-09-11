@@ -250,16 +250,23 @@ namespace rwe
         if (path.path.size() == 1)
         {
             // The path is trivial, we are already at the goal
-            // (or as close to it as we can get).
+            // (or as close to it as we can get). Two points even so: the
+            // follower walks the segment between the corner behind the unit
+            // and the one ahead of it, so a path always has both.
             const auto* position = std::get_if<SimVector>(&search.destination);
             auto only = (unreachable || position == nullptr) ? unit.position : *position;
-            return UnitPath{std::vector<SimVector>{only}, unreachable};
+            return UnitPath{std::vector<SimVector>{unit.position, only}, unreachable};
         }
 
         auto simplifiedPath = runSimplifyPath(path.path);
 
+        // The cell the unit started in is kept rather than dropped. It is the
+        // navigator's wp[0], the corner the unit has left, and without it
+        // there is no segment for the follower to project its aim point onto
+        // -- see TOTALA-EXE.md section 102. The original's emitter builds it
+        // the same way as every other corner (0x40E11F).
         std::vector<SimVector> waypoints;
-        for (auto it = ++simplifiedPath.cbegin(); it != simplifiedPath.cend(); ++it)
+        for (auto it = simplifiedPath.cbegin(); it != simplifiedPath.cend(); ++it)
         {
             waypoints.push_back(getWorldCenter(simulation, DiscreteRect(it->x, it->y, search.start.width, search.start.height)));
         }

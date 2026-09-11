@@ -191,11 +191,12 @@ namespace rwe
         // spawning the starting commanders.
         auto parameters = save->parameters;
         parameters.loadFromSaveFile = path.string();
-        leaveFor(std::make_shared<LoadingScene>(
+        auto scene = std::make_shared<LoadingScene>(
             sceneContext,
             audioLookup,
             AudioService::LoopToken(),
-            parameters));
+            parameters);
+        leaveFor(scene);
     }
 
     void GameScene::applyLoadedGame(const SaveFile& save)
@@ -304,11 +305,12 @@ namespace rwe
         // Same pipeline loadSavedGame hands a save to, minus the save: a
         // fresh LoadingScene over the game's own parameters spawns the
         // starting commanders exactly as the first load did.
-        leaveFor(std::make_shared<LoadingScene>(
+        auto scene = std::make_shared<LoadingScene>(
             sceneContext,
             audioLookup,
             AudioService::LoopToken(),
-            gameParameters));
+            gameParameters);
+        leaveFor(scene);
     }
 
     void GameScene::openConfirmDialog(const std::string& title, std::function<void()> onYes, std::function<void()> onNo)
@@ -505,6 +507,11 @@ namespace rwe
             toggle->setStage(static_cast<unsigned int>(state.unitSpeech));
         }
 
+        if (auto toggle = findInGameMenu<UiStagedButton>("TRACKMODE"))
+        {
+            toggle->setStage(static_cast<unsigned int>(state.musicTrackMode));
+        }
+
         if (auto toggle = findInGameMenu<UiStagedButton>("BSHADOWS"))
         {
             toggle->setStage(state.shadows ? 1 : 0);
@@ -619,6 +626,7 @@ namespace rwe
             scrollSpeedSetting,
             soundModeSetting,
             unitSpeechSetting,
+            musicTrackModeSetting,
             gammaSetting,
             shadingMode,
             antiAliasEnabled,
@@ -637,6 +645,7 @@ namespace rwe
         scrollSpeedSetting = state.scrollSpeed;
         soundModeSetting = state.soundMode;
         unitSpeechSetting = state.unitSpeech;
+        musicTrackModeSetting = state.musicTrackMode;
         audio->setSoundEnabled(state.soundMode != SoundMode::Off);
         gammaSetting = state.gamma;
         applyGamma();
@@ -669,11 +678,12 @@ namespace rwe
 
     void GameScene::exitToMainMenu()
     {
-        leaveFor(std::make_shared<MainMenuScene>(
+        auto menu = std::make_shared<MainMenuScene>(
             sceneContext,
             audioLookup,
             sceneContext.viewport->width(),
-            sceneContext.viewport->height()));
+            sceneContext.viewport->height());
+        leaveFor(menu);
     }
 
     void GameScene::leaveFor(std::shared_ptr<Scene> scene)
@@ -841,7 +851,14 @@ namespace rwe
                 // TOTALA-EXE.md S:63, mode 2: "Surrender this battle and exit to Windows?"
                 openConfirmDialog(
                     "Surrender this battle and exit to Windows?",
-                    [this]() { sceneContext.sceneManager->requestExit(); },
+                    [this]() {
+                        // Exiting to Windows leaves the same window open as
+                        // the other exits do -- the loop only notices at the
+                        // top of the next frame -- so the music driver is
+                        // told to stand down here too.
+                        leavingScene = true;
+                        sceneContext.sceneManager->requestExit();
+                    },
                     [this]() { openGameExitMenu(); });
             }
             else if (control == "MAINMENU")
@@ -972,6 +989,13 @@ namespace rwe
                 // Off | Medium | Full: how much of the unit chatter plays.
                 unitSpeechSetting = nextStage(unitSpeechSetting);
             }
+            else if (control == "TRACKMODE")
+            {
+                // Play All | Random | Repeat | Custom, cycled by the button
+                // itself. The new mode takes over at the next track; the one
+                // playing is left to finish (TOTALA-EXE.md S:68).
+                musicTrackModeSetting = nextStage(musicTrackModeSetting);
+            }
             else if (control == "CDPLAY")
             {
                 sceneContext.audioService->setMusicEnabled(true);
@@ -983,7 +1007,10 @@ namespace rwe
             else if (control == "CDNEXT" || control == "CDPREV")
             {
                 // The in-game rotation picks its own next track; stopping the
-                // current one is what asks it for another.
+                // current one is what asks it for another. Play All and Repeat
+                // step through the album from the track that was playing, so
+                // they are told which way.
+                pendingMusicStep = control == "CDNEXT" ? 1 : -1;
                 sceneContext.audioService->stopMusic();
             }
             else if (control == "TEST")
@@ -1013,6 +1040,10 @@ namespace rwe
         if (auto toggle = findInGameMenu<UiStagedButton>("SPEECH"))
         {
             toggle->setStage(static_cast<unsigned int>(unitSpeechSetting));
+        }
+        if (auto toggle = findInGameMenu<UiStagedButton>("TRACKMODE"))
+        {
+            toggle->setStage(static_cast<unsigned int>(musicTrackModeSetting));
         }
         if (auto toggle = findInGameMenu<UiStagedButton>("BSHADOWS"))
         {
@@ -1098,10 +1129,14 @@ namespace rwe
     void GameScene::returnToMainMenu()
     {
         LOG_INFO << "Returning to the main menu";
-        leaveFor(std::make_shared<MainMenuScene>(
+        // The front end has no music of its own -- see MainMenuScene::init --
+        // so a track left running here plays over the whole menu. The same
+        // stop exitToMainMenu does, for the same reason.
+        auto scene = std::make_unique<MainMenuScene>(
             sceneContext,
             audioLookup,
             static_cast<float>(sceneContext.viewport->width()),
-            static_cast<float>(sceneContext.viewport->height())));
+            static_cast<float>(sceneContext.viewport->height()));
+        leaveFor(std::shared_ptr<Scene>(std::move(scene)));
     }
 }

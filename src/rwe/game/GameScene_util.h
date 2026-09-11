@@ -1,6 +1,7 @@
 #pragma once
 
 #include <rwe/AudioService.h>
+#include <rwe/GlobalConfig.h>
 #include <rwe/RenderService.h>
 #include <rwe/collections/VectorMap.h>
 #include <rwe/game/BuilderGuisDatabase.h>
@@ -548,16 +549,35 @@ namespace rwe
 
     unsigned int getBuildPageCount(const BuilderGuisDatabase& db, const std::string& unitType);
 
-    bool unitIsBuilder(const GameSimulation& sim, UnitId unitId);
-
     bool unitIsBuilder(const GameSimulation& sim, std::optional<UnitId> singleSelectedUnit);
-
-    bool unitShouldLandOnAirBase(const GameSimulation& sim, UnitId flyer, UnitId target);
-
-    bool unitIsDamaged(const GameSimulation& sim, UnitId unitId);
 
     /** True for particles drawn among the world's geometry rather than over the finished frame. */
     bool particleDrawsInWorld(const Particle& particle);
+
+    /**
+     * Whether the situational music driver should put the next track on.
+     *
+     * leavingScene is the one that is not about music at all. A scene that
+     * has stopped its music and handed the scene manager its successor is
+     * still the current scene for the rest of the frame, so it still gets an
+     * update; without this it would see a silent audio service, conclude that
+     * a track had ended, and start another one over the top of whatever the
+     * incoming scene starts. See GameScene::leavingScene.
+     */
+    bool shouldStartNextMusicTrack(bool leavingScene, bool musicPlaying, GameTime gameTime, GameTime holdOffUntil);
+
+    /**
+     * The next track for MUSICRT's Play All, Random and Repeat modes
+     * (TOTALA-EXE.md S:68), as an index into tracks, the playlist in album
+     * order. last is the track that played last, empty if none; step is +1
+     * or -1 after CDNEXT or CDPREV and 0 otherwise; randomValue is a raw draw
+     * from the scene's effects generator. Play All moves one on, or the way
+     * step says, wrapping; Repeat stays put unless stepped; Random takes any
+     * track. A last track not in the list starts from the first. Custom does
+     * not come here: the situational music picks by mood. tracks must not be
+     * empty.
+     */
+    std::size_t nextMusicTrackIndex(MusicTrackMode mode, const std::vector<std::string>& tracks, const std::string& last, int step, unsigned int randomValue);
 
     bool shouldShowAllBuildBoxes(const GameSimulation& sim, PlayerId localPlayerId, std::optional<UnitId> singleSelectedUnit, std::optional<UnitId> hoveredUnit);
 

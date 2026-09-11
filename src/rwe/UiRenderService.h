@@ -2,9 +2,11 @@
 
 #include <rwe/ShaderService.h>
 #include <algorithm>
+#include <optional>
 #include <rwe/Viewport.h>
 #include <rwe/render/GraphicsContext.h>
 #include <stack>
+#include <string>
 
 namespace rwe
 {
@@ -27,6 +29,34 @@ namespace rwe
      * than a division by zero.
      */
     UiOrthoBounds computeUiOrthoBounds(float contentWidth, float contentHeight, float windowWidth, float windowHeight);
+
+    /** Where one character sits inside a run of text, measured in the font's own advances. */
+    struct TextCharacterSpan
+    {
+        /** The offset of the character from the start of the run. */
+        float x;
+
+        /** The advance the run gains from that character, which is the width to underline. */
+        float width;
+    };
+
+    /**
+     * Where the first occurrence of `character` falls in `text`, stepping by
+     * the same per-glyph advances drawText steps by, so the answer lines up
+     * with what is on screen. Nothing if the character does not occur.
+     *
+     * Matched without regard to case. The original compares the gadget's
+     * `quickkey` byte against the caption as it stands, and the shipped gui
+     * files are authored to suit -- SKIRMISH.GUI's `SelectMap` carries a
+     * lowercase `e` for `Select Map` -- but RWE has already folded the
+     * quickkey to its SDL keycode by the time a button holds it, so the
+     * original's case is gone. Four shipped gadgets would lose their
+     * underline to a case-sensitive test anyway (MISSION.GUI's `SELECT`,
+     * whose key is `L` against `Select Mission`, and the three `UNDO`
+     * buttons, whose key is `c` against `Undo Changes`), so this is also the
+     * reading that underlines what the authors plainly meant.
+     */
+    std::optional<TextCharacterSpan> findCharacterInText(const std::string& text, int character, const SpriteSeries& font);
 
     class UiRenderService
     {

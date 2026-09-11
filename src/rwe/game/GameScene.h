@@ -19,6 +19,7 @@
 #include <rwe/UiRenderService.h>
 #include <rwe/Viewport.h>
 #include <rwe/game/BuilderGuisDatabase.h>
+#include <rwe/game/DefaultAction.h>
 #include <rwe/game/GameCameraState.h>
 #include <rwe/game/GameMediaDatabase.h>
 #include <rwe/game/GameNetworkService.h>
@@ -419,6 +420,8 @@ namespace rwe
 
         SoundMode soundModeSetting{SoundMode::Stereo};
         UnitSpeechLevel unitSpeechSetting{UnitSpeechLevel::Full};
+        /** MUSICRT's TRACKMODE, TOTALA-EXE.md S:68. Only Custom lets the situational music choose. */
+        MusicTrackMode musicTrackModeSetting{MusicTrackMode::Custom};
         unsigned int gammaSetting{100};
         ShadingMode shadingMode{ShadingMode::Both};
         bool antiAliasEnabled{true};
@@ -725,6 +728,10 @@ namespace rwe
         std::vector<std::string> battleTracks;
         std::vector<std::string> musicBag;
         std::string lastMusicTrack;
+        /** Every track but the title theme, in album order, for Play All, Random and Repeat. */
+        std::vector<std::string> allMusicTracks;
+        /** +1 or -1 after CDNEXT or CDPREV, used up by the next pick in Play All and Repeat. */
+        int pendingMusicStep{0};
         bool musicPlaylistBuilt{false};
 
         MusicSituation musicSituation{MusicSituation::Building};
@@ -738,15 +745,6 @@ namespace rwe
         /** Set when a type switch is fading the current track out. */
         std::optional<MusicSituation> musicFadeTarget;
         float musicFade{1.0f};
-
-        /**
-         * Set once this scene has handed the game to another. The scene is
-         * still current for the rest of the frame -- the manager swaps at
-         * the top of the next one -- so without this the update that follows
-         * a load or restart click would find the music stopped and start a
-         * fresh track, which then plays on into the incoming scene.
-         */
-        bool leavingScene{false};
 
         void addBattlePoints(int points);
         void updateMusic();
@@ -947,6 +945,23 @@ namespace rwe
         void localPlayerIssueUnitOrder(UnitId unitId, const UnitOrder& order);
 
         void localPlayerEnqueueUnitOrder(UnitId unitId, const UnitOrder& order);
+
+        /**
+         * What one selected unit does about a click on the world, run through
+         * the ladder in DefaultAction.h and issued or queued according to the
+         * shift key. Returns whether anything was ordered.
+         *
+         * A select is not handled here: the selection is not per unit, and
+         * the caller has already dealt with it.
+         */
+        bool issueDefaultAction(UnitId selectedUnit, DefaultActionScheme scheme);
+
+        /**
+         * The cursor the whole selection shows for the current hover under
+         * one scheme -- the lowest-numbered cursor any selected unit asks
+         * for, which is what the original's chooser loop keeps (0x48D3E9).
+         */
+        CursorType selectionDefaultCursor(DefaultActionScheme scheme) const;
 
         void localPlayerStopUnit(UnitId unitId);
 
@@ -1160,6 +1175,20 @@ namespace rwe
         std::function<void()> pendingConfirmAction;
         /** What CHOICE2 runs instead, or nothing to fall back to openGameMenuRoot(). */
         std::function<void()> pendingConfirmCancel;
+
+        /**
+         * Set the moment this scene has handed the scene manager its
+         * successor, and never cleared: the scene is on its way out.
+         *
+         * The swap is not immediate. SceneManager::execute takes the next
+         * scene at the top of the loop, so a scene that calls setNextScene
+         * from inside its own update -- which every exit here does, by way of
+         * pendingMenuActions -- still owns the audio service for the rest of
+         * that update and for the render that follows it. Anything that would
+         * start a sound the incoming scene has to live with has to know not
+         * to; the situational music driver is the one that did.
+         */
+        bool leavingScene{false};
 
         void exitToMainMenu();
         /**

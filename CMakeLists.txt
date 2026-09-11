@@ -293,6 +293,8 @@ set(SOURCE_FILES
     src/rwe/float_math.h
     src/rwe/game/BuilderGuisDatabase.cpp
     src/rwe/game/BuilderGuisDatabase.h
+    src/rwe/game/DefaultAction.cpp
+    src/rwe/game/DefaultAction.h
     src/rwe/game/FeatureMediaInfo.cpp
     src/rwe/game/FeatureMediaInfo.h
     src/rwe/game/FlashEffect.cpp
@@ -514,6 +516,8 @@ set(SOURCE_FILES
     src/rwe/setup/TaInstall.cpp
     src/rwe/setup/TaInstall.h
     src/rwe/scene/SceneManager.h
+    src/rwe/scene/Screenshot.cpp
+    src/rwe/scene/Screenshot.h
     src/rwe/scene/util.h
     src/rwe/sdl/SdlContext.h
     src/rwe/sdl/SdlContextManager.cpp
@@ -847,6 +851,8 @@ set(TEST_FILES
     src/rwe/collections/MinHeap.test.cpp
     src/rwe/observable/Subject.test.cpp
     src/rwe/collections/VectorMap.test.cpp
+    src/rwe/game/DefaultAction.test.cpp
+    src/rwe/game/GameScene_audio.test.cpp
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/cloakdisplay.test.cpp
     src/rwe/game/damagesmoke.test.cpp
@@ -877,6 +883,8 @@ set(TEST_FILES
     src/rwe/io/featuretdf/io.test.cpp
     src/rwe/io/gui/gui.test.cpp
     src/rwe/io/ota/ota.test.cpp
+    src/rwe/io/pcx/pcx.test.cpp
+    src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
     src/rwe/io/tdf/ListTdfAdapter.test.cpp
     src/rwe/io/tdf/NetSchemaTdfAdapter.test.cpp
@@ -909,6 +917,7 @@ set(TEST_FILES
     src/rwe/sim/nanoframedecay.test.cpp
     src/rwe/sim/patrol.test.cpp
     src/rwe/sim/capture.test.cpp
+    src/rwe/sim/worksounds.test.cpp
     src/rwe/sim/burning.test.cpp
     src/rwe/sim/waterbuilding.test.cpp
     src/rwe/setup/TaInstall.test.cpp
@@ -920,6 +929,7 @@ set(TEST_FILES
     src/rwe/sim/kamikaze.test.cpp
     src/rwe/sim/paralyzer.test.cpp
     src/rwe/sim/moverate.test.cpp
+    src/rwe/sim/pathfollowing.test.cpp
     src/rwe/sim/transport.test.cpp
     src/rwe/sim/bomber.test.cpp
     src/rwe/sim/bomberpatrol.test.cpp

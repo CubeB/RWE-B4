@@ -136,6 +136,7 @@ namespace rwe
             pendingScrollSpeed,
             pendingSoundMode,
             pendingUnitSpeech,
+            pendingMusicTrackMode,
             pendingGamma,
             pendingShading,
             pendingAntiAlias,
@@ -154,6 +155,7 @@ namespace rwe
         pendingScrollSpeed = state.scrollSpeed;
         pendingSoundMode = state.soundMode;
         pendingUnitSpeech = state.unitSpeech;
+        pendingMusicTrackMode = state.musicTrackMode;
         pendingGamma = state.gamma;
         pendingShading = state.shading;
         pendingAntiAlias = state.antiAlias;
@@ -181,6 +183,7 @@ namespace rwe
             pendingScrollSpeed = sceneContext.globalConfig->scrollSpeed;
             pendingSoundMode = static_cast<SoundMode>(sceneContext.globalConfig->soundMode);
             pendingUnitSpeech = static_cast<UnitSpeechLevel>(sceneContext.globalConfig->unitSpeech);
+            pendingMusicTrackMode = static_cast<MusicTrackMode>(sceneContext.globalConfig->musicTrackMode);
             pendingGamma = sceneContext.globalConfig->gamma;
             pendingShading = static_cast<ShadingMode>(sceneContext.globalConfig->shadingMode);
             pendingAntiAlias = sceneContext.globalConfig->antiAlias;
@@ -328,6 +331,10 @@ namespace rwe
         if (auto toggle = active.find<UiStagedButton>("SPEECH"))
         {
             toggle->get().setStage(static_cast<unsigned int>(pendingUnitSpeech));
+        }
+        if (auto toggle = active.find<UiStagedButton>("TRACKMODE"))
+        {
+            toggle->get().setStage(static_cast<unsigned int>(pendingMusicTrackMode));
         }
 
         if (auto bar = active.find<UiScrollBar>("GAMMA"))
@@ -638,6 +645,17 @@ namespace rwe
             {
                 playMovie("movies/2.zrb");
             }
+            else if (message == "Credits")
+            {
+                // MAINMENU.GUI's sixth gadget: a captionless 80x40 button at
+                // (280,440), sitting under the logo where nothing else is,
+                // and named `Credits` in the gui's own mixed case. The GOG
+                // release ships the films as movies/1.zrb..5.zrb, and 5 is
+                // the credits reel -- so this is the intro's own path with a
+                // different number, and a data set without the file gets the
+                // same no-op the intro gets.
+                playMovie("movies/5.zrb");
+            }
         }
         else if (topic == "SINGLE")
         {
@@ -735,6 +753,12 @@ namespace rwe
             else if (message == "SPEECH")
             {
                 pendingUnitSpeech = nextStage(pendingUnitSpeech);
+            }
+            else if (message == "TRACKMODE")
+            {
+                // Saved with the other options; the menu's own music is not
+                // governed by it.
+                pendingMusicTrackMode = nextStage(pendingMusicTrackMode);
             }
             else if (message == "SHADING")
             {
@@ -891,6 +915,10 @@ namespace rwe
         if (auto toggle = active.find<UiStagedButton>("SPEECH"))
         {
             toggle->get().setStage(static_cast<unsigned int>(pendingUnitSpeech));
+        }
+        if (auto toggle = active.find<UiStagedButton>("TRACKMODE"))
+        {
+            toggle->get().setStage(static_cast<unsigned int>(pendingMusicTrackMode));
         }
         if (auto toggle = active.find<UiStagedButton>("BSHADOWS"))
         {

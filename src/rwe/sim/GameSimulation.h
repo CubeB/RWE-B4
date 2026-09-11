@@ -296,6 +296,21 @@ namespace rwe
         UnitId unitId;
     };
 
+    /**
+     * A builder's nanolathe has just begun a reclaim or a capture job: the
+     * unit is in reach, the arm is out, and this is the first tick on which
+     * work is actually done. Sound slot 11, `working` -- `reclaim1` for every
+     * construction category in the shipped data -- is played once here, by
+     * all three of the original's Reclaim (0x404C69), ReclaimUnit (0x4048B5)
+     * and Capture (0x404568) handlers alike. See TOTALA-EXE.md §97.
+     *
+     * Emitted for the scene, and never hashed.
+     */
+    struct UnitStartedReclaimingEvent
+    {
+        UnitId unitId;
+    };
+
     struct EmitParticleFromPieceEvent
     {
         enum class SfxType
@@ -359,6 +374,15 @@ namespace rwe
         UnitId unitId;
         PlayerId previousOwner;
         PlayerId newOwner;
+
+        /**
+         * The unit that took it, where a unit did. Sound slot 16, `capture`,
+         * is played by the captor when the job lands (0x4046cc, the Capture
+         * mission's state 5) -- no shipped category sets the slot, so on the
+         * shipped data it is silent. See TOTALA-EXE.md §97. Empty when the
+         * change of hands came from somewhere other than a capture mission.
+         */
+        std::optional<UnitId> captorUnitId;
     };
 
     /** A feature has just been fully reclaimed and removed. */
@@ -395,6 +419,7 @@ namespace rwe
         UnitDiedEvent,
         UnitDamagedEvent,
         UnitStartedBuildingEvent,
+        UnitStartedReclaimingEvent,
         ProjectileDiedEvent,
         ProjectileDetonatedEvent,
         UnitCapturedEvent>;
@@ -660,8 +685,12 @@ namespace rwe
          *
          * The work of getting here is counted on the capture order, not here
          * and not on the target -- see CaptureOrder.
+         *
+         * `captorUnitId` names the unit that did it, where a unit did; it
+         * rides along on the event so the scene can play the captor's slot 16
+         * `capture` sound (TOTALA-EXE.md §97) and is otherwise unused.
          */
-        bool captureUnit(UnitId targetId, PlayerId captor);
+        bool captureUnit(UnitId targetId, PlayerId captor, std::optional<UnitId> captorUnitId = std::nullopt);
 
         /** Length of the self-destruct countdown, as in TA. */
         static constexpr unsigned int SelfDestructCountdownTicks = 5 * SimTicksPerSecond;

@@ -30,6 +30,21 @@ namespace rwe
         }
     }
 
+    MusicTrackMode nextStage(MusicTrackMode mode)
+    {
+        switch (mode)
+        {
+            case MusicTrackMode::PlayAll:
+                return MusicTrackMode::Random;
+            case MusicTrackMode::Random:
+                return MusicTrackMode::Repeat;
+            case MusicTrackMode::Repeat:
+                return MusicTrackMode::Custom;
+            default:
+                return MusicTrackMode::PlayAll;
+        }
+    }
+
     ShadingMode nextStage(ShadingMode mode)
     {
         switch (mode)
@@ -90,6 +105,7 @@ namespace rwe
         options.scrollSpeed = config.scrollSpeed;
         options.soundMode = static_cast<SoundMode>(config.soundMode);
         options.unitSpeech = static_cast<UnitSpeechLevel>(config.unitSpeech);
+        options.musicTrackMode = static_cast<MusicTrackMode>(config.musicTrackMode);
         options.gamma = config.gamma;
         options.shading = static_cast<ShadingMode>(config.shadingMode);
         options.antiAlias = config.antiAlias;
@@ -122,6 +138,7 @@ namespace rwe
                                          {"scroll-speed", std::to_string(options.scrollSpeed)},
                                          {"sound-mode", std::to_string(static_cast<unsigned int>(options.soundMode))},
                                          {"unit-speech", std::to_string(static_cast<unsigned int>(options.unitSpeech))},
+                                         {"music-mode", std::to_string(static_cast<unsigned int>(options.musicTrackMode))},
                                          {"gamma", std::to_string(options.gamma)},
                                          {"shading-mode", std::to_string(static_cast<unsigned int>(options.shading))},
                                          {"anti-alias", options.antiAlias ? "true" : "false"},

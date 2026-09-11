@@ -37,6 +37,11 @@ namespace rwe
         bool headless{false};
         bool showDebugWindow{false};
         bool showDemoWindow{false};
+        /**
+         * Set by Ctrl+F9 and cleared once the picture is taken, after the
+         * scene has drawn the frame (TOTALA-EXE.md S:77).
+         */
+        bool screenshotRequested{false};
 
         unsigned int lastFrameStartTime{0};
 

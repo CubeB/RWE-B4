@@ -22,6 +22,13 @@ namespace rwe
         Patrol,
         Capture,
         Load,
+        /**
+         * The hook an air transport shows over a unit it could lift. The
+         * original splits the load cursor on `canfly` and on nothing else
+         * (0x43E7F1): an aircraft gets `cursorpickup`, a crane, ship or
+         * hovercraft gets `cursorload`. See TOTALA-EXE.md S:103.
+         */
+        Pickup,
         Unload,
         Red,
         Green,

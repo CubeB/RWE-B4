@@ -192,9 +192,60 @@ namespace rwe
      */
     std::pair<int, int> computeRockUnitAngles(SimAngle unitRotation, const SimVector& shotDirection, SimScalar rockAngle);
 
-    SteeringInfo seek(const UnitState& unit, const UnitDefinition& unitDefinition, const SimVector& destination);
+    /**
+     * How far ahead of itself a ground unit steers, in world units. The
+     * original compares against 0x500000 at 0x43CDB4, which is 80.0 in 16.16
+     * -- five map squares.
+     */
+    constexpr SimScalar PathLookAheadDistance = 80_ss;
 
-    SteeringInfo arrive(const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoGround& physics, const SimVector& destination);
+    /**
+     * A segment shorter than this is degenerate: the unit aims at the corner
+     * rather than dividing by it. 0x43CE01, comparing against 0x10000.
+     */
+    constexpr SimScalar PathMinSegmentLength = 1_ss;
+
+    /**
+     * How close a unit has to come to the waypoint ahead before the one
+     * behind it is dropped.
+     *
+     * **Deliberately not the original's number.** Navigator::Update compares
+     * the squared distance against 25 at 0x44F205, so five world units -- see
+     * TOTALA-EXE.md section 102, where the measurement that kept sixteen is
+     * written down. Five works for a unit on its own and costs a third of the
+     * arrivals in a crowd, because a waypoint is a cell centre and a unit
+     * whose footprint is two cells across cannot always reach within five of
+     * one that another unit is standing on. It circles instead, until the
+     * collision repath rescues it: at a hundred units in path_bench, five
+     * arrived 27 against sixteen's 49 and asked for 884 searches against 509.
+     * The original's own answer to that is its blocked bit, which RWE has, but
+     * RWE's units are rounder and get in each other's way differently.
+     */
+    constexpr SimScalar PathWaypointAdvanceDistance = 16_ss;
+
+    /**
+     * And for the last waypoint, which also ends the path. Same reasoning;
+     * this one matches hasReachedGoal's own tolerance, so the order finishes
+     * on the same tick the route does.
+     */
+    constexpr SimScalar PathFinalWaypointAdvanceDistance = 8_ss;
+
+    /**
+     * Where the ground follower steers and how fast, for a unit walking the
+     * segment previousWaypoint -> nextWaypoint. TotalA.exe 0x43CD20, written
+     * up as TOTALA-EXE.md section 102.
+     *
+     * afterNextWaypoint is the corner after the one being walked to, clamped
+     * to the last waypoint on a short path the way GetWaypoints clamps the
+     * index it reads (0x44F16A).
+     */
+    SteeringInfo followSegment(
+        const UnitState& unit,
+        const UnitDefinition& unitDefinition,
+        const UnitPhysicsInfoGround& physics,
+        const SimVector& previousWaypoint,
+        const SimVector& nextWaypoint,
+        const SimVector& afterNextWaypoint);
 
     /**
      * Speed for the next tick. maxSlope is the unit's movement class slope
