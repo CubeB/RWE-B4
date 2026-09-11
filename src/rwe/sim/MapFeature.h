@@ -38,11 +38,11 @@ namespace rwe
 
         /**
          * Hit points. Initialised from the definition's `damage` value (TA stores
-         * a feature's health under that key) when the feature is placed. Nothing
-         * takes them away: weapons do not damage wreckage or scenery, so this
-         * stands for how much bulk there is to clear rather than for a health
-         * bar. computeFeatureReclaimWork reads it, which is why a boulder takes
-         * longer to salvage than a shrub of the same value.
+         * a feature's health under that key) when the feature is placed. A blast
+         * takes them away unless the feature is indestructible, and at zero the
+         * feature breaks down to its featureDead form. computeFeatureReclaimWork
+         * reads what is left, which is why a boulder takes longer to salvage than
+         * a shrub of the same value, and a shelled wreck clears quicker.
          */
         unsigned int hitPoints{0};
 

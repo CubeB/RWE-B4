@@ -268,9 +268,9 @@ namespace rwe
         }
 
         // TA keeps a feature's hit points in its `damage` key; features that omit
-        // it (most vegetation) come out of the TDF reader with 1. Nothing spends
-        // these points -- weapons do not damage features -- they only tell
-        // computeFeatureReclaimWork how much bulk there is to haul away.
+        // it (most vegetation) come out of the TDF reader with 1. A blast spends
+        // them (doProjectileImpact, unless the feature is indestructible) and
+        // computeFeatureReclaimWork reads them for how much bulk is left to haul.
         newFeature.hitPoints = featureDefinition.damage;
 
         auto featureId = FeatureId(features.emplace(std::move(newFeature)));
@@ -370,11 +370,10 @@ namespace rwe
         // for wreckage -- a fusion plant's corpse is mostly a hauling job, 4104 +
         // 620 = 4724 -- while bulk alone still costs real time on scenery.
         //
-        // The hit points read here are the feature's current ones, but nothing
-        // damages a feature: weapons leave wreckage and scenery alone, so in
-        // practice this is always the full `damage` value the definition declared.
-        // The payout does not depend on it either way: reclaimFeature always hands
-        // over the full metal/energy, spread across whatever work total applies.
+        // The hit points read here are the feature's current ones, so a wreck
+        // that has been shelled clears quicker than one that has not. The payout
+        // does not depend on it either way: reclaimFeature always hands over the
+        // full metal/energy, spread across whatever work total applies.
         return std::max(1u, definition.metal + definition.energy + (currentHitPoints / 4u));
     }
 
@@ -3708,7 +3707,13 @@ namespace rwe
                   {
                       auto& feature = featureRef->get();
                       const auto& featureDefinition = getFeatureDefinition(feature.featureName);
-                      if (featureDefinition.reclaimable || featureDefinition.blocking)
+                      // Wreckage and rocks take the hit; an `indestructible`
+                      // feature does not, whatever else it is. The shipped
+                      // data has two hundred of those that are also
+                      // blocking -- the Barrier walls, the dragon's teeth --
+                      // and every one declares hit points, so without the
+                      // flag they could be shelled flat.
+                      if (!featureDefinition.indestructible && (featureDefinition.reclaimable || featureDefinition.blocking))
                       {
                           auto distance = (feature.position - position).length();
                           auto scale = blastDamageScale(distance, radius, projectile.edgeEffectiveness);
