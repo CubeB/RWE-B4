@@ -337,6 +337,13 @@ namespace rwe
 
     void GameScene::updateMusic()
     {
+        // A scene on its way out has stopped its music and must not start
+        // another track: the next scene picks its own.
+        if (leavingScene)
+        {
+            return;
+        }
+
         if (!musicPlaylistBuilt)
         {
             musicPlaylistBuilt = true;

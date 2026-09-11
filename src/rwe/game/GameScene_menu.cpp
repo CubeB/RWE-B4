@@ -191,13 +191,11 @@ namespace rwe
         // spawning the starting commanders.
         auto parameters = save->parameters;
         parameters.loadFromSaveFile = path.string();
-        sceneContext.audioService->stopMusic();
-        auto scene = std::make_shared<LoadingScene>(
+        leaveFor(std::make_shared<LoadingScene>(
             sceneContext,
             audioLookup,
             AudioService::LoopToken(),
-            parameters);
-        sceneContext.sceneManager->setNextScene(scene);
+            parameters));
     }
 
     void GameScene::applyLoadedGame(const SaveFile& save)
@@ -306,13 +304,11 @@ namespace rwe
         // Same pipeline loadSavedGame hands a save to, minus the save: a
         // fresh LoadingScene over the game's own parameters spawns the
         // starting commanders exactly as the first load did.
-        sceneContext.audioService->stopMusic();
-        auto scene = std::make_shared<LoadingScene>(
+        leaveFor(std::make_shared<LoadingScene>(
             sceneContext,
             audioLookup,
             AudioService::LoopToken(),
-            gameParameters);
-        sceneContext.sceneManager->setNextScene(scene);
+            gameParameters));
     }
 
     void GameScene::openConfirmDialog(const std::string& title, std::function<void()> onYes, std::function<void()> onNo)
@@ -673,13 +669,18 @@ namespace rwe
 
     void GameScene::exitToMainMenu()
     {
-        sceneContext.audioService->stopMusic();
-        auto menu = std::make_shared<MainMenuScene>(
+        leaveFor(std::make_shared<MainMenuScene>(
             sceneContext,
             audioLookup,
             sceneContext.viewport->width(),
-            sceneContext.viewport->height());
-        sceneContext.sceneManager->setNextScene(menu);
+            sceneContext.viewport->height()));
+    }
+
+    void GameScene::leaveFor(std::shared_ptr<Scene> scene)
+    {
+        sceneContext.audioService->stopMusic();
+        leavingScene = true;
+        sceneContext.sceneManager->setNextScene(std::move(scene));
     }
 
     void GameScene::gameMenuMessage(const std::string& topic, const std::string& control)
@@ -1097,11 +1098,10 @@ namespace rwe
     void GameScene::returnToMainMenu()
     {
         LOG_INFO << "Returning to the main menu";
-        auto scene = std::make_unique<MainMenuScene>(
+        leaveFor(std::make_shared<MainMenuScene>(
             sceneContext,
             audioLookup,
             static_cast<float>(sceneContext.viewport->width()),
-            static_cast<float>(sceneContext.viewport->height()));
-        sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+            static_cast<float>(sceneContext.viewport->height())));
     }
 }

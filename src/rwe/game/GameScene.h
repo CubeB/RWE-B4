@@ -739,6 +739,15 @@ namespace rwe
         std::optional<MusicSituation> musicFadeTarget;
         float musicFade{1.0f};
 
+        /**
+         * Set once this scene has handed the game to another. The scene is
+         * still current for the rest of the frame -- the manager swaps at
+         * the top of the next one -- so without this the update that follows
+         * a load or restart click would find the music stopped and start a
+         * fresh track, which then plays on into the incoming scene.
+         */
+        bool leavingScene{false};
+
         void addBattlePoints(int points);
         void updateMusic();
 
@@ -1153,6 +1162,13 @@ namespace rwe
         std::function<void()> pendingConfirmCancel;
 
         void exitToMainMenu();
+        /**
+         * Hands the game to another scene. Every exit from GameScene goes
+         * through here: it stops the music this scene was playing and marks
+         * the scene as leaving, so the frame's remaining update does not
+         * start another track for the next scene to inherit.
+         */
+        void leaveFor(std::shared_ptr<Scene> scene);
         GameOptions currentInGameOptions() const;
         void applyInGameOptions(const GameOptions& state);
         void saveInGameOptions();
