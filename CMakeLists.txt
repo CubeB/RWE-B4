@@ -507,6 +507,8 @@ set(SOURCE_FILES
     src/rwe/render/UniformLocation.h
     src/rwe/render/VaoHandle.h
     src/rwe/render/VboHandle.h
+    src/rwe/render/WireframeScan.cpp
+    src/rwe/render/WireframeScan.h
     src/rwe/resource_io.cpp
     src/rwe/resource_io.h
     src/rwe/rwe_time.cpp
@@ -899,6 +901,7 @@ set(TEST_FILES
     src/rwe/network_util.test.cpp
     src/rwe/pathfinding/pathfinding_utils.test.cpp
     src/rwe/render/FogTiles.test.cpp
+    src/rwe/render/WireframeScan.test.cpp
     src/rwe/rc_gen_optional.h
     src/rwe/sim/GameHash_util.test.cpp
     src/rwe/sim/accuracy.test.cpp

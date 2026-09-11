@@ -1481,11 +1481,23 @@ namespace rwe
                     continue;
                 }
 
-                // A nanoframe casts its whole shadow, and where the frame is
-                // still see-through the shadow shows through it, as it does in
-                // the original (seen in play, 2026-09-11). RWE used to cut the
-                // model's outline back out of it, which left the ground under
-                // a bare wireframe unshadowed.
+                // A bare wireframe casts no shadow of its own: a nanoframe's
+                // shadow starts with the solid green silhouette, the phase
+                // where the build display stops erasing below its line. What
+                // lies under the frame before then, other units' shadows
+                // included, shows through it. That is what the original shows
+                // (seen in play, 2026-09-11); RWE used to cast the frame's
+                // shadow from the start and then cut the frame's outline out
+                // of every shadow on the stencil, anyone else's with it.
+                if (unit.isBeingBuilt(unitDefinition))
+                {
+                    auto phase = computeBuildPhase(unit.getPreciseCompletePercent(unitDefinition), unitId.value, simulation.gameTime.value);
+                    if (phase.belowMode == BuildFillMode::Erase)
+                    {
+                        continue;
+                    }
+                }
+
                 drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), unitAtlases, unitShadowMeshBatch);
             }
             for (const auto& [_, feature] : simulation.features)

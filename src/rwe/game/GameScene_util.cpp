@@ -3,6 +3,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <rwe/render/WireframeScan.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/match.h>
 
@@ -896,35 +897,22 @@ namespace rwe
     namespace
     {
         /**
-         * One wireframe edge as a strip one output pixel wide, run half a
-         * pixel past each end so that the corners of an outline meet square.
-         * The strip lies across the screen, which the camera being
-         * orthographic makes a fixed pair of world-space steps; the edge's
-         * own direction on screen decides how they are mixed.
+         * One output pixel of wireframe, centred on centre. The camera is
+         * orthographic, so a pixel's width and height are the same two
+         * world-space steps everywhere on screen.
          */
-        void pushWireframeStrip(const WireframeScreen& screen, const Vector3f& a, const Vector3f& b, const Vector3f& color, std::vector<GlColoredVertex>& out)
+        void pushWireframePixel(const WireframeScreen& screen, const Vector3f& centre, const Vector3f& color, std::vector<GlColoredVertex>& out)
         {
-            auto clipA = screen.viewProjection * a;
-            auto clipB = screen.viewProjection * b;
-            auto dx = (clipB.x - clipA.x) * screen.width * 0.5f;
-            auto dy = (clipB.y - clipA.y) * screen.height * 0.5f;
-            auto length = std::sqrt((dx * dx) + (dy * dy));
-            if (length < 0.001f)
-            {
-                // Seen end on, an edge is a point and draws nothing.
-                return;
-            }
-            dx /= length;
-            dy /= length;
-
-            auto along = (screen.pixelRight * dx + screen.pixelUp * dy) * 0.5f;
-            auto across = (screen.pixelRight * -dy + screen.pixelUp * dx) * 0.5f;
-            auto start = a - along;
-            auto end = b + along;
+            auto right = screen.pixelRight * 0.5f;
+            auto up = screen.pixelUp * 0.5f;
+            auto bottomLeft = centre - right - up;
+            auto bottomRight = centre + right - up;
+            auto topRight = centre + right + up;
+            auto topLeft = centre - right + up;
 
             // Anticlockwise on screen, which is the way culling keeps.
-            pushTriangle(out, start - across, end - across, end + across, color);
-            pushTriangle(out, start - across, end + across, start + across, color);
+            pushTriangle(out, bottomLeft, bottomRight, topRight, color);
+            pushTriangle(out, bottomLeft, topRight, topLeft, color);
         }
     }
 
@@ -945,17 +933,19 @@ namespace rwe
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
         auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
 
-        // Edges resting on the ground trace the footprint; TA leaves those out.
-        auto groundLevel = position.y + 1.0f;
-
-        // Lift the lines slightly towards the camera so they pass the depth
-        // test against the surface they outline, while anything the model
-        // itself hides stays hidden.
+        // Lift each pixel slightly towards the camera so it passes the depth
+        // test against the surface it lies on, while anything the model
+        // itself hides stays hidden. That stands in for the original's
+        // height test, which keeps a wireframe pixel only where no higher
+        // surface of the model covers it (0x4C0A90).
         auto bias = toCamera * 0.75f;
 
         const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(unitDefinition.objectName, modelDefinition);
         const auto& transforms = computePieceTransformsForRender(modelDefinition, renderInfo, unit.pieces, frac);
 
+        std::vector<Vector3f> world;
+        std::vector<Vector2f> onScreen;
+        std::vector<WireframePixel> pixels;
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
             if (!unit.pieces[i].visible)
@@ -965,40 +955,36 @@ namespace rwe
 
             auto matrix = transform * transforms[i];
             const auto& pieceInfo = *renderInfo.pieces[i];
-            if (!pieceInfo.edges)
+            if (!pieceInfo.polygons)
             {
                 continue;
             }
 
-            auto origin = matrix * Vector3f(0.0f, 0.0f, 0.0f);
-            auto facesCamera = [&](const Vector3f& normal) {
-                return ((matrix * normal) - origin).dot(toCamera) > 0.0f;
-            };
-
-            auto facesUp = [&](const Vector3f& normal) {
-                return ((matrix * normal) - origin).y > 0.5f;
-            };
-
-            for (const auto& edge : *pieceInfo.edges)
+            // Every polygon goes through the scan conversion, and it is the
+            // conversion that drops the ones facing away (TOTALA-EXE.md S:3).
+            for (const auto& polygon : *pieceInfo.polygons)
             {
-                if (!facesCamera(edge.normalA) && !(edge.normalB && facesCamera(*edge.normalB)))
+                world.clear();
+                onScreen.clear();
+                for (const auto& corner : polygon.vertices)
                 {
-                    continue;
+                    auto w = matrix * corner;
+                    auto clip = screen.viewProjection * w;
+                    world.push_back(w);
+                    onScreen.emplace_back((clip.x + 1.0f) * 0.5f * screen.width, (1.0f - clip.y) * 0.5f * screen.height);
                 }
-                auto a = matrix * edge.start;
-                auto b = matrix * edge.end;
-                if (a.y <= groundLevel && b.y <= groundLevel)
+
+                pixels.clear();
+                scanWireframePolygon(onScreen, pixels);
+                for (const auto& p : pixels)
                 {
-                    // A ground-level edge is skipped when it is just where a
-                    // wall meets the ground, but kept when it outlines a
-                    // floor polygon such as an aircraft plant's landing pad.
-                    bool outlinesFloor = facesUp(edge.normalA) || (edge.normalB && facesUp(*edge.normalB));
-                    if (!outlinesFloor)
-                    {
-                        continue;
-                    }
+                    // The point on the edge this pixel came from, moved across
+                    // the screen to the pixel's centre. The move is in the
+                    // image plane, so the depth stays the polygon's.
+                    auto onEdge = lerp(world[p.from], world[p.to], p.t);
+                    auto centre = onEdge + (screen.pixelRight * ((static_cast<float>(p.x) + 0.5f) - p.edgeX)) + bias;
+                    pushWireframePixel(screen, centre, color, batch.triangles);
                 }
-                pushWireframeStrip(screen, a + bias, b + bias, color, batch.triangles);
             }
         }
     }

@@ -280,24 +280,83 @@ per unit so two frames side by side are not in step.
 **The wireframe is colour B**, per unit. RWE had invented a green → white →
 black cycle for it.
 
-Three more things about it, all from comparing play against the original on
-2026-09-11 rather than read out of the binary — the line routine the
-wireframe goes through has not been traced:
+### How the wireframe is drawn
 
-- **The lines are one pixel wide and solid.** RWE drew them as GL lines at
-  65% opacity into its double-size world buffer, which makes them half an
-  output pixel wide, and where the ground sits under a line the resolve takes
-  one sample of each 2x2 block, so a line could miss its pixel altogether.
-  Each edge is now a strip one output pixel wide, drawn opaque. Wide GL lines
-  are not an option: the context is forward-compatible, where `glLineWidth`
-  above one is an error.
-- **A flat face is outlined once**, however many polygons it is built from:
-  an edge shared by two polygons facing the same way is inside the face and
-  is not drawn (`polygonEdgesFrom3do`). Edges are matched by where their ends
-  are, because a 3DO usually repeats a vertex for each polygon that uses it.
-- **The shadow shows through the frame.** While the frame is still bare, the
-  ground under it is in shadow. RWE had been cutting the model's outline back
-  out of a nanoframe's shadow so that nothing showed through it.
+**It is not drawn with lines.** Decoded 2026-09-11. `0x458DD0`, the
+construction display, runs on the unit's cached bitmap whenever that bitmap
+has a height plane and `[unit+0x104]` is non-zero. It computes the two
+colours (`xor 5` at 33 steps a second for A, `xor 9` at 57 for B, both folded
+over palette 160-175), picks the phase from the fraction still to build, runs
+the per-pixel remap `0x458D30`, and then, in **every** phase, calls
+`0x458FA0` with colour B:
+
+```
+458fe1  test byte [piece+0x28],1     ; SHOW, else skip the piece
+459032  sar  16 on x, y, -z          ; each corner, integer
+45904b  sy = -z - (y >> 1)           ; the cabinet projection
+45904f  h  = y + 0x32 (or 0x7d)      ; the height-plane value
+45908a  cmp [piece+0xc],-1           ; a selection plate: start at primitive 1
+459128  call 0x4C0820                ; each primitive, loop closed, colour B
+```
+
+`0x4C0820` is a polygon scan converter. It finds the first corner with the
+least y and the first with the greatest, walks the chain of corners
+**backwards** from the top one to the bottom one to get each row's left end
+and **forwards** to get its right end, both in 16.16 with `+0xFFFF` added to
+the starting x so each row's end is rounded up, over rows from the top corner
+down to and not including the bottom one. It does not fill the row. It calls
+`0x4C0A90` for each row where the right end lies strictly to the right of the
+left, and that routine writes **two pixels**, the left end and the right end,
+each only if the height plane there is not higher than the edge
+(`cmp [plane],h / ja skip`), updating the plane where it writes. With no
+height plane it writes both unconditionally.
+
+So the look follows from the scan conversion rather than from any line
+drawing:
+
+- **A steep edge is a solid line one pixel wide**, one pixel a row.
+- **A shallow edge is a dotted line**: still one pixel a row, so the dots
+  are as far apart as the edge runs across in a row.
+- **A horizontal edge is not drawn at all.** The top and bottom of a wall
+  standing on the ground, which is why the footprint never shows.
+- **A polygon facing away draws nothing.** Its winding on screen is the other
+  way round, so its "right" chain lies to the left of its "left" one and
+  every row fails the test. There is no normal and no culling step; the
+  winding does it.
+- **A row with no pixel between its ends draws nothing either**, so a sliver
+  narrower than a pixel vanishes.
+- **The edge between two polygons is drawn by both**, the first polygon's
+  right end landing in the same column as the second's left end. That
+  includes two polygons lying in one plane, if the edge between them is
+  steep. (RWE outlined a flat face only once for a few hours on 2026-09-11,
+  going by how the original looked in play; the dotted and missing shallow
+  edges were the difference being seen.)
+- **Only the model's own surfaces hide it.** The height test is against the
+  unit's own bitmap, and keeps a pixel only where no higher surface of the
+  model covers it.
+
+RWE runs the same scan conversion (`scanWireframePolygon`,
+`src/rwe/render/WireframeScan.cpp`) on each polygon's corners projected to
+output pixels, with pixel centres standing in for the original's integer
+corners, and draws each pixel it keeps as a one-pixel quad at the depth of
+the edge it came from. The depth buffer, with the quad lifted slightly
+towards the camera, stands in for the height test. The selection plate is
+left out rather than primitive 0, as it is from the model (§58, the 3DO
+selection-plate row).
+
+### The nanoframe's shadow
+
+A bare wireframe casts **no shadow of its own**, and what lies under the
+frame shows through it, other units' shadows included. Its own shadow starts
+with the solid green silhouette, the phase where the display stops erasing
+below its line. That is from play, 2026-09-11, not from the binary: the
+unit draw routine `0x459200` has no build-progress test anywhere on its
+shadow paths (`0x4592A0`-`0x45935C` and the height-plane twin at
+`0x45949D`-`0x4595E9`; the one extra test there, `[unit+0xA6]` against the
+byte at `[globals+0x1427F]`, keeps a building below the water line from
+casting), so how the original arrives at it is not established. RWE used to
+cast the frame's shadow from the start and then cut the frame's outline out
+of the whole stencil, which hid every other unit's shadow behind it too.
 
 ---
 

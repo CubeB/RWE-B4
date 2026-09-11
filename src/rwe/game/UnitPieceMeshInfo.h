@@ -1,20 +1,21 @@
 #pragma once
 
 #include <memory>
-#include <optional>
 #include <rwe/math/Vector3f.h>
 #include <rwe/render/ShaderMesh.h>
 #include <vector>
 
 namespace rwe
 {
-    /** One polygon outline edge (model space) with the outward normals of the polygons it borders. */
-    struct WireframeEdge
+    /**
+     * One polygon of a piece as authored, model space, corners in the file's
+     * order. The construction wireframe scan-converts it the way the
+     * original does, and that order is what tells it which way the polygon
+     * faces (TOTALA-EXE.md S:3).
+     */
+    struct WireframePolygon
     {
-        Vector3f start;
-        Vector3f end;
-        Vector3f normalA;
-        std::optional<Vector3f> normalB;
+        std::vector<Vector3f> vertices;
     };
 
     struct UnitPieceMeshInfo
@@ -25,7 +26,7 @@ namespace rwe
         Vector3f firstVertexPosition;
         Vector3f secondVertexPosition;
 
-        /** Outline of every polygon in the piece, each edge once. Drawn as the construction wireframe. */
-        std::shared_ptr<std::vector<WireframeEdge>> edges;
+        /** Every polygon of the piece but the selection plate. Drawn as the construction wireframe. */
+        std::shared_ptr<std::vector<WireframePolygon>> polygons;
     };
 }

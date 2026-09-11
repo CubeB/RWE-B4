@@ -3,18 +3,9 @@
 #include <map>
 #include <rwe/fixed_point.h>
 #include <rwe/util/rwe_string.h>
-#include <tuple>
 
 namespace rwe
 {
-    namespace
-    {
-        // Two polygons whose unit normals agree this closely lie in one plane:
-        // about two and a half degrees, which a 3DO's fixed-point corners stay
-        // well inside on a genuinely flat face.
-        constexpr float CoplanarNormalDot = 0.999f;
-    }
-
     Vector3f getNormal(const Mesh::Triangle& t)
     {
         auto v1 = t.b.position - t.a.position;
@@ -74,9 +65,9 @@ namespace rwe
         auto secondVertex = o.vertices.size() > 1 ? vertexToVector(o.vertices[1]) : Vector3f(1.0f, 0.0f, 0.0f);
         auto mesh = meshFrom3do(atlasMap, teamAtlasMap, atlasColorMap, o);
         auto shaderMesh = convertMesh(graphics, mesh);
-        auto edges = std::make_shared<std::vector<WireframeEdge>>(polygonEdgesFrom3do(o));
+        auto polygons = std::make_shared<std::vector<WireframePolygon>>(wireframePolygonsFrom3do(o));
 
-        v.push_back(std::make_pair(o.name, UnitPieceMeshInfo{std::make_shared<ShaderMesh>(std::move(shaderMesh)), firstVertex, secondVertex, std::move(edges)}));
+        v.push_back(std::make_pair(o.name, UnitPieceMeshInfo{std::make_shared<ShaderMesh>(std::move(shaderMesh)), firstVertex, secondVertex, std::move(polygons)}));
 
         for (const auto& c : o.children)
         {
@@ -84,30 +75,21 @@ namespace rwe
         }
     }
 
-    std::vector<WireframeEdge> polygonEdgesFrom3do(const _3do::Object& o)
+    std::vector<WireframePolygon> wireframePolygonsFrom3do(const _3do::Object& o)
     {
-        // Edges follow the polygons as authored, not the triangulation,
-        // so a quad outlines as four lines with no diagonal.
-        // Each edge remembers the outward normals of the polygons on either
-        // side so the renderer can keep only the edges the camera can see.
-        //
-        // Edges are matched by where their ends are, not by vertex index: a
-        // 3DO often repeats a vertex for each polygon that uses it, and two
-        // indices at one point are one corner of the model.
-        std::map<std::tuple<int, int, int>, unsigned int> firstIndexAt;
-        std::vector<unsigned int> canonical(o.vertices.size());
-        for (unsigned int i = 0; i < o.vertices.size(); ++i)
+        // The polygons as authored, corners in the file's order, which is
+        // what the wireframe's scan conversion needs to tell a polygon facing
+        // the camera from one facing away. The selection plate is left out,
+        // as meshFrom3do leaves it out of the model.
+        std::vector<WireframePolygon> polygons;
+        for (std::size_t pi = 0; pi < o.primitives.size(); ++pi)
         {
-            const auto& v = o.vertices[i];
-            canonical[i] = firstIndexAt.try_emplace(std::make_tuple(v.x, v.y, v.z), i).first->second;
-        }
-
-        std::map<std::pair<unsigned int, unsigned int>, std::size_t> edgeIndices;
-        std::vector<WireframeEdge> edges;
-        for (const auto& p : o.primitives)
-        {
-            auto count = p.vertices.size();
-            if (count < 3)
+            if (o.selectionPrimitiveIndex && *o.selectionPrimitiveIndex == pi)
+            {
+                continue;
+            }
+            const auto& p = o.primitives[pi];
+            if (p.vertices.size() < 3)
             {
                 continue;
             }
@@ -121,51 +103,15 @@ namespace rwe
                 continue;
             }
 
-            // Newell's method over the vertices in reverse order, matching the
-            // winding meshFrom3do uses, so the normal points outward like the lit faces.
-            Vector3f normal(0.0f, 0.0f, 0.0f);
-            for (std::size_t i = 0; i < count; ++i)
+            WireframePolygon polygon;
+            polygon.vertices.reserve(p.vertices.size());
+            for (auto index : p.vertices)
             {
-                auto current = vertexToVector(o.vertices[p.vertices[(count - i) % count]]);
-                auto next = vertexToVector(o.vertices[p.vertices[(count - i - 1) % count]]);
-                normal.x += (current.y - next.y) * (current.z + next.z);
-                normal.y += (current.z - next.z) * (current.x + next.x);
-                normal.z += (current.x - next.x) * (current.y + next.y);
+                polygon.vertices.push_back(vertexToVector(o.vertices[index]));
             }
-            normal = normal.normalizedOr(Vector3f(0.0f, 1.0f, 0.0f));
-
-            for (std::size_t i = 0; i < count; ++i)
-            {
-                auto a = canonical[p.vertices[i]];
-                auto b = canonical[p.vertices[(i + 1) % count]];
-                if (a == b)
-                {
-                    continue;
-                }
-                auto key = std::minmax(a, b);
-                auto it = edgeIndices.find(key);
-                if (it != edgeIndices.end())
-                {
-                    auto& edge = edges[it->second];
-                    if (!edge.normalB)
-                    {
-                        edge.normalB = normal;
-                    }
-                    continue;
-                }
-                edgeIndices.emplace(key, edges.size());
-                edges.push_back(WireframeEdge{vertexToVector(o.vertices[a]), vertexToVector(o.vertices[b]), normal, std::nullopt});
-            }
+            polygons.push_back(std::move(polygon));
         }
-
-        // A flat face built from several polygons outlines as one: the edge
-        // between two polygons facing the same way lies inside that face.
-        // Facing the same way, not merely parallel -- the two sides of a thin
-        // plate face opposite ways, and the edge they share is its rim.
-        std::erase_if(edges, [](const WireframeEdge& edge) {
-            return edge.normalB && edge.normalA.dot(*edge.normalB) > CoplanarNormalDot;
-        });
-        return edges;
+        return polygons;
     }
 
     Mesh meshFrom3do(
