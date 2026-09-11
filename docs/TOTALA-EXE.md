@@ -131,13 +131,17 @@ the job rather than on the flight path.
 
 ### Deliberately not ported
 
-- **The `BrakeRate` nose re-aim** (`0x43D38E`–`0x43D47D`) is real behaviour and is
-  why the original's aircraft barely crab — speed above `BrakeRate` is stripped
-  and re-injected along the nose, so they fly roughly where they point. It moved
-  the construction-aircraft bank peak by 0.00° in testing, because a
-  construction aircraft never reaches its `BrakeRate` of 1.5, so it was left out
-  rather than risk changing fast aircraft. `brakeRate` is still unused for air
-  units in RWE.
+- ~~**The `BrakeRate` nose re-aim** (`0x43D38E`–`0x43D47D`)~~: ported 2026-09-11
+  (`applyBrakeRateNoseReaim`, in the flying state's velocity update, after drag
+  and before the profile as in the original). It is why the original's aircraft
+  barely crab: speed above `BrakeRate` is stripped and re-injected along the
+  nose, so they fly roughly where they point. It had been left out because it
+  moved the construction-aircraft bank peak by 0.00° (a construction aircraft
+  never reaches its `BrakeRate` of 1.5) and nothing faster had been measured.
+  Measured now with the shipped fighters' numbers: the worst crab angle through
+  a ninety-degree turn drops to a few degrees (`brakerate.test.cpp`). Still not
+  applied in the attack-run, gunship and dogfight states, which steer their own
+  velocities; those want their own pass.
 - **Pitch.** The original also pitches aircraft from the longitudinal component
   of the same accumulator, via `PitchScale` (`def+0x1A6`) into `unit+0x68`. RWE
   has no pitch for units at all and the renderer applies only yaw and roll.
@@ -8723,7 +8727,7 @@ original:
 - **Off-map fog cells read as the nearest on-map cell.** Reading them as "clear"
   leaves the frame's ragged edge with no neighbouring tile to cover it, and a
   strip of map shows through at the border.
-- **No `BrakeRate` nose re-aim and no pitch** — see §1.
+- **No pitch**, see §1 (the `BrakeRate` nose re-aim is ported now).
 - **A mobile unit's `buildangle` is ignored.** The original overwrites a mobile
   unit's spawn heading with the raw value (§8), which for everything but the ten
   capital ships is zero and so agrees with RWE's half-turn default anyway. RWE
