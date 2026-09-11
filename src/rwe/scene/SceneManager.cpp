@@ -1,7 +1,10 @@
 #include "SceneManager.h"
 #include <rwe/render/render_prof.h>
+#include <rwe/scene/Screenshot.h>
 #include <rwe/sim/SimTicksPerSecond.h>
+#include <rwe/util.h>
 #include <rwe/util/CrashHandler.h>
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -144,6 +147,16 @@ namespace rwe
                     continue;
                 }
 
+                // Ctrl+F9 is the original's screenshot key. It is handled a
+                // layer above the screens, so it works on every one of them
+                // and none of them ever sees it (TOTALA-EXE.md S:77). The
+                // picture itself is taken below, once the frame is drawn.
+                if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F9 && (event.key.mod & SDL_KMOD_CTRL) != 0)
+                {
+                    screenshotRequested = true;
+                    continue;
+                }
+
                 if (event.type == SDL_EVENT_QUIT)
                 {
                     return;
@@ -204,6 +217,27 @@ namespace rwe
             // stale sub-rectangle while the mouse math used the window.
             graphics->setViewport(0, 0, viewport->width(), viewport->height());
             currentScene->render();
+
+            // Taken here, after the scene and before the cursor and the debug
+            // windows, so the picture is the game with nothing of RWE's own on
+            // top of it. Whether the original's included its cursor is not
+            // decoded.
+            if (screenshotRequested)
+            {
+                screenshotRequested = false;
+                if (auto dataPath = getLocalDataPath())
+                {
+                    auto written = saveScreenshot(*dataPath / "screenshots", static_cast<unsigned int>(viewport->width()), static_cast<unsigned int>(viewport->height()));
+                    if (written)
+                    {
+                        LOG_INFO << "Screenshot saved to " << written->string();
+                    }
+                    else
+                    {
+                        LOG_ERROR << "Screenshot could not be written";
+                    }
+                }
+            }
 
             if (!imGuiContext->io->WantCaptureMouse)
             {

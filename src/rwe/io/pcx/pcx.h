@@ -142,4 +142,16 @@ namespace rwe
             return colors;
         }
     };
+
+    /**
+     * Encodes a true-colour image as a 24-bit PCX: version 5, run-length
+     * encoded, three eight-bit planes (red, green, blue), each plane of each
+     * scanline encoded on its own so no run crosses a plane or a line. rgb is
+     * width * height * 3 bytes, top row first, RGBRGB... within a row.
+     *
+     * The original writes 8-bit palettized PCX from its 8-bit screen
+     * (TOTALA-EXE.md S:77). RWE draws in true colour, so it keeps the name,
+     * the folder and the format family and widens the pixels.
+     */
+    std::vector<uint8_t> encodePcx24(unsigned int width, unsigned int height, const std::vector<uint8_t>& rgb);
 }

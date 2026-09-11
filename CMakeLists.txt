@@ -516,6 +516,8 @@ set(SOURCE_FILES
     src/rwe/setup/TaInstall.cpp
     src/rwe/setup/TaInstall.h
     src/rwe/scene/SceneManager.h
+    src/rwe/scene/Screenshot.cpp
+    src/rwe/scene/Screenshot.h
     src/rwe/scene/util.h
     src/rwe/sdl/SdlContext.h
     src/rwe/sdl/SdlContextManager.cpp
@@ -881,6 +883,8 @@ set(TEST_FILES
     src/rwe/io/featuretdf/io.test.cpp
     src/rwe/io/gui/gui.test.cpp
     src/rwe/io/ota/ota.test.cpp
+    src/rwe/io/pcx/pcx.test.cpp
+    src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
     src/rwe/io/tdf/ListTdfAdapter.test.cpp
     src/rwe/io/tdf/NetSchemaTdfAdapter.test.cpp
