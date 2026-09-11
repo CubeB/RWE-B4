@@ -893,6 +893,41 @@ namespace rwe
         pushTriangle(batch.triangles, topLeft, bottomRight, topRight, color);
     }
 
+    namespace
+    {
+        /**
+         * One wireframe edge as a strip one output pixel wide, run half a
+         * pixel past each end so that the corners of an outline meet square.
+         * The strip lies across the screen, which the camera being
+         * orthographic makes a fixed pair of world-space steps; the edge's
+         * own direction on screen decides how they are mixed.
+         */
+        void pushWireframeStrip(const WireframeScreen& screen, const Vector3f& a, const Vector3f& b, const Vector3f& color, std::vector<GlColoredVertex>& out)
+        {
+            auto clipA = screen.viewProjection * a;
+            auto clipB = screen.viewProjection * b;
+            auto dx = (clipB.x - clipA.x) * screen.width * 0.5f;
+            auto dy = (clipB.y - clipA.y) * screen.height * 0.5f;
+            auto length = std::sqrt((dx * dx) + (dy * dy));
+            if (length < 0.001f)
+            {
+                // Seen end on, an edge is a point and draws nothing.
+                return;
+            }
+            dx /= length;
+            dy /= length;
+
+            auto along = (screen.pixelRight * dx + screen.pixelUp * dy) * 0.5f;
+            auto across = (screen.pixelRight * -dy + screen.pixelUp * dx) * 0.5f;
+            auto start = a - along;
+            auto end = b + along;
+
+            // Anticlockwise on screen, which is the way culling keeps.
+            pushTriangle(out, start - across, end - across, end + across, color);
+            pushTriangle(out, start - across, end + across, start + across, color);
+        }
+    }
+
     void drawUnitWireframe(
         const GameMediaDatabase& gameMediaDatabase,
         const UnitState& unit,
@@ -900,6 +935,7 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         float frac,
         const Vector3f& toCamera,
+        const WireframeScreen& screen,
         const Vector3f& color,
         ColoredMeshBatch& batch)
     {
@@ -962,26 +998,9 @@ namespace rwe
                         continue;
                     }
                 }
-                pushLine(batch.lines, a + bias, b + bias, color);
+                pushWireframeStrip(screen, a + bias, b + bias, color, batch.triangles);
             }
         }
-    }
-
-    void drawUnitSilhouette(
-        const GameMediaDatabase& gameMediaDatabase,
-        const Matrix4f& viewProjectionMatrix,
-        const UnitState& unit,
-        const UnitDefinition& unitDefinition,
-        const UnitModelDefinition& modelDefinition,
-        float frac,
-        const UnitTextureAtlases& atlases,
-        std::vector<UnitTextureMeshRenderInfo>& out)
-    {
-        auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
-        auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
-
-        drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, 0.0f, atlases, false, out);
     }
 
     /**

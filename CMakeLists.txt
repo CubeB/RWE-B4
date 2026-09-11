@@ -895,6 +895,7 @@ set(TEST_FILES
     src/rwe/math/Vector2f.test.cpp
     src/rwe/math/Vector3f.test.cpp
     src/rwe/math/rwe_math.test.cpp
+    src/rwe/mesh_util.test.cpp
     src/rwe/network_util.test.cpp
     src/rwe/pathfinding/pathfinding_utils.test.cpp
     src/rwe/render/FogTiles.test.cpp

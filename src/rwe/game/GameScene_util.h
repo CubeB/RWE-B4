@@ -321,6 +321,24 @@ namespace rwe
     Vector3f buildCycleColorB(unsigned int unitIndex, unsigned int gameTime);
 
     /**
+     * What a wireframe needs to know about the screen to give its lines a
+     * width there. The world is drawn at twice the output size, so a GL line
+     * is half an output pixel wide and a single sample of it can miss the
+     * pixel altogether; each edge is drawn as a strip one output pixel wide
+     * instead, the width of the original's lines.
+     */
+    struct WireframeScreen
+    {
+        Matrix4f viewProjection;
+        /** The world-space step that moves one output pixel right on screen, and one up. */
+        Vector3f pixelRight;
+        Vector3f pixelUp;
+        /** The viewport in output pixels, which turns a clip-space distance into pixels. */
+        float width;
+        float height;
+    };
+
+    /**
      * Outlines the polygons of a nanoframe that face the camera, in one colour.
      * Edges resting on the ground are left out, and the lines are nudged towards
      * the camera so the depth buffer hides those behind other parts of the model.
@@ -332,19 +350,9 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         float frac,
         const Vector3f& toCamera,
+        const WireframeScreen& screen,
         const Vector3f& color,
         ColoredMeshBatch& batch);
-
-    /** The unit's model as the camera sees it, for stencil cut-outs. */
-    void drawUnitSilhouette(
-        const GameMediaDatabase& gameMediaDatabase,
-        const Matrix4f& viewProjectionMatrix,
-        const UnitState& unit,
-        const UnitDefinition& unitDefinition,
-        const UnitModelDefinition& modelDefinition,
-        float frac,
-        const UnitTextureAtlases& atlases,
-        std::vector<UnitTextureMeshRenderInfo>& out);
 
     void drawSpriteParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, SpriteBatch& batch);
 

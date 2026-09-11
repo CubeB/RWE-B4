@@ -337,33 +337,6 @@ namespace rwe
             graphics->drawTriangles(*m.mesh);
         }
 
-        if (!batch.cutouts.empty())
-        {
-            // Erase the shadow wherever these models sit on screen, so it
-            // only shows where it falls outside them.
-            graphics->useStencilBufferForClears();
-            const auto& textureShader = shaders->unitTexture;
-            graphics->bindShader(textureShader.handle.get());
-            graphics->setUniformFloat(textureShader.seaLevel, 0.0f);
-            graphics->setUniformFloat(textureShader.alpha, 1.0f);
-            graphics->setUniformFloat(textureShader.shadeStrength, 0.0f);
-            // A strength of zero means the shader never reaches the table, so
-            // this pass binds neither of the other two textures. It still says
-            // which unit each sampler is on, so that the program's samplers
-            // are never all sitting on slot 0 with the colour atlas under
-            // them -- an invariant worth keeping true everywhere rather than
-            // only where it currently matters.
-            graphics->setUniformInt(textureShader.paletteIndexSampler, 1);
-            graphics->setUniformInt(textureShader.shadeTableSampler, 2);
-            for (const auto& m : batch.cutouts)
-            {
-                graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
-                graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
-                graphics->bindTexture(m.texture);
-                graphics->drawTriangles(*m.mesh);
-            }
-        }
-
         graphics->useStencilBufferAsMask();
         graphics->enableColorBuffer();
 

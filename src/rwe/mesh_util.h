@@ -34,7 +34,7 @@ namespace rwe
         const _3do::Object& o,
         std::vector<std::pair<std::string, UnitPieceMeshInfo>>& v);
 
-    /** Every polygon outline edge of the object (model space), each edge listed once with the normals of the polygons it borders. */
+    /** Every polygon outline edge of the object (model space), each edge listed once with the normals of the polygons it borders. An edge between two polygons facing the same way is inside one flat face, and is left out. */
     std::vector<WireframeEdge> polygonEdgesFrom3do(const _3do::Object& o);
 
     Mesh meshFrom3do(

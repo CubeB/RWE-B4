@@ -136,9 +136,6 @@ namespace rwe
     struct UnitShadowMeshBatch
     {
         std::vector<UnitTextureShadowMeshRenderInfo> meshes;
-
-        /** Models drawn as the camera sees them, whose silhouettes are cut out of the shadow. */
-        std::vector<UnitTextureMeshRenderInfo> cutouts;
     };
 
     struct SpriteRenderInfo

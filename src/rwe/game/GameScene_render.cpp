@@ -1481,15 +1481,12 @@ namespace rwe
                     continue;
                 }
 
+                // A nanoframe casts its whole shadow, and where the frame is
+                // still see-through the shadow shows through it, as it does in
+                // the original (seen in play, 2026-09-11). RWE used to cut the
+                // model's outline back out of it, which left the ground under
+                // a bare wireframe unshadowed.
                 drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), unitAtlases, unitShadowMeshBatch);
-
-                if (unit.isBeingBuilt(unitDefinition))
-                {
-                    // The frame is see-through while it is built, so the shadow
-                    // would show through it. Keep only the part cast outside the
-                    // model's own outline.
-                    drawUnitSilhouette(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitAtlases, unitShadowMeshBatch.cutouts);
-                }
             }
             for (const auto& [_, feature] : simulation.features)
             {
@@ -1515,7 +1512,7 @@ namespace rwe
         }
         {
             RWE_RENDERPROF("w.shadow.draw");
-            RWE_RENDERPROF_COUNT("n.shadowmesh", unitShadowMeshBatch.meshes.size() + unitShadowMeshBatch.cutouts.size());
+            RWE_RENDERPROF_COUNT("n.shadowmesh", unitShadowMeshBatch.meshes.size());
             worldRenderService.drawUnitShadowMeshBatch(unitShadowMeshBatch);
         }
 
@@ -1579,14 +1576,27 @@ namespace rwe
 
         // Construction wireframe: the visible polygon edges of each nanoframe,
         // drawn with the depth test on so the model hides its own back. The
-        // original outlines every primitive of every piece in its second build
-        // colour, a triangle wave down palette entries 160..175 and back that
-        // comes round about every half second, offset per unit.
+        // original outlines each flat face of every piece -- once, however
+        // many polygons make it up -- in its second build colour, a triangle
+        // wave down palette entries 160..175 and back that comes round about
+        // every half second, offset per unit.
         {
             RWE_RENDERPROF("w.wireframe");
             // The direction from the scene towards the camera, in world space.
             auto inverseViewProjection = computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
-            auto toCamera = ((inverseViewProjection * Vector3f(0.0f, 0.0f, -1.0f)) - (inverseViewProjection * Vector3f(0.0f, 0.0f, 0.0f))).normalized();
+            auto clipOrigin = inverseViewProjection * Vector3f(0.0f, 0.0f, 0.0f);
+            auto toCamera = ((inverseViewProjection * Vector3f(0.0f, 0.0f, -1.0f)) - clipOrigin).normalized();
+
+            // And what one output pixel is in world space, across and up the
+            // screen, so each edge can be drawn a pixel wide.
+            auto viewportWidth = static_cast<float>(worldViewport.width());
+            auto viewportHeight = static_cast<float>(worldViewport.height());
+            WireframeScreen wireframeScreen{
+                viewProjectionMatrix,
+                (inverseViewProjection * Vector3f(2.0f / viewportWidth, 0.0f, 0.0f)) - clipOrigin,
+                (inverseViewProjection * Vector3f(0.0f, 2.0f / viewportHeight, 0.0f)) - clipOrigin,
+                viewportWidth,
+                viewportHeight};
 
             ColoredMeshBatch wireframeBatch;
             for (const auto& [unitId, unit] : simulation.units)
@@ -1606,10 +1616,11 @@ namespace rwe
                 }
                 const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
                 auto wireframeColor = buildCycleColorB(unitId.value, simulation.gameTime.value);
-                drawUnitWireframe(gameMediaDatabase, unit, unitDefinition, modelDefinition, interpolationFraction, toCamera, wireframeColor, wireframeBatch);
+                drawUnitWireframe(gameMediaDatabase, unit, unitDefinition, modelDefinition, interpolationFraction, toCamera, wireframeScreen, wireframeColor, wireframeBatch);
             }
-            // Lines cannot go below one pixel, so a lighter blend reads as a finer wire.
-            worldRenderService.drawBatch(wireframeBatch, viewProjectionMatrix, 0.65f);
+            // Solid, as the original's lines are: one palette colour, one
+            // output pixel wide.
+            worldRenderService.drawBatch(wireframeBatch, viewProjectionMatrix, 1.0f);
         }
 
         ColoredMeshBatch lineProjectilesBatch;

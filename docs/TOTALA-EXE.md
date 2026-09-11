@@ -280,6 +280,25 @@ per unit so two frames side by side are not in step.
 **The wireframe is colour B**, per unit. RWE had invented a green → white →
 black cycle for it.
 
+Three more things about it, all from comparing play against the original on
+2026-09-11 rather than read out of the binary — the line routine the
+wireframe goes through has not been traced:
+
+- **The lines are one pixel wide and solid.** RWE drew them as GL lines at
+  65% opacity into its double-size world buffer, which makes them half an
+  output pixel wide, and where the ground sits under a line the resolve takes
+  one sample of each 2x2 block, so a line could miss its pixel altogether.
+  Each edge is now a strip one output pixel wide, drawn opaque. Wide GL lines
+  are not an option: the context is forward-compatible, where `glLineWidth`
+  above one is an error.
+- **A flat face is outlined once**, however many polygons it is built from:
+  an edge shared by two polygons facing the same way is inside the face and
+  is not drawn (`polygonEdgesFrom3do`). Edges are matched by where their ends
+  are, because a 3DO usually repeats a vertex for each polygon that uses it.
+- **The shadow shows through the frame.** While the frame is still bare, the
+  ground under it is in shadow. RWE had been cutting the model's outline back
+  out of a nanoframe's shadow so that nothing showed through it.
+
 ---
 
 ## 4. Effects a script asks for: `emit-sfx`
