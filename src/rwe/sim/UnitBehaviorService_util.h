@@ -259,6 +259,17 @@ namespace rwe
 
     SimVector decelerate(SimVector currentVelocity, SimScalar deceleration);
 
+    /**
+     * The original's brake step (0x43D38E-0x43D47D), the second of the six
+     * in its per-tick air movement: if the horizontal speed is above
+     * BrakeRate, the horizontal velocity is scaled down to BrakeRate and the
+     * speed stripped off is added back along the nose. Vertical velocity is
+     * left alone. It is why the original's aircraft barely crab: anything
+     * above BrakeRate flies where the aircraft points, whatever the steering
+     * asked for. `nose` is the unit's heading as a horizontal unit vector.
+     */
+    SimVector applyBrakeRateNoseReaim(const SimVector& velocity, const SimVector& nose, SimScalar brakeRate);
+
     SimVector computeNewAirUnitVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateFlying& physics);
 
     /**

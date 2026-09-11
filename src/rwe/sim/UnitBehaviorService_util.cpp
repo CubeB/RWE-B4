@@ -763,6 +763,31 @@ namespace rwe
      */
     static constexpr SimScalar AirArrivalTaperDistance = 8_ss;
 
+    SimVector applyBrakeRateNoseReaim(const SimVector& velocity, const SimVector& nose, SimScalar brakeRate)
+    {
+        // 0x43D391-0x43D3D9: hypot of the x and z components against
+        // brakerate, and nothing happens at or below it.
+        SimVector horizontal(velocity.x, 0_ss, velocity.z);
+        auto speed = horizontal.length();
+        if (speed <= brakeRate)
+        {
+            return velocity;
+        }
+
+        // 0x43D3DF-0x43D42E: each of x and z is multiplied by brakerate/speed,
+        // so the horizontal velocity keeps its direction at BrakeRate long.
+        // 0x43D42E-0x43D47D: the excess, speed - brakerate, goes along the
+        // unit's own heading (the sixteen-bit angle at unit+0x66) and is
+        // added to x and z. y is never read.
+        auto scale = brakeRate / speed;
+        auto excess = speed - brakeRate;
+        SimVector noseFlat(nose.x, 0_ss, nose.z);
+        return SimVector(
+            velocity.x * scale + noseFlat.x * excess,
+            velocity.y,
+            velocity.z * scale + noseFlat.z * excess);
+    }
+
     SimVector computeNewAirUnitVelocity(const UnitState& unit, const UnitDefinition& unitDefinition, const AirMovementStateFlying& physics)
     {
         if (!physics.targetPosition)
@@ -778,6 +803,15 @@ namespace rwe
             ? 1_ss - (unitDefinition.acceleration / unitDefinition.maxVelocity)
             : 1_ss;
         auto currentVelocity = physics.currentVelocity * drag;
+
+        // Then the brake step, second of the original's six, before the
+        // steering gets its say. A fighter at MaxVelocity 10 with BrakeRate 6
+        // has four units of speed a tick pulled round to its nose every
+        // tick, which is what keeps it flying where it points through a
+        // turn. A construction aircraft at BrakeRate 1.5 is hardly touched,
+        // which is why leaving this out moved nothing when only those were
+        // measured.
+        currentVelocity = applyBrakeRateNoseReaim(currentVelocity, UnitState::toDirection(unit.rotation), unitDefinition.brakeRate);
 
         // The original's arrival profile: steer for sqrt(2 * Acceleration *
         // distance) towards the target, so the aircraft is always travelling
