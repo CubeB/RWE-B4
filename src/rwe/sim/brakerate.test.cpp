@@ -39,6 +39,21 @@ namespace rwe
         UnitDefinition corvamp() { return fighterFromFbi(12_ss, 7_ss, SimScalar(0.35f), 620_ss); }
         /** ARMCA, the construction aircraft: MaxVelocity=6.9 BrakeRate=1.5 Acceleration=0.06 TurnRate=90. */
         UnitDefinition armca() { return fighterFromFbi(SimScalar(6.9f), SimScalar(1.5f), SimScalar(0.06f), 90_ss); }
+        /** ARMTHUND, the Thunder bomber: MaxVelocity=9 BrakeRate=0.4 Acceleration=0.08 TurnRate=356. */
+        UnitDefinition armthund() { return fighterFromFbi(9_ss, SimScalar(0.4f), SimScalar(0.08f), 356_ss); }
+        /** ARMBRAWL, the Brawler gunship: MaxVelocity=6.6 BrakeRate=4 Acceleration=0.16 TurnRate=800, HoverAttack=1. */
+        UnitDefinition armbrawl() { return fighterFromFbi(SimScalar(6.6f), 4_ss, SimScalar(0.16f), 800_ss); }
+
+        /** A unit at the origin with its nose on +z, flying flat out along +x: the worst crab there is. */
+        UnitState crabbingUnit()
+        {
+            std::vector<UnitMesh> pieces;
+            UnitState unit(pieces, std::unique_ptr<CobEnvironment>{});
+            unit.position = SimVector(0_ss, 100_ss, 0_ss);
+            unit.previousPosition = unit.position;
+            unit.rotation = UnitState::toRotation(SimVector(0_ss, 0_ss, 1_ss));
+            return unit;
+        }
 
         float horizontalSpeed(const SimVector& v)
         {
@@ -175,6 +190,78 @@ namespace rwe
             auto caWithout = armca();
             caWithout.brakeRate = 1000_ss;
             REQUIRE(caWith <= worstCrabThroughTurn(caWithout) + 1.0f);
+        }
+    }
+
+    TEST_CASE("brake step: every air state goes through it, as every air mission does in the original", "[brakerate]")
+    {
+        // Mover::Update (0x43DD20) picks the air follower 0x43D290 for any
+        // canfly unit whatever its mission (TOTALA-EXE.md S:87), and the
+        // brake step is inside it. Each state here starts a unit flying flat
+        // out along +x with its nose on +z and a goal far off along +x, and
+        // reads what one tick does to the sideways speed. With the rule the
+        // crosswise component drops to BrakeRate (give or take a tick's
+        // acceleration); with BrakeRate out of reach it stays where it was.
+        SECTION("the bomber's attack run, ARMTHUND")
+        {
+            auto def = armthund();
+            auto unit = crabbingUnit();
+            AirMovementStateAttackRun run;
+            run.phase = AirMovementStateAttackRun::Phase::Approaching;
+            run.lastKnownTargetPos = SimVector(100000_ss, 100_ss, 0_ss);
+            run.runOutDirection = SimVector(1_ss, 0_ss, 0_ss);
+            run.currentVelocity = SimVector(9_ss, 0_ss, 0_ss);
+
+            auto with = computeNewAttackRunVelocity(unit, def, run);
+            // 0.4 stays across, 8.6 goes along the nose, then the run swings
+            // the heading a tick's turn back towards the target.
+            REQUIRE(simScalarToFloat(with.z) > simScalarToFloat(with.x));
+            REQUIRE(simScalarToFloat(with.z) > 7.0f);
+
+            auto without = def;
+            without.brakeRate = 1000_ss;
+            auto flat = computeNewAttackRunVelocity(unit, without, run);
+            REQUIRE(simScalarToFloat(flat.x) > 8.0f);
+        }
+
+        SECTION("the gunship ring, ARMBRAWL")
+        {
+            auto def = armbrawl();
+            auto unit = crabbingUnit();
+            AirMovementStateHoverAttack ring;
+            ring.station = SimVector(100000_ss, 100_ss, 0_ss);
+            ring.targetPosition = ring.station;
+            ring.currentVelocity = SimVector(SimScalar(6.6f), 0_ss, 0_ss);
+
+            auto with = computeNewHoverAttackVelocity(unit, def, ring);
+            REQUIRE(simScalarToFloat(with.x) == Approx(4.0f).margin(0.2f));
+            REQUIRE(simScalarToFloat(with.z) > 2.0f);
+
+            auto without = def;
+            without.brakeRate = 1000_ss;
+            auto flat = computeNewHoverAttackVelocity(unit, without, ring);
+            REQUIRE(simScalarToFloat(flat.x) > 6.0f);
+            REQUIRE(simScalarToFloat(flat.z) < 0.2f);
+        }
+
+        SECTION("the dogfight, ARMFIG")
+        {
+            auto def = armfig();
+            auto unit = crabbingUnit();
+            AirMovementStateDogfight fight;
+            fight.phase = AirMovementStateDogfight::Phase::Pursuing;
+            fight.goalPosition = SimVector(100000_ss, 100_ss, 0_ss);
+            fight.currentVelocity = SimVector(10_ss, 0_ss, 0_ss);
+
+            auto with = computeNewDogfightVelocity(unit, def, fight);
+            REQUIRE(simScalarToFloat(with.x) == Approx(6.0f).margin(0.4f));
+            REQUIRE(simScalarToFloat(with.z) > 3.0f);
+
+            auto without = def;
+            without.brakeRate = 1000_ss;
+            auto flat = computeNewDogfightVelocity(unit, without, fight);
+            REQUIRE(simScalarToFloat(flat.x) > 9.0f);
+            REQUIRE(simScalarToFloat(flat.z) < 0.4f);
         }
     }
 }

@@ -943,9 +943,18 @@ namespace rwe
     {
         auto targetPoint = computeAttackRunTargetPoint(unit, unitDefinition, physics);
 
+        // The brake step first, as in the original, where every air mission
+        // goes through the one per-tick mover (Mover::Update at 0x43DD20
+        // picks 0x43D290 for any `canfly` unit, §87) and so through the
+        // step at 0x43D38E before the heading is touched. A Thunder's
+        // BrakeRate of 0.4 against its MaxVelocity of 9 means nearly all of
+        // its speed is pulled round to its nose every tick: a bomber flies
+        // where it points.
+        auto currentVelocity = applyBrakeRateNoseReaim(physics.currentVelocity, UnitState::toDirection(unit.rotation), unitDefinition.brakeRate);
+
         // Speed: always winding up towards the aircraft's best. A run never
         // brakes — flying slower does not help it hit anything.
-        auto speed = physics.currentVelocity.length();
+        auto speed = currentVelocity.length();
         speed = rweMin(unitDefinition.maxVelocity, speed + unitDefinition.acceleration);
 
         // Heading: an aircraft cannot slide sideways, it banks. Swing the
@@ -953,7 +962,7 @@ namespace rwe
         // of turn, so coming back for another pass is a arc of radius
         // speed / turnRate flown at full speed, rather than a stop and a
         // pivot on the spot.
-        SimVector flatVelocity(physics.currentVelocity.x, 0_ss, physics.currentVelocity.z);
+        SimVector flatVelocity(currentVelocity.x, 0_ss, currentVelocity.z);
         auto currentHeading = flatVelocity.lengthSquared() > 0_ss
             ? UnitState::toRotation(flatVelocity)
             : unit.rotation;

@@ -296,6 +296,8 @@ namespace rwe
             auto state = makeAttackRunState(SimVector(0_ss, 50_ss, 0_ss));
             state.phase = AirMovementStateAttackRun::Phase::Approaching;
             state.currentVelocity = SimVector(4_ss, 0_ss, 0_ss);
+            // Pointing the way it flies, as it would be in the game.
+            unit.rotation = UnitState::toRotation(state.currentVelocity);
 
             // Fly the reversal out and check it never slows to a hover.
             auto slowest = state.currentVelocity.length();
@@ -327,11 +329,20 @@ namespace rwe
             auto state = makeAttackRunState(SimVector(0_ss, 50_ss, 0_ss));
             state.phase = AirMovementStateAttackRun::Phase::Approaching;
             state.currentVelocity = SimVector(4_ss, 0_ss, 0_ss);
+            // Pointing the way it flies: with the nose left on its default
+            // heading the brake step would veer the aircraft off along it on
+            // the first tick and the reversal would be over in four.
+            unit.rotation = UnitState::toRotation(state.currentVelocity);
 
             for (int tick = 0; tick < 200 && state.currentVelocity.x >= 0_ss; ++tick)
             {
                 state.currentVelocity = computeNewAttackRunVelocity(unit, def, state);
                 unit.position = unit.position + state.currentVelocity;
+                // The nose follows the flight path, as updateUnitRotation
+                // turns it; the brake step redirects speed above BrakeRate
+                // along it, so a nose left on its default heading would
+                // hold the aircraft on that heading for the whole loop.
+                unit.rotation = UnitState::toRotation(state.currentVelocity);
             }
 
             // Half a circle of radius r displaces the aircraft about 2r sideways.
@@ -420,8 +431,11 @@ namespace rwe
             auto state = makeAttackRunState(SimVector(100_ss, 50_ss, 0_ss));
             state.phase = AirMovementStateAttackRun::Phase::Engaging;
             state.runOutDirection = SimVector(1_ss, 0_ss, 0_ss);
-            // Already at max velocity
+            // Already at max velocity, and pointing the way it flies: the
+            // nose follows the run's flight path in updateUnitRotation, and
+            // the brake step redirects speed above BrakeRate along it.
             state.currentVelocity = SimVector(4_ss, 0_ss, 0_ss);
+            unit.rotation = UnitState::toRotation(SimVector(1_ss, 0_ss, 0_ss));
             auto v = computeNewAttackRunVelocity(unit, def, state);
             // velocity magnitude should remain at maxVelocity (4)
             REQUIRE(v.length() > 3.99_ssf);
