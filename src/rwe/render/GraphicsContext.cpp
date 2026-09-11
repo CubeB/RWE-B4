@@ -790,10 +790,36 @@ namespace rwe
     {
         glStencilFunc(GL_EQUAL, 1, 0xFF);
         glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+        glStencilMask(0xFF);
+    }
+
+    void GraphicsContext::useStencilBufferToMarkCutout()
+    {
+        glStencilFunc(GL_ALWAYS, 2, 0xFF);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        glStencilMask(0x02);
+    }
+
+    void GraphicsContext::useStencilBufferForWritesOutsideCutout()
+    {
+        // The test is (1 & 0x02) == (stencil & 0x02), so it passes where bit 1
+        // is clear; the write is 1 through a mask of bit 0 alone.
+        glStencilFunc(GL_EQUAL, 1, 0x02);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        glStencilMask(0x01);
+    }
+
+    void GraphicsContext::useStencilBufferToClearCutout()
+    {
+        glStencilFunc(GL_ALWAYS, 0, 0xFF);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        glStencilMask(0x02);
     }
 
     void GraphicsContext::clearStencilBuffer()
     {
+        // A clear goes through the write mask, so it has to be whole first.
+        glStencilMask(0xFF);
         glClear(GL_STENCIL_BUFFER_BIT);
     }
 
@@ -801,12 +827,14 @@ namespace rwe
     {
         glStencilFunc(GL_ALWAYS, 1, 0xFF);
         glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        glStencilMask(0xFF);
     }
 
     void GraphicsContext::useStencilBufferForClears()
     {
         glStencilFunc(GL_ALWAYS, 0, 0xFF);
         glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        glStencilMask(0xFF);
     }
 
     void GraphicsContext::setViewport(int x, int y, int width, int height)

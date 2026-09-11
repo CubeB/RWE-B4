@@ -402,15 +402,17 @@ is all of them from the first frame. So by the code a frame's own shadow is
 there from the start, and the erased parts of the frame, which are written
 transparent (`0x458DA8`), would let it show through.
 
-**That is not what the original looks like in play.** Watched on 2026-09-11,
-a nanoframe casts no shadow of its own until the solid green layer has
-finished climbing it, and until then what lies under the frame, other units'
-shadows included, shows through. RWE matches that: the frame's shadow starts
-at the phase where nothing of it is erased any more, when the texture starts
-up from the base. What in the original makes it look that way is not
-established. RWE used to cast the frame's shadow from the start and then cut
-the frame's outline out of the whole stencil, which hid every other unit's
-shadow behind it too.
+**In play the shadow is there, but not inside the frame.** Watched on
+2026-09-11 and corrected the same day: a nanoframe casts its whole shadow
+from its first frame, as the code says, but none of it shows inside the
+frame's own outline. The frame is treated as solid for its own shadow the
+whole time, while other units' shadows do show through it. RWE matches that
+(`RenderService::drawUnitShadowMeshBatch`): each nanoframe's shadow is drawn
+after every other shadow, and only outside the whole model's outline. An
+earlier version cut every nanoframe's outline out of the whole stencil,
+which hid other units' shadows behind it too. The version after it held
+the frame's shadow back until the green layer had finished, on a first
+reading of the same observation.
 
 **The three leads, followed (B4 #40, 2026-09-11).** None of them is it.
 
@@ -442,30 +444,24 @@ differ only in `digger`: with a plane a digger's copy is cut at height
 `0x32 + 0x4B` (`0x4594D8`-`0x459503`), without one it takes the plain copy.
 So the plane is not a gate either; it only changes how a digger is cut.
 
-**So the code draws a nanoframe's shadow, and the play observation says it
-does not.** Two places are left where they could still be reconciled, and
-the listing does not settle either:
+**So the code and the look agree that the shadow is drawn. What is still
+open is what keeps it out of the frame's outline**, and the listing has
+not settled it. The likeliest place is the blit. Both shadows go through
+`0x4B8500` at `x + 0x85`, before the unit image, and the image is the
+display's scratch copy with its erased pixels written as the transparent
+key (`0x458DA8`). If the frame's own shadow is masked by the whole cached
+bitmap, which is the finished model, or the blitter treats the shadow's
+single index against the frame's key, the shadow would be hidden exactly
+within the model's outline and nowhere else. Other units' shadows would be
+untouched, which is what play shows.
 
-- the blit. Both shadows go through `0x4B8500` at `x + 0x85`, before the
-  unit image, and the image is the display's scratch copy with its erased
-  pixels written as the transparent key (`0x458DA8`). If the key is what the
-  shadow is filled with as well, or the blitter treats the shadow's single
-  index as key against the frame, the shadow would vanish exactly where the
-  frame is erased; the projected rectangle sits mostly under the building's
-  own footprint, so that could read as "no shadow" from above.
-- the observation. It was made from above on a building. A wide, low
-  building (ARMSOLAR) during the erase phases would show any shadow that
-  reaches beyond its footprint; a tall one (ARMFUS) would show it to the
-  south-east where the projection sticks out. Whether anything shows there
-  is the one look that decides between "not drawn" and "drawn under the
-  frame and hidden".
-
-Until one of those is settled RWE keeps its own gate, which matches the look
-as observed. The mobile case the issue asked about goes the same way: a unit
-under construction on a factory pad has a bitmap with a plane, takes the
-`0x45949D` block, and gets the copied shadow like any other mobile unit; the
-copy is of the cached bitmap, not of the display's scratch copy, so by the
-code it would be the whole silhouette from the first frame.
+RWE does not wait on that: it cuts the frame's own shadow by the model's
+outline, which is the look. The mobile case the issue asked about goes the
+same way. A unit under construction on a factory pad has a bitmap with a
+plane, takes the `0x45949D` block, and gets the copied shadow like any
+other mobile unit. The copy is of the cached bitmap, not of the display's
+scratch copy, so its shadow is the whole silhouette from the first frame,
+and RWE cuts it by the outline in the same way.
 
 ---
 

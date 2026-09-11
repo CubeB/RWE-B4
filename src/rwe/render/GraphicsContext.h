@@ -199,6 +199,20 @@ namespace rwe
         /** Subsequent draws reset the stencil to 0 where they land. */
         void useStencilBufferForClears();
         void useStencilBufferAsMask();
+
+        /**
+         * The cut-out bit, for keeping one shadow out of one outline without
+         * touching any other shadow already marked. The stencil's bit 0 says
+         * "shadowed" and bit 1 "inside the outline being cut":
+         * useStencilBufferToMarkCutout sets bit 1 where draws land,
+         * useStencilBufferForWritesOutsideCutout sets bit 0 where they land
+         * and bit 1 is clear, and useStencilBufferToClearCutout clears bit 1
+         * again. Each touches only its own bit.
+         */
+        void useStencilBufferToMarkCutout();
+        void useStencilBufferForWritesOutsideCutout();
+        void useStencilBufferToClearCutout();
+
         void clearStencilBuffer();
         void disableStencilBuffer();
 

@@ -1507,25 +1507,23 @@ namespace rwe
                     continue;
                 }
 
-                // A nanoframe casts no shadow of its own until the solid green
-                // layer has finished climbing it: nothing of the frame is
-                // erased any more, the phase where the texture starts up from
-                // the base. Until then what lies under the frame, other units'
-                // shadows included, shows through it. That is what the
-                // original shows in play (2026-09-11). The binary has no such
-                // test on its shadow pass, which draws a frame's shadow from
-                // its first frame (TOTALA-EXE.md S:3), so how the original
-                // comes to look this way is not established; RWE matches the
-                // look. RWE used to cast the frame's shadow from the start and
-                // then cut the frame's outline out of every shadow on the
-                // stencil, anyone else's with it.
+                // A nanoframe casts its shadow from its first frame -- the
+                // shadow pass has no build-progress test (TOTALA-EXE.md S:3)
+                // -- but none of it shows inside the frame's own outline, as
+                // if the frame were solid, while other units' shadows show
+                // through the frame: the original, watched in play on
+                // 2026-09-11. So its shadow goes in a cut batch of its own
+                // with the whole model's outline, which keeps that shadow,
+                // and only that one, out of it.
                 if (unit.isBeingBuilt(unitDefinition))
                 {
-                    auto phase = computeBuildPhase(unit.getPreciseCompletePercent(unitDefinition), unitId.value, simulation.gameTime.value);
-                    if (phase.aboveMode == BuildFillMode::Erase || phase.belowMode == BuildFillMode::Erase)
-                    {
-                        continue;
-                    }
+                    UnitShadowMeshBatch own;
+                    drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), unitAtlases, own);
+                    UnitCutShadow cut;
+                    cut.shadow = std::move(own.meshes);
+                    drawUnitOutline(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitAtlases, cut.outline);
+                    unitShadowMeshBatch.cutShadows.push_back(std::move(cut));
+                    continue;
                 }
 
                 drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), unitAtlases, unitShadowMeshBatch);

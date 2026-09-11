@@ -312,7 +312,7 @@ namespace rwe
 
     void RenderService::drawUnitShadowMeshBatch(const UnitShadowMeshBatch& batch)
     {
-        if (batch.meshes.empty())
+        if (batch.meshes.empty() && batch.cutShadows.empty())
         {
             return;
         }
@@ -323,18 +323,60 @@ namespace rwe
         graphics->disableColorBuffer();
 
         const auto& shader = shaders->unitShadow;
-        graphics->bindShader(shader.handle.get());
+        auto drawShadows = [&](const std::vector<UnitTextureShadowMeshRenderInfo>& meshes) {
+            graphics->bindShader(shader.handle.get());
+            for (const auto& m : meshes)
+            {
+                graphics->setUniformFloat(shader.groundHeight, m.groundHeight);
+                graphics->setUniformBool(shader.projected, m.projected);
+                graphics->setUniformFloat(shader.shadowOriginY, m.shadowOriginY);
+                graphics->setUniformMatrix(shader.vpMatrix, m.vpMatrix);
+                graphics->setUniformMatrix(shader.modelMatrix, m.modelMatrix);
 
-        for (const auto& m : batch.meshes)
+                graphics->bindTexture(m.texture);
+                graphics->drawTriangles(*m.mesh);
+            }
+        };
+
+        drawShadows(batch.meshes);
+
+        // A nanoframe's own shadow is there from its first frame but never
+        // shows inside its own outline, as if the frame were solid, while
+        // everyone else's shadow shows through it: the original, watched in
+        // play on 2026-09-11 (TOTALA-EXE.md S:3). So each is drawn last, one
+        // at a time, into the stencil outside its own outline only. The
+        // outline is the whole model, drawn as the camera sees it and cut
+        // on the texture's alpha, and it is taken back out afterwards so
+        // the next frame's shadow is not kept out of it.
+        const auto& outlineShader = shaders->unitTexture;
+        auto drawOutline = [&](const std::vector<UnitTextureMeshRenderInfo>& meshes) {
+            graphics->bindShader(outlineShader.handle.get());
+            graphics->setUniformFloat(outlineShader.seaLevel, 0.0f);
+            graphics->setUniformFloat(outlineShader.alpha, 1.0f);
+            // With no shading the shader never reaches the table, so neither
+            // of the other two textures is bound; the samplers still name
+            // their own units, so none of them sits on the colour atlas.
+            graphics->setUniformFloat(outlineShader.shadeStrength, 0.0f);
+            graphics->setUniformFloat(outlineShader.maskValue, 0.0f);
+            graphics->setUniformInt(outlineShader.paletteIndexSampler, 1);
+            graphics->setUniformInt(outlineShader.shadeTableSampler, 2);
+            for (const auto& m : meshes)
+            {
+                graphics->setUniformMatrix(outlineShader.mvpMatrix, m.mvpMatrix);
+                graphics->setUniformMatrix(outlineShader.modelMatrix, m.modelMatrix);
+                graphics->bindTexture(m.texture);
+                graphics->drawTriangles(*m.mesh);
+            }
+        };
+
+        for (const auto& cut : batch.cutShadows)
         {
-            graphics->setUniformFloat(shader.groundHeight, m.groundHeight);
-            graphics->setUniformBool(shader.projected, m.projected);
-            graphics->setUniformFloat(shader.shadowOriginY, m.shadowOriginY);
-            graphics->setUniformMatrix(shader.vpMatrix, m.vpMatrix);
-            graphics->setUniformMatrix(shader.modelMatrix, m.modelMatrix);
-
-            graphics->bindTexture(m.texture);
-            graphics->drawTriangles(*m.mesh);
+            graphics->useStencilBufferToMarkCutout();
+            drawOutline(cut.outline);
+            graphics->useStencilBufferForWritesOutsideCutout();
+            drawShadows(cut.shadow);
+            graphics->useStencilBufferToClearCutout();
+            drawOutline(cut.outline);
         }
 
         graphics->useStencilBufferAsMask();

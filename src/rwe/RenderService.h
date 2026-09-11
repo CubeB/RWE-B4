@@ -122,9 +122,21 @@ namespace rwe
         std::vector<UnitTextureMeshRenderInfo> cloakedMeshes;
     };
 
+    /**
+     * A unit under construction: its own shadow, and the model's whole
+     * outline as the camera sees it, which that shadow and no other is kept
+     * out of. See RenderService::drawUnitShadowMeshBatch.
+     */
+    struct UnitCutShadow
+    {
+        std::vector<UnitTextureShadowMeshRenderInfo> shadow;
+        std::vector<UnitTextureMeshRenderInfo> outline;
+    };
+
     struct UnitShadowMeshBatch
     {
         std::vector<UnitTextureShadowMeshRenderInfo> meshes;
+        std::vector<UnitCutShadow> cutShadows;
     };
 
     struct SpriteRenderInfo

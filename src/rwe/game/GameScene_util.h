@@ -243,6 +243,20 @@ namespace rwe
      */
     bool unitCastsShadow(const UnitDefinition& unitDefinition);
 
+    /**
+     * The unit's whole model as the camera sees it, finished or not, for
+     * keeping a nanoframe's own shadow out of its outline.
+     */
+    void drawUnitOutline(
+        const GameMediaDatabase& gameMediaDatabase,
+        const Matrix4f& viewProjectionMatrix,
+        const UnitState& unit,
+        const UnitDefinition& unitDefinition,
+        const UnitModelDefinition& modelDefinition,
+        float frac,
+        const UnitTextureAtlases& atlases,
+        std::vector<UnitTextureMeshRenderInfo>& out);
+
     void drawUnitShadow(
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,
