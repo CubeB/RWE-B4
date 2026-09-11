@@ -1978,7 +1978,10 @@ namespace rwe
         }
 
         json j;
-        j["version"] = 1;
+        // 2 since 2026-09-11. The layout did not change; what changed is
+        // that a version 1 save may hold units made before mobile units were
+        // shaded, which loadSimulationFromJson has to put right.
+        j["version"] = 2;
 
         // The wind range is a construction-time constant; it travels with the
         // save only so the load can check it was given the right map.
@@ -2088,7 +2091,8 @@ namespace rwe
 
     void loadSimulationFromJson(const nlohmann::json& j, GameSimulation& sim)
     {
-        if (j.at("version").get<int>() != 1)
+        auto version = j.at("version").get<int>();
+        if (version != 1 && version != 2)
         {
             throw std::runtime_error("unsupported save version");
         }
@@ -2210,6 +2214,28 @@ namespace rwe
             for (const auto& pj : uj.at("pieces"))
             {
                 pieces.push_back(loadUnitMesh(pj));
+            }
+
+            // Until 2026-09-06 createUnit cleared the shade flag on every
+            // piece of anything mobile, and a save keeps the flag, so a unit
+            // made back then has come through every save and load since with
+            // no piece shaded -- a commander from the first minute of a long
+            // game, for one. In a version 1 save a mobile unit with no piece
+            // shaded is taken to be one of those and shaded again. A script
+            // can ask for that too, by saying DONT_SHADE on every piece, and
+            // an old save gets that one case wrong; nothing written since
+            // version 2 is touched.
+            if (version == 1)
+            {
+                auto definitionIt = sim.unitDefinitions.find(unitType);
+                auto noneShaded = std::none_of(pieces.begin(), pieces.end(), [](const UnitMesh& m) { return m.shaded; });
+                if (definitionIt != sim.unitDefinitions.end() && definitionIt->second.isMobile && !pieces.empty() && noneShaded)
+                {
+                    for (auto& m : pieces)
+                    {
+                        m.shaded = true;
+                    }
+                }
             }
 
             auto env = std::make_unique<CobEnvironment>(&scriptIt->second);

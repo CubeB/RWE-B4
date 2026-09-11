@@ -442,4 +442,60 @@ namespace rwe
         REQUIRE(deadB != nullptr);
         REQUIRE(deadB->corpseLevel == 3);
     }
+
+    TEST_CASE("an old save's units from before mobile units were shaded come back shaded", "[saveload]")
+    {
+        // Until 2026-09-06 every piece of a mobile unit was made unshaded, and
+        // a save keeps the flag, so a version 1 save can still hold a
+        // commander from then with no piece shaded.
+        auto addPad = [](GameSimulation& sim) {
+            auto pad = makeMobileDef(2u);
+            pad.isMobile = false;
+            pad.canMove = false;
+            pad.yardMap = Grid<YardMapCell>(2, 2, YardMapCell::Ground);
+            sim.unitDefinitions["PAD"] = pad;
+            sim.unitScriptDefinitions["PAD"] = makeLoopScript();
+        };
+
+        auto simA = makeBaseSim();
+        addPad(simA);
+        buildScenario(simA);
+
+        auto us = PlayerId(0);
+        auto tankId = spawnUnit(simA, "TANK", us, SimVector(300_ss, 0_ss, 300_ss));
+        auto padId = spawnUnit(simA, "PAD", us, SimVector(420_ss, 0_ss, 300_ss));
+        for (auto id : {tankId, padId})
+        {
+            for (auto& piece : simA.getUnitState(id).pieces)
+            {
+                piece.shaded = false;
+            }
+        }
+
+        auto saved = saveSimulationToJson(simA);
+        REQUIRE(saved.at("version").get<int>() == 2);
+
+        auto simB = makeBaseSim();
+        addPad(simB);
+
+        SECTION("a version 1 save has its unshaded mobile units shaded again")
+        {
+            saved["version"] = 1;
+            loadSimulationFromJson(saved, simB);
+            REQUIRE(simB.getUnitState(tankId).pieces.front().shaded);
+        }
+
+        SECTION("but not its buildings, which were always made shaded")
+        {
+            saved["version"] = 1;
+            loadSimulationFromJson(saved, simB);
+            REQUIRE(!simB.getUnitState(padId).pieces.front().shaded);
+        }
+
+        SECTION("and a version 2 save is loaded as written")
+        {
+            loadSimulationFromJson(saved, simB);
+            REQUIRE(!simB.getUnitState(tankId).pieces.front().shaded);
+        }
+    }
 }
