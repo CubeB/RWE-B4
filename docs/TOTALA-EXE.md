@@ -7588,6 +7588,14 @@ flag.
 
 ## 68. MUSICRT -- the CD music panel
 
+> **Ported in part, 2026-09-11** (`3da7c98a`). TRACKMODE works: Play All
+> walks the album in order and wraps, Random takes any track, Repeat plays
+> the current track again, and Custom, the default, is the situational music;
+> the evaluator keeps counting in every mode but only Custom acts on it.
+> CDNEXT and CDPREV step Play All and Repeat through the album. The mode is
+> saved to `rwe.cfg` as `music-mode`. TRACKTYPE and TRACKNUM are not ported
+> (fork issue #20).
+
 Layout (panel 150x352 at (128,128), background GAF entry `MUSICRT`):
 `NOTRAK` "Off|On" (CD music on/off), `MUSICVOL` slider, `TRACKMODE`
 "Play All|Random|Repeat|Custom", CD transport `CDPREV CDSTOP CDPLAY
@@ -7998,6 +8006,13 @@ the menu-pause bit:
 `0x4cb170` scans the directory for the highest existing number and writes the
 next `%s%s%s%04i.pcx` -- so **Ctrl+F9 = screenshot to
 `screenshots\SHOTnnnn.pcx`** (HELP.TDF line 38), no gating.
+
+> **Ported, 2026-09-11** (`1b16930e`). `SceneManager` catches Ctrl+F9 above
+> every scene, consumes it, and writes `screenshots/SHOTnnnn.pcx` under the
+> local data directory, one past the highest number already there. Two
+> departures, both in §88: the file is 24-bit where the original's was 8-bit,
+> and the picture is taken before the cursor is drawn. Where the original's
+> numbering starts is not decoded; RWE's first is `SHOT0000`.
 
 The registry value `Games` under `Total Annihilation` (read at `0x430e43`;
 `== 1` sets bit 1 of `[game+0x37f2f]`) gates the developer keys:
@@ -8830,6 +8845,12 @@ original:
   one another unit is standing on. Measured, at a hundred units in
   `path_bench`: 27 arrivals and 884 searches at five, against 49 and 509 at
   sixteen. §102 has the rest of it.
+- **Screenshots are 24-bit, and leave the cursor out.** The original writes
+  8-bit PCX from its 8-bit screen; RWE draws in true colour, so it keeps the
+  name, the folder, the numbering and the format family and widens the
+  pixels. The picture is read back after the scene draws and before the
+  cursor and the debug windows go on top; whether the original's included
+  its cursor is not decoded (§77).
 
 ---
 
@@ -10321,10 +10342,17 @@ and `"LIGHT TABLE"`, and they are the shipped `palettes/PALETTE.SHD` and
    `(84, 84, 252)`. Buttons and list boxes draw no focus indicator at all.
 
 Two smaller findings from the same pass, recorded because they are cheap to
-port: a button's caption is drawn twice, once at (x+1, y+3) in interface
-colour 0 as a drop shadow and then in the gadget's own `colorf`
-(`0x4A59A4`-`0x4A59E3`); and if the gadget's `quickkey` character appears in
-its caption, that character is underlined (`0x4A5B2C` onward).
+port. A button's caption can carry a drop shadow: `0x4A59A4` tests bit 3 of
+the gadget's attribs (`gadget+0x1B`, the dword before `colorf` at `+0x1F`)
+and only when it is set draws the caption once at (x+1, y+3) in interface
+colour 0 before drawing it in the gadget's own `colorf`
+(`0x4A59A9`-`0x4A59E3`). The shipped menu buttons do not set it. And if the
+gadget's `quickkey` character appears in its caption, `0x4A5B2C`-`0x4A5CFC`
+find it with `strstr`, measure the caption up to it and the character itself
+in the font's per-glyph widths, measure the font's `I` (`0x4A5CB7`, its
+height plus two), and draw a line under the character with the line routine
+`0x4BE950` in interface colour 2 (`[cfg+0x8B4]`), GUIPAL green: from the
+character's left edge to its right edge less one, at y + height(`I`) + 1.
 
 ### What RWE does with all this
 
@@ -10338,7 +10366,8 @@ minimap coverage ring is drawn, dashed while the launcher has a round, and
 both it and the four detection rings are clipped to the minimap. The text box
 draws the blue caret only when it has the focus, and a list box's selected row
 is brightened rather than washed with 12% white. A button's caption carries
-its drop shadow and its quick-key underline, and a greyed control is drawn
+the drop shadow only where its attribs ask for it and its quick key is
+underlined in interface green, and a greyed control is drawn
 greyed rather than removed — see the note below the list.
 
 Deliberately different, and recorded in §88 rather than left to be found:
@@ -10364,15 +10393,15 @@ Deliberately different, and recorded in §88 rather than left to be found:
 > §19 now carries the note, including why RWE's greyed face is the artwork's
 > own frame rather than SHADE row 12.
 >
-> The other two are `UiStagedButton::render`. The caption is drawn twice, once
-> at (+1, +3) in black — interface colour 0, as a literal with the slot named,
-> RWE having no runtime interface-colour table — and then in its own colour.
-> The quick-key underline is a one-pixel `fillColor` under the first
-> occurrence of the gadget's `quickkey` character in the caption, measured
-> with `findCharacterInText` in the font's own per-glyph advances so that it
-> lands under the character `drawText` actually drew, and placed at the row
-> below the glyph cell (hattfont12's frames are 12 rows with `posY=11`, so the
-> cell runs from y-11 to y and its last row is blank).
+> The other two are `UiStagedButton::render`. The shadow is drawn at (+1, +3)
+> in black — interface colour 0, as a literal with the slot named, RWE having
+> no runtime interface-colour table — for a button whose gadget sets attribs
+> bit 3 (`GuiButtonAttrib::CaptionShadow`, passed on by both of `UiFactory`'s
+> button builders). The quick-key underline is a one-pixel `fillColor` in
+> (0, 128, 0), interface colour 2 on screen, under the first occurrence of the
+> gadget's `quickkey` character in the caption, measured with
+> `findCharacterInText` in the font's own per-glyph advances so that it lands
+> under the character `drawText` actually drew, at textY + bottom(`I`) + 1.
 >
 > Two things had to be settled that the finding does not record. **The
 > alignment**: RWE's button draws its caption through three paths (left,
@@ -10391,6 +10420,14 @@ Deliberately different, and recorded in §88 rather than left to be found:
 > MISSION.GUI's `SELECT`, whose key is `L` against `Select Mission`, and the
 > `UNDO` buttons on MUSICRT, SOUNDSRT and VISUALRT, whose key is `c` against
 > `Undo Changes`.
+>
+> **Corrected, 2026-09-11** (`2fc621c0`). A play-test against the original
+> showed both of these wrong as first ported: no shadow under the menu
+> captions, and a green underline. The listing agrees on both. The first
+> reading of `0x4A59A4` missed the attribs test in front of the shadow, and
+> took the underline for the caption's colour where `0x4A5CD7` loads
+> interface colour 2. Measured from the font's `I`, the line also sits one
+> row lower than first ported for hattfont12.
 
 ---
 
