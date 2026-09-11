@@ -8970,14 +8970,15 @@ original:
   buildings. (An earlier version of this entry said both defaulted to 100.
   They never shipped that way; see the comment on `shadingStrengthUnits` in
   `GlobalConfig.h`.)
-- **Units are anti-aliased by default, and so is a building's dont-cache
-  piece.** The original box-filters a building's cached bitmap and nothing
-  else (§101). RWE filters the same, plus two things it did not: everything
-  solid that is not the ground, while `anti-alias-units` is on, which it is
-  by default since 2026-09-11; and a finished building's dont-cache pieces,
-  such as a metal extractor's top, always, because in play they read as part
-  of the building. Neither gets the halo, which stays on the cached pieces
-  the original's table actually saw.
+- **Units can be anti-aliased, on a switch that is off by default.** The
+  original box-filters a building's cached bitmap and nothing else (§101),
+  and by default so does RWE. A finished building's dont-cache pieces, such
+  as a metal extractor's top, are drawn sharp as the original drew them, and
+  the switch does not reach them. `anti-alias-units` (Units Smooth on the
+  VISUALS page) also filters everything solid that is not the ground. It
+  was on by default, and the extractor's top smoothed, for part of
+  2026-09-11; both went back to the original the same day, when the player
+  asked for it exactly.
 - **A finished `ZBuffer=0` unit's flat-coloured faces are unshaded.** The
   original leaves such a unit's textured quads raw but still shades its
   flat-colour n-gons (TOTALA-EXE-SHADING.md S:23). RWE draws the whole model
@@ -10986,21 +10987,24 @@ occluder level it always was, and green is the ground.
 
 One switch sits on top of it, `anti-alias-units` (VISUALS page), which puts
 units, nanoframes and features back into the filter for anyone who wants
-smooth edges on them more than they want the original. It shipped off, the
-faithful setting, and was turned on by default on 2026-09-11: in play, sharp
-units beside smoothed buildings looked like a fault rather than like 1997. The
-ground stays out either way: the blur there was never anti-aliasing, it was a
-box filter over a texture that cannot survive one.
+smooth edges on them more than they want the original. It is off by default,
+the faithful setting. It was turned on by default for part of 2026-09-11,
+after a play-test found sharp units beside smoothed buildings looked like a
+fault, and went back off the same day, when the player asked for the original
+exactly. The ground stays out either way: the blur there was never
+anti-aliasing, it was a box filter over a texture that cannot survive one.
 
-**A finished building's dont-cache piece follows the building, not the
-switch** (2026-09-11). It used to go into the mask as an ordinary occluder, at
-0.5, so a metal extractor's spinning top went sharp or smooth with the units.
-It has a level of its own now, 0.7: `building()` in `worldPost.frag` (above
-0.6) decides the filter and `cached()` (above 0.85) still decides the halo, so
-the top is smoothed with its extractor and still carries no fringe. Strictly
-the original drew that piece straight to the screen unfiltered, so this is a
-second deliberate divergence beside the switch; the player's reading, that an
-extractor's top is part of a building, is the one kept.
+**A finished building's dont-cache piece is drawn sharp, and the switch
+does not reach it** (2026-09-11). It used to go into the mask as an ordinary
+occluder, at 0.5, so a metal extractor's spinning top went sharp or smooth
+with the units, which a play-test rightly found wrong. It has a level of its
+own, 0.7, and `dontCache()` in `worldPost.frag` keeps a block whose native
+sample is such a piece out of every filter, the units switch included. The
+original left that piece out of the cached bitmap and drew it straight to
+the screen afterwards, unfiltered and unfringed, and that is what this
+reproduces. For a few hours the same day it was smoothed with its building
+instead; that went back when the player asked for the original exactly.
+`cached()` (above 0.85) alone now decides both the filter and the halo.
 
 So the direction of travel is worth stating plainly, because it is the
 opposite of what it looks like: **this removed a divergence rather than

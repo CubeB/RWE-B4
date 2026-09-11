@@ -198,12 +198,13 @@ namespace rwe
          *
          * On extends it back over units and everything else solid, for anyone
          * who would rather have smooth edges on them than the edges the
-         * original drew. It is a preference, not a fidelity fix -- and the
-         * preference, play-tested 2026-09-11, is on: sharp units beside
-         * smoothed buildings looked like a fault, not like 1997. Off is still
+         * original drew. It is a preference, not a fidelity fix. It was on by
+         * default for part of 2026-09-11, after a play-test found sharp units
+         * beside smoothed buildings looked like a fault, and went back off
+         * the same day when the player asked for the original exactly. On is
          * one click away on the VISUALS page. rwe.cfg key anti-alias-units.
          */
-        bool antiAliasUnits{true};
+        bool antiAliasUnits{false};
 
         /**
          * The purple halo on building edges, reproduced by running the
@@ -295,7 +296,7 @@ namespace rwe
         ShadingMode shading{ShadingMode::BuildingsOnly};
         bool antiAlias{true};
         bool buildingHalo{true};
-        bool antiAliasUnits{true};
+        bool antiAliasUnits{false};
     };
 
     /** The settings as the config file last left them. */

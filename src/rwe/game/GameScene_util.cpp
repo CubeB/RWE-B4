@@ -483,10 +483,12 @@ namespace rwe
             // -- because a gap in the coverage is a boundary, and the post
             // pass cannot tell a gap from an outline. See unitTexture.frag.
             //
-            // A finished building's dont-cache piece is the one in between, at
-            // 0.7: no halo, for the reason above, but anti-aliased with the
-            // building it belongs to. Left at 0.5 it went sharp or smooth with
-            // the units switch, and an extractor's top is part of a building.
+            // A finished building's dont-cache piece has a level of its own,
+            // 0.7: no halo, for the reason above, and no anti-aliasing either,
+            // because the original drew it straight to the screen after the
+            // cached bitmap. Left at 0.5 it went sharp or smooth with the
+            // units switch, and an extractor's top is part of a building, not
+            // a unit.
             auto maskValue = isFinishedBuilding ? (mesh.cached ? 1.0f : 0.7f) : 0.5f;
 
             drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], pieceShadeStrength, playerColorIndex, atlases, maskValue, out);

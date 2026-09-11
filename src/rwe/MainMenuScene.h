@@ -31,7 +31,7 @@ namespace rwe
         ShadingMode pendingShading{ShadingMode::BuildingsOnly};
         bool pendingAntiAlias{true};
         bool pendingBuildingHalo{true};
-        bool pendingAntiAliasUnits{true};
+        bool pendingAntiAliasUnits{false};
 
         /** Pushes the current settings back into the menu widgets: a staged button does not advance its own display. */
         void refreshOptionControls();

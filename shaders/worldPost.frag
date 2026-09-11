@@ -170,19 +170,26 @@ bool solid(vec4 texel)
     return texel.a > 0.25;
 }
 
-// ...and it was part of a finished building, cached or not (1.0 or 0.7), which
-// is what decides the anti-aliasing: an extractor's spinning top is smoothed
-// with the rest of the extractor, whatever the units switch says.
+// ...and it was part of a finished building, cached or not (1.0 or 0.7).
 bool building(vec4 texel)
 {
     return texel.a > 0.6;
 }
 
-// ...and it was a cached piece of a finished building (1.0), the only thing
-// that can carry the halo.
+// ...and it was a cached piece of a finished building (1.0): the only thing
+// the original anti-aliased, and the only thing that can carry the halo.
 bool cached(vec4 texel)
 {
     return texel.a > 0.85;
+}
+
+// ...and it was a finished building's dont-cache piece (0.7), such as a metal
+// extractor's spinning top. The original left it out of the cached bitmap and
+// drew it straight to the screen afterwards, so it is never filtered, and the
+// units switch has no say over it either.
+bool dontCache(vec4 texel)
+{
+    return building(texel) && !cached(texel);
 }
 
 // A mask sample: red is the index, and a sample with nothing in it stands in as
@@ -230,18 +237,26 @@ void main(void)
 
     if (selectiveAntiAlias > 0.0)
     {
-        // A building piece anywhere in the block is what the original
+        // A cached building piece anywhere in the block is what the original
         // filtered, and the block is averaged for it -- its silhouette
-        // included, which is where the halo comes from. The halo's own test
-        // below is narrower, cached pieces only, so a dont-cache piece is
-        // smoothed with its building but never fringed.
-        bool filterThis = building(s00) || building(s10) || building(s01) || building(s11);
+        // included, which is where the halo comes from.
+        bool filterThis = cached(s00) || cached(s10) || cached(s01) || cached(s11);
 
         // And the player's own answer to the question the original never
-        // asked, for everything solid that is not the ground.
+        // asked, for everything solid that is not the ground. Off by default,
+        // which is the original.
         if (antiAliasUnits > 0.0)
         {
             filterThis = filterThis || unfiltered(s00) || unfiltered(s10) || unfiltered(s01) || unfiltered(s11);
+        }
+
+        // Where a dont-cache piece covers the pixel -- the sample a render at
+        // native size would have taken -- it is drawn sharp over whatever is
+        // filtered around it, as the original drew it after the cached
+        // bitmap.
+        if (dontCache(s00))
+        {
+            filterThis = false;
         }
 
         if (!filterThis)
