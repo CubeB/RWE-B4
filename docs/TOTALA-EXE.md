@@ -9998,6 +9998,106 @@ The feature's `seqnamereclamate` swirl was already implemented (it plays on
 > the *when* -- in particular that a builder sent to a wreck it must walk to
 > announces nothing until it arrives.
 
+### `underattack`, `repair` and `cant`: the three voices that were never played
+
+> **Ported, 2026-09-11.** `UnitDamagedEvent` carries the cause (its
+> `paralyzer` flag) and the scene plays slot 2 off it under the gates below;
+> `UnitRepairedEvent` is raised where a repair job lands, on both sides of
+> it, and plays slot 10; `UnitCannotComplyEvent` carries the caption a
+> refusing site passes and plays slot 7. Four of the forty-five `cant`
+> sites are wired, the ones whose refusals RWE already makes: the nanoframe
+> capture, the Commander reclaim, the pad that is taken, and the corpse that
+> has gone. The rest are in the table for when their refusals exist.
+> `src/rwe/sim/unitnotifications.test.cpp`.
+
+The rest of the slot table at `0x5086F0`, read out in full this time:
+
+| Id | Key | Caption | | Id | Key | Caption |
+|---|---|---|---|---|---|---|
+| 1 | `select` | | | 12 | `load` | |
+| 2 | `underattack` | Under Attack | | 13 | `unload` | |
+| 3 | `activate` | | | 14 | `cloak` | Cloaked |
+| 4 | `deactivate` | | | 15 | `uncloak` | Visible |
+| 5 | `ok` | | | 16 | `capture` | |
+| 6 | `arrived` | Arrived | | 17-22 | `count5`..`count0` | five..zero |
+| 7 | `cant` | Cannot Comply | | 23 | `canceldestruct` | Self destruct terminated |
+| 8 | `unitcomplete` | Nanolathe Complete | | | | |
+| 9 | `build` | | | | | |
+| 10 | `repair` | | | | | |
+| 11 | `working` | | | | | |
+
+**Three entry points, one player.** `0x47F780(unit, id, caption)` is the one
+the eighty-two direct call sites use. It refuses a unit that is not the local
+player's, or not alive (`unit+0x110` bit 28 clear or bit 14 set); takes the
+caption passed in, or the table's if none; prints it (`0x4C5740`) and hands
+`(unit, id, text)` to the player `0x47FAD0`. Two siblings differ only in one
+extra gate, `0x48BCB0(unit)`, which walks the frame's draw list (the "HOT
+UNITS" list at `world+0x1435F`, §18): `0x47F7E0` plays only for a unit *in*
+the list and is never called; `0x47F850` plays only for a unit *not* in it,
+and has one caller.
+
+**The player keeps a queue.** `0x47FAD0` holds up to eight pending voices of
+17 bytes each. A slot id already waiting is not queued again (`0x47FB0A`), a
+full queue drops its head, and the entries are kept in priority order from
+the table's third dword (`underattack` 0x14, `cant` 1, `select` 0). So a unit
+under sustained fire says "Under Attack" once per playback, not once per hit.
+RWE has one reserved voice channel and drops a voice while it is busy, which
+comes to nearly the same thing.
+
+**`underattack`, slot 2, one site.** `0x4071D8`, the tail of the return-fire
+routine `0x406F80(attacker, victim, damage)` (§"Firing modes"). Every early
+exit in that routine jumps to the tail rather than returning, so the voice is
+independent of the fire mode and of whether the unit shot back. Its own gates:
+
+- `0x438BE0(victim)` returns the victim's current mission flags word
+  (`mission+0x42`); bit 7 set skips the voice. No mission handler sets that
+  bit directly in this binary; it is treated as never set.
+- `[victim+0xF4]` (the owner of the last unit to damage it) differs from the
+  victim's owner: play. Otherwise play only if `[victim+0xF5]`, the cause
+  byte, is 1, a weapon hit -- so a paralyser from your own side is silent.
+- Through `0x47F850`: only for a unit that is not being drawn this frame. It
+  is the warning for what you cannot see.
+
+**`repair`, slot 10, five sites, all with `0x5012CC` "Unit repaired".**
+`0x402491` in `SELFREPAIR` (`0x402430`, the aircraft on a pad, once its hit
+points meet the maximum), `0x415298` in `VTOL_GetRepaired` (`0x415250`, the
+same from the air side), `0x415219` in `VTOL_RepairUnit` (`0x414E70`, the
+repairer), and `0x4056FE`/`0x4057A1` in the ground repair body shared below
+`0x4056A5` (the repairer again). Both ends of a repair say it.
+
+**`cant`, slot 7, 45 sites.** Not one passes a null caption; every site
+overrides "Cannot Comply" with a message of its own, which is why the table's
+caption is never seen. The sites, by caption:
+
+| Sites | Caption |
+|---|---|
+| `4046fe` | Capture failed |
+| `402736` | Construction stopped |
+| `403a3c, 403fb0, 413dba` | Construction terminated |
+| `41473c` | Construction terminated by hostile action |
+| `40407a` | I can't get there |
+| `403c45` | I can't reach the construction site |
+| `41190b` | Landing aborted |
+| `411d36` | Landing aborted: all pads are occupied |
+| `411e01` | Landing aborted: no pads available |
+| `411c3a` | Landing failed |
+| `4047a6, 4047e6, 404b00, 41479f, 414d69` | Reclamation failed |
+| `40244e, 415268` | Repair aborted. |
+| `414f8e` | Repair mission failed |
+| `40531e, 4053aa, 40575e, 414e8e, 414f18` | Repairs unsuccessful. |
+| `404f7e` | Ressurection failed |
+| `403d10, 414055` | Target area was blocked |
+| `4042ff` | That unit cannot be captured |
+| `404799, 414d91` | That unit cannot be reclaimed |
+| `40432e` | That unit is a cloud of vapor and cannot be captured |
+| `4068d7, 411207, 411526` | Transport mission failed |
+| `402907, 403d78, 405121, 4140b8` | Unable to create any more units |
+| `411771` | Unable to unload unit |
+| `411275` | Unit is too heavy to transport |
+| `4067ea` | Unit is too large to transport |
+| `406916` | Unloading process is proceeding non-optimally |
+| `403cdf, 414020` | Waiting for target area to clear |
+
 ---
 
 ## 98. Resurrect: a real mission, a crude corpse mapping, and nothing that can use it

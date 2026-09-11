@@ -3499,7 +3499,7 @@ namespace rwe
                     attackerOwner = attackerUnit->get().owner;
                 }
             }
-            events.push_back(UnitDamagedEvent{unitId, getUnitState(unitId).owner, attackerOwner});
+            events.push_back(UnitDamagedEvent{unitId, getUnitState(unitId).owner, attackerOwner, paralyzer});
         }
 
         if (attacker)

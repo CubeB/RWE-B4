@@ -918,6 +918,7 @@ set(TEST_FILES
     src/rwe/sim/patrol.test.cpp
     src/rwe/sim/capture.test.cpp
     src/rwe/sim/worksounds.test.cpp
+    src/rwe/sim/unitnotifications.test.cpp
     src/rwe/sim/burning.test.cpp
     src/rwe/sim/waterbuilding.test.cpp
     src/rwe/setup/TaInstall.test.cpp

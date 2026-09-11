@@ -1821,6 +1821,7 @@ namespace rwe
         // Somebody else got there first.
         if (airBaseIsClaimedByAnother(*sim, order.target, unitInfo.id))
         {
+            sim->events.push_back(UnitCannotComplyEvent{unitInfo.id, "Landing aborted: no pads available"});
             return true;
         }
 
@@ -1837,7 +1838,14 @@ namespace rwe
             // mending is not its work: the pad does that, in the builder
             // path, which is why an aircraft on a switched-off pad sits there
             // indefinitely instead of taking off again.
-            return unitInfo.state->hitPoints >= unitInfo.definition->maxHitPoints;
+            if (unitInfo.state->hitPoints >= unitInfo.definition->maxHitPoints)
+            {
+                // The aircraft's own "Unit repaired" (0x402491, and
+                // VTOL_GetRepaired's at 0x415298).
+                sim->events.push_back(UnitRepairedEvent{unitInfo.id});
+                return true;
+            }
+            return false;
         }
 
         if (navigateTo(unitInfo, pad.position))
@@ -3576,6 +3584,8 @@ namespace rwe
                 const auto& targetDefinition = sim->unitDefinitions.at(target->get().unitType);
                 if (targetDefinition.canCapture)
                 {
+                    // 0x50164C, from ReclaimUnit (0x4047A6).
+                    sim->events.push_back(UnitCannotComplyEvent{unitInfo.id, "That unit cannot be reclaimed"});
                     return true;
                 }
             }
@@ -3595,7 +3605,8 @@ namespace rwe
         auto featureRef = sim->tryGetFeature(resurrectOrder.target);
         if (!featureRef)
         {
-            // "Ressurection failed" -- the corpse has gone.
+            // The corpse has gone. 0x501684, spelt as the original spells it.
+            sim->events.push_back(UnitCannotComplyEvent{unitInfo.id, "Ressurection failed"});
             return true;
         }
         const auto& feature = featureRef->get();
@@ -3722,7 +3733,9 @@ namespace rwe
 
         if (target.hitPoints >= targetDefinition.maxHitPoints)
         {
-            // Nothing to repair.
+            // Nothing to repair. The "Unit repaired" voice is raised where
+            // the mending finishes, in deployRepairArm, so an order for a
+            // unit that was already whole says nothing.
             return true;
         }
 
@@ -4054,6 +4067,7 @@ namespace rwe
         // thinks an unfinished building is.
         if (targetRef->get().isBeingBuilt(sim->unitDefinitions.at(targetRef->get().unitType)))
         {
+            sim->events.push_back(UnitCannotComplyEvent{unitInfo.id, "That unit is a cloud of vapor and cannot be captured"});
             return true;
         }
 
@@ -4972,6 +4986,10 @@ namespace rwe
 
                 if (targetUnit.hitPoints >= targetUnitDefinition.maxHitPoints)
                 {
+                    // "Unit repaired", sound slot 10, from the repairer's
+                    // side: RepairUnit and VTOL_RepairUnit (0x415219) say
+                    // it as the job lands.
+                    sim->events.push_back(UnitRepairedEvent{unitInfo.id});
                     changeState(*unitInfo.state, UnitBehaviorStateIdle());
                     return true;
                 }
