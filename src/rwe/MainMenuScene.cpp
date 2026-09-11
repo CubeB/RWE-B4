@@ -1610,6 +1610,18 @@ namespace rwe
             params.players[i] = std::move(playerInfo);
         }
 
+        // Slot n sits on the map's StartPos n, and the map decides how many
+        // of those it has: a campaign map declares one, most skirmish maps
+        // fewer than the ten slots the lobby offers. A slot the map cannot
+        // seat used to surface as "Missing key from schema" from the loader
+        // and take the game down with it (upstream #49). Say so here and
+        // stay in the lobby instead.
+        if (auto problem = startPositionProblem(params))
+        {
+            openMessageBox(*problem);
+            return;
+        }
+
         auto scene = std::make_unique<LoadingScene>(
             sceneContext,
             soundLookup,
@@ -1617,6 +1629,37 @@ namespace rwe
             params);
 
         sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+    }
+
+    std::optional<std::string> MainMenuScene::startPositionProblem(const GameParameters& params)
+    {
+        auto otaRaw = sceneContext.vfs->readFile(std::string("maps/").append(params.mapName).append(".ota"));
+        if (!otaRaw)
+        {
+            return "Could not read the map " + params.mapName;
+        }
+        std::string otaStr(otaRaw->begin(), otaRaw->end());
+        auto ota = parseOta(parseTdfFromString(otaStr));
+        if (params.schemaIndex >= ota.schemas.size())
+        {
+            return params.mapName + " has no schema " + std::to_string(params.schemaIndex);
+        }
+        const auto& schema = ota.schemas[params.schemaIndex];
+
+        for (Index i = 0; i < getSize(params.players); ++i)
+        {
+            if (!params.players[i])
+            {
+                continue;
+            }
+            auto slot = static_cast<int>(i) + 1;
+            if (!findStartPosition(schema, slot))
+            {
+                return "This map has no start position for slot " + std::to_string(slot)
+                    + " (it has " + std::to_string(countStartPositions(schema)) + ")";
+            }
+        }
+        return std::nullopt;
     }
 
     Point MainMenuScene::toScaledCoordinates(int x, int y) const

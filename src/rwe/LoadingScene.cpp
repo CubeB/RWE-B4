@@ -295,9 +295,8 @@ namespace rwe
             // stopping at the first one missing.
             for (int n = 1; n <= 10; ++n)
             {
-                auto key = std::string("StartPos") + std::to_string(n);
-                auto it = std::find_if(startSchema.specials.begin(), startSchema.specials.end(), [&key](const OtaSpecial& s) { return s.specialWhat == key; });
-                if (it == startSchema.specials.end())
+                auto it = findStartPosition(startSchema, n);
+                if (!it)
                 {
                     continue;
                 }
@@ -518,17 +517,19 @@ namespace rwe
                 continue;
             }
 
-            std::string startPosKey("StartPos");
-            startPosKey.append(std::to_string(*startPositionForSlot[i]));
-
-            auto startPosIt = std::find_if(schema.specials.begin(), schema.specials.end(), [&startPosKey](const OtaSpecial& s) { return s.specialWhat == startPosKey; });
-            if (startPosIt == schema.specials.end())
+            // The lobby refuses to start a game whose slots the map cannot
+            // seat, so this is the backstop for the command line and the
+            // harnesses. It still ends the game, but it says which map and
+            // which slot rather than naming a key.
+            auto startPos = findStartPosition(schema, *startPositionForSlot[i]);
+            if (!startPos)
             {
-                throw std::runtime_error("Missing key from schema: " + startPosKey);
+                throw std::runtime_error(
+                    "Map \"" + mapName + "\" has no start position for player slot " + std::to_string(*startPositionForSlot[i])
+                    + " (schema " + std::to_string(schemaIndex) + " declares " + std::to_string(countStartPositions(schema)) + ")");
             }
-            const auto& startPos = *startPosIt;
 
-            auto worldStartPos = gameScene->getTerrain().topLeftCoordinateToWorld(SimVector(SimScalar(startPos.xPos), 0_ss, SimScalar(startPos.zPos)));
+            auto worldStartPos = gameScene->getTerrain().topLeftCoordinateToWorld(SimVector(SimScalar(startPos->xPos), 0_ss, SimScalar(startPos->zPos)));
             worldStartPos.y = gameScene->getTerrain().getHeightAt(worldStartPos.x, worldStartPos.z);
 
             if (*gamePlayers[i] == *localPlayerId)
