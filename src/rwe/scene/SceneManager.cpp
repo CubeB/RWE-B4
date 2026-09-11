@@ -1,4 +1,5 @@
 #include "SceneManager.h"
+#include <algorithm>
 #include <rwe/render/render_prof.h>
 #include <rwe/scene/Screenshot.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -45,6 +46,14 @@ namespace rwe
           viewport(viewport),
           requestedExit(false)
     {
+        // At a scale above 1 the scenes see a viewport of the window's size
+        // divided by the scale, draw into a buffer of that size, and the
+        // buffer is blown up onto the window at the end of the frame. The
+        // mouse is mapped back through the same factor on the way in.
+        screenScale = std::clamp(globalConfig->screenScale, 1u, 4u);
+        sdl->getWindowSize(window, &windowWidth, &windowHeight);
+        viewport->setDimensions(windowWidth / static_cast<int>(screenScale), windowHeight / static_cast<int>(screenScale));
+        cursorService->setScreenScale(screenScale);
     }
 
     void SceneManager::setNextScene(std::shared_ptr<Scene> scene)
@@ -52,7 +61,7 @@ namespace rwe
         nextScene = std::move(scene);
     }
 
-    void dispatchToScene(const SDL_Event& event, Scene& currentScene)
+    void dispatchToScene(const SDL_Event& event, Scene& currentScene, float screenScale)
     {
         switch (event.type)
         {
@@ -70,7 +79,7 @@ namespace rwe
                     break;
                 }
 
-                MouseButtonEvent e(event.button.x, event.button.y, *button);
+                MouseButtonEvent e(static_cast<int>(event.button.x / screenScale), static_cast<int>(event.button.y / screenScale), *button);
                 currentScene.onMouseDown(e);
                 break;
             }
@@ -82,13 +91,13 @@ namespace rwe
                     break;
                 }
 
-                MouseButtonEvent e(event.button.x, event.button.y, *button);
+                MouseButtonEvent e(static_cast<int>(event.button.x / screenScale), static_cast<int>(event.button.y / screenScale), *button);
                 currentScene.onMouseUp(e);
                 break;
             }
             case SDL_EVENT_MOUSE_MOTION:
             {
-                MouseMoveEvent e(event.motion.x, event.motion.y);
+                MouseMoveEvent e(static_cast<int>(event.motion.x / screenScale), static_cast<int>(event.motion.y / screenScale));
                 currentScene.onMouseMove(e);
                 break;
             }
@@ -164,17 +173,19 @@ namespace rwe
 
                 if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED && event.window.windowID == sdl->getWindowId(window))
                 {
-                    viewport->setDimensions(event.window.data1, event.window.data2);
+                    windowWidth = event.window.data1;
+                    windowHeight = event.window.data2;
+                    viewport->setDimensions(windowWidth / static_cast<int>(screenScale), windowHeight / static_cast<int>(screenScale));
                     // The GL viewport does not follow the window by itself,
                     // and only the game scene ever sets it per frame -- the
                     // menu and the movie player draw through the default one,
                     // so without this a resized window kept rendering into a
                     // corner sized like the old window.
-                    graphics->setViewport(0, 0, event.window.data1, event.window.data2);
+                    graphics->setViewport(0, 0, viewport->width(), viewport->height());
                     continue;
                 }
 
-                dispatchToScene(event, *currentScene);
+                dispatchToScene(event, *currentScene, static_cast<float>(screenScale));
             }
 
             if (!headless)
@@ -209,25 +220,62 @@ namespace rwe
             imGuiContext->render();
 
             setCrashPhase(CrashPhase::Render);
+            if (screenScale > 1)
+            {
+                // The frame goes into a buffer of the scaled size. Scenes
+                // that bind buffers of their own unbind back to it rather
+                // than to the window, which is what the presentation target
+                // on the graphics context is for.
+                auto wantedWidth = static_cast<int>(viewport->width());
+                auto wantedHeight = static_cast<int>(viewport->height());
+                if (!presentationBuffer || presentationBufferWidth != wantedWidth || presentationBufferHeight != wantedHeight)
+                {
+                    presentationBuffer = graphics->createFrameBuffer(wantedWidth, wantedHeight);
+                    presentationBufferWidth = wantedWidth;
+                    presentationBufferHeight = wantedHeight;
+                }
+                graphics->setPresentationFrameBuffer(presentationBuffer->frameBuffer.get());
+                graphics->bindFrameBuffer(presentationBuffer->frameBuffer.get());
+            }
             graphics->clear();
             // The game scene points the GL viewport at its own buffers as
             // it works (the supersampled world among them), and the menu and
             // movie scenes draw through whatever is current: without this
             // reset, leaving a game left the front end rendering into a
-            // stale sub-rectangle while the mouse math used the window.
+            // corner sized like the old window.
             graphics->setViewport(0, 0, viewport->width(), viewport->height());
             currentScene->render();
 
-            // Taken here, after the scene and before the cursor and the debug
+            if (!imGuiContext->io->WantCaptureMouse)
+            {
+                sdl->hideCursor();
+                cursorService->render(uiRenderService);
+            }
+
+            if (screenScale > 1)
+            {
+                // Nearest-neighbour, so at a whole-number scale every game
+                // pixel is a square block of screen pixels. The world's own
+                // supersample and the building halo were resolved inside
+                // the frame, before this, as the original's own pixels
+                // would have been before a monitor stretched them.
+                graphics->setPresentationFrameBuffer(std::nullopt);
+                graphics->blitFrameBufferToWindow(presentationBuffer->frameBuffer.get(), presentationBufferWidth, presentationBufferHeight, windowWidth, windowHeight);
+                graphics->setViewport(0, 0, windowWidth, windowHeight);
+            }
+
+            // Taken here, after the scene and the cursor and before the debug
             // windows, so the picture is the game with nothing of RWE's own on
-            // top of it. Whether the original's included its cursor is not
-            // decoded.
+            // top of it. It reads the window's back buffer, which at a scale
+            // above 1 has the frame on it only once it has been blown up. The
+            // cursor is in it now, where it was not before the scale work; the
+            // original's own screenshots are not decoded on that point.
             if (screenshotRequested)
             {
                 screenshotRequested = false;
                 if (auto dataPath = getLocalDataPath())
                 {
-                    auto written = saveScreenshot(*dataPath / "screenshots", static_cast<unsigned int>(viewport->width()), static_cast<unsigned int>(viewport->height()));
+                    auto written = saveScreenshot(*dataPath / "screenshots", static_cast<unsigned int>(windowWidth), static_cast<unsigned int>(windowHeight));
                     if (written)
                     {
                         LOG_INFO << "Screenshot saved to " << written->string();
@@ -237,12 +285,6 @@ namespace rwe
                         LOG_ERROR << "Screenshot could not be written";
                     }
                 }
-            }
-
-            if (!imGuiContext->io->WantCaptureMouse)
-            {
-                sdl->hideCursor();
-                cursorService->render(uiRenderService);
             }
 
             {

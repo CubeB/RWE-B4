@@ -63,5 +63,11 @@ namespace rwe
         std::shared_ptr<SpriteSeries> getCursor(CursorType type) const;
 
         void render(UiRenderService& renderer) const;
+
+        /** See GlobalConfig::screenScale: the mouse is in window pixels, the frame is not. */
+        void setScreenScale(unsigned int scale);
+
+    private:
+        unsigned int screenScale{1};
     };
 }

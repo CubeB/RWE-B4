@@ -1,4 +1,5 @@
 #include "CursorService.h"
+#include <algorithm>
 #include <rwe/sdl/SdlContext.h>
 
 namespace rwe
@@ -35,8 +36,8 @@ namespace rwe
         float fy;
 
         sdlContext->getMouseState(&fx, &fy);
-        int x = static_cast<int>(fx);
-        int y = static_cast<int>(fy);
+        int x = static_cast<int>(fx / static_cast<float>(screenScale));
+        int y = static_cast<int>(fy / static_cast<float>(screenScale));
 
         auto timeInMillis = timeService->getTicks();
         const auto& frames = currentCursor->sprites;
@@ -46,5 +47,10 @@ namespace rwe
         auto frameIndex = (timeInMillis / millisPerFrame) % frames.size();
 
         renderer.drawSprite(x, y, *(frames[frameIndex]));
+    }
+
+    void CursorService::setScreenScale(unsigned int scale)
+    {
+        screenScale = std::max(1u, scale);
     }
 }

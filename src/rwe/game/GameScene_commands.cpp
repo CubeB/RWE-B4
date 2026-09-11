@@ -119,7 +119,9 @@ namespace rwe
         float fx;
         float fy;
         sceneContext.sdl->getMouseState(&fx, &fy);
-        return Point(static_cast<int>(fx), static_cast<int>(fy));
+        // Window pixels to frame pixels; see GlobalConfig::screenScale.
+        auto scale = static_cast<float>(std::max(1u, sceneContext.globalConfig->screenScale));
+        return Point(static_cast<int>(fx / scale), static_cast<int>(fy / scale));
     }
 
     std::optional<UnitId> GameScene::getFirstCollidingUnit(const Ray3f& ray) const

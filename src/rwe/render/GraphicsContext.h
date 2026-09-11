@@ -8,6 +8,7 @@
 #include <rwe/geometry/CollisionMesh.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/math/Vector3f.h>
+#include <optional>
 #include <rwe/render/FrameBufferHandle.h>
 #include <rwe/render/GlMesh.h>
 #include <rwe/render/RenderBufferHandle.h>
@@ -225,6 +226,23 @@ namespace rwe
 
         void bindFrameBuffer(FrameBufferIdentifier frameBuffer);
 
+        /**
+         * The framebuffer that unbindFrameBuffer returns to: the window's
+         * own by default, or a presentation buffer while the frame is being
+         * drawn at a scale (see SceneManager). Scenes never need to know
+         * which, which is the point.
+         */
+        void setPresentationFrameBuffer(std::optional<FrameBufferIdentifier> frameBuffer);
+
+        /**
+         * Copies the colour of `source`, `sourceWidth` by `sourceHeight`
+         * pixels, onto the window's own framebuffer stretched to
+         * `windowWidth` by `windowHeight`, sampling nearest so a whole-number
+         * scale keeps every pixel square. Leaves the window's framebuffer
+         * bound.
+         */
+        void blitFrameBufferToWindow(FrameBufferIdentifier source, int sourceWidth, int sourceHeight, int windowWidth, int windowHeight);
+
         void unbindFrameBuffer();
 
         void enableBlending();
@@ -279,6 +297,7 @@ namespace rwe
         void setActiveTextureSlot3();
 
     private:
+        unsigned int presentationFrameBuffer{0};
         ShaderHandle compileShader(GLenum shaderType, const std::string& source);
 
         VboHandle genBuffer();

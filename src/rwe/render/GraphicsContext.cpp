@@ -632,6 +632,19 @@ namespace rwe
 
     void GraphicsContext::unbindFrameBuffer()
     {
+        glBindFramebuffer(GL_FRAMEBUFFER, presentationFrameBuffer);
+    }
+
+    void GraphicsContext::setPresentationFrameBuffer(std::optional<FrameBufferIdentifier> frameBuffer)
+    {
+        presentationFrameBuffer = frameBuffer ? frameBuffer->value : 0;
+    }
+
+    void GraphicsContext::blitFrameBufferToWindow(FrameBufferIdentifier source, int sourceWidth, int sourceHeight, int windowWidth, int windowHeight)
+    {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, source.value);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBlitFramebuffer(0, 0, sourceWidth, sourceHeight, 0, 0, windowWidth, windowHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 
