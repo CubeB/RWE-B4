@@ -203,6 +203,27 @@ namespace rwe
             REQUIRE(foundRubble);
         }
 
+        SECTION("an indestructible feature shrugs off a blast")
+        {
+            // Modelled on the Barrier walls and the dragon's teeth: blocking,
+            // with 2000 hit points declared, and indestructible=1. The flag
+            // is the whole of it; the shipped data has two hundred of these
+            // and every one would otherwise be a wall that can be shelled.
+            auto wall = makeWreckDef("wall", 0u, 2000u);
+            wall.reclaimable = false;
+            wall.autoreclaimable = false;
+            wall.indestructible = true;
+            wall.featureDead = rubbleDef;
+            auto wallDef = sim.featureDefinitions.insert(wall);
+            auto wallId = sim.addFeature(wallDef, 8, 8).value();
+            auto position = sim.getFeature(wallId).position;
+
+            sim.doProjectileImpact(makeShell(position, 100000u, 64_ss), ImpactType::Normal);
+
+            REQUIRE(sim.tryGetFeature(wallId).has_value());
+            REQUIRE(sim.getFeature(wallId).hitPoints == 2000u);
+        }
+
         SECTION("a weapon whose data exempts it never touches a feature")
         {
             // The flag is still honoured, so a mod can declare a weapon that
