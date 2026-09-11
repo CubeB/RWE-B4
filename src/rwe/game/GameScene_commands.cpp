@@ -1331,7 +1331,55 @@ namespace rwe
                         if (auto victim = tryGetUnit(e.unitId))
                         {
                             lastAttackPosition = victim->get().position;
+
+                            // Sound slot 2, `underattack`, "Under Attack".
+                            // Its one call site (0x4071D8) is the tail of
+                            // the return-fire routine, reached on every hit
+                            // whatever the fire mode. It plays for damage
+                            // from another side of any cause, and for the
+                            // unit's own side only on a weapon hit; and it
+                            // goes through the entry point that refuses a
+                            // unit in the frame's draw list (0x47F850), so
+                            // it is the warning for what you cannot see.
+                            // The original also drops a repeat while one is
+                            // waiting in its voice queue; here the reserved
+                            // voice channel does the same by being busy.
+                            // TOTALA-EXE.md §97.
+                            auto otherSide = !e.attackerOwner || *e.attackerOwner != e.victimOwner;
+                            if ((otherSide || !e.paralyzer) && !victim->get().isDead())
+                            {
+                                auto viewProjectionMatrix = computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+                                auto viewCull = makeViewCullTest(viewProjectionMatrix);
+                                if (!viewCull.couldBeVisible(simVectorToFloat(victim->get().position), ViewCullModelRadius))
+                                {
+                                    const auto& unitDefinition = simulation.unitDefinitions.at(victim->get().unitType);
+                                    printConsole(unitDefinition.unitName + ": Under Attack");
+                                    playUnitNotificationSound(localPlayerId, victim->get().unitType, UnitSoundType::UnderAttack);
+                                }
+                            }
                         }
+                    }
+                },
+                [&](const UnitRepairedEvent& e) {
+                    // Sound slot 10, `repair`, with its caption "Unit
+                    // repaired" (0x5012CC), from the repairer and from the
+                    // aircraft on a pad alike. TOTALA-EXE.md §97.
+                    if (auto unit = tryGetUnit(e.unitId); unit && unit->get().isOwnedBy(localPlayerId))
+                    {
+                        const auto& unitDefinition = simulation.unitDefinitions.at(unit->get().unitType);
+                        printConsole(unitDefinition.unitName + ": Unit repaired");
+                        playUnitNotificationSound(localPlayerId, unit->get().unitType, UnitSoundType::Repair);
+                    }
+                },
+                [&](const UnitCannotComplyEvent& e) {
+                    // Sound slot 7, `cant`, with the caption the refusing
+                    // site passes in place of the table's "Cannot Comply".
+                    // TOTALA-EXE.md §97.
+                    if (auto unit = tryGetUnit(e.unitId); unit && unit->get().isOwnedBy(localPlayerId))
+                    {
+                        const auto& unitDefinition = simulation.unitDefinitions.at(unit->get().unitType);
+                        printConsole(unitDefinition.unitName + ": " + e.message);
+                        playUnitNotificationSound(localPlayerId, unit->get().unitType, UnitSoundType::Cant1);
                     }
                 },
                 [&](const UnitDiedEvent& e) {

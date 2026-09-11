@@ -289,6 +289,46 @@ namespace rwe
         UnitId unitId;
         PlayerId victimOwner;
         std::optional<PlayerId> attackerOwner;
+
+        /**
+         * The original's damage cause byte (unit+0xF5): 1 is a weapon hit
+         * and 2 a paralyser. The under-attack voice, sound slot 2, plays
+         * for damage from another player whatever its cause, and for damage
+         * from the unit's own side only when it is a weapon hit
+         * (0x4071BA-0x4071D1). See TOTALA-EXE.md §97.
+         */
+        bool paralyzer{false};
+    };
+
+    /**
+     * A repair job has finished and its unit says "Unit repaired": sound
+     * slot 10, `repair`. The original plays it from both ends of the job --
+     * the repairer when RepairUnit or VTOL_RepairUnit completes, and the
+     * aircraft itself when SELFREPAIR (0x402491) or VTOL_GetRepaired
+     * (0x415298) sees its hit points reach the maximum on a pad. See
+     * TOTALA-EXE.md §97.
+     *
+     * Emitted for the scene, and never hashed.
+     */
+    struct UnitRepairedEvent
+    {
+        UnitId unitId;
+    };
+
+    /**
+     * An order the unit cannot carry out, with the caption the original
+     * prints for it: sound slot 7, `cant`, whose table caption is "Cannot
+     * Comply" but which every one of its forty-five call sites overrides
+     * with a message of its own ("That unit is a cloud of vapor and cannot
+     * be captured", "Landing aborted: no pads available", ...). See
+     * TOTALA-EXE.md §97 for the full list.
+     *
+     * Emitted for the scene, and never hashed.
+     */
+    struct UnitCannotComplyEvent
+    {
+        UnitId unitId;
+        std::string message;
     };
 
     struct UnitStartedBuildingEvent
@@ -422,7 +462,9 @@ namespace rwe
         UnitStartedReclaimingEvent,
         ProjectileDiedEvent,
         ProjectileDetonatedEvent,
-        UnitCapturedEvent>;
+        UnitCapturedEvent,
+        UnitRepairedEvent,
+        UnitCannotComplyEvent>;
 
 
     struct UnitInfo
