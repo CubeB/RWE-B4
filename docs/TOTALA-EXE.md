@@ -139,9 +139,12 @@ the job rather than on the flight path.
   moved the construction-aircraft bank peak by 0.00° (a construction aircraft
   never reaches its `BrakeRate` of 1.5) and nothing faster had been measured.
   Measured now with the shipped fighters' numbers: the worst crab angle through
-  a ninety-degree turn drops to a few degrees (`brakerate.test.cpp`). Still not
-  applied in the attack-run, gunship and dogfight states, which steer their own
-  velocities; those want their own pass.
+  a ninety-degree turn drops to a few degrees (`brakerate.test.cpp`). Applied
+  in every air state since B4 #41: `Mover::Update` (`0x43DD20`, §87) hands any
+  `canfly` unit to `0x43D290` whatever its mission, so the gunship ring and the
+  dogfight, which already flew through the flying state's function, had it
+  from the first port, and the attack run, which steers its own heading, now
+  runs the brake step before that swing.
 - **Pitch.** The original also pitches aircraft from the longitudinal component
   of the same accumulator, via `PitchScale` (`def+0x1A6`) into `unit+0x68`. RWE
   has no pitch for units at all and the renderer applies only yaw and roll.
