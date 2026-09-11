@@ -460,12 +460,12 @@ namespace rwe
         return true;
     }
 
-    void GameSimulation::replaceFeature(FeatureId id, const std::optional<FeatureDefinitionId>& replacement)
+    std::optional<FeatureId> GameSimulation::replaceFeature(FeatureId id, const std::optional<FeatureDefinitionId>& replacement)
     {
         auto featureRef = tryGetFeature(id);
         if (!featureRef)
         {
-            return;
+            return std::nullopt;
         }
 
         auto position = featureRef->get().position;
@@ -473,10 +473,11 @@ namespace rwe
 
         deleteFeature(id);
 
-        if (replacement)
+        if (!replacement)
         {
-            addFeature(MapFeature{*replacement, position, rotation});
+            return std::nullopt;
         }
+        return addFeature(MapFeature{*replacement, position, rotation});
     }
 
     void GameSimulation::igniteFeature(FeatureId id)
@@ -3690,11 +3691,12 @@ namespace rwe
         std::unordered_set<UnitId> seenUnits;
         std::unordered_set<FeatureId> seenFeatures;
 
-        // Blasts hurt wreckage too: force-attacking a wreck field to clear a
+        // Blasts hurt features too: force-attacking a wreck field to clear a
         // lane is a standing part of play, and controlling one is an economy
-        // in itself. A feature's own `damage` key is its hit points; a wreck
+        // in itself. A feature's own `damage` key is its hit points; a feature
         // blown to nothing breaks down to its featureDead form the way a
-        // burnt one does, and a beam weapon never touches them at all.
+        // burnt one does. `damagesFeatures` is a mod's switch to exempt a
+        // weapon; the shipped data sets it on nothing.
         auto damagesFeatures = weaponIt == weaponDefinitions.end() || weaponIt->second.damagesFeatures;
 
         auto region = GridRegion::fromCoordinates(minCell, maxCell);
@@ -3723,24 +3725,34 @@ namespace rwe
                   {
                       auto& feature = featureRef->get();
                       const auto& featureDefinition = getFeatureDefinition(feature.featureName);
-                      // Wreckage and rocks take the hit; an `indestructible`
-                      // feature does not, whatever else it is. The shipped
-                      // data has two hundred of those that are also
-                      // blocking -- the Barrier walls, the dragon's teeth --
-                      // and every one declares hit points, so without the
-                      // flag they could be shelled flat.
-                      if (!featureDefinition.indestructible && (featureDefinition.reclaimable || featureDefinition.blocking))
+                      // The original's blast-on-feature routine (0x4244B0,
+                      // TOTALA-EXE.md §24) asks one thing of the feature:
+                      // that it is not `indestructible`. Blocking, reclaimable
+                      // and the rest never enter into it, so a scar decal or
+                      // a bush takes the hit like a wreck does. It adds the
+                      // weapon's default damage, unscaled by distance, to what
+                      // the feature has already taken, and breaks the feature
+                      // to its featuredead form the moment that reaches the
+                      // definition's `damage` -- which for a feature that
+                      // omits the key is zero, so the first hit takes it.
+                      if (!featureDefinition.indestructible)
                       {
-                          auto distance = (feature.position - position).length();
-                          auto scale = blastDamageScale(distance, radius, projectile.edgeEffectiveness);
-                          auto scaled = static_cast<int>(simScalarToUInt(SimScalar(static_cast<float>(projectile.getDamage(std::string()))) * scale));
-                          if (scaled > 0 && feature.hitPoints > 0)
+                          auto damage = projectile.getDamage(std::string());
+                          if (damage >= feature.hitPoints)
                           {
-                              feature.hitPoints = feature.hitPoints > static_cast<unsigned int>(scaled) ? feature.hitPoints - static_cast<unsigned int>(scaled) : 0;
-                              if (feature.hitPoints == 0)
+                              // What stands in its place lands on the cell
+                              // just walked and is not met again by this
+                              // blast, as in the original's per-cell walk;
+                              // without that a heap that names no damage
+                              // would go in the same shell that made it.
+                              if (auto replacement = replaceFeature(*cell.featureId, featureDefinition.featureDead))
                               {
-                                  replaceFeature(*cell.featureId, featureDefinition.featureDead);
+                                  seenFeatures.insert(*replacement);
                               }
+                          }
+                          else
+                          {
+                              feature.hitPoints -= damage;
                           }
                       }
                   }

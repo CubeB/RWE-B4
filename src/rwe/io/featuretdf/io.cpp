@@ -56,7 +56,12 @@ namespace rwe
         f.blocking = tdf.extractBool("blocking").value_or(false);
 
         f.indestructible = tdf.extractBool("indestructible").value_or(false);
-        f.damage = tdf.extractUint("damage").value_or(1);
+        // The original's feature parser (0x422A20) reads every integer key
+        // through one helper with a default it seeds to zero for the whole
+        // block (xor esi,esi at 0x4226F4), so a feature that omits `damage`
+        // has none: the first blast to reach it takes it. See TOTALA-EXE.md
+        // §24, "What a blast does to a feature".
+        f.damage = tdf.extractUint("damage").value_or(0);
         f.seqNameDie = tdf.findValue("seqnamedie").value_or(emptyString);
         f.featureDead = tdf.findValue("featuredead").value_or(emptyString);
 
