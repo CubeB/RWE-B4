@@ -641,7 +641,8 @@ namespace rwe
          * feature turns into a lesser one: burning out into its featureBurnt form.
          * No-op if the id is stale; the replacement is dropped if it does not fit.
          */
-        void replaceFeature(FeatureId id, const std::optional<FeatureDefinitionId>& replacement);
+        /** Removes the feature and stands its replacement, if any, in its place; returns the replacement's id. */
+        std::optional<FeatureId> replaceFeature(FeatureId id, const std::optional<FeatureDefinitionId>& replacement);
 
         /**
          * Applies workAmount of reclaim work to a feature on behalf of a player,

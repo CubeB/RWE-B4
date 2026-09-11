@@ -108,7 +108,8 @@ namespace rwe
             REQUIRE(f.permanent == false);
             REQUIRE(f.blocking == true);
             REQUIRE(f.indestructible == false);
-            REQUIRE(f.damage == 1);
+            // The original defaults a missing `damage` to nothing at all.
+            REQUIRE(f.damage == 0);
         }
     }
 }

@@ -4635,6 +4635,66 @@ with no linear speed as moving (`0x43DA8E` also tests `WORD [mov+0x24]`); RWE
 measures the distance the unit actually covered this tick and calls anything
 under a tenth of a unit stopped.
 
+### What a blast does to a feature, `0x4244B0`
+
+> **Ported, 2026-09-11** (B4 #45). The blast gate in `doProjectileImpact` is
+> `!indestructible` and nothing else; the damage added is the weapon's default
+> damage, unscaled; the feature breaks to its `featuredead` the moment what it
+> has taken reaches its `damage`; the feature reader defaults a missing
+> `damage` to zero; and a feature stood up by the blast in progress is not met
+> again by it. `wreckage.test.cpp` pins each. Not ported: the fire branch
+> below, which RWE still handles with its own chance roll in
+> `tryIgniteFeaturesInRadius`.
+
+The area walkers (`0x455496` from the blast at `0x4554xx`, and `0x49A626`)
+call `0x4244B0(cellRecord, x, z, wdef)` for each map square in the blast. The
+routine loads the globals pointer and falls into `0x4244B6`, which is why no
+call to the latter address exists. In order:
+
+1. `[globals+0x37F2F] & 8` must be set. That word is the console-toggle word
+   (`NoShake` is its bit 4, §"Screen shake"); bit 3 is **`TreeDeath`**
+   (handler `0x416E30`, record at `0x502118`), and the session set-up at
+   `0x430E90` turns it on. `TreeDeath 0` makes every feature immune.
+2. The square must hold a feature: `[cell+0x8]` below `0xFFFB`.
+3. Its definition (`[globals+0x1426F] + index * 0x100`) must not be
+   `indestructible` (`[featdef+0xFE]` bit 9). **That is the whole of the
+   gate.** `blocking`, `reclaimable` and the rest are never read here, so a
+   rock, a bush, a wreck and a scar decal are all fair game.
+4. In a multiplayer session (`0x435100` = 3) a peer that is not the local
+   authority (`[player+0x97]` bit 0 clear) does not apply the damage; it packs
+   `(x, z, wdef+0x10A)` into a type `0xF`/`0x6` message and sends it
+   (`0x450030`, `0x44FDB0`, `0x451BC0`). The rest is the local path.
+5. **Fire first.** If the definition is `flamable` (bit 4), the weapon's
+   `firestarter` byte (`wdef+0x10B`) is non-zero, and the feature is not
+   already burning (`[cell+0xC]` bit 0), the feature is set alight
+   (`0x4233A0`, §"Burning") and takes **no damage**. No chance roll happens
+   here; whatever `firestarter`'s percentage means, it is not tested on the
+   way in.
+6. Otherwise the weapon's default damage, the word at `wdef+0xD4` (the
+   `default` key, parsed at `0x42EF9A`-`0x42EFA9`), is added to what the
+   feature has taken: `[cell+0xA]` for a feature that is not burning, or the
+   burn record's `[+0x26]` (the 48-byte table at `globals+0x1420B`, found by
+   the index in `[cell+0xA]` and checked against `[+0x28]`/`[+0x2A]`) for one
+   that is. There is no distance falloff and no `edgeeffectiveness`; those are
+   for units.
+7. If the total reaches `[featdef+0xEA]`, the definition's `damage`, the
+   feature is removed and its `featuredead` stood up (`0x423550(x, z, 0)`).
+
+**The default `damage` is zero.** The feature parser (`0x422A20`) reads every
+integer key through the integer-with-default helper `0x4C46C0`, passing the
+same register as the default for the whole block, and that register is zeroed
+once at `0x4226F4`. `damage` comes off the stack at `0x422A87` straight into
+`featdef+0xEA`. So the 145 shipped features that omit the key (the `LightScar`
+and `CarScar` decals among them) go on the first hit, and the 378 that say
+`damage=20000` (the `Sl-RockScar` family) take the hit like anything else and
+in practice never fall. RWE's reader used to default the key to 1, which for
+the blast was the same thing and for reclaim work was a floor it did not need.
+
+**On the flag word's other bits**, since they had to be read to find bit 3:
+`Drop` is bit 0, `ShareMetal` bit 1, `0x416E00`'s command bit 2, `TreeDeath`
+bit 3, `NoShake` bit 4, `Clock` bit 6, `0x417030`'s bit 7, `0x417060`'s bit 8,
+`0x417090`'s bit 9, `ShootAll` bit 10.
+
 ## 25. The detection rings on the minimap
 
 Sections 25 to 29 read the same part of the game -- what the interface draws

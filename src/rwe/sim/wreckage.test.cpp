@@ -203,6 +203,55 @@ namespace rwe
             REQUIRE(foundRubble);
         }
 
+        SECTION("scenery that is neither blocking nor reclaimable takes the hit too")
+        {
+            // 0x4244B0 asks only that the feature is not indestructible. A
+            // scar decal, modelled on the shipped Sl-RockScar (damage=20000,
+            // nothing else set), loses the weapon's damage like a wreck.
+            auto scar = makeWreckDef("scar", 0u, 20000u);
+            scar.blocking = false;
+            scar.reclaimable = false;
+            scar.autoreclaimable = false;
+            auto scarDef = sim.featureDefinitions.insert(scar);
+            auto scarId = sim.addFeature(scarDef, 8, 8).value();
+            auto position = sim.getFeature(scarId).position;
+
+            sim.doProjectileImpact(makeShell(position, 500u, 64_ss), ImpactType::Normal);
+
+            REQUIRE(sim.getFeature(scarId).hitPoints == 19500u);
+        }
+
+        SECTION("a feature that names no damage goes on the first hit")
+        {
+            // The parser defaults a missing `damage` to zero, and the blast
+            // routine breaks the feature as soon as what it has taken reaches
+            // that. The LightScar decals are the shipped case.
+            auto decal = makeWreckDef("decal", 0u, 0u);
+            decal.blocking = false;
+            decal.reclaimable = false;
+            decal.featureDead = rubbleDef;
+            auto decalDef = sim.featureDefinitions.insert(decal);
+            auto decalId = sim.addFeature(decalDef, 8, 8).value();
+            auto position = sim.getFeature(decalId).position;
+
+            sim.doProjectileImpact(makeShell(position, 1u, 64_ss), ImpactType::Normal);
+
+            REQUIRE_FALSE(sim.tryGetFeature(decalId).has_value());
+        }
+
+        SECTION("the whole default damage lands, wherever in the blast the feature stands")
+        {
+            // The routine adds wdef+0xD4, the weapon's default damage, with
+            // no look at the distance; edgeeffectiveness is for units.
+            auto rockId = sim.addFeature(rockDef, 8, 8).value();
+            auto position = sim.getFeature(rockId).position;
+
+            auto shell = makeShell(position + SimVector(48_ss, 0_ss, 0_ss), 500u, 64_ss);
+            sim.doProjectileImpact(shell, ImpactType::Normal);
+
+            REQUIRE(sim.getFeature(rockId).hitPoints == 1500u);
+        }
+
         SECTION("an indestructible feature shrugs off a blast")
         {
             // Modelled on the Barrier walls and the dragon's teeth: blocking,
