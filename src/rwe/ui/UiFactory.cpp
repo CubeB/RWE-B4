@@ -533,6 +533,10 @@ namespace rwe
             button->setBehaviorMode(UiStagedButton::BehaviorMode::Cycle);
         }
 
+        // The original draws a caption's drop shadow only for a gadget whose
+        // attribs carry bit 3 (0x4A59A4, TOTALA-EXE.md S:99).
+        button->setCaptionShadow((entry.common.attribs & GuiButtonAttrib::CaptionShadow) != 0);
+
         if (entry.quickKey)
         {
             button->setQuickKey(convertQuickKeyToSdlk(*entry.quickKey));
@@ -586,6 +590,8 @@ namespace rwe
             entry.common.name,
             labels,
             entry.stages.value());
+
+        button->setCaptionShadow((entry.common.attribs & GuiButtonAttrib::CaptionShadow) != 0);
 
         if (entry.quickKey)
         {

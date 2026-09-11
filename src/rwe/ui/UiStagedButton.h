@@ -44,6 +44,9 @@ namespace rwe
 
         std::optional<int> quickKey;
 
+        /** Whether the caption gets the original's drop shadow: bit 3 of the gadget's attribs (0x4A59A4, S:99). */
+        bool captionShadow{false};
+
         /** True if the button is currently pressed down. */
         bool pressed{false};
 
@@ -132,6 +135,8 @@ namespace rwe
         void setBehaviorMode(BehaviorMode mode);
 
         void setQuickKey(int quickKey);
+
+        void setCaptionShadow(bool shadow);
 
         void setDisabledSprite(const std::shared_ptr<Sprite>& sprite);
 
