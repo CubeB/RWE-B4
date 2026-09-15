@@ -190,6 +190,15 @@ The `.text` runs span `0x402608` to `0x49e9c9`. Mapped against the routines
   attacked" / kamikaze reaction cluster (`0x406fb4`-`0x408e53`).
 - **Pervasive mission-state renumbering** (`0x414abd`-`0x4153b3`), consistent
   with a new order type inserted into TA's mission enum.
+- **A clamp inverted at `0x41BD90` and `0x41BD9A`**, two `jl` turned into `jge`
+  (`0x7C` to `0x7D`) inside the routine at `0x41BD10`. GOG forces the value
+  *down* to 1 whenever it is at least 1; Escalation forces it *up* to 1 whenever
+  it is below. The routine returns 0 unless `unit+0x108` (health) has reached
+  `def+0x1FA` (maxdamage) and then derives two truncated integers from
+  `def+0x1EA` (buildtime) and `def+0x186` (buildcostenergy) scaled by an
+  argument, clamping each. **What it computes is not identified** and is left
+  that way rather than guessed at; it is listed because it is the nearest patch
+  to the build pipeline and somebody will want to know it is not in it.
 
 **Confirmed unchanged, by reading the bytes rather than by not finding any:**
 
@@ -200,6 +209,16 @@ The `.text` runs span `0x402608` to `0x49e9c9`. Mapped against the routines
   one patched byte falls within 512 bytes of any of them. That is what licenses
   the corpse-severity finding in `TOTALA-EXE-WRECKS.md` to use all thirteen
   demos rather than the one unpatched game.
+- The **build pipeline**: the build-rate routine `0x41BA60`, whose body runs to
+  the `ret 0xC` at `0x41BCCF`, and the short routine after it (`0x41BCD0` to the
+  `ret 8` at `0x41BD02`). **Not one patched byte inside either.** The nearest
+  patched `.text` byte is 3,838 bytes below and 192 bytes above, and the one
+  above is at `0x41BD90`, in the *next* routine again — two `ret`-plus-padding
+  boundaries away, which is why the 512-byte halo flags it and reading the
+  boundaries clears it. This is what licenses the twelve Escalation demos to
+  carry the build-timing finding in `TOTALA-EXE.md` §23, whose discriminating
+  evidence — the fifteen exactly-divisible pairs — comes from them and not from
+  the single unpatched ProTA game.
 - The select-same-type UI cluster (`0x48be4f`-`0x48bee3`) and the `.rsrc` and
   `.data` string changes, all cosmetic.
 
@@ -209,8 +228,14 @@ byte nearby" is weaker evidence than the confirmed-by-content rows above.
 **What follows for the corpus:** the single ProTA demo is the clean reference
 case, and the twelve Escalation ones must not be used as oracles for D-gun or
 `commandfire` completion, aircraft repair-pad seeking, AI economy, or reclaim's
-power-switch edge case. They remain good for death, wreckage, damage and the
-economy settle, which are confirmed untouched.
+power-switch edge case. They remain good for death, wreckage, damage, the
+economy settle and **build timing**, which are confirmed untouched.
+
+`tools/exe/patchdiff.py` is the re-runnable version of this mapping. It
+reproduces the run and byte counts above, and `--range` answers "is this routine
+patched?" for the next subject that needs clearing. Prefer it to `--near`: a
+512-byte halo crosses function boundaries and over-reports, which is exactly
+what happened with the build pipeline above.
 
 ## What is worth doing
 

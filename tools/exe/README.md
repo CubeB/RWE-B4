@@ -23,6 +23,7 @@ document; offsets will differ on other releases.
 | `str.py <va>...` | Reads the NUL-terminated string at each address. Pairs with `xref.py` for identifying what a data address is. |
 | `vt.py <va> [n]` | Dumps `n` little-endian dwords from an address, as a table of `+offset -> value`. For walking vtables and jump tables. |
 | `flagreaders.py <bit> [listing]` | Finds every routine that reads one bit of the weapon definition's packed flag word at `wdef+0x111`. Grepping the offset alone gives a hundred hits across thirty flags; this follows the register forward from each load and keeps only the ones that isolate the bit you asked for. The shift-and-test form is matched loosely, so expect a false positive or two — check each hit before believing it. |
+| `patchdiff.py --base A --other B` | Compares two same-size `TotalA.exe` builds and answers "is this routine patched?". `--range LO:HI` is the test to trust; `--near` is the 512-byte halo test, which crosses function boundaries and over-reports. Reproduces the run and byte counts in [`docs/TA-PATCHES.md`](../../docs/TA-PATCHES.md). |
 | `gaf.py <file.gaf>` | Reads a GAF archive and lists its sequences and frame sizes. Used to identify the exhaust and fog artwork. |
 | `png.py` | Minimal PNG reader/writer, imported by the GAF tooling to dump frames for eyeballing. |
 

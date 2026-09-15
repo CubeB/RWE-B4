@@ -446,6 +446,18 @@ gets 6 of 15, which is what says the accumulator really is 32 bits wide and not
 just "floating point somewhere". Over every scored pair: `ceil` 10 of 41, `floor`
 36 of 41, the float32 replay **41 of 41**.
 
+**Those fifteen pairs are all Escalation**, which is a patched engine, so they
+had to be cleared before any of this could be called a fact about TA. They are:
+the build-rate routine `0x41BA60`, body to the `ret 0xC` at `0x41BCCF`, contains
+**no patched byte**, nor does the short routine after it, and the nearest change
+either side is 3,838 bytes below and 192 above — the one above being two
+function boundaries away, in a routine Escalation does alter. See
+[TA-PATCHES.md](TA-PATCHES.md), and `tools/exe/patchdiff.py --range` to re-run
+it. ProTA, the unpatched reference, agrees where it can: its one factory pair,
+`ARMVP` to `ARMFAV`, predicts 488 and shows 488. That pair is not divisible, so
+it corroborates the model without testing the bit pattern — the bit pattern
+rests on Escalation, cleared.
+
 The corpus cannot separate the four plausible spellings of that loop -- counting
 up to 1.0 or down to 0.0, and rounding the quotient to `float` once or keeping it
 at x87 width -- because all four agree on every pair the corpus has. §23's
