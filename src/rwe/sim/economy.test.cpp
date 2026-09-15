@@ -1,5 +1,6 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
@@ -7,8 +8,9 @@
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
-#include <memory>
 #include <rwe/sim/sim_test_util.h>
+#include <rwe/sim/tad_economy_episodes.h>
+#include <string>
 
 namespace rwe
 {
@@ -263,6 +265,189 @@ namespace rwe
             tickOneSecond(sim);
             REQUIRE_FALSE(sim.getUnitState(unitId).isSufficientlyPowered);
             REQUIRE(sim.getPlayer(player).metal.value == Catch::Approx(metalAfterFirst));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Everything above is hand-written: a case is whatever it took to pin one
+    // rule. Everything below comes out of real games -- the episodes in
+    // tad_economy_episodes.h, mined from the demo corpus by tad_episodes
+    // --emit-cpp. The two kinds sit together deliberately, because a reader
+    // needs to be able to tell at a glance which numbers somebody chose and
+    // which ones a game produced.
+    // ------------------------------------------------------------------
+
+    namespace
+    {
+        /**
+         * Rebuilds an episode's player: the lobby's storage setting, then one
+         * unit per unit the player owned at the sample, each carrying the
+         * storage figures the episode transcribed out of its FBI.
+         *
+         * Units under construction are given a build time they have not
+         * finished paying, which is all `isBeingBuilt` looks at.
+         */
+        PlayerId rebuildEpisode(GameSimulation& sim, const TadStorageEpisode& episode)
+        {
+            GamePlayerInfo p{
+                std::optional<std::string>("player"),
+                GamePlayerType::Human,
+                PlayerColorIndex(0),
+                GamePlayerStatus::Alive,
+                std::string("ARM"),
+                Metal(0.0f),
+                Energy(0.0f),
+                Metal(0.0f),
+                Energy(0.0f),
+                Metal(episode.startingMetal),
+                Energy(episode.startingEnergy),
+            };
+            auto player = sim.addPlayer(p);
+
+            // The commander is not in the composition -- see the header -- but
+            // the capacity it carries is credited per commander, so one has to
+            // stand in the world for the settle to count it.
+            UnitDefinition commander{};
+            commander.maxHitPoints = 100;
+            commander.buildTime = 0u;
+            commander.commander = true;
+            commander.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
+            sim.unitDefinitions["commander"] = commander;
+
+            auto script = makeEmptyCobScript();
+            auto next = 0;
+            auto place = [&]() {
+                auto x = SimScalar(static_cast<float>(64 + 16 * (next % 8)));
+                auto z = SimScalar(static_cast<float>(64 + 16 * (next / 8)));
+                ++next;
+                return SimVector(x, 0_ss, z);
+            };
+
+            addUnitOfType(sim, "commander", player, place(), script);
+
+            auto add = [&](const TadEpisodeComposition* composition, std::size_t count, bool finished) {
+                for (std::size_t i = 0; i < count; ++i)
+                {
+                    const auto& entry = composition[i];
+                    auto type = std::string(entry.unitName) + (finished ? "" : "_nanoframe");
+
+                    UnitDefinition def{};
+                    def.maxHitPoints = 100;
+                    def.buildTime = finished ? 0u : 1000u;
+                    def.metalStorage = Metal(entry.metalStorage);
+                    def.energyStorage = Energy(entry.energyStorage);
+                    def.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
+                    sim.unitDefinitions[type] = def;
+
+                    for (unsigned int n = 0; n < entry.count; ++n)
+                    {
+                        auto unitId = addUnitOfType(sim, type, player, place(), script);
+                        if (!finished)
+                        {
+                            sim.getUnitState(unitId).buildTimeCompleted = 0u;
+                        }
+                    }
+                }
+            };
+
+            add(episode.finished, episode.finishedCount, true);
+            add(episode.building, episode.buildingCount, false);
+
+            return player;
+        }
+
+        std::string episodeName(const TadStorageEpisode& episode)
+        {
+            return std::string(episode.demo) + " block " + std::to_string(episode.ownerBlock)
+                + " tick " + std::to_string(episode.sampleTick);
+        }
+    }
+
+    TEST_CASE("storage capacity is what real games report", "[economy][corpus]")
+    {
+        // The capacity is a plain sum over what the player has FINISHED, and
+        // the corpus says so on its own terms: base plus the transcribed FBI
+        // figures tracks the reported capacity from the opening sample of all
+        // 86 players in the corpus, for hundreds of samples each, and two
+        // players match every sample to the end of their recording.
+        for (const auto& episode : tadStorageEpisodes)
+        {
+            DYNAMIC_SECTION(episodeName(episode))
+            {
+                GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+                auto player = rebuildEpisode(sim, episode);
+
+                tickOneSecond(sim);
+
+                REQUIRE(sim.getPlayer(player).maxMetal.value
+                    == Catch::Approx(episode.metalStorage + episode.expectedMetalStorageDelta));
+                REQUIRE(sim.getPlayer(player).maxEnergy.value
+                    == Catch::Approx(episode.energyStorage + episode.expectedEnergyStorageDelta));
+            }
+        }
+    }
+
+    TEST_CASE("a nanoframe holds nothing until it is finished", "[economy][corpus]")
+    {
+        // The falsifiable half of the same episodes. Nine of the thirteen had
+        // a nanoframe standing when the sample was taken, and two of those
+        // nanoframes were of a type that holds something -- so crediting them
+        // would move the capacity off what the game reported, and finishing
+        // them has to move it by exactly what they carry.
+        for (const auto& episode : tadStorageEpisodes)
+        {
+            DYNAMIC_SECTION(episodeName(episode))
+            {
+                GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+                auto player = rebuildEpisode(sim, episode);
+
+                tickOneSecond(sim);
+                auto withNanoframes = sim.getPlayer(player).maxMetal.value;
+
+                // Finish them, and the capacity moves by exactly what they carry.
+                float pending = 0.0f;
+                for (std::size_t i = 0; i < episode.buildingCount; ++i)
+                {
+                    pending += episode.building[i].metalStorage * static_cast<float>(episode.building[i].count);
+                }
+                for (auto& entry : sim.units)
+                {
+                    entry.second.buildTimeCompleted = sim.unitDefinitions.at(entry.second.unitType).buildTime;
+                }
+
+                tickOneSecond(sim);
+
+                REQUIRE(sim.getPlayer(player).maxMetal.value == Catch::Approx(withNanoframes + pending));
+            }
+        }
+    }
+
+    TEST_CASE("income above a real game's storage cap is thrown away", "[economy][corpus]")
+    {
+        // Across the corpus, stored never once exceeded capacity in 61,709
+        // samples, and it sat exactly ON the capacity in 27,688 of them. Where
+        // an episode caught that, the observed stockpile IS the cap, so the
+        // clamp has a number out of a real game to land on.
+        for (const auto& episode : tadStorageEpisodes)
+        {
+            if (episode.energyStored != episode.energyStorage)
+            {
+                continue;
+            }
+
+            DYNAMIC_SECTION(episodeName(episode))
+            {
+                GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+                auto player = rebuildEpisode(sim, episode);
+
+                auto anyUnit = sim.units.begin()->first;
+                sim.addResourceDelta(UnitId(anyUnit), Energy(1000000.0f), Metal(1000000.0f));
+
+                tickOneSecond(sim);
+
+                REQUIRE(sim.getPlayer(player).energy.value
+                    == Catch::Approx(episode.energyStored + episode.expectedEnergyStorageDelta));
+            }
         }
     }
 

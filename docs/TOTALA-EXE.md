@@ -4326,7 +4326,13 @@ What did not, and now does:
   `PlayerEnergyStorage` and `PlayerMetalStorage` on the player, gated by a flag
   read out of a save or scenario file; where a skirmish gets its own values from
   has not been found. RWE keeps giving the commander the side's starting
-  stockpile as storage instead.
+  stockpile as storage instead. **The demo corpus says that route reaches the
+  right number**, which is as close to an answer as the binary has given: every
+  one of the 86 players in the thirteen demos opens on a capacity of exactly
+  1000 metal and 1000 energy, with a stockpile that started at 1000 as well, and
+  neither data set's commander declares any `MetalStorage` or `EnergyStorage` of
+  its own. So in a skirmish the base is the starting stockpile, whichever field
+  the original reads it out of. See `docs/TA-DEMOS.md`.
 - **Reclaiming a unit** is instantaneous in the original, metal only, and
   RWE's is gradual and pays energy too. Changing it would be a gameplay
   decision rather than a correction, and `0x402640` is reached from one caller
@@ -8750,6 +8756,19 @@ original:
   runs a move mission first and its footer says `Moving`; RWE's single
   `BuildOrder` covers the walk and the work, so the mission line changes one
   order earlier (S:99).
+- **Every player's economy settles on the same tick.** The original's is
+  staggered: `player+0xF0` is pushed thirty ticks ahead each time it fires and
+  starts at whatever each player's counter started at (S:23), so ten players
+  settle on ten different ticks of the second. RWE settles the whole table when
+  `gameTime % 30 == 0`. Nothing observable hangs on which tick of a second a
+  player's settle lands, since nothing between settles is spent -- a consumer's
+  only gate in between is its own debt -- and staggering would mean carrying a
+  per-player phase through the game hash and the save to buy nothing. What it
+  does mean is that two players' states are **not comparable tick for tick**,
+  which matters when reading the demo corpus rather than when playing: a `0x28`
+  sample from one player and one from another, on the same tick, are up to a
+  second apart in their economies. The storage episodes in
+  `src/rwe/sim/tad_economy_episodes.h` are per player for that reason.
 
 ---
 

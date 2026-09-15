@@ -105,8 +105,19 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   1-based index into the sorted `units\*.FBI` names of the merged VFS, so point
   it at the data set the demo was recorded on and the episodes stop being
   anonymous. It warns if the demo's own type count disagrees with the directory.
-  There is still no `--emit-cpp` and no checked-in fixture. See
-  `docs/TA-DEMOS.md`.
+
+  Two other modes. `--emit-resources` dumps every `0x28` resource sample as
+  JSON, collapsed: a sender emits `numPlayers - 1` **identical** copies of one
+  record on one tick, one unicast per peer, so a burst carries one state and it
+  is the sender's own. The dump keeps the burst length beside each sample and
+  counts any burst whose copies disagreed, which is the number that would
+  overturn that reading. `--emit-cpp` writes the checked-in fixture,
+  `src/rwe/sim/tad_economy_episodes.h` — storage episodes for the
+  `[economy][corpus]` tests, with each unit type's own FBI values transcribed
+  inline. It needs `--units`, emits in a deterministic order with no timestamp
+  and no path, and reads the old file back so a regeneration prints `unchanged`
+  or `CHANGED`. Do not hand-edit the header; regenerate it. See
+  `docs/TA-DEMOS.md`, "What an episode looks like".
 - **`tools/tad-buildtime.py`** — scores the corpus's modal build durations
   against TA's own completion arithmetic, which is a **float32** fraction and
   not `ceil(BuildTime / (WorkerTime/30))`; the difference is a tick, and where

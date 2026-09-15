@@ -35,6 +35,9 @@
 //                 scanned for *.FBI, used to name each type index
 //   --emit-json   write the episodes to a file as JSON
 //   --emit-resources  write every 0x28 resource record to a file as JSON
+//   --emit-cpp    write the storage episodes as a C++ header for rwe_test
+//   --max-types   distinct unit types an episode may carry (default 6)
+//   --max-per-player  episodes to keep per player (default 3)
 //   --all         emit rejected episodes too, each with its reasons
 
 #include <algorithm>
@@ -48,10 +51,13 @@
 #include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <rwe/io/fbi/io.h>
 #include <rwe/io/tad/TadReader.h>
 #include <rwe/io/tad/tad_events.h>
+#include <rwe/io/tdf/tdf.h>
 #include <rwe/util/OpaqueArgs.h>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -462,13 +468,13 @@ namespace
      * sees once the VFS has merged the archives. Extracted mods keep one
      * directory per archive, so this recurses.
      */
-    std::vector<std::string> readUnitStems(const std::filesystem::path& dir, std::error_code& error)
+    std::vector<std::filesystem::path> readUnitFiles(const std::filesystem::path& dir, std::error_code& error)
     {
-        std::vector<std::string> stems;
+        std::vector<std::filesystem::path> files;
         std::filesystem::recursive_directory_iterator it(dir, error);
         if (error)
         {
-            return stems;
+            return files;
         }
 
         for (const auto& entry : it)
@@ -486,11 +492,59 @@ namespace
 
             if (extension == ".fbi")
             {
-                stems.push_back(entry.path().stem().string());
+                files.push_back(entry.path());
             }
         }
 
-        return stems;
+        return files;
+    }
+
+    /**
+     * What an episode has to carry inline about a unit type, read out of the
+     * data set's own FBI with the engine's own parser.
+     *
+     * Only --emit-cpp needs this. Naming a type needs the file names alone,
+     * which is why the load order is built from stems and this is separate.
+     */
+    struct UnitStorage
+    {
+        float metalStorage;
+        float energyStorage;
+    };
+
+    std::map<std::string, UnitStorage> readUnitStorage(const std::vector<std::filesystem::path>& files)
+    {
+        std::map<std::string, UnitStorage> storage;
+        for (const auto& file : files)
+        {
+            std::ifstream stream(file, std::ios::binary);
+            if (!stream)
+            {
+                continue;
+            }
+
+            std::string contents((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+
+            try
+            {
+                auto fbi = parseUnitFbi(parseTdfFromString(contents));
+                auto name = file.stem().string();
+                for (auto& c : name)
+                {
+                    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                }
+                storage[name] = UnitStorage{
+                    static_cast<float>(fbi.metalStorage),
+                    static_cast<float>(fbi.energyStorage)};
+            }
+            catch (const std::exception&)
+            {
+                // A file the parser will not take cannot contribute a number to
+                // an episode, and an episode missing one is dropped below rather
+                // than emitted with a hole in it.
+            }
+        }
+        return storage;
     }
 
     /** The type index as a name if we have the data set, and as a number if not. */
@@ -596,6 +650,496 @@ namespace
         return j;
     }
 
+    // --- --emit-cpp: storage episodes ---------------------------------------
+    //
+    // A storage episode is one 0x28 sample plus the composition that explains
+    // its two capacity slots. The model being pinned is that TA's capacity is a
+    // plain sum over what the player has FINISHED -- base plus each unit's own
+    // MetalStorage/EnergyStorage, nanoframes contributing nothing -- and the
+    // emitter only keeps a sample where that sum is already known to come out
+    // right, because an episode the model cannot explain would be a broken test
+    // rather than a finding.
+
+    /** One (type, count) row of an episode's composition. */
+    struct CompositionEntry
+    {
+        std::string unitName;
+        unsigned int count;
+        float metalStorage;
+        float energyStorage;
+    };
+
+    struct StorageEpisode
+    {
+        std::string demo;
+        unsigned int ownerBlock;
+        uint32_t previousSampleTick;
+        uint32_t sampleTick;
+        float startingMetal;
+        float startingEnergy;
+        std::vector<CompositionEntry> finished;
+        std::vector<CompositionEntry> building;
+        float metalStorage;
+        float energyStorage;
+        float metalStored;
+        float energyStored;
+    };
+
+    /** Aggregates units by type, in name order, so regeneration is stable. */
+    std::vector<CompositionEntry> aggregate(
+        const std::vector<std::string>& names,
+        const std::map<std::string, UnitStorage>& unitStorage)
+    {
+        std::map<std::string, unsigned int> counts;
+        for (const auto& name : names)
+        {
+            ++counts[name];
+        }
+
+        std::vector<CompositionEntry> out;
+        for (const auto& [name, count] : counts)
+        {
+            auto storage = unitStorage.find(name);
+            if (storage == unitStorage.end())
+            {
+                return {};
+            }
+            out.push_back(CompositionEntry{name, count, storage->second.metalStorage, storage->second.energyStorage});
+        }
+        return out;
+    }
+
+    std::vector<StorageEpisode> mineStorageEpisodes(
+        const EpisodeHandler& handler,
+        const std::vector<std::string>& loadOrder,
+        const std::map<std::string, UnitStorage>& unitStorage,
+        std::size_t maxTypes,
+        std::size_t maxPerPlayer)
+    {
+        // Every build the demo paired, named and keyed by owner block. Rejected
+        // ones count as much as clean ones here: a unit's rejection is about
+        // whether its DURATION means anything, and it holds its storage either
+        // way.
+        std::map<unsigned int, std::vector<const Episode*>> byBlock;
+        for (const auto& episode : handler.episodes)
+        {
+            byBlock[episode.ownerBlock].push_back(&episode);
+        }
+        for (auto& [block, list] : byBlock)
+        {
+            std::sort(list.begin(), list.end(), [](const Episode* a, const Episode* b) {
+                return std::tie(a->finishTick, a->unitId) < std::tie(b->finishTick, b->unitId);
+            });
+        }
+
+        std::map<uint8_t, std::vector<const EpisodeHandler::ResourceRecord*>> bySender;
+        for (const auto& record : handler.resourceRecords)
+        {
+            bySender[record.sender].push_back(&record);
+        }
+
+        std::vector<StorageEpisode> out;
+        for (const auto& [sender, samples] : bySender)
+        {
+            auto block = handler.senderBlock.find(sender);
+            if (block == handler.senderBlock.end() || samples.empty())
+            {
+                continue;
+            }
+
+            // A watcher reports zero capacity for ever; it owns nothing and
+            // explains nothing.
+            const auto& first = *samples.front();
+            if (first.stats.metalStorage == 0.0f && first.stats.energyStorage == 0.0f)
+            {
+                continue;
+            }
+
+            const auto& completions = byBlock[block->second];
+
+            // The base is the lobby's storage setting, and the only way to read
+            // it off is a first sample taken before the player finished
+            // anything. A recording that joined a game in progress has no base
+            // and no episodes.
+            auto startedClean = std::none_of(completions.begin(), completions.end(), [&](const Episode* e) {
+                return e->finishTick <= first.tick;
+            });
+            if (!startedClean)
+            {
+                continue;
+            }
+
+            auto startingMetal = first.stats.metalStorage;
+            auto startingEnergy = first.stats.energyStorage;
+
+            auto lastMetalStorage = -1.0f;
+            auto lastEnergyStorage = -1.0f;
+            uint32_t previousTick = 0;
+            std::size_t kept = 0;
+
+            for (const auto* sample : samples)
+            {
+                if (kept >= maxPerPlayer)
+                {
+                    break;
+                }
+
+                std::vector<std::string> finishedNames;
+                std::vector<std::string> buildingNames;
+                auto predictedMetal = startingMetal;
+                auto predictedEnergy = startingEnergy;
+                auto unknownType = false;
+
+                for (const auto* e : completions)
+                {
+                    auto name = tadUnitNameForTypeIndex(loadOrder, e->typeIndex);
+                    if (!name)
+                    {
+                        unknownType = true;
+                        break;
+                    }
+
+                    auto storage = unitStorage.find(*name);
+                    if (storage == unitStorage.end())
+                    {
+                        unknownType = true;
+                        break;
+                    }
+
+                    if (e->finishTick <= sample->tick)
+                    {
+                        finishedNames.push_back(*name);
+                        predictedMetal += storage->second.metalStorage;
+                        predictedEnergy += storage->second.energyStorage;
+                    }
+                    else if (e->startTick <= sample->tick)
+                    {
+                        buildingNames.push_back(*name);
+                    }
+                }
+
+                if (unknownType)
+                {
+                    break;
+                }
+
+                // The first sample the sum stops explaining is where the
+                // player's history stops being complete -- a storage building
+                // died, or one was begun before the recording. Everything after
+                // it is unexplained, so the walk ends rather than skipping on.
+                if (predictedMetal != sample->stats.metalStorage || predictedEnergy != sample->stats.energyStorage)
+                {
+                    break;
+                }
+
+                auto changed = sample->stats.metalStorage != lastMetalStorage
+                    || sample->stats.energyStorage != lastEnergyStorage;
+
+                if (changed)
+                {
+                    auto finished = aggregate(finishedNames, unitStorage);
+                    auto building = aggregate(buildingNames, unitStorage);
+
+                    // A composition nobody can read is not worth checking in.
+                    if (finished.size() <= maxTypes)
+                    {
+                        out.push_back(StorageEpisode{
+                            handler.demo,
+                            block->second,
+                            previousTick,
+                            sample->tick,
+                            startingMetal,
+                            startingEnergy,
+                            std::move(finished),
+                            std::move(building),
+                            sample->stats.metalStorage,
+                            sample->stats.energyStorage,
+                            sample->stats.metalStored,
+                            sample->stats.energyStored});
+                        ++kept;
+                    }
+
+                    lastMetalStorage = sample->stats.metalStorage;
+                    lastEnergyStorage = sample->stats.energyStorage;
+                }
+
+                previousTick = sample->tick;
+            }
+        }
+
+        return out;
+    }
+
+    /**
+     * A float as a C++ literal that reads back bit for bit. Nine significant
+     * digits round-trip a float32, and a literal that lost its point would not
+     * compile.
+     */
+    std::string floatLiteral(float value)
+    {
+        std::ostringstream ss;
+        ss << std::setprecision(9) << value;
+        auto text = ss.str();
+        if (text.find('.') == std::string::npos && text.find('e') == std::string::npos)
+        {
+            text += ".0";
+        }
+        return text + "f";
+    }
+
+    void emitComposition(std::ostream& out, const std::string& name, const std::vector<CompositionEntry>& entries)
+    {
+        out << "    inline constexpr TadEpisodeComposition " << name << "[] = {\n";
+        for (const auto& entry : entries)
+        {
+            out << "        {\"" << entry.unitName << "\", " << entry.count << ", "
+                << floatLiteral(entry.metalStorage) << ", " << floatLiteral(entry.energyStorage) << "},\n";
+        }
+        out << "    };\n\n";
+    }
+
+    void writeEpisodes(std::ostream& out, std::vector<StorageEpisode> episodes)
+    {
+        // Deterministic order, and no timestamp or path anywhere in the output:
+        // regenerating over an unchanged corpus has to produce a byte-identical
+        // file or the check-in is worthless as a diff.
+        std::sort(episodes.begin(), episodes.end(), [](const StorageEpisode& a, const StorageEpisode& b) {
+            return std::tie(a.demo, a.ownerBlock, a.sampleTick) < std::tie(b.demo, b.ownerBlock, b.sampleTick);
+        });
+
+        // One episode per distinct set of storage-granting types, because two
+        // episodes with the same set assert the same thing and a corpus fixture
+        // earns its place by variety rather than by volume. Everything the
+        // survivor owns rides along in its composition, mexes and wind
+        // generators included, so the types that grant nothing are still being
+        // checked to grant nothing -- they simply stop deciding which episodes
+        // get checked in.
+        std::set<std::string> seen;
+        std::vector<StorageEpisode> distinct;
+        for (auto& episode : episodes)
+        {
+            std::ostringstream key;
+            key << floatLiteral(episode.metalStorage) << "/" << floatLiteral(episode.energyStorage);
+            for (const auto& entry : episode.finished)
+            {
+                if (entry.metalStorage > 0.0f || entry.energyStorage > 0.0f)
+                {
+                    key << " " << entry.unitName << "x" << entry.count;
+                }
+            }
+            for (const auto& entry : episode.building)
+            {
+                if (entry.metalStorage > 0.0f || entry.energyStorage > 0.0f)
+                {
+                    key << " +" << entry.unitName << "x" << entry.count;
+                }
+            }
+
+            if (seen.insert(key.str()).second)
+            {
+                distinct.push_back(std::move(episode));
+            }
+        }
+        episodes = std::move(distinct);
+
+        std::cout << episodes.size() << " episode(s) after keeping one per storage shape\n";
+
+        out << R"(#pragma once
+
+// GENERATED FILE -- do not edit by hand. Regenerate with tad_episodes --emit-cpp;
+// the command, and the corpus it needs, are in docs/TA-DEMOS.md.
+//
+// Episodes mined from real Total Annihilation games, for the conformance tests
+// in economy.test.cpp.
+//
+// WHY THIS IS A HEADER OF STRUCTS AND NOT A DATA FILE. rwe_test is hermetic --
+// it reads no files, mounts no VFS and opens no archive -- and it stays that
+// way. Demos and mod files never enter the repository either. So the numbers
+// travel as source: each unit's own FBI values are transcribed inline beside
+// the observation they explain, and a test can be read without either.
+//
+// WHAT AN EPISODE IS. One 0x28 resource sample from one player, with everything
+// that player had finished, and everything it still had under construction, at
+// the tick the sample landed on. A 0x28 is the sender's own state
+// (docs/TA-DEMOS.md), so the composition is that sender's own owner block.
+// Only slots 2 and 3 of the record -- the two storage capacities -- are what
+// these episodes are chosen to explain; slots 0 and 1 come along for the clamp.
+//
+// The composition does NOT include the commander. TA gives a player its lobby
+// storage setting for its commander rather than the commander's own FBI figures
+// -- neither data set's commander declares any -- and startingMetal is that
+// setting, read off the player's own opening sample, before it had finished
+// anything at all.
+
+#include <cstddef>
+
+namespace rwe
+{
+    /**
+     * One unit type in an episode's composition, with the FBI values that make
+     * the observation predictable transcribed beside it.
+     */
+    struct TadEpisodeComposition
+    {
+        const char* unitName;
+        unsigned int count;
+        float metalStorage;
+        float energyStorage;
+    };
+
+    /** One player's resource sample, and what it owned when the sample was taken. */
+    struct TadStorageEpisode
+    {
+        /** Provenance: the demo this came out of, and where in it. */
+        const char* demo;
+        unsigned int ownerBlock;
+
+        /**
+         * The tick the sample landed on, and the one before it. The pair is the
+         * window a failure has to be explained inside: anything that finished in
+         * between is credited by the later sample and not by the earlier. A zero
+         * previous tick means this was the player's first sample.
+         */
+        unsigned int previousSampleTick;
+        unsigned int sampleTick;
+
+        /** What the lobby gave the player for its commander. */
+        float startingMetal;
+        float startingEnergy;
+
+        /** Finished at sampleTick, aggregated by type, commander excluded. */
+        const TadEpisodeComposition* finished;
+        std::size_t finishedCount;
+
+        /**
+         * Nanoframes standing at sampleTick that had not finished. These
+         * contribute nothing, which is the falsifiable half of the episode:
+         * crediting them would break 5,972 of the 6,162 corpus samples that have
+         * one in flight.
+         */
+        const TadEpisodeComposition* building;
+        std::size_t buildingCount;
+
+        /** Observed, slots 2 and 3 of the record. */
+        float metalStorage;
+        float energyStorage;
+
+        /** Observed, slots 0 and 1. Never above the capacity, in 61,709 samples. */
+        float metalStored;
+        float energyStored;
+
+        /**
+         * What RWE is expected to differ by, and why.
+         *
+         * A conformance test that asserts equality gets disabled the first time
+         * it is right to fail, so an episode asserts the observation plus a
+         * known delta instead. expectedDifference names the docs/TOTALA-EXE.md
+         * section 88 entry that licences a non-zero one, and is null where there
+         * is nothing to excuse. The emitter cannot know about a deliberate
+         * difference, so it writes zero and null; an entry here is written by
+         * hand, and survives regeneration because it is written into the
+         * emitter's own table. There are none yet -- see section 88 for the
+         * differences that exist and why none of them moves a storage capacity.
+         */
+        float expectedMetalStorageDelta;
+        float expectedEnergyStorageDelta;
+        const char* expectedDifference;
+    };
+
+)";
+
+        for (std::size_t i = 0; i < episodes.size(); ++i)
+        {
+            const auto& episode = episodes[i];
+            out << "    // " << episode.demo << ", owner block " << episode.ownerBlock
+                << ", tick " << episode.sampleTick << ": capacity "
+                << floatLiteral(episode.metalStorage) << " metal, "
+                << floatLiteral(episode.energyStorage) << " energy.\n";
+
+            if (!episode.finished.empty())
+            {
+                emitComposition(out, "tadStorageEpisode" + std::to_string(i) + "Finished", episode.finished);
+            }
+            if (!episode.building.empty())
+            {
+                emitComposition(out, "tadStorageEpisode" + std::to_string(i) + "Building", episode.building);
+            }
+            if (episode.finished.empty() && episode.building.empty())
+            {
+                out << "\n";
+            }
+        }
+
+        // The table is laid out a field group to a line, which clang-format
+        // would otherwise collapse into a seventeen-field one-liner nobody can
+        // read a diff of. Everything above formats the way the tool wants it.
+        out << "    // clang-format off\n"
+            << "    inline constexpr TadStorageEpisode tadStorageEpisodes[] = {\n";
+        for (std::size_t i = 0; i < episodes.size(); ++i)
+        {
+            const auto& episode = episodes[i];
+            auto reference = [&](const char* suffix, std::size_t count) {
+                return count == 0
+                    ? std::string("nullptr, 0")
+                    : "tadStorageEpisode" + std::to_string(i) + suffix + ", " + std::to_string(count);
+            };
+
+            out << "        {\"" << episode.demo << "\", " << episode.ownerBlock << ", "
+                << episode.previousSampleTick << ", " << episode.sampleTick << ",\n"
+                << "            " << floatLiteral(episode.startingMetal) << ", "
+                << floatLiteral(episode.startingEnergy) << ",\n"
+                << "            " << reference("Finished", episode.finished.size()) << ",\n"
+                << "            " << reference("Building", episode.building.size()) << ",\n"
+                << "            " << floatLiteral(episode.metalStorage) << ", "
+                << floatLiteral(episode.energyStorage) << ", "
+                << floatLiteral(episode.metalStored) << ", "
+                << floatLiteral(episode.energyStored) << ",\n"
+                << "            0.0f, 0.0f, nullptr},\n";
+        }
+        out << "    };\n"
+            << "    // clang-format on\n"
+            << "}\n";
+    }
+
+    /**
+     * Writes the header, and says whether it moved.
+     *
+     * Regenerating over an unchanged corpus has to produce a byte-identical
+     * file -- the check-in is only worth having if its diffs mean something --
+     * so the emitter reads back what was there and reports. rwe_test cannot
+     * make this check itself: it never opens a file, and the corpus is not in
+     * the repository.
+     */
+    bool emitCpp(const std::filesystem::path& path, std::vector<StorageEpisode> episodes)
+    {
+        std::ostringstream generated;
+        writeEpisodes(generated, std::move(episodes));
+
+        std::string existing;
+        {
+            std::ifstream stream(path, std::ios::binary);
+            if (stream)
+            {
+                existing.assign((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+            }
+        }
+
+        if (existing == generated.str())
+        {
+            std::cout << "unchanged: " << path.string() << "\n";
+            return true;
+        }
+
+        std::ofstream out(path, std::ios::binary);
+        if (!out)
+        {
+            return false;
+        }
+        out << generated.str();
+        std::cout << (existing.empty() ? "wrote " : "CHANGED ") << path.string() << "\n";
+        return static_cast<bool>(out);
+    }
+
     bool isDemo(const std::filesystem::path& path)
     {
         auto extension = path.extension().string();
@@ -631,6 +1175,9 @@ int main(int argc, char* argv[])
                   << "                recursively for *.FBI, used to name each type index\n"
                   << "  --emit-json   write the episodes to a file as JSON\n"
                   << "  --emit-resources  write every 0x28 resource record as JSON\n"
+                  << "  --emit-cpp    write the storage episodes as a C++ header (needs --units)\n"
+                  << "  --max-types   distinct unit types an episode may carry (default 6)\n"
+                  << "  --max-per-player  episodes to keep per player (default 3)\n"
                   << "  --all         emit rejected episodes too, each with its reasons\n"
                   << "\n"
                   << "Without --units, episodes are keyed on an anonymous type index; see the\n"
@@ -661,23 +1208,30 @@ int main(int argc, char* argv[])
         }
     }
     std::vector<std::string> loadOrder;
+    std::map<std::string, UnitStorage> unitStorage;
     if (args.contains("units"))
     {
         auto dir = args.getString("units");
         std::error_code error;
-        auto stems = readUnitStems(dir, error);
+        auto files = readUnitFiles(dir, error);
         if (error)
         {
             std::cerr << "cannot read unit directory " << dir << ": " << error.message() << "\n";
             return 1;
         }
-        if (stems.empty())
+        if (files.empty())
         {
             std::cerr << "no *.FBI files under " << dir << "\n";
             return 1;
         }
 
+        std::vector<std::string> stems;
+        for (const auto& file : files)
+        {
+            stems.push_back(file.stem().string());
+        }
         loadOrder = tadUnitLoadOrder(std::move(stems));
+        unitStorage = readUnitStorage(files);
         std::cout << "unit load order: " << loadOrder.size() << " types from " << dir << "\n";
     }
 
@@ -691,7 +1245,21 @@ int main(int argc, char* argv[])
 
     auto emitAll = args.getBool("all");
 
+    // How big an episode may get before it stops being readable, and how many
+    // of one player's are worth keeping. Both are about the checked-in header
+    // rather than about the data: a fortieth episode from one game says nothing
+    // the first three did not.
+    std::size_t maxTypes = args.contains("max-types") ? std::stoul(args.getString("max-types")) : 6;
+    std::size_t maxPerPlayer = args.contains("max-per-player") ? std::stoul(args.getString("max-per-player")) : 3;
+
+    if (args.contains("emit-cpp") && loadOrder.empty())
+    {
+        std::cerr << "--emit-cpp needs --units: an episode carries its unit types' own FBI values\n";
+        return 1;
+    }
+
     nlohmann::json resourceJson = nlohmann::json::array();
+    std::vector<StorageEpisode> storageEpisodes;
 
     std::vector<rwe::Episode> all;
     std::map<std::string, unsigned int> rejectionCounts;
@@ -749,6 +1317,13 @@ int main(int argc, char* argv[])
             std::cerr << "  WARNING: " << path.filename().string() << " declares "
                       << handler.unitTable->restricted.size() << " unit types but --units gave "
                       << loadOrder.size() << "; names for this demo will be wrong\n";
+        }
+
+        if (args.contains("emit-cpp"))
+        {
+            auto mined = mineStorageEpisodes(handler, loadOrder, unitStorage, maxTypes, maxPerPlayer);
+            std::cout << "  " << mined.size() << " storage episode(s)\n";
+            storageEpisodes.insert(storageEpisodes.end(), mined.begin(), mined.end());
         }
 
         if (args.contains("emit-resources"))
@@ -864,6 +1439,16 @@ int main(int argc, char* argv[])
                       << std::setw(5) << total
                       << std::setw(8) << mode
                       << std::setw(7) << (100 * modeCount / total) << "%\n";
+        }
+    }
+
+    if (args.contains("emit-cpp"))
+    {
+        auto out = args.getString("emit-cpp");
+        if (!emitCpp(out, storageEpisodes))
+        {
+            std::cerr << "cannot write " << out << "\n";
+            return 1;
         }
     }
 

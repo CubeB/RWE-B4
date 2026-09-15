@@ -910,6 +910,52 @@ a test read one.
    `[Component].test.cpp` convention.
 3. **The extractor does the filtering**, which is most of the real work.
 
+### What an episode looks like, and the conventions it sets
+
+Settled by the economy oracle, and inherited by everything after it.
+
+- **A generated header of plain structs**, checked in beside the test that uses
+  it: `src/rwe/sim/tad_economy_episodes.h`. Small, text, diffable.
+- **The data set's own FBI values transcribed inline**, beside the observation
+  they explain. `rwe_test` never opens a file, and demos and mod files never
+  enter the repository, so an episode that needed either would not be a test.
+  `tad_episodes` reads them with the engine's own `parseUnitFbi`, so a fixture
+  cannot disagree with the loader about what a field means.
+- **Provenance**: the demo, the owner block, the sample tick and the sample
+  before it. The pair of ticks is the window a failure has to be explained
+  inside.
+- **Regeneration is diff-stable.** Episodes are emitted in (demo, owner block,
+  tick) order, compositions in unit-name order, floats at nine significant
+  digits so they read back bit for bit, and nothing in the output records a
+  time or a path. Two runs over one corpus, in either argument order, produce
+  byte-identical files; the tool reads the old file back and prints `unchanged`
+  or `CHANGED` so a regeneration says which it was.
+- **An expected-difference annotation on every episode.** Each carries a delta
+  per resource and the name of the `docs/TOTALA-EXE.md` §88 entry that licences
+  it, and the tests assert the observation **plus** the delta. A test that
+  asserts equality gets disabled the first time it is right to fail. No storage
+  episode needs one today -- §88's new entry, the staggered settle, does not
+  move a capacity -- but the field is there from the start rather than being
+  retrofitted to the first episode that needs it.
+- **Variety, not volume.** The emitter keeps one episode per distinct set of
+  storage-granting types: two episodes with the same set assert the same thing.
+  What the survivor also owns rides along in its composition, so the types that
+  grant nothing are still checked to grant nothing.
+
+Regenerating (Escalation; the paths are a local corpus, not a repository one):
+
+```bash
+cd build && make -j$(nproc) tad_episodes && cd ..
+./build/tad_episodes --file ~/ta-demos/14727.ted --file ~/ta-demos/14731.ted \
+    --units ~/ta-mods/x-esc --emit-cpp src/rwe/sim/tad_economy_episodes.h
+```
+
+**A demo with a computer player is contaminated for economy work** and is not a
+candidate. TA handicaps a computer player's production at every site (§23), and
+Escalation moved that constant (`docs/TA-PATCHES.md`), so its income is neither
+TA's nor the mod's documented figure. The thirteen ladder games in the corpus
+are human, but read the header rather than assuming it of the next one.
+
 ### The filters, which are the real work
 
 An episode mined from a competitive game is not a controlled experiment.
@@ -1020,16 +1066,32 @@ They catch different things and should not share machinery.
       already reproduces it. `tools/tad-buildtime.py` is the re-runnable check.
       What a fixture may assert is therefore: **factory builds, exactly**, and
       nothing about a mobile builder's offset without that builder's script.
-   2. **`--emit-cpp`.** A generated header of plain structs beside the test that
-      uses it: unit type, the real FBI values transcribed inline, observed
-      timings, and provenance (demo id plus tick range). Regeneration must be
-      diff-stable. See "How to build it without poisoning the test suite".
-   3. **The economy oracle.** Storage-cap and stall episodes need only `0x28`
-      slots 0-3, which are settled, so this has no unknowns left in it and is
-      the cheapest first real conformance test. It is also where the
-      `--emit-cpp` and expected-difference conventions get shaken out, which
-      everything after it inherits. RWE side: `GameSimulation::updateResources`
-      and `settleResourcePool`.
+   2. ~~**`--emit-cpp`.**~~ Done, together with (3), because designing the
+      format before it had a consumer would have been guesswork.
+      `tad_episodes --emit-cpp` writes
+      `src/rwe/sim/tad_economy_episodes.h`: plain structs, each unit type's own
+      FBI values transcribed inline, provenance as demo id plus the sample tick
+      and the one before it, emitted in a deterministic order with no timestamp
+      and no path, and the tool reads back what was there and says whether the
+      file moved. The conventions it settles are in "What an episode looks
+      like" below.
+   3. ~~**The economy oracle.**~~ Done: the storage half, which is the half
+      slots 2 and 3 can carry alone. TA's storage capacity is a plain sum over
+      what a player has **finished** -- the lobby's base, plus each unit's own
+      `MetalStorage`/`EnergyStorage`, with nanoframes contributing nothing --
+      and that sum tracks the reported capacity from the opening sample of all
+      86 players in the corpus. Three `[economy][corpus]` cases in
+      `src/rwe/sim/economy.test.cpp` assert it against `updateResources`, and
+      both halves bite: crediting a nanoframe, or taking the base from the
+      commander's own FBI, each break them.
+
+      **The stall half is still open**, and the sampling interval is why: the
+      corpus samples every 120 ticks and the settle runs every 30, so a single
+      settle cannot be observed and the throttle fractions, the debt mechanism
+      and the order of operations inside one settle are not assertable from
+      `0x28` alone. What is: a stall's onset and recovery across several
+      samples, and the trajectory of a stockpile over a window with a known
+      composition. Both need the production model as well as the storage one.
    4. **The build-timing oracle**, which (1) has now scoped. RWE side:
       `UnitState::getBuildCostInfo`, `UnitState::addBuildProgress`, their two
       call sites in `UnitBehaviorService.cpp`, and `workerTimePerTick` in
