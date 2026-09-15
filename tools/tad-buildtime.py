@@ -50,8 +50,12 @@ builders fall into three classes that have to be scored apart:
     tools/tad-buildtime.py --episodes /tmp/ep.json --units ~/ta-mods/x-esc
 
 Exits non-zero if any scored cell disagrees with the model, so this is a check
-and not a listing. Neither demos nor mod files are in the repository; both
-arguments are paths.
+and not a listing. It ALSO exits non-zero when there is nothing to score, which
+reads like a failure and is not one: the single ProTA demo in the corpus has
+only one immobile-builder pair with enough builds, so it needs --min-builds 3
+and at the default says "nothing to score". Read the message, not just the
+status. Neither demos nor mod files are in the repository; both arguments are
+paths.
 """
 
 import argparse

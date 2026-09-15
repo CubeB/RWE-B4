@@ -123,7 +123,9 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   not `ceil(BuildTime / (WorkerTime/30))`; the difference is a tick, and where
   `BuildTime` divides exactly it is the tick that tells the two apart. Exits
   non-zero if a scored pair stops agreeing, so it is a check rather than a
-  listing. Builders split three ways and the split matters: **immobile** ones
+  listing — but also when there is *nothing* to score, so read the message and
+  not just the status. The single ProTA demo hits that: it has one scoreable
+  immobile pair and needs `--min-builds 3`. Builders split three ways and the split matters: **immobile** ones
   are scored cell by cell, **airborne** ones are pooled and scored at -1 because
   a construction aircraft consistently finishes a tick early (58 of 66 builds,
   three builders, two rates — unexplained, and the open lead in §23), and
