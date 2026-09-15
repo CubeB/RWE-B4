@@ -2350,6 +2350,31 @@ namespace rwe
         });
     }
 
+    bool GameSimulation::isCollisionAtIgnoringBuilding(const GridRegion& region, UnitId building) const
+    {
+        return occupiedGrid.any(region, [&](const auto& cell) {
+            if (cell.mobileUnitId)
+            {
+                return true;
+            }
+            if (cell.buildingInfo && !cell.buildingInfo->passable && cell.buildingInfo->unit != building)
+            {
+                return true;
+            }
+            if (cell.featureId)
+            {
+                const auto& f = getFeature(*cell.featureId);
+                const auto& def = getFeatureDefinition(f.featureName);
+                if (def.blocking)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        });
+    }
+
     bool GameSimulation::isCollisionAt(const DiscreteRect& rect, UnitId self) const
     {
         auto region = occupiedGrid.tryToRegion(rect);

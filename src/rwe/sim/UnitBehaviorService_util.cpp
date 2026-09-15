@@ -305,7 +305,7 @@ namespace rwe
             {
                 continue;
             }
-            auto distanceSquared = unitInfo.state->position.distanceSquared(unit.position);
+            auto distanceSquared = distanceSquaredXZ(unitInfo.state->position, unit.position);
             if (distanceSquared <= bestDistanceSquared)
             {
                 bestDistanceSquared = distanceSquared;
@@ -314,6 +314,13 @@ namespace rwe
         }
 
         return best;
+    }
+
+    SimScalar distanceSquaredXZ(const SimVector& a, const SimVector& b)
+    {
+        auto dx = a.x - b.x;
+        auto dz = a.z - b.z;
+        return (dx * dx) + (dz * dz);
     }
 
     bool airBaseIsClaimedByAnother(const GameSimulation& sim, UnitId padId, UnitId claimant)
@@ -363,7 +370,7 @@ namespace rwe
             // Physical occupancy is unconditional -- an aircraft standing on
             // the pad holds it whoever else wants it.
             if (std::holds_alternative<UnitPhysicsInfoGround>(other.physics)
-                && other.position.distanceSquared(pad.position) <= reachSquared)
+                && distanceSquaredXZ(other.position, pad.position) <= reachSquared)
             {
                 return true;
             }

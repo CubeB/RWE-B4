@@ -328,12 +328,18 @@ namespace rwe
          */
         bool unitHasBuildArm(const UnitState& unit) const;
 
-        SimScalar landingTargetHeight(UnitInfo unitInfo);
+        /**
+         * The pad this aircraft is coming down on and the exact point on it,
+         * or nothing if it is landing on open ground. The point is the world
+         * position of the pad's own `QueryLandingPad` piece -- twenty world
+         * units above the base on an ARMASP. See TOTALA-EXE.md §94.
+         */
+        std::optional<std::pair<UnitId, SimVector>> airBaseLandingPoint(UnitInfo unitInfo);
 
         bool descendToGroundLevel(UnitInfo unitInfo);
 
         void transitionFromGroundToAir(UnitInfo unitInfo);
-        bool tryTransitionFromAirToGround(UnitInfo unitInfo);
+        bool tryTransitionFromAirToGround(UnitInfo unitInfo, std::optional<UnitId> pad = std::nullopt);
 
         bool flyTowardsGoal(UnitInfo unitInfo, const MovingStateGoal& goal);
     };

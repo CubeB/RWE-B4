@@ -9994,6 +9994,55 @@ both the deck height and that the hit points climb — the whole journey in one
 test, because each piece of it was already covered in isolation and every fault
 was in a join.
 
+### The pad's own footprint, and why none of the above was enough
+
+The play-test after that one: "they land on the pads but do not repair, and
+while a few brawlers were sat on the pads I set some other random planes to
+patrol and it kicked the first lot off with the message 'none available'". One
+cause underneath both halves, and it is a piece of RWE's own data handling
+rather than anything in the binary.
+
+**ARMASP's yardmap is `oooo oooo oooo oooo`, and `o` is not an open cell.**
+`parseYardMapCell` maps it to `YardMapCell::Ground`, and `isPassable` says
+Ground is impassable — correctly, because that is what stops a tank walking
+through a building. So the pad's whole four-by-four footprint blocks movement,
+and `tryTransitionFromAirToGround` tested the aircraft's footprint against it
+like any other touchdown and refused. The aircraft set `landingFailed`, climbed
+away, came back round, and did it again for ever.
+
+Everything else follows from that. It never became a ground unit, so
+`findAircraftToRepairOnPad` — which skips anything still flying — never saw it,
+and nothing mended it. And `airBaseIsClaimedByAnother`'s physical-occupancy
+branch also asks for a ground unit, so an aircraft cycling over a pad never
+held it: a later arrival was offered the same pad, and then turned the first
+one away with "Landing aborted: no pads available". The whole report is that one
+fault seen from three sides, and it was invisible to every test here because the
+fixture had written `GroundPassable` into the pad's yardmap and called it
+"sixteen open cells".
+
+**The original never asks the question.** A landed aircraft is *attached* to the
+pad: `0x48AAC0` links it into the pad's list and `0x47E570` walks the links to
+see which landing slots are free. It is carried, not standing on cells, which is
+why `QueryLandingPad` returns *pieces* and why a pad's yardmap has nothing to do
+with it. RWE has no attachment, so the equivalent is to let the aircraft through
+the footprint of the one pad it is landing on:
+`GameSimulation::isCollisionAtIgnoringBuilding`.
+
+Two smaller things went with it, both consequences of the aircraft now sitting
+twenty units up rather than on the ground:
+
+- **Every "is it standing on that pad?" test measures flat now**
+  (`distanceSquaredXZ`). Against a reach sized from the pad's footprint — 32
+  world units for a four-by-four — a deck height of 20 ate two fifths of the
+  radius, and the thing it stands in for, the original's attachment, has no
+  notion of height at all.
+- **Standing on a pad beats every claim on it.** The claim test in
+  `handleLandOnAirBaseOrder` ran *before* the standing-on-it test, so a later
+  arrival with a lower unit id could turn a parked aircraft off its own pad.
+  The guide's rule is "until the occupying aircraft has been repaired *and has
+  left*", and the lower-id tie-break is only for two aircraft both still in the
+  air.
+
 Not ported, and neither has anywhere to attach: `unit+0xB0`, the
 clock-plus-150 stance deadline, which RWE keeps as build-stance state instead;
 and the spray's own particle type, RWE running the nanolathe effect it already

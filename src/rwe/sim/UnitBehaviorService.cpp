@@ -518,10 +518,25 @@ namespace rwe
                             }
                             else
                             {
-                                auto targetHeight = landingTargetHeight(unitInfo);
+                                auto landingPoint = airBaseLandingPoint(unitInfo);
+                                auto targetHeight = landingPoint
+                                    ? landingPoint->second.y
+                                    : sim->terrain.getHeightAt(unitInfo.state->position.x, unitInfo.state->position.z);
                                 if (unitInfo.state->position.y == targetHeight)
                                 {
-                                    if (!tryTransitionFromAirToGround(unitInfo))
+                                    if (landingPoint)
+                                    {
+                                        // Exactly on the piece for the last
+                                        // step, so the aircraft ends where the
+                                        // original's piece goal would put it.
+                                        // The descent has already walked it to
+                                        // within a unit.
+                                        unitInfo.state->position.x = landingPoint->second.x;
+                                        unitInfo.state->position.z = landingPoint->second.z;
+                                    }
+
+                                    auto pad = landingPoint ? std::optional<UnitId>(landingPoint->first) : std::nullopt;
+                                    if (!tryTransitionFromAirToGround(unitInfo, pad))
                                     {
                                         // Something took the spot while we were
                                         // coming down. Climb away and look for
@@ -1885,16 +1900,27 @@ namespace rwe
             return true;
         }
 
+        // Standing on it beats every claim. "...other damaged aircraft will not
+        // use that pad until the occupying aircraft has been repaired and has
+        // left", and the half that matters here is that the aircraft already
+        // on the pad is the one that stays: this test used to run *after* the
+        // claim test, so a later arrival with a lower unit id turned a parked
+        // aircraft off its own pad with "no pads available".
+        //
+        // Flat distance, not three-dimensional: the aircraft is up on the
+        // pad's deck, twenty world units above its base on an ARMASP, and
+        // measuring that height against a reach sized from the footprint left
+        // a parked aircraft not counting as parked.
+        auto reach = airBaseRepairReach(*sim, padDefinition);
+        auto parked = std::holds_alternative<UnitPhysicsInfoGround>(unitInfo.state->physics)
+            && distanceSquaredXZ(unitInfo.state->position, pad.position) <= (reach * reach);
+
         // Somebody else got there first.
-        if (airBaseIsClaimedByAnother(*sim, order.target, unitInfo.id))
+        if (!parked && airBaseIsClaimedByAnother(*sim, order.target, unitInfo.id))
         {
             sim->events.push_back(UnitCannotComplyEvent{unitInfo.id, "Landing aborted: no pads available"});
             return true;
         }
-
-        auto reach = airBaseRepairReach(*sim, padDefinition);
-        auto parked = std::holds_alternative<UnitPhysicsInfoGround>(unitInfo.state->physics)
-            && unitInfo.state->position.distanceSquared(pad.position) <= (reach * reach);
 
         if (parked)
         {
@@ -5177,10 +5203,8 @@ namespace rwe
         return std::any_of(functions.begin(), functions.end(), [](const auto& f) { return f.name == "StartBuilding"; });
     }
 
-    SimScalar UnitBehaviorService::landingTargetHeight(UnitInfo unitInfo)
+    std::optional<std::pair<UnitId, SimVector>> UnitBehaviorService::airBaseLandingPoint(UnitInfo unitInfo)
     {
-        auto terrainHeight = sim->terrain.getHeightAt(unitInfo.state->position.x, unitInfo.state->position.z);
-
         // An aircraft coming down on a repair pad stops on the pad's *deck*,
         // not on the ground under it. The original asks the pad's own script
         // where that is: `VTOL_Landing` calls `QueryLandingPad` (0x501C14) at
@@ -5197,44 +5221,61 @@ namespace rwe
         // aircraft over the pad by the time it is descending.
         if (unitInfo.state->orders.empty())
         {
-            return terrainHeight;
+            return std::nullopt;
         }
 
         auto order = std::get_if<LandOnAirBaseOrder>(&unitInfo.state->orders.front());
         if (order == nullptr)
         {
-            return terrainHeight;
+            return std::nullopt;
         }
 
         auto padRef = sim->tryGetUnitState(order->target);
         if (!padRef || padRef->get().isDead())
         {
-            return terrainHeight;
+            return std::nullopt;
         }
         const auto& pad = padRef->get();
 
         // And only when it really is over the pad: an aircraft that gave up
         // and set down somewhere else lands on the ground like anything else.
         auto reach = airBaseRepairReach(*sim, sim->unitDefinitions.at(pad.unitType));
-        auto dx = unitInfo.state->position.x - pad.position.x;
-        auto dz = unitInfo.state->position.z - pad.position.z;
-        if ((dx * dx) + (dz * dz) > reach * reach)
+        if (distanceSquaredXZ(unitInfo.state->position, pad.position) > reach * reach)
         {
-            return terrainHeight;
+            return std::nullopt;
         }
 
         auto pieceId = runCobQuery(order->target, "QueryLandingPad");
         if (!pieceId)
         {
-            return terrainHeight;
+            return std::nullopt;
         }
 
-        return getPiecePosition(order->target, static_cast<unsigned int>(*pieceId)).y;
+        return std::make_pair(order->target, getPiecePosition(order->target, static_cast<unsigned int>(*pieceId)));
     }
 
     bool UnitBehaviorService::descendToGroundLevel(UnitInfo unitInfo)
     {
-        auto targetHeight = landingTargetHeight(unitInfo);
+        auto landingPoint = airBaseLandingPoint(unitInfo);
+        auto targetHeight = landingPoint
+            ? landingPoint->second.y
+            : sim->terrain.getHeightAt(unitInfo.state->position.x, unitInfo.state->position.z);
+
+        // Settle onto the piece as it comes down. The original has no need of
+        // this -- its landing goal *is* the pad's piece, so the aircraft has
+        // already flown to it before the descent begins -- but RWE descends
+        // where it arrived, which is anywhere inside the eight-unit arrival
+        // tolerance plus a tick of its own speed. Walking the last few units
+        // in over the descent puts it on the middle of the deck rather than
+        // half off the edge.
+        if (landingPoint)
+        {
+            auto step = 1_ss;
+            auto dx = landingPoint->second.x - unitInfo.state->position.x;
+            auto dz = landingPoint->second.z - unitInfo.state->position.z;
+            unitInfo.state->position.x += rweMax(-step, rweMin(dx, step));
+            unitInfo.state->position.z += rweMax(-step, rweMin(dz, step));
+        }
 
         unitInfo.state->position.y = rweMax(unitInfo.state->position.y - 1_ss, targetHeight);
 
@@ -5255,13 +5296,28 @@ namespace rwe
         sim->flyingUnitsSet.insert(unitInfo.id);
     }
 
-    bool UnitBehaviorService::tryTransitionFromAirToGround(UnitInfo unitInfo)
+    bool UnitBehaviorService::tryTransitionFromAirToGround(UnitInfo unitInfo, std::optional<UnitId> pad)
     {
         auto footprintRect = sim->computeFootprintRegion(unitInfo.state->position, unitInfo.definition->movementCollisionInfo);
         auto footprintRegion = sim->occupiedGrid.tryToRegion(footprintRect);
         assert(!!footprintRegion);
 
-        if (sim->isCollisionAt(*footprintRegion))
+        // The pad it is coming down on does not block it. **This is what kept
+        // the pads from working at all in a real game.** ARMASP's yardmap is
+        // `oooo oooo oooo oooo`; `o` parses to YardMapCell::Ground, and Ground
+        // is impassable. So the ordinary collision test refused every
+        // touchdown on a pad: the aircraft set landingFailed, climbed away and
+        // came back round for ever, and because it never became a ground unit
+        // nothing mended it and nothing counted it as occupying the pad --
+        // which is also why a later arrival was offered the same pad and
+        // turned the first one away with "no pads available". The original
+        // never asks the question: a landed aircraft is *attached* to the pad
+        // (0x48AAC0 links it, 0x47E570 walks the links to see which slots are
+        // free), carried rather than standing on cells.
+        auto blocked = pad
+            ? sim->isCollisionAtIgnoringBuilding(*footprintRegion, *pad)
+            : sim->isCollisionAt(*footprintRegion);
+        if (blocked)
         {
             return false;
         }

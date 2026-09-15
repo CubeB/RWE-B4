@@ -133,11 +133,15 @@ namespace rwe
             d.maxHitPoints = 680;
             d.objectName = "padmodel";
             d.buildTime = 0u;
-            // ARMASP's yardmap is sixteen open cells, so nothing is blocked
-            // from standing on the pad — which is what lets an aircraft come
-            // down on top of it.
+            // ARMASP's yardmap is `oooo oooo oooo oooo`, and `o` parses to
+            // YardMapCell::Ground, which is **impassable**. The fixture used
+            // to say GroundPassable here and call it "sixteen open cells",
+            // which is what let the pads ship unable to accept a landing at
+            // all: a landing aircraft has to be let through the pad's own
+            // footprint deliberately, because the original carries it rather
+            // than standing it on cells.
             d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{4u, 4u, 255u, 255u, 0u, 0u};
-            d.yardMap = Grid<YardMapCell>(4, 4, YardMapCell::GroundPassable);
+            d.yardMap = Grid<YardMapCell>(4, 4, YardMapCell::Ground);
             return d;
         }
 
@@ -264,8 +268,17 @@ TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
         auto padPosition = SimVector(500_ss, 0_ss, 0_ss);
         auto pad = f.addPad(f.us, padPosition);
 
-        auto resident = spawnAirBaseUnit(f.sim, "fighter", f.us, padPosition, f.script);
-        f.sim.getUnitState(resident).physics = UnitPhysicsInfoGround();
+        // Spawned clear of the pad and then moved onto it: the pad's own
+        // footprint is impassable, so tryAddUnit will not place a unit there.
+        // The engine gets an aircraft onto a pad through the landing path,
+        // which lets it through that footprint deliberately.
+        auto resident = spawnAirBaseUnit(f.sim, "fighter", f.us, SimVector(1200_ss, 0_ss, 1200_ss), f.script);
+        {
+            auto& r = f.sim.getUnitState(resident);
+            r.position = padPosition;
+            r.previousPosition = padPosition;
+            r.physics = UnitPhysicsInfoGround();
+        }
 
         f.damageFighterTo(100);
         REQUIRE_FALSE(findAirBaseToLandOn(f.sim, f.fighterInfo()).has_value());
@@ -733,5 +746,49 @@ TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
             f.sim.tick();
         }
         REQUIRE(f.sim.getUnitState(f.fighter).hitPoints > before);
+    }
+
+    TEST_CASE("an aircraft sitting on a pad is not turned off it by a later arrival", "[airbase]")
+    {
+        // "...other damaged aircraft will not use that pad until the occupying
+        // aircraft has been repaired and has left." A play-test found the
+        // opposite: a few Brawlers were sitting on pads, some other planes
+        // were sent on patrol, and the new ones turned the old ones off with
+        // "Landing aborted: no pads available". Two faults behind it, both
+        // fixed here -- the claim test ran before the standing-on-it test, so
+        // a later arrival with a lower unit id won; and the standing-on-it
+        // test measured in three dimensions against a reach sized from the
+        // pad's footprint, which the twenty units of deck height ate into.
+        AirBaseFixture f;
+        auto padPosition = SimVector(500_ss, 0_ss, 0_ss);
+        auto pad = f.addPad(f.us, padPosition);
+
+        // The resident has the *higher* id, so the old tie-break would have
+        // thrown it off in favour of the newcomer.
+        auto resident = spawnAirBaseUnit(f.sim, "fighter", f.us, SimVector(1200_ss, 0_ss, 1200_ss), f.script);
+        {
+            auto& r = f.sim.getUnitState(resident);
+            r.position = padPosition + SimVector(0_ss, 20_ss, 0_ss);
+            r.previousPosition = r.position;
+            r.physics = UnitPhysicsInfoGround();
+            r.hitPoints = 100;
+            r.orders.push_back(LandOnAirBaseOrder(pad));
+        }
+        REQUIRE(resident.value > f.fighter.value);
+
+        f.damageFighterTo(100);
+        f.sim.getUnitState(f.fighter).orders.push_back(LandOnAirBaseOrder(pad));
+
+        for (int i = 0; i < 5; ++i)
+        {
+            f.sim.tick();
+        }
+
+        // The one on the pad keeps it...
+        REQUIRE_FALSE(f.sim.getUnitState(resident).orders.empty());
+        REQUIRE(std::holds_alternative<UnitPhysicsInfoGround>(f.sim.getUnitState(resident).physics));
+
+        // ...and the newcomer is the one told there is nowhere to go.
+        REQUIRE(f.sim.getUnitState(f.fighter).orders.empty());
     }
 }

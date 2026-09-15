@@ -994,6 +994,18 @@ namespace rwe
 
         bool isCollisionAt(const GridRegion& region) const;
 
+        /**
+         * The collision test, but with one building's own cells treated as
+         * clear. An aircraft coming down on a repair pad is not blocked by the
+         * pad: ARMASP's yardmap is sixteen `o` cells and `o` is
+         * `YardMapCell::Ground`, which is impassable, so the ordinary test
+         * refused every touchdown on a pad in the game. The original never
+         * asks, because a landed aircraft is *attached* to the pad (0x48AAC0
+         * links it, 0x47E570 walks the links) rather than standing on cells.
+         * See TOTALA-EXE.md §94.
+         */
+        bool isCollisionAtIgnoringBuilding(const GridRegion& region, UnitId building) const;
+
         bool isCollisionAt(const DiscreteRect& rect, UnitId self) const;
 
         bool isYardmapBlocked(unsigned int x, unsigned int y, const Grid<YardMapCell>& yardMap, bool open, UnitId self) const;

@@ -125,6 +125,17 @@ namespace rwe
     SimScalar airBaseRepairReach(const GameSimulation& sim, const UnitDefinition& padDefinition);
 
     /**
+     * Flat distance, height ignored. Every "is this aircraft standing on that
+     * pad?" test measures this way, because the thing it stands in for -- the
+     * original's attachment of a landed aircraft to the pad (0x48AAC0) -- has
+     * no notion of height at all, and because an aircraft parked on a pad is
+     * deliberately *up* on its deck: twenty world units on an ARMASP. Measured
+     * in three dimensions, that height ate two fifths of the reach and left a
+     * parked aircraft not counting as parked.
+     */
+    SimScalar distanceSquaredXZ(const SimVector& a, const SimVector& b);
+
+    /**
      * Whether being part-way through this order is the kind of work a damaged
      * aircraft abandons to go and find a pad.
      *
