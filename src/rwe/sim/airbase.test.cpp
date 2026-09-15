@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/grid/Grid.h>
+#include <rwe/cob/CobOpCode.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/LosTables.h>
@@ -48,10 +49,49 @@ namespace rwe
             return script;
         }
 
+        /**
+         * ARMASP's, reduced to the one function that matters here.
+         * `QueryLandingPad(p1, p2, p3, p4)` in the shipped script writes piece
+         * 1 -- `landpad` -- into its first two parameters and returns; this is
+         * that, assembled by hand, because the engine reads the answer out of
+         * the thread's locals and nothing else about the pad's COB is relevant.
+         */
+        std::shared_ptr<CobScript> makeAirBasePadScript()
+        {
+            auto script = std::make_shared<CobScript>();
+            script->staticVariableCount = 0;
+            script->pieces.push_back("base");
+            script->pieces.push_back("landpad");
+
+            script->instructions = {
+                static_cast<uint32_t>(OpCode::PUSH_CONSTANT),
+                1u,
+                static_cast<uint32_t>(OpCode::POP_LOCAL_VAR),
+                0u,
+                static_cast<uint32_t>(OpCode::PUSH_CONSTANT),
+                0u,
+                static_cast<uint32_t>(OpCode::RETURN)};
+            script->functions.push_back(CobFunctionInfo{"QueryLandingPad", 0u});
+            return script;
+        }
+
         void registerAirBaseModel(GameSimulation& sim, const std::string& objectName)
         {
             std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
             sim.unitModelDefinitions[objectName] = createUnitModelDefinition(10_ss, std::move(pieces));
+        }
+
+        /**
+         * The pad's own model. ARMASP's `landpad` piece sits at (0, 20, 0) --
+         * twenty world units above the pad's base -- and that is the height an
+         * aircraft comes to rest at.
+         */
+        void registerAirBasePadModel(GameSimulation& sim, const std::string& objectName)
+        {
+            std::vector<UnitPieceDefinition> pieces{
+                UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt},
+                UnitPieceDefinition{"landpad", SimVector(0_ss, 20_ss, 0_ss), std::string("base")}};
+            sim.unitModelDefinitions[objectName] = createUnitModelDefinition(24_ss, std::move(pieces));
         }
 
         /** ARMFIG, the ARM Freedom Fighter, with its own shipped numbers. */
@@ -82,7 +122,6 @@ namespace rwe
         UnitDefinition makeAirBasePadDef()
         {
             UnitDefinition d{};
-            d.objectName = "model";
             d.isMobile = false;
             d.canMove = false;
             d.builder = true;
@@ -92,6 +131,7 @@ namespace rwe
             d.workerTimePerTick = 6u;
             d.sightDistance = 175u;
             d.maxHitPoints = 680;
+            d.objectName = "padmodel";
             d.buildTime = 0u;
             // ARMASP's yardmap is sixteen open cells, so nothing is blocked
             // from standing on the pad — which is what lets an aircraft come
@@ -104,9 +144,17 @@ namespace rwe
         UnitId spawnAirBaseUnit(GameSimulation& sim, const std::string& unitType, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
         {
             auto env = std::make_unique<CobEnvironment>(script.get());
-            UnitMesh base;
-            base.name = "base";
-            std::vector<UnitMesh> pieces{base};
+
+            // One mesh per piece of the model, the way createUnit builds them:
+            // getPieceTransform asserts the two lists are the same length, so
+            // a pad with a landpad piece needs a mesh for it.
+            std::vector<UnitMesh> pieces;
+            for (const auto& pieceDefinition : sim.unitModelDefinitions.at(sim.unitDefinitions.at(unitType).objectName).pieces)
+            {
+                UnitMesh mesh;
+                mesh.name = pieceDefinition.name;
+                pieces.push_back(mesh);
+            }
             UnitState unit(pieces, std::move(env));
             unit.unitType = unitType;
             unit.owner = owner;
@@ -127,6 +175,7 @@ namespace rwe
         struct AirBaseFixture
         {
             std::shared_ptr<CobScript> script;
+            std::shared_ptr<CobScript> padScript;
             GameSimulation sim;
             PlayerId us;
             PlayerId them;
@@ -134,6 +183,7 @@ namespace rwe
 
             AirBaseFixture()
                 : script(makeAirBaseScript()),
+                  padScript(makeAirBasePadScript()),
                   sim(makeAirBaseTerrain(512, 512), 0u, 0, 0),
                   us(addAirBasePlayer(sim)),
                   them(addAirBasePlayer(sim)),
@@ -142,6 +192,7 @@ namespace rwe
                 sim.unitDefinitions["fighter"] = makeAirBaseFighterDef();
                 sim.unitDefinitions["pad"] = makeAirBasePadDef();
                 registerAirBaseModel(sim, "model");
+                registerAirBasePadModel(sim, "padmodel");
                 sim.losTables = generateLosTables(8);
 
                 fighter = spawnAirBaseUnit(sim, "fighter", us, SimVector(0_ss, 200_ss, 0_ss), script);
@@ -152,7 +203,7 @@ namespace rwe
 
             UnitId addPad(PlayerId owner, const SimVector& position)
             {
-                auto id = spawnAirBaseUnit(sim, "pad", owner, position, script);
+                auto id = spawnAirBaseUnit(sim, "pad", owner, position, padScript);
                 sim.getUnitState(id).activated = true;
                 return id;
             }
@@ -611,9 +662,9 @@ TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
             fighterState.physics = UnitPhysicsInfoGround();
             f.sim.flyingUnitsSet.erase(f.fighter);
 
-            // Normally set by the pad's StartBuilding thread; the empty test
-            // script has none.
-            f.sim.getUnitState(padId).inBuildStance = true;
+            // Deliberately NOT setting inBuildStance: a real pad has no
+            // StartBuilding thread and never sets it, which is exactly the
+            // thing that used to stop it mending anything.
 
             // Kept inside the first second on purpose: the per-second pass
             // rebuilds maxEnergy from what is standing, and nothing here
@@ -647,5 +698,40 @@ TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
             ConstUnitInfo padInfo(padId, &padState, &f.sim.unitDefinitions.at(padState.unitType));
             REQUIRE_FALSE(findAircraftToRepairOnPad(f.sim, padInfo).has_value());
         }
+    }
+
+    TEST_CASE("a damaged aircraft flies to a pad, lands on it, and is mended", "[airbase]")
+    {
+        // The whole journey in one test, because every part of it was covered
+        // in isolation and the joins were where the faults were. A play-test
+        // found both: aircraft "sink through the pads when trying to land on
+        // them and never regain health".
+        AirBaseFixture f;
+        auto padPosition = SimVector(500_ss, 0_ss, 0_ss);
+        auto padId = f.addPad(f.us, padPosition);
+        f.damageFighterTo(150);
+
+        f.sim.getUnitState(f.fighter).orders.push_back(LandOnAirBaseOrder(padId));
+
+        auto landed = false;
+        for (int i = 0; i < 2000 && !landed; ++i)
+        {
+            f.sim.tick();
+            landed = std::holds_alternative<UnitPhysicsInfoGround>(f.sim.getUnitState(f.fighter).physics);
+        }
+        REQUIRE(landed);
+
+        // On the deck, not through it. ARMASP's landpad piece is twenty world
+        // units above the pad's base and the terrain here is flat at zero.
+        const auto& padState = f.sim.getUnitState(padId);
+        REQUIRE(f.sim.getUnitState(f.fighter).position.y == padState.position.y + 20_ss);
+
+        // And being on it, it gets mended -- one hit point a tick.
+        auto before = f.sim.getUnitState(f.fighter).hitPoints;
+        for (int i = 0; i < 20; ++i)
+        {
+            f.sim.tick();
+        }
+        REQUIRE(f.sim.getUnitState(f.fighter).hitPoints > before);
     }
 }

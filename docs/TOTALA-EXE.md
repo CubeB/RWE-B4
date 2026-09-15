@@ -9947,6 +9947,53 @@ directly rather than ticking the simulation:
 `sim/airbase.test.cpp` ticks the simulation and watches the hit points now, so
 neither can come back quietly.
 
+### Where an aircraft actually comes to rest, and the third pad fault
+
+A play-test the same day: "airplanes sink through the pads when trying to land
+on them and never regain health". Both halves were real, and the second had a
+cause neither of the two above accounts for.
+
+**The deck is a piece of the pad's model.** `VTOL_Landing` asks the pad's own
+script where to put the aircraft. It calls `QueryLandingPad` — the string at
+`0x501C14` — at `0x411A35` and again at `0x411CEC`, gets back up to four piece
+ids in the query's locals, tests each with `0x47E570` until it finds one that is
+free, keeps it on the mission at `mission+0x36`, and hands it to the navigator
+as a **piece** goal rather than a point (`0x44E250` at `0x411D60`). The circling
+approach before that is a point on a ring about the pad at the pad's own `y`,
+stepped a quarter turn each time round (`0x411AF1`–`0x411B3F`).
+
+ARMASP's `QueryLandingPad` answers with piece 1, `landpad`, and in `ARMASP.3DO`
+that piece sits at **(0, 20, 0)** — twenty world units above the pad's base.
+CORASP, ARMCARRY and CORCARRY all carry the same function. The one other thing
+the landing goal is given is a height offset, and it is not the pad's:
+`0x411D6F`–`0x411D8D` reads `def+0x170`, the model height, of whatever the
+aircraft is **carrying**, so a transport sets down high enough not to bury its
+cargo, and passes zero when it is empty.
+
+RWE's `descendToGroundLevel` used the terrain height and nothing else, so an
+aircraft landing on a pad sank twenty units through the platform and came to
+rest inside the ground. It runs the pad's `QueryLandingPad` and stops at that
+piece's world height now — only the height, since the piece's x and z are the
+pad's own on every shipped pad and the navigation has already brought the
+aircraft over it, and only while the aircraft holds a `LandOnAirBaseOrder` for a
+pad it is actually above.
+
+**And the third reason nothing was ever mended: none of the four `isairbase`
+units has a `StartBuilding` thread.** ARMASP and CORASP carry SmokeUnit, Create,
+SweetSpot, QueryLandingPad, QueryNanoPiece and Killed; the two carriers not even
+QueryNanoPiece. Their `Create` does not touch `INBUILDSTANCE` either — ARMASP's
+zeroes a static and starts SmokeUnit, and that is all of it. RWE's builder path
+waits for the build stance before it works, so it created a `StartBuilding`
+thread that found no such function and then waited for a flag nothing would ever
+set. The original has no stance test anywhere in its repair tick; RWE's is a
+sequencing device for the nanolathe animation, and now applies only to a unit
+whose script actually raises an arm.
+
+`sim/airbase.test.cpp` flies a damaged fighter to a pad, lands it, and checks
+both the deck height and that the hit points climb — the whole journey in one
+test, because each piece of it was already covered in isolation and every fault
+was in a join.
+
 Not ported, and neither has anywhere to attach: `unit+0xB0`, the
 clock-plus-150 stance deadline, which RWE keeps as build-stance state instead;
 and the spray's own particle type, RWE running the nanolathe effect it already

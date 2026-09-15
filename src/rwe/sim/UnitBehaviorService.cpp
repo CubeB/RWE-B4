@@ -518,7 +518,7 @@ namespace rwe
                             }
                             else
                             {
-                                auto targetHeight = sim->terrain.getHeightAt(unitInfo.state->position.x, unitInfo.state->position.z);
+                                auto targetHeight = landingTargetHeight(unitInfo);
                                 if (unitInfo.state->position.y == targetHeight)
                                 {
                                     if (!tryTransitionFromAirToGround(unitInfo))
@@ -5062,9 +5062,20 @@ namespace rwe
                     return repairExistingUnit(unitInfo, targetUnitId);
                 }
 
-                if (!unitInfo.state->inBuildStance)
+                // Wait for the arm to come up -- but only if there is an arm.
+                // **None of the four `isairbase` units in the shipped data has
+                // a `StartBuilding` thread at all**: ARMASP and CORASP carry
+                // SmokeUnit, Create, SweetSpot, QueryLandingPad, QueryNanoPiece
+                // and Killed, and the two carriers not even QueryNanoPiece.
+                // Their `Create` never touches INBUILDSTANCE either. So the
+                // thread created below found nothing, the stance was never set,
+                // and a pad waiting for it waited for ever -- which is the
+                // third and decisive reason the pads never mended anything.
+                // The original has no stance test anywhere in its repair tick
+                // (0x41BD10); RWE's is a sequencing device for the nanolathe
+                // animation, so it applies to a unit that has one.
+                if (!unitInfo.state->inBuildStance && unitHasBuildArm(*unitInfo.state))
                 {
-                    // We are not in the correct stance to repair the unit yet, wait.
                     return false;
                 }
 
@@ -5153,13 +5164,81 @@ namespace rwe
         return unitInfo.state->position.y == targetHeight;
     }
 
-    bool UnitBehaviorService::descendToGroundLevel(UnitInfo unitInfo)
+    bool UnitBehaviorService::unitHasBuildArm(const UnitState& unit) const
+    {
+        // "Does this unit's script raise a nanolathe arm?" A unit with no
+        // StartBuilding thread has nothing to deploy and nothing to wait for.
+        if (!unit.cobEnvironment)
+        {
+            return false;
+        }
+
+        const auto& functions = unit.cobEnvironment->_script->functions;
+        return std::any_of(functions.begin(), functions.end(), [](const auto& f) { return f.name == "StartBuilding"; });
+    }
+
+    SimScalar UnitBehaviorService::landingTargetHeight(UnitInfo unitInfo)
     {
         auto terrainHeight = sim->terrain.getHeightAt(unitInfo.state->position.x, unitInfo.state->position.z);
 
-        unitInfo.state->position.y = rweMax(unitInfo.state->position.y - 1_ss, terrainHeight);
+        // An aircraft coming down on a repair pad stops on the pad's *deck*,
+        // not on the ground under it. The original asks the pad's own script
+        // where that is: `VTOL_Landing` calls `QueryLandingPad` (0x501C14) at
+        // 0x411A35 and again at 0x411CEC, gets back up to four piece ids,
+        // picks one that is free, keeps it on the mission at `mission+0x36`
+        // and hands it to the navigator as a *piece* goal (0x44E250 at
+        // 0x411D60). ARMASP's script answers with piece 1, `landpad`, and that
+        // piece sits at (0, 20, 0) in the model -- twenty world units up. RWE
+        // descended to the terrain instead, so an aircraft landing on a pad
+        // sank through the platform and came to rest inside the ground.
+        //
+        // Only the height is taken from the piece. Its x and z are the pad's
+        // own on every shipped pad, and the navigation has already brought the
+        // aircraft over the pad by the time it is descending.
+        if (unitInfo.state->orders.empty())
+        {
+            return terrainHeight;
+        }
 
-        return unitInfo.state->position.y == terrainHeight;
+        auto order = std::get_if<LandOnAirBaseOrder>(&unitInfo.state->orders.front());
+        if (order == nullptr)
+        {
+            return terrainHeight;
+        }
+
+        auto padRef = sim->tryGetUnitState(order->target);
+        if (!padRef || padRef->get().isDead())
+        {
+            return terrainHeight;
+        }
+        const auto& pad = padRef->get();
+
+        // And only when it really is over the pad: an aircraft that gave up
+        // and set down somewhere else lands on the ground like anything else.
+        auto reach = airBaseRepairReach(*sim, sim->unitDefinitions.at(pad.unitType));
+        auto dx = unitInfo.state->position.x - pad.position.x;
+        auto dz = unitInfo.state->position.z - pad.position.z;
+        if ((dx * dx) + (dz * dz) > reach * reach)
+        {
+            return terrainHeight;
+        }
+
+        auto pieceId = runCobQuery(order->target, "QueryLandingPad");
+        if (!pieceId)
+        {
+            return terrainHeight;
+        }
+
+        return getPiecePosition(order->target, static_cast<unsigned int>(*pieceId)).y;
+    }
+
+    bool UnitBehaviorService::descendToGroundLevel(UnitInfo unitInfo)
+    {
+        auto targetHeight = landingTargetHeight(unitInfo);
+
+        unitInfo.state->position.y = rweMax(unitInfo.state->position.y - 1_ss, targetHeight);
+
+        return unitInfo.state->position.y == targetHeight;
     }
 
     void UnitBehaviorService::transitionFromGroundToAir(UnitInfo unitInfo)

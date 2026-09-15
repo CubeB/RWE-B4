@@ -315,6 +315,21 @@ namespace rwe
 
         bool climbToCruiseAltitude(UnitInfo unitInfo);
 
+        /**
+         * Where a descending aircraft is trying to stop. The terrain, unless
+         * it is coming down on a repair pad it holds an order for -- then the
+         * pad's own `QueryLandingPad` piece, which is twenty world units up on
+         * an ARMASP. See TOTALA-EXE.md §94.
+         */
+        /**
+         * Whether this unit's script raises a nanolathe arm at all. None of
+         * the shipped air repair pads or carriers does, so nothing may wait on
+         * their build stance. See TOTALA-EXE.md §94.
+         */
+        bool unitHasBuildArm(const UnitState& unit) const;
+
+        SimScalar landingTargetHeight(UnitInfo unitInfo);
+
         bool descendToGroundLevel(UnitInfo unitInfo);
 
         void transitionFromGroundToAir(UnitInfo unitInfo);
