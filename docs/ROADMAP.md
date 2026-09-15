@@ -243,14 +243,22 @@ failed to reproduce.
 
 **No conformance test exists yet.** Everything tagged `[tad]` is a decoder test.
 
-- [ ] Settle the build-duration baseline (Escalation sits one tick under
-      `ceil(BuildTime/p)` everywhere, and it may be the extractor) and the ~34
-      tick ProTA constructor overhead. Do this before any build-timing fixture.
+- [x] Settle the build-duration baseline and the ~34 tick ProTA constructor
+      overhead (2026-09-15). Neither was the extractor. TA's completion test is
+      a **float32** fraction stepped by `(WorkerTime/30)/BuildTime` a tick, not
+      `ceil(BuildTime/p)`, and the first step lands on the nanoframe's own tick;
+      replaying that predicts all 41 scored Escalation pairs, including which
+      ten of the fifteen exactly-divisible ones take an extra tick, where the
+      same replay in `double` gets six. ProTA's ~34 is the constructor's COB
+      deploy before `INBUILDSTANCE` -- mod data, not engine, and RWE already
+      gates on it. `tools/tad-buildtime.py` re-runs the check.
 - [ ] `tad_episodes --emit-cpp`: a generated, checked-in header of plain structs
       with the real FBI values transcribed inline and demo/tick provenance.
 - [ ] The economy oracle -- storage-cap and stall episodes, which need only the
       `0x28` fields already decoded and so have no unknowns left in them.
-- [ ] The build-timing oracle, once the baseline is settled.
+- [ ] The build-timing oracle. The baseline is settled, so it may assert
+      factory builds exactly; a mobile builder's offset is its own script's and
+      must not be asserted without it.
 - [ ] The weapon-event oracle: `0x0d` shot to `0x0b` damage or `0x0c` death,
       aimed at the missile motor model and the ballistics work.
 

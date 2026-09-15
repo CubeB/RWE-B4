@@ -72,6 +72,14 @@ namespace rwe
             uint32_t startTick;
             uint32_t finishTick;
 
+            /**
+             * Where the nanoframe was laid down. Carried through so that an
+             * overhead can be tested against distance -- a builder that has to
+             * walk to its next site looks nothing like one paying a fixed cost,
+             * and the 0x09 is the only place either position is recorded.
+             */
+            TadPosition position;
+
             /** Why this is not a clean measurement of the nanolathe. */
             std::vector<std::string> rejections;
 
@@ -84,6 +92,7 @@ namespace rwe
         {
             uint16_t typeIndex;
             uint32_t startTick;
+            TadPosition position;
             uint8_t sender;
             unsigned int ownerBlock;
             std::set<std::string> rejections;
@@ -215,7 +224,7 @@ namespace rwe
 
                 senderBlock[sender] = *block;
 
-                InProgress build{e->typeIndex, tick[sender], sender, *block, {}};
+                InProgress build{e->typeIndex, tick[sender], e->position, sender, *block, {}};
 
                 // A player already in stall when the frame is laid down is
                 // measuring the economy, not the nanolathe.
@@ -254,6 +263,7 @@ namespace rwe
                     e->builderId,
                     build.startTick,
                     tick[sender],
+                    build.position,
                     {build.rejections.begin(), build.rejections.end()}};
 
                 if (episode.finishTick <= episode.startTick)
@@ -427,6 +437,9 @@ namespace
         j["startTick"] = e.startTick;
         j["finishTick"] = e.finishTick;
         j["durationTicks"] = e.durationTicks();
+        j["x"] = tadFixedToDouble(e.position.x);
+        j["y"] = tadFixedToDouble(e.position.y);
+        j["z"] = tadFixedToDouble(e.position.z);
         if (!e.rejections.empty())
         {
             j["rejections"] = e.rejections;

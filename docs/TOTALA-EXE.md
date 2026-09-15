@@ -4114,9 +4114,9 @@ crediting `EnergyMake` and storage. One call does:
 ```
 
 So the per-tick spend is `buildCost * (workerTime / 30) / buildTime` for each
-resource, the whole job takes `buildTime * 30 / workerTime` ticks, and the
-answer to "what happens to progress when the spend is throttled" is: **nothing
-happens to it**. Progress is applied in full on the ticks the request is
+resource, the whole job takes about `buildTime * 30 / workerTime` ticks -- see
+below, "about" is doing real work in that sentence -- and the answer to "what
+happens to progress when the spend is throttled" is: **nothing happens to it**. Progress is applied in full on the ticks the request is
 accepted and not at all on the ticks it is refused. The throttle acts on the
 resources; the debt it leaves behind is what stops the builder next tick.
 
@@ -4128,6 +4128,54 @@ Replaying this against real FBI data, an ARMCOM (`WorkerTime=300`) building an
 ARMSOLAR (`BuildTime=2495`, `BuildCostMetal=145`, `BuildCostEnergy=760`) takes
 250 ticks — 8.33 seconds — and drains 17.43 metal and 91.38 energy per second,
 which are the numbers the original shows.
+
+#### The tick count is not a division, and the corpus can tell
+
+`buildTime * 30 / workerTime` is the right answer to the wrong question. The
+routine above does not divide to find a duration: it steps `unit+0x104` by
+`amount / buildTime` once a tick and stops when it reaches the end, and
+`unit+0x104` is a **4-byte float** — `0x485B27` stores the constant
+`0x3f800000` into it and `0x489B7D` compares it with `fcomp 1.0f`. So the count
+is however many single-precision steps it takes, which is `ceil` of the division
+except when the division comes out exact, where it depends on whether the
+repeated addition lands on the endpoint or steps past it.
+
+> **Unresolved, and it is about this field.** This document reads
+> `unit+0x104`'s polarity both ways and they cannot both be right. §23's listing
+> has `0x41BAD7` doing `progress - amount/buildTime`, and both §9 (target
+> eligibility) and §23 itself test `unit+0x104 == 0` for *fully built*; but the
+> layout table in §30 has `0x485B27` writing `1.0f` into it at spawn, and §31's
+> transport load check at `0x489B7D` rejects any candidate whose value is not
+> exactly `1.0f`, which only makes sense if `1.0f` is the complete end.
+> Whoever settles it should fix the losing side rather than add a third reading.
+> Nothing below depends on the answer — the corpus replay gives the same tick
+> count counting up to 1.0 or down to 0.0, so what follows is about the *width*,
+> which both readings agree on.
+
+That is not a distinction worth asserting from a listing, so it was checked
+against real games. Over the demo corpus there are 15 builder/product pairs
+whose `BuildTime` is an exact multiple of the builder's `workerTime / 30`; ten
+of them take an extra tick and five do not, the float32 replay predicts which
+ten, and the same replay in `double` gets 6 of 15. Across all 41 scored
+pairs the replay is exact where `ceil` manages 10 and `floor` 36. The evidence,
+the table and the re-runnable check are in
+[TA-DEMOS.md](TA-DEMOS.md), under `0x09`.
+
+Two things fall out of that for anyone reading this section:
+
+- **The first increment lands on the tick the nanoframe is created**, not the
+  tick after. The corpus measures nanoframe-to-finish as one less than the
+  number of increments, without exception on a factory build.
+- **RWE's integer `addBuildProgress` is already right** everywhere `BuildTime`
+  is not a multiple of the rate, and one tick fast where it is. Putting a
+  `float` in the simulation to close that is very likely a bad trade; see the
+  determinism rules in `CLAUDE.md`.
+
+One thing does not fall out, and is left open: Escalation's construction
+aircraft `CORCA` finishes its buildings one tick *sooner* than the replay
+allows, on all three of its pairs, which reads as an increment the model does
+not account for. Five call sites reach `0x41BA60`; whether the airborne one
+credits a job once more than the ground one over its life is the thing to check.
 
 ### What counts as production
 

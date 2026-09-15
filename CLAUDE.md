@@ -107,6 +107,14 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   anonymous. It warns if the demo's own type count disagrees with the directory.
   There is still no `--emit-cpp` and no checked-in fixture. See
   `docs/TA-DEMOS.md`.
+- **`tools/tad-buildtime.py`** — scores the corpus's modal build durations
+  against TA's own completion arithmetic, which is a **float32** fraction and
+  not `ceil(BuildTime / (WorkerTime/30))`; the difference is a tick, and where
+  `BuildTime` divides exactly it is the tick that tells the two apart. Exits
+  non-zero if a scored pair stops agreeing, so it is a check rather than a
+  listing, and it scores only immobile builders — a mobile one pays its own COB
+  deploy before `INBUILDSTANCE` and that belongs to the mod, not the engine.
+  `--overheads` lists those. `docs/TOTALA-EXE.md` §23 and `docs/TA-DEMOS.md`.
 - **`tools/visual-test.ps1`** — when only the renderer will do. It launches `build-release/rwe.exe`, finds the window, and then *drives* it: real clicks at client-relative coordinates, screenshots cropped and nearest-neighbour magnified around the thing under test. `-phase build|air|ship` are the scripted sequences already written; adding one is a few lines. Prefer this to ad-hoc screenshotting — a scripted click sequence is repeatable and an eyeballed one is not.
 - **`tools/crash-catch.cmd`** runs the Debug build under gdb and writes a backtrace to `crash.txt`. Play normally, reproduce the crash, close the window.
 - Environment switches, all pure observers: `RWE_AI_PROFILE=1` times each AI pass and logs anything over 2 ms; `RWE_DEBUG_SPAWN=ARMPW*12@0:8:1` spawns units on a timer (`<type>*<count>@<owner>:<seconds>[:<near player>]`); `RWE_DEBUG_SELF_DESTRUCT[=_PLAYER]`, `RWE_TRACE_BOMBER`, `RWE_TRACE_GUNSHIP`, `RWE_TRACE_MISSILE`.

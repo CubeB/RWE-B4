@@ -380,43 +380,148 @@ keeps this out of the circularity the conformance work has to avoid:
   kbots, construction vehicles build wind generators and metal extractors. The
   arithmetic knew nothing about unit classes.
 
-#### The constant this turned up, and did not explain
+#### What that comparison turned up: build completion is a float32 fraction
 
-Comparing each builder-type/product-type pair's modal duration against
-`ceil(BuildTime / p)`, where `p = WorkerTime / 30` with integer division:
+Scoring the mapping needed a model of how long a build *should* take, and the
+obvious one -- `ceil(BuildTime / p)` ticks, where `p = WorkerTime / 30` with
+integer division -- came out a tick short across the board. That is now settled,
+and the answer is not a fudge factor: **TA's completion test is single-precision
+floating point**, and the corpus can see the rounding.
 
-| Data set | Pairing | n | median | mode | range |
-|---|---|---|---|---|---|
-| TA:Esc 10.2 | factory to mobile unit | 2 | -1 | **-1** | -1..-1 |
-| TA:Esc 10.2 | constructor to mobile unit | 39 | -1 | **-1** | -1..50 |
-| TA:Esc 10.2 | constructor to building | 65 | +4 | **-1** | -2..110 |
-| ProTA 4.8 | constructor to building | 6 | **+34** | **+34** | 33..73 |
+[TOTALA-EXE.md](TOTALA-EXE.md) §23 has the routine. `unit+0x104` is the target's
+remaining build fraction; `0x41BACD` divides the builder's `amount` by the
+target's `BuildTime` and subtracts that from it each tick, counting **down** from
+1.0 to 0.0, and zero means finished. So the tick count is not a division at all,
+it is however many subtractions it takes to get there:
 
-Pairs need five or more builds; the range is capped to -20..120 to keep
-assisted builds out, and assists only ever shorten.
+```
+x    = (float)(WorkerTime / 30) / (float)BuildTime     // note the integer /30
+frac = 1.0f;  every tick  frac = clamp(frac - x, 0, 1)
+done when frac reaches 0
+```
 
-**Two things are tangled here.** The first is that the baseline is **-1**, not
-zero, in every Escalation pairing -- `ARMVP` to `ARMFAV`, `ARMLAB` to `ARMJETH`
-and `ARMPW`, `CORAP` to `CORFINK`, `CORVP` to `CORFAV`, `CORLAB` to `CORSTORM`
-and `CORTHUD` all land on exactly -1 over hundreds of builds each. So the
-relation is probably `ceil(BuildTime/p) - 1`, and the open question is whether
-that tick belongs to TA or to how `tad_episodes` pairs the `0x09`'s tick with
-the `0x12`'s. **Suspect the extractor first**; it has never been checked.
+Three things follow, and the corpus shows all three.
 
-The second is that ProTA's constructors are a further ~34 ticks slow where
-Escalation's are not -- `CORCV` building `CORWIN`, `CORRL`, `CORMEX` and
-`CORRAD` and `ARMCV` building `ARMWIN` give +33, +34, +33, +34 and +35. It is
-additive rather than proportional: as a fraction of the predicted duration those
-are 5.9%, 5.8%, 5.3%, 9.0% and 6.5%, and the `CORRAD` case breaks any rate
-reading. Escalation's constructor-to-building row has its mode at baseline with
-a tail to +110 instead, which is what "the builder sometimes has to reposition"
-looks like -- a tail, not a shift.
+**The first increment lands on the tick the `0x09` is emitted.** An episode's
+`finishTick - startTick` is therefore one *less* than the number of increments,
+which is the whole of the missing -1. It is not the extractor's: the tick clock
+was the suspect and it is clean. A packet coalesces about seven ticks under
+SmartPak and both event kinds land uniformly across that span rather than
+bunching at either end, and over 42,926 episodes the `0x09` and its `0x12` never
+once came from different senders, so the two ticks are always read off the same
+clock.
 
-**ProTA is one demo.** All five rows come from a single game between two
-players, so a habit of those two players would produce this and would not be a
-fact about TA. It is recorded here because an oracle built on ProTA build
-durations will be wrong by that much either way, and left unexplained because
-one game cannot settle it.
+**Where `BuildTime` is not a multiple of `p`, the float model and
+`ceil(BuildTime/p)` agree**, and the corpus agrees with both: 26 of 26 such
+pairs land on the predicted duration exactly, `ARMVP` to `ARMFLASH` over 249
+builds, `ARMLAB` to `ARMJETH` over 302, and so on.
+
+**Where it *is* a multiple they disagree, and that is the test.** An integer
+model says the job takes exactly `BuildTime/p` ticks. The float one says it
+depends on whether repeated addition of `x` overshoots 1.0f or lands on it, and
+that is not something a human can guess from the two numbers. Over the 15 such
+pairs in the Escalation corpus it predicts every one, including which ten take
+an extra tick and which five do not:
+
+| Builder | Product | BuildTime | p | BuildTime/p | model | corpus | n |
+|---|---|---|---|---|---|---|---|
+| `ARMVP` | `ARMFLASH` | 1676 | 4 | 419 | +1 | +1 | 249 |
+| `ARMVP` | `ARMLART` | 2840 | 4 | 710 | +0 | +0 | 74 |
+| `CORVP` | `CORRAID` | 3564 | 4 | 891 | +0 | +0 | 57 |
+| `ARMLAB` | `ARMVADER` | 6320 | 4 | 1580 | +1 | +1 | 54 |
+| `CORLAB` | `CORCRASH` | 1820 | 4 | 455 | +1 | +1 | 34 |
+| `CORAP` | `CORVENG` | 7356 | 4 | 1839 | +1 | +1 | 29 |
+| `ARMLAB` | `ARMFLEA` | 5032 | 4 | 1258 | +1 | +1 | 29 |
+| `CORLAB` | `CORCK` | 7720 | 4 | 1930 | +0 | +0 | 27 |
+| `ARMLAB` | `ARMROCK` | 2432 | 4 | 608 | +1 | +1 | 21 |
+| `CORVP` | `CORMIST` | 2636 | 4 | 659 | +0 | +0 | 21 |
+| `ARMVP` | `ARMJAV` | 4704 | 4 | 1176 | +1 | +1 | 14 |
+| `ARMAAP` | `ARMPNIX` | 30120 | 10 | 3012 | +1 | +1 | 8 |
+| `ARMALAB` | `ARMZEUS` | 8560 | 10 | 856 | +0 | +0 | 7 |
+| `ARMLAB` | `ARMWAR` | 4568 | 4 | 1142 | +1 | +1 | 6 |
+| `CORALAB` | `CORPYRO` | 9000 | 10 | 900 | +1 | +1 | 6 |
+
+Fifteen bits, all fifteen right. Doing the identical sum in **double** precision
+gets 6 of 15, which is what says the accumulator really is 32 bits wide and not
+just "floating point somewhere". Over every scored pair: `ceil` 10 of 41, `floor`
+36 of 41, the float32 replay **41 of 41**.
+
+The corpus cannot separate the four plausible spellings of that loop -- counting
+up to 1.0 or down to 0.0, and rounding the quotient to `float` once or keeping it
+at x87 width -- because all four agree on every pair the corpus has. §23's
+listing is the one to follow; the point the corpus settles is the width, not the
+spelling.
+
+`tools/tad-buildtime.py` is the re-runnable version of all of this, kept for the
+same reason `tools/tad-loadorder.py` is: it exits non-zero if a scored pair ever
+stops agreeing.
+
+    ./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc --emit-json /tmp/ep.json
+    tools/tad-buildtime.py --episodes /tmp/ep.json --units ~/ta-mods/x-esc
+
+**What it means for RWE.** `UnitState::addBuildProgress` accumulates integer
+build points and finishes when they equal `buildTime`, which is `ceil` — so RWE
+already matches TA everywhere `BuildTime` is not a multiple of `p`, and is one
+tick fast in ten of the fifteen cases where it is. That is worth knowing and is
+probably not worth fixing: a `float` in the simulation is exactly the hazard the
+determinism section of `CLAUDE.md` exists to warn about, and the prize is one
+tick on a subset of builds.
+
+**The one class this misses** is `CORCA`, Escalation's construction aircraft and
+the corpus's only air builder, whose three pairs all come in at exactly -1 —
+`CORMEX` 936 against 937 over 7 builds, `CORDRAG` 564 against 565 over 22,
+`CORRAD` 567 against 568 over 19, at 77-94% of each cell. Negative means an
+increment the model does not account for, and §23 lists five call sites into
+`0x41BA60`; the reading to check is that the air builder's site fires once more
+over a job than the ground one. It is one tick on one builder type and it is
+recorded rather than explained.
+
+#### The other constant: a builder's own deploy sequence, which is data
+
+The second thing the comparison turned up was that ProTA 4.8's constructors take
+a further ~34 ticks where Escalation's do not. That is real, and it is **not an
+engine behaviour** -- it is the builder's own COB script, so it belongs to the
+mod and not to TA.
+
+The shape gave it away. A habit of the two players in that one demo -- queueing
+builds at a distance, say -- would leave a distribution. What ProTA leaves is a
+**hard floor**: `CORCV` building `CORWIN` is +34 over 32 builds and the fastest
+of them is +34; `CORCV` to `CORMEX` is +34 on all 11; nine separate constructors
+across both players give the same number, and `ARMCV` gives +36 rather than +34,
+which is a per-type constant and not a per-player one.
+
+ProTA ships `.BOS` sources, and they say it outright. `StartBuilding` starts
+`RequestState`, which runs the deploy animation and only then sets
+`INBUILDSTANCE`, which is the flag the engine checks before crediting any
+progress at all:
+
+| Script | sleeps before `set INBUILDSTANCE to 1` | ms | observed |
+|---|---|---|---|
+| ProTA `CORCV.BOS` | 498 + 600 | 1098 | +34 |
+| ProTA `ARMCV.BOS` | 388 + 389 + 410 | 1187 | +36 |
+
+Escalation's constructors sit at +3 to +5 with a tail, which is the
+reposition-sometimes shape, and its factories sit at exactly 0 because a factory
+has nothing to deploy. So the rule for an oracle is: **score factory builds, and
+treat any mobile builder's offset as that unit's script until its script says
+otherwise.** `tools/tad-buildtime.py` scores only immobile builders for exactly
+this reason, and `--overheads` lists the rest with their floors so that a floor
+can be told from a tail.
+
+RWE already gates build progress on `inBuildStance` (`UnitBehaviorService.cpp`),
+so it reproduces this as long as it runs the same script. There is no engine gap
+here.
+
+**A lead, not a finding.** Those two rows also pin TA's COB clock, if the
+overhead really is the sleeps and nothing else. A clock advancing **33 ms** a
+tick gives `ceil(1098/33) = 34` and `ceil(1187/33) = 36` -- both exact, no free
+parameter. RWE's `toCobTime` uses `gameTime * 1000 / 30`, i.e. 33.33 ms, which
+gives 33 and 36 and so needs a different fudge for each. Two scripts is thin
+evidence for a constant this load-bearing, and the honest statement is that the
+overhead is bounded to (32.97, 33.27] ms a tick *given* that assumption. Worth a
+look in the binary before anything is changed.
+
+#### Back to the packet: the second id, and the last six bytes
 
 The second id is the one to be careful about. It is the *nanoframe*: over demo
 14724, 781 of the 790 distinct values of that field reappear as the **finished
@@ -828,13 +933,17 @@ They catch different things and should not share machinery.
 
    **What is left, in the order to do it:**
 
-   1. **Settle the build-duration baseline and the ProTA overhead.** Escalation's
-      modal durations sit at `ceil(BuildTime/p) - 1` across every pairing, so
-      either TA is one tick off the obvious model or `tad_episodes` is, and
-      nobody has checked which. On top of that ProTA's constructors come out a
-      further ~34 ticks slow where Escalation's do not. Both are written up
-      under "the constant this turned up" below. **Do this before transcribing
-      any build-timing fixture** -- it decides what those fixtures may assert.
+   1. ~~**Settle the build-duration baseline and the ProTA overhead.**~~ Done,
+      and both answers are above. The baseline was the model's, not the
+      extractor's: TA's completion test is a **float32** fraction counted down
+      from 1.0, the first increment lands on the `0x09`'s own tick, and
+      replaying that arithmetic predicts all 41 scored Escalation pairs
+      including the 15-way divisible split that no integer model can reach.
+      ProTA's ~34 ticks is the constructor's own COB deploy sequence before
+      `INBUILDSTANCE`, so it is mod data rather than engine behaviour and RWE
+      already reproduces it. `tools/tad-buildtime.py` is the re-runnable check.
+      What a fixture may assert is therefore: **factory builds, exactly**, and
+      nothing about a mobile builder's offset without that builder's script.
    2. **`--emit-cpp`.** A generated header of plain structs beside the test that
       uses it: unit type, the real FBI values transcribed inline, observed
       timings, and provenance (demo id plus tick range). Regeneration must be
@@ -845,7 +954,7 @@ They catch different things and should not share machinery.
       `--emit-cpp` and expected-difference conventions get shaken out, which
       everything after it inherits. RWE side: `GameSimulation::updateResources`
       and `settleResourcePool`.
-   4. **The build-timing oracle**, once (1) says what it is measuring. RWE side:
+   4. **The build-timing oracle**, which (1) has now scoped. RWE side:
       `UnitState::getBuildCostInfo`, `UnitState::addBuildProgress`, their two
       call sites in `UnitBehaviorService.cpp`, and `workerTimePerTick` in
       `LoadingScene_util.cpp`. Consume the mode, never the mean.
