@@ -27,16 +27,20 @@
 // Truly offline: no SDL, no GL, no VFS, just files.
 //
 // Usage: tad_episodes --file <path> [--file <path>...] [--dir <path>]
-//                     [--units <dir>] [--emit-json <path>] [--all]
+//                     [--units <dir>] [--emit-json <path>]
+//                     [--emit-resources <path>] [--all]
 //   --file        a .tad or .ted demo to mine; may be repeated
 //   --dir         a directory of demos to mine; recurses
 //   --units       a directory of the data set's unit files, recursively
 //                 scanned for *.FBI, used to name each type index
 //   --emit-json   write the episodes to a file as JSON
+//   --emit-resources  write every 0x28 resource record to a file as JSON
 //   --all         emit rejected episodes too, each with its reasons
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -113,12 +117,61 @@ namespace rwe
             /** Owner blocks whose resource record showed an empty pool. */
             std::map<unsigned int, uint32_t> stalledSince;
 
+            /**
+             * One 0x28 burst, collapsed. A sender emits `numPlayers - 1` copies
+             * of one record on one tick -- one unicast per other peer, which the
+             * recorder sees all of -- so the copies carry no extra information
+             * and only the first is kept. `copies` keeps the burst length,
+             * which is the evidence for that reading.
+             */
+            struct ResourceRecord
+            {
+                uint8_t sender;
+                uint32_t tick;
+                unsigned int copies;
+                TadResourceStats stats;
+            };
+
+            std::vector<ResourceRecord> resourceRecords;
+
+            /** Where each sender's current burst sits, and what it has shown. */
+            struct OpenBurst
+            {
+                std::size_t index;
+                bool statsDiffered = false;
+                bool prefixDiffered = false;
+            };
+
+            std::map<uint8_t, OpenBurst> openBurst;
+
+            /**
+             * Bursts whose copies disagreed on one of the ten floats. Expected
+             * to be zero, and reported rather than asserted: this is the number
+             * that would overturn the fan-out reading if a demo produced one.
+             */
+            unsigned int inconsistentBursts = 0;
+
+            /**
+             * Bursts whose copies agreed on the floats but not on the 17
+             * unresolved bytes. Not a counter-example: these all sit in a game's
+             * closing seconds, where 0x28 comes every five ticks or so instead
+             * of every 120 and two successive samples land on one tick.
+             */
+            unsigned int variantPrefixBursts = 0;
+
             unsigned int speedChanges = 0;
             unsigned int orphanedFinishes = 0;
 
             explicit EpisodeHandler(std::string demo) : demo(std::move(demo)) {}
 
             void onHeader(const TadHeader& h) override { header = h; }
+
+            std::vector<TadPlayer> players;
+
+            void onPlayer(const TadPlayer& p, unsigned int, unsigned int) override
+            {
+                players.push_back(p);
+            }
 
             void onUnitData(const TadBytes& record) override
             {
@@ -326,6 +379,35 @@ namespace rwe
                     return;
                 }
 
+                // Collapse the burst. Everything after the first copy is the
+                // same record addressed to another peer, so it is counted and
+                // dropped; a copy that does not match is counted separately,
+                // because that is what a positional reading would look like.
+                auto open = openBurst.find(sender);
+                if (open != openBurst.end() && resourceRecords[open->second.index].tick == tick[sender])
+                {
+                    auto& first = resourceRecords[open->second.index];
+                    ++first.copies;
+
+                    auto statsDiffer = std::memcmp(&first.stats, &*e, offsetof(TadResourceStats, prefix)) != 0;
+                    auto prefixDiffers = std::memcmp(first.stats.prefix, e->prefix, sizeof(e->prefix)) != 0;
+
+                    if (statsDiffer && !open->second.statsDiffered)
+                    {
+                        open->second.statsDiffered = true;
+                        ++inconsistentBursts;
+                    }
+                    else if (prefixDiffers && !open->second.statsDiffered && !open->second.prefixDiffered)
+                    {
+                        open->second.prefixDiffered = true;
+                        ++variantPrefixBursts;
+                    }
+                    return;
+                }
+
+                openBurst[sender] = OpenBurst{resourceRecords.size()};
+                resourceRecords.push_back(ResourceRecord{sender, tick[sender], 1, *e});
+
                 // A watcher's record is all zeros but for two slots and would
                 // otherwise read as a permanent stall. Filter it on the shape
                 // that identifies it rather than on the player table, which does
@@ -336,9 +418,9 @@ namespace rwe
                     return;
                 }
 
-                // Every owner block whose builds this record could spoil. The
-                // sender's own block is the one it reports on; there is no id in
-                // the record to say so, so attribute it by sender's own units.
+                // The record is the SENDER'S OWN state -- settled over the
+                // corpus, see docs/TA-DEMOS.md -- and it carries no id, so the
+                // owner block comes from the sender's own units.
                 auto block = senderBlock.find(sender);
                 if (block == senderBlock.end())
                 {
@@ -447,6 +529,73 @@ namespace
         return j;
     }
 
+    /**
+     * Every 0x28 of one demo, with the player table beside it.
+     *
+     * The record carries no player id, so attribution has to be worked out from
+     * the burst -- see docs/TA-DEMOS.md. This dump is what that argument is made
+     * from: the sender, the tick, the position in the burst and the raw floats,
+     * with nothing interpreted on the way out.
+     */
+    nlohmann::json resourcesToJson(const rwe::EpisodeHandler& handler)
+    {
+        nlohmann::json j;
+        j["demo"] = handler.demo;
+        j["numPlayers"] = handler.header.numPlayers;
+        j["maxUnits"] = handler.header.maxUnits;
+        j["mapName"] = handler.header.mapName;
+
+        j["players"] = nlohmann::json::array();
+        for (const auto& p : handler.players)
+        {
+            nlohmann::json pj;
+            pj["color"] = p.color;
+            pj["side"] = p.side;
+            pj["number"] = p.number;
+            pj["name"] = p.name;
+            pj["watcher"] = p.isWatcher();
+            j["players"].push_back(pj);
+        }
+
+        j["senderBlocks"] = nlohmann::json::object();
+        for (const auto& [sender, block] : handler.senderBlock)
+        {
+            j["senderBlocks"][std::to_string(sender)] = block;
+        }
+
+        j["inconsistentBursts"] = handler.inconsistentBursts;
+        j["variantPrefixBursts"] = handler.variantPrefixBursts;
+        j["records"] = nlohmann::json::array();
+        for (const auto& r : handler.resourceRecords)
+        {
+            nlohmann::json rj;
+            rj["sender"] = r.sender;
+            rj["tick"] = r.tick;
+            rj["copies"] = r.copies;
+            rj["metalStored"] = r.stats.metalStored;
+            rj["energyStored"] = r.stats.energyStored;
+            rj["metalStorage"] = r.stats.metalStorage;
+            rj["energyStorage"] = r.stats.energyStorage;
+            rj["energyCounters"] = {r.stats.energyCounters[0], r.stats.energyCounters[1], r.stats.energyCounters[2]};
+            rj["metalCounters"] = {r.stats.metalCounters[0], r.stats.metalCounters[1], r.stats.metalCounters[2]};
+
+            // The 17 unresolved bytes, whole. They are the only place a
+            // recipient or subject id could still be hiding, so the dump has to
+            // carry them for the attribution argument to be worth anything.
+            std::string prefix;
+            for (auto b : r.stats.prefix)
+            {
+                const char* digits = "0123456789abcdef";
+                prefix += digits[b >> 4];
+                prefix += digits[b & 0x0f];
+            }
+            rj["prefix"] = prefix;
+            j["records"].push_back(rj);
+        }
+
+        return j;
+    }
+
     bool isDemo(const std::filesystem::path& path)
     {
         auto extension = path.extension().string();
@@ -481,6 +630,7 @@ int main(int argc, char* argv[])
                   << "  --units       a directory of the data set's unit files, scanned\n"
                   << "                recursively for *.FBI, used to name each type index\n"
                   << "  --emit-json   write the episodes to a file as JSON\n"
+                  << "  --emit-resources  write every 0x28 resource record as JSON\n"
                   << "  --all         emit rejected episodes too, each with its reasons\n"
                   << "\n"
                   << "Without --units, episodes are keyed on an anonymous type index; see the\n"
@@ -541,6 +691,8 @@ int main(int argc, char* argv[])
 
     auto emitAll = args.getBool("all");
 
+    nlohmann::json resourceJson = nlohmann::json::array();
+
     std::vector<rwe::Episode> all;
     std::map<std::string, unsigned int> rejectionCounts;
     unsigned int cleanCount = 0;
@@ -597,6 +749,35 @@ int main(int argc, char* argv[])
             std::cerr << "  WARNING: " << path.filename().string() << " declares "
                       << handler.unitTable->restricted.size() << " unit types but --units gave "
                       << loadOrder.size() << "; names for this demo will be wrong\n";
+        }
+
+        if (args.contains("emit-resources"))
+        {
+            resourceJson.push_back(resourcesToJson(handler));
+
+            // A burst is numPlayers - 1 identical copies of one record. Report
+            // both halves of that, per demo, so a demo that breaks the reading
+            // says so where it is read rather than in a later analysis.
+            std::map<unsigned int, unsigned int> burstSizes;
+            for (const auto& r : handler.resourceRecords)
+            {
+                ++burstSizes[r.copies];
+            }
+            unsigned int modal = 0;
+            unsigned int modalCount = 0;
+            for (const auto& [size, count] : burstSizes)
+            {
+                if (count > modalCount)
+                {
+                    modal = size;
+                    modalCount = count;
+                }
+            }
+            std::cout << "  " << handler.resourceRecords.size() << " resource samples"
+                      << ", modal burst " << modal << " of an expected "
+                      << (handler.header.numPlayers - 1)
+                      << ", " << handler.inconsistentBursts << " burst(s) disagreeing on the floats"
+                      << " and " << handler.variantPrefixBursts << " on the prefix only\n";
         }
 
         for (auto& episode : handler.episodes)
@@ -684,6 +865,19 @@ int main(int argc, char* argv[])
                       << std::setw(8) << mode
                       << std::setw(7) << (100 * modeCount / total) << "%\n";
         }
+    }
+
+    if (args.contains("emit-resources"))
+    {
+        auto out = args.getString("emit-resources");
+        std::ofstream file(out);
+        if (!file)
+        {
+            std::cerr << "cannot write " << out << "\n";
+            return 1;
+        }
+        file << resourceJson.dump(2) << "\n";
+        std::cout << "wrote " << out << "\n";
     }
 
     if (args.contains("emit-json"))

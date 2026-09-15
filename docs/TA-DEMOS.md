@@ -655,10 +655,46 @@ side's 972 samples read zero in every field except the last of each triple, both
 exactly 1000.0 -- which fits no reading taken from a playing peer. Treat a
 watcher's record as uninitialised and filter it out rather than averaging it in.
 
-**So the standing question is half answered.** There is enough here for
-storage-cap and stall episodes, which need only slots 0-3, and enough to see
-production and consumption diverge. Recovering expenditure by difference still
-waits on naming the last six.
+#### Whose state it is: the sender's, and the burst is a fan-out
+
+This was the standing blocker on the economy oracle, and it dissolves rather
+than resolving. The record has no player id, and a sender emits exactly
+`numPlayers - 1` of them on one tick, which looks exactly like a positional
+table of every *other* player. It is not one. **Every copy in a burst is
+identical** -- all ten floats, byte for byte -- over all 60,445 multi-copy
+bursts in the thirteen-demo corpus, without a single exception. A burst is one
+unicast per peer, which the recorder sees every copy of. There is nothing to
+attribute: collapse the burst, credit it to its sender, and the bookkeeping is
+done.
+
+That argument rules out a positional reading on its own -- a burst carries one
+state, not `numPlayers - 1` of them -- but the reading it leaves is worth
+confirming on evidence it was not built from, so:
+
+**Storage steps.** A completed building that grants storage raises its owner's
+capacity. Of the 5,987 upward steps in `metalStorage`/`energyStorage` across the
+corpus, 4,416 are explained by the completions of exactly one owner block in the
+sampling window and **that block is the sender's own**; 53 resolve to some other
+single block, and 1,256 windows admit more than one block (1,249 of which
+include the sender's). 255 match nothing, which is what a build whose `0x09`
+preceded the recording looks like. So the sender's record tracks the sender's
+own buildings.
+
+The one field that ever varies within a burst is **prefix byte 0**, in 19 bursts
+of the 60,445. It reads 1 rather than 0 only in a game's closing seconds, and
+there the records arrive every five ticks instead of every 120 -- so those are
+two successive samples landing on one tick, not a per-recipient field. The
+sampling interval is otherwise 120 ticks in every demo, 47,880 of 56,535 gaps
+landing on exactly 120 and the rest within a few ticks of it.
+
+`tad_episodes --emit-resources` collapses the burst and reports both halves of
+this per demo: the modal burst size against `numPlayers - 1`, and a count of any
+burst whose copies disagreed. That count is zero across the corpus, and it is
+the number that would overturn the reading if a demo ever produced one.
+
+**So slots 0-3 are usable now.** Storage-cap and stall episodes need only those,
+and they are attributable. Recovering expenditure by difference still waits on
+naming the last six.
 
 ### Owner blocks, which are the cheap filter
 
@@ -1028,12 +1064,6 @@ They catch different things and should not share machinery.
   blocking checked-in episodes.~~ It is not: naming came from the load order
   instead (see `0x09`), so episodes can be named and checked in without it. The
   id stays unexplained and stays here, but nothing waits on it.
-- **Which player a `0x28` belongs to.** The record carries no id, and in a game
-  of more than two a sender emits a burst of exactly `numPlayers - 1` of them on
-  one tick, so attribution is positional and unsolved. `tad_episodes` currently
-  credits every record in a burst to the sender's own owner block, which is
-  right in a two-player demo and wrong in the rest. This blocks the economy
-  oracle and it skews the "owner stalled" filter today.
 - **The last six floats of `0x28`.** Stored and storage are identified for both
   resources; the two cumulative triples are not, so expenditure still cannot be
   recovered by difference.
@@ -1045,6 +1075,12 @@ Answered by the event-payload pass: what `0x09`, `0x0c`, `0x0d`, `0x10` and
 `0x12` carry, the first four floats of `0x28`, the layout of the `0x1a` record
 and whether it can identify a mod (it can identify one it has seen before), and
 how unit ids partition by owner. All in the sections above.
+
+Answered by the economy pass: **which player a `0x28` belongs to** -- the
+sender, and the `numPlayers - 1` burst is a unicast fan-out of one identical
+record rather than a table of the other players. See the `0x28` section. The
+filters were never skewed by this; `tad_episodes` was already crediting the
+sender, for the wrong reason.
 
 Answered since this document was written: the `ExtraSector` types (all seven
 named, in the container section), and whether the `decrypt` checksum is
