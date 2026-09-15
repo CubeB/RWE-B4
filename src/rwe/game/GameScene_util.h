@@ -244,6 +244,21 @@ namespace rwe
     bool unitCastsShadow(const UnitDefinition& unitDefinition);
 
     /**
+     * Whether a map feature drawn as a model gets a shadow.
+     *
+     * The one water test in the original's shadow pass is on the Feature
+     * Unit, the unit of type index 0 that draws map features: at
+     * 0x4592D5-0x4592F1 a unit whose type index is zero and whose ground,
+     * 0x485070 at its position, lies below the sea level byte casts
+     * nothing. A real building skips that test, and a finished unit's copied
+     * shadow is not cut at the water line either -- the cut at 0x4BA1B0 needs
+     * the height plane a finished bitmap does not carry. So a wreck on the
+     * sea bed or a rock in the shallows has no shadow, and everything else is
+     * as it is on land. TOTALA-EXE.md §3 and §100.
+     */
+    bool featureCastsShadow(SimScalar groundHeight, SimScalar seaLevel);
+
+    /**
      * The unit's whole model as the camera sees it, finished or not, for
      * keeping a nanoframe's own shadow out of its outline.
      */

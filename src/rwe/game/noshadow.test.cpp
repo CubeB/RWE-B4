@@ -16,4 +16,15 @@ namespace rwe
         d.noShadow = true;
         REQUIRE_FALSE(unitCastsShadow(d));
     }
+
+    TEST_CASE("featureCastsShadow: a feature on ground below the sea level casts none", "[noshadow]")
+    {
+        // 0x4592D5-0x4592F1: for the Feature Unit (type index 0) the ground
+        // under the feature is compared against the sea level byte and a
+        // `jl` skips the shadow. Below casts nothing; at or above casts.
+        REQUIRE(featureCastsShadow(30_ss, 20_ss));
+        REQUIRE(featureCastsShadow(20_ss, 20_ss));
+        REQUIRE_FALSE(featureCastsShadow(19_ss, 20_ss));
+        REQUIRE_FALSE(featureCastsShadow(0_ss, 20_ss));
+    }
 }

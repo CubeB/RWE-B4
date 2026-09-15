@@ -500,6 +500,12 @@ namespace rwe
         return !unitDefinition.noShadow;
     }
 
+    bool featureCastsShadow(SimScalar groundHeight, SimScalar seaLevel)
+    {
+        // `jl 0x45935C`: strictly below the sea level casts none; at it, it does.
+        return groundHeight >= seaLevel;
+    }
+
     void drawUnitShadowMesh(
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,

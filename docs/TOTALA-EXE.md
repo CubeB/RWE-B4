@@ -386,14 +386,21 @@ shadow is taken from. The shadow pass tests, in order:
   draws map features (`0x421FD3`) — so it is "is a building or a feature".
   That takes the **projected** shadow: built once by `0x45A790` from the
   pieces that are both shown and cached, each corner at `x + y/4`,
-  `-z - y/4`, and cached on the unit until its bitmap is re-rendered. A
-  building below the water line casts none unless `[unit+0xA6]` is set;
+  `-z - y/4`, and cached on the unit until its bitmap is re-rendered. The
+  water test here (`0x4592D5`-`0x4592F1`) is skipped when `[unit+0xA6]`, the
+  unit's type index (§18), is non-zero -- so it is a test on the **Feature
+  Unit** only: a map feature whose ground (`0x485070`) lies below the sea
+  level byte casts none, and a real building is never tested;
 - anything else — every mobile unit — takes the **copied** shadow if the
   second option bit (bit 3) is set and it neither hovers nor floats
   (`def+0x241 & 0x81000`, canhover and floater: so hovercraft and ships have
   no shadow). The cached bitmap is copied (`0x45A470`), every opaque pixel
-  becomes index 0 (`0x4B96A0`), anything below the water line is cut away
-  (`0x4BA1B0`), and it goes down five pixels right at ground level (§100).
+  becomes index 0 (`0x4B96A0`), and it goes down five pixels right at ground
+  level (§100). The cut below the water line (`0x4BA1B0`, at
+  `sea - unitY + 0x32` against the height plane) is in the `0x45949D` block
+  only, the one taken when the bitmap carries a height plane; a finished
+  unit's bitmap has none (`0x437B50`, B4 #40), so a finished unit driving
+  through the shallows keeps its whole silhouette.
 
 **There is no build-progress test anywhere in it.** A nanoframe's cached
 bitmap is the whole model — the display's erasing happens on the copy — and
@@ -11233,6 +11240,17 @@ row. It is a lighten-only ramp, complementary to SHD's 0 to 1.807, and §99's
 interface brightening already uses it. So it is not a candidate for the shadow
 darkening.
 
+### Shadows on water: considered, and declined
+
+Upstream #25 asked for shadows to be cast on the water surface rather than the
+sea floor. That is not what the original does: a building's projection is
+drawn flat at the ground under it wherever that ground is, a finished unit's
+copy is not cut at the water line (above), and the only water test in either
+pass is the one on map features in §3, which casts nothing for a feature whose
+ground is below the sea level. RWE follows all three, as of B4 #9, and the
+request is declined rather than recorded in §88 or `compatibility.md`, since
+nothing here departs from the original.
+
 ---
 
 ## 101. The purple halo on buildings, and what stood for transparent
@@ -12800,3 +12818,163 @@ them, `gamedata/SOUND.TDF` has no entry for them, and no gui file carries a
 sound field that reaches them. `0x46C620`, which the endgame calls with 7 at
 `0x41F897`, turns out to be the statistics recorder rather than a sound call.
 RWE plays `BEEP6` twice and says so at the call site.
+
+---
+
+## 105. The campaign: campaign files, mission files, and a unit's first orders
+
+Decoded 2026-09-15 for B4 #55, the first piece of #38. Everything here is
+read out of the same binary as the rest of this file; where a reading is
+inferred rather than followed to its consumer it says so.
+
+### The campaign file
+
+`0x476AE0` loads a campaign by name: `camps\<name>.tdf` (`0x476B07`,
+`0x476B11`), then `[HEADER]` (`0x476B32`) and its one key, `campaignside`
+(`0x476B57`), a string defaulting to `ALL` (`0x476BB1`). The two names the
+front end passes are `"Arm Campaign"` and `"Core Campaign"` (`0x477C0A`,
+`0x477C17`, under the `Campaign` and `Missions` menu strings); the shipped
+files are `ccdata.ccx/CAMPS/Arm Campaign.tdf` and `Core Campaign.tdf`, 25
+missions each. They are the original game's campaigns: the `.ccx` archives
+carry the campaign disc, and the mission maps are in `ccmiss.ccx/Maps/`.
+
+The mission list is read by `0x4356C0`-`0x4359C0`: blocks named by the format
+`MISSION%d` (`0x504A78`) from 0 up until one is missing, each giving
+`missionname` and `missionfile`. `missionname` goes through `0x4C58A0`, the
+localised-key reader: it copies the language string at `0x51FDC0` in front of
+the key (so `Germanmissionname`, `Frenchmissionname`, ...) and reads that;
+a mission with no name shows `"Error -- Unnamed Mission"` (`0x504A84`).
+`missionfile` names the map: `0x435F5E` reads it and `0x4290F0` resolves it
+to `Maps\<missionfile>` with the `OTA` extension; a missing one is
+`"The requested mission file, %s, does not exist."` (`0x504DE8`), and a
+mission entry with no `missionfile` at all is the affectionate
+`"Hey, joker!  There is no mission defintion for this mission: %s"`
+(`0x504D9C`).
+
+### The mission file
+
+A mission is an ordinary OTA read by `0x435F00`-`0x437300`, the same reader
+skirmish maps go through, with the campaign-only keys below on top of the
+ones RWE's `parseOta` already knows. The `.tnt` beside it is
+`Maps\<name>.TNT` (`0x43604E`). No `[GlobalHeader]` is fatal
+(`"No GlobalHeader block in mission file!"`, `0x4361B5`), and a header that
+parses but has no usable schema is `"No suitable schema type in mission
+file!"` (`0x43662C`).
+
+**`[GlobalHeader]` keys and defaults**, in the order they are read. Integer
+keys come through `0x4C46C0` with the default shown, strings through
+`0x4C48C0` into a buffer of the size shown, floats through `0x4C4760`.
+
+| Key | Type | Default | What the reader does with it |
+|---|---|---|---|
+| `maxunits` | int | 200 (`0xC8`) | the unit cap for the mission |
+| `brief` | string, 256 | | `camps\briefs\<brief>.TXT` (`0x436204`), read into a `"Briefing"`-tagged buffer (`0x436258`): the briefing text |
+| `narration` | string, 256 | | `camps\briefs\<narration>.WAV` (`0x4362A6`): the briefing voice-over |
+| `missionhint` | string, 256 | | `camps\hints\<hint>.TXT` (`0x4362DC`) |
+| `glamour` | string, 256 | | `<glamour>.PCX` (`0x43630B`): the briefing picture |
+| `glamoursound` | string, 256 | | `camps\briefs\<glamoursound>.WAV` (`0x436346`) |
+| `UseOnlyUnits` | string, 256 | | `camps\useonly\<name>.TDF` (`0x43637B`): the unit list the mission restricts building to |
+| `mapping` / `lineofsight` | int | 0 | as skirmish |
+| `memory` / `numplayers` / `Planet` | string, 128 | | display only |
+| `nomovie` | int | 0 | skips the mission's movie |
+| `missiondescription` | string | `"No description available"` (`0x504C58`) | |
+| `minwindspeed` / `maxwindspeed` / `gravity` | int | 0 | as skirmish |
+| `tidalstrength` / `killmul` / `timemul` | float | 0.0 | as skirmish |
+| `lavaworld` / `nosealeveltrigger` / `waterdoesdamage` / `waterdamage` | int | 0 | `waterdamage` is the per-tick damage when `waterdoesdamage` is set; the shipped missions all say `waterdoesdamage=0`, `waterdamage=100` |
+
+**Win and lose conditions** are not read by the mission reader at all. The
+rule evaluator at `0x48E040`-`0x48E720` reads them straight off the header
+block when the mission starts, each as an integer with default 0, and for
+each that is set allocates a rule object (`0x4B4F10`): `DestroyAllUnits`
+(`0x48E06B`), `KillAllMobileUnits` (`0x48E0A9`, which no shipped mission
+sets), `CommanderKilled` (`0x48E67C`) and `AllUnitsKilled` (`0x48E6C3`).
+The shipped missions set `CommanderKilled=1` and `AllUnitsKilled=1` in all
+26 and `DestroyAllUnits=1` in 22. What each rule tests, tick by tick, is not
+followed here; it is the next piece.
+
+**Which schema is played.** A skirmish map's schemas are `Network n`; a
+mission's are `Easy`, `Medium` and `Hard` (25, 25 and 26 of the shipped 26).
+`0x43689A`-`0x4368CA` lays the seven type names out in a table, and the
+switch at `0x4368DC` picks an order of preference from the difficulty
+setting at `[globals+0x37EEE]` (§24): difficulty 0 tries `Easy` then `Medium`
+then `Hard`, 1 tries `Medium` first, 2 tries `Hard` first, each falling back
+through the others (`0x4368F9`-`0x43693C`). The first schema whose `type`
+matches is the one played; none matching is the "No suitable schema type"
+error above. Inside the schema, `HumanMetal`, `HumanEnergy`,
+`ComputerMetal`, `ComputerEnergy`, `SurfaceMetal` (int, default 0),
+`aiprofile` (string; `ai\<profile>.txt`, or `ai\default.txt` when absent,
+`0x4366EA`-`0x43672D`), and the five `Meteor*` keys are read as for
+skirmish.
+
+### `[units]` — the mission's starting units
+
+Each schema's `[units]` block (`0x436C7E`) holds `[unit0]`, `[unit1]`, ...
+(9,576 of them across the shipped 26). Each is read at `0x436DFE`-`0x437002`
+into a record tagged `"MISSIONUNIT DATA"` (`0x436DA4`):
+
+| Key | Read as | Default | Stored at | Meaning |
+|---|---|---|---|---|
+| `Unitname` | string, 1024 | | the record's name | the FBI name |
+| `Ident` | string, 1024 | | | a label other orders can name (see `g` and `i` below) |
+| `InitialMission` | string, 1024 | | | the unit's first orders, the mini-language below |
+| `XPos` / `YPos` / `ZPos` | int | 0 | `+0x0C` / `+0x10` / `+0x14` | position |
+| `Angle` | int, degrees | 0 | `+0x18` | heading; `0x436EF9`-`0x436F0A` converts degrees to the 16-bit angle |
+| `Player` | int | 0 | byte `+0x22` | owning player index |
+| `HealthPercentage` | int | 100 (`0x64`) | word `+0x1A` | starting health |
+| `BuildPriority` | int | 0 | word `+0x20` | |
+| `CreationCountdown` | int | 0 | `+0x1C` | ticks before the unit appears; the shipped data only ever says 0 |
+| `MissionCriticalUnit` | int | 0 | `+0x23` bit 4 | |
+| `AiIgnore` | int | 0 | `+0x23` bit 5 | |
+| `AiPriorityTarget` | int | 0 | `+0x23` bit 6 | |
+| `InitialGroup` | int | 0 | `+0x23` bits 0-3 | a squad number |
+| `Immunity` | int | 0 | `+0x23` bit 7 | |
+
+`Kills`, which every shipped `[unit]` block carries, is not read by the
+executable at all.
+
+### `InitialMission`, the order mini-language
+
+The string is a comma-separated list of orders, each a letter and its
+arguments, interpreted by `0x487BF0`. The scanner stops at each `,`
+(`0x487C3D`); the letter, upper or lower case, indexes the byte table at
+`0x4882CC` and that the jump table at `0x488270` (`0x487C7D`-`0x487C96`).
+Arguments are scanned with the `sscanf` formats shown. Point missions go
+through `0x43F0E0(id, x, z, ...)`; named ones through `0x438760(name)`.
+
+| Letter | Scans | Issues | Read as |
+|---|---|---|---|
+| `m` | ` %f %f` | mission 2 at the point | move to (x, z) |
+| `p` | ` %f %f %f` | mission 9 at the point | patrol to (x, z) |
+| `a` | ` %f %f`, else ` %[a-zA-Z0-9_.]` | mission 3 at the point, else `ATTACKUTYPE` with the name (`0x487FEC`) | attack the point, or attack every unit of that type: `a CORCOM,` |
+| `g` | ` %[a-zA-Z0-9_.]` | `0x487AF0` looks the name up, then mission 7 | guard the unit whose `Ident` this is (inferred from mission 7's use) |
+| `i` | ` %[a-zA-Z0-9_.]` | `0x487AF0` on the name (`0x48822C`) | a link to the unit whose `Ident` this is: `i CHRIS,` in the shipped data; what the link does is not followed |
+| `o` | ` %d %d` | (`0x487C9D`) | the standing orders, read as (fire, move) from the shipped `o 0 1,` (inferred; the consumer is not followed) |
+| `w` | ` %f %d`, else `a` | `WAIT` with the number (`0x48816B`); `wa` is `WAITFORATTACK` (`0x4881C7`) | wait that long, or wait to be attacked |
+| `u` | ` %f %f` | mission 5 at the point | no shipped mission uses it; by its shape, unload at the point |
+| `b` | ` %[a-zA-Z0-9_.] %d %f %f` | `MOBILEBUILD` / `BUILDINGBUILD` / `BUILDWEAPON` (`0x4880A1`, `0x4880C8`, `0x488106`) | build the named unit at the point |
+| `d` | | `SELFDESTRUCTFG` (`0x4881E0`) | self-destruct |
+| `s` | | `MAKESELECTABLE` (`0x488206`) | make the unit selectable |
+| any other letter, and the end of the string | | `MAKESELECTABLE` (`0x487E50`) | the unit is handed to the player once its orders are done |
+
+The shipped missions use twelve shapes, the commonest being `w N,p X Z,`
+(958 units), `p X Z,` (206), `o N N,w N,` (175) and `w N,a CORCOM,` /
+`w N,a ARMCOM,` (142): wait, then patrol; or wait, then hunt the enemy
+commander.
+
+### `[specials]` and `[features]`
+
+The schema's `[specials]` (`0x437010`, tagged `"MISSIONRULE DATA"`) are the
+`StartPos` entries RWE already reads, and nothing else in the shipped
+missions. `[features]` (`0x437183`, `"MISSIONFEATURE DATA"`) are
+`Featurename` / `XPos` / `ZPos` with `-1` as the coordinate default, as RWE
+reads them for skirmish; the shipped missions place 91.
+
+### What RWE has, and what the port is
+
+`parseOta` reads the header keys shared with skirmish, the schemas' specials
+and features, and nothing above the line: none of the campaign header keys,
+no `[units]`, no rule keys. Nothing reads a campaign file. The port, per #55,
+is a campaign TDF reader with the `MISSION%d` enumeration and the localised
+name, the header keys above added to `OtaRecord`, a `[units]` reader with the
+record's fields, and the `InitialMission` grammar as data; the interpreter's
+missions, the rules and the schema choice are the pieces after it.

@@ -1552,9 +1552,14 @@ namespace rwe
                     continue;
                 }
                 auto groundHeight = simulation.terrain.getHeightAt(position.x, position.z);
-                if (position.y >= seaLevel && groundHeight < seaLevel)
+                // The original's one water test on the shadow pass, and it is
+                // on features: ground below the sea level, no shadow
+                // (0x4592D5-0x4592F1, the Feature Unit path). The upstream
+                // request to draw them on the water surface instead is not
+                // what the original does; see §100.
+                if (!featureCastsShadow(groundHeight, seaLevel))
                 {
-                    groundHeight = seaLevel;
+                    continue;
                 }
 
                 auto shadowPosition = Vector3f(simScalarToFloat(position.x), simScalarToFloat(groundHeight), simScalarToFloat(position.z));
