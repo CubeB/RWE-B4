@@ -854,6 +854,55 @@ namespace rwe
                 }
             }
 
+            // A bad target category is a preference when a target is picked,
+            // but it is more than that once one is held: the scan at 0x4089A0
+            // keeps an existing target only while it is alive, still in range
+            // and **not in that slot's bad-target set**. One that is in the set
+            // is dropped where it stands and 0x40B7B0 picks again, so a Jethro
+            // that opened up on a tank for want of anything better comes off it
+            // the moment an aircraft is in reach. Without this the first thing
+            // an anti-air unit shot at was the last: RWE preferred air when it
+            // chose and then never chose again.
+            //
+            // Two things the original gets for free and this has to say out
+            // loud. The scan only looks at a slot no mission owns (the "weapon
+            // free" bit), so an explicit attack order is left alone -- and the
+            // handler would only put the target straight back anyway. And the
+            // scan advances its cursor `unitCount/30 + 1` units a tick, so it
+            // reaches any given unit about once a second; this is phased per
+            // unit to that cadence rather than run every tick, because a gun
+            // that gave up its aim thirty times a second would never fire.
+            if (unit.fireOrders == UnitFireOrders::FireAtWill
+                && !weaponDefinition.interceptor
+                && (sim->gameTime.value + id.value) % static_cast<unsigned int>(SimTicksPerSecond) == 0)
+            {
+                if (auto targetUnit = std::get_if<UnitId>(&aimingState->target); targetUnit != nullptr)
+                {
+                    auto orderedAtIt = false;
+                    if (!unit.orders.empty())
+                    {
+                        if (auto attackOrder = std::get_if<AttackOrder>(&unit.orders.front()); attackOrder != nullptr)
+                        {
+                            auto orderTarget = std::get_if<UnitId>(&attackOrder->target);
+                            orderedAtIt = orderTarget != nullptr && *orderTarget == *targetUnit;
+                        }
+                    }
+
+                    if (!orderedAtIt)
+                    {
+                        const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
+                        const auto& badCategory = unitDefinition.badTargetCategory.at(weaponIndex);
+                        auto targetUnitState = sim->tryGetUnitState(*targetUnit);
+                        if (targetUnitState
+                            && categoryListContains(sim->unitDefinitions.at(targetUnitState->get().unitType).category, badCategory))
+                        {
+                            unit.clearWeaponTarget(weaponIndex);
+                            return;
+                        }
+                    }
+                }
+            }
+
             auto targetPosition = getTargetPosition(aimingState->target);
 
             // An interceptor's engagement rule is `coverage`, not `range`: both

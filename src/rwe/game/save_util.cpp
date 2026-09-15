@@ -317,6 +317,10 @@ namespace rwe
                 {"energyStalled", p.energyStalled},
                 {"unitsKilled", p.unitsKilled},
                 {"unitsLost", p.unitsLost},
+                {"metalProduced", saveMetal(p.metalProduced)},
+                {"energyProduced", saveEnergy(p.energyProduced)},
+                {"metalExcess", saveMetal(p.metalExcess)},
+                {"energyExcess", saveEnergy(p.energyExcess)},
                 {"desiredMetalConsumptionBuffer", saveMetal(p.desiredMetalConsumptionBuffer)},
                 {"desiredEnergyConsumptionBuffer", saveEnergy(p.desiredEnergyConsumptionBuffer)},
                 {"previousDesiredMetalConsumptionBuffer", saveMetal(p.previousDesiredMetalConsumptionBuffer)},
@@ -350,6 +354,15 @@ namespace rwe
             p.energyStalled = j.at("energyStalled").get<bool>();
             p.unitsKilled = j.at("unitsKilled").get<unsigned int>();
             p.unitsLost = j.at("unitsLost").get<unsigned int>();
+            // Added after the first saves were written; an older file simply
+            // has an empty chart.
+            if (j.contains("metalProduced"))
+            {
+                p.metalProduced = loadMetal(j.at("metalProduced"));
+                p.energyProduced = loadEnergy(j.at("energyProduced"));
+                p.metalExcess = loadMetal(j.at("metalExcess"));
+                p.energyExcess = loadEnergy(j.at("energyExcess"));
+            }
             p.desiredMetalConsumptionBuffer = loadMetal(j.at("desiredMetalConsumptionBuffer"));
             p.desiredEnergyConsumptionBuffer = loadEnergy(j.at("desiredEnergyConsumptionBuffer"));
             p.previousDesiredMetalConsumptionBuffer = loadMetal(j.at("previousDesiredMetalConsumptionBuffer"));
@@ -2004,6 +2017,8 @@ namespace rwe
         j["gameStatus"] = saveWinStatus(sim.gameStatus);
         j["currentWindGenerationFactor"] = saveSimScalar(sim.currentWindGenerationFactor);
         j["tidalStrength"] = sim.tidalStrength;
+        j["killMul"] = sim.killMul;
+        j["timeMul"] = sim.timeMul;
         j["nextWindSpeedChange"] = saveGameTime(sim.nextWindSpeedChange);
         j["featureRegrowthCursor"] = sim.featureRegrowthCursor;
 
@@ -2130,6 +2145,11 @@ namespace rwe
         sim.gameStatus = loadWinStatus(j.at("gameStatus"));
         sim.currentWindGenerationFactor = loadSimScalar(j.at("currentWindGenerationFactor"));
         sim.tidalStrength = j.at("tidalStrength").get<int>();
+        if (j.contains("killMul"))
+        {
+            sim.killMul = j.at("killMul").get<int>();
+            sim.timeMul = j.at("timeMul").get<int>();
+        }
         sim.nextWindSpeedChange = loadGameTime(j.at("nextWindSpeedChange"));
         sim.featureRegrowthCursor = j.at("featureRegrowthCursor").get<int>();
 

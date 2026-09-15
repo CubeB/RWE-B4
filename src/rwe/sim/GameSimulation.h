@@ -156,6 +156,21 @@ namespace rwe
         /** Units this player has lost, by any cause. */
         unsigned int unitsLost{0};
 
+        /**
+         * Everything the player has ever earned, and everything it earned with
+         * nowhere to put it. The end-of-game chart's four middle columns --
+         * Energy Produced, Metal Produced, Excess Energy, Excess Metal -- are
+         * these four, read out of the player record at `player+0xAC`, `+0xB4`,
+         * `+0xCC` and `+0xD4` in the original (0x41DD86-0x41DDBB). Excess is
+         * measured where the original measures it: what the storage cap threw
+         * away at the end of a second, not what a full bar refused to take
+         * during one.
+         */
+        Metal metalProduced{0};
+        Energy energyProduced{0};
+        Metal metalExcess{0};
+        Energy energyExcess{0};
+
         Metal desiredMetalConsumptionBuffer{0};
         Energy desiredEnergyConsumptionBuffer{0};
 
@@ -623,6 +638,17 @@ namespace rwe
          * loaded; unlike the wind it never changes during a game.
          */
         int tidalStrength{0};
+
+        /**
+         * The map's `killmul` and `timemul`, the two numbers the end-of-game
+         * chart's Score column is made of: `score = kills * killmul +
+         * seconds * timemul`, truncated one term at a time and floored at zero
+         * (0x41DDBE-0x41DE11). Map constants like the tide, read out of the OTA
+         * at load. The original defaults killmul to 50 and timemul to nothing,
+         * so by default a game is scored on kills alone.
+         */
+        int killMul{50};
+        int timeMul{0};
 
         GameTime nextWindSpeedChange;
 

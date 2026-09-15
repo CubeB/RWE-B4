@@ -538,6 +538,8 @@ namespace rwe
 
         updateDefeatNotifications();
 
+        updateEndGameSequence();
+
         updateProjectiles();
 
         updateFlashes();
@@ -603,6 +605,24 @@ namespace rwe
             }
         }
 
+        // Testing aid: RWE_DEBUG_ENDGAME=<seconds> declares the local player the
+        // winner at that game time, which is the only way to reach the
+        // end-of-game sequence without playing a whole game to its finish.
+        // Add W to be given the loser's half of it instead: RWE_DEBUG_ENDGAME=10L.
+        if (const char* debugEndGame = std::getenv("RWE_DEBUG_ENDGAME"); debugEndGame != nullptr && !gameOver)
+        {
+            auto seconds = static_cast<unsigned int>(std::atoi(debugEndGame));
+            if (seconds > 0 && simulation.gameTime.value >= seconds * static_cast<unsigned int>(SimTicksPerSecond))
+            {
+                auto lost = std::string(debugEndGame).find('L') != std::string::npos;
+                auto winner = lost && getSize(simulation.players) > 1 ? PlayerId(localPlayerId.value == 0 ? 1 : 0) : localPlayerId;
+                gameOver = WinStatus(WinStatusWon{winner});
+                gameOverTime = simulation.gameTime;
+                beginEndGameSequence();
+                LOG_INFO << "Debug: forcing the end-game sequence, winner player " << winner.value;
+            }
+        }
+
         // Testing aid: RWE_DEBUG_SELF_DESTRUCT=<seconds> self-destructs a
         // player's first unit (the commander) at that game time, so a crash on
         // commander death can be reproduced under a debugger. The player is
@@ -646,11 +666,13 @@ namespace rwe
                 [&](const WinStatusWon& w) {
                     gameOver = winStatus;
                     gameOverTime = simulation.gameTime;
+                    beginEndGameSequence();
                     LOG_INFO << "Game over: player " << w.winner.value << " won at tick " << simulation.gameTime.value;
                 },
                 [&](const WinStatusDraw&) {
                     gameOver = winStatus;
                     gameOverTime = simulation.gameTime;
+                    beginEndGameSequence();
                     LOG_INFO << "Game over: draw at tick " << simulation.gameTime.value;
                 },
                 [&](const WinStatusUndecided&) {

@@ -12390,3 +12390,124 @@ game's `CURSORS.GAF`.
 - The mission tables' **`+0x10` word** is tabulated above only as a lead; its
   meaning is not decoded, and its correlation with the cursor id has three
   counter-examples.
+
+---
+
+## 104. The end of a game: a banner, a fade, and a chart that runs its bars up
+
+The module is `endgame.cpp` -- the original leaves its own source path in the
+binary at `0x502A97`, `c:\cavedog\wargame\endgame.cpp` -- and it occupies
+`0x41D700`-`0x420600`. Its whole shape is one function, `0x41F7F0`, driven by a
+nine-way state in `DWORD [game+0x39057]` through the jump table at `0x4205AC`:
+
+| State | Handler | What it does |
+|---|---|---|
+| 0 | `0x41F830` | Takes a copy of the last game frame (the surface is created by name, `"Copy of last game frame"` at `0x502BE0`) and blits the screen into it |
+| 1 | `0x41F976` | Waits on the message box, if one was raised |
+| 2 | `0x41FA3D` | Arms the fade: counter `[game+0x39067] = 10`, next step at `now + 1` |
+| 3 | `0x41FA8F` | One fade step a tick, ten of them, then sets the done flag |
+| 4 | `0x41FB6C` | The campaign's CD check |
+| 5 | `0x41FC12` | Campaign mission messages; otherwise builds the chart and goes to 7 |
+| 6 | `0x41FDF8` | The campaign's full-screen outcome picture, with `"Click to continue."` |
+| 7 | `0x41FF42` | The chart, running its bars up |
+| 8 | `0x42055B` | The chart standing still, waiting for a button |
+
+Only 0, 2, 3, 5, 7 and 8 are on a skirmish's path.
+
+**The fade is ten steps.** `0x41FA3D` sets the counter to ten and `0x41FA8F`
+spends one a tick -- `[game+0x3905F] = now + 1` each time -- calling
+`0x4BF4D0(0, &rect, counter - 0x1D)` over the whole screen. The level therefore
+runs -19, -20 ... -28: darker each step, and black at the end. A third of a
+second at the original's thirty ticks a second.
+
+**The clock.** `0x4B6340` is `GetTickCount() * ticksPerSecond / 1000` and
+`0x4B6330` returns that `ticksPerSecond` on its own, so every interval below is
+in ticks of that rate.
+
+### The chart
+
+The background is `bitmaps/OUTCOME0.PCX`, shown by `0x4288D0("outcome0")` at
+`0x41F1C8`; a campaign win gets `outcome1` instead. It is a 640x480 bitmap that
+paints the frame, the button surround, and all eight column headings -- **Name,
+Kills, Losses, Energy Produced, Metal Produced, Excess Energy, Excess Metal,
+Score**. Over it the original builds `guis/ENDMSN.GUI` (`0x4AA8F0` at
+`0x41F0D3`) and enables exactly one of its buttons, `MainMenu` (`0x4A76B0` at
+`0x41F1E4`); the rest of that gui -- the mission list, Start, Save, Load, the
+difficulty dial -- belongs to the campaign's end-of-mission screen, which is
+the same gui worn differently.
+
+**The score table** is ten records of 58 bytes at `game+0x38DD9`, filled by
+`0x41DC20` and zeroed first with a `rep stos` of 145 dwords. Per record:
+
+| Offset | Field | Source |
+|---|---|---|
+| +0x00 | name, 30 bytes | `player+0x2B` |
+| +0x1E | Kills | `(int16)player+0xFC` |
+| +0x22 | Losses | `(int16)player+0xFE` |
+| +0x26 | Energy Produced | `(int)(double)player+0xAC` |
+| +0x2A | Metal Produced | `(int)(double)player+0xB4` |
+| +0x2E | Excess Energy | `(int)(double)player+0xCC` |
+| +0x32 | Excess Metal | `(int)(double)player+0xD4` |
+| +0x36 | Score | computed, below |
+
+**The score** (`0x41DDBE`-`0x41DE11`) is
+
+```
+score = (int)(kills * killmul) + (int)((gameTicks / 30) * timemul)
+if (score < 0) score = 0
+```
+
+`killmul` and `timemul` are floats read out of the **map's OTA** at `0x4365EB`
+and `0x436603` into `[gametype+0xD54]` and `[gametype+0xD58]`. Each term is
+truncated to an integer on its own -- the original converts twice, once per
+multiply -- so the two truncations do not combine. The shipped default is
+`killmul=50` and `timemul=0`, which scores a game on kills alone.
+
+**What a full bar means.** Seven dwords at `game+0x3918F` hold the maximum for
+each column, seeded at `0x41DCA4` with **10, 10, 100, 100, 100, 100, 100** and
+then raised to the largest value any player reached (`0x41DE12` onwards). The
+floor is what stops one kill in a quiet game drawing as a full bar.
+
+**Geometry**, from `0x41E420`, and confirmed against the artwork itself -- the
+cell runs measured out of `OUTCOME0.PCX` agree with the gadget rects to the
+pixel:
+
+- name cell x 16, width 90 (`0x41E556` builds the `PlayerColor%d` gadget there);
+- bars at x 112, 186, 260, 334, 408, 482, 556 -- 112 and a stride of 74 -- each
+  67 wide and 18 high, in cells the artwork draws 68 wide;
+- rows start at y 93 and step 20, ten of them.
+
+**The run-up.** `[game+0x3906B]` is the column, 0 to 6, and the jump table at
+`0x4205D0` has one arm each: **Kills, Losses, EProduced, MProduced, EWasted,
+MWasted, Score** -- left to right. Each arm walks the ten records, builds the
+gadget name with `sprintf("%s%d", label, index)` (the `"%s%d"` at `0x502B30`)
+and enables that player's bar; then `0x47F1A0` starts the group, the next
+column is scheduled at `now + 10` (`0x42053A`) and the column index is bumped.
+A bar advances by `max(target / 15, 1)` per gadget update -- the `1/15` at
+`0x4FD008` and the `1.0f` floor at `0x4FD00C` -- so every bar is full after
+fifteen frames whatever it is counting.
+
+A **click during the run-up** (`0x4C1AB0` tested at `0x41FFD9`) jumps to
+`0x420028`, which enables all seven groups at once and then
+`ActivateAllStatBars`. When every bar has reached its target the state goes to
+8 and the screen simply sits there.
+
+**The title.** `anims/ENDMSN.GAF` carries `victory` (129x29) and `defeat`
+(101x29) beside an `outcdivider`; `OUTCOME0.PCX` leaves an empty band above its
+column headings for them. These are not the `igvictory`/`igdefeat` banners the
+world renderer flashes over the battlefield (§70) -- those are 117x29 and live
+in `IGTITLES.GAF`.
+
+**What sets the banner in the first place** is `0x4169D0` (victory) and
+`0x416A30` (defeat), which each call `0x486F10` -- the routine that destroys a
+player's units -- and then set bits in `game+0x3923B`: bit 4 mission complete,
+bit 5 `igvictory`, bit 6 `igdefeat`, bit 2 game over.
+
+### Not decoded
+
+**Which sound the two beeps are.** `sounds/BEEP1..6.WAV` and
+`VICTORY2/VICTORY4.WAV` all ship, but no string in the executable names any of
+them, `gamedata/SOUND.TDF` has no entry for them, and no gui file carries a
+sound field that reaches them. `0x46C620`, which the endgame calls with 7 at
+`0x41F897`, turns out to be the statistics recorder rather than a sound call.
+RWE plays `BEEP6` twice and says so at the call site.

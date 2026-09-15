@@ -99,24 +99,38 @@ namespace rwe
         {
             RWE_RENDERPROF("frame");
 
-            if (guiVisible)
+            // Once the chart is up the game is behind it and stays there. The
+            // original has thrown the world away by this point -- it kept a
+            // copy of the last frame to fade, and that is gone too -- so there
+            // is nothing to draw underneath and no reason to spend a frame
+            // drawing it.
+            if (endGameChartVisible())
             {
-                RWE_RENDERPROF("ui");
-                renderUi();
+                renderEndGameSequence();
             }
-
-            sceneContext.graphics->enableDepthBuffer();
-
+            else
             {
-                RWE_RENDERPROF("world");
-                renderWorld();
-            }
-            sceneContext.graphics->disableDepthBuffer();
+                if (guiVisible)
+                {
+                    RWE_RENDERPROF("ui");
+                    renderUi();
+                }
 
-            if (guiVisible)
-            {
-                RWE_RENDERPROF("overlay");
-                renderOverlay();
+                sceneContext.graphics->enableDepthBuffer();
+
+                {
+                    RWE_RENDERPROF("world");
+                    renderWorld();
+                }
+                sceneContext.graphics->disableDepthBuffer();
+
+                if (guiVisible)
+                {
+                    RWE_RENDERPROF("overlay");
+                    renderOverlay();
+                }
+
+                renderEndGameSequence();
             }
         }
 #ifdef RWE_ENABLE_RENDERPROF
@@ -254,7 +268,9 @@ namespace rwe
 
         renderHelpOverlay();
 
-        renderGameOverOverlay();
+        // The end-of-game sequence draws over everything rather than into the
+        // HUD, so it is run from render() rather than from here.
+
 
         // render bottom bar
         float bottomXBuffer = GuiSizeLeft;

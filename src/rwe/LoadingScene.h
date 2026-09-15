@@ -78,6 +78,8 @@ namespace rwe
             int minWindSpeed;
             int maxWindSpeed;
             int tidalStrength;
+            int killMul;
+            int timeMul;
             std::vector<std::pair<Point, std::string>> features;
             MapTerrainGraphics terrainGraphics;
         };

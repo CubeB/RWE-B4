@@ -4363,6 +4363,12 @@ namespace rwe
                 player.metalProductionBuffer = Metal(player.metalProductionBuffer.value * bonus);
                 player.energyProductionBuffer = Energy(player.energyProductionBuffer.value * bonus);
 
+                // The chart's "produced" columns are the income itself, counted
+                // once a second as it arrives and after the difficulty bonus,
+                // which is the figure the player has actually had to spend.
+                player.metalProduced += player.metalProductionBuffer;
+                player.energyProduced += player.energyProductionBuffer;
+
                 auto metalSupply = player.metal + player.metalProductionBuffer;
                 auto energySupply = player.energy + player.energyProductionBuffer;
 
@@ -4374,13 +4380,18 @@ namespace rwe
                 player.metalStalled = metalSettlement.stalled;
                 player.energyStalled = energySettlement.stalled;
 
+                // And "excess" is what the cap takes off the top here. A player
+                // whose storage is full is throwing its whole income away, and
+                // the chart is where that shows.
                 if (player.metal > player.maxMetal)
                 {
+                    player.metalExcess += player.metal - player.maxMetal;
                     player.metal = player.maxMetal;
                 }
 
                 if (player.energy > player.maxEnergy)
                 {
+                    player.energyExcess += player.energy - player.maxEnergy;
                     player.energy = player.maxEnergy;
                 }
 

@@ -429,6 +429,34 @@ namespace rwe
 
     void GameScene::onMouseDown(MouseButtonEvent event)
     {
+        // Once the game is decided the world stops taking orders. The chart
+        // takes two clicks and no more: one anywhere fills every bar at once,
+        // which is what a click does during the original's run-up (0x420028),
+        // and one on Main Menu leaves.
+        if (gameOver)
+        {
+            if (endGameChartVisible() && event.button == MouseButtonEvent::MouseButton::Left)
+            {
+                // The button is laid out in the chart's own 640x480 space, so
+                // the click has to arrive there too -- and only if it landed on
+                // the button, because a UiStagedButton does not test that for
+                // itself: the panel that normally owns it does, and there is no
+                // panel here.
+                auto p = endGameScreenPoint(event.x, event.y);
+                if (endGameMainMenuButton && endGameMainMenuButton->contains(p.x, p.y))
+                {
+                    endGameMainMenuButton->mouseDown(MouseButtonEvent(p.x, p.y, event.button));
+                    endGameChartButtonArmed = true;
+                    return;
+                }
+
+                // Anywhere else fills every bar at once, which is what a click
+                // does during the original's run-up (0x420028).
+                finishEndGameBars();
+            }
+            return;
+        }
+
         if (isGameMenuOpen())
         {
             for (auto& panel : gameMenuPanels)
@@ -842,6 +870,17 @@ namespace rwe
 
     void GameScene::onMouseUp(MouseButtonEvent event)
     {
+        if (gameOver)
+        {
+            if (endGameChartVisible() && endGameMainMenuButton && endGameChartButtonArmed)
+            {
+                endGameChartButtonArmed = false;
+                auto p = endGameScreenPoint(event.x, event.y);
+                endGameMainMenuButton->mouseUp(MouseButtonEvent(p.x, p.y, event.button));
+            }
+            return;
+        }
+
         if (isGameMenuOpen())
         {
             for (auto& panel : gameMenuPanels)
@@ -1018,6 +1057,16 @@ namespace rwe
 
     void GameScene::onMouseMove(MouseMoveEvent event)
     {
+        if (gameOver)
+        {
+            if (endGameChartVisible() && endGameMainMenuButton)
+            {
+                auto p = endGameScreenPoint(event.x, event.y);
+                endGameMainMenuButton->mouseMove(MouseMoveEvent(p.x, p.y));
+            }
+            return;
+        }
+
         if (isGameMenuOpen())
         {
             for (auto& panel : gameMenuPanels)

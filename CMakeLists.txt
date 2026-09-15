@@ -297,6 +297,8 @@ set(SOURCE_FILES
     src/rwe/game/DefaultAction.h
     src/rwe/game/FeatureMediaInfo.cpp
     src/rwe/game/FeatureMediaInfo.h
+    src/rwe/game/EndGameStats.cpp
+    src/rwe/game/EndGameStats.h
     src/rwe/game/FlashEffect.cpp
     src/rwe/game/FlashEffect.h
     src/rwe/game/GameCameraState.cpp
@@ -310,6 +312,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_audio.cpp
     src/rwe/game/GameScene_commands.cpp
     src/rwe/game/GameScene_debug.cpp
+    src/rwe/game/GameScene_endgame.cpp
     src/rwe/game/GameScene_input.cpp
     src/rwe/game/GameScene_menu.cpp
     src/rwe/game/GameScene_render.cpp
@@ -872,6 +875,7 @@ set(TEST_FILES
     src/rwe/game/orderbuttons.test.cpp
     src/rwe/game/PlayerCommand_hotkey.test.cpp
     src/rwe/game/PlayerCommand_speed.test.cpp
+    src/rwe/game/EndGameStats.test.cpp
     src/rwe/game/dump_util.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp
     src/rwe/geometry/Circle2f.test.cpp

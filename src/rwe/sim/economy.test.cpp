@@ -196,6 +196,34 @@ namespace rwe
 
         REQUIRE(sim.getPlayer(player).energy.value == Catch::Approx(100.0f));
         REQUIRE(sim.getPlayer(player).metal.value == Catch::Approx(100.0f));
+
+        // ...and counted on the way out. The end-of-game chart's Excess columns
+        // are exactly this: what the cap took off the top, summed over the
+        // game.
+        REQUIRE(sim.getPlayer(player).energyExcess.value == Catch::Approx(400.0f));
+        REQUIRE(sim.getPlayer(player).metalExcess.value == Catch::Approx(400.0f));
+    }
+
+    TEST_CASE("what a player earned is totted up for the end of the game", "[economy]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayerWithResources(sim);
+        sim.unitDefinitions["inert"] = makeInertDef();
+        auto unitId = addUnitOfType(sim, "inert", player, SimVector(100_ss, 0_ss, 100_ss), script);
+
+        sim.addResourceDelta(unitId, Energy(60.0f), Metal(30.0f));
+        tickOneSecond(sim);
+        sim.addResourceDelta(unitId, Energy(40.0f), Metal(20.0f));
+        tickOneSecond(sim);
+
+        const auto& p = sim.getPlayer(player);
+        REQUIRE(p.energyProduced.value == Catch::Approx(100.0f));
+        REQUIRE(p.metalProduced.value == Catch::Approx(50.0f));
+
+        // Nothing was wasted: the storage was big enough for all of it.
+        REQUIRE(p.energyExcess.value == Catch::Approx(0.0f));
+        REQUIRE(p.metalExcess.value == Catch::Approx(0.0f));
     }
 
     TEST_CASE("generators and consumers over a second", "[economy]")

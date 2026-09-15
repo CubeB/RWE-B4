@@ -1084,53 +1084,6 @@ namespace rwe
         drawColumn(rightColumn, boxX + 12.0f + columnWidth);
     }
 
-    void GameScene::renderGameOverOverlay()
-    {
-        if (!gameOver)
-        {
-            return;
-        }
-
-        const auto& localPlayer = getPlayer(localPlayerId);
-        auto title = match(
-            *gameOver,
-            [&](const WinStatusWon& w) { return w.winner == localPlayerId ? std::string("VICTORY") : std::string("DEFEAT"); },
-            [&](const WinStatusDraw&) { return std::string("DRAW"); },
-            [&](const WinStatusUndecided&) { return std::string(); });
-
-        auto totalSeconds = gameOverTime.value / static_cast<unsigned int>(SimTicksPerSecond);
-        auto minutes = totalSeconds / 60;
-        auto seconds = totalSeconds % 60;
-        std::string timeText = "Game time " + std::to_string(minutes) + ":" + (seconds < 10 ? "0" : "") + std::to_string(seconds);
-
-        std::vector<std::string> lines{
-            title,
-            timeText,
-            "Units destroyed: " + std::to_string(localPlayer.unitsKilled),
-            "Units lost: " + std::to_string(localPlayer.unitsLost),
-            "",
-            "Press ESC to return to the main menu",
-        };
-
-        const float lineHeight = 16.0f;
-        const float boxWidth = 300.0f;
-        const float boxHeight = (lines.size() + 2) * lineHeight;
-        auto centerX = worldViewport.left() + (worldViewport.width() / 2.0f);
-        auto centerY = worldViewport.top() + (worldViewport.height() / 2.0f);
-        auto boxX = centerX - (boxWidth / 2.0f);
-        auto boxY = centerY - (boxHeight / 2.0f);
-
-        chromeUiRenderService.fillColor(boxX, boxY, boxWidth, boxHeight, Color(0, 0, 0, 210));
-        chromeUiRenderService.drawBoxOutline(boxX, boxY, boxWidth, boxHeight, title == "VICTORY" ? Color(83, 223, 79) : Color(255, 71, 0), 2.0f);
-
-        auto y = boxY + (lineHeight * 1.5f);
-        for (const auto& line : lines)
-        {
-            chromeUiRenderService.drawTextCentered(centerX, y, line, *guiFont);
-            y += lineHeight;
-        }
-    }
-
     UnitState& GameScene::getUnit(UnitId id)
     {
         return simulation.getUnitState(id);

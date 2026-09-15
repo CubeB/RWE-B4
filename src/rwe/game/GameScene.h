@@ -20,6 +20,7 @@
 #include <rwe/Viewport.h>
 #include <rwe/game/BuilderGuisDatabase.h>
 #include <rwe/game/DefaultAction.h>
+#include <rwe/game/EndGameStats.h>
 #include <rwe/game/GameCameraState.h>
 #include <rwe/game/GameMediaDatabase.h>
 #include <rwe/game/GameNetworkService.h>
@@ -50,6 +51,7 @@
 #include <rwe/sim/UnitState.h>
 #include <rwe/ui/UiFactory.h>
 #include <rwe/ui/UiPanel.h>
+#include <rwe/ui/UiStagedButton.h>
 #include <unordered_set>
 #include <variant>
 
@@ -343,6 +345,100 @@ namespace rwe
         /** Set when the game has been decided; the result is shown until the player leaves. */
         std::optional<WinStatus> gameOver;
         GameTime gameOverTime{0};
+
+        /**
+         * What the original's `endgame.cpp` does once a game is decided, cut
+         * down to the three steps a skirmish actually runs. Its own state
+         * machine is nine states wide (the jump table at 0x4205AC) and most of
+         * that is the campaign: the CD check, the mission list, the briefing
+         * for the next mission. What is left is the banner over the frozen
+         * world, the fade, and the chart.
+         */
+        enum class EndGamePhase
+        {
+            /**
+             * `igvictory` or `igdefeat` over the last frame of the game, which
+             * the original leaves up because the banner is a flag on the world
+             * renderer rather than a screen of its own: bits 5 and 6 of
+             * `game+0x3923B`, drawn by 0x46A107 beside `igpaused`.
+             */
+            Banner,
+
+            /** Ten steps of the fade table, one a tick (0x41FA8F). */
+            Fade,
+
+            /** The chart, over `bitmaps/OUTCOME0.PCX` (0x41FF42). */
+            Chart
+        };
+
+        EndGamePhase endGamePhase{EndGamePhase::Banner};
+
+        /** When the current phase started, on the scene clock. */
+        SceneTime endGamePhaseStart{0};
+
+        /** Filled once, when the chart is built. */
+        std::optional<EndGameStats> endGameStats;
+
+        /**
+         * How far each bar has run up, in its column's own units. The original
+         * keeps this on the gadget and advances it by `max(target/15, 1)` on
+         * every update, so a bar is full after fifteen of them whatever it is
+         * counting (0x41E697, the constants at 0x4FD008 and 0x4FD00C).
+         */
+        std::vector<std::array<float, EndGameStatCount>> endGameBarFill;
+
+        /** How many columns have been started. They go left to right. */
+        int endGameColumnsStarted{0};
+
+        /** When the next column starts: ten ticks after the last (0x42053A). */
+        SceneTime endGameNextColumn{0};
+
+        std::shared_ptr<Sprite> endGameBackground;
+
+        /**
+         * The chart's text, in the face every gui label in the game is set in
+         * and the one the column headings painted into OUTCOME0.PCX were drawn
+         * with: Haettenschweiler, out of `anims/hattfont12.gaf`.
+         */
+        std::shared_ptr<SpriteSeries> endGameChartFont;
+
+        /** ENDMSN.GUI's MainMenu button, wearing the BUTTONS0 face. */
+        std::unique_ptr<UiStagedButton> endGameMainMenuButton;
+
+        /** Whether the press that armed the button started on it. */
+        bool endGameChartButtonArmed{false};
+
+        void beginEndGameSequence();
+        void updateEndGameSequence();
+        void buildEndGameChart();
+        void renderEndGameSequence();
+        void renderEndGameChart();
+
+        bool localPlayerWon() const;
+
+        /** Window coordinates back into the chart's own 640x480 space. */
+        Point endGameScreenPoint(int windowX, int windowY) const;
+
+        /** Fills every bar at once, which is what a click during the run-up does (0x420028). */
+        void finishEndGameBars();
+
+        /** True once the chart has taken the screen; the world is not drawn behind it. */
+        bool endGameChartVisible() const;
+
+        /**
+         * Maps the original's 640x480 layout onto the window, keeping its
+         * proportions and centring what is left over -- the same bargain
+         * MovieScene and the menus strike.
+         */
+        struct EndGameLayout
+        {
+            float scale;
+            float offsetX;
+            float offsetY;
+
+            Rectangle2f rect(float x, float y, float w, float h) const;
+        };
+        EndGameLayout endGameLayout() const;
 
         /** Fog of war: hide what the local player cannot see. Off reveals the whole map. */
         bool fogOfWarEnabled{true};
@@ -1064,7 +1160,6 @@ namespace rwe
 
         void returnToMainMenu();
 
-        void renderGameOverOverlay();
 
         void renderHelpOverlay();
 

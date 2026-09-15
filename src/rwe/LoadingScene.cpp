@@ -189,6 +189,8 @@ namespace rwe
         // whose minimum is above the cap with an empty range to draw from.
         GameSimulation simulation(std::move(mapInfo.terrain), mapInfo.surfaceMetal, std::max(0, mapInfo.minWindSpeed), std::max(0, mapInfo.maxWindSpeed));
         simulation.tidalStrength = std::max(0, mapInfo.tidalStrength);
+        simulation.killMul = mapInfo.killMul;
+        simulation.timeMul = mapInfo.timeMul;
 
         // The skirmish options the simulation itself has to know about. They
         // go in before any player is added: Mapped hands a player its explored
@@ -661,7 +663,7 @@ namespace rwe
             features.emplace_back(Point(f.xPos, f.zPos), f.featureName);
         }
 
-        return LoadMapResult{std::move(terrain), static_cast<unsigned char>(schema.surfaceMetal), ota.minWindSpeed, ota.maxWindSpeed, ota.tidalStrength, std::move(features), std::move(terrainGraphics)};
+        return LoadMapResult{std::move(terrain), static_cast<unsigned char>(schema.surfaceMetal), ota.minWindSpeed, ota.maxWindSpeed, ota.tidalStrength, ota.killMul, ota.timeMul, std::move(features), std::move(terrainGraphics)};
     }
 
     std::vector<TextureArrayRegion> LoadingScene::getTileTextures(TntArchive& tnt)
