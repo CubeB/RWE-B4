@@ -4171,11 +4171,20 @@ Two things fall out of that for anyone reading this section:
   `float` in the simulation to close that is very likely a bad trade; see the
   determinism rules in `CLAUDE.md`.
 
-One thing does not fall out, and is left open: Escalation's construction
-aircraft `CORCA` finishes its buildings one tick *sooner* than the replay
-allows, on all three of its pairs, which reads as an increment the model does
-not account for. Five call sites reach `0x41BA60`; whether the airborne one
-credits a job once more than the ground one over its life is the thing to check.
+One thing does not fall out, and is left open: **a construction aircraft
+finishes one tick sooner than the replay allows.** Over the Escalation corpus
+that holds for all three airborne builders — `CORCA`, `CORACA` and `ARMCA`, 58
+of their 66 builds landing on exactly -1 with none faster, against 1 of 6,658
+ground builds. It is not a rate artifact (`CORACA` runs at p=5, the other two at
+p=2) and not the exactly-divisible case (both kinds appear, all at -1 alike), so
+what it reads as is an increment the model does not account for: an airborne
+builder credits its job once more over its life than a ground one.
+
+Five call sites reach `0x41BA60` (`0x402A09`, `0x403E43`, `0x404139`,
+`0x414235`, `0x414656`), and §23 above notes only that they all pass the same
+amount. Which of them an aircraft goes through, and whether it runs on a tick
+the ground path does not, is the thing to read out; none of the five has been
+attributed to a caller yet, so that attribution is step one.
 
 ### What counts as production
 

@@ -251,7 +251,9 @@ failed to reproduce.
       ten of the fifteen exactly-divisible ones take an extra tick, where the
       same replay in `double` gets six. ProTA's ~34 is the constructor's COB
       deploy before `INBUILDSTANCE` -- mod data, not engine, and RWE already
-      gates on it. `tools/tad-buildtime.py` re-runs the check.
+      gates on it. `tools/tad-buildtime.py` re-runs the check. One lead came out
+      of it: construction aircraft finish a tick early on 58 of 66 builds across
+      three builders and two rates, which is an increment nothing accounts for.
 - [ ] `tad_episodes --emit-cpp`: a generated, checked-in header of plain structs
       with the real FBI values transcribed inline and demo/tick provenance.
 - [ ] The economy oracle -- storage-cap and stall episodes, which need only the

@@ -467,14 +467,40 @@ probably not worth fixing: a `float` in the simulation is exactly the hazard the
 determinism section of `CLAUDE.md` exists to warn about, and the prize is one
 tick on a subset of builds.
 
-**The one class this misses** is `CORCA`, Escalation's construction aircraft and
-the corpus's only air builder, whose three pairs all come in at exactly -1 —
-`CORMEX` 936 against 937 over 7 builds, `CORDRAG` 564 against 565 over 22,
-`CORRAD` 567 against 568 over 19, at 77-94% of each cell. Negative means an
-increment the model does not account for, and §23 lists five call sites into
-`0x41BA60`; the reading to check is that the air builder's site fires once more
-over a job than the ground one. It is one tick on one builder type and it is
-recorded rather than explained.
+**A construction aircraft gets one increment more than the model accounts for.**
+Every airborne builder in the corpus finishes exactly one tick early, and it is
+the sharpest signal in the whole comparison after the model itself:
+
+| Builder | p | builds | at exactly -1 | fastest |
+|---|---|---|---|---|
+| `CORCA` | 2 | 54 | 46 | -1 |
+| `CORACA` | 5 | 9 | 9 | -1 |
+| `ARMCA` | 2 | 3 | 3 | -1 |
+| **all airborne** | | **66** | **58** | **-1** |
+| every ground builder | | 6,658 | 1 | — |
+
+58 of 66 against 1 of 6,658 is not a coincidence, and the eight that are not at
+-1 sit at +29, +59 and +119, which is interference and only ever lengthens. So
+-1 is a floor, not a centre.
+
+Three things it is **not**, each of which had to be ruled out because each would
+have meant something quite different:
+
+- **Not `CORCA`.** Three separate builders across both sides agree.
+- **Not the build rate.** `CORACA` runs at p=5 and `CORCA`/`ARMCA` at p=2. The
+  first reading of this was that p=2 was doing something, since `CORCA` was the
+  only case visible at the five-build threshold; `CORACA` is what breaks it.
+- **Not the exactly-divisible case.** `BuildTime % p` is 0 for some of these
+  pairs and non-zero for others, and all of them are -1 alike. Nor is it the
+  strict-versus-non-strict end test: none of these accumulators lands exactly on
+  the endpoint, so both spellings predict the same number for all of them.
+
+What is left is that an airborne builder credits its job once more over its life
+than a ground one does. §23 lists five call sites into `0x41BA60`; which one an
+aircraft goes through, and whether it runs on a tick the ground path does not,
+is the thing to read out of the binary. Until someone does,
+`tools/tad-buildtime.py` scores the airborne class at -1 so that the regularity
+is checked rather than merely noted.
 
 #### The other constant: a builder's own deploy sequence, which is data
 
@@ -504,9 +530,11 @@ Escalation's constructors sit at +3 to +5 with a tail, which is the
 reposition-sometimes shape, and its factories sit at exactly 0 because a factory
 has nothing to deploy. So the rule for an oracle is: **score factory builds, and
 treat any mobile builder's offset as that unit's script until its script says
-otherwise.** `tools/tad-buildtime.py` scores only immobile builders for exactly
-this reason, and `--overheads` lists the rest with their floors so that a floor
-can be told from a tail.
+otherwise** -- with construction aircraft the exception, since they deploy
+nothing and sit at a flat -1 (above). `tools/tad-buildtime.py` splits the three
+classes for exactly this reason: immobile scored cell by cell, airborne pooled
+and scored at -1, ground mobile listed by `--overheads` with their floors so a
+floor can be told from a tail, and never scored.
 
 RWE already gates build progress on `inBuildStance` (`UnitBehaviorService.cpp`),
 so it reproduces this as long as it runs the same script. There is no engine gap

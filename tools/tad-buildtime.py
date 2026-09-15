@@ -29,10 +29,21 @@ the corpus:
     15 right, which is what says the arithmetic is genuinely 32-bit.
 
 Only unassisted builds mean anything here, so every cell is consumed as its
-MODE -- assists shorten a build and missed micro-stalls lengthen it -- and only
-cells whose builder is immobile are scored. A mobile builder pays its own COB
-deploy sequence before INBUILDSTANCE is set, which is real, is data rather than
-engine, and varies by mod; see docs/TA-DEMOS.md.
+MODE -- assists shorten a build and missed micro-stalls lengthen it -- and
+builders fall into three classes that have to be scored apart:
+
+  * **Immobile** (a factory). Nothing to walk and nothing to deploy, so the
+    model applies as written. This is the class an oracle should assert.
+  * **Airborne** (a construction aircraft). Consistently finishes one tick
+    SOONER than the model, which is an increment the model does not account
+    for: over the Escalation corpus 58 of 66 such builds land on exactly -1 and
+    none is faster, against 1 of 6,658 ground builds. Three builders at two
+    different rates agree, so it is not a rate artifact. Scored at -1, and the
+    exit code covers it, so that the regularity stops being invisible.
+  * **Ground and mobile** (a construction vehicle or kbot). Pays its own COB
+    deploy sequence before INBUILDSTANCE is set, which is real, is data rather
+    than engine, and varies by mod, so there is no model to score it against.
+    Listed by --overheads, never scored. See docs/TA-DEMOS.md.
 
     ./build/tad_episodes --file ~/ta-demos/14723.ted --units ~/ta-mods/x-esc \
         --emit-json /tmp/ep.json
@@ -88,6 +99,17 @@ def is_mobile(unit):
     return (unit.get("maxvelocity") or "0").strip() not in ("0", "0.0", "")
 
 
+def flies(unit):
+    return (unit.get("canfly") or "0").strip() not in ("0", "")
+
+
+def builder_class(unit):
+    """Which of the three scoring classes this builder belongs to."""
+    if not is_mobile(unit):
+        return "immobile"
+    return "airborne" if flies(unit) else "ground"
+
+
 def cells(episodes, units, min_builds):
     """(builder type, product type) -> the durations of every build of that pair.
 
@@ -139,7 +161,8 @@ def cells(episodes, units, min_builds):
                 fastest=min(kept),
                 floor=build_time // p,
                 ceil=-(-build_time // p),
-                mobile_builder=is_mobile(units[builder]),
+                durations=kept,
+                kind=builder_class(units[builder]),
             )
         )
     return out
@@ -159,7 +182,8 @@ def main():
 
     episodes = json.load(open(args.episodes))
     rows = cells(episodes, units, args.min_builds)
-    scored = [r for r in rows if not r["mobile_builder"]]
+    scored = [r for r in rows if r["kind"] == "immobile"]
+    airborne = [r for r in rows if r["kind"] == "airborne"]
     if not scored:
         sys.exit("no immobile-builder pairs met --min-builds; nothing to score")
 
@@ -188,12 +212,32 @@ def main():
                 f" {extra:>+6} {r['mode']:>6} {r['n']:>5} {100 * r['share']:>5.0f}%{flag}"
             )
 
+    # The airborne class is pooled rather than scored cell by cell: a
+    # construction aircraft builds few of any one thing, so its cells are thin
+    # and the mode of the pool is the trustworthy statistic.
+    air_mode = None
+    if airborne:
+        pool = collections.Counter(d - r["predicted"] for r in airborne for d in r["durations"])
+        air_mode, air_at = pool.most_common(1)[0]
+        builds = sum(pool.values())
+        print(f"\nairborne builders, pooled over {len(airborne)} pairs and {builds} builds:")
+        print(f"  modal offset from the model {air_mode:+}, on {air_at} of {builds} builds, fastest {min(pool):+}")
+        for builder in sorted({r["builder"] for r in airborne}):
+            own = collections.Counter(
+                d - r["predicted"] for r in airborne if r["builder"] == builder for d in r["durations"]
+            )
+            rates = sorted({r["p"] for r in airborne if r["builder"] == builder})
+            print(
+                f"    {builder:<10} p={','.join(str(x) for x in rates):<5} {sum(own.values()):>4} builds,"
+                f" {own.get(air_mode, 0):>4} at {air_mode:+}, fastest {min(own):+}"
+            )
+
     if args.overheads:
-        print("\nmobile builders, which pay their own COB deploy before lathing:")
+        print("\nground mobile builders, which pay their own COB deploy before lathing:")
         print("a hard floor well above zero is a deploy sequence; a floor at zero with a")
-        print("long tail is a builder that sometimes had to reposition.\n")
+        print("long tail is a builder that sometimes had to reposition. Never scored.\n")
         print(f"  {'builder':<10} {'product':<12} {'n':>5} {'mode d':>7} {'fastest':>8} {'share':>6}")
-        for r in sorted((r for r in rows if r["mobile_builder"]), key=lambda r: -r["n"]):
+        for r in sorted((r for r in rows if r["kind"] == "ground"), key=lambda r: -r["n"]):
             print(
                 f"  {r['builder']:<10} {r['product']:<12} {r['n']:>5} {r['mode'] - r['predicted']:>+7}"
                 f" {r['fastest'] - r['predicted']:>+8} {100 * r['share']:>5.0f}%"
@@ -201,17 +245,22 @@ def main():
 
     misses = [r for r in scored if r["mode"] != r["predicted"]]
     print()
-    if misses:
-        for r in misses:
-            print(
-                f"MISS {r['builder']} -> {r['product']}: BuildTime {r['build_time']}, p {r['p']},"
-                f" model {r['predicted']}, corpus {r['mode']} over {r['n']} builds"
-                f" ({100 * r['share']:.0f}% at the mode)"
-            )
-        print(f"\n{len(misses)} of {len(scored)} scored pairs disagree with the model")
+    for r in misses:
+        print(
+            f"MISS {r['builder']} -> {r['product']}: BuildTime {r['build_time']}, p {r['p']},"
+            f" model {r['predicted']}, corpus {r['mode']} over {r['n']} builds"
+            f" ({100 * r['share']:.0f}% at the mode)"
+        )
+    if airborne and air_mode != -1:
+        print(f"MISS airborne builders pool at {air_mode:+} against the model, not -1")
+
+    failed = len(misses) + (1 if airborne and air_mode != -1 else 0)
+    if failed:
+        print(f"\n{failed} disagreement(s) with the model")
         return 1
 
-    print(f"all {len(scored)} scored pairs agree with the model")
+    print(f"all {len(scored)} scored pairs agree with the model", end="")
+    print(", and the airborne pool sits at -1 as it should" if airborne else "")
     return 0
 
 
