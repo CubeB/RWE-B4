@@ -386,14 +386,21 @@ shadow is taken from. The shadow pass tests, in order:
   draws map features (`0x421FD3`) — so it is "is a building or a feature".
   That takes the **projected** shadow: built once by `0x45A790` from the
   pieces that are both shown and cached, each corner at `x + y/4`,
-  `-z - y/4`, and cached on the unit until its bitmap is re-rendered. A
-  building below the water line casts none unless `[unit+0xA6]` is set;
+  `-z - y/4`, and cached on the unit until its bitmap is re-rendered. The
+  water test here (`0x4592D5`-`0x4592F1`) is skipped when `[unit+0xA6]`, the
+  unit's type index (§18), is non-zero -- so it is a test on the **Feature
+  Unit** only: a map feature whose ground (`0x485070`) lies below the sea
+  level byte casts none, and a real building is never tested;
 - anything else — every mobile unit — takes the **copied** shadow if the
   second option bit (bit 3) is set and it neither hovers nor floats
   (`def+0x241 & 0x81000`, canhover and floater: so hovercraft and ships have
   no shadow). The cached bitmap is copied (`0x45A470`), every opaque pixel
-  becomes index 0 (`0x4B96A0`), anything below the water line is cut away
-  (`0x4BA1B0`), and it goes down five pixels right at ground level (§100).
+  becomes index 0 (`0x4B96A0`), and it goes down five pixels right at ground
+  level (§100). The cut below the water line (`0x4BA1B0`, at
+  `sea - unitY + 0x32` against the height plane) is in the `0x45949D` block
+  only, the one taken when the bitmap carries a height plane; a finished
+  unit's bitmap has none (`0x437B50`, B4 #40), so a finished unit driving
+  through the shallows keeps its whole silhouette.
 
 **There is no build-progress test anywhere in it.** A nanoframe's cached
 bitmap is the whole model — the display's erasing happens on the copy — and
@@ -11181,6 +11188,17 @@ and brightens monotonically to 1.77x at row 31**, and it never darkens at any
 row. It is a lighten-only ramp, complementary to SHD's 0 to 1.807, and §99's
 interface brightening already uses it. So it is not a candidate for the shadow
 darkening.
+
+### Shadows on water: considered, and declined
+
+Upstream #25 asked for shadows to be cast on the water surface rather than the
+sea floor. That is not what the original does: a building's projection is
+drawn flat at the ground under it wherever that ground is, a finished unit's
+copy is not cut at the water line (above), and the only water test in either
+pass is the one on map features in §3, which casts nothing for a feature whose
+ground is below the sea level. RWE follows all three, as of B4 #9, and the
+request is declined rather than recorded in §88 or `compatibility.md`, since
+nothing here departs from the original.
 
 ---
 
