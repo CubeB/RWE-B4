@@ -1060,6 +1060,18 @@ namespace rwe
 
         // Reclaimed units vanish quietly: no wreck, no explosion.
         unit.markAsDeadNoCorpse();
+
+        // Death cause 5, and the one place the original checks who is doing it
+        // before moving a counter: 0x486899 tests the recorded killer against
+        // the victim's own owner and only then falls into the Losses increment.
+        // Recycling your own base is not a loss; having it eaten by an enemy
+        // builder is. (The original also rejects player 0xA, its neutral slot,
+        // which RWE has no equivalent of.)
+        if (reclaimer != unit.owner)
+        {
+            getPlayer(unit.owner).unitsLost += 1;
+        }
+
         events.push_back(UnitDiedEvent{targetId, unit.unitType, unit.position, UnitDiedEvent::DeathType::Deleted});
         return true;
     }
@@ -1279,8 +1291,10 @@ namespace rwe
             // TA kills the frame with `DamageUnit(self, self, 30000, cause 9)`,
             // and cause 9 is one of the three the death routine short-circuits:
             // no wreck, no `Killed` script, no explosion. The unit is simply
-            // taken off the board.
-            quietlyKillUnit(unitId);
+            // taken off the board -- and not counted, either: the dispatch at
+            // 0x48688C takes only causes 1 to 6, so nobody's Losses move for a
+            // frame that rotted away.
+            removeUnfinishedUnit(unitId);
         }
     }
 
@@ -3070,9 +3084,22 @@ namespace rwe
 
     void GameSimulation::quietlyKillUnit(UnitId unitId)
     {
+        quietlyKillUnit(unitId, true);
+    }
+
+    void GameSimulation::removeUnfinishedUnit(UnitId unitId)
+    {
+        quietlyKillUnit(unitId, false);
+    }
+
+    void GameSimulation::quietlyKillUnit(UnitId unitId, bool countAsLoss)
+    {
         auto& unit = getUnitState(unitId);
         unit.markAsDeadNoCorpse();
-        getPlayer(unit.owner).unitsLost += 1;
+        if (countAsLoss)
+        {
+            getPlayer(unit.owner).unitsLost += 1;
+        }
         releaseTransportLinks(unitId);
         // No explosion or wreck, but the scene still has to hear about it so
         // it drops the unit from the selection, hover state and GUI caches.
@@ -3415,13 +3442,15 @@ namespace rwe
         //             your own units was a way to farm the damage bonus of S:5
         //             and the reload bonus of S:3965; it is not.
         //
-        // The player-level tallies below are left alone deliberately. The
-        // original keeps four counters in a block at `player+0xFC` -- Kills,
-        // Losses, and a pair that go with the "Commanders Killed"/"Commanders
-        // Lost" strings -- and gates them from the death-cause jump table at
-        // 0x486E64, which is not decoded yet. See issue #51; changing them on a
-        // half-read of that table would be guessing at the end-game chart's
-        // numbers rather than matching them.
+        // The player-level tallies are gated the same way, and by the same two
+        // tests. The death-cause jump table at 0x486E64 is decoded now (issue
+        // #51): its weapon-kill entry raises the victim owner's Losses
+        // (`player+0xFE`) unconditionally, then raises the killer's Kills
+        // (`player+0xFC`) at 0x486906 behind exactly the pair above -- the
+        // victim must be finished and the killer must not be the victim's own
+        // owner. So a player's Kills column on the end-of-game chart counts
+        // neither friendly fire nor flattened nanoframes, and RWE's counted
+        // both.
         std::optional<PlayerId> killerOwner;
         if (attacker && *attacker != unitId)
         {
@@ -3432,8 +3461,8 @@ namespace rwe
                 if (!sameSide && !unit.isBeingBuilt(unitDefinition))
                 {
                     attackerUnit->get().kills += 1;
+                    getPlayer(attackerUnit->get().owner).unitsKilled += 1;
                 }
-                getPlayer(attackerUnit->get().owner).unitsKilled += 1;
                 killerOwner = attackerUnit->get().owner;
             }
         }
@@ -3476,6 +3505,27 @@ namespace rwe
                         deadState->corpseLevel = *level;
                     }
                 }
+            }
+        }
+
+        // An `isfeature` unit always leaves its wreck, at level 1, whatever its
+        // `Killed` ladder asked for. The original reaches this by forcing the
+        // death cause to 7 -- 0x41B9FE and 0x486167 both test bit 24 of
+        // `def+0x241`, which is `isfeature`, and write the cause onto the unit
+        // -- and the packer then short-circuits the level at 0x486525. Cause 7
+        // also clears `mayBurn` at 0x486D66, which has nothing to attach to
+        // here yet: RWE lights a wreck from a `firestarter` weapon rather than
+        // lighting a plume as the wreck spawns, so nothing would have burnt
+        // anyway. See TOTALA-EXE-WRECKS.md, "What each death cause is".
+        //
+        // Before the nanoframe rule below, deliberately: 0x486525 runs ahead of
+        // 0x4865D2, so a half-built fort still leaves nothing.
+        if (unitDefinition.isFeature)
+        {
+            if (auto deadState = std::get_if<UnitState::LifeStateDead>(&unit.lifeState); deadState != nullptr)
+            {
+                deadState->leaveCorpse = true;
+                deadState->corpseLevel = 1;
             }
         }
 
@@ -3617,8 +3667,12 @@ namespace rwe
                 // die quietly without a corpse.
                 // FIXME: units in TA that are not actively receiving build input
                 // die with an explosion, even though they leave no corpse.
-                // Note: under-construction kills are not credited to the attacker
-                // because the unit dies via quietlyKillUnit which has no firing path.
+                //
+                // This is still death cause 1, an ordinary weapon kill, so the
+                // owner takes the loss -- and the attacker is credited nothing,
+                // which used to be an accident of the code path and is now the
+                // rule: both the veterancy counter and the player's Kills sit
+                // behind the build-progress test at 0x4869A7. See §5.
                 quietlyKillUnit(unitId);
             }
             else

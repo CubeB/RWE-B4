@@ -6,37 +6,52 @@ which, and several say what the entry originally got wrong. The ranking it opens
 with is the ranking as first written, deliberately left alone so that the
 corrections stay legible next to the guesses that prompted them.
 
-Last revised 2026-09-15, and the shape of the file has changed again: **the
-whole of the ranked list below is now done except two entries.** What had been
-the top three -- the corpse level and its `featuredead` walk, aircraft leaving no
-wreck at all, and the exact `PALETTE.SHD` lookup -- have all landed, as have
-`AirToAir` and `maneuverleashlength`. Two subjects grew their own documents along
-the way: the shaded unit rasterizer in `TOTALA-EXE-SHADING.md` and wrecks in
-`TOTALA-EXE-WRECKS.md`.
+Last revised 2026-09-15 (twice that day), and the shape of the file has changed
+again: **the whole of the ranked list below is now done except one entry.** What
+had been the top three -- the corpse level and its `featuredead` walk, aircraft
+leaving no wreck at all, and the exact `PALETTE.SHD` lookup -- have all landed,
+as have `AirToAir` and `maneuverleashlength`. Two subjects grew their own
+documents along the way: the shaded unit rasterizer in `TOTALA-EXE-SHADING.md`
+and wrecks in `TOTALA-EXE-WRECKS.md`.
 
-Each of the remaining entries now has an issue on the fork: **#51** and **#52**.
-The third, the veterancy reload term, is **#50** and is closed -- see below.
+The one entry left has an issue on the fork: **#52**. The other two, the
+veterancy reload term and the death causes, are **#50** and **#51** and are both
+closed -- see below.
 
 ## What is left, ranked
 
-Two entries, and neither of them is "go and read the binary" either. Ranked by
-player-visible impact over effort, as before.
+One entry, and it is not "go and read the binary" either.
 
-1. **Death causes 4, 5, 7 and 9** are decoded as a set and not named
-   individually. Cause 7 both forces a wreck and suppresses the burning plume,
-   so naming it would settle what "a wreck that does not burn on land" actually
-   is. (`TOTALA-EXE-WRECKS.md` loose ends; fork issue #51.) **The jump table is
-   `0x486E64`**, found on 2026-09-15 while reading the kill-credit path next to
-   it: `0x48687C` takes the cause nibble as `[victim+0xA] >> 4`, rejects
-   anything outside 1..6 and dispatches through it. That table also gates the
-   player-level Kills and Losses counters the end-of-game chart displays (§5,
-   §104), so this entry is worth more than it looks.
-2. **The `"SELFREPAIR"` mission** pushed at `0x411ECE`. RWE's repair pads mend a
+1. **The `"SELFREPAIR"` mission** pushed at `0x411ECE`. RWE's repair pads mend a
    landed damaged aircraft now, but by nanolathing it with the pad's own build
    rate rather than by whatever that mission does. Worth reading before anyone
    claims the pads match. (Fork issue #52.)
 
 ## What was on that list, and where it went
+
+- **The death causes, named one at a time.** Closed 2026-09-15, fork issue #51.
+  The dispatch is `0x486E64`, reached from `0x48687C` on the cause nibble
+  `[victim+0xA] >> 4`, and the recorder is `0x489BB0(attacker, victim, damage,
+  cause, direction)` writing the cause to `unit+0xF5`. All eleven are named in
+  `TOTALA-EXE-WRECKS.md`, "What each death cause is". The one that mattered was
+  **cause 7**, which turns out not to be a situation at all but a unit type:
+  `0x41B9FE` and `0x486167` both test bit 24 of `def+0x241`, which is
+  `isfeature`. So "a wreck that does not burn on land" is the dragon's teeth and
+  the forts -- scenery that happens to be built -- and the wrecks document had
+  already found that same bit from the sinking side without noticing it was the
+  same bit. RWE forces the corpse at level 1 for those now, ahead of the
+  nanoframe rule as the original orders it (`sim/aircraftwreck.test.cpp`). The
+  burning half has nothing to attach to yet: RWE lights a wreck from a
+  `firestarter` weapon rather than lighting a plume as the corpse spawns.
+  **And the same read settled the end-game chart's numbers**, which #50 had
+  deliberately left alone. The player record is `[globals+0x1B63]` on a 331-byte
+  stride, which is what identifies the indexed increments: Losses
+  (`player+0xFE`) goes up on the victim's owner with no test in front of it,
+  Kills (`player+0xFC`, at `0x486906`) behind exactly the two that gate
+  veterancy, reclaim is the one handler that asks who did it, and cause 9 never
+  reaches the table. All ported; see §5. Left open: **cause 8** has three
+  packer call sites and no single meaning yet, and the neutral slot `0xA` has no
+  RWE equivalent.
 
 - **The veterancy reload term at `0x49E468`.** Closed 2026-09-15, fork issue
   #50, and it turned out this file was a week stale about it: the formula had

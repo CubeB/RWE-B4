@@ -760,17 +760,64 @@ does flattening a half-built nanoframe, whose build progress is not yet zero.
 `unit+0xFF` is the owner byte, the same one §8 checks a projectile's owner
 against. Tests in `sim/damage.test.cpp`.
 
-The **player-level** counters are a different question and are not settled.
-`0x4647FB` zeroes four words together at `player+0xFC`, `+0xFE`, `+0x104` and
-`+0x106`; `0x466215` reloads the first two from the lobby under the literal
-names `"Kills"` and `"Losses"` (`0x502BB8`, `0x502BB0`), which is what fixes
-their meaning, and §104's chart reads those two. But their increments are
-reached from the death-cause jump table at `0x486E64` -- `0x4868C1` raises
-Losses only when the recorded killer is neither player `0xA` nor the victim's
-own owner, while `0x486996` and `0x486A8C` raise `+0x106` under different
-conditions again -- and that table is not decoded. RWE's `unitsKilled` and
-`unitsLost` are therefore left counting every kill and every loss for now.
-See the third of the open priorities.
+### The player-level counters, and the death-cause dispatch that gates them
+
+Read out on 2026-09-15 (issue #51), and the answer changes what the end-of-game
+chart shows. `0x4647FB` zeroes four words together at `player+0xFC`, `+0xFE`,
+`+0x104` and `+0x106`; `0x466215` reloads the first two from the lobby under the
+literal names `"Kills"` and `"Losses"` (`0x502BB8`, `0x502BB0`), which is what
+fixes their meaning, and §104's chart reads those two. The other two go with the
+"Commanders Killed" / "Commanders Lost" strings, and nothing in the shipped
+interface displays them.
+
+Their increments hang off a jump table. `0x48687C` takes the cause nibble as
+`[pkt+0xA] >> 4`, **rejects anything outside 1 to 6 outright**, and dispatches
+through `0x486E64`:
+
+| Cause | Target | What it does |
+|---|---|---|
+| 1 weapon | `0x4868B3` | the counters, with no question about who fired |
+| 2 paralyser | `0x486A98` | nothing at all |
+| 3 self-destruct | `0x4869F5` | its own copy, behind an ally-matrix test |
+| 4 owner change | `0x486A98` | nothing at all |
+| 5 reclaim | `0x486899` | the same as 1, but only from another player |
+| 6 carrier died | `0x4868B3` | the same as 1 |
+
+The player record is `[globals+0x1B63]` with a stride of **331 bytes**, which is
+what lets the indexed increments and the pointer ones be read as the same
+fields: `0x486906` writes `globals + 331·killer + 0x1C5F`, and `0x1C5F − 0x1B63`
+is `0xFC`, Kills.
+
+So, in order:
+
+```
+4868c1  inc WORD [player+0xfe]          ; the VICTIM's owner: Losses, always
+4868ce  cmp cl,0xa                      ; the recorded killer, vs the neutral slot
+4868d3  fld [esi+0x104] ; fcomp 0.0     ; the victim must be FINISHED
+4868e6  cmp [esi+0xff],cl               ; and must not be the killer's own player
+486906  inc WORD [globals+331*cl+0x1c5f]; the KILLER's Kills
+```
+
+**Losses counts every death, friendly fire and self-inflicted alike** -- the
+increment has nothing standing in front of it -- while **Kills is gated by
+exactly the two tests that gate veterancy above**. The only handler that asks
+who did it is reclaim's: `0x486899` runs the killer-vs-owner test *before*
+falling into the Losses increment, so recycling your own base costs you nothing
+on the chart while having it eaten by an enemy builder does. And because the
+dispatch takes only 1 to 6, a nanoframe that rotted away or was taken back by
+its builder (cause 9) moves no counter at all, though one *shot* to pieces is
+cause 1 and does cost its owner a loss.
+
+The two commander columns come off a string compare at `0x48694B`: the dying
+unit's name (`def+0x20`) against the entry for its owner in a table of 562-byte
+records at `globals+0x37F5F`. On a match, the killer's `+0x104` and the victim's
+`+0x106` both go up.
+
+All of this is ported. `GameSimulation::killUnit` gates `unitsKilled` with the
+veterancy pair, `reclaimUnit` charges a loss only to a victim of somebody else,
+and `removeUnfinishedUnit` is the cause-9 removal that charges nobody anything.
+`sim/damage.test.cpp` and `sim/reclaim.test.cpp`. The neutral slot `0xA` has no
+RWE equivalent and is the one test not reproduced.
 
 Besides damage, more than five kills also earns a unit target leading
 (`0x48A324`), which RWE does not implement.

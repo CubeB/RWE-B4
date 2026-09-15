@@ -422,15 +422,39 @@ namespace rwe
             REQUIRE(sim.getUnitState(attackerId).kills == 0);
         }
 
-        SECTION("the player's own tally still counts every kill it lands")
+        SECTION("the player's Kills column is gated by the same two tests")
         {
-            // Deliberately unchanged: the original's player-level counters are
-            // gated from the death-cause table at 0x486E64, which is not
-            // decoded yet (issue #51). Pinned here so that work has to make a
-            // decision about it rather than move it by accident.
-            auto id = spawnDamageUnit(sim, "target", us, SimVector(0_ss, 0_ss, 0_ss), script);
-            sim.killUnit(id, attackerId);
+            // The death-cause table at 0x486E64 is decoded now (issue #51):
+            // the weapon entry raises the killer's `player+0xFC` at 0x486906
+            // behind exactly the pair above, so the end-of-game chart counts
+            // neither friendly fire nor flattened frames. This section used to
+            // pin the opposite, as a marker that the question was open.
+            auto friendly = spawnDamageUnit(sim, "target", us, SimVector(0_ss, 0_ss, 0_ss), script);
+            sim.killUnit(friendly, attackerId);
+            REQUIRE(sim.getPlayer(us).unitsKilled == 0);
+
+            auto frame = spawnDamageUnit(sim, "frame", them, SimVector(96_ss, 0_ss, 0_ss), script);
+            sim.killUnit(frame, attackerId);
+            REQUIRE(sim.getPlayer(us).unitsKilled == 0);
+
+            auto enemy = spawnDamageUnit(sim, "target", them, SimVector(192_ss, 0_ss, 0_ss), script);
+            sim.killUnit(enemy, attackerId);
             REQUIRE(sim.getPlayer(us).unitsKilled == 1);
+        }
+
+        SECTION("but the Losses column counts every death, friendly fire and all")
+        {
+            // The other half of the same entry, and it is not symmetric:
+            // 0x4868C1 raises the victim owner's `player+0xFE` with no tests in
+            // front of it at all. Only reclaim (cause 5) asks who did it, and
+            // only causes 1 to 6 reach the table.
+            auto friendly = spawnDamageUnit(sim, "target", us, SimVector(0_ss, 0_ss, 0_ss), script);
+            sim.killUnit(friendly, attackerId);
+            REQUIRE(sim.getPlayer(us).unitsLost == 1);
+
+            auto frame = spawnDamageUnit(sim, "frame", us, SimVector(96_ss, 0_ss, 0_ss), script);
+            sim.killUnit(frame, attackerId);
+            REQUIRE(sim.getPlayer(us).unitsLost == 2);
         }
     }
 }

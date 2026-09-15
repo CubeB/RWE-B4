@@ -219,7 +219,10 @@ of `TotalA.exe` instead of guessed at.
   water sinks: the corpse spawns at the dying unit's exact height and the
   water branch adds a fixed 0.175 units a tick of downward velocity, spent by
   a per-tick sweep. The exemption for `IsFeature=1` — the floating dragon's
-  teeth — is what shows the rule is deliberate.
+  teeth — is what shows the rule is deliberate. It also names all eleven
+  death causes, and the one that mattered is cause 7: `IsFeature=1` again,
+  read from the same bit, which is why such a unit always leaves the intact
+  wreck whatever its `Killed` ladder asked for.
 - `docs/TOTALA-EXE-MISSIONS.md` — how aircraft decide *where to go* when
   attacking: the mission name table and its handlers, the bomber attack run,
   the fighter strafing pass, the gunship standoff ring, and what `hoverattack`

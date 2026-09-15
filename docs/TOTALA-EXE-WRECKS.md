@@ -800,15 +800,126 @@ call stack; both are read, in that order.
 
 ---
 
+---
+
+## NN. What each death cause is
+
+Read out on 2026-09-15, from the call sites of the damage choke point
+`0x489BB0(attacker, victim, damage, cause, direction)` and from the two places
+that write `unit+0xF5` directly. The cause travels as the fourth argument, is
+recorded on the victim at `unit+0xF5` (§5), and ends up in the high nibble of
+`[pkt+0xA]` alongside the corpse level.
+
+| Cause | What it is | Where |
+|---|---|---|
+| 1 | A weapon hit | `0x499E35`, the blast path |
+| 2 | A paralyser | same path, `paralyzer` set |
+| 3 | Self-destruct | `0x402147` (the order) and `0x486F94` (the routine that wipes a player's units when a game ends) — attacker and victim are the same unit, 30000 damage |
+| 4 | **The unit changed owner** | `0x4886A4` and `0x4887D0`, both inside `0x488570(unit, newPlayer)` |
+| 5 | **Reclaimed** | `0x404981` and `0x414B8D`, both behind the reclaim predicate `0x489960` |
+| 6 | Its carrier died | `0x48680B`, which inherits cause 3 if the carrier self-destructed and uses 6 otherwise |
+| 7 | **Forced by the victim's own definition** | not a call site at all — see below |
+| 8 | — | three packer calls at `0x4859A8`, `0x486EB2`, `0x486EF8`, each gated on a non-zero unit type index |
+| 9 | **An unfinished unit removed** | `0x41BC49` (the build tick gives up on a frame) and `0x402701` (the builder takes its own frame back, refunding into `unit+0xD4`) |
+| 10 | A repair | `0x41BDC7`; `0x489BB0` short-circuits it into adding hit points |
+| 11 | — | `0x48AF32`; the one Return Fire refuses (§5) |
+
+**Cause 4 is a unit changing hands**, and the reason it needs a cause of its own
+is that the original implements an owner change as *destroy and replace*:
+`0x488570` copies the three weapon-slot bytes (`+0x1E`, `+0x3A`, `+0x56`) across
+to the new record and kills the old one with 30000 damage and no attacker. Its
+three callers are the capture mission (`0x4046C5`), the interface path that
+hands a unit to another player after checking the recipient is human or computer
+(`0x45577B`), and a sweep that walks every unit and transfers the ones whose
+type is in a category set (`0x493486`).
+
+**Cause 5 is reclaim.** Both sites have the same shape: a range test, the
+reclaim predicate, an accumulator on the order record that has to reach 15, and
+then damage taken from `order+0x36` applied to `order+0x16` before the
+accumulator is reset. A unit being reclaimed is whittled down rather than
+deleted, which is why it needs a cause that suppresses the wreck — otherwise the
+metal would be paid out twice.
+
+**Cause 9 is a nanoframe that never finished**, either because the build tick
+gave up on it or because its builder took it back.
+
+Those three are exactly the set that skips the `Killed` script and leaves corpse
+level 0, and now it is clear why: none of them is a death in the fiction. A
+captured unit is still standing, a reclaimed one has been carried away as metal,
+and a cancelled frame was never a unit.
+
+### And the same causes gate the end-of-game chart
+
+The cause is not only about wreckage. `0x48687C` unpacks the nibble again on the
+way out of the death routine and dispatches through a second table at
+`0x486E64`, which is what moves the player-level Kills and Losses counters
+§104's chart displays. Only causes 1 to 6 reach it: a nanoframe removed (9) or a
+repair (10) move nothing. The full read of that table is in `TOTALA-EXE.md` §5,
+including which of the two counters has tests in front of it and which does not,
+because it belongs beside the veterancy counter it shares them with.
+
+### Cause 7, and what is still open
+
+Cause 7 is not passed by any caller. It is *forced onto the victim* by two
+identical fragments, `0x41B9FE` and `0x486167`, which test **bit 24 of
+`def+0x241`** on the dying unit's own definition and, if it is set, write 7 to
+`unit+0xF5` and set bit 14 of `unit+0x110`:
+
+```
+mov edx,[esi+0x92]        ; the definition
+mov eax,[edx+0x241]       ; the packed flag word
+shr eax,0x18 ; test al,1  ; bit 24
+je  skip
+mov BYTE PTR [esi+0xf5],7
+or  ah,0x40               ; unit+0x110 bit 14
+```
+
+**And bit 24 of `def+0x241` is already named in this document: it is
+`IsFeature`.** The section on the corpse spawner identifies it from the other
+end — `0x48640A` tests the same bit to decide whether a wreck is exempt from
+sinking — and gives the parse site, `0x42C7B3`–`0x42C7CB`, reading the key
+string at `0x503B30`.
+
+So **cause 7 is "the thing that died was an `IsFeature=1` unit"**, and the three
+behaviours that hang off it are one behaviour:
+
+- it always leaves a wreck, at corpse level 1, whatever the `Killed` script
+  would have said (`0x486525`);
+- that wreck never burns (`0x486D66` sets `mayBurn` only when the cause is not
+  7);
+- and it does not sink (`0x48640A`).
+
+Which answers the question this document opened with. **"A wreck that does not
+burn on land" is not a situation at all — it is a unit type.** In the shipped
+data that is the Core Contingency's dragon's teeth and forts, `ARMFDRAG` and
+`CORFDRAG` above all: scenery that happens to be built. Every situational
+explanation that had been guessed at is ruled out.
+
+**Ported 2026-09-15**, the half of it there is anything to port. RWE's
+`GameSimulation::killUnit` forces `leaveCorpse` and `corpseLevel = 1` for an
+`isFeature` definition, placed deliberately **before** the nanoframe rule
+because `0x486525` runs ahead of `0x4865D2` — so a fort shot while it is still a
+frame leaves nothing, as in the original. `sim/aircraftwreck.test.cpp` assembles
+a two-instruction `Killed` that writes level 2 into its second parameter and
+checks that an ordinary unit with that script gets the `featuredead` form while
+scenery with the same script gets the intact wreck.
+
+The burning half is not ported and has nothing to attach to yet: RWE lights a
+wreck from a `firestarter` weapon striking it rather than lighting a plume as
+the corpse spawns, so there is no spawn-time `mayBurn` to clear. The sinking
+exemption was already in, from the other read.
+
 ## NN. Loose ends
 
 - **`unit+0xF7`**, the second term in the `Killed` severity, is still
   unidentified (§22 already flagged it). It matters here only because it feeds
   the corpse level, which decides whether a naval unit leaves anything at all.
-- **Death causes 4, 5, 7 and 9** are still decoded as a set and not named
-  individually. Cause 7 is the one that both forces a wreck and suppresses the
-  burning plume, so naming it would settle what "a wreck that does not burn on
-  land" actually is.
+- ~~**Death causes 4, 5, 7 and 9** are still decoded as a set and not named
+  individually.~~ **All four named 2026-09-15**; see "What each death cause is"
+  above, which names 3, 6 and 8 on the way past and closes this document's
+  opening question. Cause 7 turned out to be `IsFeature=1`, a bit this document
+  had already identified from the sinking side without noticing it was the same
+  one.
 - **`0x4658E0`**, the visibility test `nodrawundergray` gates on, is taken to be
   "is this cell currently seen rather than merely explored" from its use in the
   feature draw. *INFERRED*, not followed into.

@@ -4328,7 +4328,9 @@ namespace rwe
                 {
                     if (targetUnit.isBeingBuilt(targetUnitDefinition) && !targetUnit.isDead())
                     {
-                        sim->quietlyKillUnit(state.targetUnit->first);
+                        // Death cause 9: the builder takes its own frame back
+                        // (0x402701). Nobody's Losses move for it.
+                        sim->removeUnfinishedUnit(state.targetUnit->first);
                     }
                     state.targetUnit = std::nullopt;
                     return false;
@@ -4414,7 +4416,7 @@ namespace rwe
                 match(
                     state.status,
                     [&](const UnitCreationStatusDone& d) {
-                        sim->quietlyKillUnit(d.unitId);
+                        sim->removeUnfinishedUnit(d.unitId);
                     },
                     [&](const auto&) {
                         // do nothing
@@ -4425,7 +4427,7 @@ namespace rwe
             [&](const FactoryBehaviorStateBuilding& state) {
                 if (state.targetUnit)
                 {
-                    sim->quietlyKillUnit(state.targetUnit->first);
+                    sim->removeUnfinishedUnit(state.targetUnit->first);
                     unitInfo.state->cobEnvironment->createThread("StopBuilding");
                 }
                 sim->deactivateUnit(unitInfo.id);

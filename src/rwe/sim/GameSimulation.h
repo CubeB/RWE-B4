@@ -1189,7 +1189,27 @@ namespace rwe
          */
         void detonateProjectilesInBlast(std::optional<ProjectileId> source, const SimVector& position, SimScalar radius);
 
+        /**
+         * Take a unit off the board with no wreck, no explosion and no
+         * `Killed` script, counting it as a loss for its owner. This is a
+         * nanoframe shot to pieces, which the original records as an ordinary
+         * weapon death (cause 1) -- the owner's Losses go up, but the
+         * attacker's Kills do not, the build-progress test at 0x4869A7
+         * standing in front of that one.
+         */
         void quietlyKillUnit(UnitId unitId);
+
+        /**
+         * The same, for death cause 9: a nanoframe the build tick gave up on
+         * (0x41BC49) or one its builder took back (0x402701). Nobody's
+         * counters move at all -- the dispatch at 0x48688C accepts only causes
+         * 1 to 6 and rejects this one before reaching the table -- because a
+         * frame that was never finished was never a unit.
+         */
+        void removeUnfinishedUnit(UnitId unitId);
+
+        /** What the two above share; the flag is the only thing between them. */
+        void quietlyKillUnit(UnitId unitId, bool countAsLoss);
 
         Matrix4x<SimScalar> getUnitPieceLocalTransform(UnitId unitId, const std::string& pieceName) const;
 
