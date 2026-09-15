@@ -6,33 +6,50 @@ which, and several say what the entry originally got wrong. The ranking it opens
 with is the ranking as first written, deliberately left alone so that the
 corrections stay legible next to the guesses that prompted them.
 
-Last revised 2026-09-08, and the shape of the file has changed again: **the
-whole of the ranked list below is now done except three entries.** What had been
+Last revised 2026-09-15, and the shape of the file has changed again: **the
+whole of the ranked list below is now done except two entries.** What had been
 the top three -- the corpse level and its `featuredead` walk, aircraft leaving no
 wreck at all, and the exact `PALETTE.SHD` lookup -- have all landed, as have
 `AirToAir` and `maneuverleashlength`. Two subjects grew their own documents along
 the way: the shaded unit rasterizer in `TOTALA-EXE-SHADING.md` and wrecks in
 `TOTALA-EXE-WRECKS.md`.
 
+Each of the remaining entries now has an issue on the fork: **#51** and **#52**.
+The third, the veterancy reload term, is **#50** and is closed -- see below.
+
 ## What is left, ranked
 
-Three entries, and none of them is "go and read the binary" either. Ranked by
+Two entries, and neither of them is "go and read the binary" either. Ranked by
 player-visible impact over effort, as before.
 
-1. **The veterancy reload term** at `0x49E468`, which scales `reloadtime` by
-   both the firer's veterancy and its damage. Decoded, not ported; it belongs
-   with whatever picks up the rest of veterancy. (Entry 11.)
+1. **Death causes 4, 5, 7 and 9** are decoded as a set and not named
+   individually. Cause 7 both forces a wreck and suppresses the burning plume,
+   so naming it would settle what "a wreck that does not burn on land" actually
+   is. (`TOTALA-EXE-WRECKS.md` loose ends; fork issue #51.) **The jump table is
+   `0x486E64`**, found on 2026-09-15 while reading the kill-credit path next to
+   it: `0x48687C` takes the cause nibble as `[victim+0xA] >> 4`, rejects
+   anything outside 1..6 and dispatches through it. That table also gates the
+   player-level Kills and Losses counters the end-of-game chart displays (§5,
+   §104), so this entry is worth more than it looks.
 2. **The `"SELFREPAIR"` mission** pushed at `0x411ECE`. RWE's repair pads mend a
    landed damaged aircraft now, but by nanolathing it with the pad's own build
    rate rather than by whatever that mission does. Worth reading before anyone
-   claims the pads match.
-3. **Death causes 4, 5, 7 and 9** are decoded as a set and not named
-   individually. Cause 7 both forces a wreck and suppresses the burning plume,
-   so naming it would settle what "a wreck that does not burn on land" actually
-   is. (`TOTALA-EXE-WRECKS.md` loose ends.)
+   claims the pads match. (Fork issue #52.)
 
 ## What was on that list, and where it went
 
+- **The veterancy reload term at `0x49E468`.** Closed 2026-09-15, fork issue
+  #50, and it turned out this file was a week stale about it: the formula had
+  been ported some time earlier as `computeReloadTicks` in
+  `UnitBehaviorService_util`, with the commander's disintegrator worked by hand
+  in `sim/dgun.test.cpp`. Re-reading the branch confirmed the arithmetic to the
+  instruction. What the entry was really pointing at — "it belongs with whatever
+  picks up the rest of veterancy" — was the *input* to that formula rather than
+  the formula, and that had two faults: RWE credited a kill for friendly fire on
+  a comment asserting the original does too, and credited one for flattening an
+  unfinished nanoframe. The binary does neither (§5). Both fixed, both pinned in
+  `sim/damage.test.cpp`. Still not implemented, and still only a note: target
+  leading past five kills, `0x48A324`.
 - **The corpse level, and `unit+0xF7` with it.** Ported 2026-09-05. The severity
   is §22's formula with `unit+0xF7` taken as zero, since that term still has no
   known writer anywhere in the binary, and the level the script writes back is

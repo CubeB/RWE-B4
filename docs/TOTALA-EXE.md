@@ -740,9 +740,37 @@ one is not. The `0x7530` cut-out is why the D-gun ignores it.
 
 `unit+0xB8` really is a kill count: it is zeroed at unit creation (`0x485C76`)
 and incremented on the killer at `0x4869CA`, reached through the victim's
-last-damager pointer at `unit+0xF0` which `0x489DBA` records. Note the original
-**declines to credit a kill when the killer and the victim share a player**
-(`0x4869BA`–`0x4869C8`); RWE currently credits friendly fire.
+last-damager pointer at `unit+0xF0` which `0x489DBA` records.
+
+**Two tests stand in front of that increment, and RWE used to fail both.**
+Read out on 2026-09-15 and now ported:
+
+```
+4869a3  test ecx,ecx ; je                ; no known last damager -> nothing
+4869a7  fld [esi+0x104] ; fcomp 0.0      ; the victim must be FINISHED
+4869ba  dl = [esi+0xff]                  ; the victim's own owner
+4869c0  al = [esi+0xf4]                  ; the player recorded with the damager
+4869c6  cmp dl,al ; je                   ; the same player -> nothing
+4869ca  inc WORD [ecx+0xb8]              ; otherwise, one kill
+```
+
+So **friendly fire earns no veterancy at all** -- shooting your own units is not
+a way to farm the damage bonus above or the reload bonus of §21 -- and neither
+does flattening a half-built nanoframe, whose build progress is not yet zero.
+`unit+0xFF` is the owner byte, the same one §8 checks a projectile's owner
+against. Tests in `sim/damage.test.cpp`.
+
+The **player-level** counters are a different question and are not settled.
+`0x4647FB` zeroes four words together at `player+0xFC`, `+0xFE`, `+0x104` and
+`+0x106`; `0x466215` reloads the first two from the lobby under the literal
+names `"Kills"` and `"Losses"` (`0x502BB8`, `0x502BB0`), which is what fixes
+their meaning, and §104's chart reads those two. But their increments are
+reached from the death-cause jump table at `0x486E64` -- `0x4868C1` raises
+Losses only when the recorded killer is neither player `0xA` nor the victim's
+own owner, while `0x486996` and `0x486A8C` raise `+0x106` under different
+conditions again -- and that table is not decoded. RWE's `unitsKilled` and
+`unitsLost` are therefore left counting every kill and every loss for now.
+See the third of the open priorities.
 
 Besides damage, more than five kills also earns a unit target leading
 (`0x48A324`), which RWE does not implement.

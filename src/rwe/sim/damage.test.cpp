@@ -80,6 +80,14 @@ namespace rwe
             return sim.tryAddUnit(std::move(unit)).value();
         }
 
+        /** A unit type nothing can finish, so a spawned one is always a nanoframe. */
+        UnitDefinition makeUnfinishableDef(unsigned int hitPoints)
+        {
+            auto d = makeTargetDef(hitPoints);
+            d.buildTime = 100u;
+            return d;
+        }
+
         Projectile makeBlast(PlayerId owner, const SimVector& position, unsigned int damage, SimScalar radius, SimScalar edgeEffectiveness)
         {
             Projectile p{};
@@ -364,6 +372,65 @@ namespace rwe
             sim.getUnitState(id).kills = 25;
             sim.applyDamage(id, 1000, attackerId);
             REQUIRE(damageTaken(sim, id) == 520);
+        }
+    }
+
+    TEST_CASE("what actually earns a unit its veterancy", "[damage]")
+    {
+        // Two tests stand in front of the increment at 0x4869CA, and RWE used
+        // to fail both. A kill counts only if the victim was finished
+        // (0x4869A7 compares its build progress against zero) and only if the
+        // attacker's player differs from the victim's owner (0x4869BA against
+        // the owner byte at victim+0xFF) -- so friendly fire buys nothing, and
+        // neither does flattening a half-built nanoframe.
+        auto script = makeDamageScript();
+        GameSimulation sim(makeDamageTerrain(64, 64), 0u, 0, 0);
+        auto us = addDamagePlayer(sim, "us");
+        auto them = addDamagePlayer(sim, "them");
+        sim.unitDefinitions["target"] = makeTargetDef(100);
+        sim.unitDefinitions["frame"] = makeUnfinishableDef(100);
+        registerDamageModel(sim, "model");
+
+        auto attackerId = spawnDamageUnit(sim, "target", us, SimVector(32_ss, 0_ss, 32_ss), script);
+
+        SECTION("killing an enemy earns one")
+        {
+            auto id = spawnDamageUnit(sim, "target", them, SimVector(0_ss, 0_ss, 0_ss), script);
+            sim.killUnit(id, attackerId);
+            REQUIRE(sim.getUnitState(attackerId).kills == 1);
+        }
+
+        SECTION("killing one of your own earns nothing")
+        {
+            auto id = spawnDamageUnit(sim, "target", us, SimVector(0_ss, 0_ss, 0_ss), script);
+            sim.killUnit(id, attackerId);
+            REQUIRE(sim.getUnitState(attackerId).kills == 0);
+        }
+
+        SECTION("flattening an enemy nanoframe earns nothing")
+        {
+            auto id = spawnDamageUnit(sim, "frame", them, SimVector(0_ss, 0_ss, 0_ss), script);
+            REQUIRE(sim.getUnitState(id).isBeingBuilt(sim.unitDefinitions.at("frame")));
+            sim.killUnit(id, attackerId);
+            REQUIRE(sim.getUnitState(attackerId).kills == 0);
+        }
+
+        SECTION("a unit that dies with nobody to blame earns nobody anything")
+        {
+            auto id = spawnDamageUnit(sim, "target", them, SimVector(0_ss, 0_ss, 0_ss), script);
+            sim.killUnit(id, std::nullopt);
+            REQUIRE(sim.getUnitState(attackerId).kills == 0);
+        }
+
+        SECTION("the player's own tally still counts every kill it lands")
+        {
+            // Deliberately unchanged: the original's player-level counters are
+            // gated from the death-cause table at 0x486E64, which is not
+            // decoded yet (issue #51). Pinned here so that work has to make a
+            // decision about it rather than move it by accident.
+            auto id = spawnDamageUnit(sim, "target", us, SimVector(0_ss, 0_ss, 0_ss), script);
+            sim.killUnit(id, attackerId);
+            REQUIRE(sim.getPlayer(us).unitsKilled == 1);
         }
     }
 }

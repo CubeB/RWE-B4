@@ -3397,17 +3397,42 @@ namespace rwe
         getPlayer(unit.owner).unitsLost += 1;
         releaseTransportLinks(unitId, attacker);
 
-        // Credit the kill to the attacker, if any.
-        // Match TA behavior: friendly-fire kills count.
-        // Skip if the attacker is dead or no longer exists, and never
-        // credit a unit for killing itself (suicide / explodeAs).
+        // Credit the kill to the attacker, if any. Skip if the attacker is
+        // dead or no longer exists, and never credit a unit for killing itself
+        // (suicide / explodeAs).
+        //
+        // The veterancy count is the original's `unit+0xB8`, incremented at
+        // 0x4869CA, and it is fussier than RWE used to be about what earns it.
+        // Two tests stand in front of that increment and this used to fail
+        // both, on a comment that claimed the opposite of what the binary does:
+        //
+        //   0x4869A7  the victim's build progress must be zero -- an
+        //             unfinished nanoframe is worth nothing to whoever
+        //             flattens it;
+        //   0x4869BA  the attacker's recorded player (`victim+0xF4`) must
+        //             differ from the victim's own owner (`victim+0xFF`), so
+        //             **friendly fire earns no veterancy at all**. Shooting
+        //             your own units was a way to farm the damage bonus of S:5
+        //             and the reload bonus of S:3965; it is not.
+        //
+        // The player-level tallies below are left alone deliberately. The
+        // original keeps four counters in a block at `player+0xFC` -- Kills,
+        // Losses, and a pair that go with the "Commanders Killed"/"Commanders
+        // Lost" strings -- and gates them from the death-cause jump table at
+        // 0x486E64, which is not decoded yet. See issue #51; changing them on a
+        // half-read of that table would be guessing at the end-game chart's
+        // numbers rather than matching them.
         std::optional<PlayerId> killerOwner;
         if (attacker && *attacker != unitId)
         {
             auto attackerUnit = tryGetUnitState(*attacker);
             if (attackerUnit && attackerUnit->get().isAlive())
             {
-                attackerUnit->get().kills += 1;
+                auto sameSide = attackerUnit->get().owner == unit.owner;
+                if (!sameSide && !unit.isBeingBuilt(unitDefinition))
+                {
+                    attackerUnit->get().kills += 1;
+                }
                 getPlayer(attackerUnit->get().owner).unitsKilled += 1;
                 killerOwner = attackerUnit->get().owner;
             }
