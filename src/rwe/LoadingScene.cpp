@@ -472,6 +472,8 @@ namespace rwe
         sounds.okToBuild = lookUpSound("OKTOBUILD");
         sounds.notOkToBuild = lookUpSound("NOTOKTOBUILD");
         sounds.selectMultipleUnits = lookUpSound("SelectMultipleUnits");
+        sounds.panel = lookUpSound("Panel");
+        sounds.options = lookUpSound("Options");
 
         auto consoleFont = sceneContext.textureService->getFont("fonts/CONSOLE.FNT");
         // The original loads exactly two in-game fonts (0x42A320): COMIX for

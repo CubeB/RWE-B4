@@ -342,6 +342,7 @@ namespace rwe
         }
 
         updateMusic();
+        updatePanelSlide();
 
         // Pause halts simulation tick dispatch by not advancing the
         // scaled-time accumulator. Speed scales the accumulator using
@@ -415,7 +416,7 @@ namespace rwe
                 // convert that to the world, then set the camera's position to there
                 // (clamped to map bounds)
 
-                auto minimapToWorld = minimapToWorldMatrix(simulation.terrain, minimapRect);
+                auto minimapToWorld = minimapToWorldMatrix(simulation.terrain, slidMinimapRect());
                 auto mousePos = getMousePosition();
                 auto worldPos = minimapToWorld * Vector3f(static_cast<float>(mousePos.x) + 0.5f, static_cast<float>(mousePos.y) + 0.5, 0.0f);
 

@@ -528,15 +528,16 @@ namespace rwe
 
     void GameScene::renderMinimap()
     {
+        auto minimapDrawRect = slidMinimapRect();
         // draw minimap
-        chromeUiRenderService.drawSpriteAbs(minimapRect, *minimap);
+        chromeUiRenderService.drawSpriteAbs(minimapDrawRect, *minimap);
         if (fogSprite)
         {
-            chromeUiRenderService.drawSpriteAbs(minimapRect, *fogSprite);
+            chromeUiRenderService.drawSpriteAbs(minimapDrawRect, *fogSprite);
         }
 
         auto cameraInverse = computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
-        auto worldToMinimap = worldToMinimapMatrix(simulation.terrain, minimapRect);
+        auto worldToMinimap = worldToMinimapMatrix(simulation.terrain, minimapDrawRect);
 
         // draw minimap dots
         for (const auto& [unitId, unit] : simulation.units)
@@ -743,7 +744,7 @@ namespace rwe
                 }
 
                 chromeUiRenderService.drawLines(
-                    buildMinimapRing(Vector2f(centre.x, centre.y), radius, minimapRect, false, 0),
+                    buildMinimapRing(Vector2f(centre.x, centre.y), radius, slidMinimapRect(), false, 0),
                     color);
             }
         }
@@ -804,7 +805,7 @@ namespace rwe
             auto parity = dashed && ((sceneTime.value / minimapBlinkTicks) % 2 == 1) ? 1 : 0;
 
             chromeUiRenderService.drawLines(
-                buildMinimapRing(Vector2f(centre.x, centre.y), radius, minimapRect, dashed, parity),
+                buildMinimapRing(Vector2f(centre.x, centre.y), radius, slidMinimapRect(), dashed, parity),
                 Color(255, 255, 255));
         }
     }

@@ -68,6 +68,13 @@ namespace rwe
         int getX() { return posX; }
         int getY() { return posY; }
 
+        /** Moves the component; a panel's children move with it, drawn and hit-tested alike. */
+        void setPosition(int x, int y)
+        {
+            posX = x;
+            posY = y;
+        }
+
         virtual void mouseDown(MouseButtonEvent /*event*/) {}
 
         virtual void mouseUp(MouseButtonEvent /*event*/) {}

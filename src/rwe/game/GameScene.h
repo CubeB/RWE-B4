@@ -298,6 +298,22 @@ namespace rwe
         bool leftShiftDown{false};
         bool rightShiftDown{false};
 
+        /**
+         * The side panel's slide, 0 with the panel in place and
+         * PanelSlideExtent with it slid off the left edge. F4 latches it
+         * away; holding Space slides it away while the key is down and the
+         * cursor is not on the panel itself. The original's updater
+         * (0x4948E0, TOTALA-EXE.md "the panel-slide updater") moves it a
+         * quarter of the remaining distance a frame and never less than a
+         * pixel, plays the Panel sound as it leaves an end and Options as it
+         * arrives at one, and 125 is the panel's width less its border.
+         * Presentation only: the world viewport grows under it.
+         */
+        static constexpr int PanelSlideExtent = 125;
+        int panelSlide{0};
+        bool panelSlideLatched{false};
+        bool spaceDown{false};
+
         struct CameraControlStateFree
         {
         };
@@ -844,6 +860,11 @@ namespace rwe
 
         void addBattlePoints(int points);
         void updateMusic();
+
+        /** Steps the side panel's slide one frame; see panelSlide. */
+        void updatePanelSlide();
+        /** The minimap's rectangle where it is drawn this frame, slid with the panel. */
+        Rectangle2f slidMinimapRect() const;
 
         /** What size the world render textures were made at, so a window resize remakes them. */
         std::pair<unsigned int, unsigned int> worldRenderTextureSize{0, 0};

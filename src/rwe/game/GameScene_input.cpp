@@ -113,6 +113,19 @@ namespace rwe
         {
             showDebugWindow = !showDebugWindow;
         }
+        else if (keysym.key == SDLK_F4)
+        {
+            // Toggles bit 7 of the display-options word (0x49639D), the one
+            // bit of it with no registry name: the side panel slides away
+            // and stays away until the next press. See panelSlide.
+            panelSlideLatched = !panelSlideLatched;
+        }
+        else if (keysym.key == SDLK_SPACE)
+        {
+            // Polled, not dispatched, in the original (0x494942): while it
+            // is held the panel slides away, and back when it is let go.
+            spaceDown = true;
+        }
         else if (keysym.key == SDLK_F1)
         {
             helpVisible = !helpVisible;
@@ -425,6 +438,70 @@ namespace rwe
         {
             rightShiftDown = false;
         }
+        else if (keysym.key == SDLK_SPACE)
+        {
+            spaceDown = false;
+        }
+    }
+
+    void GameScene::updatePanelSlide()
+    {
+        // 0x4948E0. With the F4 bit set the position runs to the extent;
+        // with it clear it runs to zero, unless Space is held and the cursor
+        // is not on the panel's own gadget, which runs it to the extent
+        // again. Each frame moves a quarter of what is left, never less
+        // than a pixel, so the panel starts fast and eases in.
+        auto mouse = getMousePosition();
+        auto overPanel = mouse.x >= 0 && mouse.x < GuiSizeLeft - panelSlide;
+        auto wantHidden = panelSlideLatched || (spaceDown && !overPanel);
+
+        auto before = panelSlide;
+        if (wantHidden && panelSlide < PanelSlideExtent)
+        {
+            if (panelSlide == 0 && sounds.panel)
+            {
+                playUiSound(*sounds.panel);
+            }
+            panelSlide += std::max(1, (PanelSlideExtent - panelSlide) / 4);
+            if (panelSlide >= PanelSlideExtent)
+            {
+                panelSlide = PanelSlideExtent;
+                if (sounds.options)
+                {
+                    playUiSound(*sounds.options);
+                }
+            }
+        }
+        else if (!wantHidden && panelSlide > 0)
+        {
+            if (panelSlide == PanelSlideExtent && sounds.panel)
+            {
+                playUiSound(*sounds.panel);
+            }
+            panelSlide -= std::max(1, panelSlide / 4);
+            if (panelSlide <= 0)
+            {
+                panelSlide = 0;
+                if (sounds.options)
+                {
+                    playUiSound(*sounds.options);
+                }
+            }
+        }
+
+        if (panelSlide != before && guiVisible)
+        {
+            worldViewport.setInset(GuiSizeLeft - panelSlide, GuiSizeTop, GuiSizeRight, GuiSizeBottom);
+        }
+        if (currentPanel)
+        {
+            currentPanel->setPosition(-panelSlide, currentPanel->getY());
+        }
+    }
+
+    Rectangle2f GameScene::slidMinimapRect() const
+    {
+        return Rectangle2f::fromTopLeft(minimapRect.left() - static_cast<float>(panelSlide), minimapRect.top(), minimapRect.width(), minimapRect.height());
     }
 
     void GameScene::onMouseDown(MouseButtonEvent event)

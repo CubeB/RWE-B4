@@ -106,7 +106,7 @@ namespace rwe
     bool GameScene::isCursorOverMinimap() const
     {
         auto mousePos = getMousePosition();
-        return minimapRect.contains(mousePos.x, mousePos.y);
+        return slidMinimapRect().contains(mousePos.x, mousePos.y);
     }
 
     bool GameScene::isCursorOverWorld() const
