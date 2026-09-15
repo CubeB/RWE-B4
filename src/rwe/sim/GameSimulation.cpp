@@ -2873,6 +2873,26 @@ namespace rwe
         return unit.addResourceDelta(apparentEnergy, apparentMetal, actualEnergy, actualMetal);
     }
 
+    bool GameSimulation::addEnergyRequest(const UnitId& unitId, const Energy& amount)
+    {
+        auto& unit = getUnitState(unitId);
+        auto& player = getPlayer(unit.owner);
+
+        // 0x401180, in its own order: the demand goes onto the block before
+        // the answer is worked out, so a refused request still shows up in the
+        // resource bars as something the player wanted and did not get.
+        player.recordDesire(-amount);
+        unit.addEnergyDelta(-amount);
+
+        if (unit.energyDebt > Energy(0))
+        {
+            return false;
+        }
+
+        unit.energyRequestBuffer += amount;
+        return true;
+    }
+
     bool GameSimulation::trySetYardOpen(const UnitId& unitId, bool open)
     {
         auto& unit = getUnitState(unitId);

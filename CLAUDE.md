@@ -172,8 +172,10 @@ of `TotalA.exe` instead of guessed at.
   order (§85), what makes a patrolling unit leave its route (§86), the
   pathfinder and its scheduler (§87), what the D-gun's projectile does once it
   has left the barrel (§92), why an abandoned nanoframe rots away (§93), and
-  which missions send a damaged aircraft to a repair pad and what the pad does
-  when it gets there (§94), what a feature contributes to movement — the
+  which missions send a damaged aircraft to a repair pad, what the pad does
+  when it gets there, and the repair tick every repairer in the game shares --
+  one hit point and one energy per tick, clamped from *above*, so repair scales
+  with the number of builders and not with their worker time (§94), what a feature contributes to movement — the
   map square, the passability class, and why a hovercraft cannot cross a
   sunken wreck (§95) — where capture progress is kept and what sets its clock
   (§96), what `autoreclaimable` actually gates and which sound a reclaim
@@ -236,8 +238,9 @@ of `TotalA.exe` instead of guessed at.
   interface features, listed there and in the roadmap.
 - `docs/REVERSE-ENGINEERING-PRIORITIES.md` — what is worth reading out of the
   binary next, ranked, with the evidence that each is a real gap and a string
-  or offset to pivot on. Most of it is now done; the head of the file says
-  what is left.
+  or offset to pivot on. **The ranked list is empty as of 2026-09-15** -- every
+  entry has been read or refuted, and the file is now a record of what each
+  turned into and what it got wrong. Append the next one there.
 - `tools/exe/` — the probe scripts that produced them, and the method.
   `tools/exe/shading/` holds the palette work, including `shdgen.py`, which
   regenerates the shipped `PALETTE.SHD` byte-for-byte and is what pins its

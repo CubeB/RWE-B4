@@ -20,7 +20,12 @@ namespace rwe
             return MapTerrain(std::move(heights), 0_ss);
         }
 
-        /** Never short of metal, so a repair can only be limited by worker time. */
+        /**
+         * Never short of anything, so a repair can only be limited by the
+         * rules under test. The storage has to come from a *unit* -- the
+         * per-second pass rebuilds `maxEnergy` from what is standing and then
+         * clamps the stockpile to it -- so the builder below carries it.
+         */
         PlayerId addWellStockedPlayer(GameSimulation& sim)
         {
             GamePlayerInfo p{
@@ -51,6 +56,11 @@ namespace rwe
             d.maxHitPoints = 100;
             d.buildTime = 0u;
             d.buildDistance = 100_ss;
+            // Somewhere for the player's stockpile to live; see
+            // addWellStockedPlayer. Repairing costs energy now, and without
+            // this the bank is emptied by the storage clamp after one second.
+            d.energyStorage = Energy(10000.0f);
+            d.metalStorage = Metal(10000.0f);
             d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
             return d;
         }
@@ -115,23 +125,99 @@ namespace rwe
         auto builderId = addBuilderUnit(sim, player, solarPosition + SimVector(40_ss, 0_ss, 0_ss), script);
         sim.getUnitState(builderId).orders.push_back(RepairOrder(solarId));
 
-        // Health per tick = maxHitPoints * workerTimePerTick / buildTime = 100 * 30 / 150 = 20,
-        // so 10 -> 100 takes five repairing ticks plus one to deploy the arm.
+        // One hit point a tick, whatever the worker time and whatever is
+        // being mended: 0x41BD87 caps it at one (§94). The first tick raises
+        // the arm and the second is the first that mends, so 10 -> 100 is one
+        // deploying tick and ninety repairing ones.
         sim.tick();
         sim.tick();
-        REQUIRE(sim.getUnitState(solarId).hitPoints == 30u);
+        REQUIRE(sim.getUnitState(solarId).hitPoints == 11u);
         REQUIRE(std::holds_alternative<UnitBehaviorStateBuilding>(sim.getUnitState(builderId).behaviourState));
 
-        tickUntil(sim, 20, [&]() { return sim.getUnitState(builderId).orders.empty(); });
+        tickUntil(sim, 200, [&]() { return sim.getUnitState(builderId).orders.empty(); });
 
         REQUIRE(sim.getUnitState(solarId).hitPoints == 100u);
         const auto& builder = sim.getUnitState(builderId);
         REQUIRE(builder.orders.empty());
         REQUIRE(std::holds_alternative<UnitBehaviorStateIdle>(builder.behaviourState));
 
-        // Repairing is free.
+        // And it is not free: one energy a tick, also capped, out of the
+        // repairer's own block (0x41BDB7). Metal is never asked for -- the
+        // request is the single-resource 0x401180, not the two-resource
+        // 0x4011C0 the build path uses.
         REQUIRE(builder.metalRequestBuffer.value == 0.0f);
-        REQUIRE(builder.energyRequestBuffer.value == 0.0f);
+        REQUIRE(builder.energyRequestBuffer.value > 0.0f);
+    }
+
+    TEST_CASE("the repair rate is one hit point a tick however fast the worker", "[repair]")
+    {
+        // The clamp at 0x41BD87 is an upper bound, and RWE used to have a
+        // lower one, so a builder mended a cheap high-health thing -- a
+        // dragon's tooth, 3500 points on a buildtime of 520 -- at forty hit
+        // points a tick. Repair scales with the number of repairers, not with
+        // their WorkerTime.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addWellStockedPlayer(sim);
+
+        auto wallDef = makeSolarDef();
+        wallDef.maxHitPoints = 3500u;
+        wallDef.buildTime = 520u;
+        sim.unitDefinitions["wall"] = wallDef;
+
+        auto wallPosition = SimVector(200_ss, 0_ss, 200_ss);
+        auto wallId = addUndamagedUnitOfType(sim, "wall", player, wallPosition, script);
+        sim.getUnitState(wallId).hitPoints = 1000u;
+
+        // WorkerTime 300 in the FBI, the fastest anything in the shipped data
+        // has; ten units of work a tick.
+        sim.unitDefinitions["builder"] = makeBuilderDef(10u);
+        auto builderId = addUndamagedUnitOfType(sim, "builder", player, wallPosition + SimVector(40_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(builderId).inBuildStance = true;
+        sim.getUnitState(builderId).orders.push_back(RepairOrder(wallId));
+
+        for (int i = 0; i < 11; ++i)
+        {
+            sim.tick();
+        }
+
+        // One deploying tick and ten mending ones.
+        REQUIRE(sim.getUnitState(wallId).hitPoints == 1010u);
+    }
+
+    TEST_CASE("a builder in energy debt repairs nothing", "[repair]")
+    {
+        // 0x41BDB7 asks and 0x41BDBC does nothing at all if it is refused, so
+        // a stalled player's builders stand with their arms up and mend
+        // nothing. The request is still booked, which is what puts it in the
+        // resource bars.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addWellStockedPlayer(sim);
+        sim.unitDefinitions["solar"] = makeSolarDef();
+
+        auto solarPosition = SimVector(200_ss, 0_ss, 200_ss);
+        auto solarId = addUndamagedUnitOfType(sim, "solar", player, solarPosition, script);
+        sim.getUnitState(solarId).hitPoints = 10;
+
+        auto builderId = addBuilderUnit(sim, player, solarPosition + SimVector(40_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(builderId).orders.push_back(RepairOrder(solarId));
+        sim.getUnitState(builderId).energyDebt = Energy(100.0f);
+
+        for (int i = 0; i < 20; ++i)
+        {
+            sim.tick();
+        }
+
+        REQUIRE(sim.getUnitState(solarId).hitPoints == 10u);
+        REQUIRE(sim.getUnitState(builderId).energyRequestBuffer.value == 0.0f);
+
+        // Metal debt on its own does not stop it, because the request only
+        // ever consults the energy side.
+        sim.getUnitState(builderId).energyDebt = Energy(0.0f);
+        sim.getUnitState(builderId).metalDebt = Metal(100.0f);
+        sim.tick();
+        REQUIRE(sim.getUnitState(solarId).hitPoints == 11u);
     }
 
     TEST_CASE("a repair order on an unfinished unit completes its construction", "[repair]")

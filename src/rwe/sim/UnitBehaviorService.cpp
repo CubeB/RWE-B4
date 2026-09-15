@@ -286,11 +286,23 @@ namespace rwe
             // else, so a damaged aircraft that flies to a pad is actually
             // repaired rather than merely parked. Ordered work comes first: a
             // pad told to assist a factory does that instead.
+            auto padIsMending = false;
             if (unitInfo.state->orders.empty() && unitIsAnUsableAirBase(*unitInfo.state, *unitInfo.definition))
             {
                 if (auto patient = findAircraftToRepairOnPad(*sim, unitInfo))
                 {
-                    repairExistingUnit(unitInfo, *patient);
+                    padIsMending = true;
+                    // Straight to the arm, not through repairExistingUnit:
+                    // the reach has already been decided by the search, which
+                    // uses the larger of BuildDistance and half the pad's own
+                    // footprint. repairExistingUnit re-tests with BuildDistance
+                    // alone -- ARMASP's is 6, against a four-by-four footprint
+                    // 64 world units across -- so it refused every patient its
+                    // own search had just found and sent an immobile pad off to
+                    // "navigate" towards an aircraft parked in its middle. The
+                    // pads have never mended anything, and the end-to-end test
+                    // that would have shown it did not exist until now.
+                    deployRepairArm(unitInfo, *patient);
                 }
             }
 
@@ -414,8 +426,14 @@ namespace rwe
                     });
                 }
             }
-            else
+            else if (!padIsMending)
             {
+                // ...and a pad in the middle of mending something is not
+                // idle. This reset runs after the repair block above, so
+                // without the guard it wiped the building state the pad had
+                // just entered -- and told the script to stow the arm -- every
+                // single tick, which is the other half of why the pads never
+                // actually mended anything.
                 changeState(*unitInfo.state, UnitBehaviorStateIdle());
             }
 
@@ -5052,11 +5070,46 @@ namespace rwe
 
                 buildingState.nanoParticleOrigin = getNanoPoint(unitInfo.id);
 
-                // Repair at the same rate the unit would be built: full health
-                // takes buildTime worth of worker time. Repairing costs nothing,
-                // as in TA.
-                auto buildTime = std::max(1u, targetUnitDefinition.buildTime);
-                auto healthPerTick = std::max(1u, (targetUnitDefinition.maxHitPoints * unitInfo.definition->workerTimePerTick) / buildTime);
+                // The repair tick, 0x41BD10 -- the one routine every repairer
+                // in the game goes through: the two ground Repair missions,
+                // VTOL_RepairUnit, and the SELFREPAIR a landing aircraft is
+                // handed by VTOL_Landing (issue #52, §94). It works out two
+                // numbers and then throws most of them away:
+                //
+                //   work   = WorkerTime / 30                 (integer)
+                //   hp     = trunc((maxdamage       * work - 1) / buildtime + 1)
+                //   energy = trunc((buildcostenergy * work - 1) / buildtime + 1)
+                //   hp = min(hp, 1)       0x41BD87
+                //   energy = min(energy, 1)  0x41BD97
+                //
+                // Both clamps are *upper* bounds, and that is the whole of the
+                // behaviour. Since the expression reaches 1 whenever the
+                // product does, it collapses to: a repairer with any worker
+                // time at all mends exactly one hit point a tick and pays
+                // exactly one energy for it, whatever it is mending and
+                // however fast a worker it is; one with none mends nothing.
+                // Repair scales with the number of repairers, not with their
+                // WorkerTime, and nothing in the shipped data has a WorkerTime
+                // between 1 and 29, so the second case is unreachable there.
+                //
+                // RWE had `max` where the original has `min`, which let a
+                // construction vehicle mend a dragon's tooth -- 3500 hit
+                // points on a buildtime of 520 -- at forty hit points a tick
+                // instead of one. A fifth of all repairer/target pairs in the
+                // shipped data diverged.
+                auto work = unitInfo.definition->workerTimePerTick;
+                auto healthPerTick = targetUnitDefinition.maxHitPoints * work >= 1u ? 1u : 0u;
+                auto energyPerTick = Energy(targetUnitDefinition.buildCostEnergy.value * static_cast<float>(work) >= 1.0f ? 1.0f : 0.0f);
+
+                // And it is not free, which the comment this replaces claimed:
+                // 0x41BDB7 asks the repairer's own economy block for the
+                // energy and 0x41BDBC does nothing at all if it is turned
+                // down. So a player in energy debt cannot repair.
+                if (!sim->addEnergyRequest(unitInfo.id, energyPerTick))
+                {
+                    return false;
+                }
+
                 targetUnit.hitPoints = std::min(targetUnitDefinition.maxHitPoints, targetUnit.hitPoints + healthPerTick);
 
                 if (targetUnit.hitPoints >= targetUnitDefinition.maxHitPoints)

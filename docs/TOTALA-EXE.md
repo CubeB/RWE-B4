@@ -9823,67 +9823,134 @@ this:
 which works because patrol is one of the missions that carries the test, and
 standing still is not.
 
-### A pad is taken from the moment someone sets out for it
+### `SELFREPAIR`, and the repair tick every repairer in the game shares
 
-VTOL_Landing re-tests its pad before it commits, and what it tests is
-availability rather than existence:
+Read out 2026-09-15 for issue #52, which asked whether RWE's pads may be said
+to *match*. They may now, and the read turned up two divergences, one of them
+worth a fifth of all repairer/target pairs in the shipped data.
 
+**Where the mission comes from.** `VTOL_Landing` (`0x4118E0`) runs a seven-state
+machine, and in the state that finishes a landing it checks the pad it landed
+on — `mission+0x16` — against three things before doing anything else:
 
+```
+411e7c  ecx = [mission+0x16]         ; the pad
+411e7f  eax = [ecx+0x92]             ; its definition
+411e85  eax = [eax+0x241]
+411e8b  test ah,0x2                  ; bit 9, isairbase
+411e90  test al,0x40                 ; bit 6, builder
+411e94  fld [ecx+0x104] ; fcomp 0.0  ; and finished, not a nanoframe
+411eb1  call 0x4b4f10                ; new Mission(0x56 bytes)
+411ece  push 0x501c24                ; "SELFREPAIR"
+411ee1  call 0x43acb0                ; appended to the AIRCRAFT's order list
+```
 
- returns 0 -- taken -- when  is set, or when a walk of the
-pad list at  (following , comparing ) finds
-a match. It never looks at the on/off bit.
+Bit 6 is `builder`, parsed at `0x42C4CB` from the key at `0x503C44` — the same
+run of boolean keys §34's table comes from. So a pad that is not a builder, or
+that is still a frame, parks the aircraft and mends nothing.
 
-That split is exactly what the strategy guide reports, and the two confirm each
-other:
+`SELFREPAIR` is not a VTOL mission at all: it is row 20 of the **ground** table
+at `0x4FC490`, handler `0x402430`, and the two tables are merged into one sorted
+vector at startup, so either side can name either. Its state machine has three
+states: 0 re-tests the pad's `builder` bit and build progress and starts the
+mission, 1 does the work, 2 prints "Unit repaired" (`0x5012CC`). State 1, per
+tick:
 
-> When a plane is making its way back to the repair pad, that pad is considered
-> to be occupied (even if the unit isn't there yet), so other damaged aircraft
-> will not use that pad until the occupying aircraft has been repaired and has
-> left.
+```
+4024af  if (unit.hitPoints >= def.maxdamage) return done
+4024e1  unit+0xB0 = clock + 150           ; the nanolathe stance deadline
+4024f0  cx = [padDef+0x1FE]               ; the PAD's WorkerTime
+4024f7  work = WorkerTime / 30            ; integer
+402518  call 0x41BD10(pad, aircraft, (float)work)
+40252e  0x43E400 / 0x4720D0 type 6        ; the nanolathe spray, pad to aircraft
+4025bb  sleep 1 tick
+```
 
-> After I tested it out, I found that turning an aircraft repair pad 'Off'
-> would stop aircraft from returning to it. However, those that were already
-> making their way towards it will continue towards it.
+Two things to notice before the arithmetic. The mission belongs to the
+**aircraft** and the rate comes from the **pad**, and the sleep is one tick, so
+this runs every tick like any other builder's work. RWE arrives at the same
+pair of facts from the other side — its pads run the repair from the ordinary
+builder path, with the pad as the repairer — and that is not a divergence, only
+a different place to put the loop.
 
-**Switching a pad off turns away new arrivals but does not recall the aircraft
-already coming.** New arrivals stop because the query walks the owner's air
-base list, which holds only switched-on pads (); a trip under way
-carries on because the re-test above never asks about the switch. An earlier
-reading here had the re-test as an on/off test and turned those aircraft back,
-which is wrong on both the binary and the guide.
+**The repair tick, `0x41BD10`.** This is not the pad's own routine. It has five
+callers — the two ground `Repair` missions, `VTOL_RepairUnit`, `SELFREPAIR`, and
+`0x48AF92` — so it is *the* repair tick, and what it says about pads it says
+about every builder in the game:
 
-RWE needs no new state for the claim. The claim *is* the ,
-which is already serialized, and an aircraft parked on a pad is already in the
-unit list. Physical occupancy is unconditional -- an aircraft standing on the
-pad holds it however healthy it is and whoever else wants it, which is the
-"and has left" half. Two aircraft merely *en route* to the same pad can happen,
-since the choice is a random draw, and there the lower  keeps it: a
-deterministic reading of "no pads available" that needs no tie-break state.
+```
+41bd33  if (hitPoints >= maxdamage) return 0
+41bd48  hp     = ftol((maxdamage       * work - 1.0) / buildtime + 1.0)
+41bd68  energy = ftol((buildcostenergy * work - 1.0) / buildtime + 1.0)
+41bd87  if (hp     >= 1) hp     = 1
+41bd97  if (energy >= 1) energy = 1
+41bdb7  if (!0x401180(&pad->economy, (float)energy)) return 0
+41bdc7  0x489BB0(pad, aircraft, hp, cause 10, 0)
+```
 
-### The practical consequence
+Both clamps are **upper** bounds, and that is the whole of the behaviour. The
+expression reaches 1 whenever the product does — `maxdamage` and `work` are both
+integers, so `(n-1)/bt + 1 >= 1` exactly when `n >= 1` — so the elaborate
+formula collapses to:
 
-The guide is worth quoting on what this feels like to play against, because it
-is the reason the behaviour is worth having exactly rather than approximately:
+> **A repairer with any worker time at all mends exactly one hit point a tick
+> and pays exactly one energy for it, whatever it is mending and however fast a
+> worker it is. One with none mends nothing.**
 
-> This is both a blessing and a curse when you are making an assault using
-> aircraft [...] If you have to kill that buildings *NOW* [...] it can be
-> incredibly annoying having your planes continually break off. Even
-> retargetting them only causes the planes to fly back, attack for a very short
-> time and then go and get repaired.
+Repair scales with the *number* of repairers, not with their WorkerTime. Thirty
+hit points a second each, thirty energy a second each. Nothing in the shipped
+data has a WorkerTime between 1 and 29 — the values present are 0, 30, 50, 80,
+100, 125, 160, 200, 225 and 300 over 258 units — so the "mends nothing" case is
+unreachable there and is recorded rather than relied on.
 
-That loop falls out of the health test running inside each mission handler
-rather than once at the point the order is given: retargeting starts a fresh
-attack mission, which tests the health again on its next tick.
+The energy request is `0x401180`, the **single-resource** one, not the
+two-resource `0x4011C0` the build path uses. It books the demand on the
+repairer's own block either way and answers no only when that block is still
+paying off an *energy* shortfall, so a player who owes metal can still repair.
+And `0x41BDBC` tests the answer: refused means no hit points at all, not fewer.
+The heal itself goes through the damage choke point with **cause 10**, which
+`0x489BB0` short-circuits at `0x489BC1` — no armour, no veterancy, no
+direction — straight into adding hit points.
 
-And the trick it ends on is the practical way a player drives all of this:
+**What RWE had wrong.** Two things, both now fixed and both pinned in
+`sim/repair.test.cpp`:
 
-> If you have some damaged aircraft [...] sitting on the ground and you want
-> them to repair themselves, set up a 1 point Patrol route (where they are),
-> and those planes that are heavily damaged will go off and get repaired.
+- `deployRepairArm` computed `max(1, maxHitPoints * work / buildTime)` — a
+  *lower* clamp where the original has an upper one. For most aircraft the two
+  agree at 1, which is why the pads looked right; they diverge wherever a unit
+  is cheap in build time and rich in hit points. A construction vehicle mending
+  a dragon's tooth — 3500 points on a buildtime of 520 — ran it up forty points
+  a tick instead of one. Counted over the shipped data, 403 of 2080
+  repairer/target pairs differed.
+- The comment beside it said "Repairing costs nothing, as in TA". It does cost:
+  one energy a tick, and a builder whose owner is in energy debt repairs
+  nothing. `GameSimulation::addEnergyRequest` is `0x401180`, added for this.
 
-which works because patrol is one of the missions that carries the test, and
-standing still is not.
+**And writing an end-to-end test for the pads found that they had never mended
+anything at all.** Two faults, both in RWE alone and neither visible from the
+findings, because every test on this until now called the patient search
+directly rather than ticking the simulation:
+
+- the search uses `airBaseRepairReach` — the larger of `BuildDistance` and half
+  the pad's own footprint, which is the whole reason that helper exists — and
+  then handed the patient to `repairExistingUnit`, which re-tested the distance
+  with `BuildDistance` **alone**. ARMASP's `BuildDistance` is 6 against a
+  four-by-four footprint 64 world units across, so the re-test refused every
+  patient the search had just found, and sent an immobile pad off to "navigate"
+  towards an aircraft parked in its own middle. The pad path goes straight to
+  `deployRepairArm` now.
+- and the builder update ends with `else { changeState(Idle) }` for anything
+  with no orders, which runs *after* the repair block — so it wiped the building
+  state the pad had entered a few lines earlier and told the script to stow the
+  arm, every tick. The reset skips a pad that is mending.
+
+`sim/airbase.test.cpp` ticks the simulation and watches the hit points now, so
+neither can come back quietly.
+
+Not ported, and neither has anywhere to attach: `unit+0xB0`, the
+clock-plus-150 stance deadline, which RWE keeps as build-stance state instead;
+and the spray's own particle type, RWE running the nanolathe effect it already
+has.
 
 ### What RWE does not do
 

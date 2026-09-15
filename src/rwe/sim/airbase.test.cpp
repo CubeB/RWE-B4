@@ -71,6 +71,9 @@ namespace rwe
             d.sightDistance = 350u;
             d.maxHitPoints = 196;
             d.buildTime = 9182u;
+            // What mending it costs is worked out from this, so it is the
+            // shipped figure rather than a placeholder.
+            d.buildCostEnergy = Energy(3234.0f);
             d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
             return d;
         }
@@ -594,6 +597,43 @@ TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
             const auto& padState = f.sim.getUnitState(padId);
             ConstUnitInfo padInfo(padId, &padState, &f.sim.unitDefinitions.at(padState.unitType));
             REQUIRE_FALSE(findAircraftToRepairOnPad(f.sim, padInfo).has_value());
+        }
+
+        SECTION("and it mends it at one hit point a tick, paying for each one")
+        {
+            // The rate and the cost are the original's, from the repair tick
+            // the SELFREPAIR mission hands over to (§94, issue #52): capped at
+            // one hit point and one energy however fast a worker the pad is.
+            // ARMASP's WorkerTime of 200 makes no difference to either.
+            f.damageFighterTo(186);
+            auto& fighterState = f.sim.getUnitState(f.fighter);
+            fighterState.position = padPosition;
+            fighterState.physics = UnitPhysicsInfoGround();
+            f.sim.flyingUnitsSet.erase(f.fighter);
+
+            // Normally set by the pad's StartBuilding thread; the empty test
+            // script has none.
+            f.sim.getUnitState(padId).inBuildStance = true;
+
+            // Kept inside the first second on purpose: the per-second pass
+            // rebuilds maxEnergy from what is standing, and nothing here
+            // carries storage, so the stockpile would be clamped away.
+            //
+            // The first tick raises the arm and the rest mend, one point each.
+            for (int i = 0; i < 6; ++i)
+            {
+                f.sim.tick();
+            }
+            REQUIRE(f.sim.getUnitState(f.fighter).hitPoints == 191u);
+
+            for (int i = 0; i < 5; ++i)
+            {
+                f.sim.tick();
+            }
+
+            REQUIRE(f.sim.getUnitState(f.fighter).hitPoints == 196u);
+            REQUIRE(f.sim.getUnitState(padId).energyRequestBuffer.value > 0.0f);
+            REQUIRE(f.sim.getUnitState(padId).metalRequestBuffer.value == 0.0f);
         }
 
         SECTION("an undamaged aircraft is left alone")

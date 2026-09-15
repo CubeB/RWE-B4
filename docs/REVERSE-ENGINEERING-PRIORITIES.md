@@ -6,28 +6,42 @@ which, and several say what the entry originally got wrong. The ranking it opens
 with is the ranking as first written, deliberately left alone so that the
 corrections stay legible next to the guesses that prompted them.
 
-Last revised 2026-09-15 (twice that day), and the shape of the file has changed
-again: **the whole of the ranked list below is now done except one entry.** What
-had been the top three -- the corpse level and its `featuredead` walk, aircraft
-leaving no wreck at all, and the exact `PALETTE.SHD` lookup -- have all landed,
-as have `AirToAir` and `maneuverleashlength`. Two subjects grew their own
-documents along the way: the shaded unit rasterizer in `TOTALA-EXE-SHADING.md`
-and wrecks in `TOTALA-EXE-WRECKS.md`.
+Last revised 2026-09-15, the day the last three entries were read. What had been
+the top three before them -- the corpse level and its `featuredead` walk,
+aircraft leaving no wreck at all, and the exact `PALETTE.SHD` lookup -- had
+already landed, as had `AirToAir` and `maneuverleashlength`. Two subjects grew
+their own documents along the way: the shaded unit rasterizer in
+`TOTALA-EXE-SHADING.md` and wrecks in `TOTALA-EXE-WRECKS.md`.
 
-The one entry left has an issue on the fork: **#52**. The other two, the
-veterancy reload term and the death causes, are **#50** and **#51** and are both
-closed -- see below.
+**The ranked list is now empty.** All three of the entries that were left on
+2026-09-15 -- the veterancy reload term (#50), the death causes (#51) and the
+`SELFREPAIR` mission (#52) -- were read and closed that day. What each turned
+into is below.
 
 ## What is left, ranked
 
-One entry, and it is not "go and read the binary" either.
-
-1. **The `"SELFREPAIR"` mission** pushed at `0x411ECE`. RWE's repair pads mend a
-   landed damaged aircraft now, but by nanolathing it with the pad's own build
-   rate rather than by whatever that mission does. Worth reading before anyone
-   claims the pads match. (Fork issue #52.)
+Nothing. The file stays because the record of what was asked, what it turned
+out to be, and what it got wrong is the useful part; the next entry should be
+appended here when somebody finds one.
 
 ## What was on that list, and where it went
+
+- **The `"SELFREPAIR"` mission.** Closed 2026-09-15, fork issue #52. It is
+  pushed by `VTOL_Landing` at `0x411ECE` onto the *aircraft's* order list once
+  it has landed, provided the pad is `isairbase`, `builder` and finished; it is
+  row 20 of the **ground** table (`0x4FC490`), handler `0x402430`, the two
+  tables being merged at startup. Its work state runs every tick off the pad's
+  WorkerTime and hands over to `0x41BD10` -- which is not the pad's routine at
+  all but *the* repair tick, with five callers. That is where the entry paid
+  off: the rate and the cost are both clamped from **above** at one
+  (`0x41BD87`, `0x41BD97`), so every repairer in the game mends exactly one hit
+  point a tick and pays one energy for it whatever it is mending, and repair
+  scales with the number of repairers rather than their worker time. RWE had a
+  lower clamp where the original has an upper one -- forty hit points a tick on
+  a dragon's tooth instead of one, 403 of 2080 repairer/target pairs in the
+  shipped data differing -- and believed repair was free, which it is not
+  (`0x401180`, energy, refused outright while the repairer owes energy). Both
+  ported; §94 and `sim/repair.test.cpp`.
 
 - **The death causes, named one at a time.** Closed 2026-09-15, fork issue #51.
   The dispatch is `0x486E64`, reached from `0x48687C` on the cause nibble

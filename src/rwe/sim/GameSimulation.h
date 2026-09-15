@@ -1134,6 +1134,16 @@ namespace rwe
         bool addResourceDelta(const UnitId& unitId, const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal);
         bool addResourceDelta(const UnitId& unitId, const Energy& energy, const Metal& metal);
 
+        /**
+         * The single-resource request, `0x401180`. A repair asks through this
+         * rather than through `0x4011C0`, the two-resource one the build path
+         * uses, and the difference is which debt is consulted: this one looks
+         * at the unit's **energy** debt alone, so a builder whose owner owes
+         * metal can still mend something. The demand is booked for the display
+         * either way, as it is there. See TOTALA-EXE.md §94.
+         */
+        bool addEnergyRequest(const UnitId& unitId, const Energy& amount);
+
         bool trySetYardOpen(const UnitId& unitId, bool open);
 
         void emitBuggerOff(const UnitId& unitId);
