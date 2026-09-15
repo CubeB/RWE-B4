@@ -380,16 +380,43 @@ keeps this out of the circularity the conformance work has to avoid:
   kbots, construction vehicles build wind generators and metal extractors. The
   arithmetic knew nothing about unit classes.
 
-#### One thing this turned up and did not explain
+#### The constant this turned up, and did not explain
 
-ProTA constructors come out a constant **+33 to +35 ticks** slower than
-`ceil(BuildTime/p)` -- `CORCV` building `CORWIN`, `CORRL`, `CORMEX` and `CORRAD`
-gives +33, +34, +33, +34 -- while Escalation's `ARMACK` lands on 0 and -1 for
-four different products. So it is not a constant of the nanolathe and not
-something a mobile builder always pays. It is recorded here because an oracle
-built on ProTA build durations will be wrong by that much, and because whatever
-explains it is a finding about the build pipeline that is not yet in
-`TOTALA-EXE.md`.
+Comparing each builder-type/product-type pair's modal duration against
+`ceil(BuildTime / p)`, where `p = WorkerTime / 30` with integer division:
+
+| Data set | Pairing | n | median | mode | range |
+|---|---|---|---|---|---|
+| TA:Esc 10.2 | factory to mobile unit | 2 | -1 | **-1** | -1..-1 |
+| TA:Esc 10.2 | constructor to mobile unit | 39 | -1 | **-1** | -1..50 |
+| TA:Esc 10.2 | constructor to building | 65 | +4 | **-1** | -2..110 |
+| ProTA 4.8 | constructor to building | 6 | **+34** | **+34** | 33..73 |
+
+Pairs need five or more builds; the range is capped to -20..120 to keep
+assisted builds out, and assists only ever shorten.
+
+**Two things are tangled here.** The first is that the baseline is **-1**, not
+zero, in every Escalation pairing -- `ARMVP` to `ARMFAV`, `ARMLAB` to `ARMJETH`
+and `ARMPW`, `CORAP` to `CORFINK`, `CORVP` to `CORFAV`, `CORLAB` to `CORSTORM`
+and `CORTHUD` all land on exactly -1 over hundreds of builds each. So the
+relation is probably `ceil(BuildTime/p) - 1`, and the open question is whether
+that tick belongs to TA or to how `tad_episodes` pairs the `0x09`'s tick with
+the `0x12`'s. **Suspect the extractor first**; it has never been checked.
+
+The second is that ProTA's constructors are a further ~34 ticks slow where
+Escalation's are not -- `CORCV` building `CORWIN`, `CORRL`, `CORMEX` and
+`CORRAD` and `ARMCV` building `ARMWIN` give +33, +34, +33, +34 and +35. It is
+additive rather than proportional: as a fraction of the predicted duration those
+are 5.9%, 5.8%, 5.3%, 9.0% and 6.5%, and the `CORRAD` case breaks any rate
+reading. Escalation's constructor-to-building row has its mode at baseline with
+a tail to +110 instead, which is what "the builder sometimes has to reposition"
+looks like -- a tail, not a shift.
+
+**ProTA is one demo.** All five rows come from a single game between two
+players, so a habit of those two players would produce this and would not be a
+fact about TA. It is recorded here because an oracle built on ProTA build
+durations will be wrong by that much either way, and left unexplained because
+one game cannot settle it.
 
 The second id is the one to be careful about. It is the *nanoframe*: over demo
 14724, 781 of the 790 distinct values of that field reappear as the **finished
@@ -797,8 +824,39 @@ They catch different things and should not share machinery.
    sorted `units\*.FBI` names -- see the `0x09` section above for the rule and
    the evidence -- so `tad_episodes --units <dir>` names every episode and an
    episode fixture can transcribe the unit's real FBI values. It did not need
-   the `0x1a` checksum, and the checksum would not have answered it. What is
-   still to do is `--emit-cpp` and the tests that consume it.
+   the `0x1a` checksum, and the checksum would not have answered it.
+
+   **What is left, in the order to do it:**
+
+   1. **Settle the build-duration baseline and the ProTA overhead.** Escalation's
+      modal durations sit at `ceil(BuildTime/p) - 1` across every pairing, so
+      either TA is one tick off the obvious model or `tad_episodes` is, and
+      nobody has checked which. On top of that ProTA's constructors come out a
+      further ~34 ticks slow where Escalation's do not. Both are written up
+      under "the constant this turned up" below. **Do this before transcribing
+      any build-timing fixture** -- it decides what those fixtures may assert.
+   2. **`--emit-cpp`.** A generated header of plain structs beside the test that
+      uses it: unit type, the real FBI values transcribed inline, observed
+      timings, and provenance (demo id plus tick range). Regeneration must be
+      diff-stable. See "How to build it without poisoning the test suite".
+   3. **The economy oracle.** Storage-cap and stall episodes need only `0x28`
+      slots 0-3, which are settled, so this has no unknowns left in it and is
+      the cheapest first real conformance test. It is also where the
+      `--emit-cpp` and expected-difference conventions get shaken out, which
+      everything after it inherits. RWE side: `GameSimulation::updateResources`
+      and `settleResourcePool`.
+   4. **The build-timing oracle**, once (1) says what it is measuring. RWE side:
+      `UnitState::getBuildCostInfo`, `UnitState::addBuildProgress`, their two
+      call sites in `UnitBehaviorService.cpp`, and `workerTimePerTick` in
+      `LoadingScene_util.cpp`. Consume the mode, never the mean.
+   5. **The weapon-event oracle.** `0x0d` shot to `0x0b` damage or `0x0c` death
+      gives time-of-flight and hit/miss with the shot as an explicit input,
+      aimed at the missile motor model and the ballistics work. Remember `0x0b`
+      is not a complete damage ledger: treat absence as unknown, never as zero.
+
+   Every one of those carries the expected-difference annotation described in
+   "The hazard to design in from the start". A corpus is an efficient machine
+   for regressing intentional decisions if it is allowed to be.
 3. Decide on `0x2c` once the stream has been stared at. If the decode falls
    out of the binary in a day or two of probing -- pivot on `0x44F4A0`, the
    three-waypoint bit-serialiser, and on the emitter `0x451DF0` -- the

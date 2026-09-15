@@ -231,6 +231,34 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
 - [ ] Invalid UTF‑8 resilience (#14).
 - [ ] Compile a `docs/compatibility.md` of what TA behaviour is intentionally *not* replicated (bugs vs features).
 
+### The demo conformance corpus
+
+`docs/TA-DEMOS.md` is the working document; its "Suggested order" carries the
+live checklist and the file references. Where it stands: the container reader,
+the typed event decoders and the episode extractor are in (`src/rwe/io/tad/`,
+`tad_probe`, `tad_episodes`), verified over thirteen real games, and a `0x09`'s
+unit type can now be named -- it is a 1-based index into the sorted
+`units\*.FBI` list, which did not need the `0x1a` checksum that two passes
+failed to reproduce.
+
+**No conformance test exists yet.** Everything tagged `[tad]` is a decoder test.
+
+- [ ] Settle the build-duration baseline (Escalation sits one tick under
+      `ceil(BuildTime/p)` everywhere, and it may be the extractor) and the ~34
+      tick ProTA constructor overhead. Do this before any build-timing fixture.
+- [ ] `tad_episodes --emit-cpp`: a generated, checked-in header of plain structs
+      with the real FBI values transcribed inline and demo/tick provenance.
+- [ ] The economy oracle -- storage-cap and stall episodes, which need only the
+      `0x28` fields already decoded and so have no unknowns left in them.
+- [ ] The build-timing oracle, once the baseline is settled.
+- [ ] The weapon-event oracle: `0x0d` shot to `0x0b` damage or `0x0c` death,
+      aimed at the missile motor model and the ballistics work.
+
+Demos and mod files never enter the repository; only extracted numbers do, and
+`rwe_test` goes on reading no files. Every demo-derived test asserts the known
+delta against `TOTALA-EXE.md` §88 rather than a bare equality, so that a corpus
+this size cannot quietly regress a deliberate difference.
+
 ### The v3.1 interface features
 
 `docs/TA-PATCHES.md` settles what the two patches did. The GOG executable is
