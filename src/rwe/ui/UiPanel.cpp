@@ -148,18 +148,55 @@ namespace rwe
 
     void UiPanel::keyDown(KeyEvent event)
     {
+        // A key goes to the control that has the focus, not to every child.
+        // The original keeps a focused-gadget index at `panel+0x64`, and it
+        // is what the caret is drawn from (S:99). RWE used to hand each key
+        // to every child, which meant Space pressed every button on the panel
+        // at once and two text boxes would have taken the same typing.
+        //
+        // A quick key is the exception: it is defined to work wherever the
+        // focus is (S:78). Unless what has the focus is typed into, in which
+        // case the letter belongs in the text.
+        if (focusedChild && (*focusedChild)->wantsTextInput())
+        {
+            (*focusedChild)->keyDown(event);
+            return;
+        }
+
         for (auto& e : children)
         {
-            e->keyDown(event);
+            if (e->matchesQuickKey(event.keyCode))
+            {
+                e->keyDown(event);
+                return;
+            }
+        }
+
+        if (focusedChild)
+        {
+            (*focusedChild)->keyDown(event);
         }
     }
 
     void UiPanel::keyUp(KeyEvent event)
     {
-        for (auto& e : children)
+        if (focusedChild)
         {
-            e->keyUp(event);
+            (*focusedChild)->keyUp(event);
         }
+    }
+
+    void UiPanel::textInput(const std::string& text)
+    {
+        if (focusedChild)
+        {
+            (*focusedChild)->textInput(text);
+        }
+    }
+
+    bool UiPanel::wantsTextInput() const
+    {
+        return focusedChild && (*focusedChild)->wantsTextInput();
     }
 
     void UiPanel::mouseMove(MouseMoveEvent event)

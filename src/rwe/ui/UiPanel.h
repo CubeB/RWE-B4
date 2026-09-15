@@ -53,6 +53,10 @@ namespace rwe
 
         void keyUp(KeyEvent event) override;
 
+        void textInput(const std::string& text) override;
+
+        bool wantsTextInput() const override;
+
         void mouseMove(MouseMoveEvent event) override;
 
         void mouseWheel(MouseWheelEvent event) override;

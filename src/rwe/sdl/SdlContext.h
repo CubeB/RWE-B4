@@ -76,6 +76,11 @@ namespace rwe
             return SDL_PollEvent(event);
         }
 
+        bool startTextInput(SDL_Window* window)
+        {
+            return SDL_StartTextInput(window);
+        }
+
         SDL_MouseButtonFlags getMouseState(float* x, float* y)
         {
             return SDL_GetMouseState(x, y);

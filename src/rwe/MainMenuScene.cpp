@@ -570,6 +570,11 @@ namespace rwe
         topPanel().keyDown(KeyEvent(keysym.key));
     }
 
+    void MainMenuScene::onTextInput(const std::string& text)
+    {
+        topPanel().textInput(text);
+    }
+
     void MainMenuScene::goToMainMenu()
     {
         auto mainMenuGuiRaw = sceneContext.vfs->readFile(sceneContext.pathMapping->guis + "/MAINMENU.GUI");

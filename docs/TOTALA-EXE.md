@@ -11024,7 +11024,15 @@ for a launcher, which is now a restoration rather than an addition. The
 minimap coverage ring is drawn, dashed while the launcher has a round, and
 both it and the four detection rings are clipped to the minimap. The text box
 draws the blue caret only when it has the focus, and a list box's selected row
-is brightened rather than washed with 12% white. A button's caption carries
+is brightened rather than washed with 12% white. The focus now decides more
+than the caret: a key goes to the focused control and to nothing else, the way
+one focused-gadget index a panel implies, where RWE used to hand every key to
+every child of the panel -- which is what made Space press every button on a
+panel at once. A `quickkey` still answers from anywhere on the panel (S:78),
+except while a text box holds the focus, since a letter that is also a
+button's quick key belongs in the name being typed. The characters themselves
+come from SDL's composed text rather than from a table of keycodes, so a save
+name typed on a layout other than US comes out as typed. A button's caption carries
 the drop shadow only where its attribs ask for it and its quick key is
 underlined in interface green, and a greyed control is drawn
 greyed rather than removed — see the note below the list.

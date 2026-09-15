@@ -168,6 +168,13 @@ namespace rwe
             throw std::runtime_error(SDL_GetError());
         }
 
+        // SDL3 sends no SDL_EVENT_TEXT_INPUT until it is asked to, and
+        // nothing else asks: without this every text box stays empty however
+        // much is typed at it. It stays on for the life of the window, since
+        // it is the panels that decide who receives what is typed and a scene
+        // with nothing focused simply drops it.
+        sdlContext->startTextInput(window.get());
+
         if (windowMode == WindowMode::Fullscreen)
         {
             SDL_DisplayMode targetMode;

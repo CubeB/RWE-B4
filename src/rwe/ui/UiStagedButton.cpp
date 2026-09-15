@@ -240,6 +240,13 @@ namespace rwe
         }
     }
 
+    bool UiStagedButton::matchesQuickKey(int keyCode) const
+    {
+        // A disabled button answers to nothing, and must not swallow the key
+        // on its way to whatever else might want it.
+        return enabled && quickKey && *quickKey == keyCode;
+    }
+
     void UiStagedButton::activateButton(const ButtonClickEvent& event)
     {
         if (!enabled)

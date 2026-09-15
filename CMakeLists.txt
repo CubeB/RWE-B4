@@ -991,6 +991,7 @@ set(TEST_FILES
     src/rwe/util/rwe_string.test.cpp
     src/rwe/ui/UiComponent.test.cpp
     src/rwe/ui/UiTextBox.test.cpp
+    src/rwe/ui/UiPanelFocus.test.cpp
     src/rwe/UiRenderService.test.cpp
     )
 

@@ -6,14 +6,6 @@
 namespace rwe
 {
     /**
-     * What keyDown types into the box for a given keycode and modifier
-     * state (an SDL_Keymod bitmask), split out from keyDown so it can be
-     * tested without a live SDL modifier state to read. Returns nullopt for
-     * anything the box does not accept.
-     */
-    std::optional<char> textBoxCharacterFor(int keyCode, unsigned short modState);
-
-    /**
      * The gui files' gadget type 3: a single line of editable text. The
      * original uses it for the save-game name; this one accepts letters,
      * digits and a few separators from the keyboard, which is all a save
@@ -33,6 +25,11 @@ namespace rwe
         void render(UiRenderService& context) const override;
 
         void keyDown(KeyEvent event) override;
+
+        void textInput(const std::string& newText) override;
+
+        /** The box is typed into, so a focused one takes every key its panel gets. */
+        bool wantsTextInput() const override { return true; }
 
         void focus() override;
 

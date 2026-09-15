@@ -114,6 +114,8 @@ namespace rwe
 
         void keyDown(KeyEvent event) override;
 
+        bool matchesQuickKey(int keyCode) const override;
+
         Observable<ButtonClickEvent>& onClick();
 
         Observable<bool>& onHover();

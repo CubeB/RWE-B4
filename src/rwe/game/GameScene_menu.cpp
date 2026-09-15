@@ -151,9 +151,9 @@ namespace rwe
 
         // LOADGAME.GUI ships an empty defaultfocus, so the original opens
         // this dialog with no focused gadget and therefore no caret. RWE
-        // starts the name field focused instead: its keyDown is broadcast to
-        // every child rather than routed to the focused one, so typing works
-        // either way, and a field you can type into ought to look like one.
+        // starts the name field focused instead, and now has to: keys and
+        // text go to the focused control alone, so an unfocused field would
+        // be one nothing could be typed into.
         panel->setFocusByName("GAMENAME");
 
         setGameMenuPanel(std::move(panel));

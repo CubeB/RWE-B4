@@ -71,6 +71,11 @@ namespace rwe
             case SDL_EVENT_KEY_UP:
                 currentScene.onKeyUp(event.key);
                 break;
+            case SDL_EVENT_TEXT_INPUT:
+                // What the layout actually composed, which is the only thing
+                // a text box should be written from.
+                currentScene.onTextInput(event.text.text);
+                break;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
             {
                 auto button = convertSdlMouseButton(event.button.button);

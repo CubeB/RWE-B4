@@ -389,6 +389,21 @@ namespace rwe
         }
     }
 
+    void GameScene::onTextInput(const std::string& text)
+    {
+        // The game menu is the only thing in a battle with a field in it, and
+        // only while it is open; the side panel is buttons.
+        if (!isGameMenuOpen())
+        {
+            return;
+        }
+
+        for (auto& panel : gameMenuPanels)
+        {
+            panel->textInput(text);
+        }
+    }
+
     void GameScene::onKeyUp(const SDL_KeyboardEvent& keysym)
     {
         currentPanel->keyUp(KeyEvent(keysym.key));

@@ -922,6 +922,8 @@ namespace rwe
 
         void onKeyUp(const SDL_KeyboardEvent& keysym) override;
 
+        void onTextInput(const std::string& text) override;
+
         void onMouseDown(MouseButtonEvent event) override;
 
         void onMouseUp(MouseButtonEvent event) override;

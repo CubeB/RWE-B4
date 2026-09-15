@@ -81,6 +81,8 @@ namespace rwe
 
         void onKeyDown(const SDL_KeyboardEvent& keysym) override;
 
+        void onTextInput(const std::string& text) override;
+
         void update(int millisecondsElapsed) override;
 
         void goToPreviousMenu();
