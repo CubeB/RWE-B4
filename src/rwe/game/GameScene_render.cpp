@@ -1507,11 +1507,13 @@ namespace rwe
                 }
                 const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
 
+                // The ground under the unit, whatever is above it: a floating
+                // building's shadow lands on the sea bed, not on the surface.
+                // The projected pass the buildings take has no water test in it
+                // at all -- the one test in the shadow pass is on the Feature
+                // Unit (S:3) -- and RWE used to lift this one to the sea level,
+                // which is the whole of what it had to unlearn.
                 auto groundHeight = simulation.terrain.getHeightAt(unit.position.x, unit.position.z);
-                if (unitDefinition.floater || unitDefinition.canHover)
-                {
-                    groundHeight = rweMax(groundHeight, seaLevel);
-                }
 
                 // The cull goes on where the shadow lands rather than on where
                 // the unit is: an aircraft's shadow sits on the ground under it,

@@ -11251,6 +11251,14 @@ ground is below the sea level. RWE follows all three, as of B4 #9, and the
 request is declined rather than recorded in §88 or `compatibility.md`, since
 nothing here departs from the original.
 
+One thing did depart, in RWE's code rather than in this reading: a **floating
+building's** shadow was lifted to the water surface with
+`rweMax(groundHeight, seaLevel)`. The projected pass has no water test in it,
+so the shadow belongs on the sea bed under the building, and that is where RWE
+draws it now. A floating *unit* is a separate matter and unchanged: it casts no
+shadow at all, the copied pass skipping `canhover` and `floater` alike
+(`0x45957F`).
+
 ---
 
 ## 101. The purple halo on buildings, and what stood for transparent
