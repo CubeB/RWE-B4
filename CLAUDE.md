@@ -101,10 +101,12 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   step" and an extractor exits non-zero for different reasons. `--emit-json`
   writes the episodes; the console summary prints the **modal** duration per unit
   type, which is the number to consume, since assists shorten a build and missed
-  micro-stalls lengthen it. There is no `--emit-cpp` and no checked-in fixture
-  yet: a `0x09` names its type only as an index into the demo's `0x1a` table, and
-  turning that into a unit name needs TA's own checksum routine read out of
-  `TotalA.exe`. See `docs/TA-DEMOS.md`.
+  micro-stalls lengthen it. `--units <dir>` names each type: a `0x09` carries a
+  1-based index into the sorted `units\*.FBI` names of the merged VFS, so point
+  it at the data set the demo was recorded on and the episodes stop being
+  anonymous. It warns if the demo's own type count disagrees with the directory.
+  There is still no `--emit-cpp` and no checked-in fixture. See
+  `docs/TA-DEMOS.md`.
 - **`tools/visual-test.ps1`** — when only the renderer will do. It launches `build-release/rwe.exe`, finds the window, and then *drives* it: real clicks at client-relative coordinates, screenshots cropped and nearest-neighbour magnified around the thing under test. `-phase build|air|ship` are the scripted sequences already written; adding one is a few lines. Prefer this to ad-hoc screenshotting — a scripted click sequence is repeatable and an eyeballed one is not.
 - **`tools/crash-catch.cmd`** runs the Debug build under gdb and writes a backtrace to `crash.txt`. Play normally, reproduce the crash, close the window.
 - Environment switches, all pure observers: `RWE_AI_PROFILE=1` times each AI pass and logs anything over 2 ms; `RWE_DEBUG_SPAWN=ARMPW*12@0:8:1` spawns units on a timer (`<type>*<count>@<owner>:<seconds>[:<near player>]`); `RWE_DEBUG_SELF_DESTRUCT[=_PLAYER]`, `RWE_TRACE_BOMBER`, `RWE_TRACE_GUNSHIP`, `RWE_TRACE_MISSILE`.

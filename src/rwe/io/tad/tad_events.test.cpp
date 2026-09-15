@@ -322,4 +322,54 @@ namespace rwe
 
         REQUIRE(!tadDecodeSpeed(TadBytes(3, 0x1a)));
     }
+
+    TEST_CASE("tadUnitLoadOrder", "[tad]")
+    {
+        SECTION("sorts, and numbers from one")
+        {
+            auto order = tadUnitLoadOrder({"CORCV", "ARMCK", "ARMAAP"});
+            REQUIRE(order == std::vector<std::string>{"ARMAAP", "ARMCK", "CORCV"});
+
+            REQUIRE(tadUnitNameForTypeIndex(order, 1) == "ARMAAP");
+            REQUIRE(tadUnitNameForTypeIndex(order, 3) == "CORCV");
+
+            // Zero is not a type index. It appears nowhere in the corpus, which
+            // is the observation the 1-based numbering rests on.
+            REQUIRE(!tadUnitNameForTypeIndex(order, 0));
+            REQUIRE(!tadUnitNameForTypeIndex(order, 4));
+        }
+
+        SECTION("upper-cases before comparing")
+        {
+            REQUIRE(tadUnitLoadOrder({"corcv", "ARMCK"})
+                == std::vector<std::string>{"ARMCK", "CORCV"});
+        }
+
+        SECTION("orders by byte, so '_' sorts after 'Z'")
+        {
+            // TA: Escalation ships ALL_L2.FBI. If '_' (0x5f) were folded in
+            // with the letters the whole tail of the order would shift.
+            REQUIRE(tadUnitLoadOrder({"ALL_L2", "ALLZZ"})
+                == std::vector<std::string>{"ALLZZ", "ALL_L2"});
+        }
+
+        SECTION("reproduces the relative order demo 14724 observes")
+        {
+            // Nine ProTA 4.8 unit types whose identity in demo 14724 is pinned
+            // by evidence the ordering was not fitted to -- the side its
+            // owner's header entry declares, and the WorkerTime of the builder
+            // that built it -- together with the indices the demo carries for
+            // them. Sorting has to put them in exactly this sequence, because
+            // the indices ascend: 1, 39, 87, 152, 195, 235, 259, 310, 317.
+            //
+            // ARMAAP and ZZZ are the first and last of the 317 names, which is
+            // what fixes the two ends of the order.
+            auto order = tadUnitLoadOrder(
+                {"CORWIN", "ARMMEX", "ZZZ", "CORRL", "ARMAAP", "CORCV", "ARMWIN", "CORMEX", "ARMCK"});
+
+            REQUIRE(order
+                == std::vector<std::string>{
+                    "ARMAAP", "ARMCK", "ARMMEX", "ARMWIN", "CORCV", "CORMEX", "CORRL", "CORWIN", "ZZZ"});
+        }
+    }
 }

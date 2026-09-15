@@ -10273,3 +10273,21 @@ candidate can be checked before it is believed.
 
 Next time: a recursive-descent disassembly of `0x455000`-`0x46e000`, or a live
 breakpoint on the restrictions-dialog arrays at `0x44ca4e`.
+
+### What it was wanted for, and why that no longer needs it
+
+The checksum was chased in order to name the unit type a demo's `0x09` refers
+to. It turns out not to be on that path at all: the `0x09` index is not an index
+into the `0x1a` table, but the **load-order index this section already
+documents** — the one written to `+0x21e` at `0x42ab51`. The order the
+enumeration at `0x42aa66` produces was then recovered from the demo corpus
+rather than from the binary: sort every `units\*.FBI` name the merged VFS
+presents and number from one. `docs/TA-DEMOS.md`, `0x09`, carries the evidence
+and the two data sets it replicates across.
+
+So the useful part of this section was the struct map, not the packet builder,
+and the part that got away is wanted only for reproducing the table itself. The
+lesson for the next dead end is the one this section was written to record: the
+thing the work was blocked on was not the thing it was chasing, and an hour
+spent testing whether the blocker was real would have been worth more than the
+day spent on the checksum.

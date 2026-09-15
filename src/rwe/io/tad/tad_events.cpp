@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cstring>
 #include <rwe/io/tad/tad_headers.h>
 
@@ -252,5 +253,34 @@ namespace rwe
         }
 
         return TadSpeed{readU16(&s[1])};
+    }
+
+    std::vector<std::string> tadUnitLoadOrder(std::vector<std::string> unitFileStems)
+    {
+        for (auto& name : unitFileStems)
+        {
+            for (auto& c : name)
+            {
+                // The corpus is already upper case throughout; this is here so
+                // that a data set which is not does not silently reorder.
+                c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            }
+        }
+
+        std::sort(unitFileStems.begin(), unitFileStems.end());
+        return unitFileStems;
+    }
+
+    std::optional<std::string> tadUnitNameForTypeIndex(
+        const std::vector<std::string>& loadOrder,
+        uint16_t typeIndex)
+    {
+        // Numbered from one: index 0 does not appear anywhere in the corpus.
+        if (typeIndex == 0 || typeIndex > loadOrder.size())
+        {
+            return std::nullopt;
+        }
+
+        return loadOrder[typeIndex - 1];
     }
 }

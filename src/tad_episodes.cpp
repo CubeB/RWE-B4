@@ -14,21 +14,24 @@
 // work" -- and every rejection is counted and reported rather than silently
 // dropped, because the rejection rate is itself worth looking at.
 //
-// WHAT IS MISSING, AND IT IS THE WHOLE REASON THERE IS NO --emit-cpp YET.
-// A checked-in fixture has to transcribe the unit's real FBI values inline, and
-// a 0x09 names its type only as an index into the demo's 0x1a table. Those ids
-// are content-derived and resist every name hash tried against them, so turning
-// an index into a unit name needs TA's own checksum routine read out of
-// TotalA.exe. Until that lands, every episode below is keyed on an anonymous
-// type index and is for inspection, not for assertion. See docs/TA-DEMOS.md,
-// "The 0x1a unit table, and what it can and cannot tell you".
+// NAMING A TYPE. A 0x09 carries its unit type as a load-order index, not a
+// name: TA numbers every units\*.FBI in the merged VFS from one, in sorted
+// order, and that number is what the packet holds. Point --units at the data
+// set the demo was recorded on and every episode gets a name; without it the
+// type stays an anonymous index, which is still fine for the timing histogram.
+// The rule, and the evidence for it, is on tadUnitLoadOrder in tad_events.h.
+//
+// The mod files never enter the repository -- only extracted numbers do -- so
+// --units takes a path rather than shipping a table.
 //
 // Truly offline: no SDL, no GL, no VFS, just files.
 //
 // Usage: tad_episodes --file <path> [--file <path>...] [--dir <path>]
-//                     [--emit-json <path>] [--all]
+//                     [--units <dir>] [--emit-json <path>] [--all]
 //   --file        a .tad or .ted demo to mine; may be repeated
 //   --dir         a directory of demos to mine; recurses
+//   --units       a directory of the data set's unit files, recursively
+//                 scanned for *.FBI, used to name each type index
 //   --emit-json   write the episodes to a file as JSON
 //   --all         emit rejected episodes too, each with its reasons
 
@@ -362,12 +365,63 @@ namespace
 {
     using namespace rwe;
 
-    nlohmann::json toJson(const Episode& e)
+    /**
+     * Every *.FBI stem under dir, which is what TA's units\\*.FBI enumeration
+     * sees once the VFS has merged the archives. Extracted mods keep one
+     * directory per archive, so this recurses.
+     */
+    std::vector<std::string> readUnitStems(const std::filesystem::path& dir, std::error_code& error)
+    {
+        std::vector<std::string> stems;
+        std::filesystem::recursive_directory_iterator it(dir, error);
+        if (error)
+        {
+            return stems;
+        }
+
+        for (const auto& entry : it)
+        {
+            if (!entry.is_regular_file())
+            {
+                continue;
+            }
+
+            auto extension = entry.path().extension().string();
+            for (auto& c : extension)
+            {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+
+            if (extension == ".fbi")
+            {
+                stems.push_back(entry.path().stem().string());
+            }
+        }
+
+        return stems;
+    }
+
+    /** The type index as a name if we have the data set, and as a number if not. */
+    std::string typeLabel(const std::vector<std::string>& loadOrder, uint16_t typeIndex)
+    {
+        if (auto name = tadUnitNameForTypeIndex(loadOrder, typeIndex))
+        {
+            return *name;
+        }
+
+        return std::to_string(typeIndex);
+    }
+
+    nlohmann::json toJson(const Episode& e, const std::vector<std::string>& loadOrder)
     {
         nlohmann::json j;
         j["demo"] = e.demo;
         j["ownerBlock"] = e.ownerBlock;
         j["typeIndex"] = e.typeIndex;
+        if (auto name = tadUnitNameForTypeIndex(loadOrder, e.typeIndex))
+        {
+            j["unitName"] = *name;
+        }
         j["unitId"] = e.unitId;
         j["builderId"] = e.builderId;
         j["startTick"] = e.startTick;
@@ -406,15 +460,18 @@ int main(int argc, char* argv[])
 
     if (args.isHelpRequested() || (!args.contains("file") && !args.contains("dir")))
     {
-        std::cout << "usage: tad_episodes --file <path> [--dir <path>] [--emit-json <path>] [--all]\n"
+        std::cout << "usage: tad_episodes --file <path> [--dir <path>] [--units <dir>]\n"
+                  << "                   [--emit-json <path>] [--all]\n"
                   << "\n"
                   << "  --file        a .tad or .ted demo to mine; may be repeated\n"
                   << "  --dir         a directory of demos to mine; recurses\n"
+                  << "  --units       a directory of the data set's unit files, scanned\n"
+                  << "                recursively for *.FBI, used to name each type index\n"
                   << "  --emit-json   write the episodes to a file as JSON\n"
                   << "  --all         emit rejected episodes too, each with its reasons\n"
                   << "\n"
-                  << "Episodes are keyed on an anonymous unit type index; see the note at the\n"
-                  << "top of src/tad_episodes.cpp for why there is no --emit-cpp yet.\n";
+                  << "Without --units, episodes are keyed on an anonymous type index; see the\n"
+                  << "note at the top of src/tad_episodes.cpp.\n";
         return args.isHelpRequested() ? 0 : 1;
     }
 
@@ -440,6 +497,27 @@ int main(int argc, char* argv[])
             }
         }
     }
+    std::vector<std::string> loadOrder;
+    if (args.contains("units"))
+    {
+        auto dir = args.getString("units");
+        std::error_code error;
+        auto stems = readUnitStems(dir, error);
+        if (error)
+        {
+            std::cerr << "cannot read unit directory " << dir << ": " << error.message() << "\n";
+            return 1;
+        }
+        if (stems.empty())
+        {
+            std::cerr << "no *.FBI files under " << dir << "\n";
+            return 1;
+        }
+
+        loadOrder = tadUnitLoadOrder(std::move(stems));
+        std::cout << "unit load order: " << loadOrder.size() << " types from " << dir << "\n";
+    }
+
     std::sort(paths.begin(), paths.end());
 
     if (paths.empty())
@@ -497,6 +575,17 @@ int main(int argc, char* argv[])
                   << ", " << handler.orphanedFinishes << " finishes with no start"
                   << ", " << handler.inProgress.size() << " still building at the end\n";
 
+        // A name is only as good as the data set it came from. The demo's own
+        // 0x1a table carries the type count, so a --units pointed at the wrong
+        // mod is caught here rather than quietly renaming every episode.
+        if (!loadOrder.empty() && handler.unitTable
+            && handler.unitTable->restricted.size() != loadOrder.size())
+        {
+            std::cerr << "  WARNING: " << path.filename().string() << " declares "
+                      << handler.unitTable->restricted.size() << " unit types but --units gave "
+                      << loadOrder.size() << "; names for this demo will be wrong\n";
+        }
+
         for (auto& episode : handler.episodes)
         {
             if (emitAll || episode.clean())
@@ -536,8 +625,10 @@ int main(int argc, char* argv[])
             }
         }
 
-        std::cout << "\nmodal build times, by anonymous type index:\n"
-                  << "  type     n    mode   share\n";
+        std::cout << (loadOrder.empty()
+                ? "\nmodal build times, by anonymous type index:\n"
+                : "\nmodal build times, by unit type:\n")
+                  << "  type            n    mode   share\n";
         std::vector<std::pair<uint16_t, const std::map<uint32_t, unsigned int>*>> byCount;
         for (const auto& [type, histogram] : durations)
         {
@@ -575,8 +666,8 @@ int main(int argc, char* argv[])
                 continue;
             }
 
-            std::cout << "  " << std::setw(4) << type
-                      << std::setw(6) << total
+            std::cout << "  " << std::left << std::setw(12) << typeLabel(loadOrder, type) << std::right
+                      << std::setw(5) << total
                       << std::setw(8) << mode
                       << std::setw(7) << (100 * modeCount / total) << "%\n";
         }
@@ -588,7 +679,7 @@ int main(int argc, char* argv[])
         nlohmann::json j = nlohmann::json::array();
         for (const auto& episode : all)
         {
-            j.push_back(toJson(episode));
+            j.push_back(toJson(episode, loadOrder));
         }
 
         std::ofstream file(out);

@@ -316,21 +316,80 @@ significant bits and a `float` has 24.
 | 5 | 3 x s32 | position of the nanoframe, 16.16 |
 | 17 | 3 x s16 | its rotation |
 
-**The type index is not an index into the `0x1a` table.** That was the reading
-this work started from, and the corpus refutes it. The table is sorted by a
-content-derived id, so its order is effectively random with respect to which
-side a unit belongs to -- and these indices are not. In demo 14724 the ARM
-player's 19 distinct indices all fall in 4..152 and the CORE player's 27 in
-159..310; in 14733 the split is 7..258 against 268..525; and in the ten-player
-14727 the blocks fall into a low group and a high group the same way. A random
-permutation produces the two-player case with probability about 4e-13.
+**The type index is a 1-based load-order index**, and not an index into the
+`0x1a` table. The table reading is the one this work started from, and the
+corpus refutes it: the table is sorted by a content-derived id, so its order is
+effectively random with respect to which side a unit belongs to -- and these
+indices are not. In demo 14724 the ARM player's 19 distinct indices all fall in
+4..152 and the CORE player's 27 in 159..310; in 14733 the split is 7..258
+against 268..525; and in the ten-player 14727 the blocks fall into a low group
+and a high group the same way. A random permutation produces the two-player case
+with probability about 4e-13.
 
-So it is a **load-order index** -- TA's FBI loader assigns each unit type its own
-index and stores it at `record+0x21e` (`TOTALA-EXE.md` §100). That reframes the
-naming problem: it is not the checksum, and solving the checksum would not
-answer it. What is needed is the order TA's `units\*.FBI` enumeration produces.
-Plain alphabetical, which is also the HPI directory order, is not that order,
-though it scores better than chance.
+It is the index TA's FBI loader assigns each unit type and stores at
+`record+0x21e` (`TOTALA-EXE.md` §100). The order is:
+
+> Take every `units\*.FBI` name the VFS presents once the archives are merged
+> into one directory, sort it, and number from **one**.
+
+`tadUnitLoadOrder` in `src/rwe/io/tad/tad_events.h` is that rule, and
+`tad_episodes --units <dir>` applies it. The mod files stay out of the
+repository: `--units` takes a path.
+
+Three things had to be got right at once, which is why plain alphabetical
+"scores better than chance but is not it" was as far as the previous pass got.
+The sort is **global across archives**, not per-archive concatenation; the
+numbering starts at **one**; and it is a **byte** sort, which matters because
+Escalation ships `ALL_L2.FBI` and `_` sorts after `Z`.
+
+#### How it was settled
+
+The validator needs no absolute calibration: for one builder,
+`buildDurationTicks / BuildTime` must be the same for every type it builds,
+because the only other term is that builder's own `WorkerTime`. Score a
+candidate by the mean coefficient of variation of that ratio across builders
+that built two or more types; zero is perfect.
+
+| Ordering | ProTA 4.8 (317 types) | TA: Escalation 10.2 (549 types) |
+|---|---|---|
+| **sorted, numbered from 1** | **0.171** | **0.359** |
+| sorted, numbered from 0 | 0.494 | 0.927 |
+| every other offset in -8..+8 | worse than 0.5 | worse than 0.83 |
+| best of the 5040 per-archive concatenations | n/a (one archive) | 0.773 |
+
+The minimum is singular in both, and the second data set is the real test: a
+different mod, a different unit count, and seven archives instead of one.
+
+Then the checks against fields the ordering was **not** fitted to, which is what
+keeps this out of the circularity the conformance work has to avoid:
+
+- **Side.** Every one of demo 14724's 30 type indices lands on the side its
+  owner's header entry declares. 30 of 30.
+- **Index 0 never appears** anywhere in the corpus -- 13 demos, ~42,000
+  episodes. That is what a 1-based index looks like.
+- **The builder's own `WorkerTime`.** Where a builder was itself built, its type
+  is known independently, so its FBI predicts the rate it should build at.
+  Taking the modal duration of each builder-type/product-type pair, 63 of 439
+  Escalation pairs match `ceil(BuildTime / (WorkerTime/30))` to within two
+  ticks, against **0 of 344** for the zero-based sort. `ARMAAP` (`WorkerTime`
+  300) building `ARMPNIX` (`BuildTime` 30120) predicts 3012 ticks and the demos
+  show a mode of exactly 3012 over 93 builds; `ARMVP` building `ARMFLASH`
+  predicts 419 and shows 419 over 372. The rest are shortened by assists, which
+  only ever shorten.
+- **The pairs read correctly.** Aircraft plants build aircraft, kbot labs build
+  kbots, construction vehicles build wind generators and metal extractors. The
+  arithmetic knew nothing about unit classes.
+
+#### One thing this turned up and did not explain
+
+ProTA constructors come out a constant **+33 to +35 ticks** slower than
+`ceil(BuildTime/p)` -- `CORCV` building `CORWIN`, `CORRL`, `CORMEX` and `CORRAD`
+gives +33, +34, +33, +34 -- while Escalation's `ARMACK` lands on 0 and -1 for
+four different products. So it is not a constant of the nanolathe and not
+something a mobile builder always pays. It is recorded here because an oracle
+built on ProTA build durations will be wrong by that much, and because whatever
+explains it is a finding about the build pipeline that is not yet in
+`TOTALA-EXE.md`.
 
 The second id is the one to be careful about. It is the *nanoframe*: over demo
 14724, 781 of the 790 distinct values of that field reappear as the **finished
@@ -520,6 +579,13 @@ the `sub` 3 block, and one fingerprint covers all twelve Escalation demos while
 another covers the ProTA one. That is the mod filter the corpus section below
 asks for, arrived at without the checksum: a table whose fingerprint is not
 recognised is a data set we do not hold, and its episodes are not usable.
+
+**And naming a unit type no longer needs it either.** That was the reason the
+checksum was chased in the first place, and it was a false lead twice over: a
+`0x09`'s type index is not an index into this table at all, and the load order
+that it *is* an index into was recovered from the corpus without touching the
+binary. See the `0x09` section above. The checksum is now wanted only for its
+own sake -- reproducing the table, rather than reading a demo.
 
 ## What the stream is, and why that settles the playback question
 
@@ -725,12 +791,14 @@ They catch different things and should not share machinery.
    **Partly done.** The payloads are decoded (`tad_events.{h,cpp}`, sections
    above) and the death oracle landed a finding that goes into
    `TOTALA-EXE-WRECKS.md` rather than into a test. The economy has slots 0-3,
-   which is enough for storage-cap and stall episodes. The **checked-in
-   episodes are blocked**, and on one thing only: an episode fixture has to
-   transcribe the unit's real FBI values inline, and turning a `0x09`'s type
-   index into a unit name needs TA's own checksum routine read out of
-   `TotalA.exe`. Until that lands, every oracle here is keyed on an anonymous
-   type index.
+   which is enough for storage-cap and stall episodes.
+
+   **Naming is solved.** A `0x09`'s type index is a 1-based index into the
+   sorted `units\*.FBI` names -- see the `0x09` section above for the rule and
+   the evidence -- so `tad_episodes --units <dir>` names every episode and an
+   episode fixture can transcribe the unit's real FBI values. It did not need
+   the `0x1a` checksum, and the checksum would not have answered it. What is
+   still to do is `--emit-cpp` and the tests that consume it.
 3. Decide on `0x2c` once the stream has been stared at. If the decode falls
    out of the binary in a day or two of probing -- pivot on `0x44F4A0`, the
    three-waypoint bit-serialiser, and on the emitter `0x451DF0` -- the

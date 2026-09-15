@@ -74,24 +74,23 @@ namespace rwe
     struct TadBuildStarted
     {
         /**
-         * Which unit type, as a dense index -- but NOT an index into the demo's
-         * 0x1a table, which is the reading this started from and which the
-         * corpus refutes.
+         * Which unit type, as a 1-based index into the unit load order -- NOT
+         * an index into the demo's 0x1a table, which is the reading this
+         * started from and which the corpus refutes.
          *
          * The 0x1a table is sorted by a content-derived id, so its order is
          * effectively random with respect to which side a unit belongs to. The
-         * indices in this field are not: in demo 14724 the ARM player's 19
-         * indices all fall in 4..152 and the CORE player's 27 in 159..310, in
-         * 14733 the split is 7..258 against 268..525, and in the ten-player
-         * 14727 the blocks fall into a low group and a high group the same way.
-         * A random permutation gives that for one demo with probability about
-         * 4e-13.
+         * indices in this field are not: in demo 14724 the ARM player's indices
+         * all fall in 4..152 and the CORE player's in 159..310, in 14733 the
+         * split is 7..258 against 268..525, and in the ten-player 14727 the
+         * blocks fall into a low group and a high group the same way. A random
+         * permutation gives that for one demo with probability about 4e-13.
          *
-         * So it is a load-order index -- TA's FBI loader assigns each unit type
-         * its own index and stores it at record+0x21e (docs/TOTALA-EXE.md
-         * section 100). Which order that enumeration produces is not settled;
-         * plain alphabetical, which is also the HPI directory order, scores
-         * better than chance against the corpus but is not it.
+         * It is TA's load-order index, which the FBI loader assigns to each unit
+         * type and stores at record+0x21e (docs/TOTALA-EXE.md section 100). The
+         * order is the one tadUnitLoadOrder produces: every units\*.FBI name in
+         * the merged VFS, sorted, numbered from one. See that function for the
+         * evidence, and docs/TA-DEMOS.md for the whole argument.
          */
         uint16_t typeIndex;
 
@@ -283,11 +282,15 @@ namespace rwe
         uint8_t sub;
 
         /**
-         * A content-derived 32-bit id for a unit type, and the thing a 0x09's
-         * type index indexes into. It is NOT a hash of the unit's name: 88
-         * hash/form combinations over the real name sets of two mods hit
-         * nothing in either table. Naming a type needs TA's own routine read out
-         * of TotalA.exe.
+         * A content-derived 32-bit id for a unit type. It is NOT a hash of the
+         * unit's name: 88 hash/form combinations over the real name sets of two
+         * mods hit nothing in either table, and reproducing it needs TA's own
+         * routine read out of TotalA.exe.
+         *
+         * A 0x09's type index does NOT index into this table -- that reading is
+         * refuted on TadBuildStarted::typeIndex, and naming a type does not need
+         * this id. Its remaining use is identifying the data set, which
+         * TadUnitTable::knownDataSet does by fingerprint.
          */
         uint32_t id;
 
@@ -387,4 +390,53 @@ namespace rwe
     std::optional<TadScriptCall> tadDecodeScriptCall(const TadBytes& subPacket);
     std::optional<TadResourceStats> tadDecodeResourceStats(const TadBytes& subPacket);
     std::optional<TadSpeed> tadDecodeSpeed(const TadBytes& subPacket);
+
+    /**
+     * The order TA's FBI loader assigns unit types, given every unit file name
+     * in the data set.
+     *
+     * TA enumerates units\*.FBI through the VFS, which presents every archive
+     * as one merged directory, and hands each type the next index. The order is
+     * the sorted file name and the numbering starts at one, so this returns the
+     * names sorted and a caller indexes with tadUnitNameForTypeIndex.
+     *
+     * Names are the file stem, upper-cased and compared as bytes. Case folding
+     * is defensive rather than tested: every stem in both data sets is already
+     * upper case, and only the extension varies. Byte order is load-bearing --
+     * Escalation ships ALL_L2.FBI, and '_' sorts after 'Z'.
+     *
+     * The evidence, over the thirteen-demo corpus (docs/TA-DEMOS.md):
+     *
+     *  - Scoring candidate orderings by how constant buildDuration/BuildTime is
+     *    for one builder, this one gives a mean coefficient of variation of
+     *    0.171 in ProTA 4.8 against 0.494 for the same sort numbered from zero,
+     *    and every other offset in -8..+8 scores worse than 0.5.
+     *  - It replicates in a second data set with a different unit count and a
+     *    different archive layout: TA: Escalation 10.2's 549 types, spread over
+     *    seven archives, score 0.359 here against 0.836 or worse at every other
+     *    offset. Concatenating the archives instead of merging them scores no
+     *    better than 0.773 in any of the 5040 orders.
+     *  - Index 0 never appears anywhere in the corpus, which is what a 1-based
+     *    index looks like.
+     *  - Checked against fields the ordering was not fitted to: every one of
+     *    demo 14724's type indices lands on the side its owner's header entry
+     *    declares (30 of 30), and the builder's own WorkerTime predicts the
+     *    duration it builds at -- 63 of 439 builder-type/product-type pairs in
+     *    Escalation match ceil(BuildTime / (WorkerTime/30)) to within two ticks,
+     *    against 0 of 344 for the zero-based sort, with the rest shortened by
+     *    assists. Those pairs also read correctly: aircraft plants build
+     *    aircraft and kbot labs build kbots.
+     */
+    std::vector<std::string> tadUnitLoadOrder(std::vector<std::string> unitFileStems);
+
+    /**
+     * Names the type a 0x09 refers to, or nothing if the index is out of range.
+     *
+     * loadOrder must have come from tadUnitLoadOrder over the same data set the
+     * demo was recorded on -- a demo's 0x1a table carries the type count, so a
+     * caller can check it has the right one before trusting a name.
+     */
+    std::optional<std::string> tadUnitNameForTypeIndex(
+        const std::vector<std::string>& loadOrder,
+        uint16_t typeIndex);
 }
