@@ -1024,9 +1024,16 @@ They catch different things and should not share machinery.
   corpus exercises.
 - **What computes a `0x1a` id.** The layout of the record is settled and the
   fingerprint does the filtering job, but the id itself is content-derived and
-  resists every name hash tried against it, so a type index still cannot be
-  turned into a unit name. This is now the single thing blocking checked-in
-  episodes.
+  resists every name hash tried against it. ~~This is now the single thing
+  blocking checked-in episodes.~~ It is not: naming came from the load order
+  instead (see `0x09`), so episodes can be named and checked in without it. The
+  id stays unexplained and stays here, but nothing waits on it.
+- **Which player a `0x28` belongs to.** The record carries no id, and in a game
+  of more than two a sender emits a burst of exactly `numPlayers - 1` of them on
+  one tick, so attribution is positional and unsolved. `tad_episodes` currently
+  credits every record in a burst to the sender's own owner block, which is
+  right in a two-player demo and wrong in the rest. This blocks the economy
+  oracle and it skews the "owner stalled" filter today.
 - **The last six floats of `0x28`.** Stored and storage are identified for both
   resources; the two cumulative triples are not, so expenditure still cannot be
   recovered by difference.
