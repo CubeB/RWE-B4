@@ -412,6 +412,16 @@ namespace rwe
             // then draws unshaded. Render-facing, like `shaded`, and hashed
             // by nothing.
             marked.pieces.front().cached = false;
+
+            // A gun whose aim script has said yes and which is waiting on its
+            // reload. The thread that answered is deleted on the next COB
+            // pass, so the angles it was sent are all that is left to keep.
+            UnitWeapon gun;
+            gun.weaponType = "MISSILE";
+            UnitWeaponStateAttacking aimed(SimVector(40_ss, 0_ss, 50_ss));
+            aimed.attackInfo = UnitWeaponStateAttacking::AimedInfo{SimAngle(1234), SimAngle(567)};
+            gun.state = aimed;
+            marked.weapons[1] = gun;
         }
 
         auto deadId = spawnUnit(simA, "KBOT", us, SimVector(360_ss, 0_ss, 300_ss));
@@ -430,6 +440,14 @@ namespace rwe
         const auto& markedB = simB.getUnitState(markedId);
         REQUIRE(markedB.commandFireShotFired);
         REQUIRE(!markedB.pieces.front().cached);
+
+        REQUIRE(markedB.weapons[1].has_value());
+        const auto* attackingB = std::get_if<UnitWeaponStateAttacking>(&markedB.weapons[1]->state);
+        REQUIRE(attackingB != nullptr);
+        const auto* aimedB = std::get_if<UnitWeaponStateAttacking::AimedInfo>(&attackingB->attackInfo);
+        REQUIRE(aimedB != nullptr);
+        REQUIRE(aimedB->lastHeading == SimAngle(1234));
+        REQUIRE(aimedB->lastPitch == SimAngle(567));
 
         REQUIRE(!markedB.orders.empty());
         const auto* attack = std::get_if<AttackOrder>(&markedB.orders.front());

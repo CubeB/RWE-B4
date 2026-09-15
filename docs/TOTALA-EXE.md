@@ -1604,7 +1604,51 @@ resolves the script through `0x4B07C0`, checks the global bit
 `0x10`, the unit id from `unit+0xA8`, the script and its two arguments — and
 hands it to `0x451DF0`, the same emitter `0x49DB4D` uses for a projectile spawn.
 It is the network and replay echo of the call, not a second execution, and it
-does nothing at all in a local game. **Issue #42 is not explained by this.**
+does nothing at all in a local game. **Issue #42 is not explained by this** —
+what does explain it is the next subsection.
+
+### One aim per shot
+
+Issue #42 was real, and it was RWE's. A commander attacking the ground ran
+`AimPrimary` 151 times for 12 shots; the original runs it once a shot. What
+holds it to that is the slot's flag byte at `slot+0x1B` and the script's answer
+beside it at `slot+0x08`:
+
+- **Bit 0 up means aimed, or aiming.** A turret whose bit is up goes straight
+  past the aim call to the fire check (`0x49E211`–`0x49E215`). Otherwise the
+  update works out a heading and pitch, stores them at `slot+0x16` and
+  `slot+0x18`, zeroes the answer (`0x49E2FF`), starts the script with
+  `slot+0x04` as the place to put its answer (`0x49E31C`), and raises the bit
+  (`0x49E3AB`).
+- **Nothing is looked at while the reload runs.** The fire check opens by
+  testing the reload counter at `slot+0x14` and leaves if it is not zero
+  (`0x49E3AE`), so an aimed gun is not rechecked or re-aimed until the reload is
+  done.
+- **The turret handler waits on the answer.** With the bit down or the answer
+  still zero, `0x49D580` returns 0 at `0x49D86D` and changes nothing: the script
+  is still turning, or it said no.
+- **Three things in the handler lower the bit.** The eligibility test failing
+  (`0x49D65B`, which also raises bit 12 of the unit's event word); the fresh
+  angles missing the stored ones by more than tolerance (`0x49D68A` — the drift
+  check, which is what stops a ballistic shot going off on a stale aim); and the
+  round being spawned (`0x49D78B`, which zeroes the answer as well). Losing the
+  target lowers it too (`0x49E1EA`).
+
+So a gun aims, fires, aims once more on the next tick at wherever the target
+stands then, and sits on that aim for the rest of the reload. If the target has
+moved past tolerance by the time the reload runs out, the drift check sends it
+round for a second aim, and that is the only way a shot gets two.
+
+RWE went back to idle whenever a successful aim found the reload unfinished, and
+idle starts a new aim: with a script that answers straight away, one every other
+tick of every reload. It holds the aim now, as `AimedInfo`, which keeps the
+angles and not the thread, because a finished thread is deleted on the next COB
+pass. The drift check is unchanged and runs when the reload does.
+`sim/aimpershot.test.cpp` counts aims and shots with a tally-keeping script on
+ARMCOM and the shipped J7 laser: one aim a shot at the ground, one a shot at a
+unit that stands still, and two for the shot after it moves a hundred units.
+
+An answer of no is where RWE still differs: see §91.
 
 ### The hull is what has to come round
 
@@ -9410,6 +9454,13 @@ there is a regression test for it now.
   disintegrators are `rendertype=3` and declare no `duration`, so for them the
   original computes the tail and throws it away. Anything that wanted it would
   have to be a mod.
+- **An aim script that answers no is asked again on the next tick.** The
+  original leaves bit 0 up with the answer still zero (`0x49D580` returns at
+  `0x49D86D`), so it starts no other aim until something lowers the bit — §11,
+  *One aim per shot*. It matters in the shipped data: ARMCOM's `AimPrimary`
+  returns 0 while its static 3 is set. What lowers the bit when a unit changes
+  target has not been read, and asking again cannot strand a gun the original
+  would have freed, so the wait is not ported.
 
 ## 92. The D-gun's projectile: `noexplode`, the full-range flight, and who gets hurt
 

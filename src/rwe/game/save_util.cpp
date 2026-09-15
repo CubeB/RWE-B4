@@ -747,6 +747,12 @@ namespace rwe
                                 {"lastHeading", saveSimAngle(i.lastHeading)},
                                 {"lastPitch", saveSimAngle(i.lastPitch)}};
                         },
+                        [](const UnitWeaponStateAttacking::AimedInfo& i) {
+                            return json{
+                                {"kind", "aimed"},
+                                {"lastHeading", saveSimAngle(i.lastHeading)},
+                                {"lastPitch", saveSimAngle(i.lastPitch)}};
+                        },
                         [](const UnitWeaponStateAttacking::FireInfo& i) {
                             return json{
                                 {"kind", "fire"},
@@ -784,6 +790,12 @@ namespace rwe
                 {
                     a.attackInfo = UnitWeaponStateAttacking::AimInfo{
                         loadCobThreadRef(ij.at("thread"), env),
+                        loadSimAngle(ij.at("lastHeading")),
+                        loadSimAngle(ij.at("lastPitch"))};
+                }
+                else if (infoKind == "aimed")
+                {
+                    a.attackInfo = UnitWeaponStateAttacking::AimedInfo{
                         loadSimAngle(ij.at("lastHeading")),
                         loadSimAngle(ij.at("lastPitch"))};
                 }

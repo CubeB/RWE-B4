@@ -1056,33 +1056,62 @@ namespace rwe
                     }
                 }
             }
-            else if (auto aimInfo = std::get_if<UnitWeaponStateAttacking::AimInfo>(&aimingState->attackInfo))
+            else
             {
-                auto returnValue = unit.cobEnvironment->tryReapThread(aimInfo->thread);
-                if (returnValue)
+                if (auto aimInfo = std::get_if<UnitWeaponStateAttacking::AimInfo>(&aimingState->attackInfo))
                 {
-                    // we successfully reaped, clear the thread.
-                    aimingState->attackInfo = UnitWeaponStateAttacking::IdleInfo{};
-
-                    if (*returnValue)
+                    auto returnValue = unit.cobEnvironment->tryReapThread(aimInfo->thread);
+                    if (returnValue)
                     {
-                        // aiming was successful, check the target again for drift
-                        auto aimFromPosition = getAimingPoint(id, weaponIndex);
-
-                        auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, (112_ss / (30_ss * 30_ss)), weapon->ballisticZOffset, weaponDefinition.physicsType);
-                        auto heading = headingAndPitch.first;
-                        auto pitch = headingAndPitch.second;
-
-                        // if the target is close enough, try to fire
-                        if (angleBetweenIsLessOrEqual(heading, aimInfo->lastHeading, weaponDefinition.tolerance) && angleBetweenIsLessOrEqual(pitch, aimInfo->lastPitch, weaponDefinition.pitchTolerance))
+                        if (*returnValue)
                         {
-
-                            if (sim->gameTime >= weapon->readyTime)
-                            {
-                                aimingState->attackInfo = UnitWeaponStateAttacking::FireInfo{heading, pitch, *targetPosition, std::nullopt, 0, GameTime(0)};
-                                tryFireWeapon(id, weaponIndex);
-                            }
+                            aimingState->attackInfo = UnitWeaponStateAttacking::AimedInfo{aimInfo->lastHeading, aimInfo->lastPitch};
                         }
+                        else
+                        {
+                            // A no is where RWE knowingly parts from the
+                            // original. 0x49D580 finds the answer still zero
+                            // and leaves at 0x49D86D with bit 0 up, so a
+                            // script that refuses is not asked again until
+                            // something clears the bit -- and what clears it
+                            // on a change of target has not been read. Asking
+                            // again next tick cannot strand a gun the
+                            // original would have freed.
+                            aimingState->attackInfo = UnitWeaponStateAttacking::IdleInfo{};
+                        }
+                    }
+                }
+
+                // Aimed, and waiting for the reload. The original does not
+                // look at an aimed slot at all while its reload counter is
+                // running (0x49E3AE), and starts no new aim while bit 0 is up
+                // (0x49E211), so a gun that has come round sits on its aim for
+                // the rest of the reload. RWE used to go back to idle here and
+                // run the script again every other tick of every reload, which
+                // is upstream #42: 151 aims for 12 shots from a commander
+                // attacking the ground.
+                if (auto aimedInfo = std::get_if<UnitWeaponStateAttacking::AimedInfo>(&aimingState->attackInfo);
+                    aimedInfo != nullptr && sim->gameTime >= weapon->readyTime)
+                {
+                    // The reload is done: check the target again for drift
+                    // against the angles the script was sent.
+                    auto aimFromPosition = getAimingPoint(id, weaponIndex);
+
+                    auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, (112_ss / (30_ss * 30_ss)), weapon->ballisticZOffset, weaponDefinition.physicsType);
+                    auto heading = headingAndPitch.first;
+                    auto pitch = headingAndPitch.second;
+
+                    if (angleBetweenIsLessOrEqual(heading, aimedInfo->lastHeading, weaponDefinition.tolerance) && angleBetweenIsLessOrEqual(pitch, aimedInfo->lastPitch, weaponDefinition.pitchTolerance))
+                    {
+                        aimingState->attackInfo = UnitWeaponStateAttacking::FireInfo{heading, pitch, *targetPosition, std::nullopt, 0, GameTime(0)};
+                        tryFireWeapon(id, weaponIndex);
+                    }
+                    else
+                    {
+                        // Moved past tolerance while the reload ran. The
+                        // original drops bit 0 (0x49D68A) and aims afresh on
+                        // the next tick, which is what idle does here.
+                        aimingState->attackInfo = UnitWeaponStateAttacking::IdleInfo{};
                     }
                 }
             }
