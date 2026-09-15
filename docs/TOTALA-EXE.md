@@ -8670,6 +8670,18 @@ original:
   rockets are `turret=0`, so §11 applies to them and the original holds fire
   until the nose is within the weapon's tolerance, which for `vtol_rocket` and
   friends is 8000, about 44°. RWE now does the same.
+- **Build progress is an integer accumulator, not the original's float.** The
+  original steps a 4-byte float by `p / BuildTime` a tick and stops at the end
+  value (§23), so where `BuildTime` is an exact multiple of `p` it sometimes
+  needs one step more than the division says — ten of the fifteen such pairs in
+  the demo corpus do. RWE's `UnitState::addBuildProgress` adds
+  `workerTimePerTick` to an unsigned counter and finishes at `buildTime`, which
+  agrees with the original on every job whose `BuildTime` is *not* an exact
+  multiple, and is one tick fast on the rest. Kept deliberately: closing it
+  means putting a `float` in hashed simulation state, which is the determinism
+  hazard `CLAUDE.md` opens with, and the prize is one tick on a minority of
+  builds. If it is ever closed, it must be closed with fixed-point or a
+  precomputed step count, never with a `float`.
 - **The waypoint trail marches off the global clock.** The original takes each
   segment's phase from the age of the order being drawn (§26), so two orders
   queued a few ticks apart march very slightly out of step. RWE's orders do not
@@ -8886,6 +8898,14 @@ there is a regression test for it now.
 - **The anti-missile coverage ring** (§25) is decoded -- one dashed ring per
   `interceptor` weapon on an `antiweapons` unit, radius `coverage - 512` -- but
   not drawn.
+- **Why a construction aircraft finishes a build one tick early.** Over the demo
+  corpus every airborne builder does — 58 of 66 builds at exactly one tick under
+  the replay of §23's arithmetic, with none faster, against 1 of 6,658 ground
+  builds. Three builders at two different rates agree, so it is neither one unit
+  nor a rate artefact, and it reads as an increment credited once more over the
+  job than the ground path credits. Five call sites reach `0x41BA60` and none
+  has been attributed to a caller; that attribution is step one. RWE does not
+  reproduce it.
 - The exact tick at which the original commits a **bomb release** inside its
   weapon code is still not pinned down; RWE uses its own bombsight.
 - **`unit+0x110` bits 2–3.** They pick the loose 2000 default over the tight 150
