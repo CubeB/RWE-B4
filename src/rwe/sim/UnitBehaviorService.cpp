@@ -28,6 +28,14 @@ namespace rwe
         constexpr unsigned int ArmStowGraceTicks = 15;
 
         /**
+         * How near its heading has to be to the job before a builder starts
+         * work. A sixteenth of a turn: close enough that the arm comes out
+         * pointing at what it is lathing, loose enough that a slow turner is
+         * not held up over the last degree of it.
+         */
+        constexpr SimAngle WorkFacingTolerance = SimAngle(1u << 12u);
+
+        /**
          * How near a gunship has to get to its station before it counts as
          * arrived and picks the next one. The original uses sixteen units,
          * which is close enough that it really does fly to each point.
@@ -1434,6 +1442,19 @@ namespace rwe
         match(
             unitInfo.state->physics,
             [&](const UnitPhysicsInfoGround& p) {
+                // Working on something, a builder faces the job rather than
+                // whatever heading it stopped on -- see slowFacePoint, and
+                // the turn every work mission in the original makes.
+                if (unitInfo.state->slowFacePoint)
+                {
+                    auto direction = *unitInfo.state->slowFacePoint - unitInfo.state->position;
+                    direction.y = 0_ss;
+                    if (direction.lengthSquared() > 0_ss)
+                    {
+                        unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, UnitState::toRotation(direction), turnRateThisFrame);
+                        return;
+                    }
+                }
                 unitInfo.state->rotation = turnTowards(unitInfo.state->rotation, p.steeringInfo.targetAngle, turnRateThisFrame);
             },
             [&](const UnitPhysicsInfoAir& p) {
@@ -2077,7 +2098,11 @@ namespace rwe
     bool UnitBehaviorService::withinBuildReach(UnitInfo unitInfo, const UnitState& target) const
     {
         const auto& targetDefinition = sim->unitDefinitions.at(target.unitType);
-        auto rect = sim->computeFootprintRegion(target.position, targetDefinition.movementCollisionInfo);
+        return withinBuildReachOfRect(unitInfo, sim->computeFootprintRegion(target.position, targetDefinition.movementCollisionInfo));
+    }
+
+    bool UnitBehaviorService::withinBuildReachOfRect(UnitInfo unitInfo, const DiscreteRect& rect) const
+    {
         auto corner = sim->terrain.heightmapIndexToWorldCorner(rect.x, rect.y);
         auto minX = corner.x;
         auto minZ = corner.z;
@@ -2260,6 +2285,30 @@ namespace rwe
     {
         if (!unitInfo.definition->canFly)
         {
+            // On the ground, face the job before working on it. Every work
+            // mission in the original turns: the bearing to the target
+            // (0x48A980, an atan2 over the two positions), less the unit's
+            // own heading (unit+0x66), handed to the turn at 0x438590 --
+            // whose nine callers are the build, repair, capture, reclaim and
+            // resurrect handlers and the two aircraft ones. RWE turned only
+            // aircraft, so a builder that was already in reach lathed from
+            // whatever heading it happened to stop on.
+            unitInfo.state->slowFacePoint = workPosition;
+
+            // A builder that can turn finishes turning first. One that cannot
+            // -- no turn rate at all -- must not be made to wait for a turn it
+            // can never make.
+            if (unitInfo.definition->turnRate > 0_ss)
+            {
+                auto direction = workPosition - unitInfo.state->position;
+                direction.y = 0_ss;
+                if (direction.lengthSquared() > 0_ss
+                    && !angleBetweenIsLessOrEqual(unitInfo.state->rotation, UnitState::toRotation(direction), WorkFacingTolerance))
+                {
+                    return false;
+                }
+            }
+
             return true;
         }
 
@@ -3785,10 +3834,14 @@ namespace rwe
             return true;
         }
 
-        auto maxRangeSquared = 300_ss * 300_ss;
-        if (unitInfo.state->position.distanceSquared(feature.position) > maxRangeSquared)
+        // The second copy of the invented 300, unremarked where reclaim's at
+        // least admitted itself. Raising a wreck reaches exactly as far as
+        // reclaiming it, so it is measured the same way.
+        auto rect = sim->computeFootprintRegion(feature.position, static_cast<unsigned int>(featureDefinition.footprintX), static_cast<unsigned int>(featureDefinition.footprintZ));
+        if (!withinBuildReachOfRect(unitInfo, rect))
         {
-            navigateTo(unitInfo, resurrectOrder.target);
+            // The footprint itself, as reclaim does: see reclaimTarget.
+            navigateTo(unitInfo, rect);
             return false;
         }
 
@@ -4251,8 +4304,12 @@ namespace rwe
         }
         auto& targetUnit = targetUnitRef->get();
 
-        // Same reach as building; see the FIXME in buildExistingUnit.
-        if (unitInfo.state->position.distanceSquared(targetUnit.position) > (unitInfo.definition->buildDistance * unitInfo.definition->buildDistance))
+        // Reach measured to the footprint, as building measures it. The FIXME
+        // this used to point at is settled in reclaimTarget: the original's
+        // work missions all reach by Builddistance. Measuring to the footprint
+        // rather than the centre only ever helps, so anywhere navigation
+        // already brought a captor close enough it still does.
+        if (!withinBuildReach(unitInfo, targetUnit))
         {
             navigateTo(unitInfo, captureOrder.target);
             return false;
@@ -4350,8 +4407,9 @@ namespace rwe
         }
         auto& targetUnit = targetUnitRef->get();
 
-        // Same reach as building; see the FIXME in buildExistingUnit.
-        if (unitInfo.state->position.distanceSquared(targetUnit.position) > (unitInfo.definition->buildDistance * unitInfo.definition->buildDistance))
+        // Reach measured to the footprint, as building measures it; see
+        // captureExistingUnit and reclaimTarget for the same change.
+        if (!withinBuildReach(unitInfo, targetUnit))
         {
             navigateTo(unitInfo, targetUnitId);
             return false;
@@ -4846,21 +4904,63 @@ namespace rwe
             return true;
         }
 
-        // FIXME: figure out actual range of reclaiming
-        auto maxRangeSquared = 300_ss * 300_ss;
-        if (unitInfo.state->position.distanceSquared(*targetPosition) > maxRangeSquared)
+        // A unit and a feature are reached by different rules in the original,
+        // and they are different handlers: ReclaimUnit (0x404730) against
+        // Reclaim (0x404AD0).
+        //
+        // A unit is reached by the reclaimer's own Builddistance. ReclaimUnit
+        // state 4 loads it from def+0x212 at 0x4048F4, squares it at 0x40494E
+        // and compares against dx^2 + dz^2. (It adds a term off the target's
+        // definition, def+0x184, read at that one instruction and written
+        // nowhere else in the binary, so it contributes nothing.) Measured
+        // here to the footprint, the way building measures it.
+        //
+        // A feature has no reach test anywhere in its handler. Reclaim state 0
+        // (0x404B5B) checks canreclamate and installs a move goal on the
+        // feature's own square (0x438AD0); the later states work out the job's
+        // length, turn to face it and work. Arriving is the whole test, which
+        // is what navigateTo returns.
+        //
+        // What stood here was a flat 300 for both, under a comment admitting
+        // it was a guess: seven and a half times an ARMCK's forty, which is
+        // what let a builder lathe a wreck from across the yard rather than
+        // walking up to it.
+        // A feature is measured the same way here, and that is RWE's own
+        // approximation rather than the original's rule: gating a feature on
+        // having arrived at its move goal, which is what the original does,
+        // never reports arrival in RWE, because the feature's own footprint
+        // is blocking and the goal cells are inside it. Builddistance to the
+        // footprint expresses the same intent -- walk up to it, then work --
+        // in the idiom RWE's navigation actually has.
+        auto rect = match(
+            target,
+            [&](const UnitId& id) {
+                const auto& u = sim->getUnitState(id);
+                return sim->computeFootprintRegion(u.position, sim->unitDefinitions.at(u.unitType).movementCollisionInfo);
+            },
+            [&](const FeatureId& id) {
+                const auto& f = sim->getFeature(id);
+                const auto& d = sim->getFeatureDefinition(f.featureName);
+                return sim->computeFootprintRegion(f.position, static_cast<unsigned int>(d.footprintX), static_cast<unsigned int>(d.footprintZ));
+            });
+
+        if (!withinBuildReachOfRect(unitInfo, rect))
         {
-            auto navigationGoal = match(
-                target, [&](const UnitId& u) -> NavigationGoal { return u; }, [&](const FeatureId& f) -> NavigationGoal { return f; });
-            navigateTo(unitInfo, navigationGoal);
-        }
-        else
-        {
-            // we're in range, start reclaiming
-            return deployReclaimArm(unitInfo, target);
+            // Walk at the thing itself, not at a ring drawn one build
+            // distance around it. hasReachedGoal reports success as soon as
+            // the pathfinder has got as close as it can, and on a ring that
+            // can be a cell short of the reach test -- which parks the
+            // builder a few units outside its own arm for ever, the same
+            // standing-about failure as B4 #57. Aimed at the footprint, the
+            // relaxation lands on the feature itself when nothing blocks it
+            // and alongside when something does, and both are well inside
+            // Builddistance.
+            navigateTo(unitInfo, rect);
+            return false;
         }
 
-        return false;
+        // we're in range, start reclaiming
+        return deployReclaimArm(unitInfo, target);
     }
 
     bool UnitBehaviorService::buildExistingUnit(UnitInfo unitInfo, UnitId targetUnitId, std::optional<UnitId> standNextTo)

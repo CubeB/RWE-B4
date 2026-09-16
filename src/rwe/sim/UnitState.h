@@ -694,9 +694,17 @@ namespace rwe
         std::optional<AirLoiterState> airLoiter;
 
         /**
-         * Set each tick while a construction aircraft holds station: it turns
-         * towards this point at a slow fixed rate instead of chasing its
-         * flight path. Cleared at the start of every behaviour update.
+         * Where a working builder points itself, asserted afresh on every
+         * tick it works and cleared at the start of every behaviour update.
+         *
+         * A construction aircraft holding station turns towards this instead
+         * of chasing its flight path. A builder on the ground turns towards
+         * it instead of holding the heading it happened to stop on, which is
+         * what the original does in every one of its work missions: the
+         * bearing to the job (0x48A980, an atan2 over the two positions),
+         * less the unit's own heading (unit+0x66), handed to the turn at
+         * 0x438590 -- whose nine callers are the build, repair, capture,
+         * reclaim and resurrect handlers and the two aircraft ones.
          */
         std::optional<SimVector> slowFacePoint;
 

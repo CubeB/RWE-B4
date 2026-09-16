@@ -102,7 +102,11 @@ namespace rwe
                 builder.maxVelocity = 3_ss;
                 builder.acceleration = 1_ss;
                 builder.brakeRate = 1_ss;
-                builder.turnRate = 1000_ss;
+                // Fast enough to finish any turn within a tick. A builder
+                // faces its work before starting on it now, and what these
+                // cases measure is when the arm goes away, not how long the
+                // unit takes to come round.
+                builder.turnRate = 32768_ss;
                 builder.maxHitPoints = 100;
                 builder.buildTime = 0u;
                 // The player's capacity is recomputed from the units that
