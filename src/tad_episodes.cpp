@@ -1275,12 +1275,39 @@ namespace rwe
     }
 
     /**
+     * The build a unit id was carrying at a tick -- the last one to finish at or
+     * before it -- as (finish tick, name).
+     *
+     * Both places that name a unit from its id go through here, because the two
+     * disagreeing is exactly the fault this exists to prevent: the build cells
+     * kept the FIRST name an id ever held while --weapon-slots scoped, and the
+     * gap between the two predicates was 453 failures against 14. The finish
+     * tick comes back with the name because how stale a name is is what
+     * separates a recycled id from a genuine reading.
+     */
+    std::optional<std::pair<uint32_t, std::string>> buildAtTick(
+        const std::vector<std::pair<uint32_t, std::string>>& builds,
+        uint32_t at)
+    {
+        std::optional<std::pair<uint32_t, std::string>> best;
+        for (const auto& build : builds)
+        {
+            if (build.first <= at)
+            {
+                best = build;
+            }
+        }
+        return best;
+    }
+
+    /**
      * (builder type, product type) cells over the whole corpus.
      *
      * A builder's own type is known only where the builder was itself built
      * during the recording, which is what makes builder-keyed rows possible at
-     * all: pair a 0x12's builderId back to the unitId of an earlier episode.
-     * That is also what limits how many cells there are.
+     * all: pair a 0x12's builderId back to the unitId of an earlier episode,
+     * scoped to the build that id was carrying when this one started. That is
+     * also what limits how many cells there are.
      */
     std::vector<BuildCell> mineBuildCells(
         const std::vector<Episode>& episodes,
@@ -1299,27 +1326,48 @@ namespace rwe
         // cells. The demo's own 0x1a table says how many types it had, so a
         // disagreement with --units is grounds to drop it rather than to print a
         // warning and hope. That is what keeps --dir over a mixed corpus honest.
-        std::vector<const Episode*> byFinish;
+
+        // Each id's builds, oldest first, so a builder can be named as of a tick
+        // rather than for all time. Scoping matters because TA recycles unit ids
+        // heavily -- in 14725, 2,622 of 4,093 distinct ids are reused by a later
+        // nanoframe and 2,550 of those by a different type -- so keeping the
+        // FIRST name an id ever held looks most builders up under a stale name.
+        // The reference script scopes the same way, and scoping moved no scored
+        // cell's mode: a stale name either carries a different WorkerTime, which
+        // puts the duration outside the outlier cap and drops the build, or the
+        // same one (every stock factory is p = 4), which lands it in the wrong
+        // cell with the right duration, since only p and the product's BuildTime
+        // enter the arithmetic. What it buys is evidence -- builds roughly
+        // double and four more pairs clear --min-builds.
+        std::map<std::pair<std::string, uint16_t>, std::vector<std::pair<uint32_t, std::string>>> lives;
         for (const auto& e : episodes)
         {
             if (wrongDataSet.count(e.demo) != 0)
             {
                 continue;
             }
-            byFinish.push_back(&e);
-        }
-        std::stable_sort(byFinish.begin(), byFinish.end(), [](const Episode* a, const Episode* b) {
-            return std::tie(a->demo, a->finishTick) < std::tie(b->demo, b->finishTick);
-        });
-
-        std::map<std::pair<std::string, uint16_t>, std::string> born;
-        for (const auto* e : byFinish)
-        {
-            if (auto name = nameOf(*e))
+            if (auto name = nameOf(e))
             {
-                born.emplace(std::make_pair(e->demo, e->unitId), *name);
+                lives[std::make_pair(e.demo, e.unitId)].emplace_back(e.finishTick, *name);
             }
         }
+        for (auto& [id, list] : lives)
+        {
+            std::sort(list.begin(), list.end());
+        }
+
+        auto nameAt = [&](const std::string& demo, uint16_t id, uint32_t at) -> std::optional<std::string> {
+            auto it = lives.find(std::make_pair(demo, id));
+            if (it == lives.end())
+            {
+                return std::nullopt;
+            }
+            if (auto build = buildAtTick(it->second, at))
+            {
+                return build->second;
+            }
+            return std::nullopt;
+        };
 
         // Grouped in first-appearance order, because the mode's tie-break is
         // first-encountered and the port has to agree with the script's on the
@@ -1332,17 +1380,17 @@ namespace rwe
                 continue;
             }
 
-            auto builder = born.find(std::make_pair(e.demo, e.builderId));
+            auto builder = nameAt(e.demo, e.builderId, e.startTick);
             auto product = nameOf(e);
-            if (builder == born.end() || !product)
+            if (!builder || !product)
             {
                 continue;
             }
-            if (unitFacts.count(builder->second) == 0 || unitFacts.count(*product) == 0)
+            if (unitFacts.count(*builder) == 0 || unitFacts.count(*product) == 0)
             {
                 continue;
             }
-            grouped[std::make_pair(builder->second, *product)].push_back(&e);
+            grouped[std::make_pair(*builder, *product)].push_back(&e);
         }
 
         std::vector<BuildCell> out;
@@ -1622,17 +1670,15 @@ namespace rwe
     // firing, it collects the set of slots that type was seen using and checks
     // each against the slots that type's FBI actually fills.
     //
-    // NAMING A SHOOTER IS THE WHOLE DIFFICULTY, and it is why this does not
-    // reuse the born map that mineBuildCells shares with tools/tad-buildtime.py.
-    // TA recycles unit ids heavily -- in 14725, 2,622 of 4,093 distinct ids are
-    // reused by a later nanoframe and 2,550 of those by a different type -- so
-    // a map that keeps the FIRST name an id ever held names most shooters
-    // wrongly, and the wrong name is what makes a metal extractor appear to open
-    // fire. Scoping the name to the id's most recent build BEFORE the shot fixes
-    // it. The build cells do not scope, deliberately: the script is their
-    // reference and it does not either. That is a known loose end rather than a
-    // difference of opinion, and closing it is the first item of the weapon
-    // oracle hand-off.
+    // NAMING A SHOOTER IS THE WHOLE DIFFICULTY. TA recycles unit ids heavily --
+    // in 14725, 2,622 of 4,093 distinct ids are reused by a later nanoframe and
+    // 2,550 of those by a different type -- so a map that keeps the FIRST name
+    // an id ever held names most shooters wrongly, and the wrong name is what
+    // makes a metal extractor appear to open fire. Scoping the name to the id's
+    // most recent build BEFORE the shot fixes it, and takes the occupancy test
+    // from 453 failures to 14. mineBuildCells now scopes the same way, and
+    // unscopedViolating below is what is left of the contrast: the naive tally
+    // kept for the argument, not a second implementation in use anywhere.
 
     /** What one unit type was seen doing, against what its FBI allows. */
     struct WeaponSlotTally
@@ -1649,10 +1695,10 @@ namespace rwe
 
         /**
          * The same tally again under the occupancy predicate but with shooters
-         * named the way the build cells name a builder -- the FIRST name an id
-         * ever held. Carried for the second contrast: the gap between this and
-         * `violating` is what unit-id recycling costs, and it is the argument
-         * for scoping.
+         * named by the FIRST name an id ever held. Carried for the second
+         * contrast: the gap between this and `violating` is what unit-id
+         * recycling costs, and it is the argument that made the build cells
+         * scope too.
          */
         unsigned int unscopedViolating = 0;
         unsigned long shots = 0;
@@ -1712,22 +1758,13 @@ namespace rwe
         // shot that build finished is what separates a recycled id from a
         // genuine reading: a shot 30,000 ticks after "the wind generator was
         // built" is a later unit wearing the wind generator's id.
-        auto nameAt = [&](uint16_t id, uint32_t at) -> std::optional<std::pair<std::string, uint32_t>> {
+        auto nameAt = [&](uint16_t id, uint32_t at) -> std::optional<std::pair<uint32_t, std::string>> {
             auto it = lives.find(id);
             if (it == lives.end())
             {
                 return std::nullopt;
             }
-
-            std::optional<std::pair<std::string, uint32_t>> best;
-            for (const auto& [finish, name] : it->second)
-            {
-                if (finish <= at)
-                {
-                    best = std::make_pair(name, finish);
-                }
-            }
-            return best;
+            return buildAtTick(it->second, at);
         };
 
         /** What one unit type was seen doing, and how stale its name was. */
@@ -1759,9 +1796,9 @@ namespace rwe
             if (auto name = nameAt(record.shot.shooterId, record.tick))
             {
                 ++named;
-                auto& observation = slotsPerType[name->first];
+                auto& observation = slotsPerType[name->second];
                 observation.slots.insert(record.shot.weaponSlot);
-                observation.ages.push_back(record.tick - name->second);
+                observation.ages.push_back(record.tick - name->first);
             }
             if (auto first = firstName.find(record.shot.shooterId); first != firstName.end())
             {

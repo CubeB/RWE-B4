@@ -412,41 +412,42 @@ once came from different senders, so the two ticks are always read off the same
 clock.
 
 **Where `BuildTime` is not a multiple of `p`, the float model and
-`ceil(BuildTime/p)` agree**, and the corpus agrees with both: 26 of 26 such
-pairs land on the predicted duration exactly, `ARMVP` to `ARMFLASH` over 249
-builds, `ARMLAB` to `ARMJETH` over 302, and so on.
+`ceil(BuildTime/p)` agree**, and the corpus agrees with both: 29 of 29 such
+pairs land on the predicted duration exactly, `ARMVP` to `ARMFAV` over 363
+builds, `ARMLAB` to `ARMJETH` over 312, and so on.
 
 **Where it *is* a multiple they disagree, and that is the test.** An integer
 model says the job takes exactly `BuildTime/p` ticks. The float one says it
 depends on whether repeated addition of `x` overshoots 1.0f or lands on it, and
-that is not something a human can guess from the two numbers. Over the 15 such
+that is not something a human can guess from the two numbers. Over the 16 such
 pairs in the Escalation corpus it predicts every one, including which ten take
-an extra tick and which five do not:
+an extra tick and which six do not:
 
 | Builder | Product | BuildTime | p | BuildTime/p | model | corpus | n |
 |---|---|---|---|---|---|---|---|
 | `ARMVP` | `ARMFLASH` | 1676 | 4 | 419 | +1 | +1 | 249 |
 | `ARMVP` | `ARMLART` | 2840 | 4 | 710 | +0 | +0 | 74 |
+| `ARMLAB` | `ARMVADER` | 6320 | 4 | 1580 | +1 | +1 | 65 |
 | `CORVP` | `CORRAID` | 3564 | 4 | 891 | +0 | +0 | 57 |
-| `ARMLAB` | `ARMVADER` | 6320 | 4 | 1580 | +1 | +1 | 54 |
-| `CORLAB` | `CORCRASH` | 1820 | 4 | 455 | +1 | +1 | 34 |
-| `CORAP` | `CORVENG` | 7356 | 4 | 1839 | +1 | +1 | 29 |
-| `ARMLAB` | `ARMFLEA` | 5032 | 4 | 1258 | +1 | +1 | 29 |
-| `CORLAB` | `CORCK` | 7720 | 4 | 1930 | +0 | +0 | 27 |
-| `ARMLAB` | `ARMROCK` | 2432 | 4 | 608 | +1 | +1 | 21 |
+| `CORAP` | `CORVENG` | 7356 | 4 | 1839 | +1 | +1 | 40 |
+| `CORLAB` | `CORCRASH` | 1820 | 4 | 455 | +1 | +1 | 37 |
+| `ARMLAB` | `ARMROCK` | 2432 | 4 | 608 | +1 | +1 | 35 |
+| `ARMLAB` | `ARMFLEA` | 5032 | 4 | 1258 | +1 | +1 | 35 |
+| `CORLAB` | `CORCK` | 7720 | 4 | 1930 | +0 | +0 | 29 |
+| `ARMAAP` | `ARMPNIX` | 30120 | 10 | 3012 | +1 | +1 | 27 |
 | `CORVP` | `CORMIST` | 2636 | 4 | 659 | +0 | +0 | 21 |
 | `ARMVP` | `ARMJAV` | 4704 | 4 | 1176 | +1 | +1 | 14 |
-| `ARMAAP` | `ARMPNIX` | 30120 | 10 | 3012 | +1 | +1 | 8 |
+| `ARMASY` | `ARMSUBK` | 32110 | 10 | 3211 | +0 | +0 | 10 |
 | `ARMALAB` | `ARMZEUS` | 8560 | 10 | 856 | +0 | +0 | 7 |
 | `ARMLAB` | `ARMWAR` | 4568 | 4 | 1142 | +1 | +1 | 6 |
 | `CORALAB` | `CORPYRO` | 9000 | 10 | 900 | +1 | +1 | 6 |
 
-Fifteen bits, all fifteen right. Doing the identical sum in **double** precision
-gets 6 of 15, which is what says the accumulator really is 32 bits wide and not
-just "floating point somewhere". Over every scored pair: `ceil` 10 of 41, `floor`
-36 of 41, the float32 replay **41 of 41**.
+Sixteen bits, all sixteen right. Doing the identical sum in **double** precision
+gets 7 of 16, which is what says the accumulator really is 32 bits wide and not
+just "floating point somewhere". Over every scored pair: `ceil` 10 of 45, `floor`
+39 of 45, the float32 replay **45 of 45**.
 
-**Those fifteen pairs are all Escalation**, which is a patched engine, so they
+**Those sixteen pairs are all Escalation**, which is a patched engine, so they
 had to be cleared before any of this could be called a fact about TA. They are:
 the build-rate routine `0x41BA60`, body to the `ret 0xC` at `0x41BCCF`, contains
 **no patched byte**, nor does the short routine after it, and the nearest change
@@ -474,7 +475,7 @@ stops agreeing.
 **What it means for RWE.** `UnitState::addBuildProgress` accumulates integer
 build points and finishes when they equal `buildTime`, which is `ceil` — so RWE
 already matches TA everywhere `BuildTime` is not a multiple of `p`, and is one
-tick fast in ten of the fifteen cases where it is. That is worth knowing and is
+tick fast in ten of the sixteen cases where it is. That is worth knowing and is
 probably not worth fixing: a `float` in the simulation is exactly the hazard the
 determinism section of `CLAUDE.md` exists to warn about, and the prize is one
 tick on a subset of builds.
@@ -702,11 +703,17 @@ test from **453 failures to 14**, which is the third row of the table. With the
 scoping, **630,522 of the 631,578 shots have a nameable shooter** and 612,992
 are aimed at a unit, so naming is not what will limit a weapon corpus.
 
-The build-timing cells do **not** scope, deliberately: `tools/tad-buildtime.py`
-is their reference and it does not either. That is a known loose end rather than
-a disagreement -- it costs builds without moving a single mode, for reasons in
-"What an episode looks like" -- and closing it is the first job of the weapon
-oracle.
+The build-timing cells scope the same way, in `tools/tad-buildtime.py` first and
+then in the port, and the two still agree cell for cell. It was worth doing for
+the evidence rather than for a correction: **no scored cell's mode moved**, but
+builds roughly double -- `ARMVP -> ARMFAV` 151 to 363, `ARMLAB -> ARMPW` 152 to
+256, `CORAP -> CORFINK` 69 to 115, `ARMAAP -> ARMPNIX` 8 to 27 -- and four more
+pairs clear `--min-builds`: `ARMAVP -> ARMLATNK`, `ARMASY -> ARMSUBK`,
+`ARMHP -> ARMLH`, `CORVP -> CORCV`. The nine cells whose mode *did* move are all
+ground-mobile builders, which are never scored. Why the scored modes were safe
+under the old map is in "What an episode looks like", and it is luck a weapon
+oracle will not have: a build's arithmetic depends on one shared integer, and a
+weapon's behaviour depends on the weapon.
 
 ### `0x10`, script call -- all 22 bytes
 
@@ -1042,7 +1049,7 @@ Settled by the economy oracle, and inherited by everything after it.
 
   A build-timing cell already **is** an aggregate, so there the rule is one
   episode per scored cell, capped by `--max-cells`, and the cap prefers the
-  cells where the two completion models part company: all fifteen whose
+  cells where the two completion models part company: all sixteen whose
   `BuildTime` divides exactly by the rate, because those carry the deltas, then
   the most-observed of the rest, because a mode over 249 builds is a stronger
   observation than one over 5. Provenance for a mode is not a single tick: the
@@ -1050,26 +1057,31 @@ Settled by the economy oracle, and inherited by everything after it.
   and how many landed on the mode, and the tick range of one representative
   build out of one of the games it pooled over.
 
-- **Naming a unit by its id is lossy, and known to be.** TA recycles unit ids
-  heavily -- in 14725, 2,622 of 4,093 distinct ids are reused by a later
-  nanoframe and 2,550 of those by a *different* type. `cells()` in
-  `tools/tad-buildtime.py`, and the port that follows it, keep the **first**
-  name an id ever held, so every build by a builder whose id had been recycled
-  is looked up under a stale name.
+- **Naming a unit by its id is lossy, and the name is scoped in time because of
+  it.** TA recycles unit ids heavily -- in 14725, 2,622 of 4,093 distinct ids are
+  reused by a later nanoframe and 2,550 of those by a *different* type. So
+  `cells()` in `tools/tad-buildtime.py`, and the port that follows it, name a
+  builder by the **most recent build of that id to finish before this build
+  started**, not by the first name the id ever held.
 
-  **It costs builds and it does not move a mode.** Scoping the name instead to
-  the id's most recent build before the event was tried over the whole corpus:
-  every one of the 41 cells keeps its mode and its delta, while the builds
-  behind them roughly double (`ARMVP -> ARMFAV` 151 to 363, `ARMAAP -> ARMPNIX`
-  8 to 27) and four more cells clear `--min-builds`. The modes survive because a
-  stale name is wrong in only two ways: if its `WorkerTime` differs the build
-  misses the outlier cap and is dropped rather than miscounted, and if it
-  matches -- every stock factory is `p = 4` -- the build lands in the wrong cell
-  with an identical duration, because only `p` and the product's `BuildTime`
-  enter the arithmetic. **That is luck a weapon oracle will not have**, since a
-  weapon's behaviour depends on the weapon and not on one shared integer, which
-  is why `--weapon-slots` scopes and the build cells still do not. Fixing it
-  means changing the script first, because the script is the reference.
+  **It buys builds and it moved no scored mode.** The unscoped map was measured
+  against the scoped one over the whole corpus before it was replaced: every one
+  of the 41 cells kept its mode and its delta, while the builds behind them
+  roughly double (`ARMVP -> ARMFAV` 151 to 363, `ARMLAB -> ARMPW` 152 to 256,
+  `CORAP -> CORFINK` 69 to 115, `ARMAAP -> ARMPNIX` 8 to 27) and four more cells
+  clear `--min-builds` (`ARMAVP -> ARMLATNK`, `ARMASY -> ARMSUBK`,
+  `ARMHP -> ARMLH`, `CORVP -> CORCV`), taking the scored set from 41 to 45. Nine
+  cells did move, and every one of them has a ground-mobile builder, which is
+  never scored.
+
+  The modes survived because a stale name is wrong in only two ways: if its
+  `WorkerTime` differs the build misses the outlier cap and is dropped rather
+  than miscounted, and if it matches -- every stock factory is `p = 4` -- the
+  build lands in the wrong cell with an identical duration, because only `p` and
+  the product's `BuildTime` enter the arithmetic. **That is luck a weapon oracle
+  will not have**, since a weapon's behaviour depends on the weapon and not on
+  one shared integer. Changing this meant changing the script first, because the
+  script is the reference and the port is checked against it.
 
 - **The wrong data set excludes itself.** A build-timing cell pools across
   demos, so one recording made on another mod would name its types out of the
@@ -1210,8 +1222,8 @@ They catch different things and should not share machinery.
       and both answers are above. The baseline was the model's, not the
       extractor's: TA's completion test is a **float32** fraction counted down
       from 1.0, the first increment lands on the `0x09`'s own tick, and
-      replaying that arithmetic predicts all 41 scored Escalation pairs
-      including the 15-way divisible split that no integer model can reach.
+      replaying that arithmetic predicts all 45 scored Escalation pairs
+      including the 16-way divisible split that no integer model can reach.
       ProTA's ~34 ticks is the constructor's own COB deploy sequence before
       `INBUILDSTANCE`, so it is mod data rather than engine behaviour and RWE
       already reproduces it. `tools/tad-buildtime.py` is the re-runnable check.
@@ -1269,7 +1281,7 @@ They catch different things and should not share machinery.
 
       **This is the first fixture whose expected-difference field carries a
       non-zero value**, which is the whole argument for the field existing. Ten
-      of the fifteen cells whose `BuildTime` divides exactly by the builder's
+      of the sixteen cells whose `BuildTime` divides exactly by the builder's
       rate need one increment more than the division says, and RWE finishes
       those a tick early -- `docs/TOTALA-EXE.md` §88, kept deliberately, because
       closing it means a `float` in hashed simulation state. Those ten carry

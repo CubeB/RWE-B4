@@ -140,9 +140,8 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   453 over the corpus: the first gap is the standard TA convention of putting
   the anti-air weapon in slot 3 and leaving slot 2 empty, which is the argument
   that the byte is a slot at all, and the second is what unit-id recycling costs
-  anything that names a unit from its id. The build cells deliberately do not
-  scope; `docs/TA-DEMOS.md`, the `0x0d` section, says why that matters and what
-  it costs.
+  anything that names a unit from its id. The build cells scope the same way
+  now; `docs/TA-DEMOS.md`, the `0x0d` section, says what that bought.
 - **`tools/tad-buildtime.py`** — scores the corpus's modal build durations
   against TA's own completion arithmetic, which is a **float32** fraction and
   not `ceil(BuildTime / (WorkerTime/30))`; the difference is a tick, and where

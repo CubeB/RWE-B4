@@ -126,14 +126,44 @@ def cells(episodes, units, min_builds):
     A builder's own type is known only where the builder was itself built during
     the recording, which is what makes builder-keyed rows possible at all: pair
     builderId back to the unitId of an earlier episode.
+
+    That pairing has to be SCOPED IN TIME, because TA recycles unit ids heavily:
+    in demo 14725, 2,622 of 4,093 distinct ids are reused by a later nanoframe
+    and 2,550 of those by a different unit type. A map that keeps the first name
+    an id ever held therefore looks most builders up under a stale name. So each
+    id carries its whole list of builds and the name asked for is the most
+    recent build that finished at or before the build under consideration
+    started.
+
+    Scoping does not move a single mode -- verified cell for cell -- because a
+    stale name fails in one of two harmless ways: a different WorkerTime puts
+    the duration outside the outlier cap and drops the build, and an identical
+    one (every stock factory is p = 4) lands it in the wrong cell with the right
+    duration, since only p and the product's BuildTime enter the arithmetic.
+    What it buys is evidence: builds roughly double and four more pairs clear
+    --min-builds.
     """
-    born = {}
-    for e in sorted(episodes, key=lambda e: (e["demo"], e["finishTick"])):
-        born.setdefault((e["demo"], e["unitId"]), e.get("unitName"))
+    lives = collections.defaultdict(list)
+    for e in episodes:
+        name = e.get("unitName")
+        if name is not None:
+            lives[(e["demo"], e["unitId"])].append((e["finishTick"], name))
+    for entries in lives.values():
+        entries.sort()
+
+    def name_at(demo, unit_id, tick):
+        entries = lives.get((demo, unit_id))
+        if not entries:
+            return None
+        best = None
+        for finish, name in entries:
+            if finish <= tick:
+                best = name
+        return best
 
     grouped = collections.defaultdict(list)
     for e in episodes:
-        builder = born.get((e["demo"], e["builderId"]))
+        builder = name_at(e["demo"], e["builderId"], e["startTick"])
         product = e.get("unitName")
         if builder in units and product in units:
             grouped[(builder, product)].append(e["durationTicks"])

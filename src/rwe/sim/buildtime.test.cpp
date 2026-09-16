@@ -102,9 +102,9 @@ namespace rwe
         // duration is one less than the number of increments -- which is what
         // makes this comparable with a demo's finishTick - startTick at all.
         //
-        // Fifteen of these episodes are pairs whose BuildTime divides exactly by
+        // Sixteen of these episodes are pairs whose BuildTime divides exactly by
         // the builder's rate, and those are where RWE's integer accumulator and
-        // the original's float32 fraction part company: ten of the fifteen need
+        // the original's float32 fraction part company: ten of the sixteen need
         // one increment more than the division says, and RWE finishes those a
         // tick early. That is expectedDurationDelta, and section 88 of
         // docs/TOTALA-EXE.md is why it is kept rather than closed.
