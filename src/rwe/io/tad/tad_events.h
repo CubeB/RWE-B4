@@ -223,9 +223,19 @@ namespace rwe
          * friends -- and every one of them defines Weapon1 and Weapon3 and
          * leaves Weapon2 empty, which is the standard TA convention of putting
          * the anti-air weapon in the third slot. Test slot OCCUPANCY, not weapon
-         * count. The residual fourteen are dominated by units the corpus names
-         * as carrying no weapon at all, which is what a leftover naming error
-         * looks like and not a counter-example.
+         * count.
+         *
+         * The residual fourteen are NOT explained, and the obvious explanation
+         * has been measured and does not cover them. They are types the data set
+         * gives no weapon at all, so a leftover naming error is the natural
+         * reading -- but they account for 7,180 shots, 1.1% of the named total
+         * rather than a handful, and their median staleness against the build
+         * that named them is 10,008 ticks against a conforming 7,083, nowhere
+         * near the separation a recycled id gives. The competing story, that
+         * 0x0d covers something besides weapons, is damaged too: ARMULAB and
+         * ARMFAHP carry LAB_DIR in slot 3 and the shots attributed to them read
+         * slot 0, so a record reporting LAB_DIR would have to say 2. None of it
+         * touches the 112-to-14 gap the reading rests on.
          *
          * `tad_episodes --weapon-slots` prints the table this came from. See
          * docs/TA-DEMOS.md, the 0x0d section.
