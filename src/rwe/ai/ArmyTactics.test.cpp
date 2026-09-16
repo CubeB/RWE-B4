@@ -328,4 +328,69 @@ namespace rwe
             REQUIRE(moves.front().destination.x < 450_ss);
         }
     }
+
+    TEST_CASE("the army does not shoot at a contact nobody has seen for a while", "[ai]")
+    {
+        // A play-test asked whether CORE Storms were shooting from outside
+        // what the player could see. Their rocket reaches 400 and they see
+        // 265, so the shot itself is legitimate whenever their side has eyes
+        // on the target from somewhere -- the original's eligibility test
+        // (S:10) has no visibility rule in it at all, and sight is applied
+        // when the candidate list is built. What was not legitimate is RWE's
+        // blackboard: it keeps a contact until the AI is standing where it
+        // last saw it, so an army went on firing at a unit its side had lost
+        // entirely.
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai");
+        auto them = addPlayer(sim, "them");
+        sim.unitDefinitions["UNIT"] = UnitDefinition{};
+        auto script = makeEmptyCobScript();
+
+        auto soldier = addUnitOfType(sim, "UNIT", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto quarry = addUnitOfType(sim, "UNIT", them, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.attackInWaves = false;
+        profile.raidingParties = false;
+        // The tactical pass runs on its own cadence; these cases drive it by
+        // hand, one call at a time, as the others in this file do.
+        profile.tacticalTickInterval = 1;
+
+        AiBlackboard bb;
+        bb.phase = GamePhase::Attack;
+        bb.combatUnits.push_back(soldier);
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+
+        KnownEnemy known{};
+        known.unitId = quarry;
+        known.unitType = "UNIT";
+        known.lastKnownPosition = SimVector(100_ss, 0_ss, 0_ss);
+        known.isArmed = true;
+        bb.knownEnemies[quarry.value] = known;
+
+        ThreatMap threatMap(64, 64);
+        ArmyManager manager;
+
+        SECTION("freshly seen, it is attacked")
+        {
+            bb.now = GameTime(100u);
+            bb.knownEnemies[quarry.value].lastSeen = GameTime(100u);
+
+            std::vector<PlayerCommand> commands;
+            manager.update(sim, ai, profile, threatMap, bb, commands);
+
+            REQUIRE_FALSE(ordersFor<AttackOrder>(commands, soldier).empty());
+        }
+
+        SECTION("last seen long ago, it is left alone")
+        {
+            bb.now = GameTime(100u + static_cast<unsigned int>(profile.targetMemoryTicks) + 1u);
+            bb.knownEnemies[quarry.value].lastSeen = GameTime(100u);
+
+            std::vector<PlayerCommand> commands;
+            manager.update(sim, ai, profile, threatMap, bb, commands);
+
+            REQUIRE(ordersFor<AttackOrder>(commands, soldier).empty());
+        }
+    }
 }

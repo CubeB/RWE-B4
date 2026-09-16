@@ -31,7 +31,7 @@ namespace rwe
         int ticksSinceLastUpdate{0};
 
         void updateRallyPoint(const AiTuningProfile& profile, AiBlackboard& bb) const;
-        std::optional<UnitId> nearestKnownEnemy(const GameSimulation& sim, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly = false) const;
+        std::optional<UnitId> nearestKnownEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly = false) const;
 
         /**
          * Mobile anti-air covers the base instead of joining the attack.

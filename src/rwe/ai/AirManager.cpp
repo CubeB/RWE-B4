@@ -18,6 +18,12 @@ namespace rwe
             return PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(AttackOrder(target), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
         }
 
+        /** As ArmyManager's: a contact nobody has seen lately is not a target. See AiTuningProfile::targetMemoryTicks. */
+        bool inSightRecently(const AiBlackboard& bb, const AiTuningProfile& profile, const KnownEnemy& enemy)
+        {
+            return bb.now.value <= enemy.lastSeen.value + static_cast<unsigned int>(profile.targetMemoryTicks);
+        }
+
         bool isAttackingUnit(const UnitState& unit, UnitId target)
         {
             if (unit.orders.empty())
@@ -181,6 +187,10 @@ namespace rwe
                     {
                         continue;
                     }
+                    if (!inSightRecently(bb, profile, enemy))
+                    {
+                        continue;
+                    }
                     auto unitRef = sim.tryGetUnitState(enemy.unitId);
                     if (!unitRef || unitRef->get().isDead())
                     {
@@ -258,6 +268,10 @@ namespace rwe
             for (const auto& [_, enemy] : bb.knownEnemies)
             {
                 if (!enemy.isAir)
+                {
+                    continue;
+                }
+                if (!inSightRecently(bb, profile, enemy))
                 {
                     continue;
                 }

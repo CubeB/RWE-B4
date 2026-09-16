@@ -20,6 +20,21 @@ namespace rwe
             return PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(AttackOrder(target), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
         }
 
+        /**
+         * Whether a remembered enemy is fresh enough to be shot at.
+         *
+         * PerceptionManager only stamps `lastSeen` on what the AI can
+         * actually see, so this is "has our side laid eyes on it lately".
+         * The marker itself is kept longer on purpose -- it is what sends a
+         * scout back to look -- but a target nobody can see is not one the
+         * original would have offered a weapon. See AiTuningProfile::
+         * targetMemoryTicks and TOTALA-EXE.md S:10.
+         */
+        bool inSightRecently(const AiBlackboard& bb, const AiTuningProfile& profile, const KnownEnemy& enemy)
+        {
+            return bb.now.value <= enemy.lastSeen.value + static_cast<unsigned int>(profile.targetMemoryTicks);
+        }
+
         bool isAttackingUnit(const UnitState& unit, UnitId target)
         {
             if (unit.orders.empty())
@@ -67,13 +82,17 @@ namespace rwe
         bb.rallyPoint = *bb.baseAnchor + (towards * profile.rallyDistance);
     }
 
-    std::optional<UnitId> ArmyManager::nearestKnownEnemy(const GameSimulation& sim, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly) const
+    std::optional<UnitId> ArmyManager::nearestKnownEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly) const
     {
         std::optional<UnitId> best;
         auto bestDistanceSquared = maxDistance * maxDistance;
         for (const auto& [_, enemy] : bb.knownEnemies)
         {
             if (airOnly && !enemy.isAir)
+            {
+                continue;
+            }
+            if (!inSightRecently(bb, profile, enemy))
             {
                 continue;
             }
@@ -115,7 +134,7 @@ namespace rwe
             // Anything airborne within reach gets shot at. The army's engage
             // radius, because it is the same question: is that close enough
             // to be worth leaving what I am doing.
-            if (auto enemy = nearestKnownEnemy(sim, bb, unit.position, profile.engageRadius, true))
+            if (auto enemy = nearestKnownEnemy(sim, profile, bb, unit.position, profile.engageRadius, true))
             {
                 if (!isAttackingUnit(unit, *enemy))
                 {
@@ -382,6 +401,10 @@ namespace rwe
                 {
                     continue;
                 }
+                if (!inSightRecently(bb, profile, known->second))
+                {
+                    continue;
+                }
                 auto distance = bb.baseAnchor->distanceSquared(known->second.lastKnownPosition);
                 if (!intruder || distance < nearest)
                 {
@@ -463,7 +486,7 @@ namespace rwe
             const auto& unit = sim.getUnitState(unitId);
 
             // Anything within reach gets shot at, whatever the phase.
-            if (auto enemy = nearestKnownEnemy(sim, bb, unit.position, profile.engageRadius))
+            if (auto enemy = nearestKnownEnemy(sim, profile, bb, unit.position, profile.engageRadius))
             {
                 if (!isAttackingUnit(unit, *enemy))
                 {

@@ -359,6 +359,21 @@ namespace rwe
         int scoutTickInterval{60};
         int tacticalTickInterval{15};
 
+        /**
+         * How long a contact stays a target after it was last seen, in ticks.
+         *
+         * The original's computer player and its weapons read the same list:
+         * `0x40AA40` rebuilds the enemy list once per player through the
+         * can-see predicate `0x465AC0`, and both the acquisition scan and the
+         * missions walk that (TOTALA-EXE.md S:10). RWE's blackboard instead
+         * remembers a contact until the AI is standing where it last saw it,
+         * which is right for deciding where to go and wrong for deciding what
+         * to shoot: it let an army keep firing at a unit its side had long
+         * lost. Five seconds, so a target that steps behind a hill for a
+         * moment is not dropped mid-burst.
+         */
+        int targetMemoryTicks{150};
+
         // --- Army ---
         int scoutCount{1};
         /** Attack once this many combat units are at the rally point. */

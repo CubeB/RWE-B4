@@ -193,6 +193,7 @@ namespace rwe
             || setInt("waveMeetEnemyCount", p.waveMeetEnemyCount)
             || setBool("spreadDefences", p.spreadDefences)
             || setBool("cheatModeOmniscient", p.cheatModeOmniscient)
+            || setInt("targetMemoryTicks", p.targetMemoryTicks)
             || setScalar("defenceDistanceFromBase", p.defenceDistanceFromBase)
             || setScalar("radarDistanceFromBase", p.radarDistanceFromBase)
             || setScalar("nearMexSearchRadius", p.nearMexSearchRadius)
