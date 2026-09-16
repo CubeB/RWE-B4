@@ -1040,7 +1040,7 @@ namespace rwe
         {
             return match(
                 s,
-                [](const UnitCreationStatusPending&) { return json{{"kind", "pending"}}; },
+                [](const UnitCreationStatusPending& p) { return json{{"kind", "pending"}, {"attempts", p.attempts}, {"nextAttempt", saveGameTime(p.nextAttempt)}}; },
                 [](const UnitCreationStatusFailed&) { return json{{"kind", "failed"}}; },
                 [&](const UnitCreationStatusDone& d) { return json{{"kind", "done"}, {"unitId", saveUnitIdRef(d.unitId, ctx)}}; });
         }
@@ -1050,7 +1050,7 @@ namespace rwe
             const auto& kind = j.at("kind").get_ref<const std::string&>();
             if (kind == "pending")
             {
-                return UnitCreationStatusPending();
+                return UnitCreationStatusPending{j.at("attempts").get<unsigned int>(), loadGameTime(j.at("nextAttempt"))};
             }
             if (kind == "failed")
             {

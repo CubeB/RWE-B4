@@ -289,9 +289,9 @@ namespace rwe
             {"position", dumpJson(s.position)},
         };
     }
-    nlohmann::json dumpJson(const UnitCreationStatusPending&)
+    nlohmann::json dumpJson(const UnitCreationStatusPending& s)
     {
-        return nlohmann::json();
+        return nlohmann::json{{"attempts", s.attempts}, {"nextAttempt", dumpJson(s.nextAttempt)}};
     }
     nlohmann::json dumpJson(const UnitCreationStatusDone& s)
     {

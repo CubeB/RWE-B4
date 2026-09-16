@@ -493,7 +493,12 @@ namespace rwe
                 const auto& unitDefinition = simulation.unitDefinitions.at(unitType);
                 auto mc = simulation.getAdHocMovementClass(unitDefinition.movementCollisionInfo);
                 auto footprintRect = simulation.computeFootprintRegion(pos, unitDefinition.movementCollisionInfo);
-                auto isValid = simulation.canBeBuiltAt(mc, unitDefinition.yardMap, unitDefinition.yardMapContainsGeo, footprintRect.x, footprintRect.y);
+                // Asked as the local player sees the world, not as the
+                // simulation knows it: an enemy building nobody here has
+                // discovered must not turn the box red, or the box has told
+                // them it is there. The build fails on arrival instead, with
+                // the message that failure now carries.
+                auto isValid = simulation.canBeBuiltAtAsSeenBy(mc, unitDefinition.yardMap, unitDefinition.yardMapContainsGeo, footprintRect.x, footprintRect.y, localPlayerId);
                 hoverBuildInfo = HoverBuildInfo{footprintRect, isValid};
             }
             else

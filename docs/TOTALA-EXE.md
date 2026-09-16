@@ -5636,6 +5636,27 @@ click handler at `0x498F86` confirms independently:
 498f9f  push 0x509660            ; "oktobuild"
 ```
 
+### Correction: the gate is fog-aware, and this reading was wrong
+
+The passage above says bit 6 decides, and that `0x47D2E0` settles it from the
+map's own occupancy. Tested against the running game, that is **not** the whole
+gate: the original **does** let a building be placed on top of an enemy
+structure that is not in view, and refuses once the structure has been seen.
+
+About two thirds of `0x47D2E0` was traced when the paragraphs above were
+written, and no reference to the explored array of section 2 was found in it,
+which is why the reading came out as "just as fog-blind as RWE". Either the
+untraced span (`0x47D479`-`0x47D800`) consults it, or something upstream of the
+call filters the occupancy the check sees. Whichever it is, the behaviour is
+settled by observation and the mechanism is not.
+
+RWE follows the observed behaviour: the box and the click gate ignore an
+occupant the local player has not discovered, and the build then fails at the
+site with the constructor message, which is the sequence the original shows.
+That test lives on the presentation side -- `canBeBuiltAtAsSeenBy` -- because
+the simulation's own occupancy test has to stay identical on every peer, and
+one player's fog is not.
+
 ### Drawing it, inside the world render at `0x469E0B`
 
 The box is drawn by the world render `0x468CF0` itself, sharing its code with the

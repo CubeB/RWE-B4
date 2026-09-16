@@ -4614,6 +4614,11 @@ namespace rwe
                 return match(
                     state.status,
                     [&](const UnitCreationStatusPending&) {
+                        // Ask again, for the reason given in createNewUnit:
+                        // spawnNewUnits empties the request queue every pass,
+                        // so a yard waiting out a blocked pad has to put its
+                        // hand up on each tick or it is simply forgotten.
+                        sim->unitCreationRequests.push_back(unitInfo.id);
                         return false;
                     },
                     [&](const UnitCreationStatusDone& s) {
@@ -4622,8 +4627,17 @@ namespace rwe
                         return false;
                     },
                     [&](const UnitCreationStatusFailed&) {
-                        unitInfo.state->factoryState = FactoryBehaviorStateBuilding();
-                        return false;
+                        // Given up on: the site stayed blocked for the whole
+                        // of the original's ten tries, and spawnNewUnits has
+                        // said so. Returning true pops this entry off the
+                        // build queue, so the yard moves on to the next thing
+                        // in it instead of spinning on a spot it cannot use.
+                        // It used to drop straight back into Building, which
+                        // re-requested the same blocked site on the very next
+                        // tick, for ever, and never told anyone.
+                        unitInfo.state->factoryState = FactoryBehaviorStateIdle();
+                        sim->deactivateUnit(unitInfo.id);
+                        return true;
                     });
             },
             [&](FactoryBehaviorStateBuilding& state) {
@@ -5019,6 +5033,14 @@ namespace rwe
         {
             if (s->unitType == unitType && s->position == position)
             {
+                // Still waiting on a site that was occupied: ask again. The
+                // request queue is emptied on every pass of spawnNewUnits, so
+                // a job that is not re-asked for is never looked at again --
+                // which is why a blocked site used to get exactly one try.
+                if (std::holds_alternative<UnitCreationStatusPending>(s->status))
+                {
+                    sim->unitCreationRequests.push_back(unitInfo.id);
+                }
                 return s->status;
             }
         }
@@ -5028,9 +5050,13 @@ namespace rwe
         if (navigateTo(unitInfo, footprintRect))
         {
             // If we only got "as close as we could" because the site cannot be
-            // reached, give the order up rather than lathing across a wall.
+            // reached, give the order up rather than lathing across a wall --
+            // and say so. This is a different refusal from a site that is
+            // merely occupied: there is nothing to wait for, because nothing
+            // about the ground in between is going to change.
             if (auto moving = std::get_if<NavigationStateMoving>(&unitInfo.state->navigationState.state); moving != nullptr && moving->reachableDestination)
             {
+                sim->events.push_back(UnitCannotComplyEvent{unitInfo.id, "Target area was blocked"});
                 return UnitCreationStatusFailed();
             }
 

@@ -979,6 +979,20 @@ namespace rwe
          */
         bool canBeBuiltAt(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y) const;
 
+        /**
+         * As canBeBuiltAt, but blind to occupants the given player has not
+         * discovered, so that refusing a placement cannot tell them something
+         * is there. The original allows the placement in that case and reports
+         * the failure when the builder arrives -- see TOTALA-EXE.md §27's
+         * correction.
+         *
+         * For the interface only. Nothing in the tick may call this: what it
+         * answers depends on one player's fog, where canBeBuiltAt answers the
+         * same for every peer, and only the latter may decide anything the
+         * simulation does.
+         */
+        bool canBeBuiltAtAsSeenBy(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y, PlayerId player) const;
+
         DiscreteRect computeFootprintRegion(const SimVector& position, unsigned int footprintX, unsigned int footprintZ) const;
 
         DiscreteRect computeFootprintRegion(const SimVector& position, const UnitDefinition::MovementCollisionInfo& collisionInfo) const;
@@ -1343,6 +1357,13 @@ namespace rwe
         void deleteDeadProjectiles();
 
         void spawnNewUnits();
+
+        /**
+         * What to do with a creation request whose site was occupied: count
+         * the attempt, tell the player the first time and again when it gives
+         * up, and say whether to keep waiting or abandon it.
+         */
+        UnitCreationStatus retryBlockedSite(UnitId unitId, const UnitCreationStatusPending& pending);
 
         /**
          * The unit a corpse raises into, if any.

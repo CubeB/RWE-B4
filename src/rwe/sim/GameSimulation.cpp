@@ -36,6 +36,18 @@ namespace rwe
         constexpr unsigned int CloakSuppressionTicks = 90;
 
         /**
+         * What a builder does about a build site that is occupied when it
+         * comes to put the unit down. The original tries again every thirty
+         * ticks and gives up after ten goes, announcing "Waiting for target
+         * area to clear" as it starts and "Target area was blocked" when it
+         * runs out -- the two captions in the `cant` table at 403cdf/414020
+         * and 403d10/414055, from the site check 0x47D2E0 called through
+         * 0x47DB70 at unit-creation time.
+         */
+        constexpr unsigned int BlockedSiteRetryTicks = 30;
+        constexpr unsigned int BlockedSiteAttempts = 10;
+
+        /**
          * Whether any of the dishes or jammers of the given kind reaches the
          * point, measured in the map plane. Both lists carry their radius
          * already squared.
@@ -2221,6 +2233,55 @@ namespace rwe
     bool GameSimulation::canBeBuiltAt(const rwe::MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y) const
     {
         if (isCollisionAt(DiscreteRect(x, y, mc.footprintX, mc.footprintZ)))
+        {
+            return false;
+        }
+
+        if (!isGridPointWalkable(terrain, mc, x, y))
+        {
+            return false;
+        }
+
+        if (yardMapContainsGeo && yardMap && !containsAnyGeoMatch(*yardMap, x, y))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    bool GameSimulation::canBeBuiltAtAsSeenBy(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y, PlayerId player) const
+    {
+        auto region = occupiedGrid.tryToRegion(DiscreteRect(x, y, mc.footprintX, mc.footprintZ));
+        if (!region)
+        {
+            return false;
+        }
+
+        // A unit the player has not seen does not stand in the way of the
+        // placement box, because letting it would say that it is there. A
+        // feature does: a wreck or a tree is part of the ground rather than
+        // somebody's secret, and the report this answers was about buildings.
+        auto blocked = occupiedGrid.any(*region, [&](const auto& cell) {
+            if (cell.mobileUnitId && canSeeUnit(player, *cell.mobileUnitId))
+            {
+                return true;
+            }
+            if (cell.buildingInfo && !cell.buildingInfo->passable && canSeeUnit(player, cell.buildingInfo->unit))
+            {
+                return true;
+            }
+            if (cell.featureId)
+            {
+                const auto& f = getFeature(*cell.featureId);
+                if (getFeatureDefinition(f.featureName).blocking)
+                {
+                    return true;
+                }
+            }
+            return false;
+        });
+        if (blocked)
         {
             return false;
         }
@@ -4763,6 +4824,26 @@ namespace rwe
         return candidate;
     }
 
+    UnitCreationStatus GameSimulation::retryBlockedSite(UnitId unitId, const UnitCreationStatusPending& pending)
+    {
+        // Said once, at the front of the run of tries, and once more when the
+        // tries run out. Between the two the builder simply waits: the
+        // original's site check refuses quietly on the intervening attempts.
+        if (pending.attempts == 0)
+        {
+            events.push_back(UnitCannotComplyEvent{unitId, "Waiting for target area to clear"});
+        }
+
+        auto attempts = pending.attempts + 1;
+        if (attempts >= BlockedSiteAttempts)
+        {
+            events.push_back(UnitCannotComplyEvent{unitId, "Target area was blocked"});
+            return UnitCreationStatusFailed();
+        }
+
+        return UnitCreationStatusPending{attempts, gameTime + GameTime(BlockedSiteRetryTicks)};
+    }
+
     void GameSimulation::spawnNewUnits()
     {
         for (const auto& unitId : unitCreationRequests)
@@ -4777,6 +4858,12 @@ namespace rwe
             {
 
                 if (!std::holds_alternative<UnitCreationStatusPending>(s->status))
+                {
+                    continue;
+                }
+
+                // Waiting out the gap between two tries at a blocked site.
+                if (gameTime < std::get<UnitCreationStatusPending>(s->status).nextAttempt)
                 {
                     continue;
                 }
@@ -4803,8 +4890,11 @@ namespace rwe
                 auto newUnitId = trySpawnUnit(s->unitType, s->owner, s->position, spawnRotation);
                 if (!newUnitId)
                 {
-                    LOG_INFO << "Could not place " << s->unitType << " at " << s->position.x.value << "," << s->position.z.value << " for player " << s->owner.value << "; the build order is dropped";
-                    s->status = UnitCreationStatusFailed();
+                    // Occupied. Wait for it to clear and say so, rather than
+                    // dropping the order on the spot with only a log line --
+                    // which is what this did, and why a builder whose site was
+                    // briefly straddled by a passing unit silently gave up.
+                    s->status = retryBlockedSite(unitId, std::get<UnitCreationStatusPending>(s->status));
                     continue;
                 }
 
@@ -4820,10 +4910,20 @@ namespace rwe
                     continue;
                 }
 
+                // As above: the yard waits out the gap between tries.
+                if (gameTime < std::get<UnitCreationStatusPending>(s->status).nextAttempt)
+                {
+                    continue;
+                }
+
                 auto newUnitId = trySpawnUnit(s->unitType, s->owner, s->position, s->rotation);
                 if (!newUnitId)
                 {
-                    s->status = UnitCreationStatusFailed();
+                    // A factory had it worst of all: this set Failed without
+                    // even a log line, and handleBuild dropped straight back
+                    // into Building, which re-requested the same blocked spot
+                    // on the next tick and every tick after it.
+                    s->status = retryBlockedSite(unitId, std::get<UnitCreationStatusPending>(s->status));
                     continue;
                 }
 

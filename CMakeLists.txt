@@ -953,6 +953,7 @@ set(TEST_FILES
     src/rwe/sim/nanonozzle.test.cpp
     src/rwe/sim/builderfacing.test.cpp
     src/rwe/sim/reclaimreach.test.cpp
+    src/rwe/sim/fogplacement.test.cpp
     src/rwe/sim/gunship.test.cpp
     src/rwe/sim/aircraftidle.test.cpp
     src/rwe/sim/airbase.test.cpp

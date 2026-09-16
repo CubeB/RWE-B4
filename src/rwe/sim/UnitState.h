@@ -72,6 +72,17 @@ namespace rwe
 
     struct UnitCreationStatusPending
     {
+        /**
+         * How many times the site has been found blocked. The original tries
+         * again every 30 ticks and gives up after ten goes -- 300 ticks --
+         * announcing "Waiting for target area to clear" on the way and
+         * "Target area was blocked" at the end of it. See TOTALA-EXE.md's
+         * table of the `cant` captions, at 403cdf/414020 and 403d10/414055.
+         */
+        unsigned int attempts{0};
+
+        /** Not tried again before this. */
+        GameTime nextAttempt{0};
     };
 
     struct UnitCreationStatusDone

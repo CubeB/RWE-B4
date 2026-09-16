@@ -299,9 +299,9 @@ namespace rwe
             s.status);
     }
 
-    GameHash computeHashOf(const UnitCreationStatusPending&)
+    GameHash computeHashOf(const UnitCreationStatusPending& s)
     {
-        return GameHash(0);
+        return combineHashes(s.attempts, s.nextAttempt);
     }
     GameHash computeHashOf(const UnitCreationStatusDone& s)
     {

@@ -5,6 +5,9 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/UnitBehaviorService_util.h>
+#include <rwe/sim/UnitModelDefinition.h>
+#include <rwe/sim/UnitPieceDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <memory>
@@ -209,5 +212,81 @@ namespace rwe
             sim.tick();
         }
         REQUIRE(countEvents<UnitCannotComplyEvent>(sim) == 1);
+    }
+
+    TEST_CASE("cannot comply: a blocked build site is waited on, then given up", "[unitnotifications]")
+    {
+        // The site check is run again when the builder actually comes to put
+        // the unit down, and a site that is occupied then is announced rather
+        // than silently abandoned: "Waiting for target area to clear" at the
+        // front of the run, a quiet retry every thirty ticks, and "Target area
+        // was blocked" when ten of them have gone by. Both captions are in the
+        // cant table -- 403cdf/414020 and 403d10/414055 -- from the two
+        // unit-creation sites that wrap 0x47D2E0 through 0x47DB70.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto player = addPlayer(sim);
+
+        std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+        sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
+
+        // Upper case because createUnit upper-cases the type name before
+        // tryAddUnit looks it up again: a lower-case key is registered
+        // where the spawn path cannot see it.
+        auto solarDefinition = makeSolarDef();
+        solarDefinition.objectName = "model";
+        solarDefinition.yardMap = Grid<YardMapCell>(2, 2, YardMapCell::Ground);
+        sim.unitDefinitions["SOLAR"] = solarDefinition;
+        sim.unitScriptDefinitions["SOLAR"] = *script;
+        sim.unitDefinitions["builder"] = makeBuilderDef(30u);
+
+        // Something is already standing exactly where the solar is to go, and
+        // it has to be spawned the real way: trySpawnUnit stamps the occupancy
+        // grid, where the shared helper only puts a unit in the list. A blocker
+        // that occupies nothing leaves the site free and the build quietly
+        // succeeds, which is what this test used to measure.
+        SimVector site(200_ss, 0_ss, 200_ss);
+        auto blockerId = sim.trySpawnUnit("SOLAR", player, site, std::nullopt).value();
+
+        // Finished, so it cannot rot away as an abandoned nanoframe part-way
+        // through the run and clear the site behind our backs.
+        sim.getUnitState(blockerId).buildTimeCompleted = solarDefinition.buildTime;
+
+        // The builder stands exactly where the engine reckons it has arrived,
+        // rather than at a distance worked out by hand: createNewUnit asks for
+        // nothing at all until navigateTo says it is there, so a builder parked
+        // short of the site never attempts the spawn and never refuses.
+        auto siteRect = sim.computeFootprintRegion(site, solarDefinition.movementCollisionInfo);
+        auto builderFootprint = sim.getFootprintXZ(sim.unitDefinitions.at("builder").movementCollisionInfo);
+        auto standPoint = findClosestPointToFootprintXZForUnit(
+            sim.terrain,
+            siteRect,
+            SimVector(1000_ss, 0_ss, 200_ss),
+            static_cast<int>(builderFootprint.first),
+            static_cast<int>(builderFootprint.second));
+
+        auto builderId = addUnitOfType(sim, "builder", player, standPoint, script);
+        sim.getUnitState(builderId).inBuildStance = true;
+        sim.getUnitState(builderId).orders.push_back(BuildOrder("SOLAR", site));
+
+        sim.tick();
+
+        auto refused = eventsOf<UnitCannotComplyEvent>(sim);
+        REQUIRE(refused.size() == 1);
+        REQUIRE(refused[0].unitId == builderId);
+        REQUIRE(refused[0].message == "Waiting for target area to clear");
+
+        // While it waits it keeps the order and says nothing further.
+        tick(sim, 100);
+        REQUIRE_FALSE(sim.getUnitState(builderId).orders.empty());
+        REQUIRE(countEvents<UnitCannotComplyEvent>(sim) == 1);
+
+        // Ten tries at thirty ticks apiece, and it gives the order up.
+        tick(sim, 250);
+        auto all = eventsOf<UnitCannotComplyEvent>(sim);
+        REQUIRE(all.size() == 2);
+        REQUIRE(all[1].unitId == builderId);
+        REQUIRE(all[1].message == "Target area was blocked");
+        REQUIRE(sim.getUnitState(builderId).orders.empty());
     }
 }
