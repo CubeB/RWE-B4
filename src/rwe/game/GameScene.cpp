@@ -298,22 +298,34 @@ namespace rwe
     float computeSoundCeiling(int soundCount)
     {
         assert(soundCount > 0);
-        if (soundCount <= 4)
-        {
-            return soundCount;
-        }
 
-        if (soundCount <= 8)
-        {
-            return 4 + ((soundCount - 4) * 0.5f);
-        }
-
-        if (soundCount <= 16)
-        {
-            return (6 + ((soundCount - 8) * 0.25f));
-        }
-
-        return 8;
+        // How loud the mix as a whole may get, counted in units of one sound
+        // at the base gain. Per-sound gain is this over soundCount, so the
+        // worst case -- every sound peaking in the same instant -- is the
+        // ceiling times the base gain, and that is the number the mixer has
+        // to fit.
+        //
+        // Four, against a base gain of a half, puts that worst case at 2.0.
+        // The curve this replaces climbed to eight, which was the same 2.0
+        // while the base gain was a quarter and multiplied in, and 8.0 once
+        // the SDL3 migration dropped that multiplication -- which is the sum
+        // the mixer was clamping when a loud battle crackled (issue #58).
+        //
+        // Doubling the base and halving the ceiling together leave 2/N for
+        // any N at or above the cap, exactly what the old curve gave, so a
+        // dense battle sounds as it did. What comes up is the sparse end.
+        //
+        // The graduated middle goes with it, which is less of a loss than it
+        // looks: past a summed 1.0 the extra was clamped rather than heard,
+        // so most of that climb was the mixer running out of room rather
+        // than the battle getting bigger.
+        //
+        // Neither number is the original's. TA's own mixing of weapon and
+        // explosion voices is not decoded -- only the eight-slot
+        // notification queue at 0x47FAD0 is, and that is a different
+        // mechanism for a different class of sound -- so this is RWE's own
+        // balance, tuned by ear.
+        return static_cast<float>(std::min(soundCount, 4));
     }
 
     int computeSoundVolume(int soundCount)

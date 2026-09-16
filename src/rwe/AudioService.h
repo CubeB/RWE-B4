@@ -122,8 +122,16 @@ namespace rwe
         // and not a ported one.
         static constexpr unsigned int maxConcurrentCopiesOfOneSound = 4;
 
-        // Default gain applied to sounds on load (equivalent to old MIX_MAX_VOLUME/4)
-        static constexpr float defaultGain = 0.25f;
+        // Base gain for an effect, multiplied by the channel volume the
+        // automatic gain control hands out -- see computeEffectGain.
+        //
+        // Upstream used MIX_MAX_VOLUME/4. A half is RWE's own, tuned by ear
+        // against a play-test: a quarter is what the old two-gain
+        // arrangement came to, and it left a lone explosion 12 dB down with
+        // the whole battle playing under the music. computeSoundCeiling's
+        // cap came down from eight to four to pay for it, so the worst-case
+        // summed peak is exactly where it was.
+        static constexpr float defaultGain = 0.5f;
 
         // Music sits under the effects rather than over them.
         static constexpr float musicGain = 0.3f;

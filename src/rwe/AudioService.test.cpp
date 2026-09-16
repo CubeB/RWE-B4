@@ -123,15 +123,16 @@ namespace rwe
     TEST_CASE("computeEffectGain keeps the loudest allowed mix in range", "[audio]")
     {
         // computeSoundCeiling counts in units of one sound at the base gain
-        // and allows at most eight of them, so the loudest the mix may sum
-        // to is eight times the base gain: 2.0 at a quarter -- hot on
-        // purpose, since uncorrelated peaks rarely land together -- where
-        // without the base gain it was 8.0 and the mixer could only clamp.
-        auto loudestOneTrack = computeEffectGain(128, 0.25f, 1.0f, true);
+        // and allows at most four of them, so the loudest the mix may sum to
+        // is four times the base gain: 2.0 at a half -- hot on purpose,
+        // since uncorrelated peaks rarely land together -- where before the
+        // base gain was folded in at all it was 8.0 and the mixer could only
+        // clamp.
+        auto loudestOneTrack = computeEffectGain(128, 0.5f, 1.0f, true);
         REQUIRE(loudestOneTrack <= 1.0f);
-        REQUIRE((loudestOneTrack * 8.0f) == 2.0f);
+        REQUIRE((loudestOneTrack * 4.0f) == 2.0f);
 
         // A volume above the scale's top cannot push a track past it.
-        REQUIRE(computeEffectGain(1000, 0.25f, 1.0f, true) == 0.25f);
+        REQUIRE(computeEffectGain(1000, 0.5f, 1.0f, true) == 0.5f);
     }
 }
