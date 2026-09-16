@@ -861,6 +861,7 @@ set(TEST_FILES
     src/rwe/game/DefaultAction.test.cpp
     src/rwe/game/GameScene_audio.test.cpp
     src/rwe/game/GameSpeed.test.cpp
+    src/rwe/game/buildghost.test.cpp
     src/rwe/game/cloakdisplay.test.cpp
     src/rwe/game/damagesmoke.test.cpp
     src/rwe/game/featureplacement.test.cpp

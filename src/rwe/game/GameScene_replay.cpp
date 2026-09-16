@@ -342,6 +342,7 @@ namespace rwe
         unconfirmedStockpileDelta.clear();
         selfDestructAnnounced.clear();
         buildBoxAppearedAt.clear();
+        localBuildGhosts.clear();
         nextUnitCursor = std::nullopt;
         // Timed callbacks are keyed on a scene time that has just moved
         // backwards, and would all fire at once on the next tick.
@@ -561,6 +562,10 @@ namespace rwe
         updateDebris();
 
         updateBuildBoxAppearances();
+
+        // Drop each local build ghost once the real order it stood in for
+        // has caught up (see issue #61 and GameScene::addLocalBuildGhost).
+        reconcileLocalBuildGhosts();
 
         // Testing aid: RWE_DEBUG_SPAWN=<unitType>*<count>@<player>:<seconds>
         // drops finished units of that type, owned by that player, in a ring

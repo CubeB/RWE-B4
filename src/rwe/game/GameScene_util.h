@@ -619,6 +619,34 @@ namespace rwe
 
     bool shouldShowAllBuildBoxes(const GameSimulation& sim, PlayerId localPlayerId, std::optional<UnitId> singleSelectedUnit, std::optional<UnitId> hoveredUnit);
 
+    /**
+     * What a locally predicted build ghost (GameScene::localBuildGhosts)
+     * stands in for: an order the click has not reached the simulation for
+     * yet, or a cancellation the simulation has not caught up to yet.
+     */
+    enum class LocalBuildGhostKind
+    {
+        Placement,
+        Cancellation,
+    };
+
+    /**
+     * Whether a locally predicted build ghost is still doing useful work,
+     * given whether a BuildOrder matching it currently sits for real in the
+     * unit's own order queue.
+     *
+     * A Placement ghost covers for an order that has not shown up yet, so it
+     * stops once one does -- drawing both together would double it, and from
+     * then on the real order draws it just as well. A Cancellation ghost
+     * covers for an order that has not gone away yet, so it stops once it
+     * has. Either kind gives up once it has lived past timeout of scene
+     * time, in case the command it stood in for was refused (the footprint
+     * was already taken) or simply lost: nothing here ever hears back that a
+     * command arrived, so a ghost that outlives its usefulness has to expire
+     * by the clock instead of by being told.
+     */
+    bool localBuildGhostIsActive(LocalBuildGhostKind kind, bool matchingOrderPresent, GameTime createdAt, GameTime now, GameTime timeout);
+
     int computeSoundVolume(int soundCount);
 
     std::optional<AudioService::SoundHandle> getSound(const GameSimulation& sim, const GameMediaDatabase& meshDb, const std::string& unitType, UnitSoundType soundType);

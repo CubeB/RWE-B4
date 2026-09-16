@@ -1902,4 +1902,22 @@ namespace rwe
 
         return sim.getFeatureDefinition(feature->get().featureName).reclaimable;
     }
+
+    bool localBuildGhostIsActive(LocalBuildGhostKind kind, bool matchingOrderPresent, GameTime createdAt, GameTime now, GameTime timeout)
+    {
+        if (now - createdAt >= timeout)
+        {
+            return false;
+        }
+
+        switch (kind)
+        {
+            case LocalBuildGhostKind::Placement:
+                return !matchingOrderPresent;
+            case LocalBuildGhostKind::Cancellation:
+                return matchingOrderPresent;
+        }
+
+        return false;
+    }
 }

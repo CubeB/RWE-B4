@@ -1073,6 +1073,35 @@ namespace rwe
         /** The position of the unit's queued build order whose footprint covers position, if any. */
         std::optional<SimVector> plannedBuildOrderAt(UnitId unitId, const SimVector& position) const;
 
+        /**
+         * A planned building or a cancellation the local player just clicked,
+         * drawn (or hidden) a frame ahead of the order actually reaching the
+         * unit's queue -- see issue #61. Presentation only: this list is
+         * never read by anything under src/rwe/sim/, never serialized and
+         * never hashed. What it stands in for is always the same click that
+         * also went into localPlayerCommandBuffer as a real command; this is
+         * just what the screen shows while that command is still in transit.
+         */
+        struct LocalBuildGhost
+        {
+            UnitId builderId;
+            /** Empty for a Cancellation ghost, which only needs to match a position. */
+            std::string unitType;
+            SimVector position;
+            LocalBuildGhostKind kind;
+            /** Scene time the ghost was added, for the timeout in reconcileLocalBuildGhosts. */
+            GameTime createdAt;
+        };
+        std::vector<LocalBuildGhost> localBuildGhosts;
+
+        void addLocalBuildGhost(UnitId unitId, const std::string& unitType, const SimVector& position, LocalBuildGhostKind kind);
+
+        /** Drops each local ghost once the real order it stood in for has caught up, or once it has waited too long. */
+        void reconcileLocalBuildGhosts();
+
+        /** Whether a Cancellation ghost is currently hiding the build order at position for unitId. */
+        bool buildOrderIsLocallyCancelled(UnitId unitId, const SimVector& position) const;
+
         /** The ORDERS panel with the buttons a unit cannot use taken out. */
         std::unique_ptr<UiPanel> createOrdersPanel();
 
@@ -1332,7 +1361,7 @@ namespace rwe
         /** The marching string of stars the original draws between queued waypoints. */
         void drawWaypointTrail(const Matrix4f& worldToUi, const SimVector& from, const SimVector& to);
 
-        void renderBuildBoxes(const UnitState& unit, const Color& outerColor, const Color& innerColor);
+        void renderBuildBoxes(UnitId unitId, const UnitState& unit, const Color& outerColor, const Color& innerColor);
 
         /**
          * The white ring the v3.1 patch draws around a cloaked unit while

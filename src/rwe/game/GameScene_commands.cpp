@@ -220,8 +220,20 @@ namespace rwe
         auto kind = PlayerUnitCommand::IssueOrder::IssueKind::Immediate;
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::IssueOrder(order, kind)));
 
-        if (std::holds_alternative<BuildOrder>(order))
+        // An Immediate order wipes the unit's whole queue (see issueUnitOrder),
+        // so whatever the local ghost list was still predicting for this unit
+        // is about to stop being true either way; nothing here would ever
+        // reconcile against an order that is not going to exist.
+        localBuildGhosts.erase(
+            std::remove_if(localBuildGhosts.begin(), localBuildGhosts.end(), [&](const LocalBuildGhost& ghost) { return ghost.builderId == unitId; }),
+            localBuildGhosts.end());
+
+        if (const auto buildOrder = std::get_if<BuildOrder>(&order))
         {
+            // See issue #61: the outline is drawn from this ghost until the
+            // order actually lands in the unit's queue on a later tick.
+            addLocalBuildGhost(unitId, buildOrder->unitType, buildOrder->position, LocalBuildGhostKind::Placement);
+
             if (sounds.okToBuild)
             {
                 playUiSound(*sounds.okToBuild);
@@ -243,8 +255,13 @@ namespace rwe
         auto kind = PlayerUnitCommand::IssueOrder::IssueKind::Queued;
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::IssueOrder(order, kind)));
 
-        if (std::holds_alternative<BuildOrder>(order))
+        if (const auto buildOrder = std::get_if<BuildOrder>(&order))
         {
+            // Queued rather than Immediate, so a drag laying out a whole line
+            // of buildings gets a ghost for every click rather than only the
+            // last one landing before the others catch up.
+            addLocalBuildGhost(unitId, buildOrder->unitType, buildOrder->position, LocalBuildGhostKind::Placement);
+
             if (sounds.okToBuild)
             {
                 playUiSound(*sounds.okToBuild);
@@ -647,6 +664,13 @@ namespace rwe
             {
                 continue;
             }
+            if (buildOrderIsLocallyCancelled(unitId, buildOrder->position))
+            {
+                // The click that removes this one is already on its way;
+                // answer as if it were already gone rather than offering to
+                // cancel it a second time.
+                continue;
+            }
             const auto& definition = simulation.unitDefinitions.at(buildOrder->unitType);
             auto rect = simulation.computeFootprintRegion(buildOrder->position, definition.movementCollisionInfo);
             if (cell.x >= rect.x && cell.x < rect.x + static_cast<int>(rect.width) && cell.y >= rect.y && cell.y < rect.y + static_cast<int>(rect.height))
@@ -654,12 +678,91 @@ namespace rwe
                 return buildOrder->position;
             }
         }
+
+        // A build just placed this same frame may not have reached the order
+        // queue yet; its ghost has to answer the same question the real
+        // order would once it lands, or a drag that doubles back over ground
+        // it just planned would enqueue a second order on top of the first.
+        for (const auto& ghost : localBuildGhosts)
+        {
+            if (ghost.kind != LocalBuildGhostKind::Placement || ghost.builderId != unitId)
+            {
+                continue;
+            }
+            const auto& definition = simulation.unitDefinitions.at(ghost.unitType);
+            auto rect = simulation.computeFootprintRegion(ghost.position, definition.movementCollisionInfo);
+            if (cell.x >= rect.x && cell.x < rect.x + static_cast<int>(rect.width) && cell.y >= rect.y && cell.y < rect.y + static_cast<int>(rect.height))
+            {
+                return ghost.position;
+            }
+        }
+
         return std::nullopt;
     }
 
     void GameScene::localPlayerCancelBuildOrder(UnitId unitId, const SimVector& position)
     {
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::CancelBuildOrder{position}));
+
+        // Hide it now rather than waiting for the cancel to make its own trip
+        // through the tick. A Placement ghost still standing in for this
+        // exact building is dropped outright: both its IssueOrder and this
+        // CancelBuildOrder are already queued in order in the same buffer, so
+        // the simulation will net them out to nothing without any help from
+        // here. What might already be a real order, or about to become one
+        // from that same IssueOrder before the cancel catches up to it, is
+        // covered by a Cancellation ghost until the simulation actually
+        // removes it.
+        localBuildGhosts.erase(
+            std::remove_if(localBuildGhosts.begin(), localBuildGhosts.end(), [&](const LocalBuildGhost& ghost) {
+                return ghost.kind == LocalBuildGhostKind::Placement && ghost.builderId == unitId && ghost.position == position;
+            }),
+            localBuildGhosts.end());
+        addLocalBuildGhost(unitId, std::string(), position, LocalBuildGhostKind::Cancellation);
+    }
+
+    void GameScene::addLocalBuildGhost(UnitId unitId, const std::string& unitType, const SimVector& position, LocalBuildGhostKind kind)
+    {
+        localBuildGhosts.push_back(LocalBuildGhost{unitId, unitType, position, kind, simulation.gameTime});
+    }
+
+    void GameScene::reconcileLocalBuildGhosts()
+    {
+        // A second of game time: ample for a command already in the buffer to
+        // reach the front of it and land, and short enough that a refused or
+        // lost one does not leave a phantom outline standing around for long.
+        const GameTime timeout(static_cast<unsigned int>(SimTicksPerSecond));
+
+        localBuildGhosts.erase(
+            std::remove_if(localBuildGhosts.begin(), localBuildGhosts.end(), [&](const LocalBuildGhost& ghost) {
+                bool matchingOrderPresent = false;
+                if (auto unit = tryGetUnit(ghost.builderId))
+                {
+                    for (const auto& order : unit->get().orders)
+                    {
+                        auto buildOrder = std::get_if<BuildOrder>(&order);
+                        if (buildOrder && buildOrder->position == ghost.position)
+                        {
+                            matchingOrderPresent = true;
+                            break;
+                        }
+                    }
+                }
+                return !localBuildGhostIsActive(ghost.kind, matchingOrderPresent, ghost.createdAt, simulation.gameTime, timeout);
+            }),
+            localBuildGhosts.end());
+    }
+
+    bool GameScene::buildOrderIsLocallyCancelled(UnitId unitId, const SimVector& position) const
+    {
+        for (const auto& ghost : localBuildGhosts)
+        {
+            if (ghost.kind == LocalBuildGhostKind::Cancellation && ghost.builderId == unitId && ghost.position == position)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     std::unique_ptr<UiPanel> GameScene::createOrdersPanel()

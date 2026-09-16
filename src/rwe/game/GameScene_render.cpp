@@ -809,41 +809,62 @@ namespace rwe
         }
     }
 
-    void GameScene::renderBuildBoxes(const UnitState& unit, const Color& outerColor, const Color& innerColor)
+    void GameScene::renderBuildBoxes(UnitId unitId, const UnitState& unit, const Color& outerColor, const Color& innerColor)
     {
         auto worldToUi = worldUiRenderService.getInverseViewProjectionMatrix()
             * computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+
+        auto drawBox = [&](const std::string& unitType, const SimVector& position) {
+            const auto& unitDefinition = simulation.unitDefinitions.at(unitType);
+            auto footprintRect = simulation.computeFootprintRegion(position, unitDefinition.movementCollisionInfo);
+
+            auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(footprintRect.x, footprintRect.y);
+            topLeftWorld.y = simulation.terrain.getHeightAt(
+                topLeftWorld.x + ((SimScalar(footprintRect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss),
+                topLeftWorld.z + ((SimScalar(footprintRect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
+
+            auto topLeftUi = worldToUi * simVectorToFloat(topLeftWorld);
+            auto boxWidth = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
+            auto boxHeight = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits);
+
+            // Two nested one-pixel outlines with the darker line INSIDE.
+            // The exact colours came out of the binary at last: the
+            // "unwritable" interface colour table is written by 0x4AC7D0
+            // addressing it from a different base, a runtime nearest-match
+            // of GUIPAL.PAL into the screen palette. A selected owner's
+            // queue draws bright green over dark cyan; anyone else's
+            // draws bright blue over navy -- the teal tint in the
+            // screenshot was cyan, not a green.
+            worldUiRenderService.drawBoxOutline(topLeftUi.x, topLeftUi.y, boxWidth, boxHeight, outerColor, 1.0f);
+            if (boxWidth > 2.0f && boxHeight > 2.0f)
+            {
+                worldUiRenderService.drawBoxOutline(topLeftUi.x + 1.0f, topLeftUi.y + 1.0f, boxWidth - 2.0f, boxHeight - 2.0f, innerColor, 1.0f);
+            }
+        };
+
         for (const auto& order : unit.orders)
         {
             if (const auto buildOrder = std::get_if<BuildOrder>(&order))
             {
-                const auto& unitType = buildOrder->unitType;
-                const auto& unitDefinition = simulation.unitDefinitions.at(unitType);
-                auto mc = simulation.getAdHocMovementClass(unitDefinition.movementCollisionInfo);
-                auto footprintRect = simulation.computeFootprintRegion(buildOrder->position, unitDefinition.movementCollisionInfo);
-
-                auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(footprintRect.x, footprintRect.y);
-                topLeftWorld.y = simulation.terrain.getHeightAt(
-                    topLeftWorld.x + ((SimScalar(footprintRect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss),
-                    topLeftWorld.z + ((SimScalar(footprintRect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
-
-                auto topLeftUi = worldToUi * simVectorToFloat(topLeftWorld);
-                auto boxWidth = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
-                auto boxHeight = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits);
-
-                // Two nested one-pixel outlines with the darker line INSIDE.
-                // The exact colours came out of the binary at last: the
-                // "unwritable" interface colour table is written by 0x4AC7D0
-                // addressing it from a different base, a runtime nearest-match
-                // of GUIPAL.PAL into the screen palette. A selected owner's
-                // queue draws bright green over dark cyan; anyone else's
-                // draws bright blue over navy -- the teal tint in the
-                // screenshot was cyan, not a green.
-                worldUiRenderService.drawBoxOutline(topLeftUi.x, topLeftUi.y, boxWidth, boxHeight, outerColor, 1.0f);
-                if (boxWidth > 2.0f && boxHeight > 2.0f)
+                // A cancel already clicked for this one hides it at once
+                // rather than waiting for the order itself to go away.
+                if (buildOrderIsLocallyCancelled(unitId, buildOrder->position))
                 {
-                    worldUiRenderService.drawBoxOutline(topLeftUi.x + 1.0f, topLeftUi.y + 1.0f, boxWidth - 2.0f, boxHeight - 2.0f, innerColor, 1.0f);
+                    continue;
                 }
+                drawBox(buildOrder->unitType, buildOrder->position);
+            }
+        }
+
+        // Issue #61: a build just placed this same frame may not have
+        // reached this unit's order queue yet; its ghost is drawn exactly as
+        // the real order above would be, so there is no gap for the player
+        // to notice.
+        for (const auto& ghost : localBuildGhosts)
+        {
+            if (ghost.kind == LocalBuildGhostKind::Placement && ghost.builderId == unitId)
+            {
+                drawBox(ghost.unitType, ghost.position);
             }
         }
     }
@@ -926,6 +947,24 @@ namespace rwe
             }
         }
 
+        // A local placement ghost (issue #61) claims its footprint's entry
+        // from the click onward, before the real order exists to claim it.
+        // Because both are keyed on the same footprint, the entry this
+        // stamps here is the one the real order finds already waiting for it
+        // once it lands, so the sweep times itself from the click and not
+        // from however many ticks the order took to arrive.
+        for (const auto& ghost : localBuildGhosts)
+        {
+            if (ghost.kind != LocalBuildGhostKind::Placement)
+            {
+                continue;
+            }
+            const auto& unitDefinition = simulation.unitDefinitions.at(ghost.unitType);
+            auto key = buildBoxKey(simulation.computeFootprintRegion(ghost.position, unitDefinition.movementCollisionInfo));
+            auto existing = buildBoxAppearedAt.find(key);
+            stillThere[key] = existing == buildBoxAppearedAt.end() ? ghost.createdAt : existing->second;
+        }
+
         // Anything no longer queued is dropped, so the same spot built on
         // twice gets its sweep twice.
         buildBoxAppearedAt = std::move(stillThere);
@@ -999,6 +1038,13 @@ namespace rwe
                     continue;
                 }
 
+                // A cancel already clicked for this one hides it at once
+                // rather than waiting for the order itself to go away.
+                if (buildOrderIsLocallyCancelled(unitId, buildOrder->position))
+                {
+                    continue;
+                }
+
                 const auto& unitDefinition = simulation.unitDefinitions.at(buildOrder->unitType);
                 auto footprintRect = simulation.computeFootprintRegion(buildOrder->position, unitDefinition.movementCollisionInfo);
                 auto it = buildBoxAppearedAt.find(buildBoxKey(footprintRect));
@@ -1015,6 +1061,35 @@ namespace rwe
 
                 renderBuildBoxSweep(worldToUi, footprintRect, age, ownerSelected);
             }
+        }
+
+        // Issue #61: a placement ghost still waiting on its real order plays
+        // the same sweep the order would, from the same footprint entry (see
+        // updateBuildBoxAppearances), so the acknowledgement is not held up
+        // by however many ticks the order takes to land.
+        for (const auto& ghost : localBuildGhosts)
+        {
+            if (ghost.kind != LocalBuildGhostKind::Placement)
+            {
+                continue;
+            }
+
+            const auto& unitDefinition = simulation.unitDefinitions.at(ghost.unitType);
+            auto footprintRect = simulation.computeFootprintRegion(ghost.position, unitDefinition.movementCollisionInfo);
+            auto it = buildBoxAppearedAt.find(buildBoxKey(footprintRect));
+            if (it == buildBoxAppearedAt.end())
+            {
+                continue;
+            }
+
+            auto age = simulation.gameTime.value - it->second.value;
+            if (age > BuildBoxSweepTicks)
+            {
+                continue;
+            }
+
+            auto ownerSelected = selectedUnits.find(ghost.builderId) != selectedUnits.end();
+            renderBuildBoxSweep(worldToUi, footprintRect, age, ownerSelected);
         }
     }
 
@@ -1834,11 +1909,11 @@ namespace rwe
             // if unit is a builder, show all other buildings being built
             if (shouldShowAllBuildBoxes(simulation, localPlayerId, singleSelectedUnit, hoveredUnit))
             {
-                for (const auto& [_, unit] : simulation.units)
+                for (const auto& [unitId, unit] : simulation.units)
                 {
                     if (unit.isOwnedBy(localPlayerId))
                     {
-                        renderBuildBoxes(unit, Color(84, 84, 252), Color(0, 0, 128));
+                        renderBuildBoxes(unitId, unit, Color(84, 84, 252), Color(0, 0, 128));
                     }
                 }
             }
@@ -1856,7 +1931,7 @@ namespace rwe
             // draw orders for all selected units
             for (const auto& selectedUnitId : selectedUnits)
             {
-                renderBuildBoxes(getUnit(selectedUnitId), Color(83, 223, 79), Color(0, 128, 128));
+                renderBuildBoxes(selectedUnitId, getUnit(selectedUnitId), Color(83, 223, 79), Color(0, 128, 128));
 
                 if (selectedUnitId != hoveredUnit)
                 {
