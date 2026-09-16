@@ -191,8 +191,10 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   the five classes it deliberately does not score — accelerating, ballistic,
   `vlaunch`, `waterweapon` and `burst` — each of which needs a model of its own.
   Exits non-zero if a scored cell moves, including the two named, unexplained
-  exceptions it carries. `docs/TA-DEMOS.md`, "Pairing a `0x0d` to the `0x0b` it
-  caused".
+  exceptions it carries. `--motor` scouts the accelerating class, the largest
+  thing the constant-speed model leaves alone, against a missile-motor replay —
+  a listing that never touches the status, because nobody has pinned that model
+  yet. `docs/TA-DEMOS.md`, "Pairing a `0x0d` to the `0x0b` it caused".
 - **`tools/visual-test.ps1`** — when only the renderer will do. It launches `build-release/rwe.exe`, finds the window, and then *drives* it: real clicks at client-relative coordinates, screenshots cropped and nearest-neighbour magnified around the thing under test. `-phase build|air|ship` are the scripted sequences already written; adding one is a few lines. Prefer this to ad-hoc screenshotting — a scripted click sequence is repeatable and an eyeballed one is not.
 - **`tools/crash-catch.cmd`** runs the Debug build under gdb and writes a backtrace to `crash.txt`. Play normally, reproduce the crash, close the window.
 - Environment switches, all pure observers: `RWE_AI_PROFILE=1` times each AI pass and logs anything over 2 ms; `RWE_DEBUG_SPAWN=ARMPW*12@0:8:1` spawns units on a timer (`<type>*<count>@<owner>:<seconds>[:<near player>]`); `RWE_DEBUG_SELF_DESTRUCT[=_PLAYER]`, `RWE_TRACE_BOMBER`, `RWE_TRACE_GUNSHIP`, `RWE_TRACE_MISSILE`.

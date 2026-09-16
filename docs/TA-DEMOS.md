@@ -855,6 +855,42 @@ the same `GAUSS_MAV` and agrees. They are named in the script's
 disagrees *or* if either of those two stops reading what it reads today. An
 unexplained observation that says so is not a licensed divergence.
 
+
+#### The accelerating class: a motor replay, scouted and not yet pinned
+
+`--motor` is the first look at the biggest of the four -- 27 cells and 15,826
+pairings. It is a **listing and never a check**: it does not touch the exit code,
+because nobody has pinned this model and putting it in the status would make a
+guess look like a finding.
+
+Replaying a missile's speed the obvious way -- `speed = min(cap, speed + accel)`
+once a tick, out of `startvelocity`, `weaponacceleration` and `weaponvelocity` --
+takes the class from **0 of 27 cells landing on zero to 14 of 27**. The
+ground-fire missiles are the ones that land, at 46-53% shares; the anti-air ones
+sit at +1 or worse around 10-15%.
+
+**That split is about the victim, not the weapon**, which is the useful half.
+Filtering by what the victim could do sharpens the same model monotonically:
+
+| victims kept | cells | pairings | landing on zero |
+|---|---|---|---|
+| any | 27 | 15,826 | 27% |
+| cannot fly | 14 | 9,934 | 37% |
+| cannot move | 3 | 354 | **55%** |
+
+So the residual is mostly a **stale aim point** rather than a wrong motor: a
+`0x0d` records where the shot was aimed, and over a 20-to-40-tick missile flight
+a moving target has left. A laser crossing 200 units in six ticks barely
+notices. That is why the constant-speed class could be scored over every victim
+and this one probably cannot, and it is the same trade the storage and
+build-timing passes made: a sharper filter over less volume.
+
+What the replay ignores is the reason not to trust it yet -- the motor burns for
+a bounded time and then coasts (`weapontimer`, `flighttime`, `noautorange`), a
+missile steers rather than flying straight, and a two-phase one turns over.
+RWE's `updateSelfPropelledProjectile` is a decoded reading of the real routine;
+where the two differ that one is right, and the script is what should change.
+
 ### `0x10`, script call -- all 22 bytes
 
 `u16` unit, `u16` script index into that unit's own COB, `u8` argument count,
@@ -1514,10 +1550,15 @@ They catch different things and should not share machinery.
       **What is left** is the other four classes, each of which wants its own
       model and its own cells: the missile motor (27 cells, 15,826 pairings, the
       biggest prize and what the flight-model work in `TOTALA-EXE-MISSIONS.md`
-      would be checked against), ballistics (18 cells), `vlaunch` (3) and
-      torpedoes (4). And the hit/miss half of the oracle, which is a different
-      statistic over the same pairings and where target type probably does
-      belong in the cell key.
+      would be checked against, and already scouted -- see "The accelerating
+      class" above, which takes it from 0 of 27 cells to 14), ballistics (18
+      cells, and the one with a decoding prize in it, because a ballistic shot is
+      where the `0x0d`'s rotation triple could be checked against the geometry),
+      `vlaunch` (3) and torpedoes (4). And the hit/miss half of the oracle, which
+      is a different statistic over the same pairings and where target type
+      probably does belong in the cell key -- but which has to answer why 53,706
+      shots drew no damage in the window before it can call any of them misses,
+      given that `0x0b` is not a complete ledger.
 
    Every one of those carries the expected-difference annotation described in
    "The hazard to design in from the start". A corpus is an efficient machine

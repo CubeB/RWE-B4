@@ -228,7 +228,7 @@ def weapon_class(block):
 
 
 def pair(path, window, still_only, units):
-    """(shooter type, slot) -> [(flight ticks, distance, damage, demo, tick)].
+    """(shooter type, slot) -> [(flight, distance, damage, demo, tick, victim type)].
 
     Everything is keyed on (attacker, victim) because that is the only join the
     stream offers. A shot survives when it is alone in its window and draws
@@ -280,8 +280,118 @@ def pair(path, window, still_only, units):
                     rejections["several damage events in the window"] += 1
                     continue
                 cells[(shooter, slot)].append(
-                    (inside[0][0] - tick, distance, inside[0][1], demo, tick))
+                    (inside[0][0] - tick, distance, inside[0][1], demo, tick, target))
     return cells, rejections
+
+
+# --- --motor: a first look at the class this script does not score ----------
+#
+# NOT A CHECK. The accelerating class is 27 cells and 15,826 pairings, the
+# largest thing the constant-speed model leaves on the table, and this is a
+# scouting report rather than a model anybody has ported or pinned. It is here
+# rather than in a scratch file because the finding is worth reproducing and a
+# number in a document is not.
+#
+# The replay is the obvious reading of the TDF: the missile leaves the rail at
+# startvelocity and gains weaponacceleration every tick up to weaponvelocity.
+# Everything it ignores is a reason to distrust it -- the motor burns for a
+# bounded time and then coasts (weapontimer, flighttime, noautorange), a missile
+# steers rather than flying straight, and a two-phase one turns over. RWE's
+# updateSelfPropelledProjectile is a decoded reading of the real thing; where
+# the two differ, that one is right and this should be changed to match.
+
+
+def motor_ticks(distance, start_per_tick, accel_per_tick, cap_per_tick, limit=4000):
+    """Ticks for a missile that accelerates each tick to cover `distance`."""
+    speed = start_per_tick
+    travelled = 0.0
+    ticks = 0
+    while travelled < distance and ticks < limit:
+        speed = min(cap_per_tick, speed + accel_per_tick)
+        travelled += speed
+        ticks += 1
+    return ticks
+
+
+def report_motor(cells, units, weapons, min_n):
+    """The accelerating class against the motor replay, and against a still victim.
+
+    The second half is the more useful one. Filtering by what the VICTIM could do
+    sharpens the model monotonically -- over the corpus, 27% of pairings land on
+    zero with every victim, 37% with victims that cannot fly, 55% with victims
+    that cannot move at all, and all three surviving cells land on zero. The
+    residual is therefore mostly a STALE AIM POINT rather than a wrong motor: a
+    0x0d records where the shot was aimed, and over a 20-to-40-tick missile
+    flight a moving target has left. A constant-speed laser crossing 200 units in
+    six ticks barely notices; a missile does, which is why that class could be
+    scored over every victim and this one probably cannot.
+    """
+    def flies(name):
+        unit = units.get(name)
+        return bool(unit) and (unit.get("canfly") or "0").strip() not in ("0", "")
+
+    def immobile(name):
+        unit = units.get(name)
+        return bool(unit) and (unit.get("maxvelocity") or "0").strip() in ("0", "0.0", "")
+
+    print("\n--motor: the accelerating class against a motor replay. NOT SCORED,")
+    print("and not a model anybody has pinned -- see the comment above report_motor.\n")
+    print(f"  {'shooter':<13} {'weapon':<22} {'n':>5} {'naive':>7} {'motor':>7} {'share':>6}")
+
+    on_zero = 0
+    scouted = 0
+    for (shooter, slot), observations in sorted(cells.items(), key=lambda kv: -len(kv[1])):
+        if len(observations) < min_n:
+            continue
+        name, block = weapon_of(units, weapons, shooter, slot)
+        if not block or weapon_class(block) != "accelerating":
+            continue
+        velocity = num(block, "weaponvelocity")
+        start = num(block, "startvelocity", velocity)
+        accel = num(block, "weaponacceleration", 0.0)
+        naive = collections.Counter(
+            flight - (math.ceil(distance / (velocity / 30.0)) - 1)
+            for flight, distance, _d, _demo, _t, _victim in observations)
+        motor = collections.Counter(
+            flight - (motor_ticks(distance, start / 30.0, accel / 900.0, velocity / 30.0) - 1)
+            for flight, distance, _d, _demo, _t, _victim in observations)
+        mode, at_mode = motor.most_common(1)[0]
+        scouted += 1
+        on_zero += 1 if mode == 0 else 0
+        print(f"  {shooter:<13} {name:<22} {len(observations):>5}"
+              f" {naive.most_common(1)[0][0]:>+7} {mode:>+7}"
+              f" {100 * at_mode / len(observations):>5.0f}%")
+
+    print(f"\n  the motor replay puts {on_zero} of {scouted} cells on zero;"
+          f" the constant-speed model puts none")
+
+    # And what the victim's own mobility does to that, which is the finding.
+    print("\n  pooled, by what the victim could do:")
+    for label, keep in (("any victim", lambda t: True),
+                        ("cannot fly", lambda t: not flies(t)),
+                        ("cannot move", immobile)):
+        pooled = collections.Counter()
+        kept_cells = 0
+        for (shooter, slot), observations in cells.items():
+            name, block = weapon_of(units, weapons, shooter, slot)
+            if not block or weapon_class(block) != "accelerating":
+                continue
+            subset = [o for o in observations if keep(o[5])]
+            if len(subset) < min_n:
+                continue
+            velocity = num(block, "weaponvelocity")
+            start = num(block, "startvelocity", velocity)
+            accel = num(block, "weaponacceleration", 0.0)
+            errors = collections.Counter(
+                flight - (motor_ticks(distance, start / 30.0, accel / 900.0, velocity / 30.0) - 1)
+                for flight, distance, _d, _demo, _t, _victim in subset)
+            pooled += errors
+            kept_cells += 1
+        total = sum(pooled.values())
+        if total == 0:
+            continue
+        print(f"    {label:<12} {kept_cells:>3} cells, {total:>6} pairings,"
+              f" {100 * pooled[0] / total:>3.0f}% land on zero")
 
 
 def score(cells, units, weapons, min_n):
@@ -296,15 +406,15 @@ def score(cells, units, weapons, min_n):
         per_tick = velocity / 30.0
         errors = collections.Counter(
             flight - (math.ceil(distance / per_tick) - 1)
-            for flight, distance, _damage, _demo, _tick in observations)
+            for flight, distance, _damage, _demo, _tick, _victim in observations)
         mode, at_mode = errors.most_common(1)[0]
         damage, damage_at = collections.Counter(
-            d for _f, _dist, d, _demo, _t in observations).most_common(1)[0]
+            d for _f, _dist, d, _demo, _t, _v in observations).most_common(1)[0]
         # The overshoot past the aim point when the damage lands, which is what
         # says the spread either side of the mode is quantisation: it is always
         # less than one step.
         overshoot = sorted(distance - (flight + 1) * per_tick
-                           for flight, distance, _d, _demo, _t in observations)
+                           for flight, distance, _d, _demo, _t, _victim in observations)
         rows.append(dict(
             shooter=shooter, slot=slot, weapon=name or "-",
             kind=weapon_class(block), velocity=velocity, per_tick=per_tick,
@@ -324,6 +434,8 @@ def main():
     ap.add_argument("--min-n", type=int, default=30, help="pairings a cell needs to be scored (default 30)")
     ap.add_argument("--still-victim", action="store_true",
                     help="keep only victims that cannot move, which sharpens every mode")
+    ap.add_argument("--motor", action="store_true",
+                    help="scout the accelerating class against a missile-motor replay; never scored")
     ap.add_argument("--classes", action="store_true",
                     help="also list the classes this model does not describe")
     args = ap.parse_args()
@@ -369,6 +481,9 @@ def main():
     overshoots = sorted(r["overshoot"] for r in scored)
     print(f"median overshoot past the aim point: {overshoots[len(overshoots) // 2]:.1f}"
           f" world units, never a whole step")
+
+    if args.motor:
+        report_motor(cells, units, weapons, args.min_n)
 
     if args.classes:
         print("\nthe classes this model does not describe, listed and never scored:")
