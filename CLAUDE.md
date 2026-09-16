@@ -160,7 +160,7 @@ Much of the current work is matching the original's behaviour down to the
 arithmetic. Where a behaviour is meant to match TA, it has usually been read out
 of `TotalA.exe` instead of guessed at.
 
-- `docs/TOTALA-EXE.md` — the findings, numbered up to §104 (§83 and §84 do not
+- `docs/TOTALA-EXE.md` — the findings, numbered up to §105 (§83 and §84 do not
   exist, so the count is two short of the last number): the flight
   model, fog of war and line of sight, the damage pipeline, missile flight,
   target selection and eligibility, the economy, the nanolathe and construction

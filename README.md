@@ -15,13 +15,13 @@ and pinning them to what the original executable actually does. That is a long
 tail of small fidelity work, and it is the easy end of the problem — the
 foundation was already there.
 
-233 commits ahead of upstream `master`, and the suite stands at **416 cases /
-58,723 assertions**, green on Debug and Release.
+417 commits ahead of upstream `master`, and the suite stands at **629 cases /
+72,380 assertions**, green on Debug and Release.
 
 ## What is different here
 
 Most of the work is behavioural, and most of it was **read out of `TotalA.exe`
-rather than guessed at**. `docs/TOTALA-EXE.md` is ninety-five sections of
+rather than guessed at**. `docs/TOTALA-EXE.md` is a hundred and three sections of
 findings — the flight model, fog of war and line of sight, the damage pipeline,
 target selection, the economy, the nanolathe, the interface, transports, the
 music system, the renderer's own rasteriser — with the probe scripts that
