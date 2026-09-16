@@ -316,6 +316,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_input.cpp
     src/rwe/game/GameScene_menu.cpp
     src/rwe/game/GameScene_render.cpp
+    src/rwe/game/panel_slide.cpp
     src/rwe/game/GameScene_replay.cpp
     src/rwe/game/GameScene_util.cpp
     src/rwe/game/featureplacement.cpp
@@ -860,6 +861,7 @@ set(TEST_FILES
     src/rwe/collections/VectorMap.test.cpp
     src/rwe/game/DefaultAction.test.cpp
     src/rwe/game/GameScene_audio.test.cpp
+    src/rwe/game/panel_slide.test.cpp
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/buildghost.test.cpp
     src/rwe/game/cloakdisplay.test.cpp

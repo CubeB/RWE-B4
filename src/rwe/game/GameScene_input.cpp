@@ -68,7 +68,12 @@ namespace rwe
         // hotkey territory (Ctrl+A select-all, Ctrl+S stop, Ctrl+D self-destruct,
         // etc.), and the panel's letter-bound buttons (e.g. ATTACK on plain "A")
         // would otherwise also fire.
-        if (!isCtrlDown())
+        // Space is the panel peek in game (76), so it does not reach the side
+        // panel's gadgets -- a focused UiStagedButton activates on Space
+        // (UiStagedButton.cpp), and the peek would fire whatever button last
+        // had focus. The game menu is handled above and has already returned,
+        // so this only takes Space away from the in-game panel.
+        if (!isCtrlDown() && keysym.key != SDLK_SPACE)
         {
             currentPanel->keyDown(KeyEvent(keysym.key));
         }
@@ -116,6 +121,16 @@ namespace rwe
         else if (keysym.key == SDLK_F1)
         {
             helpVisible = !helpVisible;
+        }
+        else if (keysym.key == SDLK_F4)
+        {
+            // 76: F4 is the only thing that touches the latch, and it does not
+            // persist -- a new game starts with the panel out.
+            panelHiddenLatch = !panelHiddenLatch;
+        }
+        else if (keysym.key == SDLK_SPACE)
+        {
+            spaceDown = true;
         }
         else if (keysym.scancode == SDL_SCANCODE_GRAVE)
         {
@@ -439,6 +454,10 @@ namespace rwe
         else if (keysym.key == SDLK_RSHIFT)
         {
             rightShiftDown = false;
+        }
+        else if (keysym.key == SDLK_SPACE)
+        {
+            spaceDown = false;
         }
     }
 

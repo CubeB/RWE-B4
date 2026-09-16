@@ -222,6 +222,16 @@ namespace rwe
         static constexpr int GuiSizeTop = 32;
         static constexpr int GuiSizeBottom = 32;
 
+        /**
+         * How far the left column travels when F4 or Space puts it away.
+         *
+         * TOTALA-EXE.md 76 gives the original's figure as 0x7d, 125 pixels,
+         * which is its own side panel's width. RWE's column is 128 wide, so
+         * the faithful analogue is this engine's width rather than the
+         * original's number -- 125 here would leave a three pixel sliver.
+         */
+        static constexpr int PanelSlideTravel = GuiSizeLeft;
+
     private:
         static const unsigned int UnitSelectChannel = 0;
 
@@ -232,6 +242,13 @@ namespace rwe
          * in world units/second.
          */
         static constexpr float CameraPanSpeed = 1000.0f;
+
+        /**
+         * How fast the side panel slides, in pixels per second. RWE's own
+         * number: 76 pins the endpoints and the sounds but says nothing
+         * about the rate. 850 crosses the 128 pixels in about 150ms.
+         */
+        static constexpr float PanelSlidePixelsPerSecond = 850.0f;
 
         static const Rectangle2f minimapViewport;
 
@@ -273,6 +290,14 @@ namespace rwe
         std::shared_ptr<SpriteSeries> minimapDots;
         std::shared_ptr<Sprite> minimapDotHighlight;
         Rectangle2f minimapRect;
+
+        /**
+         * Where the minimap sits with the panel out. minimapRect itself is
+         * driven from this every frame, so the six places that read it --
+         * the draw, the drag, the dot hover, isCursorOverMinimap -- follow
+         * the slide without each needing to know about it.
+         */
+        Rectangle2f minimapRectBase;
 
         std::unique_ptr<UiPanel> currentPanel;
         std::optional<std::unique_ptr<UiPanel>> nextPanel;
@@ -871,6 +896,36 @@ namespace rwe
         std::vector<FlashEffect> flashes;
         bool guiVisible{true};
 
+        /**
+         * How far the left column is currently slid, in pixels: 0 with it in
+         * place, PanelSlideTravel with it clear of the screen.
+         *
+         * Presentation only. Nothing under sim/ reads it, so it is neither
+         * saved nor hashed -- see the determinism section of CLAUDE.md.
+         */
+        float panelSlide{0.0f};
+
+        /**
+         * F4's latch -- the original's display word bit 7 at game+0x37f06
+         * (76). That bit has no registry name and only F4 touches it, so it
+         * lasts the session and no longer, and this bool does the same.
+         */
+        bool panelHiddenLatch{false};
+
+        /** Space held, which peeks past the panel while it is down. */
+        bool spaceDown{false};
+
+        /** currentPanel's own x, before the slide is taken off it. */
+        int panelBaseX{0};
+
+        /**
+         * The left inset the world viewport was last given. The slide only
+         * moves this between its two endpoints, never through them: changing
+         * it remakes the world framebuffer and two full size textures, which
+         * is not a thing to do sixty times a second.
+         */
+        int appliedLeftInset{GuiSizeLeft};
+
         FrameBufferInfo worldFrameBuffer;
 
         TextureHandle dodgeMask;
@@ -1024,6 +1079,11 @@ namespace rwe
         bool isCursorOverMinimap() const;
 
         bool isCursorOverWorld() const;
+
+        /** Whether the cursor is on the side panel, which is Space's exception (76). */
+        bool isCursorOverPanel();
+
+        void updatePanelSlide(int millisecondsElapsed);
 
         Point getMousePosition() const;
 

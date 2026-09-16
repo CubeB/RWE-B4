@@ -1131,6 +1131,8 @@ namespace rwe
             {"Pause", "Pause"},
             {"Arrows", "Scroll the map"},
             {"`", "Health bars"},
+            {"F4", "Hide or show the side panel"},
+            {"Space (hold)", "Peek past the side panel"},
             {"F10 / F11", "Debug menus"},
         };
         static const std::vector<std::pair<std::string, std::string>> rightColumn{

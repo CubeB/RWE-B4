@@ -69,6 +69,15 @@ namespace rwe
         int getX() { return posX; }
         int getY() { return posY; }
 
+        /**
+         * Moves the component. Both rendering and hit testing are expressed
+         * relative to posX/posY -- UiPanel translates the render matrix by
+         * them and subtracts them from incoming mouse events -- so setting
+         * this moves a panel and everything inside it together, which is what
+         * the side panel's F4/Space slide rides on.
+         */
+        void setX(int x) { posX = x; }
+
         virtual void mouseDown(MouseButtonEvent /*event*/) {}
 
         virtual void mouseUp(MouseButtonEvent /*event*/) {}

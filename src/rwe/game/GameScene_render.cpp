@@ -167,6 +167,23 @@ namespace rwe
         const auto& intGafName = localSideData.intGaf;
         auto topPanelBackground = sceneContext.textureService->tryGetGafEntry("anims/" + intGafName + ".GAF", "PANELTOP");
         auto bottomPanelBackground = sceneContext.textureService->tryGetGafEntry("anims/" + intGafName + ".GAF", "PANELBOT");
+        // With the column slid away the world's left inset is zero, so the world
+        // fills the middle band -- but the strips above and below it, inside
+        // GuiSizeTop and GuiSizeBottom, belong to neither the world nor the
+        // panel and nothing else draws there. Tile the plain filler across
+        // them. This runs before PANELTOP below, which keeps its own position,
+        // so the resource readouts laid out against it in absolute coordinates
+        // do not move with the slide.
+        if (panelSlide > 0.0f && bottomPanelBackground)
+        {
+            const auto& filler = *(*bottomPanelBackground)->sprites.at(0);
+            for (float x = GuiSizeLeft - panelSlide; x < GuiSizeLeft; x += filler.bounds.width())
+            {
+                chromeUiRenderService.drawSpriteAbs(x, 0.0f, filler);
+                chromeUiRenderService.drawSpriteAbs(x, worldViewport.bottom(), filler);
+            }
+        }
+
         float topXBuffer = GuiSizeLeft;
         if (topPanelBackground)
         {
@@ -2309,10 +2326,14 @@ namespace rwe
         {
             if (guiVisible)
             {
-                worldViewport.setInset(GuiSizeLeft, GuiSizeTop, GuiSizeRight, GuiSizeBottom);
+                // Coming back with the panel already slid away would otherwise
+                // put the inset back to full width underneath it.
+                appliedLeftInset = panelSlide > 0.0f ? 0 : GuiSizeLeft;
+                worldViewport.setInset(appliedLeftInset, GuiSizeTop, GuiSizeRight, GuiSizeBottom);
             }
             else
             {
+                appliedLeftInset = 0;
                 worldViewport.setInset(0, 0, 0, 0);
             }
             recreateWorldRenderTextures();

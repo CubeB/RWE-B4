@@ -1,5 +1,7 @@
 #include "GameScene.h"
 #include <algorithm>
+#include <cmath>
+#include <rwe/game/panel_slide.h>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -231,6 +233,7 @@ namespace rwe
           minimapDots(minimapDots),
           minimapDotHighlight(minimapDotHighlight),
           minimapRect(minimapViewport.scaleToFit(this->minimap->bounds)),
+          minimapRectBase(minimapRect),
           sounds(std::move(sounds)),
           guiFont(guiFont),
           speechFont(speechFont),
@@ -288,6 +291,7 @@ namespace rwe
 
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
         currentPanel = uiFactory.panelFromGuiFile(sidePrefix + "MAIN2");
+        panelBaseX = currentPanel->getX();
 
         sceneContext.audioService->reserveChannels(reservedChannelsCount);
         gameNetworkService->start();
@@ -333,6 +337,85 @@ namespace rwe
         soundCount = std::max(soundCount, 1);
         auto headRoom = computeSoundCeiling(soundCount);
         return std::clamp(static_cast<int>(headRoom * 128) / soundCount, 1, 128);
+    }
+
+    bool GameScene::isCursorOverPanel()
+    {
+        // The panel's live bounds, not its resting ones: once it has started
+        // moving the cursor is no longer on it, which is what keeps a held
+        // Space from arguing with itself part way through the slide.
+        auto p = getMousePosition();
+        auto x = currentPanel->getX();
+        auto y = currentPanel->getY();
+        return p.x >= x
+            && p.x < x + static_cast<int>(currentPanel->getWidth())
+            && p.y >= y
+            && p.y < y + static_cast<int>(currentPanel->getHeight());
+    }
+
+    void GameScene::updatePanelSlide(int millisecondsElapsed)
+    {
+        // TOTALA-EXE.md 76. The original keeps a display word bit (game+0x37f06
+        // bit 7) that only F4 toggles -- it has no registry name, so it does not
+        // outlive the session -- and a slide position at 0x51f2d8 animated
+        // between 0 and 0x7d, its side panel's width. With the bit set the
+        // position runs to 0x7d; with it clear it runs back to 0, except while
+        // Space is held and the cursor is off the panel's own gadget. A second
+        // updater at 0x4689c0 runs the same Space logic.
+        //
+        // Which endpoint is the hidden one is inference, not decoding: the
+        // arithmetic and the two sounds are as the finding states, but nothing
+        // in the trace says 0x7d means "out of the way". That Space is a
+        // momentary peek is what makes this the sensible reading of it.
+        if (!guiVisible)
+        {
+            // The debug panel's GUI checkbox owns the inset while the HUD is
+            // off, and there is no panel on screen to slide anyway.
+            return;
+        }
+
+        auto wantHidden = panelWantsHiding(
+            panelHiddenLatch,
+            spaceDown && !isGameMenuOpen(),
+            isCursorOverPanel());
+        auto target = wantHidden ? static_cast<float>(PanelSlideTravel) : 0.0f;
+
+        auto previous = panelSlide;
+        panelSlide = advancePanelSlide(panelSlide, target, PanelSlidePixelsPerSecond, millisecondsElapsed);
+
+        if (panelSlide != previous && panelSlide == target)
+        {
+            // Both endpoints play a UI sound. 76 names them and ALLSOUND.TDF
+            // has both -- PANEL is servsml6, OPTIONS is butoptn -- but which
+            // sound belongs to which end is not decoded, so this pairing is
+            // RWE's: the servo as the panel leaves, the button as it returns.
+            const auto& arrival = wantHidden ? sounds.panel : sounds.options;
+            if (arrival)
+            {
+                playUiSound(*arrival);
+            }
+        }
+
+        auto offset = static_cast<int>(std::lround(panelSlide));
+        currentPanel->setX(panelBaseX - offset);
+        minimapRect = Rectangle2f(
+            Vector2f(minimapRectBase.position.x - static_cast<float>(offset), minimapRectBase.position.y),
+            minimapRectBase.extents);
+
+        // The inset is snapped, not animated. It sizes the world framebuffer
+        // and two full screen textures, and anti-aliasing doubles all three,
+        // so moving it every frame would reallocate them every frame. Opening
+        // it the moment the slide leaves rest, and closing it only once the
+        // panel is home again, costs two reallocations per round trip and
+        // means the panel always slides across a world that is already drawn
+        // underneath it.
+        auto desiredLeft = panelSlide > 0.0f ? 0 : GuiSizeLeft;
+        if (desiredLeft != appliedLeftInset)
+        {
+            appliedLeftInset = desiredLeft;
+            worldViewport.setInset(desiredLeft, GuiSizeTop, GuiSizeRight, GuiSizeBottom);
+            recreateWorldRenderTextures();
+        }
     }
 
     void GameScene::update(int millisecondsElapsed)
@@ -701,7 +784,16 @@ namespace rwe
             currentPanel = std::move(*nextPanel);
             nextPanel = std::nullopt;
             attachOrdersMenuEventHandlers();
+            // The incoming panel carries its own x from its gui file, and the
+            // slide is taken off that -- so it has to be read before the slide
+            // is applied, or a panel swapped in mid-slide would have the
+            // offset subtracted from an already offset position.
+            panelBaseX = currentPanel->getX();
         }
+
+        // Straight after the swap, so a panel that arrived this frame is put
+        // in the right place before anything draws it.
+        updatePanelSlide(millisecondsElapsed);
 
         // The drift gate below asks the network thread what time everyone
         // else is at, and skips ticks to stay level with them. There is

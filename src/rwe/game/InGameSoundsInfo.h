@@ -21,5 +21,9 @@ namespace rwe
         std::optional<AudioService::SoundHandle> notOkToBuild;
 
         std::optional<AudioService::SoundHandle> selectMultipleUnits;
+
+        /** The two the side panel's slide plays at its endpoints (76). */
+        std::optional<AudioService::SoundHandle> panel;
+        std::optional<AudioService::SoundHandle> options;
     };
 }
