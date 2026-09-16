@@ -36,6 +36,7 @@ namespace rwe
         bb.scoutUnits.clear();
         bb.antiAirUnits.clear();
         bb.transports.clear();
+        bb.navalCombatUnits.clear();
         bb.orphanedFrames.clear();
 
         const auto& player = sim.getPlayer(aiOwner);
@@ -226,6 +227,18 @@ namespace rwe
             else if (def.isMobile && def.isTransport() && !def.builder)
             {
                 bb.transports.push_back(unitId);
+            }
+            else if (def.isMobile && !isFerryPassenger
+                && ((!bb.sideUnits.destroyer.empty() && unit.unitType == bb.sideUnits.destroyer)
+                    || (!bb.sideUnits.submarine.empty() && unit.unitType == bb.sideUnits.submarine)
+                    || (!bb.sideUnits.scoutShip.empty() && unit.unitType == bb.sideUnits.scoutShip)))
+            {
+                // Hulls. See AiBlackboard::navalCombatUnits for why these are
+                // sorted here rather than falling through to the ordinary
+                // scout/anti-air/combat buckets below, which is what a
+                // destroyer's own weapon-bearing mobile-unit shape would
+                // otherwise land it in.
+                bb.navalCombatUnits.push_back(unitId);
             }
             else if (def.isMobile && (isAiScoutType(bb.sideUnits, unit.unitType) || (def.canFly && !def.canAttack && !def.builder)))
             {

@@ -119,6 +119,21 @@ namespace rwe
         return static_cast<float>(def.maxHitPoints) * bestDps / metal;
     }
 
+    bool BuildManager::towerCostJustified(const AiTuningProfile& profile, const AiBlackboard& bb, const UnitDefinition& towerDef, int extractorsCovered)
+    {
+        if (profile.defenceValueMaxPaybackSeconds <= 0)
+        {
+            return true;
+        }
+        if (bb.metalIncome.value <= 0.0f)
+        {
+            return true;
+        }
+        auto allowanceSeconds = static_cast<float>(profile.defenceValueMaxPaybackSeconds)
+            + (static_cast<float>(std::max(0, extractorsCovered)) * static_cast<float>(profile.outpostDefenceValueSecondsPerExtractor));
+        return towerDef.buildCostMetal.value <= bb.metalIncome.value * allowanceSeconds;
+    }
+
     bool BuildManager::canAfford(const AiBlackboard& bb, const BuildEstimate& estimate, int extraSeconds)
     {
         if (bb.metalStorage.value > 0.0f && bb.currentMetal.value >= bb.metalStorage.value * 0.9f)
@@ -347,6 +362,84 @@ namespace rwe
             auto towards = target - *bb.baseAnchor;
             return SimVector(towards.x, 0_ss, towards.z).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
         }
+
+        /**
+         * Which way our buildings have actually been lost from lately,
+         * weighted so a loss just now counts fully and one about to age out
+         * of bb.recentLosses barely counts at all. The window is
+         * LossMemoryTicks, the same one EconomyManager already prunes that
+         * list to -- read again here rather than reinvented, since a
+         * second, looser memory would just steer placement at a raid the
+         * replace-what-was-lost rule has already stopped treating as
+         * current.
+         *
+         * Falls back to threatDirection when there is nothing to weigh:
+         * every opening, since recentLosses only exists after something has
+         * been destroyed, and any later stretch where nothing has been lost
+         * inside the window. threatDirection's own fallback -- the world
+         * origin, when no enemy base has been seen -- is not a real
+         * threat direction either, but it is at least the map's middle
+         * rather than a corner nobody stood in, and it is what the radar
+         * still uses, so it stays the answer for whichever of the two has
+         * no better one.
+         *
+         * Only buildings are ever in recentLosses -- it is diffed from
+         * standingBuildings, which never held anything mobile -- so a raid
+         * that kills only units passing through leaves no signal here.
+         * Widening that is a change to EconomyManager's loss tracking, not
+         * to how a tower reads it, and is left for whoever picks that up.
+         */
+        SimVector defenceFacingDirection(const AiBlackboard& bb)
+        {
+            SimVector sum(0_ss, 0_ss, 0_ss);
+            float totalWeight = 0.0f;
+            for (const auto& loss : bb.recentLosses)
+            {
+                auto age = bb.now.value - loss.lostAt.value;
+                if (age > LossMemoryTicks)
+                {
+                    continue;
+                }
+                auto weight = 1.0f - (static_cast<float>(age) / static_cast<float>(LossMemoryTicks));
+                auto dir = loss.position - *bb.baseAnchor;
+                sum += SimVector(dir.x, 0_ss, dir.z) * SimScalar(weight);
+                totalWeight += weight;
+            }
+            if (totalWeight <= 0.0f)
+            {
+                return threatDirection(bb);
+            }
+            return sum.normalizedOr(threatDirection(bb));
+        }
+
+        /**
+         * How many warships the map's water is worth: navalFleetSize in
+         * full on a Water map, halved (and rounded down, floor of one) on a
+         * Mixed map with ground of ours the base cannot reach -- half the
+         * fighting there is still on land, and a full fleet's metal
+         * competes with the army that does it. Zero on a Land map, zero
+         * before MapIntel has run, and zero whenever navalFleetSize itself
+         * is zero: that last one is the knob's documented kill switch, and
+         * folding it in here means buildPriorities and planFactories only
+         * ever have to ask this one question.
+         */
+        int navalFleetTarget(const AiTuningProfile& profile, const AiBlackboard& bb)
+        {
+            if (profile.navalFleetSize <= 0 || !bb.mapIntel.valid)
+            {
+                return 0;
+            }
+            switch (bb.mapIntel.character)
+            {
+                case MapCharacter::Water:
+                    return profile.navalFleetSize;
+                case MapCharacter::Mixed:
+                    return bb.hasUnreachableGround ? std::max(1, profile.navalFleetSize / 2) : 0;
+                case MapCharacter::Land:
+                default:
+                    return 0;
+            }
+        }
     }
 
     std::optional<SimVector> BuildManager::chooseBuildSite(
@@ -527,8 +620,14 @@ namespace rwe
         // -- a range from the first, at least as far forward as the post,
         // and then as near the base as it can be -- lands beside the first
         // rather than out in front of it or behind it. That makes a line
-        // across the front.
-        auto towards = threatDirection(bb);
+        // across the front. Facing follows where our buildings have
+        // actually been lost from lately in preference to the enemy's base,
+        // which is often unknown and always beside the point when a raid
+        // has been landing somewhere else entirely -- see
+        // defenceFacingDirection. Radar siting is untouched by this and
+        // still uses threatDirection: a radar's job is watching the enemy's
+        // side of the map, which recentLosses says nothing about.
+        auto towards = profile.defenceFacesRecentLosses ? defenceFacingDirection(bb) : threatDirection(bb);
         auto post = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
         return chooseScoredBuildSite(sim, profile, unitType, post, rng, [&](const SimVector& site, int) {
             auto forward = std::min((site - *bb.baseAnchor).dot(towards), profile.defenceDistanceFromBase);
@@ -561,6 +660,61 @@ namespace rwe
                 return SiteScore{-static_cast<float>(ring), site.y.value, 0.0f};
             },
             walkable);
+    }
+
+    std::optional<SimVector> BuildManager::chooseShipyardSite(
+        const GameSimulation& sim,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        const std::string& unitType,
+        std::minstd_rand& rng) const
+    {
+        (void)profile;
+        const auto defIt = sim.unitDefinitions.find(unitType);
+        if (defIt == sim.unitDefinitions.end() || !bb.baseAnchor || bb.mapIntel.shipyardSites.empty())
+        {
+            return std::nullopt;
+        }
+        const auto& def = defIt->second;
+        const auto mc = sim.getAdHocMovementClass(def.movementCollisionInfo);
+
+        // Nearest to the base among the sites MapIntel nominated. Every one
+        // of them already sits on real, deep-enough water -- MapIntel's own
+        // depth test is the same isWaterDepthWithinBounds canBeBuiltAt
+        // reaches -- so the only question left is whether a builder standing
+        // at home has any hope of reaching it, and distance is what answers
+        // that in practice: a site half the map away is a site the shore
+        // never gets close enough to work, whatever body of water it is on.
+        std::vector<SimVector> best;
+        std::optional<SimScalar> bestDistance;
+        for (const auto& candidate : bb.mapIntel.shipyardSites)
+        {
+            if (siteFailedLately(sim, candidate.position))
+            {
+                continue;
+            }
+            if (!sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo,
+                    static_cast<unsigned int>(candidate.tile.x), static_cast<unsigned int>(candidate.tile.y)))
+            {
+                continue;
+            }
+            auto distance = flatDistance(candidate.position, *bb.baseAnchor);
+            if (!bestDistance || distance < *bestDistance)
+            {
+                bestDistance = distance;
+                best.clear();
+                best.push_back(candidate.position);
+            }
+            else if (distance == *bestDistance)
+            {
+                best.push_back(candidate.position);
+            }
+        }
+        if (best.empty())
+        {
+            return std::nullopt;
+        }
+        return best[randomBelow(rng, static_cast<unsigned int>(best.size()))];
     }
 
     std::optional<SimVector> BuildManager::chooseMexSite(
@@ -1088,6 +1242,19 @@ namespace rwe
             want(s.vehiclePlant);
         }
 
+        // Naval: a shipyard, once the map's water is worth a fleet.
+        // navalFleetTarget folds together the map-character gate -- mirroring
+        // how airMatters gates the air plant above -- and the kill switch:
+        // navalFleetSize=0 makes the target always zero, so this never fires
+        // and nothing downstream in planFactories does either. ARMSY/CORSY
+        // sit on page two of the commander and both ordinary land
+        // constructors, so no construction ship is needed first -- see
+        // AiSideUnits.h and docs/ai-architecture-proposal.md S:13.2.
+        if (navalFleetTarget(profile, bb) > 0 && !s.shipyard.empty() && total(s.shipyard) < profile.targetShipyardCount)
+        {
+            want(s.shipyard);
+        }
+
         // Growth, once the plan above is satisfied. The targets are where
         // the base starts, not where it stops: the AI used to build its
         // eighth extractor and never another, and its income sat at ten a
@@ -1273,6 +1440,41 @@ namespace rwe
                     next = s.tank;
                 }
             }
+            else if (!s.shipyard.empty() && factory.unitType == s.shipyard)
+            {
+                // Eyes first -- ARMPT/CORPT is the cheapest hull afloat, the
+                // way the scout plane is the air plant's first job -- then
+                // the sea transport once TransportManager actually wants one
+                // (bb.wantsTransport, the same signal the air transport
+                // reads), then destroyers as the fleet's generalist body,
+                // and submarines only once enough of those stand that the
+                // fleet can already win a surface fight without them: a
+                // submarine's only weapon is a waterweapon (S:13.2), so it
+                // cannot answer anything that is not afloat.
+                auto fleetTarget = navalFleetTarget(profile, bb);
+                if (fleetTarget > 0)
+                {
+                    auto submarineTarget = std::min(profile.targetSubmarineCount, fleetTarget);
+                    auto destroyerTarget = std::max(0, fleetTarget - submarineTarget);
+                    if (!s.scoutShip.empty() && total(s.scoutShip) < profile.targetScoutShipCount)
+                    {
+                        next = s.scoutShip;
+                    }
+                    else if (!s.seaTransport.empty() && bb.wantsTransport && total(s.seaTransport) < profile.targetSeaTransportCount)
+                    {
+                        next = s.seaTransport;
+                    }
+                    else if (!s.destroyer.empty() && total(s.destroyer) < destroyerTarget)
+                    {
+                        next = s.destroyer;
+                    }
+                    else if (!s.submarine.empty() && total(s.submarine) < submarineTarget
+                        && total(s.destroyer) >= profile.submarineMinDestroyerCount)
+                    {
+                        next = s.submarine;
+                    }
+                }
+            }
             else if (!s.advancedLab.empty() && factory.unitType == s.advancedLab)
             {
                 // The advanced constructor first, for the same reason the
@@ -1345,7 +1547,7 @@ namespace rwe
         const GameSimulation& sim,
         PlayerId aiOwner,
         const AiTuningProfile& profile,
-        const AiBlackboard& bb,
+        AiBlackboard& bb,
         const ReachabilityMap& reachability,
         std::minstd_rand& rng,
         std::vector<PlayerCommand>& outCommands)
@@ -1777,6 +1979,10 @@ namespace rwe
             }
 
             std::optional<SimVector> site;
+            // Set below when this pass's site is the outpost plan's anchor,
+            // so the value gate after the site search knows how many
+            // extractors it is being asked to justify a tower for.
+            bool isOutpostTower = false;
             // A moho extractor stands on a metal patch exactly as the
             // level-one one does, and must go through the same search: the
             // ordinary site chooser deliberately refuses a patch, so a moho
@@ -1928,6 +2134,7 @@ namespace rwe
                 // base rule that is still short of its target is the
                 // tie-break in the base's favour.
                 site = chooseBuildSite(sim, profile, next, outpost->anchor, rng);
+                isOutpostTower = true;
                 if (site)
                 {
                     LOG_INFO << "AI build: unit " << builderId.value << " defends " << outpost->extractors << " extractor(s) at "
@@ -1950,9 +2157,39 @@ namespace rwe
                 auto towerAnchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
                 site = chooseBuildSite(sim, profile, next, towerAnchor, rng);
             }
+            else if (!sideUnits.shipyard.empty() && next == sideUnits.shipyard)
+            {
+                // Not a ring search: an 8x8 footprint needing
+                // MinWaterDepth=30 would refuse every candidate a walk out
+                // from the (dry) anchor ever offered. See chooseShipyardSite.
+                site = chooseShipyardSite(sim, profile, bb, next, rng);
+            }
             else
             {
                 site = chooseBuildSite(sim, profile, next, anchor, rng);
+            }
+
+            if (site)
+            {
+                // A tower's own worth: is its cost proportionate to what it
+                // protects, judged against the base's current income (and,
+                // for an outpost, against how much it would cover)? Not
+                // asked of a raided outpost or a base with an armed enemy
+                // already inside defendRadius -- those bypass the test the
+                // same way they already bypass metalShort, because this
+                // knob is about declining a speculative tower, not about
+                // refusing to rebuild one that was just shot down.
+                bool isTowerType = next == sideUnits.lightLaserTower || next == sideUnits.antiAirTower
+                    || (!sideUnits.heavyLaserTower.empty() && next == sideUnits.heavyLaserTower)
+                    || (!sideUnits.heavyPlasmaTower.empty() && next == sideUnits.heavyPlasmaTower);
+                bool urgent = (isOutpostTower && outpost && outpost->raided) || !bb.enemiesNearBase.empty();
+                if (isTowerType && !urgent
+                    && !towerCostJustified(profile, bb, nextDefIt->second, (isOutpostTower && outpost) ? outpost->extractors : 0))
+                {
+                    LOG_DEBUG << "AI build: " << next << " at " << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value)
+                              << " is not worth its metal against income " << bb.metalIncome.value << "/s; skipping";
+                    site.reset();
+                }
             }
 
             if (site && siteFailedLately(sim, *site))
@@ -1969,6 +2206,20 @@ namespace rwe
                 savingFor.clear();
                 issuedOrders[builderId.value] = IssuedOrder{next, *site, bb.now};
                 outCommands.push_back(buildCommand(builderId, next, *site));
+
+                // Far enough from the base that the builder placing this is
+                // otherwise on its own. ArmyManager reads this and detaches
+                // a guard; it also owns clearing it again once the builder
+                // is no longer there to protect. Only ever written here, so
+                // a builder reassigned to something at home simply stops
+                // refreshing it and the existing guard (if any) ages out on
+                // its own terms.
+                if (profile.buildSiteGuardSize > 0 && bb.baseAnchor && flatDistance(*site, *bb.baseAnchor) >= profile.buildSiteGuardMinDistance)
+                {
+                    bb.buildSiteGuardRequest = AiBlackboard::BuildSiteGuardRequest{*site, builderId, bb.now};
+                    LOG_INFO << "AI build: unit " << builderId.value << " building " << next << " "
+                             << static_cast<int>(flatDistance(*site, *bb.baseAnchor).value) << " from base wants a guard";
+                }
                 return;
             }
             LOG_DEBUG << "AI build: no site found for " << next << " near " << builder.position.x.value << "," << builder.position.z.value;

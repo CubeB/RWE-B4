@@ -56,6 +56,12 @@ namespace rwe
             units.advancedRadar = "CORARAD";
             units.mohoExtractor = "CORMOHO";
             units.fusion = "CORFUS";
+            units.shipyard = "CORSY";
+            units.constructionShip = "CORCS";
+            units.scoutShip = "CORPT";
+            units.destroyer = "CORROY";
+            units.seaTransport = "CORTSHIP";
+            units.submarine = "CORSUB";
         }
         else
         {
@@ -87,6 +93,12 @@ namespace rwe
             units.advancedRadar = "ARMARAD";
             units.mohoExtractor = "ARMMOHO";
             units.fusion = "ARMFUS";
+            units.shipyard = "ARMSY";
+            units.constructionShip = "ARMCS";
+            units.scoutShip = "ARMPT";
+            units.destroyer = "ARMROY";
+            units.seaTransport = "ARMTSHIP";
+            units.submarine = "ARMSUB";
         }
 
         auto check = [&](std::string& name) {
@@ -123,6 +135,12 @@ namespace rwe
         check(units.advancedRadar);
         check(units.mohoExtractor);
         check(units.fusion);
+        check(units.shipyard);
+        check(units.constructionShip);
+        check(units.scoutShip);
+        check(units.destroyer);
+        check(units.seaTransport);
+        check(units.submarine);
         return units;
     }
 

@@ -133,6 +133,80 @@ namespace rwe
                     blackboard.hasUnreachableGround = reachability.walkableTileCount() > reachability.reachableTileCount() + 64;
                 });
             }
+
+            // 3c. Where can our navy float? Same gate and the same reset of
+            // ticksSinceReachabilityRebuild as the ground layer just above,
+            // so a naval flood never happens more often than a ground one --
+            // flooding the whole heightmap a second time for a second
+            // movement class would be the expensive half of what rebuild()
+            // exists to amortise. Skipped outright on a map with no
+            // navigable water, or when nothing that could float has a
+            // resolved type to build the labelling from -- a mod that
+            // defines no sea transport and no other hull leaves the naval
+            // layer untouched (isNavalValid() stays false) rather than
+            // flooding for a movement class nothing will ever use.
+            if (blackboard.mapIntel.valid && blackboard.mapIntel.character != MapCharacter::Land)
+            {
+                const std::string& navalMover = !blackboard.sideUnits.seaTransport.empty() ? blackboard.sideUnits.seaTransport
+                    : !blackboard.sideUnits.destroyer.empty()                              ? blackboard.sideUnits.destroyer
+                    : !blackboard.sideUnits.submarine.empty()                              ? blackboard.sideUnits.submarine
+                    : !blackboard.sideUnits.scoutShip.empty()                              ? blackboard.sideUnits.scoutShip
+                                                                                            : blackboard.sideUnits.constructionShip;
+                auto navalMoverDef = navalMover.empty() ? sim.unitDefinitions.end() : sim.unitDefinitions.find(navalMover);
+                if (navalMoverDef != sim.unitDefinitions.end())
+                {
+                    // Anchor on our own shipyard if we have built one;
+                    // failing that, the nearest site a shipyard could stand
+                    // -- the best water access MapIntel already knows about
+                    // near our base -- rather than the base anchor itself,
+                    // which is dry land more often than not and would label
+                    // almost nothing as home.
+                    SimVector navalAnchor = *blackboard.baseAnchor;
+                    bool haveShipyardAnchor = false;
+                    if (!blackboard.sideUnits.shipyard.empty())
+                    {
+                        for (auto id : blackboard.factories)
+                        {
+                            if (sim.getUnitState(id).unitType == blackboard.sideUnits.shipyard)
+                            {
+                                navalAnchor = sim.getUnitState(id).position;
+                                haveShipyardAnchor = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!haveShipyardAnchor && !blackboard.mapIntel.shipyardSites.empty())
+                    {
+                        const NavalSite* nearest = nullptr;
+                        SimScalar bestDistanceSquared(0_ss);
+                        for (const auto& site : blackboard.mapIntel.shipyardSites)
+                        {
+                            auto d = site.position.distanceSquared(*blackboard.baseAnchor);
+                            if (!nearest || d < bestDistanceSquared)
+                            {
+                                nearest = &site;
+                                bestDistanceSquared = d;
+                            }
+                        }
+                        if (nearest)
+                        {
+                            // The site's own top-left tile, not its centre:
+                            // components are labelled by footprint top-left,
+                            // and the shipyard's 8x8 is wider than plenty of
+                            // hulls that might anchor here, so the centre can
+                            // land on a column a narrower footprint could
+                            // never start from. The top-left is the tile the
+                            // site was actually validated at, which is
+                            // walkable for anything no bigger.
+                            auto corner = sim.terrain.heightmapIndexToWorldCorner(nearest->tile);
+                            navalAnchor = SimVector(corner.x, sim.terrain.getSeaLevel(), corner.z);
+                        }
+                    }
+                    timed("navalReachability", [&] {
+                        reachability.rebuildNaval(sim, navalMoverDef->second.movementCollisionInfo, navalAnchor);
+                    });
+                }
+            }
         }
 
         // Worth a line: it is the one thing the AI reacts to rather than

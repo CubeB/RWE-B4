@@ -233,6 +233,61 @@ namespace rwe
         /** Give up on a ferry that has not finished in this many seconds. */
         int ferryTimeoutSeconds{120};
 
+        // --- Naval ---
+        /**
+         * Warships (destroyer, submarine and the scout ship together) the
+         * AI keeps once a shipyard stands, on a map where the water is
+         * worth a fleet -- MapCharacter::Water in full, and halved on a
+         * Mixed map with ground of ours the base cannot reach, since half
+         * the fighting there is still on land and a full fleet's metal
+         * competes with the army that does it. See BuildManager's
+         * navalFleetTarget.
+         *
+         * This is the kill switch: zero means the naval branch of
+         * buildPriorities never fires, no shipyard is ever wanted, and
+         * ArmyManager's land army is unaffected either way, because ships
+         * were never sorted into it in the first place -- see
+         * AiBlackboard::navalCombatUnits. Zero restores the AI to exactly
+         * what it built on a water map before a navy existed.
+         */
+        int navalFleetSize{6};
+        /** Shipyards wanted, once the fleet target above is not zero. One is the whole navy's factory. */
+        int targetShipyardCount{1};
+        /**
+         * Scout ships kept once a shipyard stands. Cheap eyes on the water
+         * the way a scout plane is cheap eyes on the ground -- ARMPT is 100
+         * metal, the cheapest hull afloat, and the first thing the yard
+         * produces.
+         */
+        int targetScoutShipCount{1};
+        /**
+         * Sea transports wanted once bb.wantsTransport says a crossing is
+         * actually needed -- the same signal TransportManager sets for the
+         * air transport, read here rather than guessed at, so a shipyard
+         * never speculatively lays one down before there is an army to
+         * ferry. Kept as its own count instead of sharing
+         * targetTransportCount because the two draw on different factories
+         * and answer different crossings: the air plant's answers ground
+         * the base cannot walk to at all, this one answers water in the
+         * way.
+         */
+        int targetSeaTransportCount{1};
+        /**
+         * Submarines wanted, out of navalFleetSize, once the destroyer core
+         * below is standing. A submarine's only weapon is a waterweapon
+         * (TOTALA-EXE.md and S:13.2), so it cannot answer anything on land
+         * or in the air; it is a specialist added to a fleet that can
+         * already fight, not a substitute for one.
+         */
+        int targetSubmarineCount{2};
+        /**
+         * Destroyers wanted before a submarine is worth building, so the
+         * early fleet is all generalist hulls. A submarine bought before
+         * the fleet can already win a surface fight is metal that cannot
+         * shoot back at whatever is shelling the coast.
+         */
+        int submarineMinDestroyerCount{3};
+
         // --- Site search ---
         /**
          * How far a builder looks for a patch to stand a metal extractor on.
@@ -328,6 +383,86 @@ namespace rwe
          * two against each other.
          */
         bool spreadDefences{true};
+        /**
+         * Face the next tower towards where our buildings have actually
+         * been lost from lately (bb.recentLosses, weighted by age within
+         * the existing LossMemoryTicks window) in preference to
+         * enemyBasePosition.
+         *
+         * chooseDefenceSite used to push every non-anti-air tower towards
+         * enemyBasePosition regardless of where an attack had actually come
+         * from, which docs/ai-architecture-proposal.md S:13.3 flags by name
+         * and says recentLosses "was built with it in mind" for. That
+         * target is also frequently unset -- PerceptionManager clears
+         * enemyBasePosition every refresh and only sets it again once an
+         * enemy building is actually in sight, so it reads empty for the
+         * whole opening and again whenever contact is lost -- and its
+         * fallback is the world origin, not a real threat direction. A raid
+         * that lands on the flank now tilts the post that way instead;
+         * false restores the previous behaviour exactly, and is also what
+         * this falls back to of its own accord whenever there is no loss
+         * inside the window, which includes every opening.
+         */
+        bool defenceFacesRecentLosses{true};
+        /**
+         * The most a tower may cost against the current metal income before
+         * it is judged not worth its metal, expressed as seconds of that
+         * income -- a light laser tower at 90 seconds of a ten-a-second
+         * economy is 900 metal's worth of allowance against a much cheaper
+         * building, so this is deliberately generous and meant to catch a
+         * starved economy rather than veto an ordinary one.
+         *
+         * Reasoned rather than measured: nothing here has been played, so
+         * treat the actual number as a starting point for the arena rather
+         * than a settled answer. Zero switches the test off -- the count
+         * thresholds and metalShort are all that gate a tower, which is
+         * every behaviour before this knob existed. A reading of zero
+         * income (nothing produced yet, or a test rig that never modelled
+         * any) is treated as unmeasured rather than as "no income", so the
+         * gate does not fire before there is anything to judge it against.
+         * A tower answering an actual raid -- outpostDefencePlan::raided, or
+         * an armed enemy already inside defendRadius -- bypasses the test
+         * outright, the same way those already bypass metalShort: this
+         * knob is about declining a speculative tower, not about refusing
+         * to rebuild one that was just shot down.
+         */
+        int defenceValueMaxPaybackSeconds{90};
+        /**
+         * Extra payback seconds an outpost tower earns per extractor the
+         * site would cover, added to defenceValueMaxPaybackSeconds. A
+         * tower guarding three extractors is worth more than one guarding
+         * a single lonely patch, and without this the value test could not
+         * tell them apart.
+         */
+        int outpostDefenceValueSecondsPerExtractor{45};
+
+        /**
+         * How many combat units are detached to stand over a builder
+         * placing something away from the base -- an outpost tower is the
+         * usual case, since nothing else ever went there with it. Modelled
+         * on raidPartySize, except a guard is sent even under strength: it
+         * stands rather than walks into a fight it chose, so a guard of one
+         * is still worth having where a raid of one was called a gift.
+         * Zero switches the whole feature off.
+         */
+        int buildSiteGuardSize{2};
+        /**
+         * How far a build site has to be from the base anchor before the
+         * builder placing something there is offered a guard. Short enough
+         * that an outpost beyond the base's own cover always qualifies;
+         * long enough that an ordinary building going up beside the lab
+         * does not draw a combat unit off the rally point for nothing.
+         */
+        SimScalar buildSiteGuardMinDistance{900_ss};
+        /**
+         * How long a guard will stand over a site with nothing to show for
+         * it before it gives up and rejoins the reserve -- the builder
+         * changed its mind, got stuck, or the order was dropped and never
+         * reissued. Long enough to cover an ordinary build, short enough
+         * that an abandoned request does not tie up part of the army for
+         * the rest of the game.
+         */
+        int buildSiteGuardTimeoutSeconds{180};
 
         /**
          * How long a builder will wait for the stockpile to reach the price

@@ -65,6 +65,15 @@ namespace rwe
 
         std::optional<SimVector> landingNear(const GameSimulation& sim, const ReachabilityMap& reachability, const SimVector& target, const SimVector& from) const;
 
+        /**
+         * The hull counterpart of landingNear(): a ship cannot come ashore
+         * anywhere along the way, so the drop point it returns must also
+         * have water alongside it that the naval layer marks reachable from
+         * our own base -- not merely dry and walkable for the cargo, which
+         * is all landingNear asks. See issue #26.
+         */
+        std::optional<SimVector> navalLandingNear(const GameSimulation& sim, const ReachabilityMap& reachability, const SimVector& target, const SimVector& from) const;
+
         void bookPassengers(AiBlackboard& bb, const Ferry& ferry);
     };
 }

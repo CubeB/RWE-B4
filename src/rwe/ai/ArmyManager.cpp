@@ -67,6 +67,49 @@ namespace rwe
             auto dz = a.z - b.z;
             return rweSqrt((dx * dx) + (dz * dz));
         }
+
+        /**
+         * Whether something of ours now stands, finished, at the site a
+         * guard was asked for -- the construction it came to protect is
+         * done.
+         *
+         * Judged by what stands there rather than by the builder's own
+         * order queue. A BuildOrder BuildManager issues this tick is a
+         * PlayerCommand, not yet applied to the builder's own orders --
+         * that happens through the ordinary command pipeline, at the
+         * earliest next tick, the same one tick of latency a human
+         * player's command carries. Checking the order queue the same
+         * tick the request was written released the guard before the
+         * order had even landed, which is not the same bug in two places;
+         * it is the one bug this function exists to avoid.
+         *
+         * Buildings only. A mobile unit -- the builder itself, arriving to
+         * start the job -- is complete and stands right there too, and
+         * counting it would report the job done the moment it began.
+         */
+        bool somethingFinishedStandsAt(const GameSimulation& sim, PlayerId owner, const SimVector& site)
+        {
+            for (const auto& [_, unit] : sim.units)
+            {
+                if (unit.owner != owner || !unit.isAlive())
+                {
+                    continue;
+                }
+                if (unit.position.distanceSquared(site) > (64_ss * 64_ss))
+                {
+                    continue;
+                }
+                const auto& def = sim.unitDefinitions.at(unit.unitType);
+                // Not the builder itself: a mobile unit standing at its own
+                // build site is not the sign the build is done, it is the
+                // sign it has just arrived to start.
+                if (!def.isMobile && !unit.isBeingBuilt(def))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     void ArmyManager::updateRallyPoint(const AiTuningProfile& profile, AiBlackboard& bb) const
@@ -162,6 +205,112 @@ namespace rwe
         }
     }
 
+    std::optional<UnitId> ArmyManager::nearestNavalEnemy(
+        const GameSimulation& sim,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        const SimVector& from,
+        SimScalar maxDistance) const
+    {
+        if (!bb.mapIntel.valid)
+        {
+            return std::nullopt;
+        }
+        std::optional<UnitId> best;
+        auto bestDistanceSquared = maxDistance * maxDistance;
+        for (const auto& [_, enemy] : bb.knownEnemies)
+        {
+            if (!inSightRecently(bb, profile, enemy))
+            {
+                continue;
+            }
+            if (!sameWaterBody(bb.mapIntel, sim.terrain, from, enemy.lastKnownPosition))
+            {
+                continue;
+            }
+            auto unitRef = sim.tryGetUnitState(enemy.unitId);
+            if (!unitRef || unitRef->get().isDead())
+            {
+                continue;
+            }
+            auto d = from.distanceSquared(enemy.lastKnownPosition);
+            if (d <= bestDistanceSquared)
+            {
+                bestDistanceSquared = d;
+                best = enemy.unitId;
+            }
+        }
+        return best;
+    }
+
+    void ArmyManager::updateNavy(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        AiBlackboard& bb,
+        std::vector<PlayerCommand>& outCommands) const
+    {
+        if (bb.navalCombatUnits.empty())
+        {
+            return;
+        }
+
+        // Home is our own shipyard, not the (land) base anchor or rally
+        // point -- a ship called back to either of those is exactly the
+        // "sent inland" bug this exists to avoid. No shipyard standing
+        // means no home to hold, and with nothing to measure a leash
+        // against a fleet is left where it is rather than guessed at; that
+        // should not arise in practice, since nothing builds a hull without
+        // a shipyard to build it.
+        std::optional<SimVector> navalHome;
+        if (!bb.sideUnits.shipyard.empty())
+        {
+            for (const auto& [_, unit] : sim.units)
+            {
+                if (unit.owner == aiOwner && unit.isAlive() && unit.unitType == bb.sideUnits.shipyard)
+                {
+                    navalHome = unit.position;
+                    break;
+                }
+            }
+        }
+        if (!navalHome)
+        {
+            return;
+        }
+
+        for (auto shipId : bb.navalCombatUnits)
+        {
+            auto shipRef = sim.tryGetUnitState(shipId);
+            if (!shipRef)
+            {
+                continue;
+            }
+            const auto& ship = shipRef->get();
+
+            // Anything on our own sea gets shot at, whatever else is
+            // happening -- the land army's own "anything within reach"
+            // rule, just asked with nearestNavalEnemy instead.
+            if (auto enemy = nearestNavalEnemy(sim, profile, bb, ship.position, profile.engageRadius))
+            {
+                if (!isAttackingUnit(ship, *enemy))
+                {
+                    outCommands.push_back(attackCommand(shipId, *enemy));
+                }
+                continue;
+            }
+
+            // Nothing worth fighting: hold the coast at home instead of
+            // drifting, so the fleet is already where the next thing worth
+            // shooting turns up.
+            if (ship.position.distanceSquared(*navalHome) > (profile.rallyDistance * profile.rallyDistance)
+                && ship.orders.empty())
+            {
+                outCommands.push_back(moveCommand(shipId, *navalHome));
+            }
+        }
+    }
+
     std::optional<UnitId> ArmyManager::chooseRaidTarget(
         const GameSimulation& sim,
         const AiTuningProfile& profile,
@@ -220,7 +369,6 @@ namespace rwe
         AiBlackboard& bb,
         std::vector<PlayerCommand>& outCommands)
     {
-        (void)aiOwner;
         updateRallyPoint(profile, bb);
 
         ++ticksSinceLastUpdate;
@@ -246,6 +394,73 @@ namespace rwe
         }
 
         updateAntiAir(sim, profile, bb, outCommands);
+        updateNavy(sim, aiOwner, profile, bb, outCommands);
+
+        // A guard for a builder placing something away from the base --
+        // an outpost tower is the usual case. Modelled on the raid
+        // detachment below: drawn from the reserve and released the same
+        // way, except a guard stands rather than walks into a fight it
+        // chose, so it is worth sending under strength where a raid of one
+        // was called a gift.
+        //
+        // Released -- the request cleared and the group sent back to the
+        // reserve -- once the builder is no longer there to protect: it
+        // died, the thing it was building now stands finished, or the
+        // request has simply stood too long. Checked before the request is
+        // acted on further this pass, so a stale guard does not linger a
+        // tick longer than it has to.
+        if (bb.buildSiteGuardRequest)
+        {
+            const auto& request = *bb.buildSiteGuardRequest;
+            auto builderRef = sim.tryGetUnitState(request.builderId);
+            bool builderGone = !builderRef || builderRef->get().isDead();
+            bool jobDone = somethingFinishedStandsAt(sim, aiOwner, request.position);
+            bool timedOut = profile.buildSiteGuardTimeoutSeconds > 0
+                && bb.now.value > request.requestedAt.value + static_cast<unsigned int>(profile.buildSiteGuardTimeoutSeconds) * SimTicksPerSecond;
+            if (builderGone || jobDone || timedOut)
+            {
+                if (!bb.guardGroup.empty())
+                {
+                    LOG_INFO << "AI army: guard of " << bb.guardGroup.size() << " released, builder " << request.builderId.value
+                             << (builderGone ? " lost" : (jobDone ? " finished" : " timed out"));
+                }
+                bb.buildSiteGuardRequest.reset();
+                bb.guardGroup.clear();
+            }
+        }
+        else
+        {
+            bb.guardGroup.clear();
+        }
+        if (bb.buildSiteGuardRequest)
+        {
+            // Prune the dead out of a guard already standing, the same way
+            // the raid group below is pruned.
+            for (auto it = bb.guardGroup.begin(); it != bb.guardGroup.end();)
+            {
+                auto alive = std::binary_search(bb.combatUnits.begin(), bb.combatUnits.end(), UnitId(*it), [](UnitId a, UnitId b) { return a.value < b.value; });
+                it = alive ? std::next(it) : bb.guardGroup.erase(it);
+            }
+            if (profile.buildSiteGuardSize > 0 && static_cast<int>(bb.guardGroup.size()) < profile.buildSiteGuardSize)
+            {
+                for (auto unitId : bb.combatUnits)
+                {
+                    if (static_cast<int>(bb.guardGroup.size()) >= profile.buildSiteGuardSize)
+                    {
+                        break;
+                    }
+                    if (bb.scoutUnitId && *bb.scoutUnitId == unitId)
+                    {
+                        continue;
+                    }
+                    if (bb.attackGroup.count(unitId.value) != 0 || bb.raidGroup.count(unitId.value) != 0 || bb.guardGroup.count(unitId.value) != 0)
+                    {
+                        continue;
+                    }
+                    bb.guardGroup.insert(unitId.value);
+                }
+            }
+        }
 
         // A detachment for the enemy's outlying economy, drawn from the units
         // gathering for the next wave and never from the wave that is out.
@@ -283,7 +498,7 @@ namespace rwe
                         {
                             continue;
                         }
-                        if (bb.attackGroup.count(unitId.value) != 0)
+                        if (bb.attackGroup.count(unitId.value) != 0 || bb.guardGroup.count(unitId.value) != 0)
                         {
                             continue;
                         }
@@ -332,7 +547,8 @@ namespace rwe
             {
                 for (auto unitId : bb.combatUnits)
                 {
-                    if (!(bb.scoutUnitId && *bb.scoutUnitId == unitId) && bb.raidGroup.count(unitId.value) == 0)
+                    if (!(bb.scoutUnitId && *bb.scoutUnitId == unitId) && bb.raidGroup.count(unitId.value) == 0
+                        && bb.guardGroup.count(unitId.value) == 0)
                     {
                         bb.attackGroup.insert(unitId.value);
                     }
@@ -355,7 +571,8 @@ namespace rwe
                     {
                         continue;
                     }
-                    if (bb.attackGroup.count(unitId.value) != 0 || bb.raidGroup.count(unitId.value) != 0)
+                    if (bb.attackGroup.count(unitId.value) != 0 || bb.raidGroup.count(unitId.value) != 0
+                        || bb.guardGroup.count(unitId.value) != 0)
                     {
                         continue;
                     }
@@ -491,6 +708,23 @@ namespace rwe
                 if (!isAttackingUnit(unit, *enemy))
                 {
                     outCommands.push_back(attackCommand(unitId, *enemy));
+                }
+                continue;
+            }
+
+            // A guard stands over the builder it was sent to protect
+            // instead of anything the phase below would otherwise have it
+            // do -- the builder placing an outpost does not care whether
+            // the wave has been called yet. Held to a tight leash around
+            // the site itself, not the builder: the builder is what moves
+            // once its order finishes, and the guard's job is the ground,
+            // not the escort.
+            if (bb.buildSiteGuardRequest && bb.guardGroup.count(unitId.value) != 0)
+            {
+                const auto& site = bb.buildSiteGuardRequest->position;
+                if (!isMovingTo(unit, site) && unit.position.distanceSquared(site) > (128_ss * 128_ss))
+                {
+                    outCommands.push_back(moveCommand(unitId, site));
                 }
                 continue;
             }

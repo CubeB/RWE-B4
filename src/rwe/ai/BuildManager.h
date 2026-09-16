@@ -36,7 +36,7 @@ namespace rwe
             const GameSimulation& sim,
             PlayerId aiOwner,
             const AiTuningProfile& profile,
-            const AiBlackboard& bb,
+            AiBlackboard& bb,
             const ReachabilityMap& reachability,
             std::minstd_rand& rng,
             std::vector<PlayerCommand>& outCommands);
@@ -85,6 +85,26 @@ namespace rwe
          * yes, never the other way round.
          */
         static bool canAfford(const AiBlackboard& bb, const BuildEstimate& estimate, int extraSeconds = 0);
+
+        /**
+         * Whether a tower's cost is proportionate to what it protects,
+         * judged in seconds of the base's current metal income --
+         * profile.defenceValueMaxPaybackSeconds, extended by
+         * profile.outpostDefenceValueSecondsPerExtractor for every
+         * extractor `extractorsCovered` says the site would additionally
+         * cover. This is a separate question from canAfford: that asks
+         * whether the stockpile lasts the build, this asks whether the
+         * build is worth having at all.
+         *
+         * A reading of zero income is treated as unmeasured rather than as
+         * "no income" -- most often the very first tick, or a fixture that
+         * never modelled any -- so the gate does not fire before there is
+         * anything to judge a tower against. defenceValueMaxPaybackSeconds
+         * of zero switches the whole test off and always answers yes: the
+         * count thresholds and metalShort are all that gate a tower then,
+         * which is every behaviour before this existed.
+         */
+        static bool towerCostJustified(const AiTuningProfile& profile, const AiBlackboard& bb, const UnitDefinition& towerDef, int extractorsCovered = 0);
 
         /**
          * An extractor cluster of ours that nothing defends, and where a
@@ -181,6 +201,31 @@ namespace rwe
             const AiTuningProfile& profile,
             const AiBlackboard& bb,
             const ReachabilityMap& reachability,
+            const std::string& unitType,
+            std::minstd_rand& rng) const;
+
+        /**
+         * A shipyard site, from MapIntel::shipyardSites -- nearest the base
+         * of the ones still valid, rather than a ring search around the
+         * anchor: chooseBuildSite's ring walk asks canBeBuiltAt about
+         * ordinary dry ground, and an 8x8 footprint needing
+         * MinWaterDepth=30 would refuse every candidate it ever offered.
+         * MapIntel's list already answers the depth question; this only
+         * re-checks canBeBuiltAt (occupancy, the live yard map) and the
+         * site's own failedSites memory, exactly as every other site choice
+         * does.
+         *
+         * Doesn't itself verify a builder can walk close enough to work the
+         * site -- that is what createNewUnit's own "Target area was
+         * blocked" refusal is for, which drops the order and lands the site
+         * in failedSites the same way an unreachable metal patch does. A
+         * site nobody can reach is tried once and then left alone for
+         * failedSiteMemorySeconds, not filtered out ahead of time.
+         */
+        std::optional<SimVector> chooseShipyardSite(
+            const GameSimulation& sim,
+            const AiTuningProfile& profile,
+            const AiBlackboard& bb,
             const std::string& unitType,
             std::minstd_rand& rng) const;
 

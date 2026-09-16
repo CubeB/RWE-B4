@@ -194,6 +194,17 @@ namespace rwe
         /** Complete mobile transports, in id order. */
         std::vector<UnitId> transports;
         /**
+         * Complete warships -- destroyer, submarine, and the scout ship --
+         * in id order. Kept out of combatUnits entirely: every one of
+         * ArmyManager's gather/attack/raid rules is written in terms of
+         * combatUnits, so a hull that landed in there would be rallied and
+         * marched at a land target the moment the phase called for it. Read
+         * only by ArmyManager::updateNavy, which is also why the scout ship
+         * is here rather than in scoutUnits -- ScoutManager's routes are
+         * built for the ground the rest of the AI walks on.
+         */
+        std::vector<UnitId> navalCombatUnits;
+        /**
          * Our building frames that no builder is on, in id order: the one
          * that started them died, or was sent elsewhere. Half the metal is
          * already in them, and a frame left alone rots away (TOTALA-EXE.md
@@ -274,5 +285,30 @@ namespace rwe
         std::set<unsigned int> raidGroup;
         /** Where the raid is headed, if one is out. */
         std::optional<SimVector> raidTarget;
+
+        /**
+         * A build site away from the base that wants protection, and the
+         * builder placing it there. Written by BuildManager the pass it
+         * sends a builder to a site far enough out to be worth escorting --
+         * an outpost tower, most often, since a builder placing one goes
+         * there alone otherwise -- and read by ArmyManager, which is what
+         * actually detaches a guard. Cleared (by ArmyManager) once the
+         * builder is no longer there to protect: the job finished, the
+         * builder died, or the request timed out.
+         */
+        struct BuildSiteGuardRequest
+        {
+            SimVector position;
+            UnitId builderId;
+            GameTime requestedAt;
+        };
+        std::optional<BuildSiteGuardRequest> buildSiteGuardRequest;
+        /**
+         * The units detached to stand over a remote build site, by raw id.
+         * Modelled on raidGroup: drawn from the units gathering for the next
+         * wave and never from the wave that is out, and returned to the
+         * reserve the same way once buildSiteGuardRequest is cleared.
+         */
+        std::set<unsigned int> guardGroup;
     };
 }

@@ -26,6 +26,12 @@ namespace rwe
         p.antiAirMobileCount = 3;
         p.buildPlannerTickInterval = 20;
         p.tacticalTickInterval = 10;
+        p.defenceValueMaxPaybackSeconds = 45;
+        p.outpostDefenceValueSecondsPerExtractor = 20;
+        p.buildSiteGuardSize = 3;
+        p.navalFleetSize = 12;
+        p.targetSubmarineCount = 4;
+        p.submarineMinDestroyerCount = 2;
         return p;
     }
 
@@ -66,6 +72,22 @@ namespace rwe
                 p.buildPlannerTickInterval = 60;
                 p.tacticalTickInterval = 30;
                 p.scoutTickInterval = 120;
+                // Builds a tower wherever the count thresholds say to and
+                // never second-guesses the metal, faces it at the enemy's
+                // base (or the map's middle, not knowing that either) rather
+                // than reading where it has actually been hit, and a
+                // builder sent somewhere alone stays alone -- the weaker AI
+                // is meant to be, among other things, worse at judging
+                // value, worse at reading a raid, and less careful with its
+                // army.
+                p.defenceFacesRecentLosses = false;
+                p.defenceValueMaxPaybackSeconds = 0;
+                p.buildSiteGuardSize = 0;
+                // A small fleet, late, and no submarines: teching into a
+                // specialist hull is not the kind of judgement Easy is meant
+                // to show.
+                p.navalFleetSize = 3;
+                p.targetSubmarineCount = 0;
                 return p;
             }
             case AiDifficulty::Standard:
@@ -88,6 +110,12 @@ namespace rwe
                 p.buildPlannerTickInterval = 20;
                 p.tacticalTickInterval = 10;
                 p.scoutTickInterval = 45;
+                p.defenceValueMaxPaybackSeconds = 60;
+                p.outpostDefenceValueSecondsPerExtractor = 30;
+                p.buildSiteGuardSize = 3;
+                p.navalFleetSize = 9;
+                p.targetSubmarineCount = 3;
+                p.submarineMinDestroyerCount = 2;
                 return p;
             }
             case AiDifficulty::Brutal:
@@ -163,6 +191,12 @@ namespace rwe
             || setInt("targetFusionCount", p.targetFusionCount)
             || setInt("targetScoutPlaneCount", p.targetScoutPlaneCount)
             || setInt("targetScoutVehicleCount", p.targetScoutVehicleCount)
+            || setInt("navalFleetSize", p.navalFleetSize)
+            || setInt("targetShipyardCount", p.targetShipyardCount)
+            || setInt("targetScoutShipCount", p.targetScoutShipCount)
+            || setInt("targetSeaTransportCount", p.targetSeaTransportCount)
+            || setInt("targetSubmarineCount", p.targetSubmarineCount)
+            || setInt("submarineMinDestroyerCount", p.submarineMinDestroyerCount)
             || setInt("saveUpSeconds", p.saveUpSeconds)
             || setInt("failedSiteMemorySeconds", p.failedSiteMemorySeconds)
             || setInt("buildPlannerTickInterval", p.buildPlannerTickInterval)
@@ -192,6 +226,12 @@ namespace rwe
             || setScalar("waveMeetEnemyRadius", p.waveMeetEnemyRadius)
             || setInt("waveMeetEnemyCount", p.waveMeetEnemyCount)
             || setBool("spreadDefences", p.spreadDefences)
+            || setBool("defenceFacesRecentLosses", p.defenceFacesRecentLosses)
+            || setInt("defenceValueMaxPaybackSeconds", p.defenceValueMaxPaybackSeconds)
+            || setInt("outpostDefenceValueSecondsPerExtractor", p.outpostDefenceValueSecondsPerExtractor)
+            || setInt("buildSiteGuardSize", p.buildSiteGuardSize)
+            || setScalar("buildSiteGuardMinDistance", p.buildSiteGuardMinDistance)
+            || setInt("buildSiteGuardTimeoutSeconds", p.buildSiteGuardTimeoutSeconds)
             || setBool("cheatModeOmniscient", p.cheatModeOmniscient)
             || setInt("targetMemoryTicks", p.targetMemoryTicks)
             || setScalar("defenceDistanceFromBase", p.defenceDistanceFromBase)

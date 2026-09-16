@@ -846,6 +846,8 @@ set(TEST_FILES
     src/rwe/ai/AiPlayerController.test.cpp
     src/rwe/ai/AiBehaviour.test.cpp
     src/rwe/ai/MapIntel.test.cpp
+    src/rwe/ai/ReachabilityMap.test.cpp
+    src/rwe/ai/TransportManager.test.cpp
     src/rwe/ai/AiBuildTree.test.cpp
     src/rwe/ai/ArmyTactics.test.cpp
     src/rwe/ai/AirTactics.test.cpp

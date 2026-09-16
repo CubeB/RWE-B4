@@ -3,6 +3,7 @@
 #include <rwe/ai/AiBuildTree.h>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/ai/AiTuningProfile.h>
+#include <rwe/ai/MapIntel.h>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
@@ -123,6 +124,26 @@ namespace rwe
             sim.unitDefinitions["ARMARAD"] = makeDef(false, false, false, "", 200u);
             sim.unitDefinitions["ARMMOHO"] = makeDef(false, false, false, "", 50u);
             sim.unitDefinitions["ARMFUS"] = makeDef(false, false, false, "", 50u);
+
+            // Naval: real shipped values (docs/ai-architecture-proposal.md
+            // S:13.2). The shipyard floats IN the water it needs rather
+            // than standing beside it -- 8x8, MinWaterDepth=30 -- and the
+            // scout ship and destroyer are ordinary armed hulls with their
+            // own, much shallower draughts.
+            auto armsy = makeDef(false, true, false, "", 200u);
+            armsy.movementCollisionInfo = UnitDefinition::AdHocMovementClass{8u, 8u, 255u, 255u, 30u, 255u};
+            armsy.buildCostMetal = Metal(615.0f);
+            sim.unitDefinitions["ARMSY"] = armsy;
+
+            auto armpt = makeDef(false, false, true, "LASER", 300u);
+            armpt.movementCollisionInfo = UnitDefinition::AdHocMovementClass{4u, 4u, 255u, 255u, 6u, 255u};
+            armpt.buildCostMetal = Metal(100.0f);
+            sim.unitDefinitions["ARMPT"] = armpt;
+
+            auto armroy = makeDef(false, false, true, "LASER", 300u);
+            armroy.movementCollisionInfo = UnitDefinition::AdHocMovementClass{4u, 4u, 255u, 255u, 12u, 255u};
+            armroy.buildCostMetal = Metal(898.0f);
+            sim.unitDefinitions["ARMROY"] = armroy;
         }
 
         /**
@@ -133,9 +154,9 @@ namespace rwe
         AiBuildTree makeBuildTree()
         {
             AiBuildTree tree;
-            tree.buildableBy["ARMCOM"] = {"ARMSOLAR", "ARMMEX", "ARMLAB", "ARMVP", "ARMAP", "ARMLLT", "ARMRAD", "ARMMAKR"};
+            tree.buildableBy["ARMCOM"] = {"ARMSOLAR", "ARMMEX", "ARMLAB", "ARMVP", "ARMAP", "ARMLLT", "ARMRAD", "ARMMAKR", "ARMSY"};
             tree.buildableBy["ARMCK"] = {"ARMSOLAR", "ARMMEX", "ARMLAB", "ARMVP", "ARMAP", "ARMLLT", "ARMRAD", "ARMMAKR",
-                "ARMALAB", "ARMHLT", "ARMGUARD", "ARMRL"};
+                "ARMALAB", "ARMHLT", "ARMGUARD", "ARMRL", "ARMSY"};
             tree.buildableBy["ARMACK"] = {"ARMLAB", "ARMARAD", "ARMFUS", "ARMMOHO"};
             return tree;
         }
@@ -152,6 +173,34 @@ namespace rwe
                 }
             }
             return MapTerrain(std::move(heights), 30_ss);
+        }
+
+        /**
+         * Mostly open water 60 deep -- comfortably past NavalShipyardMinWaterDepth
+         * -- with a dry strip along the west edge (heightmap x in [0, 10)) for
+         * the base to stand on. Heightmap width 64 and HeightTileWidthInWorldUnits
+         * 16 puts world x 0 at tile 32, so the shore is at world x -352 and
+         * everything east of it is water.
+         */
+        MapTerrain makeWaterMapTerrain()
+        {
+            Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
+            for (int y = 0; y < 64; ++y)
+            {
+                for (int x = 0; x < 10; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(90));
+                }
+                // A shelf too shallow for a shipyard (depth 20, under
+                // NavalShipyardMinWaterDepth=30) but still water for
+                // waterFraction/character purposes -- so a valid nomination
+                // has to have skipped it, not just have skipped the dry land.
+                for (int x = 10; x < 14; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(40));
+                }
+            }
+            return MapTerrain(std::move(heights), 60_ss);
         }
 
         template <typename Order>
@@ -1743,6 +1792,182 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a tower faces where losses actually came from, not the enemy's unseen base", "[ai]")
+    {
+        // threatDirection falls back to the world origin when no enemy base
+        // has been seen, which is the whole opening and any later stretch
+        // where contact has been lost -- not a real threat direction. A
+        // tower lost to the south should steer the next one there instead
+        // of towards the map's middle.
+        //
+        // The casualty is itself a light laser tower rather than, say, a
+        // solar collector: recentLosses feeds "replace what was just
+        // destroyed" too (buildPriorities' last rule), which reorders the
+        // wanted list to put back whatever type was lost first of all --
+        // a solar collector would then jump the queue ahead of the very
+        // tower this test is about, for a reason that has nothing to do
+        // with facing. A lost tower is already wanted first (it is what
+        // targetDefenceCount asks for), so the reorder is a no-op here and
+        // the test is actually isolating the facing logic.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        const SimVector anchor(0_ss, 0_ss, 0_ss);
+        layOutBase(sim, ai, script, anchor);
+        // Standing long enough to be noticed, then destroyed -- the raid.
+        auto raidedId = addUnit(sim, "ARMLLT", ai, anchor + SimVector(0_ss, 0_ss, -500_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+
+        SECTION("on: the tower is posted south, towards the loss")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 2, commands);
+            sim.getUnitState(raidedId).markAsDead();
+            runTicks(sim, controller, 30, commands);
+            REQUIRE(controller.getBlackboard().recentLosses.size() == 1);
+
+            auto order = theBuildOrder(commands, "ARMLLT");
+            REQUIRE(order.position.z < -50_ss);
+        }
+
+        SECTION("off: the knob restores the old facing, towards the map's middle")
+        {
+            profile.defenceFacesRecentLosses = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 2, commands);
+            sim.getUnitState(raidedId).markAsDead();
+            runTicks(sim, controller, 30, commands);
+            REQUIRE(controller.getBlackboard().recentLosses.size() == 1);
+
+            auto order = theBuildOrder(commands, "ARMLLT");
+            // Facing (1,0,0): posted east, towards the map's middle. Not
+            // asserted on z -- with no other tower yet standing, "forward"
+            // is capped and tied for every candidate at the post's ring,
+            // so the tie-break between a candidate north and one south of
+            // it is the RNG's, not the facing logic's, to answer.
+            REQUIRE(order.position.x > 50_ss);
+        }
+    }
+
+    TEST_CASE("a tower has to be worth its metal", "[ai]")
+    {
+        // towerCostJustified is a pure function of the profile, the
+        // blackboard's income and the tower's own cost, so it is tested
+        // directly rather than through a whole game -- the same style as
+        // canAfford's "a stockpile at the cap" case above.
+        auto profile = makeDefaultStandardProfile();
+        AiBlackboard bb;
+        UnitDefinition tower{};
+        tower.buildCostMetal = Metal(600.0f);
+
+        SECTION("an economy too poor to pay it back in time is refused")
+        {
+            bb.metalIncome = Metal(1.0f);
+            // 90 seconds (the default) of a 1/s economy is 90 metal, nowhere near 600.
+            REQUIRE_FALSE(BuildManager::towerCostJustified(profile, bb, tower));
+        }
+
+        SECTION("a healthy economy clears it easily")
+        {
+            bb.metalIncome = Metal(20.0f);
+            // 90 seconds of a 20/s economy is 1800, comfortably over 600.
+            REQUIRE(BuildManager::towerCostJustified(profile, bb, tower));
+        }
+
+        SECTION("an outpost earns extra allowance for what it covers")
+        {
+            bb.metalIncome = Metal(1.0f);
+            REQUIRE_FALSE(BuildManager::towerCostJustified(profile, bb, tower, 0));
+            // 90 + 6*45 = 360, still short; 90 + 12*45 = 630 clears it.
+            REQUIRE_FALSE(BuildManager::towerCostJustified(profile, bb, tower, 6));
+            REQUIRE(BuildManager::towerCostJustified(profile, bb, tower, 12));
+        }
+
+        SECTION("a reading of zero income is unmeasured, not poor, and does not block")
+        {
+            bb.metalIncome = Metal(0.0f);
+            REQUIRE(BuildManager::towerCostJustified(profile, bb, tower));
+        }
+
+        SECTION("the knob switches the whole test off")
+        {
+            profile.defenceValueMaxPaybackSeconds = 0;
+            bb.metalIncome = Metal(1.0f);
+            REQUIRE(BuildManager::towerCostJustified(profile, bb, tower));
+        }
+    }
+
+    TEST_CASE("a guard is sent to a builder placed away from the base, and released once it is done", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        const SimVector anchor(-300_ss, 0_ss, 0_ss);
+        layOutBase(sim, ai, script, anchor);
+        // A small army to draw the guard from.
+        for (int i = 0; i < 3; ++i)
+        {
+            addUnit(sim, "ARMPW", ai, anchor + SimVector(0_ss, 0_ss, SimScalar(-200.0f - i * 40.0f)), script);
+        }
+
+        auto profile = makeDefaultStandardProfile();
+        // The ordinary front-of-base tower -- 160 out, per layOutBase's
+        // world -- already qualifies as "away from the base" for this test.
+        profile.buildSiteGuardMinDistance = 50_ss;
+
+        SECTION("a guard is detached to the site, and released once the tower stands")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            const auto& bb = controller.getBlackboard();
+            auto order = theBuildOrder(commands, "ARMLLT");
+            REQUIRE(bb.buildSiteGuardRequest.has_value());
+            bool guardsExactBuildSite = bb.buildSiteGuardRequest->position == order.position;
+            REQUIRE(guardsExactBuildSite);
+            REQUIRE(bb.guardGroup.size() == static_cast<std::size_t>(profile.buildSiteGuardSize));
+
+            int guardMoves = 0;
+            for (auto id : bb.guardGroup)
+            {
+                auto moves = ordersFor<MoveOrder>(commands, UnitId(id));
+                if (!moves.empty())
+                {
+                    REQUIRE(flatDistanceBetween(moves.back().destination, order.position) < 1_ss);
+                    ++guardMoves;
+                }
+            }
+            REQUIRE(guardMoves > 0);
+
+            // The tower stands, and the builder that placed it is idle
+            // again -- the job the guard was sent for is over.
+            addUnit(sim, "ARMLLT", ai, order.position, script);
+            sim.getUnitState(bb.buildSiteGuardRequest->builderId).orders.clear();
+            runTicks(sim, controller, 20, commands);
+            REQUIRE_FALSE(controller.getBlackboard().buildSiteGuardRequest.has_value());
+            REQUIRE(controller.getBlackboard().guardGroup.empty());
+        }
+
+        SECTION("the knob at zero never asks for one")
+        {
+            profile.buildSiteGuardSize = 0;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            theBuildOrder(commands, "ARMLLT");
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE_FALSE(bb.buildSiteGuardRequest.has_value());
+            REQUIRE(bb.guardGroup.empty());
+        }
+    }
+
     TEST_CASE("a builder assisting a factory is offered to the planner again", "[ai]")
     {
         // The bug this pins: a builder sent to lend a hand at a factory
@@ -1904,5 +2129,212 @@ namespace rwe
         auto clearX = (rect.x >= factoryRect.x + factoryRect.width + 3) || (factoryRect.x >= rect.x + rect.width + 3);
         auto clearZ = (rect.y >= factoryRect.y + factoryRect.height + 3) || (factoryRect.y >= rect.y + rect.height + 3);
         REQUIRE((clearX || clearZ));
+    }
+
+    TEST_CASE("naval: a shipyard goes up on a water map, in water deep enough for it", "[ai]")
+    {
+        // makeWaterMapTerrain's shelf (tiles 10-13) is water but too shallow
+        // for ARMSY's own MinWaterDepth=30; only tiles 14 and beyond clear
+        // it. Every existing priority ahead of the naval branch in
+        // buildPriorities is zeroed out or pre-satisfied below, so the
+        // shipyard is the first thing the commander's one planning pass can
+        // actually find a site for and afford -- see BuildManager.cpp's
+        // buildPriorities for why that ordering matters.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+        REQUIRE(mapIntel.character == MapCharacter::Water);
+        REQUIRE_FALSE(mapIntel.shipyardSites.empty());
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-400_ss, 90_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.openingMetalExtractorCount = 0;
+        profile.openingSolarCount = 0;
+        profile.targetMetalExtractorCount = 0;
+        profile.targetSolarCount = 0;
+        profile.targetMetalMakerCount = 0;
+        profile.targetRadarCount = 0;
+        profile.targetDefenceCount = 0;
+        profile.baseAntiAirTowerCount = 0;
+        profile.reactiveAntiAirTowerCount = 0;
+        profile.outpostDefenceCount = 0;
+        profile.targetAirPlantCount = 0;
+        profile.targetVehiclePlantCount = 0;
+        profile.surplusLabCount = 0;
+
+        AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 31, commands);
+
+        auto builds = ordersFor<BuildOrder>(commands, commanderId);
+        REQUIRE(!builds.empty());
+        REQUIRE(builds.front().unitType == "ARMSY");
+
+        // The site is one MapIntel actually nominated for its depth, and
+        // specifically one on the deep side of the shelf -- not a ring
+        // search from the (dry) anchor, which chooseBuildSite would have
+        // run and which could never satisfy MinWaterDepth=30 at all.
+        auto matched = std::find_if(mapIntel.shipyardSites.begin(), mapIntel.shipyardSites.end(), [&](const NavalSite& s) {
+            return s.position.distanceSquared(builds.front().position) < (1_ss * 1_ss);
+        });
+        REQUIRE(matched != mapIntel.shipyardSites.end());
+        REQUIRE(matched->tile.x >= 14);
+    }
+
+    TEST_CASE("naval: no shipyard is ever wanted on a land map", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        auto mapIntel = analyseMap(makeFlatTerrain(), {});
+        REQUIRE(mapIntel.character == MapCharacter::Land);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 61, commands);
+
+        auto types = buildOrderTypes(commands);
+        REQUIRE(std::find(types.begin(), types.end(), "ARMSY") == types.end());
+    }
+
+    TEST_CASE("naval: navalFleetSize=0 restores today's behaviour exactly", "[ai]")
+    {
+        // The same water map and the same neutered priority list as "a
+        // shipyard goes up on a water map", except for the one knob this
+        // is about. Everything else held equal, flipping it back to zero
+        // is what has to be the only thing standing between a shipyard and
+        // none at all.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+        REQUIRE(mapIntel.character == MapCharacter::Water);
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-400_ss, 90_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.openingMetalExtractorCount = 0;
+        profile.openingSolarCount = 0;
+        profile.targetMetalExtractorCount = 0;
+        profile.targetSolarCount = 0;
+        profile.targetMetalMakerCount = 0;
+        profile.targetRadarCount = 0;
+        profile.targetDefenceCount = 0;
+        profile.baseAntiAirTowerCount = 0;
+        profile.reactiveAntiAirTowerCount = 0;
+        profile.outpostDefenceCount = 0;
+        profile.targetAirPlantCount = 0;
+        profile.targetVehiclePlantCount = 0;
+        profile.surplusLabCount = 0;
+        profile.navalFleetSize = 0; // the kill switch
+
+        AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 31, commands);
+
+        auto types = buildOrderTypes(commands);
+        REQUIRE(std::find(types.begin(), types.end(), "ARMSY") == types.end());
+    }
+
+    TEST_CASE("naval: a shipyard builds a scout ship, then destroyers", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMSY", ai, SimVector(0_ss, 60_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+
+        SECTION("eyes first")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMPT") == 1);
+            REQUIRE(countQueueCommands(commands, "ARMROY") == 0);
+        }
+
+        SECTION("then destroyers, once eyes are covered")
+        {
+            addUnit(sim, "ARMPT", ai, SimVector(50_ss, 60_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMROY") == 1);
+        }
+    }
+
+    TEST_CASE("naval: a warship is never sent inland", "[ai]")
+    {
+        // Without MapIntel::sameWaterBody filtering the target, the land
+        // army's plain "anything within engageRadius gets shot at" rule
+        // would fire on this enemy: it is the only known contact and well
+        // inside the default 450-unit range. With it, a hull afloat and an
+        // enemy standing on dry land are never on the same body of water,
+        // so nothing here ever asks the destroyer to fire on it or walk to
+        // it.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMSY", ai, SimVector(-90_ss, 0_ss, 0_ss), script);
+        auto destroyerId = addUnit(sim, "ARMROY", ai, SimVector(-100_ss, 0_ss, 0_ss), script);
+        auto enemyId = addUnit(sim, "ARMPW", human, SimVector(-450_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+
+        AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 2, commands);
+
+        const auto& bb = controller.getBlackboard();
+        REQUIRE(std::find(bb.navalCombatUnits.begin(), bb.navalCombatUnits.end(), destroyerId) != bb.navalCombatUnits.end());
+        REQUIRE(std::find(bb.combatUnits.begin(), bb.combatUnits.end(), destroyerId) == bb.combatUnits.end());
+        REQUIRE(bb.knownEnemies.count(enemyId.value) == 1);
+
+        REQUIRE(ordersFor<AttackOrder>(commands, destroyerId).empty());
+        for (const auto& order : ordersFor<MoveOrder>(commands, destroyerId))
+        {
+            // Never further landward than the shore itself (tile 10, world
+            // x -352): a ship allowed to walk to bb.rallyPoint or
+            // bb.attackTarget -- both on the dry strip -- would fail this.
+            REQUIRE(order.destination.x.value > -352.0f);
+        }
     }
 }
