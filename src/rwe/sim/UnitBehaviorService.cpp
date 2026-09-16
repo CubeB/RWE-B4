@@ -42,6 +42,34 @@ namespace rwe
          */
         const SimScalar HoverAttackArrivalTolerance = 16_ss;
 
+        /**
+         * How far inside its own weapon's maximum range an attacker's
+         * approach point sits (see attackApproachGoal). A margin rather than
+         * the exact edge, so the point does not land right on the range
+         * boundary and have the unit flicker between navigating and firing
+         * as fixed-point rounding nudges it a unit either side of maxRange.
+         */
+        const SimScalar AttackApproachRangeMargin = 8_ss;
+
+        /**
+         * How far outside a target's own footprint an attacker's approach
+         * point sits, for a weapon whose range is too short to clear the
+         * footprint on its own -- a short-ranged unit against a Big Bertha,
+         * say. Without a floor like this the approach point would fall
+         * inside the target and the attacker would try to walk into it.
+         */
+        const SimScalar AttackApproachFootprintMargin = 8_ss;
+
+        /**
+         * How much a target may drift before an attacker's cached approach
+         * point (see attackApproachGoal) is treated as stale and recomputed.
+         * The same eight units hasReachedGoal accepts as "arrived", chosen
+         * here for the same reason: comfortably past the float rounding a
+         * normalise-and-multiply round trip leaves behind, without being so
+         * loose that a target which has genuinely moved gets ignored.
+         */
+        const SimScalar AttackApproachDriftTolerance = 8_ss;
+
         // The original's idle circuits, read out of VTOL_SeekAttack (0x4103E0,
         // where an aircraft goes when its target dies) and VTOL_Follow
         // (0x40FBE0, the guard mission). Both build the same thing: a goal on
@@ -2773,6 +2801,120 @@ namespace rwe
             });
     }
 
+    /**
+     * See the declaration in UnitBehaviorService.h for what this is for
+     * (issue #66: a group ordered to attack one unit was sending every
+     * attacker at the same cell).
+     *
+     * Why the goal has to stay stable rather than tracking the attacker's
+     * exact position every tick: groundUnitMoveTo only keeps following its
+     * current path when the newly-resolved goal compares equal to the one
+     * the path was built for (`movingState->movementGoal != goal`); a goal
+     * that differs even fractionally from one tick to the next throws the
+     * path away and re-enters PathFindingService's request queue every
+     * tick, for every attacker -- the same queue this change exists to stop
+     * flooding, and can even ask for a second path for a unit whose first
+     * request is still the scheduler's active search, which is exactly the
+     * ordering PathFindingService::update asserts cannot happen. A large
+     * group crowding the same approach is exactly when searches take more
+     * than one tick to finish, so it is exactly when that matters.
+     *
+     * A plain UnitId goal already has this problem solved, and not merely by
+     * being cheap to compare: for a stationary target it is invariant.
+     * groundUnitMoveTo's identity check never resets the path (the goal is
+     * just the id), and the position it resolves to, through
+     * getUnitPositionWithCache, comes back bit-identical to what it was
+     * before as long as the target has not actually moved -- so
+     * `resolvedDestination != movingState->pathDestination` is false and no
+     * second request ever goes in. A point on a bearing from the attacker's
+     * own position does not get that for free, because the attacker is the
+     * one moving.
+     *
+     * So it is cached the same way, but in a slot of its own rather than
+     * sharing unitPositionCache: that one holds the target's own position
+     * under the very same key, and a capture order on a unit just attacked
+     * would have read this approach point back as the target's position.
+     * It is invalidated on whether the target has moved rather than on a
+     * timer: the cached point is only good as long as it is still
+     * standoffDistance from the target's current position, which is exactly
+     * what changes if the target does and never changes if it does not. A
+     * stationary target -- the common case, and every case this fixes --
+     * therefore gets exactly one approach point and one path request per
+     * attacker for the whole engagement, same as the old UnitId goal did;
+     * a moving one gets a fresh bearing only when it has actually moved far
+     * enough to matter.
+     */
+    NavigationGoal UnitBehaviorService::attackApproachGoal(UnitInfo unitInfo, UnitId targetId, const WeaponDefinition& weaponDefinition) const
+    {
+        auto targetUnitRef = sim->tryGetUnitState(targetId);
+        if (!targetUnitRef)
+        {
+            // The caller already resolved a live position for this target
+            // this tick, so it cannot actually have gone away; fall back to
+            // the plain goal, which does no worse than before this change.
+            return targetId;
+        }
+        const auto& targetUnit = targetUnitRef->get();
+        const auto& targetDefinition = sim->unitDefinitions.at(targetUnit.unitType);
+
+        auto footprintRect = sim->computeFootprintRegion(targetUnit.position, targetDefinition.movementCollisionInfo);
+        auto footprintHalfWidth = (SimScalar(static_cast<float>(footprintRect.width)) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss;
+        auto footprintHalfHeight = (SimScalar(static_cast<float>(footprintRect.height)) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss;
+        auto footprintStandoff = rweMax(footprintHalfWidth, footprintHalfHeight) + AttackApproachFootprintMargin;
+
+        auto rangeStandoff = weaponDefinition.maxRange > AttackApproachRangeMargin
+            ? weaponDefinition.maxRange - AttackApproachRangeMargin
+            : 0_ss;
+
+        // Never closer than the footprint allows, even if that means
+        // standing outside the weapon's own range -- a short-ranged unit
+        // ordered at something too large to reach at all still has one
+        // consistent place to walk to rather than trying to sit inside it.
+        auto standoffDistance = rweMax(footprintStandoff, rangeStandoff);
+
+        auto& cache = unitInfo.state->navigationState.attackApproachCache;
+        if (cache && cache->unitId == targetId)
+        {
+            // A tolerance rather than exact equality: standoffDistance is
+            // recomputed the same way every time and would compare equal
+            // bit for bit, but the cached point came from multiplying by a
+            // normalised direction, and normalising is a division by a
+            // square root -- it does not round-trip to bit-exact float
+            // equality even when nothing has actually moved. Eight units,
+            // the same arrival tolerance hasReachedGoal uses, comfortably
+            // clears that rounding and still catches any real movement of
+            // the target worth reacting to.
+            // A band around the stand-off distance, rather than a
+            // difference of squares: |d^2 - s^2| factors as (d - s)(d + s),
+            // so testing it against the tolerance squared makes the
+            // tolerance that actually applies to the target's movement
+            // 64/(2s) -- about a sixth of a unit at a stand-off of 200,
+            // not the eight intended. That threw the cache away on almost
+            // every tick for a target that was moving at all, which is
+            // precisely the case that most needs its path request left
+            // alone.
+            auto lowerBound = standoffDistance > AttackApproachDriftTolerance
+                ? standoffDistance - AttackApproachDriftTolerance
+                : 0_ss;
+            auto upperBound = standoffDistance + AttackApproachDriftTolerance;
+            auto driftSquared = cache->position.distanceSquared(targetUnit.position);
+            if (driftSquared > (lowerBound * lowerBound) && driftSquared < (upperBound * upperBound))
+            {
+                return cache->position;
+            }
+        }
+
+        auto offset = unitInfo.state->position - targetUnit.position;
+        offset.y = 0_ss;
+        auto direction = offset.normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+
+        auto approachPoint = targetUnit.position + (direction * standoffDistance);
+        approachPoint.y = targetUnit.position.y;
+
+        cache = UnitPositionCache{targetId, approachPoint, sim->gameTime};
+        return approachPoint;
+    }
+
     bool UnitBehaviorService::weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const
     {
         return sim->weaponCanHitUnit(weaponDefinition, attacker, target);
@@ -2979,7 +3121,20 @@ namespace rwe
         auto maxRangeSquared = weaponDefinition.maxRange * weaponDefinition.maxRange;
         if (unitInfo.state->position.distanceSquared(*targetPosition) > maxRangeSquared)
         {
-            navigateTo(unitInfo, attackTargetToNavigationGoal(target));
+            // A unit target gets a stand-off point of its own rather than
+            // the target's bare centre -- see attackApproachGoal. A ground
+            // point (an attack-move order with no unit behind it) has
+            // nothing to stand off from and no footprint to collide two
+            // attackers on in the first place, so it keeps going straight at
+            // the point as before.
+            if (auto targetUnitId = std::get_if<UnitId>(&target))
+            {
+                navigateTo(unitInfo, attackApproachGoal(unitInfo, *targetUnitId, weaponDefinition));
+            }
+            else
+            {
+                navigateTo(unitInfo, attackTargetToNavigationGoal(target));
+            }
         }
         else
         {

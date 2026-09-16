@@ -161,6 +161,27 @@ namespace rwe
     {
         std::optional<NavigationGoal> desiredDestination;
         std::optional<UnitPositionCache> unitPositionCache;
+
+        /**
+         * Where an attacker has decided to stand while it walks in at a unit
+         * target -- see UnitBehaviorService::attackApproachGoal.
+         *
+         * A slot of its own rather than sharing unitPositionCache, which
+         * holds the target's *own* position. Both are keyed by the target's
+         * id, so one slot for the two meanings let an approach point be read
+         * back as the target's position by anything navigating to that same
+         * unit inside the cache's second -- a capture order on a unit just
+         * attacked, for one, which would then have walked to a point a whole
+         * stand-off distance wide of it.
+         *
+         * Cached rather than hashed, for the same reason as its neighbour:
+         * it is derived from positions that are hashed, so peers cannot
+         * disagree about it without already disagreeing about those. It is
+         * saved, because when a path is requested changes where a unit ends
+         * up.
+         */
+        std::optional<UnitPositionCache> attackApproachCache;
+
         NavigationState state;
     };
 

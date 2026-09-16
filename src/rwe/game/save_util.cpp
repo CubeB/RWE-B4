@@ -1356,6 +1356,12 @@ namespace rwe
                          {"position", saveSimVector(c.position)},
                          {"cachedAtTime", saveGameTime(c.cachedAtTime)}};
                  })},
+                {"attackApproachCache", saveOptional(i.attackApproachCache, [&](const UnitPositionCache& c) {
+                     return json{
+                         {"unitId", saveUnitIdRef(c.unitId, ctx)},
+                         {"position", saveSimVector(c.position)},
+                         {"cachedAtTime", saveGameTime(c.cachedAtTime)}};
+                 })},
                 {"state", saveNavigationState(i.state, ctx)}};
         }
 
@@ -1364,6 +1370,12 @@ namespace rwe
             return NavigationStateInfo{
                 loadOptional(j.at("desiredDestination"), [&](const json& g) { return loadNavigationGoal(g, ctx); }),
                 loadOptional(j.at("unitPositionCache"), [&](const json& c) {
+                    return UnitPositionCache{
+                        loadUnitIdRef(c.at("unitId"), ctx),
+                        loadSimVector(c.at("position")),
+                        loadGameTime(c.at("cachedAtTime"))};
+                }),
+                loadOptional(j.at("attackApproachCache"), [&](const json& c) {
                     return UnitPositionCache{
                         loadUnitIdRef(c.at("unitId"), ctx),
                         loadSimVector(c.at("position")),

@@ -269,6 +269,25 @@ namespace rwe
 
         void moveTo(UnitInfo unitInfo, const MovingStateGoal& goal);
 
+        /**
+         * Where a ground attacker should walk while it is out of range of a
+         * unit target: not the target's centre, which is what sends a whole
+         * group to the same cell and jams the pathfinder's single request
+         * queue (issue #66), but a point on the line from the target's
+         * centre through the attacker's own position, clamped to just inside
+         * weapon range (or to the target's footprint plus a margin, for a
+         * short-ranged weapon against something large). Cached on the
+         * attacker's own navigation state and only recomputed once the
+         * target has actually moved, so the goal stays stable tick to tick
+         * while the attacker's exact position keeps moving underneath it --
+         * see the .cpp for why that stability matters.
+         *
+         * A function of the attacker's and target's current positions and
+         * the target's definition only, so every peer computes the same
+         * point.
+         */
+        NavigationGoal attackApproachGoal(UnitInfo unitInfo, UnitId targetId, const WeaponDefinition& weaponDefinition) const;
+
         bool attackTarget(UnitInfo unitInfo, const AttackTarget& target);
 
         /**
