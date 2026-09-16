@@ -1659,6 +1659,23 @@ namespace rwe
         unsigned long named = 0;
         unsigned long aimedAtUnit = 0;
         std::map<unsigned int, unsigned long> slotCounts;
+
+        /**
+         * How many shots the violating observations account for, against the
+         * conforming ones, and how stale the name behind each shot was.
+         *
+         * These two were meant to separate the competing explanations for a
+         * violation -- a handful of very stale shots would be recycled unit ids
+         * and nothing more; a large share, or shots landing promptly after their
+         * own build, would mean 0x0d covers something besides weapons. Over the
+         * corpus the answer came out in between and neither story covers the
+         * fourteen: 7,180 shots, median staleness 10,008 ticks against a
+         * conforming 7,083. See docs/TA-DEMOS.md, the 0x0d section.
+         */
+        unsigned long violatingShots = 0;
+        unsigned long conformingShots = 0;
+        std::vector<uint32_t> violatingAges;
+        std::vector<uint32_t> conformingAges;
     };
 
     /**
@@ -1691,25 +1708,38 @@ namespace rwe
         WeaponSlotTally& total)
     {
         auto lives = unitLives(handler, loadOrder);
-        auto nameAt = [&](uint16_t id, uint32_t at) -> std::optional<std::string> {
+        // The name AND the build that supplied it, because how long before the
+        // shot that build finished is what separates a recycled id from a
+        // genuine reading: a shot 30,000 ticks after "the wind generator was
+        // built" is a later unit wearing the wind generator's id.
+        auto nameAt = [&](uint16_t id, uint32_t at) -> std::optional<std::pair<std::string, uint32_t>> {
             auto it = lives.find(id);
             if (it == lives.end())
             {
                 return std::nullopt;
             }
 
-            std::optional<std::string> best;
+            std::optional<std::pair<std::string, uint32_t>> best;
             for (const auto& [finish, name] : it->second)
             {
                 if (finish <= at)
                 {
-                    best = name;
+                    best = std::make_pair(name, finish);
                 }
             }
             return best;
         };
 
-        std::map<std::string, std::set<unsigned int>> slotsPerType;
+        /** What one unit type was seen doing, and how stale its name was. */
+        struct TypeObservation
+        {
+            std::set<unsigned int> slots;
+
+            /** Ticks between the build that named the shooter and the shot. */
+            std::vector<uint32_t> ages;
+        };
+
+        std::map<std::string, TypeObservation> slotsPerType;
         std::map<std::string, std::set<unsigned int>> slotsPerTypeUnscoped;
         std::map<uint16_t, std::string> firstName;
         for (const auto& [id, list] : lives)
@@ -1729,7 +1759,9 @@ namespace rwe
             if (auto name = nameAt(record.shot.shooterId, record.tick))
             {
                 ++named;
-                slotsPerType[*name].insert(record.shot.weaponSlot);
+                auto& observation = slotsPerType[name->first];
+                observation.slots.insert(record.shot.weaponSlot);
+                observation.ages.push_back(record.tick - name->second);
             }
             if (auto first = firstName.find(record.shot.shooterId); first != firstName.end())
             {
@@ -1759,11 +1791,24 @@ namespace rwe
         };
         auto unscopedViolating = countViolations(slotsPerTypeUnscoped);
 
+        auto median = [](std::vector<uint32_t> values) -> uint32_t {
+            if (values.empty())
+            {
+                return 0;
+            }
+            std::nth_element(values.begin(), values.begin() + values.size() / 2, values.end());
+            return values[values.size() / 2];
+        };
+
         unsigned int consistent = 0;
         unsigned int violating = 0;
         unsigned int naiveViolating = 0;
+        unsigned long violatingShots = 0;
+        unsigned long conformingShots = 0;
+        std::vector<uint32_t> violatingAges;
+        std::vector<uint32_t> conformingAges;
         std::ostringstream violations;
-        for (const auto& [type, slots] : slotsPerType)
+        for (const auto& [type, observation] : slotsPerType)
         {
             auto facts = unitFacts.find(type);
             if (facts == unitFacts.end())
@@ -1775,7 +1820,7 @@ namespace rwe
             auto naiveOk = true;
             auto weaponCount = static_cast<unsigned int>(
                 std::popcount(facts->second.weaponSlotMask));
-            for (auto slot : slots)
+            for (auto slot : observation.slots)
             {
                 if (slot > 2 || (facts->second.weaponSlotMask & (1u << slot)) == 0)
                 {
@@ -1791,10 +1836,17 @@ namespace rwe
             if (ok)
             {
                 ++consistent;
+                conformingShots += observation.ages.size();
+                conformingAges.insert(
+                    conformingAges.end(), observation.ages.begin(), observation.ages.end());
                 continue;
             }
 
             ++violating;
+            violatingShots += observation.ages.size();
+            violatingAges.insert(
+                violatingAges.end(), observation.ages.begin(), observation.ages.end());
+
             violations << "    " << type << " fills slots";
             for (unsigned int slot = 0; slot < 3; ++slot)
             {
@@ -1808,11 +1860,12 @@ namespace rwe
                 violations << " none";
             }
             violations << ", fired";
-            for (auto slot : slots)
+            for (auto slot : observation.slots)
             {
                 violations << " " << slot;
             }
-            violations << "\n";
+            violations << " on " << observation.ages.size() << " shot(s), median "
+                       << median(observation.ages) << " ticks after the build that named it\n";
         }
 
         std::cout << "  " << handler.shots.size() << " shots, " << named
@@ -1828,6 +1881,12 @@ namespace rwe
         total.violating += violating;
         total.naiveViolating += naiveViolating;
         total.unscopedViolating += unscopedViolating;
+        total.violatingShots += violatingShots;
+        total.conformingShots += conformingShots;
+        total.violatingAges.insert(
+            total.violatingAges.end(), violatingAges.begin(), violatingAges.end());
+        total.conformingAges.insert(
+            total.conformingAges.end(), conformingAges.begin(), conformingAges.end());
         total.shots += handler.shots.size();
         total.named += named;
         total.aimedAtUnit += aimedAtUnit;
@@ -2188,6 +2247,22 @@ int main(int argc, char* argv[])
                   << weaponSlots.unscopedViolating << "\n"
                   << "the first gap is the Weapon1-and-Weapon3 convention, which is what says"
                   << " the byte is a slot;\nthe second is what unit-id recycling costs\n";
+
+        auto median = [](std::vector<uint32_t> values) -> uint32_t {
+            if (values.empty())
+            {
+                return 0;
+            }
+            std::nth_element(values.begin(), values.begin() + values.size() / 2, values.end());
+            return values[values.size() / 2];
+        };
+
+        std::cout << "the " << weaponSlots.violating << " that fail account for "
+                  << weaponSlots.violatingShots << " shot(s) against "
+                  << weaponSlots.conformingShots << " conforming;\n"
+                  << "median ticks between the naming build and the shot: "
+                  << median(weaponSlots.violatingAges) << " for a failing shot, "
+                  << median(weaponSlots.conformingAges) << " for a conforming one\n";
     }
 
     // The build-timing cells, corpus-wide. Printed on --cells so the port can be

@@ -651,12 +651,45 @@ are confirmations no other reading of the byte predicts.
 The second gap is not about the byte at all -- it is what naming a shooter
 badly costs, and it is the next paragraph.
 
-The fourteen that remain are dominated by types the data set gives **no weapon
-at all** -- a wind generator, a metal extractor, a fusion plant, a repair pad --
-which cannot fire anything, so they are naming residue rather than
-counter-evidence. Two are factories whose only weapon is `LAB_DIR`, the dummy
-TA labs aim their build spot with, appearing to fire slot 0; those are the ones
-to look at again if the naming is ever tightened further.
+**The fourteen that remain are not explained**, and the obvious explanation has
+been tested and does not cover them. Twelve are types the data set gives no
+weapon at all -- wind generators, metal extractors, fusion plants, a repair pad
+-- and two are factories whose only weapon is `LAB_DIR`, the dummy TA labs aim
+their build spot with. None of them can fire, so the natural reading is that the
+shooter was named wrongly: the id was recycled once more than the scoping
+caught, and the unit really firing was one whose own build the recording never
+paired.
+
+Two measurements were made to test that, and both came out against it.
+
+- **Volume.** The fourteen account for **7,180 shots**, not a handful -- 1.1% of
+  the 630,522 with a named shooter. Three of them carry 85% of that: `ARMULAB`
+  2,686, `ARMASP_UPGRADE` 1,721 across two demos, `ARMFWIN` 1,668. A stray
+  misattribution does not fire two thousand times.
+- **Staleness.** If the name came from a long-dead unit whose id was reused, the
+  shot should land far after the build that supplied the name. The median gap is
+  **10,008 ticks for a failing shot against 7,083 for a conforming one** -- a
+  difference, but nothing like the separation a recycled id would give.
+
+The per-type figures do split, and the split is the useful part. Five of the
+fourteen are *very* stale -- `ARMCK` at 79,952 ticks, `ARMMAKR` 48,792, `ARMFAHP`
+43,990, `ARMMOHO` 40,100, `ARMWIN` 20,959 -- and those are recycled ids on the
+evidence, but between them they are only 506 shots. The three that carry the
+volume sit at or below the conforming median (`ARMFWIN` 5,956, `ARMASP_UPGRADE`
+9,527, `ARMULAB` 13,447), so staleness does not explain them.
+
+The competing story -- that `0x0d` covers something besides weapons, a factory
+aiming its build spot -- is **also** damaged, and by the slot itself: `ARMULAB`
+and `ARMFAHP` carry `LAB_DIR` in slot **3** and the shots attributed to them
+read slot **0**. A record reporting `LAB_DIR` would have to say 2.
+
+So the reading of the byte stands on the 112-to-14 gap, which nothing here
+touches, and the fourteen are an open question of their own. What would move it:
+whether those shooter ids are ever rebuilt *after* the shot (an open-ended naming
+window is where a missed `0x09` hides), whether the same type conforms in the
+demos where it is not a violator, and what those shots look like geometrically --
+`ARMFWIN` and `ARMULAB` are both water units, which may or may not be a
+coincidence.
 
 **Naming the shooter is the whole difficulty here**, and it is worth knowing
 before reusing any of this. TA recycles unit ids heavily -- in 14725, 2,622 of
