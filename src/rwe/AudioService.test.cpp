@@ -94,4 +94,44 @@ namespace rwe
 
         REQUIRE(selectTrackForSound(tracks, 0, &soundA, 1) == 0u);
     }
+
+    TEST_CASE("computeEffectGain folds the base gain back into the channel volume", "[audio]")
+    {
+        // SDL2_mixer multiplied the sample's own level by the channel's.
+        // SDL3_mixer has one gain per track and setting it replaces what was
+        // there, so the base gain has to be folded in here or it is simply
+        // lost -- which is what made the mix four times hotter than it was
+        // ever meant to be (issue #58).
+        //
+        // Every figure here is a power of two, so the arithmetic is exact
+        // and these can be compared directly.
+        REQUIRE(computeEffectGain(128, 0.25f, 1.0f, true) == 0.25f);
+        REQUIRE(computeEffectGain(64, 0.25f, 1.0f, true) == 0.125f);
+        REQUIRE(computeEffectGain(0, 0.25f, 1.0f, true) == 0.0f);
+    }
+
+    TEST_CASE("computeEffectGain honours the volume setting and Sound Mode Off", "[audio]")
+    {
+        // Every other play path applies both, and this one is reapplied to
+        // each unit sound channel every frame, so leaving them out here let
+        // weapon fire ignore the slider and the mute outright.
+        REQUIRE(computeEffectGain(128, 0.25f, 0.5f, true) == 0.125f);
+        REQUIRE(computeEffectGain(128, 0.25f, 0.0f, true) == 0.0f);
+        REQUIRE(computeEffectGain(128, 0.25f, 1.0f, false) == 0.0f);
+    }
+
+    TEST_CASE("computeEffectGain keeps the loudest allowed mix in range", "[audio]")
+    {
+        // computeSoundCeiling counts in units of one sound at the base gain
+        // and allows at most eight of them, so the loudest the mix may sum
+        // to is eight times the base gain: 2.0 at a quarter -- hot on
+        // purpose, since uncorrelated peaks rarely land together -- where
+        // without the base gain it was 8.0 and the mixer could only clamp.
+        auto loudestOneTrack = computeEffectGain(128, 0.25f, 1.0f, true);
+        REQUIRE(loudestOneTrack <= 1.0f);
+        REQUIRE((loudestOneTrack * 8.0f) == 2.0f);
+
+        // A volume above the scale's top cannot push a track past it.
+        REQUIRE(computeEffectGain(1000, 0.25f, 1.0f, true) == 0.25f);
+    }
 }

@@ -45,6 +45,31 @@ namespace rwe
         const void* soundKey,
         unsigned int maxConcurrentCopies);
 
+    /**
+     * The gain an effect track should be given, from the 0-128 channel
+     * volume the game's automatic gain control still speaks in.
+     *
+     * SDL2_mixer had two gains in series: Mix_VolumeChunk set the sample's
+     * own level -- MIX_MAX_VOLUME/4 here, which is defaultGain -- and
+     * Mix_Volume scaled the channel on top of it, so the two multiplied.
+     * SDL3_mixer has one gain per track and MIX_SetTrackGain replaces it,
+     * so the migration (45eb5f03) left `volume / 128` as the whole of the
+     * level and the quarter was lost.
+     *
+     * That made every effect four times louder than intended, and it turned
+     * computeSoundCeiling's budget into something it was never written to
+     * be: the ceiling counts in units of one sound at the base gain and
+     * allows at most eight of them, which is a peak of 2.0 when the base
+     * gain is a quarter and 8.0 without it. The mixer can only clamp what
+     * will not fit, and that is what a loud battle sounded like (issue #58).
+     *
+     * The volume setting and Sound Mode Off belong here too. Every other
+     * play path applies them, and this one is reapplied to every unit sound
+     * channel each frame, so leaving them out let weapon fire and impacts
+     * ignore the slider and the mute outright.
+     */
+    float computeEffectGain(int volume, float baseGain, float volumeScale, bool enabled);
+
     class AudioService
     {
     public:

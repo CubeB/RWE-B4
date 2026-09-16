@@ -46,6 +46,18 @@ namespace rwe
     {
     }
 
+    float computeEffectGain(int volume, float baseGain, float volumeScale, bool enabled)
+    {
+        if (!enabled)
+        {
+            return 0.0f;
+        }
+
+        // 128 is MIX_MAX_VOLUME, the scale computeSoundVolume still works in.
+        auto channelScale = std::clamp(static_cast<float>(volume), 0.0f, 128.0f) / 128.0f;
+        return channelScale * baseGain * volumeScale;
+    }
+
     void AudioService::allocateTracks(unsigned int count)
     {
         tracks.reserve(count);
@@ -373,8 +385,7 @@ namespace rwe
     {
         if (channel >= 0 && static_cast<unsigned int>(channel) < tracks.size())
         {
-            // Old scale: 0-128 (MIX_MAX_VOLUME). New scale: 0.0-1.0
-            float gain = static_cast<float>(volume) / 128.0f;
+            auto gain = computeEffectGain(volume, defaultGain, soundVolumeScale, soundEnabled);
             sdlMixerContext->setTrackGain(tracks[channel].get(), gain);
         }
     }
