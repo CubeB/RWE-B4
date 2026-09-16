@@ -139,7 +139,19 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   the constant-speed weapons the paired flight time is
   `ceil(distance / (weaponvelocity / 30)) - 1`. See `docs/TA-DEMOS.md`,
   "Pairing a `0x0d` to the `0x0b` it caused", for the filters, the rejection
-  counts and the three weapon classes that need models of their own.
+  counts and the four classes that need models of their own.
+
+  `--weapon-cells` prints the (shooter type, weapon slot) **flight-time** cells
+  — the same filters and the same model `tools/tad-weapontime.py` scores,
+  ported and checked against it cell for cell — and `--emit-weapon-cpp` writes
+  them as the third fixture, `src/rwe/sim/tad_weapon_episodes.h`, for the
+  `[weapon][corpus]` tests. Only constant-speed weapons become episodes, and
+  only the cells the model predicts: the two that do not are skipped with a
+  printed reason rather than checked in with their offset, the same rule that
+  keeps airborne builders out of the build fixture. Needs `--units`, which now
+  also reads the data set's `weapon*/*.tdf` through the engine's own
+  `parseWeaponTdf`. `--window` and `--min-pairings` are the script's two knobs
+  and mean the same things.
 
   `--weapon-slots` is the evidence that a `0x0d`'s trailing byte is the
   shooter's **weapon slot**, a 0-based index into its FBI's

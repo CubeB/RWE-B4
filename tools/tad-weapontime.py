@@ -348,7 +348,10 @@ def main():
 
     print(f"  {'shooter':<13} {'sl':>2} {'weapon':<22} {'v/30':>6} {'n':>5} {'delta':>6}"
           f" {'share':>6} {'over':>6} {'damage':>7} {'decl':>6}")
-    for r in sorted(scored, key=lambda r: -r["n"]):
+    # (-n, shooter, slot), which is the order the port prints in too: two cells
+    # with the same count would otherwise sort by whichever dict filled first and
+    # a diff against --weapon-cells would show a phantom difference.
+    for r in sorted(scored, key=lambda r: (-r["n"], r["shooter"], r["slot"])):
         flag = "" if r["mode"] == 0 else "   <-- disagrees"
         declared = int(r["declared_damage"]) if r["declared_damage"] else 0
         print(f"  {r['shooter']:<13} {r['slot']:>2} {r['weapon']:<22} {r['per_tick']:>6.1f}"
@@ -387,7 +390,10 @@ def main():
     # what it read when it was written down. Either half failing is a result.
     print()
     failures = 0
-    for r in sorted(scored, key=lambda r: -r["n"]):
+    # (-n, shooter, slot), which is the order the port prints in too: two cells
+    # with the same count would otherwise sort by whichever dict filled first and
+    # a diff against --weapon-cells would show a phantom difference.
+    for r in sorted(scored, key=lambda r: (-r["n"], r["shooter"], r["slot"])):
         known = KNOWN_EXCEPTIONS.get((r["shooter"], r["slot"]))
         if r["mode"] == 0 and known is None:
             continue

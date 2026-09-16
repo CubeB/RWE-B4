@@ -1231,6 +1231,33 @@ Settled by the economy oracle, and inherited by everything after it.
   the regeneration below be a plain `--dir` over the whole corpus with the one
   ProTA recording in it.
 
+- **A weapon-flight cell is a shot, not an aggregate, and it says how much
+  company it had.** There are three fixtures now, one per oracle, in three
+  headers that share no struct: storage in `tad_economy_episodes.h`, build
+  timing in `tad_build_episodes.h`, and flight time in
+  `tad_weapon_episodes.h`. A weapon episode carries one representative
+  pairing -- the earliest one of its cell that landed on the cell's modal
+  flight time -- with the shot's own origin and aim point as the raw 16.16
+  integers the wire carried, the tick it was fired on, the tick its damage
+  arrived, and `pairings`/`pairingsAtMode` beside them. The geometry is part of
+  the observation here in a way it never was for a build: what the test has to
+  reproduce is a distance being crossed, so the distance travels with the
+  number.
+
+  **Only the 23 cells the model predicts are checked in.** The two that do not,
+  `ARMAMPH` firing `GAUSS_MAV` and `CORGEO` firing `RIOT_ALL`, are skipped with
+  a printed reason rather than checked in with their offset written into
+  `expectedFlightDelta` -- the same rule that keeps airborne builders out of the
+  build fixture. That field is for a divergence somebody decided on, never for
+  an observation nobody has explained.
+
+  `expectedFlightDelta` is zero in all 23. RWE steps a line-of-sight projectile
+  after the behaviour pass that spawns it, so it takes its first step on the
+  firing tick exactly as the original does, and the prediction that it would
+  agree held on the first run. The field stays because a fixture that cannot
+  express a divergence is a fixture that gets disabled the week one is decided
+  on.
+
 Regenerating (Escalation; the paths are a local corpus, not a repository one):
 
 ```bash
@@ -1239,13 +1266,16 @@ cd build && make -j$(nproc) tad_episodes && cd ..
     --units ~/ta-mods/x-esc --emit-cpp src/rwe/sim/tad_economy_episodes.h
 ./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc \
     --emit-build-cpp src/rwe/sim/tad_build_episodes.h
+./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc \
+    --emit-weapon-cpp src/rwe/sim/tad_weapon_episodes.h
 ```
 
-The build-timing one takes the whole directory because a cell pools across
-games and wants every build it can get. It prints a warning for the one ProTA
-recording and then excludes it, per the rule above; `--cells` prints the table
-without writing anything, which is what `tools/tad-buildtime.py` scores and what
-the port was checked against, cell for cell, over the same episodes.
+The build-timing and weapon ones take the whole directory because their cells
+pool across games and want every observation they can get. The build pass prints
+a warning for the one ProTA recording and then excludes it, per the rule above.
+`--cells` and `--weapon-cells` print the two tables without writing anything,
+which is what `tools/tad-buildtime.py` and `tools/tad-weapontime.py` score and
+what each port was checked against, cell for cell, over the same corpus.
 
 The single ProTA demo yields exactly one scoreable cell of its own
 (`ARMVP -> ARMFAV`, three builds, agreeing with the model), which is not enough
@@ -1462,17 +1492,32 @@ They catch different things and should not share machinery.
       firing-tick off-by-one as the build accumulator. The pairing is confirmed
       by a number the filters never look at: each cell's modal `damage` is that
       weapon's own `[DAMAGE] default`. The whole argument, the rejection counts
-      and the three weapon classes that need their own models are in "Pairing a
+      and the four classes that need their own models are in "Pairing a
       `0x0d` to the `0x0b` it caused" above.
 
-      **What is left** is the fixture and the test: a cell keyed on
-      (shooter type, weapon slot), `UnitFacts` widened to carry the weapon's
-      TDF block through the engine's own parser rather than the analysis
-      script's, and a `[weapon][corpus]` test driving `Projectile` directly the
-      way `buildtime.test.cpp` drives the build accumulator. RWE steps a
-      line-of-sight projectile after the behaviour pass that spawns it, so it
-      takes its first step on the firing tick too and the expected difference
-      should be zero -- which is a prediction to check, not a result.
+      **The fixture and the test exist.** `--emit-weapon-cpp` writes
+      `src/rwe/sim/tad_weapon_episodes.h`, 23 episodes over the cells the model
+      predicts, with `UnitFacts` widened to carry each FBI's `WeaponN` names and
+      a second reader over the data set's weapon TDFs going through the engine's
+      own `parseWeaponTdf`, so a fixture cannot disagree with the loader about
+      what a field means. `weaponflight.test.cpp` (`[weapon][corpus]`) spawns a
+      real `Projectile` through `spawnProjectile` and steps it with `tick()`, and
+      all 23 passed on the first run: `expectedFlightDelta` is zero throughout,
+      which was the prediction. Both mutations landed -- making a projectile skip
+      its first step moves **all 23**, which says the cases measure the stepping
+      and not a constant, and converting `weaponvelocity` to a per-tick step with
+      integer division instead of float moves **exactly the two** whose
+      representative distance sits near a tick boundary and none of the eighteen
+      whose velocity divides by 30 exactly, which says they measure the
+      fractional part of a step rather than a rounded one.
+
+      **What is left** is the other four classes, each of which wants its own
+      model and its own cells: the missile motor (27 cells, 15,826 pairings, the
+      biggest prize and what the flight-model work in `TOTALA-EXE-MISSIONS.md`
+      would be checked against), ballistics (18 cells), `vlaunch` (3) and
+      torpedoes (4). And the hit/miss half of the oracle, which is a different
+      statistic over the same pairings and where target type probably does
+      belong in the cell key.
 
    Every one of those carries the expected-difference annotation described in
    "The hazard to design in from the start". A corpus is an efficient machine

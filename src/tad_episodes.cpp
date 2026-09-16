@@ -50,6 +50,7 @@
 //   --all         emit rejected episodes too, each with its reasons
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -65,6 +66,7 @@
 #include <rwe/io/tad/TadReader.h>
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tdf/tdf.h>
+#include <rwe/io/weapontdf/WeaponTdf.h>
 #include <rwe/util/OpaqueArgs.h>
 #include <set>
 #include <sstream>
@@ -601,7 +603,143 @@ namespace
          * when the slots it really has are 0 and 2.
          */
         unsigned int weaponSlotMask;
+
+        /**
+         * What the FBI puts in Weapon1/Weapon2/Weapon3, empty where the slot is
+         * empty. The 0x0d's trailing byte indexes this array directly, which is
+         * what turns a shot into a *weapon* rather than merely a shooter.
+         */
+        std::array<std::string, 3> weaponNames;
     };
+
+    /**
+     * One weapon block, out of the data set's own weapon TDFs.
+     *
+     * A SECOND READER OVER A DIFFERENT DIRECTORY, which is the one place the
+     * "widen UnitFacts rather than adding a reader" rule does not apply: weapons
+     * are genuinely a second file format in a second place, and an FBI names a
+     * weapon without describing it. It goes through the engine's own
+     * parseWeaponTdf, exactly as readUnitFacts goes through parseUnitFbi, so a
+     * checked-in fixture cannot disagree with the loader about what a field
+     * means.
+     */
+    struct WeaponFacts
+    {
+        /** TDF weaponvelocity, in world units a SECOND; divide by 30 for a tick. */
+        unsigned int velocity;
+
+        /** Zero in the TDF means "off the rail at full speed", not "stationary". */
+        unsigned int startVelocity;
+        unsigned int acceleration;
+        unsigned int range;
+
+        /** Rounds per trigger pull. Anything above 1 is why a shot cannot be isolated. */
+        unsigned int burst;
+
+        bool ballistic;
+        bool vLaunch;
+        bool waterWeapon;
+        bool lineOfSight;
+
+        /** The [DAMAGE] block's `default`, which is what a paired 0x0b should carry. */
+        unsigned int defaultDamage;
+    };
+
+    /**
+     * Every weapon TDF under dir.
+     *
+     * The VFS path is `weapons\*.tdf`, but a mod's extracted tree renames the
+     * directory -- Escalation's is `weaponE` -- so the match is on the directory
+     * name CONTAINING "weapon" rather than equalling "weapons". Widening it to
+     * every .tdf under the tree would sweep in sound, GUI and feature
+     * definitions, which parse as weapons with every field defaulted and would
+     * be indistinguishable from a real one with no velocity.
+     */
+    std::map<std::string, WeaponFacts> readWeaponFacts(const std::filesystem::path& dir, std::error_code& error)
+    {
+        std::map<std::string, WeaponFacts> facts;
+        std::filesystem::recursive_directory_iterator it(dir, error);
+        if (error)
+        {
+            return facts;
+        }
+
+        for (const auto& entry : it)
+        {
+            if (!entry.is_regular_file())
+            {
+                continue;
+            }
+
+            auto extension = entry.path().extension().string();
+            for (auto& c : extension)
+            {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+            if (extension != ".tdf")
+            {
+                continue;
+            }
+
+            auto parent = entry.path().parent_path().filename().string();
+            for (auto& c : parent)
+            {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+            if (parent.find("weapon") == std::string::npos)
+            {
+                continue;
+            }
+
+            std::ifstream stream(entry.path(), std::ios::binary);
+            if (!stream)
+            {
+                continue;
+            }
+            std::string contents((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+
+            try
+            {
+                for (const auto& [name, weapon] : parseWeaponTdf(parseTdfFromString(contents)))
+                {
+                    auto key = name;
+                    for (auto& c : key)
+                    {
+                        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                    }
+
+                    unsigned int defaultDamage = 0;
+                    for (const auto& [category, value] : weapon.damage)
+                    {
+                        if (category == "DEFAULT" || category == "default")
+                        {
+                            defaultDamage = value;
+                        }
+                    }
+
+                    facts[key] = WeaponFacts{
+                        weapon.weaponVelocity,
+                        weapon.startVelocity,
+                        weapon.weaponAcceleration,
+                        weapon.range,
+                        weapon.burst,
+                        weapon.ballistic,
+                        weapon.vLaunch,
+                        weapon.waterWeapon,
+                        weapon.lineOfSight,
+                        defaultDamage};
+                }
+            }
+            catch (const std::exception&)
+            {
+                // Same as readUnitFacts: a file the parser will not take cannot
+                // contribute a number, and a cell missing one is dropped rather
+                // than emitted with a hole in it.
+            }
+        }
+
+        return facts;
+    }
 
     std::map<std::string, UnitFacts> readUnitFacts(const std::vector<std::filesystem::path>& files)
     {
@@ -633,7 +771,8 @@ namespace
                     fbi.canFly,
                     static_cast<unsigned int>(
                         (fbi.weapon1.empty() ? 0u : 1u) | (fbi.weapon2.empty() ? 0u : 2u)
-                        | (fbi.weapon3.empty() ? 0u : 4u))};
+                        | (fbi.weapon3.empty() ? 0u : 4u)),
+                    std::array<std::string, 3>{fbi.weapon1, fbi.weapon2, fbi.weapon3}};
             }
             catch (const std::exception&)
             {
@@ -2095,6 +2234,472 @@ namespace rwe
             total.slotCounts[slot] += count;
         }
     }
+    // --- the weapon-flight cells ---------------------------------------------
+    //
+    // A port of tools/tad-weapontime.py, which is the reference and which has
+    // the whole argument in its docstring. The short version: nothing links a
+    // 0x0d to the 0x0b it caused, so a flight time is a filtered statistic.
+    // Keyed on (attacker, victim), a shot survives only where it is the only
+    // shot from that shooter at that victim within +-window ticks and exactly
+    // one damage record from that shooter to that victim lands in the window
+    // after it. The survivors are scored against
+    //
+    //     flight = ceil(distance / (weaponvelocity / 30)) - 1
+    //
+    // where the -1 is a projectile taking its first step on the tick it is
+    // fired -- the same off-by-one as the build accumulator's first increment
+    // landing on the 0x09's own tick.
+    //
+    // THIS AND THE SCRIPT MUST KEEP AGREEING, cell for cell, and the script is
+    // the reference. --weapon-cells prints the same table the script prints.
+
+    /** One (shooter type, weapon slot) cell of the corpus. */
+    struct WeaponCell
+    {
+        std::string shooter;
+        unsigned int slot;
+        std::string weapon;
+
+        /** The weapon's own TDF values, for transcribing into the fixture. */
+        unsigned int velocity;
+        unsigned int damage;
+
+        unsigned int pairings;
+        unsigned int pairingsAtMode;
+
+        /** Modal `flight - (ceil(d/v) - 1)`, which the model says is zero. */
+        int modeDelta;
+
+        /** The modal damage value, which should be the weapon's own. */
+        unsigned int modalDamage;
+
+        /** One representative pairing that landed on the mode. */
+        std::string demo;
+        uint32_t shotTick;
+        uint32_t damageTick;
+        TadPosition origin;
+        TadPosition target;
+    };
+
+    /** One surviving (shot, damage) pairing. */
+    struct Pairing
+    {
+        std::string demo;
+        std::string shooter;
+        unsigned int slot;
+        uint32_t shotTick;
+        uint32_t damageTick;
+        double distance;
+        unsigned int damage;
+        TadPosition origin;
+        TadPosition target;
+    };
+
+    double tadDistance(const TadPosition& a, const TadPosition& b)
+    {
+        auto dx = tadFixedToDouble(a.x) - tadFixedToDouble(b.x);
+        auto dy = tadFixedToDouble(a.y) - tadFixedToDouble(b.y);
+        auto dz = tadFixedToDouble(a.z) - tadFixedToDouble(b.z);
+        return std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    /** The filters, per demo. */
+    std::vector<Pairing> pairShots(
+        const EpisodeHandler& handler,
+        const std::vector<std::string>& loadOrder,
+        unsigned int window)
+    {
+        auto lives = unitLives(handler, loadOrder);
+        auto nameOf = [&](uint16_t id, uint32_t at) -> std::string {
+            auto it = lives.find(id);
+            if (it == lives.end())
+            {
+                return "";
+            }
+            auto build = buildAtTick(it->second, at);
+            return build ? build->second : std::string();
+        };
+
+        struct Fired
+        {
+            uint32_t tick;
+            std::string shooter;
+            unsigned int slot;
+            double distance;
+            TadPosition origin;
+            TadPosition target;
+        };
+
+        std::map<std::pair<uint16_t, uint16_t>, std::vector<Fired>> fired;
+        for (const auto& record : handler.shots)
+        {
+            if (record.shot.targetId == 0)
+            {
+                continue;
+            }
+            auto shooter = nameOf(record.shot.shooterId, record.tick);
+            if (shooter.empty())
+            {
+                continue;
+            }
+            fired[std::make_pair(record.shot.shooterId, record.shot.targetId)].push_back(
+                Fired{record.tick, shooter, record.shot.weaponSlot, tadDistance(record.shot.origin, record.shot.target), record.shot.origin, record.shot.target});
+        }
+
+        std::map<std::pair<uint16_t, uint16_t>, std::vector<std::pair<uint32_t, unsigned int>>> landed;
+        for (const auto& record : handler.damageRecords)
+        {
+            landed[std::make_pair(record.damage.attackerId, record.damage.victimId)]
+                .emplace_back(record.tick, record.damage.damage);
+        }
+
+        std::vector<Pairing> out;
+        for (auto& [key, shots] : fired)
+        {
+            std::stable_sort(shots.begin(), shots.end(), [](const Fired& a, const Fired& b) {
+                return a.tick < b.tick;
+            });
+
+            std::vector<std::pair<uint32_t, unsigned int>> hits;
+            if (auto it = landed.find(key); it != landed.end())
+            {
+                hits = it->second;
+                std::stable_sort(hits.begin(), hits.end(), [](const auto& a, const auto& b) {
+                    return a.first < b.first;
+                });
+            }
+
+            for (std::size_t i = 0; i < shots.size(); ++i)
+            {
+                const auto& shot = shots[i];
+                if (i > 0 && shot.tick - shots[i - 1].tick < window)
+                {
+                    continue;
+                }
+                if (i + 1 < shots.size() && shots[i + 1].tick - shot.tick < window)
+                {
+                    continue;
+                }
+
+                const std::pair<uint32_t, unsigned int>* only = nullptr;
+                unsigned int inside = 0;
+                for (const auto& hit : hits)
+                {
+                    if (hit.first >= shot.tick && hit.first <= shot.tick + window)
+                    {
+                        ++inside;
+                        only = &hit;
+                    }
+                }
+                if (inside != 1)
+                {
+                    continue;
+                }
+
+                out.push_back(Pairing{
+                    handler.demo, shot.shooter, shot.slot, shot.tick, only->first, shot.distance, only->second, shot.origin, shot.target});
+            }
+        }
+        return out;
+    }
+
+    /** What the model predicts, and what excludes a weapon from being scored. */
+    int tadFlightModel(double distance, unsigned int velocity)
+    {
+        auto perTick = static_cast<double>(velocity) / 30.0;
+        return static_cast<int>(std::ceil(distance / perTick)) - 1;
+    }
+
+    /**
+     * Which model describes this weapon, or why none of them does. The strings
+     * match tools/tad-weapontime.py's weapon_class so the two tables can be
+     * compared row for row.
+     */
+    std::string weaponClass(const WeaponFacts& facts)
+    {
+        if (facts.vLaunch)
+        {
+            return "vlaunch";
+        }
+        if (facts.waterWeapon)
+        {
+            return "waterweapon";
+        }
+        if (facts.ballistic)
+        {
+            return "ballistic";
+        }
+        if (facts.burst > 1)
+        {
+            return "burst";
+        }
+        if (facts.velocity == 0)
+        {
+            return "no velocity";
+        }
+        // The TDF's startvelocity is zero where the weapon leaves the rail at
+        // full speed, which is the constant-speed case and not a stationary one.
+        if (facts.startVelocity != 0 && facts.startVelocity != facts.velocity)
+        {
+            return "accelerating";
+        }
+        return "constant speed";
+    }
+
+    std::vector<WeaponCell> mineWeaponCells(
+        const std::vector<Pairing>& pairings,
+        const std::map<std::string, UnitFacts>& unitFacts,
+        const std::map<std::string, WeaponFacts>& weaponFacts,
+        unsigned int minPairings)
+    {
+        std::map<std::pair<std::string, unsigned int>, std::vector<const Pairing*>> grouped;
+        for (const auto& p : pairings)
+        {
+            grouped[std::make_pair(p.shooter, p.slot)].push_back(&p);
+        }
+
+        std::vector<WeaponCell> out;
+        for (const auto& [key, group] : grouped)
+        {
+            if (group.size() < minPairings)
+            {
+                continue;
+            }
+
+            auto unit = unitFacts.find(key.first);
+            if (unit == unitFacts.end() || key.second > 2)
+            {
+                continue;
+            }
+            auto weaponName = unit->second.weaponNames[key.second];
+            for (auto& c : weaponName)
+            {
+                c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            }
+            auto weapon = weaponFacts.find(weaponName);
+            if (weaponName.empty() || weapon == weaponFacts.end() || weapon->second.velocity == 0)
+            {
+                continue;
+            }
+
+            std::map<int, unsigned int> deltas;
+            std::map<unsigned int, unsigned int> damages;
+            int mode = 0;
+            unsigned int atMode = 0;
+            for (const auto* p : group)
+            {
+                auto delta = static_cast<int>(p->damageTick - p->shotTick)
+                    - tadFlightModel(p->distance, weapon->second.velocity);
+                auto count = ++deltas[delta];
+                if (count > atMode)
+                {
+                    mode = delta;
+                    atMode = count;
+                }
+                ++damages[p->damage];
+            }
+
+            unsigned int modalDamage = 0;
+            unsigned int atModalDamage = 0;
+            for (const auto& [value, count] : damages)
+            {
+                if (count > atModalDamage)
+                {
+                    modalDamage = value;
+                    atModalDamage = count;
+                }
+            }
+
+            // The representative is the earliest pairing that landed on the
+            // mode, so the provenance is stable under regeneration.
+            const Pairing* representative = nullptr;
+            for (const auto* p : group)
+            {
+                auto delta = static_cast<int>(p->damageTick - p->shotTick)
+                    - tadFlightModel(p->distance, weapon->second.velocity);
+                if (delta != mode)
+                {
+                    continue;
+                }
+                if (representative == nullptr
+                    || std::tie(p->demo, p->shotTick) < std::tie(representative->demo, representative->shotTick))
+                {
+                    representative = p;
+                }
+            }
+
+            out.push_back(WeaponCell{
+                key.first, key.second, weaponName, weapon->second.velocity, weapon->second.defaultDamage, static_cast<unsigned int>(group.size()), atMode, mode, modalDamage, representative->demo, representative->shotTick, representative->damageTick, representative->origin, representative->target});
+        }
+
+        std::sort(out.begin(), out.end(), [](const WeaponCell& a, const WeaponCell& b) {
+            return std::tie(a.shooter, a.slot) < std::tie(b.shooter, b.slot);
+        });
+        return out;
+    }
+
+
+    /**
+     * Writes the weapon-flight episodes.
+     *
+     * One episode per scored cell, and only the cells the model predicts. The
+     * two that do not -- ARMAMPH firing GAUSS_MAV and CORGEO firing RIOT_ALL,
+     * both one tick low and both near-ties with the bucket the model names --
+     * are SKIPPED rather than checked in with their offset written into
+     * expectedFlightDelta, because that field is for a divergence somebody
+     * decided on and not for an observation nobody has explained. It is the same
+     * rule that keeps airborne builders out of the build fixture.
+     *
+     * A THIRD HEADER, beside tad_economy_episodes.h and tad_build_episodes.h.
+     * They share no struct, are mined by different passes over different
+     * corpora, and regenerate independently, so one regeneration never churns
+     * another's diff.
+     */
+    void writeWeaponEpisodes(
+        std::ostream& out,
+        const std::vector<WeaponCell>& cells,
+        const std::map<std::string, WeaponFacts>& weaponFacts)
+    {
+        std::vector<const WeaponCell*> scored;
+        unsigned int unexplained = 0;
+        for (const auto& cell : cells)
+        {
+            auto weapon = weaponFacts.find(cell.weapon);
+            if (weapon == weaponFacts.end() || weaponClass(weapon->second) != "constant speed")
+            {
+                continue;
+            }
+            if (cell.modeDelta != 0)
+            {
+                std::cout << "  skipping " << cell.shooter << " slot " << cell.slot
+                          << " (" << cell.weapon << "): corpus is " << std::showpos << cell.modeDelta
+                          << std::noshowpos << " off the model over " << cell.pairings << " pairings\n";
+                ++unexplained;
+                continue;
+            }
+            scored.push_back(&cell);
+        }
+
+        std::cout << scored.size() << " weapon episode(s)";
+        if (unexplained != 0)
+        {
+            std::cout << ", " << unexplained << " cell(s) skipped as unexplained";
+        }
+        std::cout << "\n";
+
+        out << R"(#pragma once
+
+#include <cstdint>
+
+// GENERATED FILE -- do not edit by hand. Regenerate with tad_episodes
+// --emit-weapon-cpp; the command, and the corpus it needs, are in
+// docs/TA-DEMOS.md.
+//
+// Episodes mined from real Total Annihilation games, for the conformance tests
+// in weaponflight.test.cpp. Its siblings are tad_economy_episodes.h and
+// tad_build_episodes.h; the three share no struct and are mined by different
+// passes, so they are kept apart and regenerate independently.
+//
+// WHY THIS IS A HEADER OF STRUCTS AND NOT A DATA FILE. rwe_test is hermetic --
+// it reads no files, mounts no VFS and opens no archive -- and it stays that
+// way. Demos and mod files never enter the repository either. So the numbers
+// travel as source: each weapon's own TDF values are transcribed inline beside
+// the observation they explain, and a test can be read without either.
+//
+// WHAT AN EPISODE IS. One shot out of a real game, with the damage it caused.
+// NOTHING IN A DEMO LINKS THE TWO -- no shot id, no sequence number, and no tick
+// on a damage record beyond the packet serial carrying it, against 631,578 shots
+// and 824,844 damage events -- so the pairing is a filter, not a lookup: a shot
+// is kept only where it is the only shot from that shooter at that victim within
+// 300 ticks either side and exactly one damage record from that shooter to that
+// victim lands in the 300 after it. That keeps 35,535 shots. The representative
+// below is the earliest surviving pairing of its cell that landed on the cell's
+// modal flight time, and `pairings` and `pairingsAtMode` say how much company it
+// had.
+//
+// The pairing is confirmed by a number no filter looks at: every cell's modal
+// damage is its weapon's own [DAMAGE] default, which is `weaponDamage` here.
+//
+// WHICH SHOTS MAY BE HERE. Only weapons that fly at a constant speed, which is
+// to say the ones this arithmetic describes. An accelerating missile leaves the
+// rail at `startvelocity` and works up, a ballistic round travels an arc longer
+// than the straight line, a vlaunch rocket goes up before it goes anywhere, a
+// torpedo travels through water, and a burst weapon fires several rounds from
+// one trigger so the isolation filter cannot mean what it means elsewhere. Those
+// five are five more oracles, not discrepancies. See docs/TA-DEMOS.md.
+//
+// THE ARITHMETIC BEING PINNED. A projectile covers weaponVelocity / 30 world
+// units a tick -- the same conversion LoadingScene_util.cpp does -- and takes
+// its FIRST step on the tick it is fired, so it has covered the distance after
+// ceil(d / v) steps and the gap between the shot and the damage is one less.
+// RWE steps projectiles after the behaviour pass that spawns them, so it takes
+// that first step on the firing tick too, and expectedFlightDelta is zero
+// everywhere below. The field is kept because the fixture's whole purpose is to
+// survive a deliberate divergence; a non-zero value here would have to name the
+// docs/TOTALA-EXE.md section that licensed it, exactly as the build fixture's
+// does.
+
+namespace rwe
+{
+    struct TadWeaponEpisode
+    {
+        const char* demo;
+        const char* shooterName;
+        unsigned int weaponSlot;
+        const char* weaponName;
+
+        /** The tick the shot was fired on, and the tick its damage arrived. */
+        uint32_t shotTick;
+        uint32_t damageTick;
+
+        /** How many pairings the cell held, and how many shared this flight time. */
+        unsigned int pairings;
+        unsigned int pairingsAtMode;
+
+        /** TDF weaponvelocity, in world units a SECOND. Divide by 30 for a tick. */
+        unsigned int weaponVelocity;
+
+        /** The weapon's [DAMAGE] default, which the cell's modal damage matches. */
+        unsigned int weaponDamage;
+
+        /**
+         * Where the shot came from and where it was aimed, as TA puts them on
+         * the wire: 16.16 fixed point in world units, y up. Kept as the raw
+         * integers because 16.16 carries up to 32 significant bits and a float
+         * has 24, so converting here would lose the low end of a large
+         * coordinate and could move a ceil across a boundary.
+         */
+        int32_t originX, originY, originZ;
+        int32_t targetX, targetY, targetZ;
+
+        /** damageTick - shotTick, which is what the test has to reproduce. */
+        unsigned int flightTicks;
+
+        /** Ticks RWE is expected to differ by, and what licenses it. */
+        int expectedFlightDelta;
+        const char* expectedDifference;
+    };
+
+    // clang-format off
+    inline constexpr TadWeaponEpisode tadWeaponEpisodes[] = {
+)";
+
+        for (const auto* cell : scored)
+        {
+            out << "        {\"" << cell->demo << "\", \"" << cell->shooter << "\", "
+                << cell->slot << ", \"" << cell->weapon << "\",\n"
+                << "            " << cell->shotTick << ", " << cell->damageTick << ", "
+                << cell->pairings << ", " << cell->pairingsAtMode << ",\n"
+                << "            " << cell->velocity << ", " << cell->damage << ",\n"
+                << "            " << cell->origin.x << ", " << cell->origin.y << ", " << cell->origin.z << ",\n"
+                << "            " << cell->target.x << ", " << cell->target.y << ", " << cell->target.z << ",\n"
+                << "            " << (cell->damageTick - cell->shotTick) << ", 0, nullptr},\n";
+        }
+
+        out << "    };\n"
+            << "    // clang-format on\n"
+            << "}\n";
+    }
 
     bool isDemo(const std::filesystem::path& path)
     {
@@ -2135,6 +2740,10 @@ int main(int argc, char* argv[])
                   << "  --emit-cpp    write the storage episodes as a C++ header (needs --units)\n"
                   << "  --emit-build-cpp  write the build-timing episodes as a C++ header (needs --units)\n"
                   << "  --cells       print the (builder, product) build-timing cells\n"
+                  << "  --weapon-cells  print the (shooter, weapon slot) flight-time cells\n"
+                  << "  --emit-weapon-cpp  write the weapon-flight episodes as a C++ header\n"
+                  << "  --window      isolation window for the weapon pass, ticks (default 300)\n"
+                  << "  --min-pairings  pairings a weapon cell needs (default 30)\n"
                   << "  --weapon-slots  check the 0x0d trailing byte against each shooter's FBI\n"
                   << "  --max-types   distinct unit types an episode may carry (default 6)\n"
                   << "  --max-per-player  episodes to keep per player (default 3)\n"
@@ -2171,6 +2780,7 @@ int main(int argc, char* argv[])
     }
     std::vector<std::string> loadOrder;
     std::map<std::string, UnitFacts> unitFacts;
+    std::map<std::string, WeaponFacts> weaponFacts;
     if (args.contains("units"))
     {
         auto dir = args.getString("units");
@@ -2195,6 +2805,16 @@ int main(int argc, char* argv[])
         loadOrder = tadUnitLoadOrder(std::move(stems));
         unitFacts = readUnitFacts(files);
         std::cout << "unit load order: " << loadOrder.size() << " types from " << dir << "\n";
+
+        // The weapon TDFs sit beside the FBIs in the same tree but are a
+        // different format in a different directory, so they are a second read.
+        // Their absence is not an error: only the weapon pass needs them.
+        std::error_code weaponError;
+        weaponFacts = readWeaponFacts(dir, weaponError);
+        if (!weaponFacts.empty())
+        {
+            std::cout << "weapon definitions: " << weaponFacts.size() << " blocks\n";
+        }
     }
 
     std::sort(paths.begin(), paths.end());
@@ -2219,6 +2839,12 @@ int main(int argc, char* argv[])
     // consuming. The same default, and the same meaning, as
     // tools/tad-buildtime.py's.
     unsigned int minBuilds = args.contains("min-builds") ? std::stoul(args.getString("min-builds")) : 5;
+
+    // The isolation window and the cell floor for the weapon pass. Both are
+    // tools/tad-weapontime.py's defaults and mean the same things, because the
+    // two have to keep agreeing cell for cell.
+    unsigned int window = args.contains("window") ? std::stoul(args.getString("window")) : 300;
+    unsigned int minPairings = args.contains("min-pairings") ? std::stoul(args.getString("min-pairings")) : 30;
 
     if (args.contains("emit-cpp") && loadOrder.empty())
     {
@@ -2257,6 +2883,13 @@ int main(int argc, char* argv[])
         }
     }
 
+    if ((args.contains("weapon-cells") || args.contains("emit-weapon-cpp")) && loadOrder.empty())
+    {
+        std::cerr << "--weapon-cells and --emit-weapon-cpp need --units: a cell is keyed on the"
+                  << " shooter's type and carries its weapon's own TDF values\n";
+        return 1;
+    }
+
     nlohmann::json resourceJson = nlohmann::json::array();
     std::vector<StorageEpisode> storageEpisodes;
 
@@ -2266,6 +2899,10 @@ int main(int argc, char* argv[])
     std::set<std::string> wrongDataSet;
 
     WeaponSlotTally weaponSlots;
+
+    // A weapon cell pools across demos for the same reason a build cell does,
+    // so the pairings accumulate here and are grouped once the walk is over.
+    std::vector<Pairing> pairings;
     std::map<std::string, unsigned int> rejectionCounts;
     unsigned int cleanCount = 0;
 
@@ -2327,6 +2964,14 @@ int main(int argc, char* argv[])
         if (args.contains("weapon-slots"))
         {
             reportWeaponSlots(handler, loadOrder, unitFacts, weaponSlots);
+        }
+
+
+        if (args.contains("weapon-cells") || args.contains("emit-weapon-cpp"))
+        {
+            auto mined = pairShots(handler, loadOrder, window);
+            std::cout << "  " << mined.size() << " shot(s) paired\n";
+            pairings.insert(pairings.end(), mined.begin(), mined.end());
         }
 
         if (shotFile.is_open())
@@ -2599,6 +3244,88 @@ int main(int argc, char* argv[])
         }
     }
 
+    std::vector<WeaponCell> weaponCells;
+    if (!pairings.empty())
+    {
+        weaponCells = mineWeaponCells(pairings, unitFacts, weaponFacts, minPairings);
+    }
+
+    if (args.contains("weapon-cells"))
+    {
+        // The same table tools/tad-weapontime.py prints, in the same order, so
+        // the two can be diffed cell for cell. The script is the reference.
+        std::map<std::string, std::vector<const WeaponCell*>> byClass;
+        for (const auto& cell : weaponCells)
+        {
+            auto weapon = weaponFacts.find(cell.weapon);
+            byClass[weapon == weaponFacts.end() ? "no weapon block" : weaponClass(weapon->second)]
+                .push_back(&cell);
+        }
+
+        const auto& scored = byClass["constant speed"];
+        std::cout << "\n"
+                  << pairings.size() << " shots paired, " << weaponCells.size()
+                  << " cells with " << minPairings << "+ pairings\n"
+                  << "scoring the " << scored.size() << " whose weapon flies at a constant speed\n\n";
+        std::cout << "  " << std::left << std::setw(13) << "shooter" << " " << std::right << std::setw(2) << "sl"
+                  << " " << std::left << std::setw(22) << "weapon" << std::right
+                  << std::setw(7) << "v/30" << std::setw(6) << "n" << std::setw(7) << "delta"
+                  << std::setw(7) << "share" << std::setw(8) << "damage" << std::setw(7) << "decl" << "\n";
+
+        unsigned int agreeing = 0;
+        unsigned int damageAgreeing = 0;
+        std::vector<const WeaponCell*> sorted(scored.begin(), scored.end());
+        std::stable_sort(sorted.begin(), sorted.end(), [](const auto* a, const auto* b) {
+            return a->pairings > b->pairings;
+        });
+        for (const auto* cell : sorted)
+        {
+            agreeing += cell->modeDelta == 0 ? 1 : 0;
+            damageAgreeing += cell->modalDamage == cell->damage ? 1 : 0;
+            std::cout << "  " << std::left << std::setw(13) << cell->shooter << " "
+                      << std::right << std::setw(2) << cell->slot << " "
+                      << std::left << std::setw(22) << cell->weapon << std::right
+                      << std::setw(7) << std::fixed << std::setprecision(1) << (cell->velocity / 30.0)
+                      << std::setw(6) << cell->pairings
+                      << std::setw(6) << std::showpos << cell->modeDelta << std::noshowpos
+                      << std::setw(6) << static_cast<int>(std::lround(100.0 * cell->pairingsAtMode / cell->pairings)) << "%"
+                      << std::setw(8) << cell->modalDamage << std::setw(7) << cell->damage
+                      << (cell->modeDelta == 0 ? "" : "   <-- disagrees") << "\n";
+        }
+
+        std::cout << "\n"
+                  << damageAgreeing << " of " << sorted.size()
+                  << " scored cells carry their weapon's own [DAMAGE] default as the modal damage\n";
+        std::cout << "\nthe classes this model does not describe, listed and never scored:\n";
+        for (const auto& [kind, group] : byClass)
+        {
+            if (kind == "constant speed")
+            {
+                continue;
+            }
+            unsigned int pooled = 0;
+            for (const auto* cell : group)
+            {
+                pooled += cell->pairings;
+            }
+            std::cout << "  " << kind << ": " << group.size() << " cells, " << pooled << " pairings\n";
+        }
+        std::cout << "\n"
+                  << (sorted.size() - agreeing) << " disagreement(s) with the model\n";
+    }
+
+
+    if (args.contains("emit-weapon-cpp"))
+    {
+        auto out = args.getString("emit-weapon-cpp");
+        std::ostringstream generated;
+        writeWeaponEpisodes(generated, weaponCells, weaponFacts);
+        if (!writeGeneratedHeader(out, generated.str()))
+        {
+            std::cerr << "cannot write " << out << "\n";
+            return 1;
+        }
+    }
     if (shotFile.is_open())
     {
         shotFile.close();
