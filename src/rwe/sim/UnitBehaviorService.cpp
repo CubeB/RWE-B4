@@ -853,7 +853,8 @@ namespace rwe
                 }
             }
             else if (unit.fireOrders == UnitFireOrders::FireAtWill
-                && (!weaponDefinition.commandFire || sim->getPlayer(unit.owner).type == GamePlayerType::Computer))
+                && (!weaponDefinition.commandFire || sim->getPlayer(unit.owner).type == GamePlayerType::Computer)
+                && !std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType))
             {
                 // A `commandfire` weapon is normally fired by hand and never
                 // acquires a target of its own -- that is what makes the D-gun
@@ -869,6 +870,13 @@ namespace rwe
                 // does not unless told. Reported from a play-test: a commander
                 // stood and died under fire from several units with the one
                 // weapon that would have cleared them unused.
+                //
+                // A dropped weapon is excluded from this scan entirely --
+                // 0x408A7F skips it before the loop ever runs a comparison, so
+                // a bomb never auto-acquires (§86). Nothing else routes a bomb
+                // into an attack order except the break-off in
+                // handlePatrolOrder / findEnemyToEngage, which is the only way
+                // a bomber ever drops anything.
                 if (auto target = chooseTarget(id, weaponIndex))
                 {
                     weapon->state = UnitWeaponStateAttacking(*target);
@@ -3137,10 +3145,10 @@ namespace rwe
 
         // An aircraft after another aircraft is a different mission
         // entirely: 0x43F2CB gives AIRTOAIR to anything whose weapon is not
-        // dropped when the target can fly. A bomber never reaches it -- the
-        // original produces no mission at all for a bomber sent at an
-        // aircraft, which §86 records -- so the bomb test comes first here
-        // too.
+        // dropped when the target can fly. A bomber gets no mission at all
+        // for the same target -- see the bomb branch just below -- so the
+        // two halves of this test read together as one rule: what a flying
+        // target becomes depends on whether the weapon is dropped.
         if (auto targetUnitId = std::get_if<UnitId>(&target))
         {
             if (!std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType))
@@ -3151,6 +3159,26 @@ namespace rwe
                     {
                         return dogfightTarget(unitInfo, target, *targetUnitId, weaponDefinition.maxRange);
                     }
+                }
+            }
+            else if (auto targetState = sim->tryGetUnitState(*targetUnitId))
+            {
+                if (sim->unitDefinitions.at(targetState->get().unitType).canFly)
+                {
+                    // And a bomber sent at an aircraft is not AIRTOAIR either --
+                    // it is nothing. 0x43F2AA skips AIRSTRIKE for a flying
+                    // target too, so execution falls through 0x43F2CB ->
+                    // 0x43F2F0 -> 0x43F31B and lands in 0x4401DC, whose entire
+                    // body is `mov eax,[esp+0x14] / mov [eax],0 / ret` -- it
+                    // clears the mission-created flag and hands back nothing.
+                    // This order came from a patrol sighting (handlePatrolOrder
+                    // pushes AttackOrder unconditionally, with no test for
+                    // whether the quarry flies), so dropping it here is exactly
+                    // that "no mission": the patrol underneath resumes on its
+                    // own, without ever having built an attack run to chase
+                    // the aircraft with. See TOTALA-EXE.md §86.
+                    unitInfo.state->clearWeaponTargets();
+                    return true;
                 }
             }
         }

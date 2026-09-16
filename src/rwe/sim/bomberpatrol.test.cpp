@@ -191,6 +191,108 @@ namespace rwe
         REQUIRE(bombed == expectBombed);
     }
 
+    TEST_CASE("a bomber on patrol does not chase a flying enemy across its route", "[patrol][bomber]")
+    {
+        // §86: a bomb never gets a mission against a target that can fly at
+        // all -- 0x43F2AA skips AIRSTRIKE for it and the fall-through
+        // (0x43F2CB -> ... -> 0x4401DC) hands back no mission whatsoever.
+        // handlePatrolOrder still pushes an AttackOrder at the sighting --
+        // that half is deliberately unconditional -- so the refusal has to
+        // land in attackTargetAir, on the very next tick, before it ever
+        // builds an attack run. Left unfixed, this is issue #63: the bomber
+        // latches onto the aircraft and follows it instead of carrying on.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        auto them = addPlayer(sim, "them");
+        sim.unitDefinitions["bomber"] = makeBomberDef();
+        auto flyer = makeTargetDef();
+        flyer.canFly = true;
+        sim.unitDefinitions["flyer"] = flyer;
+        registerModel(sim);
+        defineBomb(sim);
+
+        // Same route as the "directly on the route" case above, which is
+        // bombed when the target cannot fly. Flying is the only thing that
+        // changes here. The flyer itself has no orders of its own -- it
+        // stands in for a patrolling or transiting aircraft by being walked
+        // across the bomber's leg by hand, on the route for a window of
+        // ticks around when the bomber is expected to pass, and well clear
+        // of it (out of both sight distance and weapon range) the rest of
+        // the time. That is what "crosses the patrol leg" is testing: not
+        // just that the bomber refuses to bomb it, but that finding it and
+        // being refused a mission for it does not itself leave the bomber
+        // parked there -- once the flyer moves on, the patrol has to be
+        // free to carry the bomber the rest of the way to the far waypoint.
+        auto west = SimVector(-800_ss, 0_ss, 0_ss);
+        auto east = SimVector(800_ss, 0_ss, 0_ss);
+        auto onRoute = SimVector(0_ss, 200_ss, 0_ss);
+        // Off the map's diagonal corner -- comfortably outside both sight
+        // distance (350) and weapon range (1280) from anywhere on the
+        // route, but still inside the 128x128 (2048x2048 world unit) map,
+        // which a position at, say, 10000 is not: tryAddUnit refuses a spawn
+        // outside the terrain outright.
+        auto wellClear = SimVector(950_ss, 200_ss, 950_ss);
+        auto targetId = spawnUnit(sim, "flyer", them, wellClear, script);
+        auto startingHitPoints = sim.getUnitState(targetId).hitPoints;
+
+        auto bomberId = launchBomber(sim, us, SimVector(west.x, 200_ss, west.z), script);
+        {
+            auto& bomber = sim.getUnitState(bomberId);
+            bomber.orders.push_back(PatrolOrder(east));
+            bomber.orders.push_back(PatrolOrder(west));
+        }
+
+        bool reachedEast = false;
+        for (int tick = 0; tick < 2000; ++tick)
+        {
+            // The westbound leg of the earlier test notices its target
+            // (parked at the same spot, offset 0) somewhere around tick
+            // 150-175, so the crossing window is centred there with margin
+            // either side.
+            auto& target = sim.getUnitState(targetId);
+            target.position = (tick >= 140 && tick < 260) ? onRoute : wellClear;
+            target.previousPosition = target.position;
+
+            sim.tick();
+            if (std::getenv("RWE_TRACE_PATROL") && tick % 25 == 0)
+            {
+                const auto& b = sim.getUnitState(bomberId);
+                std::string state = "ground";
+                if (auto air = std::get_if<UnitPhysicsInfoAir>(&b.physics))
+                {
+                    if (std::holds_alternative<AirMovementStateFlying>(air->movementState)) state = "flying";
+                    else if (auto r = std::get_if<AirMovementStateAttackRun>(&air->movementState)) state = "run" + std::to_string(static_cast<int>(r->phase));
+                    else state = "other";
+                }
+                std::string front = "none";
+                if (!b.orders.empty())
+                {
+                    front = std::holds_alternative<PatrolOrder>(b.orders.front()) ? "patrol" : (std::holds_alternative<AttackOrder>(b.orders.front()) ? "attack" : "other");
+                }
+                std::cout << "t=" << tick
+                          << " pos=" << simScalarToFloat(b.position.x) << "," << simScalarToFloat(b.position.z)
+                          << " orders=" << b.orders.size()
+                          << " front=" << front
+                          << " air=" << state
+                          << std::endl;
+            }
+            if (sim.getUnitState(bomberId).position.x > 700_ss)
+            {
+                reachedEast = true;
+                break;
+            }
+        }
+
+        // Never bombed -- there was never a mission for the bomb to fall
+        // out of.
+        REQUIRE(sim.getUnitState(targetId).hitPoints == startingHitPoints);
+        // And never stuck circling it either: with no mission built, the
+        // patrol underneath is free to carry the bomber on to the far
+        // waypoint exactly as if it had never sighted anything.
+        REQUIRE(reachedEast);
+    }
+
     TEST_CASE("a bomber that ships on Hold Fire is given Fire At Will", "[patrol][bomber]")
     {
         // DELIBERATE DIVERGENCE. The engine's patrol engage check is Fire At
