@@ -785,8 +785,8 @@ next steps are no longer obvious from reading the code.
 
 ## 13.2 Naval, which is the biggest single gap
 
-The AI has no navy at all. `AiSideUnits` has fifteen fields and not one is a
-ship, so on a water map it ferries ground units by air and fights for the land.
+The AI has no navy at all. `AiSideUnits` names twenty-six roles and not one is
+a ship, so on a water map it ferries ground units by air and fights for the land.
 That works, and it is why naval was deprioritised, but on a map that reads as
 Water it leaves the sea uncontested.
 
@@ -794,12 +794,25 @@ What it needs, in order:
 
 1. **Unit table.** `AiSideUnits` gains `shipyard`, `conShip`, `scoutShip`,
    `attackShip`; `AiSideUnits.cpp` gains the ARM and CORE names. Cheap.
-2. **A coastal build site finder.** This is the real work. A shipyard needs a
-   cell on land, adjacent to water deep enough to float what it builds, and
-   reachable by a builder. `BuildManager` searches rings around an anchor; a
-   coastal variant wants the same ring walk with a water-adjacency test, and
-   `MapIntel` is the natural place to precompute the coastline once rather than
-   testing it per candidate.
+2. **A coastal build site finder.** This is the real work.
+
+   **Corrected 2026-09-16 against the shipped data.** This step used to say a
+   shipyard needs "a cell on land, adjacent to water deep enough to float what
+   it builds". It does not. `ARMSY.FBI` and `CORSY.FBI` both carry
+   `MinWaterDepth=30` with an 8x8 footprint and a YardMap of `wCCCCCCw`,
+   `CCCCCCCC` six times, `wCCCCCCw` -- the yard stands *in* the water, with dry
+   corners, rather than beside it. An implementation built on the old sentence
+   would have searched for the wrong cells entirely. Depth at a cell is
+   `seaLevel - height`.
+
+   What is actually wanted is a site whose footprint carries the required depth
+   and which a builder can still reach. `BuildManager` searches rings around an
+   anchor; a coastal variant wants the same ring walk over candidates
+   `MapIntel` has already nominated, rather than testing the whole map per
+   candidate. Validation itself is not new work: `GameSimulation::canBeBuiltAt`
+   already runs `isGridPointWalkable`, which applies `isWaterDepthWithinBounds`
+   from the movement class the unit definition yields, so the depth rule is
+   enforced in one place already and must not be reimplemented beside it.
 3. **A naval branch in `buildPriorities`,** gated on
    `mapIntel.character == MapCharacter::Water`, or Mixed plus
    `hasUnreachableGround`.
@@ -812,6 +825,24 @@ What it needs, in order:
 
 Steps 1 and 3 are an afternoon. Steps 2 and 4 are the substance, and 4 in
 particular changes a data structure several managers read.
+
+**There is no bootstrap problem, which this section never checked.** Read out
+of the shipped build menus on 2026-09-16: `ARMSY` sits on page 2 of `ARMCK`,
+`ARMCV` *and* `ARMCOM`, and `CORSY` likewise on `CORCK`, `CORCV` and `CORCOM`.
+The commander and the ordinary land constructors can all put up a shipyard
+directly, so a construction ship is never on the critical path -- the yard
+builds one (`ARMCS`/`CORCS`), not the other way round. The cheapest armed hull
+from a standing commander is 715 metal for ARM (`ARMSY` 615 then `ARMPT` 100)
+and 695 for CORE (`CORSY` 600 then `CORPT` 95). A shipyard offers exactly five
+things and they are the whole navy: construction ship, scout ship, destroyer,
+transport ship, submarine.
+
+One targeting fact belongs with step 5. A destroyer's main gun is an ordinary
+surface cannon with no `waterweapon` flag, but its second weapon is a
+`waterweapon=1` depth charge, and a submarine's *only* weapon is a
+`waterweapon=1` torpedo. So a submarine cannot engage anything that is not in
+the water, and target selection has to read that flag rather than assume a
+combat unit can shoot whatever it can see.
 
 ## 13.3 Opponent modelling
 
