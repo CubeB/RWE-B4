@@ -156,7 +156,10 @@ namespace rwe
          * while it is still getting into position for the first time, so the
          * caller waits.
          *
-         * Ground builders are always ready and it returns true for them.
+         * A builder on the ground points itself at the job instead, and is
+         * not ready until it has come round far enough -- the turn every one
+         * of the original's work missions makes. One with no turn rate at all
+         * is ready at once, since it has no way to comply.
          */
         bool prepareBuilderForWork(UnitInfo unitInfo, const SimVector& workPosition);
 
