@@ -848,6 +848,7 @@ set(TEST_FILES
     src/rwe/ai/AiBuildTree.test.cpp
     src/rwe/ai/ArmyTactics.test.cpp
     src/rwe/ai/AirTactics.test.cpp
+    src/rwe/AudioService.test.cpp
     src/rwe/BoxTreeSplit.test.cpp
     src/rwe/AlphaTable.test.cpp
     src/rwe/ShadeTable.test.cpp

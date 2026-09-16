@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <rwe/observable/Subject.h>
 #include <rwe/sdl/SdlContext.h>
 #include <rwe/sdl/SdlMixerContext.h>
@@ -12,6 +13,38 @@
 
 namespace rwe
 {
+    /**
+     * One unreserved track's state, as seen by selectTrackForSound: whether
+     * it is currently playing, and -- if it is -- the identity of the sound
+     * on it. Kept free of MIX_Track/MIX_Audio so the picking logic below can
+     * run under a test with no mixer device behind it.
+     */
+    struct TrackSlot
+    {
+        bool playing;
+        const void* soundKey;
+    };
+
+    /**
+     * Chooses the unreserved track a new copy of `soundKey` should play on.
+     * TA's own per-effect voice limit has not been read out of the exe --
+     * only the eight-slot unit-notification queue at `0x47FAD0` is decoded
+     * (docs/TOTALA-EXE.md S:"underattack, repair and cant"), and that is a
+     * different mechanism for a different class of sound. Absent the
+     * original's rule for weapon fire and impacts, this caps concurrent
+     * copies of one sample conservatively instead of guessing at a limiter:
+     * a handful of overlapping copies of the same wav reads as one loud
+     * effect, forty of them reads as clipping (issue #58). A track is never
+     * taken from a sound still playing on it -- the search only ever returns
+     * a track that is already free -- so nothing already sounding is cut
+     * short by this.
+     */
+    std::optional<unsigned int> selectTrackForSound(
+        const std::vector<TrackSlot>& tracks,
+        unsigned int reservedCount,
+        const void* soundKey,
+        unsigned int maxConcurrentCopies);
+
     class AudioService
     {
     public:
@@ -51,6 +84,18 @@ namespace rwe
         // Tracks 0..reservedCount-1 are "reserved" (used by playSoundIfFree).
         std::vector<SdlMixerContext::TrackPtr> tracks;
         unsigned int reservedCount{0};
+
+        // Parallel to tracks: the sound each one was last given, so
+        // selectTrackForSound can count how many copies of a sample are
+        // already sounding. Stale once a track finishes, but findTrackForSound
+        // only ever reads an entry alongside that track's own trackPlaying(),
+        // so a stale key on a silent track is never mistaken for a live copy.
+        std::vector<const Sound*> trackSoundKey;
+
+        // Never let more than this many copies of one sample sound at once.
+        // See selectTrackForSound's comment for why this is RWE's own number
+        // and not a ported one.
+        static constexpr unsigned int maxConcurrentCopiesOfOneSound = 4;
 
         // Default gain applied to sounds on load (equivalent to old MIX_MAX_VOLUME/4)
         static constexpr float defaultGain = 0.25f;
@@ -140,6 +185,16 @@ namespace rwe
 
         void setVolume(int channel, int volume);
 
+        /**
+         * True while the mixer is still sounding this channel. A caller
+         * holding on to a channel index from an earlier play (GameScene's
+         * playingUnitChannels does, for the AGC in computeSoundVolume) needs
+         * this to tell "still my sound" from "reused for someone else's"
+         * before believing a finished notification for it -- see the note at
+         * GameScene::onChannelFinished.
+         */
+        bool isChannelPlaying(unsigned int channel);
+
         Observable<int>& getChannelFinished();
 
         /**
@@ -153,6 +208,7 @@ namespace rwe
     private:
         void haltChannel(int channel);
         int findFreeTrack();
+        std::optional<unsigned int> findTrackForSound(const Sound* soundKey, unsigned int maxConcurrentCopies);
         void setupTrackCallback(int trackIndex);
     };
 }

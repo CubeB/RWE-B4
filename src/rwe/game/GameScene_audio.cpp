@@ -656,6 +656,23 @@ namespace rwe
 
     void GameScene::onChannelFinished(int channel)
     {
+        // The mixer queues this notification on its own thread and it is
+        // only read once a frame (GameScene::update), so in a big battle --
+        // where a track's turnover is fast -- the channel this notification
+        // names may already have been handed to a new sound by the time we
+        // get to it. Erasing it then would tell computeSoundVolume there is
+        // one fewer sound in the mix than there really is, so the survivor
+        // gets a bigger share of the headroom than it should, which is heard
+        // as the mix clipping (issue #58). isChannelPlaying, checked before
+        // taking the lock per the note in GameScene::update, tells a stale
+        // notification for a reused channel from a genuine one: a reused
+        // channel is still sounding, so it stays counted until its own,
+        // later finish notice retires it.
+        if (sceneContext.audioService->isChannelPlaying(channel))
+        {
+            return;
+        }
+
         std::scoped_lock<std::mutex> lock(playingUnitChannelsLock);
         playingUnitChannels.erase(channel);
     }
