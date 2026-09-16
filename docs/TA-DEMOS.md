@@ -622,7 +622,58 @@ See the wrecks section below; this is the largest single finding of the pass.
 Two 16.16 position triples -- where the shot came from and where it was aimed,
 and the second is far enough from the first that it cannot be a velocity -- then
 a rotation triple, then `u16` target (zero if the shot was not aimed at a unit),
-`u16` shooter, and one byte that is 0, 1 or 2 and is dominated by 0.
+`u16` shooter, and one byte that is 0, 1 or 2.
+
+**That last byte is the weapon slot**, a 0-based index into the shooter's own
+`Weapon1`/`Weapon2`/`Weapon3` -- so `WeaponN` with `N = slot + 1`. This is what
+makes a shot resolvable to a *weapon definition* rather than only to a shooter,
+and it is therefore the thing the weapon-event oracle stands on.
+
+**The evidence, and why the obvious test gets it wrong.** `tad_episodes
+--weapon-slots` collects, for every unit type the corpus caught firing, the set
+of slots it was seen using, and checks each against that type's FBI. Over the
+thirteen demos and all 631,578 shots:
+
+| test | (demo, type) observations that fail |
+|---|---|
+| `slot < number of weapons the FBI declares` | 112 of 658 |
+| the slot the FBI actually **fills** is non-empty | **14 of 658** |
+| the same, with the shooter named by its id's *first* build | 453 |
+
+The first gap is the whole argument for the reading. Ninety-eight observations
+are explained by nothing except the standard TA convention of putting a unit's
+anti-air weapon in the **third** slot and leaving the second empty: `ARMSAM`,
+`ARMJETH`, `CORMIST` and `ARMYORK` all declare `Weapon1` and `Weapon3`, all fire
+slots 0 and 2, and none of them ever fires slot 1. Under a count test they look
+like counter-examples. Under an occupancy test they are confirmations, and they
+are confirmations no other reading of the byte predicts.
+
+The second gap is not about the byte at all -- it is what naming a shooter
+badly costs, and it is the next paragraph.
+
+The fourteen that remain are dominated by types the data set gives **no weapon
+at all** -- a wind generator, a metal extractor, a fusion plant, a repair pad --
+which cannot fire anything, so they are naming residue rather than
+counter-evidence. Two are factories whose only weapon is `LAB_DIR`, the dummy
+TA labs aim their build spot with, appearing to fire slot 0; those are the ones
+to look at again if the naming is ever tightened further.
+
+**Naming the shooter is the whole difficulty here**, and it is worth knowing
+before reusing any of this. TA recycles unit ids heavily -- in 14725, 2,622 of
+4,093 distinct ids are reused by a later nanoframe, and 2,550 of those by a
+*different* type -- so a map that keeps the first name an id ever held names
+most shooters wrongly, and a wrongly named shooter is exactly what makes a metal
+extractor appear to open fire. `--weapon-slots` scopes each name to the id's
+most recent build *before the shot*, and that one change takes the occupancy
+test from **453 failures to 14**, which is the third row of the table. With the
+scoping, **630,522 of the 631,578 shots have a nameable shooter** and 612,992
+are aimed at a unit, so naming is not what will limit a weapon corpus.
+
+The build-timing cells do **not** scope, deliberately: `tools/tad-buildtime.py`
+is their reference and it does not either. That is a known loose end rather than
+a disagreement -- it costs builds without moving a single mode, for reasons in
+"What an episode looks like" -- and closing it is the first job of the weapon
+oracle.
 
 ### `0x10`, script call -- all 22 bytes
 
@@ -882,7 +933,8 @@ clean tick clock:
   stalls, which no unit test covers today.
 - **Weapon events.** `0x0d` shot to `0x0b` damage or `0x0c` death gives
   time-of-flight and hit/miss with the shot as the explicit input -- straight
-  at the missile motor model and the ballistics work.
+  at the missile motor model and the ballistics work. The shot names its
+  **weapon** and not just its shooter, since the trailing byte is the slot.
 - **Death and wrecks.** Death position to feature, which is the
   `TOTALA-EXE-WRECKS.md` material with real cases behind it.
 
@@ -964,6 +1016,27 @@ Settled by the economy oracle, and inherited by everything after it.
   episode carries the builder and product names, how many builds the cell pooled
   and how many landed on the mode, and the tick range of one representative
   build out of one of the games it pooled over.
+
+- **Naming a unit by its id is lossy, and known to be.** TA recycles unit ids
+  heavily -- in 14725, 2,622 of 4,093 distinct ids are reused by a later
+  nanoframe and 2,550 of those by a *different* type. `cells()` in
+  `tools/tad-buildtime.py`, and the port that follows it, keep the **first**
+  name an id ever held, so every build by a builder whose id had been recycled
+  is looked up under a stale name.
+
+  **It costs builds and it does not move a mode.** Scoping the name instead to
+  the id's most recent build before the event was tried over the whole corpus:
+  every one of the 41 cells keeps its mode and its delta, while the builds
+  behind them roughly double (`ARMVP -> ARMFAV` 151 to 363, `ARMAAP -> ARMPNIX`
+  8 to 27) and four more cells clear `--min-builds`. The modes survive because a
+  stale name is wrong in only two ways: if its `WorkerTime` differs the build
+  misses the outlier cap and is dropped rather than miscounted, and if it
+  matches -- every stock factory is `p = 4` -- the build lands in the wrong cell
+  with an identical duration, because only `p` and the product's `BuildTime`
+  enter the arithmetic. **That is luck a weapon oracle will not have**, since a
+  weapon's behaviour depends on the weapon and not on one shared integer, which
+  is why `--weapon-slots` scopes and the build cells still do not. Fixing it
+  means changing the script first, because the script is the reference.
 
 - **The wrong data set excludes itself.** A build-timing cell pools across
   demos, so one recording made on another mod would name its types out of the
@@ -1185,6 +1258,23 @@ They catch different things and should not share machinery.
       gives time-of-flight and hit/miss with the shot as an explicit input,
       aimed at the missile motor model and the ballistics work. Remember `0x0b`
       is not a complete damage ledger: treat absence as unknown, never as zero.
+
+      **Two things are settled for it already.** A `0x0d`'s trailing byte is the
+      shooter's weapon slot (the `0x0d` section above), so a shot resolves to a
+      weapon definition and not merely to a shooter; and with the shooter named
+      by the id's most recent build, 630,522 of the corpus's 631,578 shots have
+      a named shooter and 612,992 are aimed at a unit, so naming will not be
+      what limits this.
+
+      **What is not settled is pairing**, and that is the job. Nothing links a
+      shot to the damage it caused: no shot id, no sequence number, and no tick
+      on a `0x0b` beyond the `0x2c` serial of the packet carrying it, against
+      631,578 shots and 824,844 damage events. A unit firing a burst has several
+      shots in flight and several damage events arriving, and nothing says which
+      came from which. So time-of-flight is a filtered statistic and not a
+      lookup, and the filters are the work -- one shot in flight from that
+      shooter at that victim, one shooter firing at that victim, the shot aimed
+      at a unit at all -- exactly as the build-timing filters were.
 
    Every one of those carries the expected-difference annotation described in
    "The hazard to design in from the start". A corpus is an efficient machine

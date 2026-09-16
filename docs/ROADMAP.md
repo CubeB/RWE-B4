@@ -254,15 +254,24 @@ failed to reproduce.
       gates on it. `tools/tad-buildtime.py` re-runs the check. One lead came out
       of it: construction aircraft finish a tick early on 58 of 66 builds across
       three builders and two rates, which is an increment nothing accounts for.
-- [ ] `tad_episodes --emit-cpp`: a generated, checked-in header of plain structs
+- [x] `tad_episodes --emit-cpp`: a generated, checked-in header of plain structs
       with the real FBI values transcribed inline and demo/tick provenance.
-- [ ] The economy oracle -- storage-cap and stall episodes, which need only the
-      `0x28` fields already decoded and so have no unknowns left in them.
-- [ ] The build-timing oracle. The baseline is settled, so it may assert
-      factory builds exactly; a mobile builder's offset is its own script's and
-      must not be asserted without it.
+      `--emit-build-cpp` writes the second one.
+- [x] The economy oracle -- the storage half. Capacity is a plain sum over what
+      a player has finished, and three `[economy][corpus]` cases assert it. The
+      **stall half is still open**, and the sampling interval is why: the corpus
+      samples every 120 ticks and the settle runs every 30.
+- [x] The build-timing oracle. 25 factory cells in
+      `src/rwe/sim/tad_build_episodes.h`, asserted by `[build][corpus]` cases
+      against `UnitState::addBuildProgress` driven directly rather than through
+      the factory pipeline. Ten of them carry `expectedDurationDelta = -1`, the
+      integer accumulator of `TOTALA-EXE.md` §88 -- the first fixture whose
+      expected-difference field carries a non-zero value.
 - [ ] The weapon-event oracle: `0x0d` shot to `0x0b` damage or `0x0c` death,
-      aimed at the missile motor model and the ballistics work.
+      aimed at the missile motor model and the ballistics work. A `0x0d`'s
+      trailing byte is now known to be the shooter's weapon slot, so a shot
+      resolves to a weapon definition; what is not solved is pairing a shot to
+      the damage it caused, which nothing in the stream links.
 
 Demos and mod files never enter the repository; only extracted numbers do, and
 `rwe_test` goes on reading no files. Every demo-derived test asserts the known

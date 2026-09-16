@@ -170,7 +170,8 @@ namespace rwe
         REQUIRE(e);
         REQUIRE(e->shooterId == 2022);
         REQUIRE(e->targetId == 1009);
-        REQUIRE(e->unknown == 0);
+        // Weapon1 of the shooter's own FBI: the byte is a 0-based slot index.
+        REQUIRE(e->weaponSlot == 0);
 
         // The second triple is far from the first, so it is where the shot was
         // aimed and not a velocity: nothing in TA travels 380 world units in a

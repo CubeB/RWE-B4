@@ -134,7 +134,7 @@ namespace rwe
         result.rotation = readRotation(&s[25]);
         result.targetId = readU16(&s[31]);
         result.shooterId = readU16(&s[33]);
-        result.unknown = s[35];
+        result.weaponSlot = s[35];
         return result;
     }
 

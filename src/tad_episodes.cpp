@@ -39,6 +39,8 @@
 //   --emit-build-cpp  write the build-timing episodes as a C++ header
 //   --cells       print the (builder, product) build-timing cells, which is
 //                 what tools/tad-buildtime.py scores
+//   --weapon-slots  check a 0x0d's trailing byte against the slots the
+//                 shooter's own FBI fills; the evidence that it is a weapon index
 //   --max-types   distinct unit types an episode may carry (default 6)
 //   --max-per-player  episodes to keep per player (default 3)
 //   --max-cells   build-timing episodes to check in (default 25)
@@ -46,6 +48,7 @@
 //   --all         emit rejected episodes too, each with its reasons
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -144,6 +147,15 @@ namespace rwe
             };
 
             std::vector<ResourceRecord> resourceRecords;
+
+            /** One 0x0d, with the sender's tick, for --weapon-slots. */
+            struct ShotRecord
+            {
+                uint32_t tick;
+                TadShot shot;
+            };
+
+            std::vector<ShotRecord> shots;
 
             /** Where each sender's current burst sits, and what it has shown. */
             struct OpenBurst
@@ -256,6 +268,13 @@ namespace rwe
 
                         case TadSubPacketCode::PlayerResourceInfo:
                             onResources(packet.sender, s);
+                            break;
+
+                        case TadSubPacketCode::WeaponFired:
+                            if (auto shot = tadDecodeShot(s))
+                            {
+                                shots.push_back(ShotRecord{tick[packet.sender], *shot});
+                            }
                             break;
 
                         default:
@@ -524,6 +543,15 @@ namespace
         unsigned int workerTime;
         float maxVelocity;
         bool canFly;
+
+        /**
+         * Which of Weapon1/Weapon2/Weapon3 the FBI actually fills, as bits 0-2.
+         * A mask and not a count: the standard TA convention puts a unit's
+         * anti-air weapon in slot 3 and leaves slot 2 empty, so counting weapons
+         * makes a two-weapon unit look as though it may only fire slots 0 and 1
+         * when the slots it really has are 0 and 2.
+         */
+        unsigned int weaponSlotMask;
     };
 
     std::map<std::string, UnitFacts> readUnitFacts(const std::vector<std::filesystem::path>& files)
@@ -553,7 +581,10 @@ namespace
                     fbi.buildTime,
                     fbi.workerTime,
                     fbi.maxVelocity,
-                    fbi.canFly};
+                    fbi.canFly,
+                    static_cast<unsigned int>(
+                        (fbi.weapon1.empty() ? 0u : 1u) | (fbi.weapon2.empty() ? 0u : 2u)
+                        | (fbi.weapon3.empty() ? 0u : 4u))};
             }
             catch (const std::exception&)
             {
@@ -1584,6 +1615,228 @@ namespace rwe
             << "}\n";
     }
 
+    // --- --weapon-slots: what the last byte of a 0x0d indexes -----------------
+    //
+    // The byte is a 0-based index into the shooter's own Weapon1/Weapon2/Weapon3,
+    // and this mode is the evidence. For every unit type the corpus caught
+    // firing, it collects the set of slots that type was seen using and checks
+    // each against the slots that type's FBI actually fills.
+    //
+    // NAMING A SHOOTER IS THE WHOLE DIFFICULTY, and it is why this does not
+    // reuse the born map that mineBuildCells shares with tools/tad-buildtime.py.
+    // TA recycles unit ids heavily -- in 14725, 2,622 of 4,093 distinct ids are
+    // reused by a later nanoframe and 2,550 of those by a different type -- so
+    // a map that keeps the FIRST name an id ever held names most shooters
+    // wrongly, and the wrong name is what makes a metal extractor appear to open
+    // fire. Scoping the name to the id's most recent build BEFORE the shot fixes
+    // it. The build cells do not scope, deliberately: the script is their
+    // reference and it does not either. That is a known loose end rather than a
+    // difference of opinion, and closing it is the first item of the weapon
+    // oracle hand-off.
+
+    /** What one unit type was seen doing, against what its FBI allows. */
+    struct WeaponSlotTally
+    {
+        unsigned int consistent = 0;
+        unsigned int violating = 0;
+
+        /**
+         * The same tally under the naive predicate `slot < number of weapons`.
+         * Carried purely for the contrast: the gap between the two is the
+         * Weapon1-and-Weapon3 convention, and it is the argument.
+         */
+        unsigned int naiveViolating = 0;
+
+        /**
+         * The same tally again under the occupancy predicate but with shooters
+         * named the way the build cells name a builder -- the FIRST name an id
+         * ever held. Carried for the second contrast: the gap between this and
+         * `violating` is what unit-id recycling costs, and it is the argument
+         * for scoping.
+         */
+        unsigned int unscopedViolating = 0;
+        unsigned long shots = 0;
+        unsigned long named = 0;
+        unsigned long aimedAtUnit = 0;
+        std::map<unsigned int, unsigned long> slotCounts;
+    };
+
+    /**
+     * Each unit id's builds, newest last, so a name can be asked for as of a
+     * tick rather than for all time.
+     */
+    std::map<uint16_t, std::vector<std::pair<uint32_t, std::string>>> unitLives(
+        const EpisodeHandler& handler,
+        const std::vector<std::string>& loadOrder)
+    {
+        std::map<uint16_t, std::vector<std::pair<uint32_t, std::string>>> lives;
+        for (const auto& e : handler.episodes)
+        {
+            if (auto name = tadUnitNameForTypeIndex(loadOrder, e.typeIndex))
+            {
+                lives[e.unitId].emplace_back(e.finishTick, *name);
+            }
+        }
+        for (auto& [id, list] : lives)
+        {
+            std::sort(list.begin(), list.end());
+        }
+        return lives;
+    }
+
+    void reportWeaponSlots(
+        const EpisodeHandler& handler,
+        const std::vector<std::string>& loadOrder,
+        const std::map<std::string, UnitFacts>& unitFacts,
+        WeaponSlotTally& total)
+    {
+        auto lives = unitLives(handler, loadOrder);
+        auto nameAt = [&](uint16_t id, uint32_t at) -> std::optional<std::string> {
+            auto it = lives.find(id);
+            if (it == lives.end())
+            {
+                return std::nullopt;
+            }
+
+            std::optional<std::string> best;
+            for (const auto& [finish, name] : it->second)
+            {
+                if (finish <= at)
+                {
+                    best = name;
+                }
+            }
+            return best;
+        };
+
+        std::map<std::string, std::set<unsigned int>> slotsPerType;
+        std::map<std::string, std::set<unsigned int>> slotsPerTypeUnscoped;
+        std::map<uint16_t, std::string> firstName;
+        for (const auto& [id, list] : lives)
+        {
+            firstName.emplace(id, list.front().second);
+        }
+        unsigned long named = 0;
+        unsigned long aimedAtUnit = 0;
+        std::map<unsigned int, unsigned long> slotCounts;
+        for (const auto& record : handler.shots)
+        {
+            ++slotCounts[record.shot.weaponSlot];
+            if (record.shot.targetId != 0)
+            {
+                ++aimedAtUnit;
+            }
+            if (auto name = nameAt(record.shot.shooterId, record.tick))
+            {
+                ++named;
+                slotsPerType[*name].insert(record.shot.weaponSlot);
+            }
+            if (auto first = firstName.find(record.shot.shooterId); first != firstName.end())
+            {
+                slotsPerTypeUnscoped[first->second].insert(record.shot.weaponSlot);
+            }
+        }
+
+        auto countViolations = [&](const std::map<std::string, std::set<unsigned int>>& seen) {
+            unsigned int bad = 0;
+            for (const auto& [type, slots] : seen)
+            {
+                auto facts = unitFacts.find(type);
+                if (facts == unitFacts.end())
+                {
+                    continue;
+                }
+                for (auto slot : slots)
+                {
+                    if (slot > 2 || (facts->second.weaponSlotMask & (1u << slot)) == 0)
+                    {
+                        ++bad;
+                        break;
+                    }
+                }
+            }
+            return bad;
+        };
+        auto unscopedViolating = countViolations(slotsPerTypeUnscoped);
+
+        unsigned int consistent = 0;
+        unsigned int violating = 0;
+        unsigned int naiveViolating = 0;
+        std::ostringstream violations;
+        for (const auto& [type, slots] : slotsPerType)
+        {
+            auto facts = unitFacts.find(type);
+            if (facts == unitFacts.end())
+            {
+                continue;
+            }
+
+            auto ok = true;
+            auto naiveOk = true;
+            auto weaponCount = static_cast<unsigned int>(
+                std::popcount(facts->second.weaponSlotMask));
+            for (auto slot : slots)
+            {
+                if (slot > 2 || (facts->second.weaponSlotMask & (1u << slot)) == 0)
+                {
+                    ok = false;
+                }
+                if (slot >= weaponCount)
+                {
+                    naiveOk = false;
+                }
+            }
+            naiveViolating += naiveOk ? 0 : 1;
+
+            if (ok)
+            {
+                ++consistent;
+                continue;
+            }
+
+            ++violating;
+            violations << "    " << type << " fills slots";
+            for (unsigned int slot = 0; slot < 3; ++slot)
+            {
+                if ((facts->second.weaponSlotMask & (1u << slot)) != 0)
+                {
+                    violations << " " << slot;
+                }
+            }
+            if (facts->second.weaponSlotMask == 0)
+            {
+                violations << " none";
+            }
+            violations << ", fired";
+            for (auto slot : slots)
+            {
+                violations << " " << slot;
+            }
+            violations << "\n";
+        }
+
+        std::cout << "  " << handler.shots.size() << " shots, " << named
+                  << " with a named shooter, " << aimedAtUnit << " aimed at a unit; slots";
+        for (const auto& [slot, count] : slotCounts)
+        {
+            std::cout << " " << slot << "x" << count;
+        }
+        std::cout << "; " << consistent << " type(s) consistent, " << violating << " not\n"
+                  << violations.str();
+
+        total.consistent += consistent;
+        total.violating += violating;
+        total.naiveViolating += naiveViolating;
+        total.unscopedViolating += unscopedViolating;
+        total.shots += handler.shots.size();
+        total.named += named;
+        total.aimedAtUnit += aimedAtUnit;
+        for (const auto& [slot, count] : slotCounts)
+        {
+            total.slotCounts[slot] += count;
+        }
+    }
+
     bool isDemo(const std::filesystem::path& path)
     {
         auto extension = path.extension().string();
@@ -1622,6 +1875,7 @@ int main(int argc, char* argv[])
                   << "  --emit-cpp    write the storage episodes as a C++ header (needs --units)\n"
                   << "  --emit-build-cpp  write the build-timing episodes as a C++ header (needs --units)\n"
                   << "  --cells       print the (builder, product) build-timing cells\n"
+                  << "  --weapon-slots  check the 0x0d trailing byte against each shooter's FBI\n"
                   << "  --max-types   distinct unit types an episode may carry (default 6)\n"
                   << "  --max-per-player  episodes to keep per player (default 3)\n"
                   << "  --max-cells   build-timing episodes to check in (default 25)\n"
@@ -1726,6 +1980,8 @@ int main(int argc, char* argv[])
 
     /** Demos whose own type count disagrees with --units; see mineBuildCells. */
     std::set<std::string> wrongDataSet;
+
+    WeaponSlotTally weaponSlots;
     std::map<std::string, unsigned int> rejectionCounts;
     unsigned int cleanCount = 0;
 
@@ -1782,6 +2038,11 @@ int main(int argc, char* argv[])
                       << handler.unitTable->restricted.size() << " unit types but --units gave "
                       << loadOrder.size() << "; names for this demo will be wrong\n";
             wrongDataSet.insert(path.filename().string());
+        }
+
+        if (args.contains("weapon-slots"))
+        {
+            reportWeaponSlots(handler, loadOrder, unitFacts, weaponSlots);
         }
 
         if (args.contains("emit-cpp"))
@@ -1905,6 +2166,28 @@ int main(int argc, char* argv[])
                       << std::setw(8) << mode
                       << std::setw(7) << (100 * modeCount / total) << "%\n";
         }
+    }
+
+    if (args.contains("weapon-slots"))
+    {
+        std::cout << "\n"
+                  << weaponSlots.shots << " shots, " << weaponSlots.named
+                  << " with a named shooter, " << weaponSlots.aimedAtUnit << " aimed at a unit\n"
+                  << "trailing byte:";
+        for (const auto& [slot, count] : weaponSlots.slotCounts)
+        {
+            std::cout << " " << slot << "x" << count;
+        }
+        std::cout << "\n"
+                  << weaponSlots.consistent << " of "
+                  << (weaponSlots.consistent + weaponSlots.violating)
+                  << " (demo, type) observations fired only slots their FBI fills;"
+                  << " the naive `slot < weapon count` test fails "
+                  << weaponSlots.naiveViolating << " of them, and naming a shooter"
+                  << " by its id's FIRST build rather than its most recent fails "
+                  << weaponSlots.unscopedViolating << "\n"
+                  << "the first gap is the Weapon1-and-Weapon3 convention, which is what says"
+                  << " the byte is a slot;\nthe second is what unit-id recycling costs\n";
     }
 
     // The build-timing cells, corpus-wide. Printed on --cells so the port can be

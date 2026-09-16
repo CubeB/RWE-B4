@@ -130,6 +130,19 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   builders become episodes; `--max-cells` caps how many, keeping every cell
   whose `BuildTime` divides exactly by the rate, because those are the ten that
   carry a non-zero `expectedDurationDelta`.
+
+  `--weapon-slots` is the evidence that a `0x0d`'s trailing byte is the
+  shooter's **weapon slot**, a 0-based index into its FBI's
+  `Weapon1`/`Weapon2`/`Weapon3`: it checks every slot each type was seen firing
+  against the slots that type's FBI fills, and prints the naive
+  `slot < weapon count` tally beside it, and a third for naming a shooter by its
+  id's first build rather than its most recent. The three read 112, **14** and
+  453 over the corpus: the first gap is the standard TA convention of putting
+  the anti-air weapon in slot 3 and leaving slot 2 empty, which is the argument
+  that the byte is a slot at all, and the second is what unit-id recycling costs
+  anything that names a unit from its id. The build cells deliberately do not
+  scope; `docs/TA-DEMOS.md`, the `0x0d` section, says why that matters and what
+  it costs.
 - **`tools/tad-buildtime.py`** — scores the corpus's modal build durations
   against TA's own completion arithmetic, which is a **float32** fraction and
   not `ceil(BuildTime / (WorkerTime/30))`; the difference is a tick, and where

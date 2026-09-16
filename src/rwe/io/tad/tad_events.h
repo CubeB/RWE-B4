@@ -208,8 +208,29 @@ namespace rwe
 
         uint16_t shooterId;
 
-        /** 0, 1 or 2 over the corpus, dominated by 0. */
-        uint8_t unknown;
+        /**
+         * Which of the shooter's weapons fired, as a 0-based index into its
+         * FBI's Weapon1/Weapon2/Weapon3 -- so `WeaponN` with N = weaponSlot + 1.
+         *
+         * Over the thirteen-demo corpus, with shooters named by the unit id's
+         * most recent build rather than its first, every slot a type was seen
+         * firing on lands on a WeaponN that type's FBI actually fills, in 644 of
+         * 658 (demo, type) observations.
+         *
+         * The near-misses are the confirmation rather than the exception.
+         * Fifteen types fail a naive `slot < number of weapons` test by emitting
+         * slots 0 and 2 and never 1 -- ARMSAM, ARMJETH, CORMIST, ARMYORK and
+         * friends -- and every one of them defines Weapon1 and Weapon3 and
+         * leaves Weapon2 empty, which is the standard TA convention of putting
+         * the anti-air weapon in the third slot. Test slot OCCUPANCY, not weapon
+         * count. The residual fourteen are dominated by units the corpus names
+         * as carrying no weapon at all, which is what a leftover naming error
+         * looks like and not a counter-example.
+         *
+         * `tad_episodes --weapon-slots` prints the table this came from. See
+         * docs/TA-DEMOS.md, the 0x0d section.
+         */
+        uint8_t weaponSlot;
     };
 
     /**
