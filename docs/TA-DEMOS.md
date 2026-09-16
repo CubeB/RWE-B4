@@ -915,7 +915,12 @@ a test read one.
 Settled by the economy oracle, and inherited by everything after it.
 
 - **A generated header of plain structs**, checked in beside the test that uses
-  it: `src/rwe/sim/tad_economy_episodes.h`. Small, text, diffable.
+  it: `src/rwe/sim/tad_economy_episodes.h`, and now
+  `src/rwe/sim/tad_build_episodes.h` beside it. Small, text, diffable. **One
+  header per oracle**, not one shared table: the two share no struct, are mined
+  by different passes -- storage per demo, build timing corpus-wide, because a
+  build-timing cell pools across games -- and are regenerated from different
+  corpora, so neither regeneration should churn the other's diff.
 - **The data set's own FBI values transcribed inline**, beside the observation
   they explain. `rwe_test` never opens a file, and demos and mod files never
   enter the repository, so an episode that needed either would not be a test.
@@ -931,16 +936,42 @@ Settled by the economy oracle, and inherited by everything after it.
   byte-identical files; the tool reads the old file back and prints `unchanged`
   or `CHANGED` so a regeneration says which it was.
 - **An expected-difference annotation on every episode.** Each carries a delta
-  per resource and the name of the `docs/TOTALA-EXE.md` §88 entry that licences
-  it, and the tests assert the observation **plus** the delta. A test that
-  asserts equality gets disabled the first time it is right to fail. No storage
-  episode needs one today -- §88's new entry, the staggered settle, does not
-  move a capacity -- but the field is there from the start rather than being
-  retrofitted to the first episode that needs it.
+  and the name of the `docs/TOTALA-EXE.md` §88 entry that licences it, and the
+  tests assert the observation **plus** the delta. A test that asserts equality
+  gets disabled the first time it is right to fail. No storage episode needs one
+  -- §88's staggered settle does not move a capacity -- but the build-timing
+  ones do: ten of the twenty-five carry `-1`, for the integer accumulator §88
+  keeps on purpose. That is what the field was put there for, and why it was put
+  there before anything needed it.
+
+  A storage delta is hand-written into the emitter's table, because nothing can
+  derive it. A build-timing delta is computed, because both completion models
+  are small enough to replay and the emitter replays them. That is not circular:
+  a case asserting mode + delta still fails if the engine stops matching its own
+  model, and it fails on exactly the ten -- and no others -- if the engine is
+  changed to the original's float.
 - **Variety, not volume.** The emitter keeps one episode per distinct set of
   storage-granting types: two episodes with the same set assert the same thing.
   What the survivor also owns rides along in its composition, so the types that
   grant nothing are still checked to grant nothing.
+
+  A build-timing cell already **is** an aggregate, so there the rule is one
+  episode per scored cell, capped by `--max-cells`, and the cap prefers the
+  cells where the two completion models part company: all fifteen whose
+  `BuildTime` divides exactly by the rate, because those carry the deltas, then
+  the most-observed of the rest, because a mode over 249 builds is a stronger
+  observation than one over 5. Provenance for a mode is not a single tick: the
+  episode carries the builder and product names, how many builds the cell pooled
+  and how many landed on the mode, and the tick range of one representative
+  build out of one of the games it pooled over.
+
+- **The wrong data set excludes itself.** A build-timing cell pools across
+  demos, so one recording made on another mod would name its types out of the
+  wrong load order and merge into somebody else's cells. The demo's own `0x1a`
+  table carries its type count, so a disagreement with `--units` drops that demo
+  from the cells rather than printing a warning and hoping -- which is what lets
+  the regeneration below be a plain `--dir` over the whole corpus with the one
+  ProTA recording in it.
 
 Regenerating (Escalation; the paths are a local corpus, not a repository one):
 
@@ -948,7 +979,21 @@ Regenerating (Escalation; the paths are a local corpus, not a repository one):
 cd build && make -j$(nproc) tad_episodes && cd ..
 ./build/tad_episodes --file ~/ta-demos/14727.ted --file ~/ta-demos/14731.ted \
     --units ~/ta-mods/x-esc --emit-cpp src/rwe/sim/tad_economy_episodes.h
+./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc \
+    --emit-build-cpp src/rwe/sim/tad_build_episodes.h
 ```
+
+The build-timing one takes the whole directory because a cell pools across
+games and wants every build it can get. It prints a warning for the one ProTA
+recording and then excludes it, per the rule above; `--cells` prints the table
+without writing anything, which is what `tools/tad-buildtime.py` scores and what
+the port was checked against, cell for cell, over the same episodes.
+
+The single ProTA demo yields exactly one scoreable cell of its own
+(`ARMVP -> ARMFAV`, three builds, agreeing with the model), which is not enough
+to be worth a fixture, and it cannot join the Escalation ones in any case:
+`--units` names types out of one load order, and the two data sets do not share
+one.
 
 **A demo with a computer player is contaminated for economy work** and is not a
 candidate. TA handicaps a computer player's production at every site (§23), and
@@ -1092,10 +1137,50 @@ They catch different things and should not share machinery.
       `0x28` alone. What is: a stall's onset and recovery across several
       samples, and the trajectory of a stockpile over a window with a known
       composition. Both need the production model as well as the storage one.
-   4. **The build-timing oracle**, which (1) has now scoped. RWE side:
-      `UnitState::getBuildCostInfo`, `UnitState::addBuildProgress`, their two
-      call sites in `UnitBehaviorService.cpp`, and `workerTimePerTick` in
-      `LoadingScene_util.cpp`. Consume the mode, never the mean.
+   4. ~~**The build-timing oracle.**~~ Done.
+      `tad_episodes --emit-build-cpp` writes `src/rwe/sim/tad_build_episodes.h`
+      -- 25 (factory, product) cells of the Escalation corpus, each consumed as
+      the modal duration of every build of that pair -- and three
+      `[build][corpus]` cases in `src/rwe/sim/buildtime.test.cpp` assert them
+      against `UnitState::addBuildProgress`, driven directly, with
+      `workerTimePerTick` (`src/rwe/LoadingScene_util.cpp:438`) as the rate.
+
+      **Not through the factory pipeline**, and that is the scoping decision the
+      whole item turns on. RWE does not credit progress on the tick the
+      nanoframe appears: `UnitBehaviorService.cpp` pushes a
+      `unitCreationRequest` that `spawnNewUnits` services later, the next tick
+      starts a `StartBuilding` COB thread and returns without building, and
+      nothing is credited until the script sets `INBUILDSTANCE`. The corpus
+      number has the opposite convention on purpose -- TA's first increment
+      lands on the `0x09`'s own tick, and a builder's deploy before
+      `INBUILDSTANCE` is mod data rather than engine behaviour, which is why
+      only immobile builders are scored at all. A pipeline measurement would
+      carry RWE's scheduling latency and the test script's deploy and compare
+      them against a number chosen to exclude TA's. So the cases count calls to
+      the accumulator and assert `calls - 1`, which is hermetic, fast, and
+      immune to anything a script does. A pipeline test is worth having and is a
+      separate thing, under a separate name and with no corpus number in it.
+
+      **This is the first fixture whose expected-difference field carries a
+      non-zero value**, which is the whole argument for the field existing. Ten
+      of the fifteen cells whose `BuildTime` divides exactly by the builder's
+      rate need one increment more than the division says, and RWE finishes
+      those a tick early -- `docs/TOTALA-EXE.md` §88, kept deliberately, because
+      closing it means a `float` in hashed simulation state. Those ten carry
+      `expectedDurationDelta = -1` and the other fifteen carry zero. A test
+      asserting equality here would have been right to fail on a quarter of its
+      cases and disabled within a week.
+
+      Both mutations landed. Finishing one increment early moves **all 25**
+      cells, which says the cases are measuring the accumulator and not a
+      constant. Replacing the accumulator with the original's float32 fraction
+      fails **exactly the ten** and no others, which says the deltas are
+      precisely the divergence §88 describes rather than a per-episode fudge.
+
+      Airborne builders are still not episodes and must not become them until
+      §91 says why a construction aircraft finishes a tick early; writing that
+      `-1` into `expectedDurationDelta` would launder an open question into a
+      licensed divergence.
    5. **The weapon-event oracle.** `0x0d` shot to `0x0b` damage or `0x0c` death
       gives time-of-flight and hit/miss with the shot as an explicit input,
       aimed at the missile motor model and the ballistics work. Remember `0x0b`

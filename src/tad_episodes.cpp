@@ -36,8 +36,13 @@
 //   --emit-json   write the episodes to a file as JSON
 //   --emit-resources  write every 0x28 resource record to a file as JSON
 //   --emit-cpp    write the storage episodes as a C++ header for rwe_test
+//   --emit-build-cpp  write the build-timing episodes as a C++ header
+//   --cells       print the (builder, product) build-timing cells, which is
+//                 what tools/tad-buildtime.py scores
 //   --max-types   distinct unit types an episode may carry (default 6)
 //   --max-per-player  episodes to keep per player (default 3)
+//   --max-cells   build-timing episodes to check in (default 25)
+//   --min-builds  builds a cell needs before its mode is used (default 5)
 //   --all         emit rejected episodes too, each with its reasons
 
 #include <algorithm>
@@ -505,16 +510,25 @@ namespace
      *
      * Only --emit-cpp needs this. Naming a type needs the file names alone,
      * which is why the load order is built from stems and this is separate.
+     *
+     * The storage pair explains a 0x28 capacity; buildTime and workerTime
+     * explain a nanoframe's duration, and maxVelocity and canFly decide which
+     * of the three scoring classes a builder falls into. One reader, because a
+     * second one could disagree with this about what a field means.
      */
-    struct UnitStorage
+    struct UnitFacts
     {
         float metalStorage;
         float energyStorage;
+        unsigned int buildTime;
+        unsigned int workerTime;
+        float maxVelocity;
+        bool canFly;
     };
 
-    std::map<std::string, UnitStorage> readUnitStorage(const std::vector<std::filesystem::path>& files)
+    std::map<std::string, UnitFacts> readUnitFacts(const std::vector<std::filesystem::path>& files)
     {
-        std::map<std::string, UnitStorage> storage;
+        std::map<std::string, UnitFacts> facts;
         for (const auto& file : files)
         {
             std::ifstream stream(file, std::ios::binary);
@@ -533,9 +547,13 @@ namespace
                 {
                     c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
                 }
-                storage[name] = UnitStorage{
+                facts[name] = UnitFacts{
                     static_cast<float>(fbi.metalStorage),
-                    static_cast<float>(fbi.energyStorage)};
+                    static_cast<float>(fbi.energyStorage),
+                    fbi.buildTime,
+                    fbi.workerTime,
+                    fbi.maxVelocity,
+                    fbi.canFly};
             }
             catch (const std::exception&)
             {
@@ -544,7 +562,7 @@ namespace
                 // than emitted with a hole in it.
             }
         }
-        return storage;
+        return facts;
     }
 
     /** The type index as a name if we have the data set, and as a number if not. */
@@ -688,7 +706,7 @@ namespace
     /** Aggregates units by type, in name order, so regeneration is stable. */
     std::vector<CompositionEntry> aggregate(
         const std::vector<std::string>& names,
-        const std::map<std::string, UnitStorage>& unitStorage)
+        const std::map<std::string, UnitFacts>& unitFacts)
     {
         std::map<std::string, unsigned int> counts;
         for (const auto& name : names)
@@ -699,8 +717,8 @@ namespace
         std::vector<CompositionEntry> out;
         for (const auto& [name, count] : counts)
         {
-            auto storage = unitStorage.find(name);
-            if (storage == unitStorage.end())
+            auto storage = unitFacts.find(name);
+            if (storage == unitFacts.end())
             {
                 return {};
             }
@@ -712,7 +730,7 @@ namespace
     std::vector<StorageEpisode> mineStorageEpisodes(
         const EpisodeHandler& handler,
         const std::vector<std::string>& loadOrder,
-        const std::map<std::string, UnitStorage>& unitStorage,
+        const std::map<std::string, UnitFacts>& unitFacts,
         std::size_t maxTypes,
         std::size_t maxPerPlayer)
     {
@@ -799,8 +817,8 @@ namespace
                         break;
                     }
 
-                    auto storage = unitStorage.find(*name);
-                    if (storage == unitStorage.end())
+                    auto storage = unitFacts.find(*name);
+                    if (storage == unitFacts.end())
                     {
                         unknownType = true;
                         break;
@@ -837,8 +855,8 @@ namespace
 
                 if (changed)
                 {
-                    auto finished = aggregate(finishedNames, unitStorage);
-                    auto building = aggregate(buildingNames, unitStorage);
+                    auto finished = aggregate(finishedNames, unitFacts);
+                    auto building = aggregate(buildingNames, unitFacts);
 
                     // A composition nobody can read is not worth checking in.
                     if (finished.size() <= maxTypes)
@@ -1110,11 +1128,8 @@ namespace rwe
      * make this check itself: it never opens a file, and the corpus is not in
      * the repository.
      */
-    bool emitCpp(const std::filesystem::path& path, std::vector<StorageEpisode> episodes)
+    bool writeGeneratedHeader(const std::filesystem::path& path, const std::string& generated)
     {
-        std::ostringstream generated;
-        writeEpisodes(generated, std::move(episodes));
-
         std::string existing;
         {
             std::ifstream stream(path, std::ios::binary);
@@ -1124,7 +1139,7 @@ namespace rwe
             }
         }
 
-        if (existing == generated.str())
+        if (existing == generated)
         {
             std::cout << "unchanged: " << path.string() << "\n";
             return true;
@@ -1135,9 +1150,438 @@ namespace rwe
         {
             return false;
         }
-        out << generated.str();
+        out << generated;
         std::cout << (existing.empty() ? "wrote " : "CHANGED ") << path.string() << "\n";
         return static_cast<bool>(out);
+    }
+
+    // --- --emit-build-cpp: build-timing episodes -----------------------------
+    //
+    // A build-timing episode is one (builder type, product type) cell of the
+    // corpus, consumed as the MODE of its durations. The model being pinned is
+    // TA's completion arithmetic: a builder contributes p = WorkerTime / 30
+    // build units a tick, the first increment lands on the 0x09's own tick, and
+    // the job finishes when a single-precision fraction counted up by
+    // p / BuildTime passes 1.0f. tools/tad-buildtime.py is the same arithmetic
+    // and is the re-runnable check; this is the port that feeds the fixture.
+    //
+    // This is a corpus-wide pass, unlike the storage miner, because a cell pools
+    // across demos: a pair that appears six times in each of four games is one
+    // observation with 24 builds behind it.
+
+    /** One (builder, product) pair of the corpus, with its modal duration. */
+    struct BuildCell
+    {
+        std::string builder;
+        std::string product;
+        unsigned int buildTime;
+        unsigned int workerTime;
+
+        /** The builder's contribution a tick, WorkerTime / 30, integer division. */
+        unsigned int p;
+
+        /** How many builds survived the outlier cap, and how many hit the mode. */
+        unsigned int builds;
+        unsigned int buildsAtMode;
+
+        /** The modal duration in ticks, which is the number to consume. */
+        uint32_t mode;
+
+        /** What TA's float32 fraction predicts, as a duration. */
+        unsigned int floatModel;
+
+        /** What RWE's integer accumulator predicts, as a duration. */
+        unsigned int integerModel;
+
+        /** immobile, airborne or ground: the three classes that score apart. */
+        std::string kind;
+
+        /** One build that landed on the mode, for the episode's provenance. */
+        std::string demo;
+        uint32_t startTick;
+        uint32_t finishTick;
+    };
+
+    /**
+     * How many increments TA needs, by replaying its accumulator.
+     *
+     * Every operation is a float32 one and has to stay that way: doing the same
+     * sum in double precision gets 6 of the 15 divisible pairs right where this
+     * gets all 15, which is what says the arithmetic is genuinely 32-bit.
+     */
+    unsigned int tadTicksToBuild(unsigned int buildTime, unsigned int p)
+    {
+        auto x = static_cast<float>(p) / static_cast<float>(buildTime);
+        auto frac = 0.0f;
+        unsigned int n = 0;
+        while (frac <= 1.0f && n < 400000)
+        {
+            frac = frac + x;
+            ++n;
+        }
+        return n;
+    }
+
+    /**
+     * How many increments RWE needs. UnitState::addBuildProgress clamps the
+     * contribution to what is left and finishes on equality, so this is a plain
+     * ceiling -- and where BuildTime divides exactly by p, that is a tick fewer
+     * than TA takes. docs/TOTALA-EXE.md section 88.
+     */
+    unsigned int rweTicksToBuild(unsigned int buildTime, unsigned int p)
+    {
+        return (buildTime + p - 1) / p;
+    }
+
+    /** Which of the three scoring classes a builder belongs to. */
+    std::string builderClass(const UnitFacts& facts)
+    {
+        if (facts.maxVelocity == 0.0f)
+        {
+            return "immobile";
+        }
+        return facts.canFly ? "airborne" : "ground";
+    }
+
+    /**
+     * (builder type, product type) cells over the whole corpus.
+     *
+     * A builder's own type is known only where the builder was itself built
+     * during the recording, which is what makes builder-keyed rows possible at
+     * all: pair a 0x12's builderId back to the unitId of an earlier episode.
+     * That is also what limits how many cells there are.
+     */
+    std::vector<BuildCell> mineBuildCells(
+        const std::vector<Episode>& episodes,
+        const std::vector<std::string>& loadOrder,
+        const std::map<std::string, UnitFacts>& unitFacts,
+        const std::set<std::string>& wrongDataSet,
+        unsigned int minBuilds)
+    {
+        auto nameOf = [&](const Episode& e) -> std::optional<std::string> {
+            return tadUnitNameForTypeIndex(loadOrder, e.typeIndex);
+        };
+
+        // A cell pools across demos, so unlike the storage miner this one can be
+        // poisoned by a single demo recorded on another data set: its type
+        // indices would name the wrong units and merge into somebody else's
+        // cells. The demo's own 0x1a table says how many types it had, so a
+        // disagreement with --units is grounds to drop it rather than to print a
+        // warning and hope. That is what keeps --dir over a mixed corpus honest.
+        std::vector<const Episode*> byFinish;
+        for (const auto& e : episodes)
+        {
+            if (wrongDataSet.count(e.demo) != 0)
+            {
+                continue;
+            }
+            byFinish.push_back(&e);
+        }
+        std::stable_sort(byFinish.begin(), byFinish.end(), [](const Episode* a, const Episode* b) {
+            return std::tie(a->demo, a->finishTick) < std::tie(b->demo, b->finishTick);
+        });
+
+        std::map<std::pair<std::string, uint16_t>, std::string> born;
+        for (const auto* e : byFinish)
+        {
+            if (auto name = nameOf(*e))
+            {
+                born.emplace(std::make_pair(e->demo, e->unitId), *name);
+            }
+        }
+
+        // Grouped in first-appearance order, because the mode's tie-break is
+        // first-encountered and the port has to agree with the script's on the
+        // cells where two durations are equally common.
+        std::map<std::pair<std::string, std::string>, std::vector<const Episode*>> grouped;
+        for (const auto& e : episodes)
+        {
+            if (wrongDataSet.count(e.demo) != 0)
+            {
+                continue;
+            }
+
+            auto builder = born.find(std::make_pair(e.demo, e.builderId));
+            auto product = nameOf(e);
+            if (builder == born.end() || !product)
+            {
+                continue;
+            }
+            if (unitFacts.count(builder->second) == 0 || unitFacts.count(*product) == 0)
+            {
+                continue;
+            }
+            grouped[std::make_pair(builder->second, *product)].push_back(&e);
+        }
+
+        std::vector<BuildCell> out;
+        for (const auto& [pair, builds] : grouped)
+        {
+            const auto& builderFacts = unitFacts.at(pair.first);
+            const auto& productFacts = unitFacts.at(pair.second);
+            auto p = builderFacts.workerTime / 30;
+            if (p == 0 || productFacts.buildTime == 0)
+            {
+                continue;
+            }
+
+            auto floatModel = tadTicksToBuild(productFacts.buildTime, p) - 1;
+
+            // Assisted builds are the bulk of a competitive game and only ever
+            // shorten; a cap either side keeps them and the badly stalled ones
+            // from dragging the mode off the unassisted build.
+            std::vector<const Episode*> kept;
+            for (const auto* e : builds)
+            {
+                auto delta = static_cast<long long>(e->durationTicks()) - static_cast<long long>(floatModel);
+                if (delta >= -20 && delta <= 120)
+                {
+                    kept.push_back(e);
+                }
+            }
+            if (kept.size() < minBuilds)
+            {
+                continue;
+            }
+
+            std::map<uint32_t, unsigned int> histogram;
+            uint32_t mode = 0;
+            unsigned int atMode = 0;
+            for (const auto* e : kept)
+            {
+                auto count = ++histogram[e->durationTicks()];
+                if (count > atMode)
+                {
+                    mode = e->durationTicks();
+                    atMode = count;
+                }
+            }
+
+            // The representative build is the earliest one that landed on the
+            // mode, so the provenance is stable under regeneration.
+            const Episode* representative = nullptr;
+            for (const auto* e : kept)
+            {
+                if (e->durationTicks() != mode)
+                {
+                    continue;
+                }
+                if (representative == nullptr
+                    || std::tie(e->demo, e->startTick, e->unitId)
+                        < std::tie(representative->demo, representative->startTick, representative->unitId))
+                {
+                    representative = e;
+                }
+            }
+
+            out.push_back(BuildCell{
+                pair.first,
+                pair.second,
+                productFacts.buildTime,
+                builderFacts.workerTime,
+                p,
+                static_cast<unsigned int>(kept.size()),
+                atMode,
+                mode,
+                floatModel,
+                rweTicksToBuild(productFacts.buildTime, p) - 1,
+                builderClass(builderFacts),
+                representative->demo,
+                representative->startTick,
+                representative->finishTick});
+        }
+
+        return out;
+    }
+
+    /**
+     * Picks the cells worth checking in, and writes them.
+     *
+     * The storage miner's selection rule -- one episode per distinct set of
+     * storage-granting types -- does not transfer, because a cell already IS an
+     * aggregate: every one of them asserts something different by construction.
+     * So the rule here is one episode per scored cell, capped, and the cap
+     * prefers the cells where the two models part company: all of the ones whose
+     * BuildTime divides exactly by p, because those carry the ten deltas, and
+     * then the most-observed of the rest, because a mode over 249 builds is a
+     * stronger observation than one over 5.
+     *
+     * A SEPARATE HEADER from tad_economy_episodes.h, deliberately. The two share
+     * no struct, are mined from different passes -- storage per demo, build
+     * timing corpus-wide, because a cell pools across games -- and are
+     * regenerated from different corpora, so one regeneration should never churn
+     * the other's diff.
+     */
+    void writeBuildEpisodes(std::ostream& out, std::vector<BuildCell> cells, std::size_t maxCells)
+    {
+        // A cell the float32 model does not predict is an unexplained
+        // observation, and checking one in would write a mystery into
+        // expectedDurationDelta as though it were a licensed divergence -- the
+        // one thing that field exists to prevent. There are none over the
+        // Escalation corpus; if one ever appears, tools/tad-buildtime.py exits
+        // non-zero at the same moment and that is where to start.
+        std::vector<BuildCell> scored;
+        unsigned int unexplained = 0;
+        for (auto& cell : cells)
+        {
+            if (cell.kind != "immobile")
+            {
+                continue;
+            }
+            if (cell.mode != cell.floatModel)
+            {
+                std::cout << "  skipping " << cell.builder << " -> " << cell.product
+                          << ": corpus says " << cell.mode << ", the model says " << cell.floatModel << "\n";
+                ++unexplained;
+                continue;
+            }
+            scored.push_back(std::move(cell));
+        }
+
+        std::stable_sort(scored.begin(), scored.end(), [](const BuildCell& a, const BuildCell& b) {
+            auto rank = [](const BuildCell& c) { return c.buildTime % c.p == 0 ? 0 : 1; };
+            return std::make_tuple(rank(a), b.builds, a.builder, a.product)
+                < std::make_tuple(rank(b), a.builds, b.builder, b.product);
+        });
+        if (scored.size() > maxCells)
+        {
+            scored.resize(maxCells);
+        }
+
+        // Emitted in name order, so a regeneration that adds a cell inserts one
+        // row rather than reshuffling the table.
+        std::sort(scored.begin(), scored.end(), [](const BuildCell& a, const BuildCell& b) {
+            return std::tie(a.builder, a.product) < std::tie(b.builder, b.product);
+        });
+
+        unsigned int divergent = 0;
+        for (const auto& cell : scored)
+        {
+            divergent += cell.integerModel == cell.mode ? 0 : 1;
+        }
+        std::cout << scored.size() << " build episode(s), " << divergent
+                  << " of them where RWE is expected to differ";
+        if (unexplained != 0)
+        {
+            std::cout << ", " << unexplained << " cell(s) skipped as unexplained";
+        }
+        std::cout << "\n";
+
+        out << R"(#pragma once
+
+// GENERATED FILE -- do not edit by hand. Regenerate with tad_episodes
+// --emit-build-cpp; the command, and the corpus it needs, are in
+// docs/TA-DEMOS.md.
+//
+// Episodes mined from real Total Annihilation games, for the conformance tests
+// in buildtime.test.cpp. Its sibling, tad_economy_episodes.h, holds the storage
+// ones; they share no struct and are mined by different passes, so they are kept
+// apart and regenerate independently.
+//
+// WHY THIS IS A HEADER OF STRUCTS AND NOT A DATA FILE. rwe_test is hermetic --
+// it reads no files, mounts no VFS and opens no archive -- and it stays that
+// way. Demos and mod files never enter the repository either. So the numbers
+// travel as source: each unit's own FBI values are transcribed inline beside the
+// observation they explain, and a test can be read without either.
+//
+// WHAT AN EPISODE IS. One (builder type, product type) cell of the corpus: every
+// build of that product by that builder, pooled across the games it appeared in,
+// consumed as the MODE of its durations. The mode and not the mean, because a
+// build runs at full rate unless something interferes -- an assist shortens it
+// and a missed micro-stall lengthens it -- so the modal duration is the
+// unassisted, unimpeded one and the spread either side is the interference.
+//
+// WHICH BUILDS MAY BE HERE. Only builds by an IMMOBILE builder, which is to say
+// a factory: there is nothing for it to walk to and nothing for it to deploy, so
+// the duration is the nanolathe and nothing else. A ground mobile builder pays
+// its own COB deploy sequence before INBUILDSTANCE, which is the mod's data
+// rather than the engine's behaviour. An airborne one finishes consistently one
+// tick early against the model, for a reason nobody has yet read out of the
+// binary (docs/TOTALA-EXE.md section 91), and writing that into
+// expectedDurationDelta would launder an open question into a licensed
+// divergence, which is the one thing that field exists to prevent. See
+// docs/TA-DEMOS.md.
+//
+// THE ARITHMETIC BEING PINNED. A builder contributes p = WorkerTime / 30 build
+// units a tick -- integer division, in the engine and in the demo tooling alike.
+// The first increment lands on the tick the nanoframe appears, so an episode's
+// duration is one less than the number of increments. The original finishes when
+// a single-precision fraction counted up by p / BuildTime passes 1.0f; RWE adds
+// p to an unsigned counter and finishes at BuildTime. Those two agree except
+// where BuildTime divides exactly by p, and expectedDurationDelta is where they
+// do not.
+
+namespace rwe
+{
+    /** One (builder, product) cell of the corpus, consumed as its modal duration. */
+    struct TadBuildEpisode
+    {
+        /**
+         * Provenance. builds is how many builds of this pair the corpus held
+         * after the outlier cap, buildsAtMode how many of them landed on the
+         * mode, and the tick pair is one representative build that did -- out of
+         * the named demo, which is not necessarily the only game the cell pooled
+         * over.
+         */
+        const char* demo;
+        const char* builderName;
+        const char* productName;
+        unsigned int startTick;
+        unsigned int finishTick;
+        unsigned int builds;
+        unsigned int buildsAtMode;
+
+        /** The builder's own WorkerTime and the product's own BuildTime, from the FBI. */
+        unsigned int workerTime;
+        unsigned int buildTime;
+
+        /** Observed: finishTick - startTick, at the mode. */
+        unsigned int modeDurationTicks;
+
+        /**
+         * What RWE is expected to differ by, and why.
+         *
+         * A conformance test that asserts equality gets disabled the first time
+         * it is right to fail, so an episode asserts the observation plus a
+         * known delta instead. expectedDifference names the docs/TOTALA-EXE.md
+         * section 88 entry that licences a non-zero one, and is null where there
+         * is nothing to excuse.
+         *
+         * Unlike the storage episodes' deltas, these are not hand-written: the
+         * two completion models are both small enough to replay, so the emitter
+         * computes the difference between them. That is not circular. A test
+         * asserting mode + delta still fails if the engine stops matching its
+         * own model, and it fails on exactly these rows -- and no others -- if
+         * the engine is changed to the original's float, which is what says the
+         * deltas are the divergence section 88 describes rather than a fudge
+         * that happens to fit.
+         */
+        int expectedDurationDelta;
+        const char* expectedDifference;
+    };
+
+    // clang-format off
+    inline constexpr TadBuildEpisode tadBuildEpisodes[] = {
+)";
+
+        for (const auto& cell : scored)
+        {
+            auto delta = static_cast<int>(cell.integerModel) - static_cast<int>(cell.mode);
+            out << "        {\"" << cell.demo << "\", \"" << cell.builder << "\", \"" << cell.product << "\",\n"
+                << "            " << cell.startTick << ", " << cell.finishTick << ", "
+                << cell.builds << ", " << cell.buildsAtMode << ",\n"
+                << "            " << cell.workerTime << ", " << cell.buildTime << ", "
+                << cell.mode << ",\n"
+                << "            " << delta << ", "
+                << (delta == 0
+                           ? std::string("nullptr")
+                           : "\"TOTALA-EXE.md 88: build progress is an integer accumulator, not the original's float\"")
+                << "},\n";
+        }
+
+        out << "    };\n"
+            << "    // clang-format on\n"
+            << "}\n";
     }
 
     bool isDemo(const std::filesystem::path& path)
@@ -1176,8 +1620,12 @@ int main(int argc, char* argv[])
                   << "  --emit-json   write the episodes to a file as JSON\n"
                   << "  --emit-resources  write every 0x28 resource record as JSON\n"
                   << "  --emit-cpp    write the storage episodes as a C++ header (needs --units)\n"
+                  << "  --emit-build-cpp  write the build-timing episodes as a C++ header (needs --units)\n"
+                  << "  --cells       print the (builder, product) build-timing cells\n"
                   << "  --max-types   distinct unit types an episode may carry (default 6)\n"
                   << "  --max-per-player  episodes to keep per player (default 3)\n"
+                  << "  --max-cells   build-timing episodes to check in (default 25)\n"
+                  << "  --min-builds  builds a cell needs before its mode is used (default 5)\n"
                   << "  --all         emit rejected episodes too, each with its reasons\n"
                   << "\n"
                   << "Without --units, episodes are keyed on an anonymous type index; see the\n"
@@ -1208,7 +1656,7 @@ int main(int argc, char* argv[])
         }
     }
     std::vector<std::string> loadOrder;
-    std::map<std::string, UnitStorage> unitStorage;
+    std::map<std::string, UnitFacts> unitFacts;
     if (args.contains("units"))
     {
         auto dir = args.getString("units");
@@ -1231,7 +1679,7 @@ int main(int argc, char* argv[])
             stems.push_back(file.stem().string());
         }
         loadOrder = tadUnitLoadOrder(std::move(stems));
-        unitStorage = readUnitStorage(files);
+        unitFacts = readUnitFacts(files);
         std::cout << "unit load order: " << loadOrder.size() << " types from " << dir << "\n";
     }
 
@@ -1251,6 +1699,12 @@ int main(int argc, char* argv[])
     // the first three did not.
     std::size_t maxTypes = args.contains("max-types") ? std::stoul(args.getString("max-types")) : 6;
     std::size_t maxPerPlayer = args.contains("max-per-player") ? std::stoul(args.getString("max-per-player")) : 3;
+    std::size_t maxCells = args.contains("max-cells") ? std::stoul(args.getString("max-cells")) : 25;
+
+    // How many builds a (builder, product) cell needs before its mode is worth
+    // consuming. The same default, and the same meaning, as
+    // tools/tad-buildtime.py's.
+    unsigned int minBuilds = args.contains("min-builds") ? std::stoul(args.getString("min-builds")) : 5;
 
     if (args.contains("emit-cpp") && loadOrder.empty())
     {
@@ -1258,10 +1712,20 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    if (args.contains("emit-build-cpp") && loadOrder.empty())
+    {
+        std::cerr << "--emit-build-cpp needs --units: a cell is keyed on the builder's and the"
+                  << " product's own types, and carries their FBI values\n";
+        return 1;
+    }
+
     nlohmann::json resourceJson = nlohmann::json::array();
     std::vector<StorageEpisode> storageEpisodes;
 
     std::vector<rwe::Episode> all;
+
+    /** Demos whose own type count disagrees with --units; see mineBuildCells. */
+    std::set<std::string> wrongDataSet;
     std::map<std::string, unsigned int> rejectionCounts;
     unsigned int cleanCount = 0;
 
@@ -1317,11 +1781,12 @@ int main(int argc, char* argv[])
             std::cerr << "  WARNING: " << path.filename().string() << " declares "
                       << handler.unitTable->restricted.size() << " unit types but --units gave "
                       << loadOrder.size() << "; names for this demo will be wrong\n";
+            wrongDataSet.insert(path.filename().string());
         }
 
         if (args.contains("emit-cpp"))
         {
-            auto mined = mineStorageEpisodes(handler, loadOrder, unitStorage, maxTypes, maxPerPlayer);
+            auto mined = mineStorageEpisodes(handler, loadOrder, unitFacts, maxTypes, maxPerPlayer);
             std::cout << "  " << mined.size() << " storage episode(s)\n";
             storageEpisodes.insert(storageEpisodes.end(), mined.begin(), mined.end());
         }
@@ -1442,10 +1907,99 @@ int main(int argc, char* argv[])
         }
     }
 
+    // The build-timing cells, corpus-wide. Printed on --cells so the port can be
+    // diffed against tools/tad-buildtime.py over the same episodes, which is the
+    // check that says this is the script's arithmetic and not a second opinion.
+    std::vector<BuildCell> buildCells;
+    if (!loadOrder.empty() && (args.contains("cells") || args.contains("emit-build-cpp")))
+    {
+        if (!wrongDataSet.empty())
+        {
+            std::cout << "\nexcluding " << wrongDataSet.size()
+                      << " demo(s) from the build-timing cells: recorded on another data set\n";
+        }
+        buildCells = mineBuildCells(all, loadOrder, unitFacts, wrongDataSet, minBuilds);
+    }
+
+    if (args.contains("cells"))
+    {
+        std::vector<const BuildCell*> scored;
+        for (const auto& cell : buildCells)
+        {
+            if (cell.kind == "immobile")
+            {
+                scored.push_back(&cell);
+            }
+        }
+
+        std::map<std::string, unsigned int> byClass;
+        for (const auto& cell : buildCells)
+        {
+            ++byClass[cell.kind];
+        }
+
+        std::cout << "\n"
+                  << buildCells.size() << " pairs with " << minBuilds << "+ builds:";
+        for (const auto& [kind, count] : byClass)
+        {
+            std::cout << " " << count << " " << kind;
+        }
+
+        // Only the immobile class may become an episode. A ground mobile
+        // builder pays its own COB deploy before INBUILDSTANCE, which is mod
+        // data; an airborne one finishes a tick early for a reason nobody has
+        // read out of the binary yet (TOTALA-EXE.md section 91), and writing
+        // that into expectedDifference would launder an open question into a
+        // licensed divergence. docs/TA-DEMOS.md.
+        std::cout << "\nscoring the " << scored.size() << " whose builder is immobile\n\n"
+                  << "  builder    product      BuildTime   p   BT/p  extra   mode     n  share  delta\n";
+
+        std::sort(scored.begin(), scored.end(), [](const BuildCell* a, const BuildCell* b) {
+            return std::tie(b->builds, a->builder, a->product) < std::tie(a->builds, b->builder, b->product);
+        });
+
+        unsigned int misses = 0;
+        for (const auto* cell : scored)
+        {
+            auto floorTicks = cell->buildTime / cell->p;
+            auto extra = static_cast<int>(cell->floatModel + 1) - static_cast<int>(floorTicks);
+            auto delta = static_cast<int>(cell->integerModel) - static_cast<int>(cell->mode);
+            auto agrees = cell->mode == cell->floatModel;
+            misses += agrees ? 0 : 1;
+            std::cout << "  " << std::left << std::setw(10) << cell->builder << " "
+                      << std::setw(12) << cell->product << std::right
+                      << std::setw(10) << cell->buildTime
+                      << std::setw(4) << cell->p
+                      << std::setw(7) << floorTicks
+                      << std::setw(6) << std::showpos << extra << std::noshowpos
+                      << std::setw(7) << cell->mode
+                      << std::setw(6) << cell->builds
+                      << std::setw(6) << (100 * cell->buildsAtMode / cell->builds) << "%"
+                      << std::setw(6) << std::showpos << delta << std::noshowpos
+                      << (agrees ? "" : "   <-- disagrees with the float32 model") << "\n";
+        }
+        std::cout << "\n"
+                  << misses << " disagreement(s) with the float32 model\n";
+    }
+
     if (args.contains("emit-cpp"))
     {
         auto out = args.getString("emit-cpp");
-        if (!emitCpp(out, storageEpisodes))
+        std::ostringstream generated;
+        writeEpisodes(generated, std::move(storageEpisodes));
+        if (!writeGeneratedHeader(out, generated.str()))
+        {
+            std::cerr << "cannot write " << out << "\n";
+            return 1;
+        }
+    }
+
+    if (args.contains("emit-build-cpp"))
+    {
+        auto out = args.getString("emit-build-cpp");
+        std::ostringstream generated;
+        writeBuildEpisodes(generated, std::move(buildCells), maxCells);
+        if (!writeGeneratedHeader(out, generated.str()))
         {
             std::cerr << "cannot write " << out << "\n";
             return 1;

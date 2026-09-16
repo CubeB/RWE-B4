@@ -875,6 +875,7 @@ set(TEST_FILES
     src/rwe/game/wake.test.cpp
     src/rwe/game/viewcull.test.cpp
     src/rwe/sim/buildangle.test.cpp
+    src/rwe/sim/buildtime.test.cpp
     src/rwe/sim/bombsight.test.cpp
     src/rwe/sim/cob.test.cpp
     src/rwe/sim/SimAngle.test.cpp

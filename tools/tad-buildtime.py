@@ -49,6 +49,12 @@ builders fall into three classes that have to be scored apart:
         --emit-json /tmp/ep.json
     tools/tad-buildtime.py --episodes /tmp/ep.json --units ~/ta-mods/x-esc
 
+The cell grouping and the completion model are both ported into
+src/tad_episodes.cpp, which is what generates the checked-in fixture
+(src/rwe/sim/tad_build_episodes.h). This script is the reference: `tad_episodes
+--cells` prints the same table over the same episodes and the two must keep
+agreeing, cell for cell. If they part company it is the port that is wrong.
+
 Exits non-zero if any scored cell disagrees with the model, so this is a check
 and not a listing. It ALSO exits non-zero when there is nothing to score, which
 reads like a failure and is not one: the single ProTA demo in the corpus has
