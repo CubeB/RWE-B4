@@ -34,6 +34,12 @@ namespace rwe
         s.basicTexture.tint = graphics.getUniformLocation(s.basicTexture.handle.get(), "tint");
         s.basicTexture.desaturate = graphics.getUniformLocation(s.basicTexture.handle.get(), "desaturate");
 
+        s.basicTextureMasked.handle = loadShader(graphics, "shaders/basicTexture.vert", "shaders/basicTextureMasked.frag", texturedVertexAttribs);
+        s.basicTextureMasked.mvpMatrix = graphics.getUniformLocation(s.basicTextureMasked.handle.get(), "mvpMatrix");
+        s.basicTextureMasked.tint = graphics.getUniformLocation(s.basicTextureMasked.handle.get(), "tint");
+        s.basicTextureMasked.desaturate = graphics.getUniformLocation(s.basicTextureMasked.handle.get(), "desaturate");
+        s.basicTextureMasked.maskValue = graphics.getUniformLocation(s.basicTextureMasked.handle.get(), "maskValue");
+
         s.mapTerrain.handle = loadShader(graphics, "shaders/mapTerrain.vert", "shaders/mapTerrain.frag", texturedVertexAttribs);
         s.mapTerrain.mvpMatrix = graphics.getUniformLocation(s.mapTerrain.handle.get(), "mvpMatrix");
         s.mapTerrain.fogSampler = graphics.getUniformLocation(s.mapTerrain.handle.get(), "fogSampler");

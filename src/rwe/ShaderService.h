@@ -20,6 +20,21 @@ namespace rwe
         UniformLocation desaturate;
     };
 
+    /**
+     * basicTexture, plus the building halo's coverage mask. The one caller
+     * that wants a standing feature -- a tree -- to occlude a building for
+     * the halo test uses this instead. See basicTextureMasked.frag.
+     */
+    struct BasicTextureMaskedShader
+    {
+        ShaderProgramHandle handle;
+        UniformLocation mvpMatrix;
+        UniformLocation tint;
+        UniformLocation desaturate;
+        /** Always 0.5, "anything else solid". See UnitTextureShader::maskValue. */
+        UniformLocation maskValue;
+    };
+
     struct MapTerrainShader
     {
         ShaderProgramHandle handle;
@@ -107,6 +122,7 @@ namespace rwe
     public:
         BasicColorShader basicColor;
         BasicTextureShader basicTexture;
+        BasicTextureMaskedShader basicTextureMasked;
         MapTerrainShader mapTerrain;
         UnitTextureShader unitTexture;
         UnitShadowShader unitShadow;

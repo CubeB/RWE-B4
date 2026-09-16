@@ -403,4 +403,21 @@ namespace rwe
             graphics->drawTriangles(*s.sprite->mesh);
         }
     }
+
+    void RenderService::drawMaskedSpriteBatch(const SpriteBatch& batch, float maskValue)
+    {
+        const auto& shader = shaders->basicTextureMasked;
+        graphics->bindShader(shader.handle.get());
+        graphics->setUniformFloat(shader.maskValue, maskValue);
+
+        for (const auto& s : batch.sprites)
+        {
+            float alpha = s.translucent ? 0.5f : 1.0f;
+            graphics->bindTexture(s.sprite->texture.get());
+            graphics->setUniformMatrix(shader.mvpMatrix, s.mvpMatrix);
+            graphics->setUniformVec4(shader.tint, 1.0f, 1.0f, 1.0f, alpha);
+            graphics->setUniformFloat(shader.desaturate, s.fogged ? 1.0f : 0.0f);
+            graphics->drawTriangles(*s.sprite->mesh);
+        }
+    }
 }

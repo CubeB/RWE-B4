@@ -1781,7 +1781,20 @@ namespace rwe
             RWE_RENDERPROF("w.feature.draw");
             RWE_RENDERPROF_COUNT("n.featuresprite", featureBatch.sprites.size() + featureShadowBatch.sprites.size());
             worldRenderService.drawSpriteBatch(featureShadowBatch);
-            worldRenderService.drawSpriteBatch(featureBatch);
+            // A standing feature -- a tree -- is drawn as an unmasked sprite
+            // everywhere else in the mesh passes above, so it never told the
+            // halo's coverage mask it was there: a tree in front of a
+            // building left the mask reading "building" under the tree's own
+            // pixels, and the halo pass painted its fringe into the tree's
+            // colour (issue #67). Its shadow is left out of the mask on
+            // purpose -- a translucent decal, not something that actually
+            // hides the building underneath it.
+            if (maskWanted)
+            {
+                sceneContext.graphics->useDualDrawBuffers();
+            }
+            worldRenderService.drawMaskedSpriteBatch(featureBatch, 0.5f);
+            sceneContext.graphics->useSingleDrawBuffer();
         }
 
         // Particles that belong in the world rather than over it: drawn here,

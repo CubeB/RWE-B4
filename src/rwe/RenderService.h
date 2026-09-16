@@ -197,5 +197,16 @@ namespace rwe
         void drawUnitShadowMeshBatch(const UnitShadowMeshBatch& batch);
 
         void drawSpriteBatch(const SpriteBatch& batch);
+
+        /**
+         * As drawSpriteBatch, but also fills the building halo's coverage
+         * mask with maskValue -- 0.5, "anything else solid", for a standing
+         * feature -- so the halo pass sees the sprite as an occluder instead
+         * of drawing through it onto whatever mask sample is still
+         * underneath. Callers wrap this in useDualDrawBuffers() /
+         * useSingleDrawBuffer() themselves, as the terrain and unit mesh
+         * passes do; whether the mask is wanted at all is their call to make.
+         */
+        void drawMaskedSpriteBatch(const SpriteBatch& batch, float maskValue);
     };
 }
