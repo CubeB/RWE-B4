@@ -35,6 +35,8 @@
 //                 scanned for *.FBI, used to name each type index
 //   --emit-json   write the episodes to a file as JSON
 //   --emit-resources  write every 0x28 resource record to a file as JSON
+//   --emit-shots  write every 0x0d, 0x0b and 0x0c as JSON Lines, for the
+//                 weapon-event pairing work; see writeShotJson
 //   --emit-cpp    write the storage episodes as a C++ header for rwe_test
 //   --emit-build-cpp  write the build-timing episodes as a C++ header
 //   --cells       print the (builder, product) build-timing cells, which is
@@ -148,14 +150,59 @@ namespace rwe
 
             std::vector<ResourceRecord> resourceRecords;
 
-            /** One 0x0d, with the sender's tick, for --weapon-slots. */
+            /**
+             * One 0x0d, with the sender's tick, for --weapon-slots and
+             * --emit-shots.
+             *
+             * WHOSE TICK, and why the sender is kept beside it. Each peer emits
+             * the events for its own units against its own 0x2c serial, so the
+             * sender is what says which clock a tick is on. That mattered when
+             * this was written because a shot and its damage looked like they
+             * might be stamped by two different peers; they are not (see
+             * DamageRecord), and the sender stays because it is the evidence for
+             * that rather than a field anything now has to correct for.
+             */
             struct ShotRecord
             {
+                uint8_t sender;
                 uint32_t tick;
                 TadShot shot;
             };
 
             std::vector<ShotRecord> shots;
+
+            /**
+             * One 0x0b, with the sender's tick.
+             *
+             * THE SENDER IS THE ATTACKER'S OWNER, not the victim's, which is the
+             * single most useful thing the dump established: 797,783 of the
+             * corpus's damage records are sent by the peer that owns the
+             * attacker and NOT ONE by the peer that owns the victim. So a shot
+             * and the damage it caused are stamped by the same peer's 0x2c
+             * clock, and a flight time is a difference within one clock rather
+             * than across two. The residual 27,061 are records with no
+             * attributable attacker at all -- 21,013 of them carry attacker id
+             * 0, which is terrain, decay or self-damage -- rather than
+             * counter-examples.
+             */
+            struct DamageRecord
+            {
+                uint8_t sender;
+                uint32_t tick;
+                TadDamage damage;
+            };
+
+            std::vector<DamageRecord> damageRecords;
+
+            /** One 0x0c, with the sender's tick. */
+            struct DeathRecord
+            {
+                uint8_t sender;
+                uint32_t tick;
+                TadDeath death;
+            };
+
+            std::vector<DeathRecord> deathRecords;
 
             /** Where each sender's current burst sits, and what it has shown. */
             struct OpenBurst
@@ -263,7 +310,7 @@ namespace rwe
                             break;
 
                         case TadSubPacketCode::UnitKilled:
-                            onDeath(s);
+                            onDeath(packet.sender, s);
                             break;
 
                         case TadSubPacketCode::PlayerResourceInfo:
@@ -273,7 +320,7 @@ namespace rwe
                         case TadSubPacketCode::WeaponFired:
                             if (auto shot = tadDecodeShot(s))
                             {
-                                shots.push_back(ShotRecord{tick[packet.sender], *shot});
+                                shots.push_back(ShotRecord{packet.sender, tick[packet.sender], *shot});
                             }
                             break;
 
@@ -388,9 +435,10 @@ namespace rwe
                 }
 
                 lastDamageTick[e->victimId] = tick[sender];
+                damageRecords.push_back(DamageRecord{sender, tick[sender], *e});
             }
 
-            void onDeath(const TadBytes& s)
+            void onDeath(uint8_t sender, const TadBytes& s)
             {
                 auto e = tadDecodeDeath(s);
                 if (!e)
@@ -399,6 +447,7 @@ namespace rwe
                 }
 
                 inProgress.erase(e->unitId);
+                deathRecords.push_back(DeathRecord{sender, tick[sender], *e});
             }
 
             void onResources(uint8_t sender, const TadBytes& s)
@@ -1747,6 +1796,120 @@ namespace rwe
         return lives;
     }
 
+    // --- --emit-shots: the raw weapon events, for arguing pairing in Python ---
+    //
+    // This is a dump and not a miner, deliberately. A weapon oracle needs a shot
+    // paired with the damage it caused, and NOTHING IN THE STREAM LINKS THEM:
+    // there is no shot id, no sequence number, and no tick on a 0x0b beyond the
+    // 0x2c serial of the packet carrying it, against 631,578 shots and 824,844
+    // damage events over the corpus. A unit firing a burst has several shots in
+    // flight and several damage events arriving, and nothing says which came
+    // from which. So time-of-flight is a filtered statistic, the filters are the
+    // job, and the filters get argued over the JSON before a line of C++ miner
+    // is written -- which is the order that caught every mistake in the
+    // build-timing pass.
+    //
+    // Three things the dump has to preserve because a summary would destroy
+    // them:
+    //
+    //  * THE SENDER of every record. Each peer emits the events for its own
+    //    units against its own tick clock, so a shot is stamped by the shooter's
+    //    owner and the damage it causes by the victim's owner. A flight time
+    //    measured across the two is a difference between two clocks, and whether
+    //    those clocks agree is the first thing to check rather than the thing to
+    //    assume.
+    //  * THE GEOMETRY. Origin and aim point are both in the 0x0d, and the
+    //    distance between them is what any flight time has to be explained
+    //    against.
+    //  * DEATHS as well as damage. 0x0b is not a complete ledger -- 17,526 of
+    //    the corpus's script-driven deaths carry no recorded damage on the
+    //    victim at all -- so a killing blow may arrive only as a 0x0c. Absence
+    //    is unknown, never zero.
+    //
+    // JSON LINES, not a JSON array, because the corpus is about 1.5 million
+    // records and a pretty-printed array of them is neither writable in one pass
+    // nor loadable in one go. One object per line, streamed per demo:
+    //
+    //     import json
+    //     rows = [json.loads(line) for line in open(path)]
+    //
+    // Names are scoped through buildAtTick, the same way --weapon-slots names a
+    // shooter, so a consumer never has to redo the load-order lookup and can
+    // never do it differently.
+
+    /** Writes one demo's shots, damage and deaths as JSON Lines. */
+    void writeShotJson(
+        std::ostream& out,
+        const EpisodeHandler& handler,
+        const std::vector<std::string>& loadOrder)
+    {
+        auto lives = unitLives(handler, loadOrder);
+        auto nameOf = [&](uint16_t id, uint32_t at) -> std::string {
+            auto it = lives.find(id);
+            if (it == lives.end())
+            {
+                return "";
+            }
+            auto build = buildAtTick(it->second, at);
+            return build ? build->second : std::string();
+        };
+
+        auto position = [](std::ostream& o, const char* prefix, const TadPosition& p) {
+            o << ",\"" << prefix << "x\":" << tadFixedToDouble(p.x)
+              << ",\"" << prefix << "y\":" << tadFixedToDouble(p.y)
+              << ",\"" << prefix << "z\":" << tadFixedToDouble(p.z);
+        };
+
+        out << std::fixed << std::setprecision(3);
+
+        for (const auto& record : handler.shots)
+        {
+            out << "{\"kind\":\"shot\",\"demo\":\"" << handler.demo
+                << "\",\"sender\":" << static_cast<unsigned int>(record.sender)
+                << ",\"tick\":" << record.tick
+                << ",\"shooter\":" << record.shot.shooterId
+                << ",\"shooterName\":\"" << nameOf(record.shot.shooterId, record.tick)
+                << "\",\"slot\":" << static_cast<unsigned int>(record.shot.weaponSlot)
+                << ",\"target\":" << record.shot.targetId
+                << ",\"targetName\":\"" << nameOf(record.shot.targetId, record.tick) << "\"";
+            position(out, "o", record.shot.origin);
+            position(out, "t", record.shot.target);
+            out << "}\n";
+        }
+
+        for (const auto& record : handler.damageRecords)
+        {
+            out << "{\"kind\":\"damage\",\"demo\":\"" << handler.demo
+                << "\",\"sender\":" << static_cast<unsigned int>(record.sender)
+                << ",\"tick\":" << record.tick
+                << ",\"victim\":" << record.damage.victimId
+                << ",\"victimName\":\"" << nameOf(record.damage.victimId, record.tick)
+                << "\",\"attacker\":" << record.damage.attackerId
+                << ",\"attackerName\":\"" << nameOf(record.damage.attackerId, record.tick)
+                << "\",\"damage\":" << record.damage.damage
+                // The trailing u16 rides along unnamed. It is not remaining
+                // health and it is not identified (tad_events.h says what it
+                // is not), and this dump is the first thing to carry it beside
+                // a named shooter and a named weapon slot, which is what would
+                // narrow it.
+                << ",\"unknown\":" << record.damage.unknown << "}\n";
+        }
+
+        for (const auto& record : handler.deathRecords)
+        {
+            out << "{\"kind\":\"death\",\"demo\":\"" << handler.demo
+                << "\",\"sender\":" << static_cast<unsigned int>(record.sender)
+                << ",\"tick\":" << record.tick
+                << ",\"unit\":" << record.death.unitId
+                << ",\"unitName\":\"" << nameOf(record.death.unitId, record.tick)
+                << "\",\"killer\":" << record.death.killerId
+                << ",\"killerName\":\"" << nameOf(record.death.killerId, record.tick)
+                << "\",\"severity\":" << static_cast<unsigned int>(record.death.severity)
+                << ",\"cause\":" << static_cast<unsigned int>(record.death.cause())
+                << ",\"corpseLevel\":" << static_cast<unsigned int>(record.death.corpseLevel()) << "}\n";
+        }
+    }
+
     void reportWeaponSlots(
         const EpisodeHandler& handler,
         const std::vector<std::string>& loadOrder,
@@ -1968,6 +2131,7 @@ int main(int argc, char* argv[])
                   << "                recursively for *.FBI, used to name each type index\n"
                   << "  --emit-json   write the episodes to a file as JSON\n"
                   << "  --emit-resources  write every 0x28 resource record as JSON\n"
+                  << "  --emit-shots  write every 0x0d, 0x0b and 0x0c as JSON Lines (needs --units)\n"
                   << "  --emit-cpp    write the storage episodes as a C++ header (needs --units)\n"
                   << "  --emit-build-cpp  write the build-timing episodes as a C++ header (needs --units)\n"
                   << "  --cells       print the (builder, product) build-timing cells\n"
@@ -2069,6 +2233,30 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    // Opened before the walk and written per demo, because the corpus is about
+    // 1.5 million records and holding them all to serialise at the end would be
+    // a needless peak. --emit-shots does not need --units, but without it every
+    // name in the dump is empty, which makes the pairing work impossible: say so
+    // rather than writing a file that silently cannot be used.
+    std::ofstream shotFile;
+    unsigned long shotLines = 0;
+    if (args.contains("emit-shots"))
+    {
+        if (loadOrder.empty())
+        {
+            std::cerr << "--emit-shots needs --units: without it no shooter, victim or"
+                      << " target in the dump has a name\n";
+            return 1;
+        }
+        auto out = args.getString("emit-shots");
+        shotFile.open(out);
+        if (!shotFile)
+        {
+            std::cerr << "cannot write " << out << "\n";
+            return 1;
+        }
+    }
+
     nlohmann::json resourceJson = nlohmann::json::array();
     std::vector<StorageEpisode> storageEpisodes;
 
@@ -2139,6 +2327,16 @@ int main(int argc, char* argv[])
         if (args.contains("weapon-slots"))
         {
             reportWeaponSlots(handler, loadOrder, unitFacts, weaponSlots);
+        }
+
+        if (shotFile.is_open())
+        {
+            writeShotJson(shotFile, handler, loadOrder);
+            shotLines += handler.shots.size() + handler.damageRecords.size()
+                + handler.deathRecords.size();
+            std::cout << "  " << handler.shots.size() << " shots, "
+                      << handler.damageRecords.size() << " damage, "
+                      << handler.deathRecords.size() << " deaths\n";
         }
 
         if (args.contains("emit-cpp"))
@@ -2399,6 +2597,13 @@ int main(int argc, char* argv[])
             std::cerr << "cannot write " << out << "\n";
             return 1;
         }
+    }
+
+    if (shotFile.is_open())
+    {
+        shotFile.close();
+        std::cout << "wrote " << args.getString("emit-shots") << ", " << shotLines
+                  << " JSON Lines record(s)\n";
     }
 
     if (args.contains("emit-resources"))

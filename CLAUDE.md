@@ -131,6 +131,16 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   whose `BuildTime` divides exactly by the rate, because those are the ten that
   carry a non-zero `expectedDurationDelta`.
 
+  `--emit-shots` dumps every `0x0d`, `0x0b` and `0x0c` as **JSON Lines** (about
+  1.5 million records, 275 MB), shooters and victims already named, so the
+  weapon-event pairing can be argued over the data before any miner is written.
+  What it established: a `0x0b` is sent by the **attacker's** owner and never
+  the victim's, 797,783 to 0, so a shot and its damage share one clock; and over
+  the constant-speed weapons the paired flight time is
+  `ceil(distance / (weaponvelocity / 30)) - 1`. See `docs/TA-DEMOS.md`,
+  "Pairing a `0x0d` to the `0x0b` it caused", for the filters, the rejection
+  counts and the three weapon classes that need models of their own.
+
   `--weapon-slots` is the evidence that a `0x0d`'s trailing byte is the
   shooter's **weapon slot**, a 0-based index into its FBI's
   `Weapon1`/`Weapon2`/`Weapon3`: it checks every slot each type was seen firing
@@ -159,6 +169,18 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   `docs/TA-DEMOS.md`. The same arithmetic, ported, is what feeds
   `--emit-build-cpp`; the two must keep agreeing, and the script is the
   reference.
+- **`tools/tad-weapontime.py`** — the reference for the weapon oracle, the same
+  role `tad-buildtime.py` plays for build timing. It pairs each `0x0d` to the
+  `0x0b` it caused (nothing in the stream links them, so the filters are the
+  work) and scores the result against
+  `flight = ceil(distance / (weaponvelocity / 30)) - 1`, which holds in 23 of 25
+  constant-speed cells; the `-1` is a projectile taking its first step on the
+  firing tick, the same off-by-one as the build accumulator. `--classes` lists
+  the five classes it deliberately does not score — accelerating, ballistic,
+  `vlaunch`, `waterweapon` and `burst` — each of which needs a model of its own.
+  Exits non-zero if a scored cell moves, including the two named, unexplained
+  exceptions it carries. `docs/TA-DEMOS.md`, "Pairing a `0x0d` to the `0x0b` it
+  caused".
 - **`tools/visual-test.ps1`** — when only the renderer will do. It launches `build-release/rwe.exe`, finds the window, and then *drives* it: real clicks at client-relative coordinates, screenshots cropped and nearest-neighbour magnified around the thing under test. `-phase build|air|ship` are the scripted sequences already written; adding one is a few lines. Prefer this to ad-hoc screenshotting — a scripted click sequence is repeatable and an eyeballed one is not.
 - **`tools/crash-catch.cmd`** runs the Debug build under gdb and writes a backtrace to `crash.txt`. Play normally, reproduce the crash, close the window.
 - Environment switches, all pure observers: `RWE_AI_PROFILE=1` times each AI pass and logs anything over 2 ms; `RWE_DEBUG_SPAWN=ARMPW*12@0:8:1` spawns units on a timer (`<type>*<count>@<owner>:<seconds>[:<near player>]`); `RWE_DEBUG_SELF_DESTRUCT[=_PLAYER]`, `RWE_TRACE_BOMBER`, `RWE_TRACE_GUNSHIP`, `RWE_TRACE_MISSILE`.

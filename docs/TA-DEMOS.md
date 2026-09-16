@@ -596,8 +596,12 @@ it counts is not being spent by the hits.
 
 The damage field is constant per attacker over a run of hits and takes small
 values -- 30, 40, 41, 45, 46, 180 in that demo -- which is what a weapon's damage
-figure looks like. Confirming it against a weapon definition needs the unit-type
-names, so it waits on the checksum work.
+figure looks like. **It is now confirmed against the weapon definitions
+themselves**: once a shot is paired to the damage it caused and the pairs are
+grouped by (shooter type, weapon slot), each cell's modal damage is that
+weapon's own `[DAMAGE] default` out of the mod's weapon TDF. See "Pairing a
+`0x0d` to the `0x0b` it caused" below -- and note that the confirmation came
+free, because nothing in the pairing filters looks at this field.
 
 **`0x0b` is not a complete damage ledger.** 17,526 of the 56,913 script-driven
 deaths in the corpus have *no* recorded damage on the victim at all, and the
@@ -714,6 +718,142 @@ ground-mobile builders, which are never scored. Why the scored modes were safe
 under the old map is in "What an episode looks like", and it is luck a weapon
 oracle will not have: a build's arithmetic depends on one shared integer, and a
 weapon's behaviour depends on the weapon.
+
+### Pairing a `0x0d` to the `0x0b` it caused
+
+The decoding above is not the hard part of a weapon oracle. **Nothing in the
+stream links a shot to the damage it caused** -- no shot id, no sequence number,
+and no tick on a `0x0b` beyond the `0x2c` serial of the packet carrying it,
+against 631,578 shots and 824,844 damage events. A unit firing a burst has
+several shots in flight and several damage events arriving, and nothing says
+which came from which. So time-of-flight is a **filtered statistic**, the filters
+are the work, and `tad_episodes --emit-shots` exists so they can be argued over
+the data before any of it is ported:
+
+```bash
+./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc \
+    --emit-shots /tmp/shots.jsonl
+```
+
+It writes every `0x0d`, `0x0b` and `0x0c` as **JSON Lines** -- one object per
+line, about 1.5 million of them and 275 MB, which is why it is not a JSON array
+-- with shooters, targets, victims and killers already named through the same
+scoped lookup `--weapon-slots` uses, so a consumer never has to redo the
+load-order work and can never do it differently.
+
+#### A `0x0b` is sent by the attacker's owner, which is what makes this tractable
+
+The first thing the dump settled, and the most useful. Each peer emits the
+events for its own units against its own `0x2c` clock, so it mattered a great
+deal whether a shot and its damage were stamped by two different peers. They are
+not. Taking each unit's owning peer from the `0x0d`s it emits and checking every
+damage record against it:
+
+| the sender of a `0x0b` is | records |
+|---|---|
+| the **attacker's** owner | **797,783** |
+| the victim's owner | **0** |
+| neither, or no attacker to attribute | 27,061 |
+
+Not one counter-example in thirteen games. The residual is not evidence against
+it: 21,013 of those records carry attacker id 0 -- terrain, decay, self-damage --
+and the rest name an attacker that never fired a `0x0d` at all, so there is
+nothing to compare the sender against. **A flight time is therefore a difference
+within one clock**, and none of the cross-clock correction this was expected to
+need is required.
+
+#### The filters, and what they leave
+
+Keyed on `(attacker, victim)`, a shot is kept only when the shooter fired at
+that victim exactly once in a +-300-tick window and exactly one damage record
+from that shooter to that victim lands in the 300 ticks after it. Over the
+corpus that keeps **35,535 of 631,578 shots**. The rejections are the shape to
+expect and are worth reading rather than summing: 405,784 shots have another
+shot at the same victim just before them and 111,547 just after -- which is what
+sustained fire looks like -- 53,706 have no damage recorded in the window at
+all, and 5,404 have several.
+
+**The pairing is confirmed by a number it was not built from.** Group the
+survivors by (shooter type, weapon slot) and take the modal `damage` value of
+each cell: it is the weapon's own `[DAMAGE] default` out of the mod's weapon
+TDF, cell after cell -- `GAUSS_SNIPE` 675, `LIGHTNING` 225, `ROCKET` 108,
+`MISSILE_GF_HEAVY` 45, `LASER_SUMO` 768. Nothing in the filters looks at the
+damage figure, so a wrongly paired event has no reason to carry the firing
+weapon's damage. This also closes the older note in the `0x0b` section above:
+the damage field **is** the weapon's damage, now checked against a weapon
+definition rather than inferred from looking small.
+
+#### The model: `flight = ceil(distance / (weaponvelocity / 30)) - 1`
+
+With the pairing done, the implied speed -- straight-line distance from the
+shot's origin to its aim point, over the paired flight time -- lands on the
+weapon's declared `weaponvelocity / 30` with a median ratio of **0.971** over 95
+cells. The deviations are not noise, and sorting the cells by what kind of
+weapon fired them is what makes them legible. `tools/tad-weapontime.py` is the
+reference that does the sorting and the scoring, and it is a check rather than a
+listing: it exits non-zero if a scored cell moves.
+
+```bash
+./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc \
+    --emit-shots /tmp/shots.jsonl
+tools/tad-weapontime.py --shots /tmp/shots.jsonl --units ~/ta-mods/x-esc --classes
+```
+
+**Only one class is scored, and it lands on the model exactly.** A weapon whose
+`startvelocity` equals its `weaponvelocity` flies at one speed in a straight
+line, and for those the flight time is `ceil(d / v) - 1` in **23 of 25** cells
+with 30 or more pairings. The `-1` has no fudge in it: a projectile takes its
+first step on the tick it is fired, so it has covered the distance after
+`ceil(d / v)` steps and the gap between the firing tick and the arrival tick is
+one less. It is the same off-by-one as the build accumulator's first increment
+landing on the `0x09`'s own tick, for the same reason.
+
+The mode's share runs 40% to 76% -- `LASER_LIGHT` 76%, `LASER_MAK` 69%,
+`PARALYZER` 68%, `LIGHTNING` 67%, `GAUSS_SNIPE` 60% over 4,356 pairings -- and
+the spread either side is quantisation rather than a second effect. Measuring
+how far past the aim point the projectile has travelled when the damage lands,
+`d - (flight + 1) * v`, gives an overshoot that is **always less than one step**
+and that scales with the weapon's speed: about 25 world units for a
+32-unit-a-tick laser and about 1 for a 15-unit-a-tick gauss. A projectile
+arrives partway through its final tick and the tick it arrives on is the only
+thing the stream can report. Restricting to victims that **cannot move** -- a
+building is where it was aimed -- sharpens every share, to `LIGHTNING_LATNK`
+86%, `LASER_MAK` 83%, `PARALYZER` 80%, at the cost of five sixths of the volume.
+
+**And 25 of the 25 scored cells carry their firing weapon's own `[DAMAGE]
+default` as their modal damage.** Nothing in the filters looks at the damage
+field, so that is the pairing checking itself against evidence it was not built
+from.
+
+**The four classes the model does not describe** are listed by `--classes` and
+never scored. Each is explicable and each wants a model of its own:
+
+| class | cells | pairings | why the constant-speed model misses |
+|---|---|---|---|
+| accelerating | 27 | 15,826 | leaves the rail at `startvelocity` and works up, so it arrives late |
+| ballistic | 18 | 4,946 | travels an arc, which is longer than the straight line measured |
+| `waterweapon` | 4 | 299 | a torpedo's path from a surface launcher to a submerged target is not that line either |
+| `vlaunch` | 3 | 807 | goes up before it goes anywhere; `ARMMERL` reads +138 |
+| `burst` | 6 | 312 | see below |
+
+The `burst` exclusion is the one worth spelling out, because it is what turned
+eight failures into two. A burst weapon fires `burst` rounds `burstrate` seconds
+apart from one trigger, each its own `0x0d` and each thrown off the aim line by
+`sprayangle`, so the isolation filter cannot mean there what it means everywhere
+else: the shot that survives it is one round of several and the damage that
+arrives need not be its own. Six of the eight cells that failed the model before
+the class existed are burst weapons -- both flamethrowers, both `EMG`s,
+`EMG_VTOL`, `GAUSS_SPRAY` -- excluded on a criterion that has nothing to do with
+flight time.
+
+**The two that remain are not explained.** `ARMAMPH` firing `GAUSS_MAV` reads -1
+over 221 pairings and `CORGEO` firing `RIOT_ALL` reads -1 over 53, both near-ties
+with the `+0` bucket (45% against 28% and 45% against 40%), and `ARMMAV` fires
+the same `GAUSS_MAV` and agrees. They are named in the script's
+`KNOWN_EXCEPTIONS`, printed on every run, and covered by the exit code the way
+`tad-buildtime.py` covers its airborne pool -- the run fails if a new cell
+disagrees *or* if either of those two stops reading what it reads today. An
+unexplained observation that says so is not a licensed divergence.
 
 ### `0x10`, script call -- all 22 bytes
 
@@ -1311,15 +1451,28 @@ They catch different things and should not share machinery.
       a named shooter and 612,992 are aimed at a unit, so naming will not be
       what limits this.
 
-      **What is not settled is pairing**, and that is the job. Nothing links a
-      shot to the damage it caused: no shot id, no sequence number, and no tick
-      on a `0x0b` beyond the `0x2c` serial of the packet carrying it, against
-      631,578 shots and 824,844 damage events. A unit firing a burst has several
-      shots in flight and several damage events arriving, and nothing says which
-      came from which. So time-of-flight is a filtered statistic and not a
-      lookup, and the filters are the work -- one shot in flight from that
-      shooter at that victim, one shooter firing at that victim, the shot aimed
-      at a unit at all -- exactly as the build-timing filters were.
+      **Pairing is solved, and the model with it.** `--emit-shots` dumps every
+      `0x0d`, `0x0b` and `0x0c` as JSON Lines; a `0x0b` turns out to be sent by
+      the **attacker's** owner and never the victim's (797,783 to 0), so a
+      flight time is a difference within one clock; filtering to shots that are
+      the only shot from that shooter at that victim in a +-300-tick window, and
+      that draw exactly one damage record in the 300 after, keeps 35,535 shots;
+      and over the constant-speed weapons the flight time is
+      `ceil(distance / (weaponvelocity / 30)) - 1`, the same first-step-on-the-
+      firing-tick off-by-one as the build accumulator. The pairing is confirmed
+      by a number the filters never look at: each cell's modal `damage` is that
+      weapon's own `[DAMAGE] default`. The whole argument, the rejection counts
+      and the three weapon classes that need their own models are in "Pairing a
+      `0x0d` to the `0x0b` it caused" above.
+
+      **What is left** is the fixture and the test: a cell keyed on
+      (shooter type, weapon slot), `UnitFacts` widened to carry the weapon's
+      TDF block through the engine's own parser rather than the analysis
+      script's, and a `[weapon][corpus]` test driving `Projectile` directly the
+      way `buildtime.test.cpp` drives the build accumulator. RWE steps a
+      line-of-sight projectile after the behaviour pass that spawns it, so it
+      takes its first step on the firing tick too and the expected difference
+      should be zero -- which is a prediction to check, not a result.
 
    Every one of those carries the expected-difference annotation described in
    "The hazard to design in from the start". A corpus is an efficient machine
