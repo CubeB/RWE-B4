@@ -258,6 +258,9 @@ namespace rwe
 
         bool navigateTo(UnitInfo unitInfo, const NavigationGoal& goal);
 
+        /** Stows the nanolathe arm once a job has been over for long enough; see UnitState::armStowDueTime. */
+        void updatePendingArmStow(UnitInfo unitInfo);
+
         void moveTo(UnitInfo unitInfo, const MovingStateGoal& goal);
 
         bool attackTarget(UnitInfo unitInfo, const AttackTarget& target);
@@ -301,7 +304,7 @@ namespace rwe
 
         UnitCreationStatus createNewUnit(UnitInfo unitInfo, const std::string& unitType, const SimVector& position);
 
-        bool buildExistingUnit(UnitInfo unitInfo, UnitId targetUnitId);
+        bool buildExistingUnit(UnitInfo unitInfo, UnitId targetUnitId, std::optional<UnitId> standNextTo = std::nullopt);
 
         void changeState(UnitState& unit, const UnitBehaviorState& newState);
 

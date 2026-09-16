@@ -261,4 +261,96 @@ namespace rwe
         tick(yard.sim, 20);
         REQUIRE(yard.sim.getUnitState(*second).buildTimeCompleted - before == 100u);
     }
+
+    // The cases above give the builder a reach of 200 and the plant a 4x4
+    // footprint, which is why they passed while the game did not: at those
+    // numbers everything is in range of everything. The shipped ones are not
+    // so kind. ARMCK reaches 40, a vehicle plant is 8x6 tiles -- 128 by 96
+    // world units -- and the frame it is building stands at its middle, some
+    // 48 units inside the nearest cell a builder can stand on. Measuring the
+    // reach to the frame therefore put the assister permanently out of range:
+    // it walked up to the yard, found itself short and stood there, which is
+    // what the play-test reported. It measures to the factory now.
+    namespace
+    {
+        UnitDefinition makeBigPlantDef()
+        {
+            UnitDefinition d{};
+            d.objectName = "model";
+            d.isMobile = false;
+            d.canMove = false;
+            d.builder = true;
+            d.workerTimePerTick = 2u;
+            d.metalStorage = Metal(10000.0f);
+            d.energyStorage = Energy(10000.0f);
+            d.maxHitPoints = 100;
+            d.buildTime = 0u;
+            // ARMVP: FootprintX=8, FootprintZ=6.
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{8u, 6u, 255u, 255u, 0u, 0u};
+            d.yardMap = Grid<YardMapCell>(8, 6, YardMapCell::Ground);
+            return d;
+        }
+
+        UnitDefinition makeShortArmedBuilderDef()
+        {
+            UnitDefinition d{};
+            d.objectName = "model";
+            d.isMobile = true;
+            d.canMove = true;
+            d.builder = true;
+            // ARMCK: Builddistance=40.
+            d.buildDistance = 40_ss;
+            d.workerTimePerTick = 3u;
+            d.maxVelocity = 3_ss;
+            d.acceleration = 1_ss;
+            d.brakeRate = 1_ss;
+            d.turnRate = 1000_ss;
+            d.maxHitPoints = 100;
+            d.buildTime = 0u;
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
+            return d;
+        }
+    }
+
+    TEST_CASE("a short-armed builder reaches a frame in the middle of a full-sized plant", "[guardassist]")
+    {
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        registerModel(sim);
+
+        sim.unitDefinitions["plant"] = makeBigPlantDef();
+        sim.unitDefinitions["builder"] = makeShortArmedBuilderDef();
+        sim.unitDefinitions["TANK"] = makeTankDef();
+        // Long enough to still be under construction once the builder has
+        // walked in. The plant on its own finishes three hundred points well
+        // inside that walk, and a finished tank would leave the builder idle
+        // for honest reasons, saying nothing about its reach.
+        sim.unitDefinitions["TANK"].buildTime = 3000u;
+        sim.unitScriptDefinitions["TANK"] = *script;
+
+        auto plantId = addUnitOfType(sim, "plant", player, SimVector(200_ss, 0_ss, 200_ss), script);
+        sim.getUnitState(plantId).inBuildStance = true;
+        sim.getUnitState(plantId).buildQueue.push_back(std::make_pair(std::string("TANK"), 1));
+
+        // Well outside the yard, so it has to walk in.
+        auto builderId = addUnitOfType(sim, "builder", player, SimVector(360_ss, 0_ss, 200_ss), script);
+        sim.getUnitState(builderId).inBuildStance = true;
+        sim.getUnitState(builderId).orders.push_back(GuardOrder(plantId));
+
+        tick(sim, 120);
+
+        auto frame = findFrame(sim, "TANK");
+        REQUIRE(frame.has_value());
+
+        // In range and lathing, rather than parked outside doing nothing.
+        auto building = std::get_if<UnitBehaviorStateBuilding>(&sim.getUnitState(builderId).behaviourState);
+        REQUIRE(building != nullptr);
+        REQUIRE(building->targetUnit == *frame);
+
+        // Two from the plant and three from the guard.
+        auto before = progressOf(sim, "TANK");
+        tick(sim, 20);
+        REQUIRE(progressOf(sim, "TANK") - before == 100u);
+    }
 }

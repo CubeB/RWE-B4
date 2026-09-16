@@ -71,6 +71,8 @@ namespace rwe
             {"navigationState", dumpJson(u.navigationState)},
             {"behaviourState", dumpJson(u.behaviourState)},
             {"inBuildStance", dumpJson(u.inBuildStance)},
+            {"armStowDueTime", dumpJson(u.armStowDueTime)},
+            {"nanoPoint", dumpJson(u.nanoPoint)},
             {"yardOpen", dumpJson(u.yardOpen)},
             {"inCollision", dumpJson(u.inCollision)},
             {"fireOrders", dumpJson(u.fireOrders)},

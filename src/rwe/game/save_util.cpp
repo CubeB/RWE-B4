@@ -1664,6 +1664,9 @@ namespace rwe
                 {"navigationState", saveNavigationStateInfo(u.navigationState, ctx)},
                 {"buildOrderUnitId", saveOptional(u.buildOrderUnitId, [&](UnitId id) { return saveUnitIdRef(id, ctx); })},
                 {"inBuildStance", u.inBuildStance},
+                {"armStowDueTime", saveOptional(u.armStowDueTime, [](GameTime t) { return saveGameTime(t); })},
+                {"nanoPointQueriedAt", saveOptional(u.nanoPointQueriedAt, [](GameTime t) { return saveGameTime(t); })},
+                {"nanoPoint", saveSimVector(u.nanoPoint)},
                 {"commandFireShotFired", u.commandFireShotFired},
                 {"yardOpen", u.yardOpen},
                 {"inCollision", u.inCollision},
@@ -1740,6 +1743,9 @@ namespace rwe
             u.navigationState = loadNavigationStateInfo(j.at("navigationState"), ctx);
             u.buildOrderUnitId = loadOptional(j.at("buildOrderUnitId"), [&](const json& v) { return loadUnitIdRef(v, ctx); });
             u.inBuildStance = j.at("inBuildStance").get<bool>();
+            u.armStowDueTime = loadOptional(j.at("armStowDueTime"), [](const json& v) { return loadGameTime(v); });
+            u.nanoPointQueriedAt = loadOptional(j.at("nanoPointQueriedAt"), [](const json& v) { return loadGameTime(v); });
+            u.nanoPoint = loadSimVector(j.at("nanoPoint"));
             u.commandFireShotFired = j.value("commandFireShotFired", false);
             u.yardOpen = j.at("yardOpen").get<bool>();
             u.inCollision = j.at("inCollision").get<bool>();

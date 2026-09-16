@@ -505,6 +505,34 @@ namespace rwe
          */
         std::optional<UnitId> buildOrderUnitId;
 
+        /**
+         * The nozzle this unit's nanolathe is spraying from, and the tick it
+         * was asked for.
+         *
+         * `QueryNanoPiece` is a question with a side effect: a unit with two
+         * nozzles answers with a different one each time, which is how the
+         * original makes both of them spray -- ARMACK alternates `rnanospray`
+         * and `lnanospray`, ARMASP `beam1` and `beam2`. RWE asked twice every
+         * tick, once where the work is done and once where a running spray
+         * follows its nozzle, so the answer advanced twice and every tick
+         * landed on the same side. One question a tick, remembered here, and
+         * the two nozzles take their turn as they should.
+         */
+        std::optional<GameTime> nanoPointQueriedAt;
+        SimVector nanoPoint;
+
+        /**
+         * When the nanolathe arm is due to be put away, if it is.
+         *
+         * A job ending used to stow the arm on the spot, so a builder handed
+         * another job a tick later put the arm away, turned round and took it
+         * straight back out -- and one reclaiming its way along a patrol did
+         * that between every wreck. The stow waits a moment now: work started
+         * again before this time cancels it, so back-to-back jobs keep the arm
+         * out and the builder simply turns to the new one.
+         */
+        std::optional<GameTime> armStowDueTime;
+
         bool inBuildStance{false};
         bool yardOpen{false};
 

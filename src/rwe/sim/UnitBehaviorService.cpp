@@ -19,6 +19,15 @@ namespace rwe
     namespace
     {
         /**
+         * How long a builder holds its nanolathe arm out after a job ends,
+         * waiting to see whether another one turns up. Half a second: long
+         * enough for the next order in the queue, or the next wreck on a
+         * reclaiming patrol, and short enough that a builder walking away
+         * stows on the way rather than carrying the arm across the map.
+         */
+        constexpr unsigned int ArmStowGraceTicks = 15;
+
+        /**
          * How near a gunship has to get to its station before it counts as
          * arrived and picks the next one. The original uses sixteen units,
          * which is close enough that it really does fly to each point.
@@ -256,6 +265,10 @@ namespace rwe
         {
             unitInfo.state->clearWeaponTargets();
         }
+
+        // A stow put off when the last job ended: if nothing has taken its
+        // place by now, the arm goes away.
+        updatePendingArmStow(unitInfo);
 
         // Run unit and weapon AI
         if (!paralyzed && !unitInfo.state->isBeingBuilt(*unitInfo.definition))
@@ -3660,7 +3673,8 @@ namespace rwe
         {
             if (fs->targetUnit)
             {
-                buildExistingUnit(unitInfo, fs->targetUnit->first);
+                // Beside the factory, not beside the frame inside it.
+                buildExistingUnit(unitInfo, fs->targetUnit->first, guardOrder.target);
                 return false;
             }
         }
@@ -4510,13 +4524,21 @@ namespace rwe
 
     SimVector UnitBehaviorService::getNanoPoint(UnitId id)
     {
-        auto pieceId = runCobQuery(id, "QueryNanoPiece");
-        if (!pieceId)
+        auto& unit = sim->getUnitState(id);
+
+        // Asked already this tick: the same nozzle, not the next one. The
+        // query alternates on a unit that has two of them, so asking twice in
+        // one tick pins the spray to one side for ever -- see
+        // UnitState::nanoPointQueriedAt.
+        if (unit.nanoPointQueriedAt == sim->gameTime)
         {
-            return sim->getUnitState(id).position;
+            return unit.nanoPoint;
         }
 
-        return getPiecePosition(id, *pieceId);
+        auto pieceId = runCobQuery(id, "QueryNanoPiece");
+        unit.nanoPoint = pieceId ? getPiecePosition(id, *pieceId) : unit.position;
+        unit.nanoPointQueriedAt = sim->gameTime;
+        return unit.nanoPoint;
     }
 
     SimVector UnitBehaviorService::getPieceLocalPosition(UnitId id, unsigned int pieceId)
@@ -4841,7 +4863,7 @@ namespace rwe
         return false;
     }
 
-    bool UnitBehaviorService::buildExistingUnit(UnitInfo unitInfo, UnitId targetUnitId)
+    bool UnitBehaviorService::buildExistingUnit(UnitInfo unitInfo, UnitId targetUnitId, std::optional<UnitId> standNextTo)
     {
         auto targetUnitRef = sim->tryGetUnitState(targetUnitId);
 
@@ -4852,18 +4874,31 @@ namespace rwe
         }
         auto& targetUnit = targetUnitRef->get();
 
-        // Reach is measured to the building's footprint, not its centre, so a
-        // builder stops as soon as it is within arm's length of any edge
-        // instead of walking round to the front.
-        if (!withinBuildReach(unitInfo, targetUnit))
+        // What a builder has to get alongside is not always what it is
+        // lathing. A unit coming out of a factory stands at the factory's
+        // build piece -- the middle of a building nothing can walk into -- and
+        // measuring the reach to *that* put every assister permanently out of
+        // range: an ARMCK reaches 40 and a vehicle plant is 128 across, so the
+        // frame's own footprint sits some 48 units inside the nearest cell the
+        // builder can stand on. It walked as close as the yard allowed, found
+        // itself short, and stood there for the rest of the game, which is
+        // exactly what the play-test reported. A guard assisting a factory
+        // therefore measures to the factory.
+        auto standNextToRef = standNextTo ? sim->tryGetUnitState(*standNextTo) : std::nullopt;
+        const auto& reachUnit = standNextToRef ? standNextToRef->get() : targetUnit;
+
+        // Reach is measured to the footprint, not the centre, so a builder
+        // stops as soon as it is within arm's length of any edge instead of
+        // walking round to the front.
+        if (!withinBuildReach(unitInfo, reachUnit))
         {
             // Out of arm's length: the spray stops until it is back in range.
             if (auto buildingState = std::get_if<UnitBehaviorStateBuilding>(&unitInfo.state->behaviourState))
             {
                 buildingState->nanoParticleOrigin = std::nullopt;
             }
-            const auto& targetDefinition = sim->unitDefinitions.at(targetUnit.unitType);
-            auto rect = sim->computeFootprintRegion(targetUnit.position, targetDefinition.movementCollisionInfo);
+            const auto& reachDefinition = sim->unitDefinitions.at(reachUnit.unitType);
+            auto rect = sim->computeFootprintRegion(reachUnit.position, reachDefinition.movementCollisionInfo);
             auto reachTiles = std::max(0, static_cast<int>(simScalarToFloat(unitInfo.definition->buildDistance) / simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits)) - 1);
             navigateTo(unitInfo, rect.expand(reachTiles));
             return false;
@@ -4871,6 +4906,32 @@ namespace rwe
 
         // we're close enough -- actually build the unit
         return deployBuildArm(unitInfo, targetUnitId);
+    }
+
+    void UnitBehaviorService::updatePendingArmStow(UnitInfo unitInfo)
+    {
+        auto& unit = *unitInfo.state;
+        if (!unit.armStowDueTime)
+        {
+            return;
+        }
+
+        // Work found in the meantime: the arm stays out and simply swings
+        // round to it, which is the whole point of the delay.
+        if (std::holds_alternative<UnitBehaviorStateBuilding>(unit.behaviourState)
+            || std::holds_alternative<UnitBehaviorStateReclaiming>(unit.behaviourState))
+        {
+            unit.armStowDueTime = std::nullopt;
+            return;
+        }
+
+        if (sim->gameTime < *unit.armStowDueTime)
+        {
+            return;
+        }
+
+        unit.armStowDueTime = std::nullopt;
+        unit.cobEnvironment->createThread("StopBuilding");
     }
 
     void UnitBehaviorService::changeState(UnitState& unit, const UnitBehaviorState& newState)
@@ -4887,7 +4948,15 @@ namespace rwe
         // just set, which leaves the builder with its arm up doing nothing.
         if (wasWorking && !willBeWorking)
         {
-            unit.cobEnvironment->createThread("StopBuilding");
+            // Not on the spot: a builder that takes up another job within the
+            // grace keeps its arm out and only turns to it. See
+            // UnitState::armStowDueTime and updatePendingArmStow.
+            unit.armStowDueTime = sim->gameTime + GameTime(ArmStowGraceTicks);
+        }
+        else if (willBeWorking)
+        {
+            // Working again, so whatever stow was pending is off.
+            unit.armStowDueTime = std::nullopt;
         }
         unit.behaviourState = newState;
     }
