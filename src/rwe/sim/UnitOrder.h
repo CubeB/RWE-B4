@@ -37,6 +37,25 @@ namespace rwe
     {
         AttackTarget target;
         std::optional<AttackLeash> leash;
+
+        /**
+         * Where this attacker's owner last actually saw a unit target.
+         *
+         * An attack order does not follow a unit through the fog: it holds the
+         * last seen position and picks the target up again, moved if it moved,
+         * once the ground is visible once more. See TOTALA-EXE.md S:9's
+         * correction, and resolveAttackTargetPosition for the rule.
+         *
+         * It rides on the order, beside the leash anchor, because that is
+         * where the original keeps a position captured at sight-time
+         * (0x43B330) -- and the order queue is hashed, so it is covered like
+         * any other piece of simulation state.
+         *
+         * Empty for a ground target, which is a place and does not hide, and
+         * for a unit target nobody has seen yet.
+         */
+        std::optional<SimVector> lastSeenPosition;
+
         explicit AttackOrder(UnitId target) : target(target) {}
         explicit AttackOrder(const SimVector& target) : target(target) {}
         AttackOrder(UnitId target, const AttackLeash& leash) : target(target), leash(leash) {}

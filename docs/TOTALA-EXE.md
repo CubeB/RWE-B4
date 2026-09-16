@@ -1315,6 +1315,38 @@ Deliberately not ported:
 - **`unitsOnly`, `turret`, `lineOfSight`, `minbarrelangle`.** Decoded far enough
   to say they are no part of this decision: `0x49ABB0` never looks at them.
 
+### Correction: an attack order does not follow a target through the fog
+
+Sections 9 and 10 are about *choosing* a target, and that half is fog-correct:
+the acquisition scan asks `0x465AC0` -- RWE's `canSeeUnit` -- so a unit will not
+pick something it cannot see. What neither section says, because it was never
+asked, is what becomes of a target **already** being attacked when it goes out
+of sight.
+
+Tested against the running game: the order **stays on the last position the
+attacker's owner actually saw**. The attacker walks to that spot rather than to
+wherever the target has gone, and when the ground is visible again the order
+picks the target up where it now is -- moved, if it moved while it was dark.
+
+RWE followed the live position the whole time, which is omniscient: an ordered
+attacker walked to where its quarry really was rather than to where it was last
+seen. The last seen position now rides on the order itself, beside the leash
+anchor the original already keeps there (`0x43B330`), and is refreshed only
+while `canSeeUnit` is true.
+
+Deliberately `canSeeUnit` and not `canDetectUnit`: a radar contact is a blip and
+not a target, and the radar picture is recomputed for one player a tick
+(section 18), so it could not feed a deterministic decision even if the original
+wanted it to.
+
+The routine in the exe that does this has not been found, so this is behaviour
+rather than transcription -- the same standing as the placement gate corrected
+in section 27, and the second time a static reading here said "no fog
+involvement" where the running game disagrees. A target that was never seen at
+all keeps the live position rather than being lost, which is the conservative
+half: in play an attack order is issued by clicking something visible, so the
+remembered position is set on the first tick.
+
 ## 10. Weapon target eligibility, `0x49ABB0` in full
 
 §9 gave this routine a sentence. It is the whole of "may this weapon shoot at

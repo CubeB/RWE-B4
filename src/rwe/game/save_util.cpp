@@ -903,6 +903,10 @@ namespace rwe
                         j["leashAnchor"] = saveSimVector(a.leash->anchor);
                         j["leashDistance"] = saveSimScalar(a.leash->distance);
                     }
+                    if (a.lastSeenPosition)
+                    {
+                        j["lastSeenPosition"] = saveSimVector(*a.lastSeenPosition);
+                    }
                     return j;
                 },
                 [](const BuildOrder& b) { return json{{"kind", "build"}, {"unitType", b.unitType}, {"position", saveSimVector(b.position)}}; },
@@ -954,6 +958,10 @@ namespace rwe
                 if (j.contains("leashAnchor"))
                 {
                     order.leash = AttackLeash(loadSimVector(j.at("leashAnchor")), loadSimScalar(j.at("leashDistance")));
+                }
+                if (j.contains("lastSeenPosition"))
+                {
+                    order.lastSeenPosition = loadSimVector(j.at("lastSeenPosition"));
                 }
                 return order;
             }

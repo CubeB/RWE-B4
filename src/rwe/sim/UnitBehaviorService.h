@@ -56,7 +56,7 @@ namespace rwe
         bool handleMoveOrder(UnitInfo unitInfo, const MoveOrder& moveOrder);
 
         /** Returns true if the order has been completed. */
-        bool handleAttackOrder(UnitInfo unitInfo, const AttackOrder& attackOrder);
+        bool handleAttackOrder(UnitInfo unitInfo, AttackOrder& attackOrder);
 
         /** Returns true if the order has been completed. */
         bool handleBuildOrder(UnitInfo unitInfo, const BuildOrder& buildOrder);
@@ -289,22 +289,44 @@ namespace rwe
          * the target's definition only, so every peer computes the same
          * point.
          */
-        NavigationGoal attackApproachGoal(UnitInfo unitInfo, UnitId targetId, const WeaponDefinition& weaponDefinition) const;
+        NavigationGoal attackApproachGoal(UnitInfo unitInfo, UnitId targetId, const SimVector& targetPosition, const WeaponDefinition& weaponDefinition) const;
 
-        bool attackTarget(UnitInfo unitInfo, const AttackTarget& target);
+        /**
+         * Where an ordered attacker should believe its target is, updating the
+         * remembered position as it goes.
+         *
+         * The original does not track a unit through the fog: an attack order
+         * on something that goes out of sight stays on the last position the
+         * attacker's owner actually saw it at, and picks the target up again
+         * -- moved, if it has moved -- when that ground is visible once more.
+         * Tested against the running game; the routine in the exe that does it
+         * has not been found, so this is behaviour rather than transcription.
+         *
+         * canSeeUnit is the question, deliberately, and not canDetectUnit: a
+         * radar contact is a blip and not a target, and the radar picture is
+         * recomputed for one player a tick, so it could not feed a
+         * deterministic decision even if the original wanted it to.
+         *
+         * Nothing here depends on who is at the keyboard -- it asks about the
+         * attacking unit's own owner -- so every peer resolves the same
+         * position.
+         */
+        std::optional<SimVector> resolveAttackTargetPosition(UnitInfo unitInfo, const AttackTarget& target, std::optional<SimVector>& lastSeenPosition);
+
+        bool attackTarget(UnitInfo unitInfo, const AttackTarget& target, std::optional<SimVector>& lastSeenPosition);
 
         /**
          * Aircraft-specific attack target handler. Drives the AirMovementStateAttackRun
          * state machine: Approaching -> Engaging -> Departing -> (loop back or terminate).
          * Returns true when the order is satisfied and the unit should drop the order.
          */
-        bool attackTargetAir(UnitInfo unitInfo, const AttackTarget& target);
+        bool attackTargetAir(UnitInfo unitInfo, const AttackTarget& target, const std::optional<SimVector>& targetPosition);
 
         /**
          * Walks a crawling bomb onto its target and detonates it. The original's
          * ATTACK_KAMIKAZE mission handler, 0x403336 / 0x4032B4.
          */
-        bool kamikazeRun(UnitInfo unitInfo, const AttackTarget& target);
+        bool kamikazeRun(UnitInfo unitInfo, const AttackTarget& target, const std::optional<SimVector>& targetPosition);
 
         /**
          * Works out which speed band the unit is now in and, if it has changed,

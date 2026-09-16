@@ -2087,7 +2087,7 @@ namespace rwe
             [&](const MoveOrder& o) {
                 return handleMoveOrder(unitInfo, o);
             },
-            [&](const AttackOrder& o) {
+            [&](AttackOrder& o) {
                 return handleAttackOrder(unitInfo, o);
             },
             [&](const BuildOrder& o) {
@@ -2766,7 +2766,7 @@ namespace rwe
         return false;
     }
 
-    bool UnitBehaviorService::handleAttackOrder(UnitInfo unitInfo, const AttackOrder& attackOrder)
+    bool UnitBehaviorService::handleAttackOrder(UnitInfo unitInfo, AttackOrder& attackOrder)
     {
         // A unit that picked this target for itself gives up once it is
         // maneuverleashlength from the spot where it first saw it. Every
@@ -2786,7 +2786,7 @@ namespace rwe
             }
         }
 
-        return attackTarget(unitInfo, attackOrder.target);
+        return attackTarget(unitInfo, attackOrder.target, attackOrder.lastSeenPosition);
     }
 
     NavigationGoal attackTargetToNavigationGoal(const AttackTarget& target)
@@ -2844,20 +2844,20 @@ namespace rwe
      * a moving one gets a fresh bearing only when it has actually moved far
      * enough to matter.
      */
-    NavigationGoal UnitBehaviorService::attackApproachGoal(UnitInfo unitInfo, UnitId targetId, const WeaponDefinition& weaponDefinition) const
+    NavigationGoal UnitBehaviorService::attackApproachGoal(UnitInfo unitInfo, UnitId targetId, const SimVector& targetPosition, const WeaponDefinition& weaponDefinition) const
     {
         auto targetUnitRef = sim->tryGetUnitState(targetId);
         if (!targetUnitRef)
         {
-            // The caller already resolved a live position for this target
-            // this tick, so it cannot actually have gone away; fall back to
-            // the plain goal, which does no worse than before this change.
+            // The caller already resolved a position for this target this
+            // tick, so it cannot actually have gone away; fall back to the
+            // plain goal, which does no worse than before this change.
             return targetId;
         }
         const auto& targetUnit = targetUnitRef->get();
         const auto& targetDefinition = sim->unitDefinitions.at(targetUnit.unitType);
 
-        auto footprintRect = sim->computeFootprintRegion(targetUnit.position, targetDefinition.movementCollisionInfo);
+        auto footprintRect = sim->computeFootprintRegion(targetPosition, targetDefinition.movementCollisionInfo);
         auto footprintHalfWidth = (SimScalar(static_cast<float>(footprintRect.width)) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss;
         auto footprintHalfHeight = (SimScalar(static_cast<float>(footprintRect.height)) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss;
         auto footprintStandoff = rweMax(footprintHalfWidth, footprintHalfHeight) + AttackApproachFootprintMargin;
@@ -2875,41 +2875,40 @@ namespace rwe
         auto& cache = unitInfo.state->navigationState.attackApproachCache;
         if (cache && cache->unitId == targetId)
         {
-            // A tolerance rather than exact equality: standoffDistance is
-            // recomputed the same way every time and would compare equal
-            // bit for bit, but the cached point came from multiplying by a
+            // A band around the stand-off distance rather than exact
+            // equality: the cached point came from multiplying by a
             // normalised direction, and normalising is a division by a
-            // square root -- it does not round-trip to bit-exact float
-            // equality even when nothing has actually moved. Eight units,
-            // the same arrival tolerance hasReachedGoal uses, comfortably
-            // clears that rounding and still catches any real movement of
-            // the target worth reacting to.
-            // A band around the stand-off distance, rather than a
-            // difference of squares: |d^2 - s^2| factors as (d - s)(d + s),
-            // so testing it against the tolerance squared makes the
-            // tolerance that actually applies to the target's movement
+            // square root, so it does not round-trip to bit-exact float
+            // equality even when nothing has moved. Eight units is the
+            // same tolerance hasReachedGoal accepts as arrival, and
+            // comfortably clears that rounding while still catching any
+            // real movement worth reacting to.
+            //
+            // A band, and not |d^2 - s^2| against the tolerance squared:
+            // that difference factors as (d - s)(d + s), which would make
+            // the tolerance actually applied to the target's movement
             // 64/(2s) -- about a sixth of a unit at a stand-off of 200,
-            // not the eight intended. That threw the cache away on almost
-            // every tick for a target that was moving at all, which is
-            // precisely the case that most needs its path request left
+            // rather than the eight intended -- and would throw the cache
+            // away on almost every tick for a target that was moving at
+            // all, which is the case that most needs its path request left
             // alone.
             auto lowerBound = standoffDistance > AttackApproachDriftTolerance
                 ? standoffDistance - AttackApproachDriftTolerance
                 : 0_ss;
             auto upperBound = standoffDistance + AttackApproachDriftTolerance;
-            auto driftSquared = cache->position.distanceSquared(targetUnit.position);
+            auto driftSquared = cache->position.distanceSquared(targetPosition);
             if (driftSquared > (lowerBound * lowerBound) && driftSquared < (upperBound * upperBound))
             {
                 return cache->position;
             }
         }
 
-        auto offset = unitInfo.state->position - targetUnit.position;
+        auto offset = unitInfo.state->position - targetPosition;
         offset.y = 0_ss;
         auto direction = offset.normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
 
-        auto approachPoint = targetUnit.position + (direction * standoffDistance);
-        approachPoint.y = targetUnit.position.y;
+        auto approachPoint = targetPosition + (direction * standoffDistance);
+        approachPoint.y = targetPosition.y;
 
         cache = UnitPositionCache{targetId, approachPoint, sim->gameTime};
         return approachPoint;
@@ -3074,8 +3073,52 @@ namespace rwe
         return best ? best : bestBad;
     }
 
-    bool UnitBehaviorService::attackTarget(UnitInfo unitInfo, const AttackTarget& target)
+    std::optional<SimVector> UnitBehaviorService::resolveAttackTargetPosition(UnitInfo unitInfo, const AttackTarget& target, std::optional<SimVector>& lastSeenPosition)
     {
+        // See the declaration for the rule and where it came from.
+        auto targetUnitId = std::get_if<UnitId>(&target);
+        if (targetUnitId == nullptr)
+        {
+            // A ground target is a place, and a place does not hide.
+            return getTargetPosition(target);
+        }
+
+        // A target that has died ends the order however well we remember where
+        // it was: the remembered position is for a unit out of sight, not for
+        // one that is gone.
+        auto livePosition = tryGetSweetSpot(*targetUnitId);
+        if (!livePosition)
+        {
+            return std::nullopt;
+        }
+
+        if (sim->canSeeUnit(unitInfo.state->owner, *targetUnitId))
+        {
+            lastSeenPosition = *livePosition;
+            return livePosition;
+        }
+
+        if (lastSeenPosition)
+        {
+            return lastSeenPosition;
+        }
+
+        // Never seen at all: keep the live position rather than losing the
+        // order. In play an attack order is issued by clicking something
+        // visible, so the remembered position is set on the first tick, and
+        // this only arises for an order issued from somewhere with its own
+        // notion of what it knows.
+        return livePosition;
+    }
+
+    bool UnitBehaviorService::attackTarget(UnitInfo unitInfo, const AttackTarget& target, std::optional<SimVector>& lastSeenPosition)
+    {
+        // Where this attacker believes its target is, which is not where the
+        // target is once it has gone into the fog. Resolved before anything
+        // else so that every path below -- the crawling bomb, the aircraft,
+        // the ground approach -- works from the same answer.
+        auto targetPosition = resolveAttackTargetPosition(unitInfo, target, lastSeenPosition);
+
         // A crawling bomb has no weapon to aim, so this has to come first. The
         // original turns an attack order on one of these into its own mission,
         // ATTACK_KAMIKAZE (0x43F38A), whose handler at 0x403336 walks the unit
@@ -3083,7 +3126,7 @@ namespace rwe
         // ordinary SELFDESTRUCT order (0x4032E4).
         if (unitInfo.definition->kamikaze)
         {
-            return kamikazeRun(unitInfo, target);
+            return kamikazeRun(unitInfo, target, targetPosition);
         }
 
         if (!unitInfo.state->weapons[0])
@@ -3106,12 +3149,11 @@ namespace rwe
         // approach/aim/fire pattern.
         if (unitInfo.definition->canFly)
         {
-            return attackTargetAir(unitInfo, target);
+            return attackTargetAir(unitInfo, target, targetPosition);
         }
 
         const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType);
 
-        auto targetPosition = getTargetPosition(target);
         if (!targetPosition)
         {
             // target has gone away, throw away this order
@@ -3129,7 +3171,7 @@ namespace rwe
             // the point as before.
             if (auto targetUnitId = std::get_if<UnitId>(&target))
             {
-                navigateTo(unitInfo, attackApproachGoal(unitInfo, *targetUnitId, weaponDefinition));
+                navigateTo(unitInfo, attackApproachGoal(unitInfo, *targetUnitId, *targetPosition, weaponDefinition));
             }
             else
             {
@@ -3198,9 +3240,8 @@ namespace rwe
         unitInfo.state->cobEnvironment->createThread("MoveRate" + std::to_string(band));
     }
 
-    bool UnitBehaviorService::kamikazeRun(UnitInfo unitInfo, const AttackTarget& target)
+    bool UnitBehaviorService::kamikazeRun(UnitInfo unitInfo, const AttackTarget& target, const std::optional<SimVector>& targetPosition)
     {
-        auto targetPosition = getTargetPosition(target);
         if (!targetPosition)
         {
             // Whatever it was chasing has gone; there is nothing left to die on.
@@ -3226,10 +3267,11 @@ namespace rwe
         return true;
     }
 
-    bool UnitBehaviorService::attackTargetAir(UnitInfo unitInfo, const AttackTarget& target)
+    bool UnitBehaviorService::attackTargetAir(UnitInfo unitInfo, const AttackTarget& target, const std::optional<SimVector>& targetPosition)
     {
-        // Resolve the target position. If the target has gone away, drop the order.
-        auto targetPosition = getTargetPosition(target);
+        // The position is resolved by the caller, and is the last one this
+        // aircraft's owner saw if the target is in fog. Empty means the target
+        // has gone away, and the order goes with it.
         if (!targetPosition)
         {
             unitInfo.state->clearWeaponTargets();
