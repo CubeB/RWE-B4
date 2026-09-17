@@ -51,9 +51,23 @@ footprint: a round stops about a footprint's half-width short of the aim point,
 which for the common cases is about one step, so the aim-point model sat a tick
 high on a small target and more on a big one -- which is exactly the residual
 that model carried, a second bucket at -1 growing with the victim's footprint.
-Nothing in the corpus says which tick the first step lands on; the interval is
-k, and where the shot record sits relative to that first step is a separate
-question the corpus cannot answer (docs/TA-DEMOS.md).
+
+WHICH TICK THE FIRST STEP LANDS ON: THE FIRING TICK, and the interval read here
+is a tick wider than the flight for a reason that belongs to the demo rather
+than to the engine. TotalA.exe creates the round inside the unit pass and the
+projectile pass that follows in the same tick latches the array length once and
+walks it (0x49D77E, 0x49B740), so the round moves immediately and its damage
+lands on T + k - 1. But an event is stamped with the last 0x2c before it in its
+sender's stream, and the 0x2c is queued at the end of that player's unit
+sub-pass (0x48B003): a 0x0d goes in before it and a 0x0b after it, so the shot
+reads a tick early and the difference of the two is k. Over the corpus, 121,624
+of the 122,637 runs between consecutive 0x2c records that carry both codes put
+every 0x0b before every 0x0d, which is only possible if the damage belongs to
+the previous tick. NOTHING HERE CHANGES: `flight` stays k and the scoring is
+untouched. What it settles is what a consumer may conclude -- a round fired on
+tick T detonates on T + k - 1 -- and docs/TA-DEMOS.md, "Which tick a round
+first moves on", has the decode, the Escalation patch check and the stream
+measurement.
 
 HOW FAST THE ROUND FLIES, ONE MODEL PER SCORED CLASS. A constant-speed round
 covers weaponvelocity / 30 a tick. A self-propelled one -- a missile -- is

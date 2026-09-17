@@ -662,8 +662,48 @@ that stop takes 792 of 810 constant-speed pairings on still victims where the
 aim point took 65%, flat across footprints 2 to 8. RWE's
 `checkProjectileCollision` is already this shape -- move, then the occupied
 grid, then the model-height test -- and `weaponflight.test.cpp` now drives it
-against a victim with the episode's own footprint. What is not settled is on
-which tick a new round first moves: `docs/TA-DEMOS.md`, "Where a round stops".
+against a victim with the episode's own footprint.
+
+### Which tick a new round first moves on
+
+**The tick it is fired.** The order in one sim step (§102, `0x4954BD`) is: game
+tick incremented, unit pass `0x48AD30`, projectile pass `0x49B720`
+(`0x495513`), feature pass, per-player settle. The fire routine runs inside the
+unit pass, reached from the per-tick weapon update `0x49E1A0`, and at
+`0x49D77E` it calls `0x49C9C0`, which appends the round to the flat projectile
+array -- count at `globals+0x141F3`, base at `+0x141F7`, stride 107 -- and
+increments the count before returning. It then builds the 36-byte `0x0d` and
+queues it (`0x49D859`).
+
+The projectile pass reads that count **once** into its trip counter
+(`0x49B728`, stored at `0x49B740`) and counts it down (`0x49BE41`) without
+re-reading it. The round created a moment earlier is inside the count, so it is
+walked: it moves (`0x49BD41`) and `0x49B090` tests the square it now stands in
+straight afterwards (`0x49BD88`). A hit goes `0x499EB0` → `0x499CD0` →
+`0x489BB0`, synchronously, which is where the damage and its `0x0b` happen.
+
+So a round fired on tick T detonates on **`T + k - 1`** for `k` steps to the
+footprint, and there is no creation-tick guard anywhere in that chain. The only
+per-round time test on the way in is the **burst** gate at `0x49B790`, and a
+burst is not a deferral for an ordinary weapon: `0x49CB79` copies the new
+round's `proj+0x60` from `wdef+0xEA`, which the parser at `0x42E619` defaults
+to zero, and a zero sends the record down the ordinary flying path. A non-zero
+one makes the record a template that emits one copy per `burstrate` and never
+flies itself, and those copies *are* a tick late -- `0x49B810` appends them past
+the trip count the pass had already latched, which is the one place the
+snapshot is observable.
+
+The demo corpus records the interval between a shot and its damage as `k`
+rather than `k - 1`, and that extra tick is the demo's clock and not the
+engine's: an event is stamped with the last `0x2c` before it in its sender's
+stream, the `0x2c` is queued at the end of that player's unit sub-pass
+(`0x48B003`), and so a `0x0d` is stamped a tick early while its `0x0b` is
+stamped true. `docs/TA-DEMOS.md`, "Which tick a round first moves on", has the
+stream measurement that confirms it and the Escalation patch check for every
+routine named here. RWE's own order is the same -- `spawnProjectile` emplaces
+during the behaviour pass and `updateProjectiles` walks the new round in the
+same tick, applying damage inline on the collision -- and
+`src/rwe/sim/weaponfiretick.test.cpp` pins it end to end through `tick()`.
 
 ### Guidance, `0x49B520`
 
@@ -749,6 +789,14 @@ have yet, so the smoke rises straight up for now.
 ### Decoded but not ported
 
 - **Wind on ballistic projectiles** (`0x49BD10`) is decoded but not ported.
+- **Escalation changes what an expired ballistic round does.** The GOG binary
+  tests `burnblow` (bit 23) at `0x49BC67` -- `shr eax,0x17` then `je` past the
+  detonation -- and Escalation patches the two bytes to `shr eax,0x1b` and
+  `jne`, so it tests `noautorange` (bit 27) and in the opposite sense. The
+  selfprop equivalent at `0x49BAC3` is unpatched and so is everything else in
+  `0x49B720`. Nothing scored today goes near it, but the ballistic oracle is
+  the next one to be written and it would be scored against Escalation demos,
+  so it has to use Escalation's rule and not this one.
 - The `meteor` projectile kind (`0x49BD46`, flag bit 5) adds a per-tick spin to
   the projectile's own heading and pitch from two words at `proj+0x1E` and
   `proj+0x26`, each shifted left by 8. Only `METEORS.TDF` uses it and RWE has no
@@ -10714,9 +10762,13 @@ at `0x48AF98` -- and only after the projectile (`0x49B720`) and feature
 counted into that same tick's settle. The corpus puts a stalled factory's first
 accepted increment on demo ticks that are multiples of 30, which with that order
 means either the settle runs at internal ticks one short of a multiple of 30 or
-the demo clock is stamped a tick behind the internal one. The corpus cannot tell
-those apart, and nothing depends on it: either way the seconds partition the
-lathes the same way.
+the demo clock is stamped a tick behind the internal one. **It is the second.**
+The weapon work settled it: everything queued during the unit pass -- a `0x09`
+among it -- goes into the sender's buffer *before* that tick's `0x2c`
+(`0x48B003`), so it is stamped with the previous tick's serial. See §7, "Which
+tick a new round first moves on", and `docs/TA-DEMOS.md`, "Which tick a round
+first moves on", for the decode and the stream measurement behind that. Nothing
+depended on it either way: the seconds partition the lathes the same way.
 
 ### Where RWE's economy differs
 

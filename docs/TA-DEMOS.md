@@ -825,7 +825,10 @@ round stops is the section after them, "Where a round stops", and it is what
 makes all 37 scored cells land -- 24 constant-speed, 13 with a motor. Before it
 the constant-speed model was `flight = ceil(d / v) - 1`, landing on 22 of 24
 cells, and its `-1` was read as a projectile taking its first step on the tick
-it is fired. That reading is retired; the `-1` was the footprint.
+it is fired. That reading of the `-1` is retired -- the `-1` was the footprint.
+A round *does* take its first step on the tick it is fired; that fact simply
+never showed in this interval, for the reason "Which tick a round first moves
+on" gives below.
 
 **A round that flies at one speed** covers `weaponvelocity / 30` world units a
 step. The mode's share now runs 43% to 93% -- `CORFAV` 93%, `ARMFAV` 92%,
@@ -896,6 +899,14 @@ the first step `k` at which the round, flown along the line from its origin to
 its aim point, stands in the victim's footprint, stamped at the aim point with
 the left edge rounded to the nearest square -- which is RWE's
 `computeFootprintRegion` -- and the shot-to-damage interval is `k` itself.
+
+That the *recorded* interval is `k` and not `k - 1` is the demo's clock rather
+than a tick of hesitation in the round: a `0x0d` is queued before its tick's
+`0x2c` and a `0x0b` after it, so a shot reads a tick early. "Which tick a round
+first moves on" below has the decode and the stream measurement. The model and
+`flightTicks` are unaffected; what it settles is what a consumer may conclude
+from them, which is that a round fired on tick T detonates on `T + k - 1`.
+
 `tools/tad-weapontime.py --footprint` prints the evidence, over victims that
 cannot move so nothing but geometry is being scored:
 
@@ -934,23 +945,126 @@ units of drift). RWE already stamps a unit that way.
 * **47 scored pairings step over the footprint without landing in it** -- a
   fast round crossing the corner of a small victim between two steps. They are
   counted against their cell's share rather than dropped.
-* **Which tick the first step lands on.** The interval is `k`, and before this
-  the `-1` in `ceil(d / v) - 1` was taken to say the first step lands on the
-  firing tick. Retiring it reopens that, and a first reading of the binary
-  points the wrong way: the fire routines create the projectile and build the
-  `0x0d` in one go (`0x49D69E` calls `0x49C9C0`, then writes the `0x0d`), they
-  are reached through the weapon's own pointer `[wdef+0x60]` from the per-tick
-  weapon update `0x49E1A0`, that runs inside the unit pass `0x48AD30`, and the
-  sim step calls the unit pass before the projectile pass `0x49B720`
-  (`0x4954ED`, `0x495513`) -- with no creation-tick guard visible on the
-  non-burst path. Taken at face value a round fired on tick T would move on T
-  and its damage would land on `T + k - 1`, where the corpus says `T + k`.
-  Something in that chain is a tick later than it reads -- the fire deferred
-  through a COB thread, the damage record emitted from a queue, or a guard not
-  yet found -- and it is not settled. **It matters for RWE**: the fixture
-  spawns the projectile outside `tick()` and counts `k`, so it pins the stepping
-  and the stop, and it does not pin where RWE's own firing sits relative to the
-  first step in play.
+* **Which tick the first step lands on** was open here until the section
+  below. It is settled: on the tick the round is fired, and the extra tick the
+  interval appears to carry is the demo's own clock rather than the engine's.
+
+#### Which tick a round first moves on, and why the interval reads one higher
+
+The interval above is `k`, the step count to the footprint. Read naively that
+says a round fired on tick T lands its damage on `T + k`, which would mean the
+round waits a tick before moving. **It does not.** The binary says the first
+step is on the firing tick, and the extra tick is put there by how a demo
+stamps its events.
+
+**The engine's order.** One tick of `TotalA.exe` is `0x4954BD`: increment the
+game tick, the unit pass `0x48AD30`, the projectile pass `0x49B720`
+(`0x495513`), the feature pass, then the per-player settle (§102 of
+[TOTALA-EXE.md](TOTALA-EXE.md)). A firing weapon is reached from the per-tick
+weapon update `0x49E1A0` inside the unit pass, and at `0x49D77E` it calls
+`0x49C9C0`, which appends the round to the flat projectile array
+(`globals+0x141F3` the count, `+0x141F7` the base, stride 107) and takes the
+count up with it. The projectile pass then reads that count **once**
+(`0x49B728`, latched into its trip counter at `0x49B740`) and walks it,
+decrementing (`0x49BE41`) without ever re-reading it. The round created a
+moment earlier in the same tick is inside that count, so it moves
+(`0x49BD41`) and is tested against the square it now stands in immediately
+afterwards (`0x49BD88` into `0x49B090`). A hit runs `0x499EB0` → `0x499CD0` →
+`0x489BB0` synchronously, and that is what queues the `0x0b`.
+
+So **fire on T, first step on T, detonation and damage on `T + k - 1`.**
+
+Two things that could have made it later, and do not:
+
+* **The burst counter is not a deferral for an ordinary weapon.** `0x49CB79`
+  sets the new round's `proj+0x60` from the weapon's own `burst` (`wdef+0xEA`),
+  and the parser at `0x42E619` defaults that key to **0**. A zero sends the
+  record down the flying path at `0x49B9AE`; a non-zero one makes it a
+  *template* that spawns one copy per `burstrate` and never flies itself. Only
+  four weapons in the Escalation data have a burst, and they are excluded from
+  the oracle anyway. A burst continuation **is** a tick later than the template
+  that made it, because `0x49B810` appends it past the trip count the pass had
+  already latched -- which is the one place this array walk's snapshot is
+  observable.
+* **No creation-tick guard exists.** The only per-round time test on the way in
+  is the burst gate at `0x49B790` (`gameTick < proj+0x42 + burstrate`), and
+  `proj+0x42` is the creation tick (`0x49C7AC`), so with `burstrate` at zero it
+  does not even hold the first copy back.
+
+**Where the extra tick comes from.** A subpacket has no clock of its own; it is
+stamped with the last `0x2c` before it in its sender's stream. The `0x2c` is
+built and queued at the end of that player's unit sub-pass -- `0x48B003` calls
+`0x48B710`, which ends by handing the packet to the same queue `0x451DF0` that
+every event record goes through (`0x48B903`). So within one tick the sender's
+buffer gets: the unit pass's `0x0d`s, `0x09`s and `0x12`s; **then** the `0x2c`
+stamped T; **then** the projectile pass's `0x0b`s and `0x0c`s, and the settle's
+`0x28`s. A shot therefore reads as tick `T - 1` and its damage as tick
+`T + k - 1`, and the difference is `k`.
+
+**The stream says so directly.** Take the run of subpackets between two
+consecutive `0x2c`s from one sender and ask which side of it each code sits on:
+
+| in one sender's run between two `0x2c`s | runs |
+|---|---|
+| every `0x0b` **before** every `0x0d` | **121,624** |
+| every `0x0d` before every `0x0b` | 536 |
+| interleaved | 477 |
+| every `0x0b` before every `0x09`/`0x12` | **13,145** of 13,485 |
+| every `0x28` before every `0x0d` | **4,210** of 4,373 |
+
+99.2% of the runs that carry both put the damage records first, which is only
+possible if they belong to the *previous* tick's projectile pass. The build
+events sit on the shot's side of the divide and the resource samples on the
+damage's side, exactly as their emitters' positions in the tick predict. The
+residual is expected rather than awkward: `0x489BB0` has callers inside the
+unit pass too (the lathe at `0x41BC49`/`0x41BDC7` among them), so a minority of
+`0x0b`s really are queued before the `0x2c`.
+
+**This also closes §102's either/or.** That section could not tell whether the
+settle runs at internal ticks one short of a multiple of 30 or the demo clock
+is a tick behind the internal one. It is the second, for everything queued
+before the `0x2c`: a settle at the end of internal tick T pays a stalled
+builder in tick `T + 1`'s unit pass, and that builder's `0x09` is stamped with
+tick T's `0x2c` -- which is why the corpus puts the first accepted increment on
+demo ticks that are multiples of thirty.
+
+**What it means for the fixture.** Nothing changes. `flightTicks` is still
+`damageTick - shotTick` and still the step count, and `weaponflight.test.cpp`
+still spawns the round outside `tick()` and counts `k` ticks to the victim, so
+the two conventions cancel and the numbers stand. What was missing is a test of
+the half neither of them covers, and that is
+`src/rwe/sim/weaponfiretick.test.cpp`: it fires a real weapon from a real unit
+through `tick()` and asserts the tick of the damage against the tick of the
+shot, with a case whose round reaches the footprint on its first step so that
+the two fall on one tick. RWE already matched -- `spawnProjectile` emplaces
+during the behaviour pass and `updateProjectiles` walks the new round in the
+same tick -- so nothing was changed to make it pass; the test exists so that a
+rearrangement of `tick()` cannot quietly put every weapon in the game a tick
+behind the original without the 37 corpus episodes noticing, which they would
+not.
+
+**Every routine above is unpatched in Escalation's `TotalA.exe`.**
+`tools/exe/patchdiff.py --range` reports `0x4954A0`-`0x495570` (the tick),
+`0x48B710`-`0x48B920` (the `0x2c` builder), `0x49C9C0`-`0x49CC20` (creation),
+`0x49D660`-`0x49D880` (the fire routine and the `0x0d`), `0x451DF0`-`0x451FD0`
+(the queue), `0x489BB0`-`0x489CE0` (damage and the `0x0b`), `0x49B090`-`0x49B2E0`
+(the stop) and `0x42E5F0`-`0x42E690` (the `burst` parse) all clean. Two ranges
+in the chain do carry patched bytes and neither touches the order:
+`0x48AD30`-`0x48B030` is patched only between `0x48AEC0` and `0x48AFC5`, which
+is the self-repair arithmetic -- the call sequence, the unit loop's back edge
+and the `0x2c` call at `0x48B003` disassemble identically in both -- and
+`0x499CD0`-`0x49A0A0` has two bytes at `0x49A00C`, a `jmp` turned into two
+`nop`s so that a weapon with flag bit 10 gets the crater call as well as the
+effect call. The `0x0b` emitter at `0x499E37` is untouched.
+
+**One patched byte pair that the next class must know about.** Escalation
+*does* change the projectile pass, at `0x49BC67`: the test that decides what a
+**ballistic** round does when its life runs out reads `burnblow` (bit 23,
+`shr eax,0x17` / `je`) in GOG v3.1 and `noautorange` (bit 27, `shr eax,0x1b` /
+`jne`) in Escalation, which is the opposite sense as well as a different flag.
+The selfprop equivalent at `0x49BAC3` is unpatched, so nothing scored today is
+affected -- but the ballistic model is the next one to be written and it would
+be scored against Escalation demos, so it has to use Escalation's rule.
 
 #### The drift bound: when a flight time stops measuring a flight
 
