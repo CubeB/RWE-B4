@@ -184,7 +184,12 @@ function Show-Arm {
         army      = [math]::Round((($samples | Measure-Object -Property army -Average).Average), 1)
         lost      = [math]::Round((($samples | Measure-Object -Property lost -Average).Average), 1)
         metalRate = [math]::Round((($samples | Measure-Object -Property metal -Average).Average), 1)
-        dead      = ($samples | Where-Object { $_.dead }).Count
+        # @() around it, or a genuine zero renders as an EMPTY CELL: Where-Object
+        # yields nothing rather than an empty array when nothing matches, and
+        # nothing has no .Count. It showed up as a blank in the one column where
+        # a blank reads as good news -- "no deaths" and "not measured" looking
+        # identical is precisely the silent-gap fault this tool exists to avoid.
+        dead      = @($samples | Where-Object { $_.dead }).Count
     }
     foreach ($t in $typeList) {
         $total = 0
