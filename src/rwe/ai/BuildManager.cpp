@@ -1401,6 +1401,11 @@ namespace rwe
             const auto& factory = sim.getUnitState(factoryId);
             if (!factory.buildQueue.empty())
             {
+                // A factory is only topped up once its queue drains, so a
+                // plant that queues one unit which never finishes is never
+                // asked for anything again. Nothing recorded that until now.
+                LOG_DEBUG << "AI factory: " << factory.unitType << " " << factoryId.value
+                          << " skipped, queue holds " << factory.buildQueue.size();
                 continue;
             }
 

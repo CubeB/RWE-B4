@@ -301,6 +301,11 @@ namespace rwe
         bb.enemyAcrossWater = enemyAcrossWater;
         bb.wantsTransport = expansionSite.has_value() || enemyAcrossWater;
 
+        if (enemyAcrossWater && bb.phase == GamePhase::Attack && bb.transports.empty())
+        {
+            LOG_DEBUG << "AI transport: army ferry wanted, but nothing is classified as a transport";
+        }
+
         for (auto transportId : bb.transports)
         {
             if (ferries.count(transportId.value) > 0)
@@ -310,6 +315,11 @@ namespace rwe
             const auto& transport = sim.getUnitState(transportId);
             if (!transport.orders.empty() || !transport.carriedUnits.empty())
             {
+                if (enemyAcrossWater && bb.phase == GamePhase::Attack)
+                {
+                    LOG_DEBUG << "AI transport " << transportId.value << ": army ferry blocked, transport busy ("
+                              << transport.orders.size() << " orders, " << transport.carriedUnits.size() << " aboard)";
+                }
                 continue;
             }
             const auto& transportDef = sim.unitDefinitions.at(transport.unitType);
@@ -372,6 +382,9 @@ namespace rwe
                     : navalLandingNear(sim, reachability, *bb.attackTarget, *bb.baseAnchor);
                 if (!landing)
                 {
+                    LOG_DEBUG << "AI transport " << transportId.value << ": army ferry blocked, no landing near "
+                              << static_cast<int>(bb.attackTarget->x.value) << "," << static_cast<int>(bb.attackTarget->z.value)
+                              << (transportDef.canFly ? " (air)" : " (sea)");
                     continue;
                 }
                 std::vector<UnitId> passengers;
@@ -430,6 +443,8 @@ namespace rwe
                 }
                 if (passengers.empty())
                 {
+                    LOG_DEBUG << "AI transport " << transportId.value << ": army ferry blocked, no eligible passenger out of "
+                              << bb.combatUnits.size() << " combat units (capacity " << capacity << ")";
                     continue;
                 }
                 Ferry ferry{passengers, *landing, sim.gameTime, false};
