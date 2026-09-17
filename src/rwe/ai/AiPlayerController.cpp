@@ -306,6 +306,8 @@ namespace rwe
                      // discarded, so a ferry that never fired left nothing to read.
                      << ", unreachable ground " << (blackboard.hasUnreachableGround ? "yes" : "no")
                      << ", wants transport " << (blackboard.wantsTransport ? "yes" : "no")
+                     << " (expansion site " << (blackboard.hasExpansionSite ? "yes" : "no")
+                     << ", enemy across water " << (blackboard.enemyAcrossWater ? "yes" : "no") << ")"
                      << ", naval scout " << (blackboard.navalScoutUnitId ? "yes" : "no")
                      << ", units:" << counts << "; " << commanderDoing;
         }

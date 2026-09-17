@@ -297,6 +297,8 @@ namespace rwe
 
         // Is there anywhere worth going that needs a lift?
         bool enemyAcrossWater = bb.groundReachabilityValid && bb.attackTarget && !reachability.isReachable(sim, *bb.attackTarget);
+        bb.hasExpansionSite = expansionSite.has_value();
+        bb.enemyAcrossWater = enemyAcrossWater;
         bb.wantsTransport = expansionSite.has_value() || enemyAcrossWater;
 
         for (auto transportId : bb.transports)

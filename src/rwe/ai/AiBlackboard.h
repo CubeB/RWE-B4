@@ -282,6 +282,18 @@ namespace rwe
         std::set<unsigned int> ferryPassengers;
         /** Set when there is somewhere worth going that ground units cannot walk to. */
         bool wantsTransport{false};
+        /**
+         * The two halves of wantsTransport, kept apart because their union
+         * cannot be read back. Observational only: nothing branches on
+         * these, they exist so a log line can say which of the two is true.
+         * hasExpansionSite is what the BUILDER ferry needs -- a metal patch
+         * on walkable ground the base cannot reach -- and enemyAcrossWater
+         * is what the ARMY ferry needs. Folded together they are useless for
+         * diagnosis: a twenty-game run with eight ferries and one with none
+         * both read "wants transport yes" on every line.
+         */
+        bool hasExpansionSite{false};
+        bool enemyAcrossWater{false};
         std::optional<SimVector> rallyPoint;
         std::optional<SimVector> attackTarget;
         int armySize{0};
