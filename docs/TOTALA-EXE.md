@@ -8706,6 +8706,19 @@ original:
   rockets are `turret=0`, so §11 applies to them and the original holds fire
   until the nose is within the weapon's tolerance, which for `vtol_rocket` and
   friends is 8000, about 44°. RWE now does the same.
+- **A nanoframe appears a tick after the order that asked for it, and a
+  factory's first lathe a tick after that.** The original creates the frame and
+  lathes it inside one mission pass; RWE cannot create a unit during the
+  behaviour pass (it is walking the unit map), so every builder defers to
+  `spawnNewUnits` at the end of the tick and meets its own frame on the next
+  one. That is where the first lathe lands — for a mobile builder and, since
+  §101 was ported, for the two that a construction aircraft pays there. A
+  factory takes one tick more: its state machine spends the tick it picks the
+  creation up starting `StartBuilding` and lathes from the tick after. None of
+  this changes a job's *length*, which is what the corpus measures and what the
+  build fixture asserts; it shifts the whole job a tick or two later against the
+  order. Closing it means creating units inside the behaviour pass, which is the
+  iterator hazard that section exists to avoid.
 - **Build progress is an integer accumulator, not the original's float.** The
   original steps a 4-byte float by `p / BuildTime` a tick and stops at the end
   value (§23), so where `BuildTime` is an exact multiple of `p` it sometimes
@@ -8951,9 +8964,9 @@ there is a regression test for it now.
   increments on the creation tick, because `VTOL_MobileBuild` discards its stance
   wait's answer and a pending COB event re-runs the lathe in the same tick; see
   §101, which also accounts for the 8 builds off the model (late by whole
-  seconds). **RWE does not reproduce it**, and it credits a construction aircraft
-  only once it is in its build stance, which the original never waits for. Whether
-  to port the second increment or license it in the build fixture is open.
+  seconds). **Ported**: RWE credits a construction aircraft twice on the tick it
+  first has a frame to lathe and never makes one wait for its stance, and the
+  airborne cells are in the build fixture on the ordinary §88 delta.
 - The exact tick at which the original commits a **bomb release** inside its
   weapon code is still not pinned down; RWE uses its own bombsight.
 - **`unit+0x110` bits 2–3.** They pick the loose 2000 default over the tight 150
@@ -10590,24 +10603,45 @@ It is not on the lathe path and was not followed. The unit-initialisation patch
 at `0x485C69` moves the code around the write of `unit+0xBA` but still zeroes
 it.
 
-### What it means for RWE
+### What it means for RWE, and what was done about it
 
-- **RWE does not reproduce the second increment.** `UnitBehaviorService` credits
-  a job once a tick, and it gates every builder on `inBuildStance`, where the
-  original never makes a construction aircraft wait for its stance at all
-  (`VTOL_MobileBuild` discards the answer, and `VTOL_HelpBuild` never asks).
-  With stock scripts, which set the stance without a sleep, that second
-  difference costs at most a tick.
-- **Airborne cells could now enter the build fixture** without writing an open
-  question into it, because there is no longer one. Driven through RWE's integer
-  accumulator the way `buildtime.test.cpp` drives it, their
-  `expectedDurationDelta` would be `ceil(BuildTime / p) - N + 1`, where `N` is
-  the float32 increment count: **+1** in general and **0** on a divisible pair
-  where float32 needs the extra increment. For the three cells scored by default
-  that is `CORDRAG` 0, `CORRAD` +1, `CORMEX` 0. A +1 would be the fixture's first
-  positive delta, and the test admits only -1 on a divisible pair, so this is a
-  decision, to license the difference or to credit a construction aircraft twice
-  on its creation tick, and not just a regeneration.
+**Ported**, in `UnitBehaviorService.cpp`. Both halves:
+
+- `deployBuildArm` no longer gates a `canfly` builder on `inBuildStance`. The
+  gate stays for a factory and a ground constructor, which is where the
+  original has it, and it covers assisting as well as building because both go
+  through that one handler -- `VTOL_HelpBuild` does not consult the stance
+  either.
+- `buildUnit` passes `frameJustCreated` on the tick it picks its own finished
+  creation up, and that tick runs the lathe **twice**. The lathe moved into
+  `latheNanoframe` so it can be called twice in a tick the way the service loop
+  calls it, and the sequence in the handler is the original's: deploy (which is
+  `StartBuilding`, queued), lathe, lathe. No new simulation state -- the second
+  increment is sequenced inside the one call rather than remembered across
+  ticks -- so there is nothing for the four-places rule to catch.
+
+**Where the creation tick is, in RWE.** The original creates the nanoframe and
+lathes it inside one mission pass on one tick. RWE cannot: a behaviour handler
+may not add a unit while the behaviour pass is walking the unit map, so a build
+order pushes onto `unitCreationRequests` and `spawnNewUnits` lays the frame down
+at the end of that tick. The builder meets its own frame on the **next** tick,
+as `UnitCreationStatusDone`, and that is the tick RWE treats as the creation
+tick: the first tick on which there is a frame to lathe at all. The two
+increments land there. So the relation the corpus actually pins -- two
+increments on the job's first tick and one a tick after, ending a tick before a
+factory at the same rate -- holds exactly; what differs is a fixed tick of
+scheduling latency between the order and the frame, which no episode measures.
+A factory pays one tick more of that latency still (§88).
+
+**The fixture.** Airborne cells are now in it, on the same delta convention as
+the factory ones, because the emitter subtracts two increments rather than one
+for that class: `CORCA` to `CORDRAG` -1, to `CORMEX` -1, to `CORRAD` 0. The -1s
+are §88's integer accumulator on a divisible pair and nothing else, which is the
+point of porting rather than licensing -- there is no airborne delta left to
+write down. `buildtime.test.cpp` drives the accumulator with the double credit
+and carries a case showing what it buys: credited once, all three cells come out
+a tick late against the games they were measured in. The behaviour half is
+`aircraftbuild.test.cpp`, in the real simulation on `CORCA`'s own FBI figures.
 
 It took one session. The discarded return value at `0x41413E` was visible as
 soon as the two mobile build handlers were read side by side; what took the time

@@ -525,8 +525,17 @@ whole-second shape a resource stall leaves (factories show it too: 347 of their
 384 late builds are late by a multiple of 30). All 15 airborne pairs' modes,
 including the 10 whose `BuildTime` divides exactly by p, match the float32
 model with two increments on the `0x09`'s tick, and `tools/tad-buildtime.py` now
-scores the class that way, cell by cell. The build fixture still leaves them
-out; §101 says what delta they would carry and why that is a decision.
+scores the class that way, cell by cell.
+
+**RWE does the same now**, so the airborne cells are in the build fixture: at
+the default `--min-builds` the corpus offers three, `CORCA` to `CORDRAG`,
+`CORMEX` and `CORRAD`, and they carry -1, -1 and 0 — the ordinary integer
+accumulator delta on the two pairs whose `BuildTime` divides by the rate
+(§88), and nothing of their own. That is what porting bought over licensing:
+there is no airborne delta left to write into `expectedDurationDelta`, and the
+`[build][corpus]` test carries a case showing that crediting them once instead
+would put all three a tick late against the games they came from. The
+behaviour, as opposed to the arithmetic, is pinned in `aircraftbuild.test.cpp`.
 
 #### The other constant: a builder's own deploy sequence, which is data
 
@@ -563,9 +572,12 @@ immobile scored cell by cell, airborne scored cell by cell against two
 increments on the `0x09`'s tick, ground mobile listed by `--overheads` with
 their floors so a floor can be told from a tail, and never scored.
 
-RWE already gates build progress on `inBuildStance` (`UnitBehaviorService.cpp`),
-so it reproduces this as long as it runs the same script. There is no engine gap
-here.
+RWE gates build progress on `inBuildStance` (`UnitBehaviorService.cpp`) for a
+factory and a ground builder, so it reproduces this as long as it runs the same
+script. There is no engine gap here. A construction aircraft is exempt, because
+the original exempts it: neither VTOL build mission waits for the stance
+(`TOTALA-EXE.md` §101), which is why an aircraft's overhead is not its script's
+either.
 
 **A lead, not a finding.** Those two rows also pin TA's COB clock, if the
 overhead really is the sleeps and nothing else. A clock advancing **33 ms** a
@@ -1792,8 +1804,9 @@ Settled by the economy oracle, and inherited by everything after it.
   model that is all 37 -- 24 constant-speed and 13 with a motor. Under the
   aim-point model it was 33, and the four it did not predict were skipped with
   a printed reason rather than checked in with their offset written into
-  `expectedFlightDelta` -- the same rule that keeps airborne builders out of the
-  build fixture. That field is for a divergence somebody decided on, never for an
+  `expectedFlightDelta` -- the same rule that kept airborne builders out of the
+  build fixture until §101 explained their extra tick and RWE reproduced it.
+  That field is for a divergence somebody decided on, never for an
   observation nobody has explained, and the rule still stands for the next
   cell that disagrees.
 

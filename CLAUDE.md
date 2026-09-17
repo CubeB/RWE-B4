@@ -126,10 +126,14 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   `src/rwe/sim/tad_build_episodes.h`, for the `[build][corpus]` tests. Unlike
   the storage pass this one is corpus-wide, because a cell pools across games,
   which is also why a demo whose own type count disagrees with `--units` is
-  dropped from it outright rather than merely warned about. Only immobile
-  builders become episodes; `--max-cells` caps how many, keeping every cell
-  whose `BuildTime` divides exactly by the rate, because those are the ten that
-  carry a non-zero `expectedDurationDelta`.
+  dropped from it outright rather than merely warned about. Immobile and
+  airborne builders become episodes, each scored against its own model — a
+  construction aircraft's first tick pays two increments (`docs/TOTALA-EXE.md`
+  §101), which RWE reproduces, so its cells carry the ordinary
+  `expectedDurationDelta` and nothing of their own. A ground mobile builder
+  never becomes one. `--max-cells` caps how many, keeping every cell whose
+  `BuildTime` divides exactly by the rate, because those are the ones that carry
+  a non-zero delta, and every airborne cell, because there are three.
 
   `--emit-shots` dumps every `0x0d`, `0x0b` and `0x0c` as **JSON Lines** (about
   1.5 million records, 320 MB, coordinates exact), shooters and victims already
