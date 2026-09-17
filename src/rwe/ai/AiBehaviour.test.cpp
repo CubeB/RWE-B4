@@ -2822,10 +2822,12 @@ namespace rwe
 
         SECTION("an army below the cap keeps being made")
         {
-            // Three kbots against a default cap of twelve. This section read
-            // "off by default" until the default became 12 above
-            // isolatedLandArmyCapMinWaterFraction; what it pins is unchanged
-            // either way, that an army under the cap is not capped.
+            // Off by default, so the lab keeps working. The default was
+            // briefly 12 above isolatedLandArmyCapMinWaterFraction and was
+            // measured back to zero the same day -- the cap halved the land
+            // army and bought no hulls with the savings. What this pins holds
+            // either way: an uncapped lab, or an army under the cap, goes on
+            // being made.
             AiPlayerController controller(ai, profile, 42u, islandMap);
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 31, commands);

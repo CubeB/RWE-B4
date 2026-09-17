@@ -385,10 +385,9 @@ namespace rwe
          * read: a land army is worth building right up until there is
          * nowhere for it to walk.
          *
-         * Twelve is the measured value, and it is now the default -- but
-         * only above isolatedLandArmyCapMinWaterFraction, which is the
-         * gate the table below turned out to need. Played at 12 against its
-         * own absence, twenty 1800s games a map with the seats dealt, the
+         * Zero -- the default -- is off, and it is off after two separate
+         * measurements rather than one. Played at 12 against its own
+         * absence, twenty 1800s games a map with the seats dealt, the
          * capped side against the untouched one:
          *
          *   Hundred Isles  (92% water)  hulls 33 v 23, yards 29 v 17,
@@ -406,11 +405,31 @@ namespace rwe
          * the army. The conclusion that used to end here -- that a default
          * would have to be gated on how much water there is, not merely on
          * whether some ground is out of reach -- is what
-         * isolatedLandArmyCapMinWaterFraction now is. The knob nobody had
-         * needed yet was needed the moment someone watched the AI ferry
-         * kbots around Hundred Isles and asked why it was not simply
-         * building aircraft and hulls, which is the same conclusion this
-         * table reached from the other side.
+         * isolatedLandArmyCapMinWaterFraction is, and the gate stands.
+         *
+         * THE DEFAULT DOES NOT. Turned on at 12 above that gate on
+         * 2026-09-17 and measured the same day, ten games a map with the
+         * seats dealt, the capped arm against the same binary uncapped, on
+         * Hundred Isles at 92% water -- which is the map the gate exists to
+         * admit, so this is the friendliest case it has:
+         *
+         *   900s    army 6.4 v 16.0, income 10.8 v 10.2, nobody died
+         *   1800s   army 16.3 v 32.0, income 13.8 v 12.8, nobody died
+         *
+         * and in both runs THE HULL COUNTS WERE IDENTICAL: ARMROYx4,
+         * ARMSUBx2 and ARMSYx2 in every 1800s game, on both sides of every
+         * pair. The cap halves the land army and buys no fleet whatever
+         * with the savings, because the fleet was never short of metal --
+         * navalFleetSize is 6 and both arms already reach it, so the freed
+         * income has nowhere to go.
+         *
+         * Which is the honest reading of the first table too, in hindsight:
+         * what it measured was a fleet starved by YARD TIMING, and the
+         * shipyard hoist (44dff154) and targetShipyardCount=2 have since
+         * fixed that at the source. The cap was compensating for a bug that
+         * no longer exists. Raising navalFleetSize is the lever that would
+         * make the freed metal worth having, and until something does, this
+         * stays off.
          *
          * The harm this was held back for did not appear: the case where
          * the cap fires while the enemy is still walkable happened in 0 of
@@ -419,7 +438,7 @@ namespace rwe
          * there was no unreachable ground at all. Rare, not impossible --
          * and with the knob off it cannot bite regardless.
          */
-        int isolatedLandArmyCap{12};
+        int isolatedLandArmyCap{0};
         /**
          * How much of the map must be water before the cap above is allowed
          * to fire, as a fraction of the heightmap.
