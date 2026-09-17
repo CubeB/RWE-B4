@@ -300,7 +300,44 @@ namespace rwe
          * the 512 this used to share.
          */
         SimScalar nearMexSearchRadius{1200_ss};
+        /**
+         * The ring count chooseBuildSite lays every structure out in -- so
+         * this is a cap on how far the base may sprawl, not on how far metal
+         * is looked for (nearMexSearchRadius above does that job).
+         *
+         * Stays at 512. Raising it outright was tried and withdrawn: see
+         * buildSiteFallbackRadius below, which fixes the case that needed
+         * fixing without charging every map for it.
+         */
         SimScalar maxMexSearchRadius{512_ss};
+        /**
+         * How far the site search is allowed to reach when the normal budget
+         * above turns up NOTHING -- not even a crowded site.
+         *
+         * 512 is sixteen tiles, and on an island start that disc frequently
+         * had no room for a 6x6 lab. The planner takes the first want it can
+         * site, so a lab with nowhere to stand meant no lab, no factory, no
+         * army, and a side that never left Boom -- while the shipyard, the
+         * one siting that scans MapIntel globally rather than a ring, got
+         * built anyway. That read as an AI preferring a navy. It was an AI
+         * that could not fit a factory.
+         *
+         * Raising maxMexSearchRadius to 2048 fixed it and was measured, 20
+         * games at 1800s, each slot run both ways. On Hundred Isles it took
+         * army 65 against 5, and 30.2 against 3.4 swapped. But on Painted
+         * Desert the swap refused it: in one slot the wide setting took 57.6
+         * units and army 22.2 against 66.6 and 24.8 and lost two games
+         * outright, while in the other the two were a wash -- about 5% worse
+         * on land, averaged. The unswapped land run alone had looked fine,
+         * which is exactly why it was swapped.
+         *
+         * So the widening is conditional instead. A base with room never
+         * reaches it, because the normal scan succeeds first; the cramped
+         * island start does. It also bounds the cost of the deeper scan to
+         * the case where the cheap one already failed. Set equal to or below
+         * maxMexSearchRadius to switch it off entirely.
+         */
+        SimScalar buildSiteFallbackRadius{2048_ss};
         /**
          * How far from the base a constructor will go for a patch, nearest
          * first, once nothing near it is free.

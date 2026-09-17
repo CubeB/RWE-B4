@@ -240,6 +240,7 @@ namespace rwe
             || setScalar("radarDistanceFromBase", p.radarDistanceFromBase)
             || setScalar("nearMexSearchRadius", p.nearMexSearchRadius)
             || setScalar("maxMexSearchRadius", p.maxMexSearchRadius)
+            || setScalar("buildSiteFallbackRadius", p.buildSiteFallbackRadius)
             || setScalar("expansionMexSearchRadius", p.expansionMexSearchRadius)
             || setScalar("commanderMexSearchRadius", p.commanderMexSearchRadius)
             || setScalar("mexAvoidsEnemyGunsRadius", p.mexAvoidsEnemyGunsRadius)

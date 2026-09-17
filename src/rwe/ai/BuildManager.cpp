@@ -210,11 +210,11 @@ namespace rwe
          */
         std::vector<PlacementObstacle> collectStandingBuildings(
             const GameSimulation& sim,
-            const AiTuningProfile& profile,
-            const SimVector& anchor)
+            const SimVector& anchor,
+            SimScalar radius)
         {
             std::vector<PlacementObstacle> buildings;
-            auto reach = profile.maxMexSearchRadius + profile.maxMexSearchRadius;
+            auto reach = radius + radius;
             for (const auto& [_, unit] : sim.units)
             {
                 if (!unit.isAlive())
@@ -276,19 +276,18 @@ namespace rwe
          */
         std::vector<BuildableSite> collectBuildableSites(
             const GameSimulation& sim,
-            const AiTuningProfile& profile,
             const UnitDefinition& def,
             const SimVector& anchor,
-            bool nearestRingOnly)
+            bool nearestRingOnly,
+            SimScalar radius)
         {
             const auto mc = sim.getAdHocMovementClass(def.movementCollisionInfo);
             auto footprint = sim.getFootprintXZ(def.movementCollisionInfo);
             auto spacingTiles = static_cast<float>(std::max(footprint.first, footprint.second) + 2);
             const SimScalar spacing = SimScalar(spacingTiles * MapTerrain::HeightTileWidthInWorldUnits.value);
-            const SimScalar radius = profile.maxMexSearchRadius;
             const int ringCount = std::max(1, static_cast<int>(radius.value / spacing.value));
 
-            const auto standing = collectStandingBuildings(sim, profile, anchor);
+            const auto standing = collectStandingBuildings(sim, anchor, radius);
             const auto ownMargin = isFactory(def) ? factoryClearanceTiles : buildingClearanceTiles;
 
             std::vector<BuildableSite> sites;
@@ -454,7 +453,17 @@ namespace rwe
         {
             return std::nullopt;
         }
-        auto sites = collectBuildableSites(sim, profile, defIt->second, anchor, true);
+        // Normal budget first; widen only if nothing fits at all, not even
+        // a crowded site. A base with room never reaches the wide scan --
+        // see buildSiteFallbackRadius for why it is conditional.
+        auto sites = collectBuildableSites(sim, defIt->second, anchor, true, profile.maxMexSearchRadius);
+        if (sites.empty() && profile.buildSiteFallbackRadius > profile.maxMexSearchRadius)
+        {
+            sites = collectBuildableSites(sim, defIt->second, anchor, true, profile.buildSiteFallbackRadius);
+            LOG_DEBUG << "AI build: widened site search for " << unitType << " at "
+                      << static_cast<int>(anchor.x.value) << "," << static_cast<int>(anchor.z.value)
+                      << (sites.empty() ? " -- still nothing" : " -- found one");
+        }
         if (sites.empty())
         {
             return std::nullopt;
@@ -478,7 +487,15 @@ namespace rwe
         }
         std::vector<SimVector> best;
         std::optional<SiteScore> bestScore;
-        for (const auto& site : collectBuildableSites(sim, profile, defIt->second, anchor, false))
+        auto scored = collectBuildableSites(sim, defIt->second, anchor, false, profile.maxMexSearchRadius);
+        if (scored.empty() && profile.buildSiteFallbackRadius > profile.maxMexSearchRadius)
+        {
+            scored = collectBuildableSites(sim, defIt->second, anchor, false, profile.buildSiteFallbackRadius);
+            LOG_DEBUG << "AI build: widened scored site search for " << unitType << " at "
+                      << static_cast<int>(anchor.x.value) << "," << static_cast<int>(anchor.z.value)
+                      << (scored.empty() ? " -- still nothing" : " -- found one");
+        }
+        for (const auto& site : scored)
         {
             if (accept && !accept(site.position))
             {

@@ -18,8 +18,13 @@ namespace rwe
     {
         // Build a tiny zero-height heightmap big enough to host one
         // commander and a couple of mexes within the AI's search radius.
-        // 32x32 cells gives 32 * 16 = 512 world units per axis, which
-        // matches AiTuningProfile::maxMexSearchRadius.
+        // 32x32 cells is 512 world units per axis. That used to be exactly
+        // maxMexSearchRadius; it is not any more, the default having been
+        // raised to 2048 once it turned out that a 512 ring could not fit a
+        // 6x6 lab on an island start. Nothing here depends on the two
+        // matching -- the map only has to be big enough for a commander and
+        // a couple of extractors -- so the size stays as it is, and this
+        // note replaces the coincidence it used to claim.
         MapTerrain makeFlatTerrain(int width = 32, int height = 32)
         {
             Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));

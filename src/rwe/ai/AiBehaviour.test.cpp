@@ -2131,6 +2131,110 @@ namespace rwe
         REQUIRE((clearX || clearZ));
     }
 
+    TEST_CASE("the site search widens when nothing fits, and only then", "[ai]")
+    {
+        // The island start that was costing the AI its entire game. A 6x6
+        // lab needs spacing (6+2)*16 = 128 world units a ring, so a 512
+        // budget is four rings; on a small island every one of those rings
+        // is in the sea and the planner -- which takes the first want it can
+        // SITE, not the first it can afford -- silently skipped the lab. No
+        // lab meant no factory, no army, and a side that never left Boom,
+        // while the shipyard got built anyway because its siting scans
+        // MapIntel globally instead of walking rings. It read as an AI that
+        // liked boats.
+        //
+        // Raising maxMexSearchRadius outright fixed that and cost about 5%
+        // on land, losing two games of twenty in one slot of a swapped
+        // Painted Desert run, so the widening is conditional instead. Both
+        // halves of that are pinned here: it must find the far site when the
+        // near rings are empty, and the kill switch must genuinely restore
+        // the old refusal.
+        //
+        // The terrain is land only in a 10x10 tile patch at the origin --
+        // bounded on BOTH axes, unlike makeWaterMapTerrain's strip, which is
+        // narrow in x but runs the full height of the map and so always has
+        // room along z inside 512.
+        // World coordinates are CENTRED on the map, so heightmap tile and
+        // world position relate as tile = (world + 896) / 16 for this
+        // 112-tile map (112 * 16 = 1792 world units, half of it 896).
+        // Getting that backwards is what made an earlier version of this
+        // fixture put the anchor inside the island it was supposed to be
+        // unable to reach.
+        Grid<unsigned char> heights(112, 112, static_cast<unsigned char>(0));
+        // The anchor's island: tiles 50-59, i.e. world -96 to 64.
+        for (int y = 50; y < 60; ++y)
+        {
+            for (int x = 50; x < 60; ++x)
+            {
+                heights.set(x, y, static_cast<unsigned char>(90));
+            }
+        }
+        // The far island: tiles 94-105, i.e. world 608 to 800.
+        //
+        // A 6x6 building spaces its rings (6+2)*16 = 128 apart, so a 512
+        // budget is four rings reaching 512 world units from the anchor at
+        // world -16. Rings 1-4 put their whole footprint in open water; the
+        // first candidate whose 6x6 lands entirely on this island is ring 6,
+        // 768 out, about 1086 away -- past the budget and well inside the
+        // 2048 fallback.
+        for (int y = 94; y < 106; ++y)
+        {
+            for (int x = 94; x < 106; ++x)
+            {
+                heights.set(x, y, static_cast<unsigned char>(90));
+            }
+        }
+        MapTerrain terrain(std::move(heights), 60_ss);
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+
+        // A 6x6 building that cannot stand in water. The field order is
+        // {footprintX, footprintZ, maxSlope, maxWaterSlope, minWaterDepth,
+        // maxWaterDepth}, so dry-land-only is a maxWaterDepth of 0 with the
+        // slopes left open -- the same shape ReachabilityMap.test.cpp uses
+        // for its land mover.
+        UnitDefinition labDef;
+        labDef.isMobile = false;
+        labDef.builder = false;
+        labDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{6u, 6u, 255u, 255u, 0u, 0u};
+        sim.unitDefinitions["LAB"] = labDef;
+
+        // World -16 is tile 55, the middle of the anchor's island.
+        auto anchor = SimVector(-16_ss, 90_ss, -16_ss);
+        std::minstd_rand rng(1u);
+        BuildManager buildManager;
+
+        SECTION("with the fallback off, the search gives up exactly as it used to")
+        {
+            auto profile = makeDefaultStandardProfile();
+            // Equal, not smaller: the guard is a strict >, so this is the
+            // documented way to switch the behaviour off.
+            profile.buildSiteFallbackRadius = profile.maxMexSearchRadius;
+
+            REQUIRE_FALSE(buildManager.chooseBuildSite(sim, profile, "LAB", anchor, rng).has_value());
+        }
+
+        SECTION("with it on, the far patch is found")
+        {
+            auto profile = makeDefaultStandardProfile();
+            REQUIRE(profile.buildSiteFallbackRadius > profile.maxMexSearchRadius);
+
+            auto site = buildManager.chooseBuildSite(sim, profile, "LAB", anchor, rng);
+            REQUIRE(site.has_value());
+
+            // It really is the far patch, not somewhere the near rings could
+            // have reached -- otherwise the section above would have found it
+            // too and this would pin nothing.
+            REQUIRE(flatDistanceBetween(*site, anchor) > profile.maxMexSearchRadius);
+
+            // And it is dry: a site in the sea would mean the footprint test
+            // is not being applied at the wider radius.
+            REQUIRE(sim.terrain.getHeightAt(site->x, site->z) >= sim.terrain.getSeaLevel());
+        }
+    }
+
     TEST_CASE("naval: a shipyard goes up on a water map, in water deep enough for it", "[ai]")
     {
         // makeWaterMapTerrain's shelf (tiles 10-13) is water but too shallow
