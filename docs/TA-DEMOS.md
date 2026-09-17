@@ -508,12 +508,25 @@ have meant something quite different:
   strict-versus-non-strict end test: none of these accumulators lands exactly on
   the endpoint, so both spellings predict the same number for all of them.
 
-What is left is that an airborne builder credits its job once more over its life
-than a ground one does. §23 lists five call sites into `0x41BA60`; which one an
-aircraft goes through, and whether it runs on a tick the ground path does not,
-is the thing to read out of the binary. Until someone does,
-`tools/tad-buildtime.py` scores the airborne class at -1 so that the regularity
-is checked rather than merely noted.
+What was left was that an airborne builder credits its job once more over its
+life than a ground one does, and [TOTALA-EXE.md](TOTALA-EXE.md) §101 has now
+read out where: **the extra increment lands on the creation tick, which gets
+two.**
+`VTOL_MobileBuild` calls the `INBUILDSTANCE` wait and discards its answer, and
+the wait leaves event bit `0x4` in the mission's wake mask. Every COB `set`
+raises that bit on the unit and nothing on an aircraft consumes it between
+jobs, so the mission service loop runs the lathe a second time before the tick
+ends. A factory waits for its stance before it creates the nanoframe, and a
+ground constructor's wait returns its answer, so neither can. The table above
+was drawn before builder ids were scoped in time; over the corpus as it is
+emitted now it is 60 of 68 builds (`CORCA` 47 of 55, `CORACA` 9 of 9, `ARMCA`
+4 of 4), and the eight off it are late by exactly 30, 60 or 120 ticks, the
+whole-second shape a resource stall leaves (factories show it too: 347 of their
+384 late builds are late by a multiple of 30). All 15 airborne pairs' modes,
+including the 10 whose `BuildTime` divides exactly by p, match the float32
+model with two increments on the `0x09`'s tick, and `tools/tad-buildtime.py` now
+scores the class that way, cell by cell. The build fixture still leaves them
+out; §101 says what delta they would carry and why that is a decision.
 
 #### The other constant: a builder's own deploy sequence, which is data
 
@@ -543,11 +556,12 @@ Escalation's constructors sit at +3 to +5 with a tail, which is the
 reposition-sometimes shape, and its factories sit at exactly 0 because a factory
 has nothing to deploy. So the rule for an oracle is: **score factory builds, and
 treat any mobile builder's offset as that unit's script until its script says
-otherwise** -- with construction aircraft the exception, since they deploy
-nothing and sit at a flat -1 (above). `tools/tad-buildtime.py` splits the three
-classes for exactly this reason: immobile scored cell by cell, airborne pooled
-and scored at -1, ground mobile listed by `--overheads` with their floors so a
-floor can be told from a tail, and never scored.
+otherwise** -- with construction aircraft the exception, since they never wait
+for their stance and get a second increment on the creation tick (above).
+`tools/tad-buildtime.py` splits the three classes for exactly this reason:
+immobile scored cell by cell, airborne scored cell by cell against two
+increments on the `0x09`'s tick, ground mobile listed by `--overheads` with
+their floors so a floor can be told from a tail, and never scored.
 
 RWE already gates build progress on `inBuildStance` (`UnitBehaviorService.cpp`),
 so it reproduces this as long as it runs the same script. There is no engine gap
