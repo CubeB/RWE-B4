@@ -255,6 +255,275 @@ namespace rwe
         return TadSpeed{readU16(&s[1])};
     }
 
+    namespace
+    {
+        /**
+         * Reads the way 0x415DC0 does: fields least significant bit first,
+         * out of the subpacket taken as one little-endian integer.
+         *
+         * Reading past the end yields zeros and latches `overrun`, so a decoder
+         * can read a whole record and ask once whether it was all there.
+         */
+        class TadBitReader
+        {
+        public:
+            explicit TadBitReader(const TadBytes& bytes) : bytes(bytes) {}
+
+            /** Reads `width` bits, width at most 32. */
+            uint32_t read(unsigned int width)
+            {
+                if (position + width > bytes.size() * 8)
+                {
+                    overrun = true;
+                    position = bytes.size() * 8;
+                    return 0;
+                }
+
+                uint64_t value = 0;
+                for (unsigned int i = 0; i < width; ++i, ++position)
+                {
+                    auto bit = (bytes[position / 8] >> (position % 8)) & 1u;
+                    value |= static_cast<uint64_t>(bit) << i;
+                }
+                return static_cast<uint32_t>(value);
+            }
+
+            std::size_t bitsRead() const { return position; }
+
+            std::size_t bitsLeft() const { return bytes.size() * 8 - position; }
+
+            bool overrun{false};
+
+        private:
+            const TadBytes& bytes;
+            std::size_t position{0};
+        };
+
+        uint32_t take(TadBitReader& r, unsigned int width)
+        {
+            return r.read(width);
+        }
+
+        TadPosition takePosition(TadBitReader& r)
+        {
+            auto x = static_cast<int32_t>(take(r, 32));
+            auto y = static_cast<int32_t>(take(r, 32));
+            auto z = static_cast<int32_t>(take(r, 32));
+            return TadPosition{x, y, z};
+        }
+
+        int16_t takeS16(TadBitReader& r)
+        {
+            return static_cast<int16_t>(take(r, 16));
+        }
+
+        /** The navigator's serialiser, 0x44F4A0. */
+        TadGroundPath takeGroundPath(TadBitReader& r)
+        {
+            TadGroundPath path;
+            path.blocked = take(r, 1) != 0;
+            auto count = take(r, 2);
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                auto x = takeS16(r);
+                auto z = takeS16(r);
+                path.waypoints.push_back(TadWaypoint{x, z});
+            }
+            return path;
+        }
+
+        /** The move goal's serialiser, 0x44DDC0. */
+        TadMoveGoal takeMoveGoal(TadBitReader& r)
+        {
+            TadMoveGoal goal;
+            goal.flags = static_cast<uint8_t>(take(r, 8));
+            if (goal.flags & 0x01)
+            {
+                goal.unknown10 = takeS16(r);
+                goal.attachedUnitId = static_cast<uint16_t>(take(r, 16));
+            }
+            if (goal.flags & 0x10)
+            {
+                goal.tolerance = takeS16(r);
+            }
+            if (goal.flags & 0x08)
+            {
+                goal.altitude = takeS16(r);
+            }
+            if (goal.flags & 0x40)
+            {
+                goal.headingOffset = takeS16(r);
+            }
+            if (goal.flags & 0x20)
+            {
+                goal.position = takePosition(r);
+            }
+            return goal;
+        }
+
+        /** The moving goal's serialiser, 0x44E930. */
+        TadMovingGoal takeMovingGoal(TadBitReader& r)
+        {
+            TadMovingGoal goal;
+            auto hasHeading = take(r, 1) != 0;
+            goal.position = takePosition(r);
+            goal.velocity = takePosition(r);
+            if (hasHeading)
+            {
+                goal.heading = static_cast<uint16_t>(take(r, 16));
+            }
+            return goal;
+        }
+
+        /** The aircraft mover's serialiser, 0x4908C0. Nothing for the unused kind 3. */
+        std::optional<TadAirMover> takeAirMover(TadBitReader& r)
+        {
+            TadAirMover mover;
+            switch (take(r, 2))
+            {
+                case 0:
+                    break;
+                case 1:
+                    mover.goal = takeMoveGoal(r);
+                    break;
+                case 2:
+                    mover.goal = takeMovingGoal(r);
+                    break;
+                default:
+                    return std::nullopt;
+            }
+            mover.movementMode = static_cast<uint8_t>(take(r, 2));
+            return mover;
+        }
+
+        /** The full-state record, 0x48B200. */
+        TadUnitSync takeUnitSync(TadBitReader& r, const TadUnitStateLayout& layout, uint16_t index)
+        {
+            TadUnitSync sync{};
+            sync.index = index;
+            sync.typeIndex = static_cast<uint16_t>(take(r, layout.typeIndexBits));
+            if (sync.typeIndex == 0)
+            {
+                return sync;
+            }
+
+            sync.health = static_cast<uint16_t>(take(r, 16));
+            sync.buildProgress = static_cast<uint8_t>(take(r, 8));
+            sync.flags10E = static_cast<uint8_t>(take(r, 8));
+            sync.motionState = static_cast<uint8_t>(take(r, 2));
+
+            if (take(r, 1) != 0)
+            {
+                auto carrier = static_cast<uint16_t>(take(r, 15));
+                auto piece = static_cast<int8_t>(take(r, 8));
+                sync.carried = TadCarried{carrier, piece};
+                return sync;
+            }
+
+            sync.position = takePosition(r);
+            auto y = takeS16(r);
+            auto z = takeS16(r);
+            auto x = takeS16(r);
+            sync.rotation = TadRotation{x, y, z};
+
+            // The speed is written only when the unit has a mover, which the
+            // receiver knows from its own copy of the unit and a reader of the
+            // stream does not. It does not need to: this record is the last
+            // thing in the subpacket, so padding leaves at most seven bits and
+            // a speed leaves at least thirty-two.
+            if (r.bitsLeft() >= 32)
+            {
+                sync.speed = static_cast<int32_t>(take(r, 32));
+            }
+            return sync;
+        }
+    }
+
+    TadUnitStateLayout tadUnitStateLayout(const std::vector<bool>& canFlyInLoadOrder, uint16_t maxUnits)
+    {
+        // 0x42D65B: shift the type count right until it is gone, counting.
+        TadUnitStateLayout layout;
+        layout.maxUnits = maxUnits;
+        layout.typeIndexBits = static_cast<unsigned int>(std::bit_width(canFlyInLoadOrder.size()));
+        layout.canFly.push_back(false);
+        layout.canFly.insert(layout.canFly.end(), canFlyInLoadOrder.begin(), canFlyInLoadOrder.end());
+        return layout;
+    }
+
+    std::optional<TadUnitState> tadDecodeUnitState(const TadBytes& s, const TadUnitStateLayout& layout)
+    {
+        if (s.size() < 7 || static_cast<TadSubPacketCode>(s[0]) != TadSubPacketCode::UnitStatAndMove
+            || readU16(&s[1]) != s.size() || layout.typeIndexBits == 0 || layout.maxUnits == 0)
+        {
+            return std::nullopt;
+        }
+
+        TadBitReader r(s);
+        r.read(24);
+
+        {
+            TadUnitState state;
+            state.tick = take(r, 32);
+
+            while (!r.overrun)
+            {
+                auto index = static_cast<uint16_t>(take(r, 16));
+                if (index == 0xffff)
+                {
+                    break;
+                }
+
+                TadUnitUpdate update;
+                update.index = index;
+                update.typeIndex = static_cast<uint16_t>(take(r, layout.typeIndexBits));
+                if (update.typeIndex == 0 || update.typeIndex >= layout.canFly.size())
+                {
+                    return std::nullopt;
+                }
+
+                if (layout.canFly[update.typeIndex])
+                {
+                    auto mover = takeAirMover(r);
+                    if (!mover)
+                    {
+                        return std::nullopt;
+                    }
+                    update.mover = std::move(*mover);
+                }
+                else
+                {
+                    update.mover = takeGroundPath(r);
+                }
+                state.updates.push_back(std::move(update));
+            }
+
+            if (take(r, 1) != 0)
+            {
+                // The builder always sets this bit (0x48B83F). Which unit follows
+                // is not on the wire: it is the tick modulo maxUnits (0x48B835).
+                state.sync = takeUnitSync(r, layout, static_cast<uint16_t>(state.tick % layout.maxUnits));
+                if (state.sync->typeIndex >= layout.canFly.size())
+                {
+                    return std::nullopt;
+                }
+            }
+
+            // Every bit accounted for: what is left is the padding of the last
+            // byte, and nothing more.
+            if (r.overrun || (r.bitsRead() + 7) / 8 != s.size())
+            {
+                return std::nullopt;
+            }
+
+            return state;
+        }
+    }
+
+    uint16_t tadUnitIdOfIndex(unsigned int block, uint16_t index, uint16_t maxUnits)
+    {
+        return static_cast<uint16_t>(block * maxUnits + index + 1u);
+    }
+
     std::vector<std::string> tadUnitLoadOrder(std::vector<std::string> unitFileStems)
     {
         for (auto& name : unitFileStems)
