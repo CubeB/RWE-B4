@@ -875,6 +875,15 @@ namespace
         j["maxUnits"] = handler.header.maxUnits;
         j["mapName"] = handler.header.mapName;
 
+        // How many unit types the demo's own 0x1a table declares, so a consumer
+        // can drop a demo recorded on another data set the way the build cells
+        // do (wrongDataSet) rather than naming its units out of the wrong load
+        // order. tools/tad-stalltime.py reads it.
+        if (handler.unitTable)
+        {
+            j["unitTypes"] = handler.unitTable->restricted.size();
+        }
+
         j["players"] = nlohmann::json::array();
         for (const auto& p : handler.players)
         {
