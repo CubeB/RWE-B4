@@ -238,7 +238,7 @@ the code did not appear; those lengths are the reference's and are unverified.
 | `0x28` | 58 | 469,842 | resource statistics |
 | `0x29` | 3 | 726 | ? |
 | `0x2a` | 2 | 19,728 | loading progress |
-| `0x2c` | `s[1] \| s[2]<<8` | 7,422,196 | **unit state + movement**, the bulk of the stream |
+| `0x2c` | `s[1] \| s[2]<<8` | 7,422,196 | **unit state**: a bit stream of path and goal updates plus one unit's full state per tick (see below) |
 | `0x2e` | 9 | | ? |
 | `0x42` | `s[1] \| s[2]<<8` + 3 | | Thaldren extension |
 | `0xf6` | 1 | | ? |
@@ -1028,6 +1028,198 @@ the number that would overturn the reading if a demo ever produced one.
 and they are attributable. Recovering expenditure by difference still waits on
 naming the last six.
 
+### `0x2c`, unit state -- every bit, read out of `TotalA.exe`
+
+Unlike the sections above, this one was decoded from the binary first and held
+to the corpus second. **All 7,422,196 `0x2c` subpackets in the thirteen demos
+decode with every bit accounted for** -- the fields end in the subpacket's last
+byte, and its declared length matches -- and the decode passes every
+independent check below. `tadDecodeUnitState` in `tad_events.{h,cpp}` is the
+decoder; `tad_episodes --units <dir> --unit-state` re-runs the checks, and
+`--emit-unit-state <path>` (with `--with-updates` for the per-tick half) dumps
+the result as JSON Lines.
+
+**The routines are unpatched in Escalation's `TotalA.exe`**:
+`tools/exe/patchdiff.py --range` reports every one of `0x48B200`-`0x48BAD2`,
+`0x44DDC0`, `0x44E080`, `0x44E930`, `0x44E9C0`, `0x44F480`-`0x44F564`,
+`0x44F5C0`, `0x4908B0`, `0x490A10`, `0x415C10`-`0x415EF0`, `0x43DC00` and
+`0x42D5F0` clean, so the GOG v3.1 reading applies to the whole corpus.
+
+#### It is a bit stream, and what that means
+
+The builder is `0x48B710`. It writes nothing byte-wise: every field goes through
+the bit writer at `0x415C10` (reader `0x415DC0`), which packs values **least
+significant bit first into little-endian 32-bit words**. Read the subpacket as one
+little-endian integer and take fields off the bottom, and that is the format.
+Widths are per field, not per byte, which is why nobody got anywhere staring at
+the bytes: after the header nothing is aligned.
+
+| Bits | Field | Source |
+|---|---|---|
+| 8 | `0x2c` | constant |
+| 16 | length in bytes, patched in afterwards via `0x415DA0` | `ceil(bits/8)` |
+| 32 | the sender's tick -- the serial this document already uses as the clock | `globals+0x38A47` |
+| *repeat* | **one entry per unit whose mover has news**, in unit order: | `0x48B77A` loop |
+| 16 | the unit's index within its owner's block, `id - (block * maxUnits + 1)` | `unit+0xA8 - player+0x6F` |
+| *W* | its type index -- the same 1-based load-order index as a `0x09` | `unit+0xA6` |
+| ... | the mover's own serialiser, below; which one is decided by the type | mover vtable `+0x20` |
+| 16 | `0xFFFF`, end of entries | |
+| 1 | always 1: a full-state record follows | `0x48B83F` |
+| ... | **one unit's full state**, below | `0x48B200` |
+
+*W* is the bit length of the unit type count (`0x42D65B` shifts it right until it
+is gone): **10 bits for Escalation's 549 types, 9 for ProTA's 317**. It is the
+only reason decoding needs the data set, together with the next point.
+
+**Entries stop once the packet reaches 512 bytes** (`0x48B7F6`), so a busy tick
+defers some units' news to a later one.
+
+**Which serialiser wrote an entry is not on the wire.** `0x43DC00` builds a unit's
+mover from its definition: `canfly` (`def+0x241` bit 11) gets an aircraft mover,
+everything else a navigator. A reader has to know the type flies. Taking a
+`CORVENG` for a ground unit does not account for its length, which is a test.
+
+#### A ground unit's entry: the next three waypoints (`0x44F4A0`)
+
+| Bits | Field |
+|---|---|
+| 1 | blocked, `mover+0x2E` bit 2 |
+| 2 | waypoint count, `min(nav+0x5C, 3)`, zero when the navigator has no path |
+| 16 + 16 per waypoint | x, z in **whole world units**, signed (`nav+0x0C` onward) |
+
+This is the serialiser `TOTALA-EXE.md` §87 found. It is sent only when the
+navigator's path-changed bit is set or its blocked bit has moved (`0x44F480`),
+so it is a **delta**: the path a unit had until it next appears. An empty path
+means it has stopped. The receiving machine's stub navigator (`0x44F570`, reader
+`0x44F5C0`) steers along those three points itself -- **positions are not sent
+per tick at all**.
+
+#### An aircraft's entry: its goal (`0x4908C0`)
+
+| Bits | Field |
+|---|---|
+| 2 | goal kind: 0 none, 1 a move goal, 2 a moving goal |
+| ... | the goal, below |
+| 2 | movement mode, `mover+0x2E & 3`: 1 landed, 2 flying |
+
+A **move goal** (kind 1, the 0x36-byte goal of `TOTALA-EXE-MISSIONS.md`,
+serialiser `0x44DDC0`) is 8 bits of its flag word and then, in this order, only
+the parts whose flag is set: `0x01` a signed 16 at `goal+0x10` (not identified)
+and the attached unit's 16-bit global id; `0x10` the 16-bit arrival tolerance;
+`0x08` the 16-bit cruise altitude; `0x40` the 16-bit heading offset; `0x20` the
+goal position as three 16.16 values. Over the corpus the goal height never
+exceeds the 511 `0x44E6C0` clamps it to.
+
+A **moving goal** (kind 2, `0x44E930`, 463 of them) is 1 flag bit, a 16.16
+position, a 16.16 per-tick velocity that its resolver `0x44EA60` adds to the
+position every tick, and a 16-bit heading if the flag is set.
+
+#### The full-state record (`0x48B200`)
+
+Every `0x2c` ends with one. Its unit is not named on the wire: it is the one
+whose block index is **`tick % maxUnits`** (`0x48B835`), so a sender walks its
+whole block round robin and **each unit's full state is sent once every
+`maxUnits` ticks** -- 33 seconds at 1000, 50 at 1500 -- and at no other time.
+
+| Bits | Field | Source |
+|---|---|---|
+| *W* | type index; **0 for an empty slot, and the record ends there** | `unit+0xA6` |
+| 16 | current health | `unit+0x108` |
+| 8 | build progress: 0 once complete, else `1 + trunc(254 * remaining)` | float `unit+0x104` |
+| 8 | the flag byte (bit 1 armoured, bit 4 paralysed) | `unit+0x10E` |
+| 2 | motion state, 2 airborne | `unit+0x110 & 3` |
+| 1 | attached | `unit+0x86 != 0` |
+| 15 + 8 | *if attached*: the carrier's global id, and the piece it hangs from | carrier `+0xA8`, `unit+0xF9` |
+| 3 x 32 | *if not*: position, 16.16, x y z | `unit+0x6A` |
+| 3 x 16 | *if not*: rotation, **sent y, z, x** | `unit+0x66`, `+0x68`, `+0x64` |
+| 32 | *if not, and the unit has a mover*: current speed, 16.16 a tick | `mover+0x20` |
+
+The speed is present exactly when the receiver's copy of the unit has a mover,
+which a reader of the stream cannot know. It does not have to: the record is the
+last thing in the subpacket, so padding leaves at most seven bits and a speed
+leaves at least 32.
+
+"Attached" is broader than riding a transport. Over 14725 the carriers are
+mostly **factories** -- a nanoframe on the build pad, and a finished unit that
+has not yet rolled off -- plus geothermal and fusion plants, which were not
+looked into.
+
+#### The evidence
+
+Printed by `tad_episodes --units ~/ta-mods/x-esc --unit-state` over the twelve
+Escalation demos (the ProTA one, run with its own `--units`, reads the same in
+every row that applies):
+
+| Check | Result |
+|---|---|
+| decodes, every bit accounted for | **7,309,124 of 7,309,124** (and 113,072 of 113,072 ProTA) |
+| the first full-state record of a `0x09`'s slot carries the `0x09`'s type | 61,993 of 62,639 (99.0%) |
+| ... and, for an immobile type, the `0x09`'s exact 16.16 position | **20,165 of 20,213 (99.8%)** |
+| ... and its exact rotation, once the wire's y, z, x is put back | 19,292 of those |
+| a speed is present on a type with a `MaxVelocity`, absent on one without | 446,557 and 884,045; the exceptions are 845 immobile `ARMASPEN`/`CORASPEN` pads, which have a mover |
+| the speed does not exceed 1.1 x the FBI `MaxVelocity` | 446,497 of 446,557 |
+| an immobile unit has not moved between two records one cycle apart | 864,713 of 864,840 |
+| a mobile one has moved no further than `MaxVelocity` allows | 407,370 of 408,274 |
+| a `0x0d` aimed at an immobile unit aims at its record's position | **6,236 exactly, 2,311 within 8**, 913 further, of 9,460 |
+| a ground unit's first waypoint is within 32 units of where a `0x0d` puts that unit within 10 ticks | **150,341 of 208,338 (72%)**, 97% within 128 |
+| ... the same test against another unit's waypoint | 35 of 208,338 |
+
+The type mismatches after a `0x09` are most likely an id recycled inside one
+cycle, and the rotation mismatches are all yaw alone, mostly on wind generators
+and metal extractors, which reads as the building turning after it was placed;
+neither was chased further. On bounds: the header carries no map size and the
+maps are not on disk, so only a range check was possible. Every full-state
+position has non-negative x and z and stays inside a map-sized range (the largest
+is 14,357 by 8,706 on Iron Isle), except 292 records below zero -- and every one
+of those is an aircraft whose motion state reads airborne, flying off the edge.
+
+#### What it does and does not carry
+
+**What a unit's state on the wire is:** its intentions every tick it changes
+them, and its actual state once a cycle. A ground unit's position, heading and
+speed are observable every `maxUnits` ticks and otherwise only as the path it is
+following. Velocity is never sent; nor are weapon state, targets, orders or
+script state -- those travel as `0x0d`, `0x10` and friends. That is exactly the
+shape an owner-authoritative engine with dead reckoning would have, which is what
+the rest of this document already says TA is.
+
+**So the kinematic corpus this document hoped for is not there.** Acceleration,
+turn rate and braking cannot be fitted to samples 33 seconds apart. What is
+there for movement is the replicated *path* -- the first three waypoints of every
+route every unit took, which is a direct view of the pathfinder's output and
+could become a pathfinding oracle -- and the per-cycle speed, which is a clean
+sample of "how fast was this unit going" at a known instant.
+
+**What it opens for the weapon oracle.** *The drift bound*: the zero-drift row of
+that table assumed an immobile victim's aim point is its position; it now
+demonstrably is, to the bit, in two thirds of cases. For a mobile victim the
+bound is still a worst case from `maxvelocity`, but the path stream supplies an
+observed alternative: a ground victim whose last path update before the shot
+carried **no waypoints**, with none between the shot and the damage, was standing
+still for the whole flight. That is a zero-drift filter over mobile victims, and
+it does not cost the missile class its fast targets by assumption. It has not
+been built. It does not help against aircraft, whose entries are goals rather
+than positions. The footprint residual stays open: the aim point *is* the centre,
+so the collision-volume reading is now the only one left. *Hit or miss*: health
+is sampled once a cycle, so a victim's health across the two records bracketing a
+shot, against the `0x0b` damage recorded between them, is a direct test of how
+incomplete `0x0b` is and of whether a shot with no damage record really missed
+-- but only at 33-second resolution, so only for victims hit by little else in
+that window.
+
+**For the economy stall work** it adds little: a nanoframe's build progress is
+sampled once a cycle, which is coarser than `0x28`'s 120 ticks.
+
+**For puppet playback** it settles the design: the original itself does not send
+positions per tick, so a player has to steer each unit along its replicated
+waypoints (or toward its goal) and correct at each full-state record, which is
+what the receiving TA does.
+
+**Stream coverage.** `0x2c` is 60.7% of the subpackets and **69.6% of the bytes**.
+With it, the fully decoded codes (`0x09`, `0x0c`, `0x0d`, `0x10`, `0x12`, `0x2c`)
+account for 81.8% of subpackets and 88.1% of bytes, and 98.2% of bytes once the
+partly read `0x0b` and `0x28` are included.
+
 ### Owner blocks, which are the cheap filter
 
 Unit ids partition into contiguous blocks of `maxUnits`, numbered from zero, with
@@ -1659,9 +1851,14 @@ They catch different things and should not share machinery.
 
 ## Open questions
 
-- The `0x2c` layout: field order, bit widths, coordinate scaling, and what
-  fraction of a unit's state it actually carries. Bytes 1-2 are its length and
-  3-6 its serial; the rest is unread.
+- ~~The `0x2c` layout.~~ **Decoded**, out of `TotalA.exe` and held to the corpus:
+  a bit stream of per-unit path and goal updates and one round-robin full-state
+  record per tick, all 7,422,196 accounting for every bit. See "`0x2c`, unit
+  state". What is left inside it is small: the move goal's `goal+0x10` word,
+  why a few percent of buildings report a different yaw from their `0x09`, and
+  what a geothermal or fusion plant is carrying when a unit reports it as its
+  carrier. The larger consequence is a negative: positions are sent once every
+  `maxUnits` ticks, so the kinematic corpus hoped for below is not in the stream.
 - What `0x07` (30,577) and `0x0a` (94,445) are. Both are common enough to be
   something ordinary and both are `UNK_` in the reference.
 - The length of `0x13`, which the reference never had, and which nothing in the

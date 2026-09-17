@@ -19,6 +19,7 @@
 #include <optional>
 #include <rwe/io/tad/tad_util.h>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace rwe
@@ -409,6 +410,244 @@ namespace rwe
     {
         uint16_t value;
     };
+
+    // ---------------------------------------------------------------------
+    // 0x2c, unit state. Unlike everything above, this one was read out of
+    // TotalA.exe rather than off the corpus, and then checked against the
+    // corpus -- docs/TA-DEMOS.md, "0x2c, unit state".
+    //
+    // It is a BIT stream, not a byte layout: the builder at 0x48B710 writes
+    // through the bit writer at 0x415C10, which packs each field least
+    // significant bit first into little-endian 32-bit words. Reading the
+    // subpacket's bytes as one little-endian integer and taking fields from the
+    // bottom is the same thing.
+    //
+    // The builder, the per-unit serialisers and the receiver are all unpatched
+    // in TA: Escalation's TotalA.exe (tools/exe/patchdiff.py --range), so the
+    // GOG v3.1 reading applies to the whole corpus.
+    // ---------------------------------------------------------------------
+
+    /** A navigator waypoint: whole world units, x and z. */
+    struct TadWaypoint
+    {
+        int16_t x;
+        int16_t z;
+
+        bool operator==(const TadWaypoint& other) const = default;
+    };
+
+    /**
+     * A ground unit's path, from its navigator's serialiser at 0x44F4A0.
+     *
+     * Sent only when the navigator's "path changed" bit is set or the blocked
+     * bit has changed (0x44F480), so it is a delta: a unit that is not in a
+     * packet has the path it last had.
+     */
+    struct TadGroundPath
+    {
+        /** mover+0x2E bit 2, the mover's blocked flag. */
+        bool blocked;
+
+        /**
+         * The next zero to three waypoints of the path, from navigator+0x0C.
+         * None means the unit has no path -- it has stopped. The navigator
+         * holds up to twenty, and only the first three are sent; a remote
+         * machine steers along those and waits for the next update.
+         *
+         * Corpus: the first waypoint is within 32 world units of where a 0x0d
+         * places the unit within ten ticks in 72% of 210,770 cases and within
+         * 128 in 97%, against 3% for the same comparison made with another
+         * unit's waypoint.
+         */
+        std::vector<TadWaypoint> waypoints;
+    };
+
+    /**
+     * An aircraft's move goal, the 0x36-byte object docs/TOTALA-EXE-MISSIONS.md
+     * calls a goal (vtable 0x4FD3B8), from its serialiser at 0x44DDC0. Each
+     * optional is present exactly when its flag bit is set.
+     */
+    struct TadMoveGoal
+    {
+        /** The goal's flag word, low byte only -- the wire carries eight bits. */
+        uint8_t flags;
+
+        /** Flag 0x01: goal+0x10, not identified. */
+        std::optional<int16_t> unknown10;
+
+        /** Flag 0x01: the attached unit's global id, zero for none. */
+        std::optional<uint16_t> attachedUnitId;
+
+        /** Flag 0x10: arrival tolerance, whole world units. */
+        std::optional<int16_t> tolerance;
+
+        /** Flag 0x08: cruise altitude above ground. */
+        std::optional<int16_t> altitude;
+
+        /** Flag 0x40: heading offset, used by the relative-goal resolver. */
+        std::optional<int16_t> headingOffset;
+
+        /**
+         * Flag 0x20: the goal position, 16.16. y is the absolute target height,
+         * clamped to 511 by 0x44E6C0, and never exceeds it in the corpus.
+         */
+        std::optional<TadPosition> position;
+    };
+
+    /**
+     * An aircraft's moving goal (vtable 0x4FD3F8), from its serialiser at
+     * 0x44E930: a point that advances by a fixed velocity every tick (the
+     * resolver at 0x44EA60 adds one to the other). 463 of them in the corpus.
+     */
+    struct TadMovingGoal
+    {
+        TadPosition position;
+
+        /** Added to position every tick; 16.16 world units a tick. */
+        TadPosition velocity;
+
+        /** A heading, present when the goal's flag bit 0 is set. */
+        std::optional<uint16_t> heading;
+    };
+
+    /** An aircraft's mover state, from 0x4908C0. */
+    struct TadAirMover
+    {
+        /** No goal, a move goal, or a moving goal: the wire's two-bit kind 0, 1, 2. */
+        std::variant<std::monostate, TadMoveGoal, TadMovingGoal> goal;
+
+        /** mover+0x2E bits 0-1, the movement mode: 1 landed, 2 flying. */
+        uint8_t movementMode;
+    };
+
+    /** One unit's entry in the per-tick part of a 0x2c. */
+    struct TadUnitUpdate
+    {
+        /**
+         * The unit's index within its owner's block, NOT its global id. The
+         * global id is `block * maxUnits + index + 1`; see tadUnitIdOfIndex.
+         */
+        uint16_t index;
+
+        /** The same 1-based load-order index a 0x09 carries. */
+        uint16_t typeIndex;
+
+        /**
+         * Which serialiser wrote the rest is decided by the unit's type, not by
+         * anything on the wire: canfly picks the aircraft mover at 0x43DC5F, and
+         * everything else gets a navigator. That is why decoding needs the data
+         * set.
+         */
+        std::variant<TadGroundPath, TadAirMover> mover;
+    };
+
+    /** The unit a carried unit is attached to, in place of a position. */
+    struct TadCarried
+    {
+        /** The carrier's global id, fifteen bits wide on the wire. */
+        uint16_t carrierId;
+
+        /** unit+0xF9, the carrier piece the unit hangs from. */
+        int8_t piece;
+    };
+
+    /**
+     * The full-state record every 0x2c ends with, from 0x48B200: one unit of
+     * the sender's per tick, round robin, the one whose index is
+     * `tick % maxUnits`. So each unit's position is on the wire once every
+     * maxUnits ticks (33 seconds at 1000) and at no other time.
+     */
+    struct TadUnitSync
+    {
+        /** The unit's index within its owner's block: `tick % maxUnits`. */
+        uint16_t index;
+
+        /** Zero for an empty slot, in which case nothing below is meaningful. */
+        uint16_t typeIndex;
+
+        /** unit+0x108, current health. */
+        uint16_t health;
+
+        /**
+         * 0 once the unit is complete; otherwise `1 + trunc(254 * remaining)`,
+         * where remaining is the float at unit+0x104 that counts down from 1.0.
+         */
+        uint8_t buildProgress;
+
+        /** unit+0x10E: bit 1 armoured, bit 4 paralysed, and more. */
+        uint8_t flags10E;
+
+        /** unit+0x110 bits 0-1; 2 is airborne. */
+        uint8_t motionState;
+
+        /** Present for a unit riding a transport or pad, instead of a position. */
+        std::optional<TadCarried> carried;
+
+        TadPosition position;
+
+        /**
+         * Sent as y, z, x (unit+0x66, +0x68, +0x64) and stored here the usual
+         * way round, so it compares equal to the rotation of the unit's 0x09.
+         */
+        TadRotation rotation;
+
+        /**
+         * mover+0x20, the current speed as 16.16 world units a tick. Present
+         * exactly when the unit has a mover; buildings do not.
+         */
+        std::optional<int32_t> speed;
+    };
+
+    /** 0x2c, a sender's unit state for one tick. */
+    struct TadUnitState
+    {
+        /** The sender's tick, the serial docs/TA-DEMOS.md uses as the clock. */
+        uint32_t tick;
+
+        /**
+         * Units whose movers had something new (their serialiser's vtable
+         * +0x1C said so), in unit order, until the packet reaches 512 bytes.
+         */
+        std::vector<TadUnitUpdate> updates;
+
+        /** Absent only if the sender wrote no sync bit, which the corpus never does. */
+        std::optional<TadUnitSync> sync;
+    };
+
+    /** What decoding a 0x2c needs to know about the data set. */
+    struct TadUnitStateLayout
+    {
+        /**
+         * The width of a type index on the wire: the bit length of the unit
+         * type count (0x42D65B), so 10 for Escalation's 549 and 9 for ProTA's
+         * 317.
+         */
+        unsigned int typeIndexBits;
+
+        /** Whether each type index flies, indexed by the 1-based type index. */
+        std::vector<bool> canFly;
+
+        /** The header's maxUnits, which says whose turn the full-state record is. */
+        uint16_t maxUnits;
+    };
+
+    /**
+     * Builds the layout from each type's canfly in load order -- element 0 is
+     * type index 1, the order tadUnitLoadOrder gives -- and the demo header's
+     * maxUnits.
+     */
+    TadUnitStateLayout tadUnitStateLayout(const std::vector<bool>& canFlyInLoadOrder, uint16_t maxUnits);
+
+    /**
+     * Decodes a 0x2c. Returns nothing unless every bit is accounted for: the
+     * declared length must match the subpacket, every type index must be in
+     * range, and the fields must end in the subpacket's last byte. Over the
+     * thirteen-demo corpus all 7,422,196 decode.
+     */
+    std::optional<TadUnitState> tadDecodeUnitState(const TadBytes& subPacket, const TadUnitStateLayout& layout);
+
+    /** A block-relative unit index as a global id, the inverse of tadOwnerBlockOfUnitId. */
+    uint16_t tadUnitIdOfIndex(unsigned int block, uint16_t index, uint16_t maxUnits);
 
     /**
      * Which owner block a unit id falls in.

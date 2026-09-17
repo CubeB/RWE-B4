@@ -41,6 +41,11 @@
 //   --emit-build-cpp  write the build-timing episodes as a C++ header
 //   --cells       print the (builder, product) build-timing cells, which is
 //                 what tools/tad-buildtime.py scores
+//   --unit-state  decode every 0x2c and hold it to the rest of the stream: the
+//                 0x09 that placed a unit, its FBI MaxVelocity, the previous
+//                 full-state record, and where a 0x0d put it. Needs --units
+//   --emit-unit-state  write the decoded full-state records as JSON Lines;
+//                 --with-updates adds the per-tick mover updates
 //   --weapon-slots  check a 0x0d's trailing byte against the slots the
 //                 shooter's own FBI fills; the evidence that it is a weapon index
 //   --max-types   distinct unit types an episode may carry (default 6)
@@ -52,6 +57,8 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <climits>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -2974,6 +2981,622 @@ namespace rwe
             << "}\n";
     }
 
+    // --- --unit-state: decode every 0x2c and check it against the stream ---
+    //
+    // The decode came out of TotalA.exe (docs/TA-DEMOS.md, "0x2c, unit state"),
+    // so what this pass exists to do is hold it to the corpus, with checks that
+    // share nothing with the decoder: where a 0x09 put a nanoframe, how fast the
+    // FBI says a unit can go, whether a building stays where it was, and where a
+    // 0x0d says a shooter stood. A decode that failed those would not be a
+    // decode, so the pass exits non-zero if anything fails to decode at all, and
+    // prints the rest for reading.
+
+    struct UnitStateTally
+    {
+        unsigned long decoded = 0;
+        unsigned long failed = 0;
+        unsigned long updates = 0;
+        unsigned long groundUpdates = 0;
+        unsigned long airUpdates = 0;
+        unsigned long syncs = 0;
+        unsigned long carried = 0;
+
+        // Against the 0x09 that created the unit.
+        unsigned long buildsChecked = 0;
+        unsigned long buildTypeAgrees = 0;
+        unsigned long buildPositionChecked = 0;
+        unsigned long buildPositionAgrees = 0;
+        unsigned long buildRotationAgrees = 0;
+
+        // Against the FBI.
+        unsigned long speedPresentMobile = 0;
+        unsigned long speedPresentImmobile = 0;
+        unsigned long speedAbsentMobile = 0;
+        unsigned long speedAbsentImmobile = 0;
+        unsigned long speedWithinMax = 0;
+        unsigned long speedOverMax = 0;
+
+        // Between successive syncs of one unit, maxUnits ticks apart.
+        unsigned long immobileSame = 0;
+        unsigned long immobileMoved = 0;
+        unsigned long mobileWithinReach = 0;
+        unsigned long mobileTooFar = 0;
+
+        // A ground unit's first waypoint against where a 0x0d within ten ticks
+        // puts it; and the same distance to another unit's waypoint, as the
+        // control that says what "near" is worth.
+        std::array<unsigned long, 4> waypointDistance{};
+        std::array<unsigned long, 4> controlDistance{};
+
+        // A 0x0d's origin and aim point against the full-state position of an
+        // immobile shooter or target: exact, under 8, under 32, further.
+        std::array<unsigned long, 4> shooterDistance{};
+        std::array<unsigned long, 4> targetDistance{};
+
+        void add(const UnitStateTally& o)
+        {
+            decoded += o.decoded;
+            failed += o.failed;
+            updates += o.updates;
+            groundUpdates += o.groundUpdates;
+            airUpdates += o.airUpdates;
+            syncs += o.syncs;
+            carried += o.carried;
+            buildsChecked += o.buildsChecked;
+            buildTypeAgrees += o.buildTypeAgrees;
+            buildPositionChecked += o.buildPositionChecked;
+            buildPositionAgrees += o.buildPositionAgrees;
+            buildRotationAgrees += o.buildRotationAgrees;
+            speedPresentMobile += o.speedPresentMobile;
+            speedPresentImmobile += o.speedPresentImmobile;
+            speedAbsentMobile += o.speedAbsentMobile;
+            speedAbsentImmobile += o.speedAbsentImmobile;
+            speedWithinMax += o.speedWithinMax;
+            speedOverMax += o.speedOverMax;
+            immobileSame += o.immobileSame;
+            immobileMoved += o.immobileMoved;
+            mobileWithinReach += o.mobileWithinReach;
+            mobileTooFar += o.mobileTooFar;
+            for (std::size_t i = 0; i < 4; ++i)
+            {
+                waypointDistance[i] += o.waypointDistance[i];
+                controlDistance[i] += o.controlDistance[i];
+                shooterDistance[i] += o.shooterDistance[i];
+                targetDistance[i] += o.targetDistance[i];
+            }
+        }
+    };
+
+    struct UnitStateHandler : TadHandler
+    {
+        const std::vector<std::string>& loadOrder;
+        const std::map<std::string, UnitFacts>& unitFacts;
+        std::ostream* json;
+        bool withUpdates;
+
+        std::optional<TadHeader> header;
+        std::optional<TadUnitTable> unitTable;
+        std::optional<TadUnitStateLayout> layout;
+        std::string demo;
+
+        std::map<uint8_t, uint32_t> tick;
+
+        struct Sync
+        {
+            uint32_t tick;
+            TadUnitSync state;
+        };
+
+        /** Keyed on (sender, index within its block). */
+        std::map<std::pair<uint8_t, uint16_t>, std::vector<Sync>> syncs;
+
+        struct Build
+        {
+            uint8_t sender;
+            uint32_t tick;
+            TadBuildStarted event;
+        };
+        std::vector<Build> builds;
+
+        struct Waypoint
+        {
+            uint8_t sender;
+            uint32_t tick;
+            uint16_t index;
+            TadWaypoint first;
+        };
+        std::vector<Waypoint> waypoints;
+
+        /** Every 0x0d shooter position, by global id, in tick order. */
+        std::map<uint16_t, std::vector<std::pair<uint32_t, TadPosition>>> shooters;
+
+        /** Every 0x0d aimed at a unit: (target id, aim point). */
+        std::vector<std::pair<uint16_t, TadPosition>> aims;
+
+        UnitStateTally tally;
+        int32_t minX = INT32_MAX, maxX = INT32_MIN, minZ = INT32_MAX, maxZ = INT32_MIN;
+
+        UnitStateHandler(
+            const std::vector<std::string>& loadOrder,
+            const std::map<std::string, UnitFacts>& unitFacts,
+            std::ostream* json,
+            bool withUpdates,
+            std::string demo)
+            : loadOrder(loadOrder), unitFacts(unitFacts), json(json), withUpdates(withUpdates), demo(std::move(demo))
+        {
+        }
+
+        const UnitFacts* facts(uint16_t typeIndex) const
+        {
+            auto name = tadUnitNameForTypeIndex(loadOrder, typeIndex);
+            if (!name)
+            {
+                return nullptr;
+            }
+            auto it = unitFacts.find(*name);
+            return it == unitFacts.end() ? nullptr : &it->second;
+        }
+
+        std::string name(uint16_t typeIndex) const
+        {
+            auto n = tadUnitNameForTypeIndex(loadOrder, typeIndex);
+            return n ? *n : std::to_string(typeIndex);
+        }
+
+        void onHeader(const TadHeader& h) override
+        {
+            header = h;
+        }
+
+        void onUnitData(const TadBytes& record) override
+        {
+            unitTable = tadDecodeUnitTable(record);
+            if (!header || !unitTable || unitTable->restricted.size() != loadOrder.size())
+            {
+                return;
+            }
+
+            std::vector<bool> canFly;
+            for (std::size_t i = 1; i <= loadOrder.size(); ++i)
+            {
+                auto f = facts(static_cast<uint16_t>(i));
+                canFly.push_back(f && f->canFly);
+            }
+            layout = tadUnitStateLayout(canFly, header->maxUnits);
+        }
+
+        void writePosition(std::ostream& out, const TadPosition& p)
+        {
+            out << "[" << tadFixedToDouble(p.x) << "," << tadFixedToDouble(p.y) << "," << tadFixedToDouble(p.z) << "]";
+        }
+
+        void onPacket(const TadPacket& packet, const std::vector<TadBytes>& subPackets, const TadWalkStats&) override
+        {
+            if (!layout)
+            {
+                return;
+            }
+
+            for (const auto& s : subPackets)
+            {
+                if (s.empty())
+                {
+                    continue;
+                }
+
+                auto code = static_cast<TadSubPacketCode>(s[0]);
+                if (code == TadSubPacketCode::UnitBuildStarted)
+                {
+                    if (auto e = tadDecodeBuildStarted(s); e && tick.count(packet.sender))
+                    {
+                        builds.push_back(Build{packet.sender, tick[packet.sender], *e});
+                    }
+                    continue;
+                }
+                if (code == TadSubPacketCode::WeaponFired)
+                {
+                    if (auto e = tadDecodeShot(s); e && tick.count(packet.sender))
+                    {
+                        shooters[e->shooterId].emplace_back(tick[packet.sender], e->origin);
+                        if (e->targetId != 0)
+                        {
+                            aims.emplace_back(e->targetId, e->target);
+                        }
+                    }
+                    continue;
+                }
+                if (code != TadSubPacketCode::UnitStatAndMove)
+                {
+                    continue;
+                }
+
+                auto state = tadDecodeUnitState(s, *layout);
+                if (!state)
+                {
+                    ++tally.failed;
+                    continue;
+                }
+                ++tally.decoded;
+                tick[packet.sender] = state->tick;
+
+                for (const auto& u : state->updates)
+                {
+                    ++tally.updates;
+                    if (auto path = std::get_if<TadGroundPath>(&u.mover))
+                    {
+                        ++tally.groundUpdates;
+                        if (!path->waypoints.empty())
+                        {
+                            waypoints.push_back(Waypoint{packet.sender, state->tick, u.index, path->waypoints.front()});
+                        }
+                    }
+                    else
+                    {
+                        ++tally.airUpdates;
+                    }
+
+                    if (json && withUpdates)
+                    {
+                        auto& out = *json;
+                        out << "{\"demo\":\"" << demo << "\",\"sender\":" << unsigned(packet.sender)
+                            << ",\"tick\":" << state->tick << ",\"kind\":\"update\",\"index\":" << u.index
+                            << ",\"type\":\"" << name(u.typeIndex) << "\"";
+                        if (auto path = std::get_if<TadGroundPath>(&u.mover))
+                        {
+                            out << ",\"blocked\":" << (path->blocked ? "true" : "false") << ",\"waypoints\":[";
+                            for (std::size_t i = 0; i < path->waypoints.size(); ++i)
+                            {
+                                out << (i ? "," : "") << "[" << path->waypoints[i].x << "," << path->waypoints[i].z << "]";
+                            }
+                            out << "]";
+                        }
+                        else
+                        {
+                            const auto& air = std::get<TadAirMover>(u.mover);
+                            out << ",\"movementMode\":" << unsigned(air.movementMode);
+                            if (auto goal = std::get_if<TadMoveGoal>(&air.goal))
+                            {
+                                out << ",\"goalFlags\":" << unsigned(goal->flags);
+                                if (goal->position)
+                                {
+                                    out << ",\"goal\":";
+                                    writePosition(out, *goal->position);
+                                }
+                                if (goal->attachedUnitId)
+                                {
+                                    out << ",\"goalUnit\":" << *goal->attachedUnitId;
+                                }
+                            }
+                            else if (auto moving = std::get_if<TadMovingGoal>(&air.goal))
+                            {
+                                out << ",\"movingGoal\":";
+                                writePosition(out, moving->position);
+                                out << ",\"goalVelocity\":";
+                                writePosition(out, moving->velocity);
+                            }
+                        }
+                        out << "}\n";
+                    }
+                }
+
+                if (state->sync && state->sync->typeIndex != 0)
+                {
+                    const auto& u = *state->sync;
+                    ++tally.syncs;
+                    if (u.carried)
+                    {
+                        ++tally.carried;
+                    }
+                    else
+                    {
+                        minX = std::min(minX, u.position.x);
+                        maxX = std::max(maxX, u.position.x);
+                        minZ = std::min(minZ, u.position.z);
+                        maxZ = std::max(maxZ, u.position.z);
+                    }
+                    syncs[{packet.sender, u.index}].push_back(Sync{state->tick, u});
+
+                    if (json)
+                    {
+                        auto& out = *json;
+                        out << "{\"demo\":\"" << demo << "\",\"sender\":" << unsigned(packet.sender)
+                            << ",\"tick\":" << state->tick << ",\"kind\":\"sync\",\"index\":" << u.index
+                            << ",\"type\":\"" << name(u.typeIndex) << "\",\"health\":" << u.health
+                            << ",\"buildProgress\":" << unsigned(u.buildProgress)
+                            << ",\"flags10E\":" << unsigned(u.flags10E)
+                            << ",\"motionState\":" << unsigned(u.motionState);
+                        if (u.carried)
+                        {
+                            out << ",\"carrier\":" << u.carried->carrierId << ",\"piece\":" << int(u.carried->piece);
+                        }
+                        else
+                        {
+                            out << ",\"position\":";
+                            writePosition(out, u.position);
+                            out << ",\"rotation\":[" << u.rotation.x << "," << u.rotation.y << "," << u.rotation.z << "]";
+                            if (u.speed)
+                            {
+                                out << ",\"speed\":" << tadFixedToDouble(*u.speed);
+                            }
+                        }
+                        out << "}\n";
+                    }
+                }
+            }
+        }
+
+        static std::size_t distanceBucket(double d)
+        {
+            return d < 8.0 ? 0 : d < 32.0 ? 1 : d < 128.0 ? 2 : 3;
+        }
+
+        /** Runs the checks once the whole demo is in. */
+        void check()
+        {
+            if (!layout)
+            {
+                return;
+            }
+            auto maxUnits = header->maxUnits;
+
+            // Which block each sender's own units live in, learned from its builds.
+            std::map<uint8_t, std::map<unsigned int, unsigned int>> blockVotes;
+            for (const auto& b : builds)
+            {
+                if (auto block = tadOwnerBlockOfUnitId(b.event.unitId, maxUnits))
+                {
+                    ++blockVotes[b.sender][*block];
+                }
+            }
+            std::map<uint8_t, unsigned int> blockOf;
+            for (const auto& [sender, votes] : blockVotes)
+            {
+                auto best = std::max_element(votes.begin(), votes.end(), [](const auto& a, const auto& b) {
+                    return a.second < b.second;
+                });
+                blockOf[sender] = best->first;
+            }
+
+            // The first sync of the built unit's slot after its 0x09.
+            for (const auto& b : builds)
+            {
+                auto block = tadOwnerBlockOfUnitId(b.event.unitId, maxUnits);
+                if (!block)
+                {
+                    continue;
+                }
+                auto index = static_cast<uint16_t>(b.event.unitId - 1 - *block * maxUnits);
+                auto it = syncs.find({b.sender, index});
+                if (it == syncs.end())
+                {
+                    continue;
+                }
+                auto next = std::lower_bound(it->second.begin(), it->second.end(), b.tick, [](const Sync& s, uint32_t t) {
+                    return s.tick < t;
+                });
+                if (next == it->second.end() || next->tick - b.tick > maxUnits)
+                {
+                    continue;
+                }
+
+                ++tally.buildsChecked;
+                if (next->state.typeIndex != b.event.typeIndex)
+                {
+                    continue;
+                }
+                ++tally.buildTypeAgrees;
+
+                // A unit that can move may already have left the pad.
+                auto f = facts(b.event.typeIndex);
+                if (!f || f->maxVelocity > 0.0f || next->state.carried)
+                {
+                    continue;
+                }
+                ++tally.buildPositionChecked;
+                if (next->state.position == b.event.position)
+                {
+                    ++tally.buildPositionAgrees;
+                    if (next->state.rotation == b.event.rotation)
+                    {
+                        ++tally.buildRotationAgrees;
+                    }
+                }
+            }
+
+            for (const auto& [key, list] : syncs)
+            {
+                for (std::size_t i = 0; i < list.size(); ++i)
+                {
+                    const auto& s = list[i].state;
+                    auto f = facts(s.typeIndex);
+                    if (!f || s.carried)
+                    {
+                        continue;
+                    }
+                    auto mobile = f->maxVelocity > 0.0f;
+                    if (s.speed)
+                    {
+                        ++(mobile ? tally.speedPresentMobile : tally.speedPresentImmobile);
+                        if (mobile)
+                        {
+                            ++(tadFixedToDouble(*s.speed) <= f->maxVelocity * 1.1 + 0.01 ? tally.speedWithinMax : tally.speedOverMax);
+                        }
+                    }
+                    else
+                    {
+                        ++(mobile ? tally.speedAbsentMobile : tally.speedAbsentImmobile);
+                    }
+
+                    if (i == 0)
+                    {
+                        continue;
+                    }
+                    const auto& p = list[i - 1];
+                    if (p.state.typeIndex != s.typeIndex || p.state.carried || list[i].tick - p.tick != maxUnits)
+                    {
+                        continue;
+                    }
+                    auto dx = tadFixedToDouble(s.position.x) - tadFixedToDouble(p.state.position.x);
+                    auto dz = tadFixedToDouble(s.position.z) - tadFixedToDouble(p.state.position.z);
+                    auto d = std::sqrt(dx * dx + dz * dz);
+                    if (!mobile)
+                    {
+                        ++(d == 0.0 ? tally.immobileSame : tally.immobileMoved);
+                    }
+                    else
+                    {
+                        ++(d <= f->maxVelocity * maxUnits * 1.1 + 1.0 ? tally.mobileWithinReach : tally.mobileTooFar);
+                    }
+                }
+            }
+
+            for (auto& [id, list] : shooters)
+            {
+                std::stable_sort(list.begin(), list.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+            }
+
+            // An immobile unit's position is the same in every full-state record,
+            // so any of them will do: compare a shot's origin and aim point to it
+            // horizontally. The origin is the firing piece, not the unit's
+            // origin, so it lands near rather than on.
+            std::map<unsigned int, uint8_t> senderOfBlock;
+            for (const auto& [sender, block] : blockOf)
+            {
+                senderOfBlock[block] = sender;
+            }
+            auto immobilePosition = [&](uint16_t id) -> std::optional<TadPosition> {
+                auto block = tadOwnerBlockOfUnitId(id, maxUnits);
+                if (!block || !senderOfBlock.count(*block))
+                {
+                    return std::nullopt;
+                }
+                auto it = syncs.find({senderOfBlock[*block], static_cast<uint16_t>(id - 1 - *block * maxUnits)});
+                if (it == syncs.end() || it->second.size() < 2)
+                {
+                    return std::nullopt;
+                }
+                // Only a slot that held one immobile type, unmoved, all game,
+                // so that a recycled id cannot put the shot at the wrong unit.
+                const auto& first = it->second.front().state;
+                auto f = facts(first.typeIndex);
+                if (!f || f->maxVelocity > 0.0f || first.carried)
+                {
+                    return std::nullopt;
+                }
+                for (const auto& s : it->second)
+                {
+                    if (s.state.typeIndex != first.typeIndex || s.state.carried || !(s.state.position == first.position))
+                    {
+                        return std::nullopt;
+                    }
+                }
+                return first.position;
+            };
+            auto exactBucket = [](const TadPosition& a, const TadPosition& b) -> std::size_t {
+                auto d = std::max(
+                    std::abs(tadFixedToDouble(a.x) - tadFixedToDouble(b.x)),
+                    std::abs(tadFixedToDouble(a.z) - tadFixedToDouble(b.z)));
+                return d == 0.0 ? 0 : d < 8.0 ? 1 : d < 32.0 ? 2 : 3;
+            };
+            for (const auto& [id, list] : shooters)
+            {
+                if (auto p = immobilePosition(id))
+                {
+                    for (const auto& shot : list)
+                    {
+                        ++tally.shooterDistance[exactBucket(shot.second, *p)];
+                    }
+                }
+            }
+            for (const auto& [id, aim] : aims)
+            {
+                if (auto p = immobilePosition(id))
+                {
+                    ++tally.targetDistance[exactBucket(aim, *p)];
+                }
+            }
+
+            // A fixed stride through the waypoints stands in for a random control,
+            // so a re-run prints the same numbers.
+            std::size_t control = waypoints.size() / 2 + 1;
+            for (std::size_t w = 0; w < waypoints.size(); ++w)
+            {
+                const auto& wp = waypoints[w];
+                auto block = blockOf.find(wp.sender);
+                if (block == blockOf.end())
+                {
+                    continue;
+                }
+                auto id = tadUnitIdOfIndex(block->second, wp.index, maxUnits);
+                auto it = shooters.find(id);
+                if (it == shooters.end())
+                {
+                    continue;
+                }
+                auto next = std::lower_bound(it->second.begin(), it->second.end(), wp.tick, [](const auto& s, uint32_t t) {
+                    return s.first < t;
+                });
+                const TadPosition* best = nullptr;
+                uint32_t bestGap = 11;
+                for (auto c : {next, next == it->second.begin() ? next : std::prev(next)})
+                {
+                    if (c == it->second.end())
+                    {
+                        continue;
+                    }
+                    auto gap = c->first > wp.tick ? c->first - wp.tick : wp.tick - c->first;
+                    if (gap < bestGap)
+                    {
+                        bestGap = gap;
+                        best = &c->second;
+                    }
+                }
+                if (!best)
+                {
+                    continue;
+                }
+                auto x = tadFixedToDouble(best->x);
+                auto z = tadFixedToDouble(best->z);
+                auto chebyshev = [&](const TadWaypoint& p) {
+                    return std::max(std::abs(x - p.x), std::abs(z - p.z));
+                };
+                ++tally.waypointDistance[distanceBucket(chebyshev(wp.first))];
+                ++tally.controlDistance[distanceBucket(chebyshev(waypoints[(w + control) % waypoints.size()].first))];
+            }
+        }
+    };
+
+    void printUnitStateTally(const UnitStateTally& t, const std::string& indent)
+    {
+        auto pct = [](unsigned long a, unsigned long b) {
+            std::ostringstream ss;
+            ss << a << "/" << b << " (" << std::fixed << std::setprecision(1) << (b ? 100.0 * a / b : 0.0) << "%)";
+            return ss.str();
+        };
+        auto buckets = [](const std::array<unsigned long, 4>& a) {
+            std::ostringstream ss;
+            ss << "<8 " << a[0] << ", <32 " << a[1] << ", <128 " << a[2] << ", further " << a[3];
+            return ss.str();
+        };
+        std::cout << indent << "0x2c decoded " << t.decoded << ", failed " << t.failed
+                  << "; " << t.updates << " mover updates (" << t.groundUpdates << " ground, " << t.airUpdates << " air), "
+                  << t.syncs << " full-state records (" << t.carried << " attached)\n"
+                  << indent << "  sync after a 0x09, type agrees: " << pct(t.buildTypeAgrees, t.buildsChecked)
+                  << "; immobile position agrees: " << pct(t.buildPositionAgrees, t.buildPositionChecked)
+                  << ", rotation too: " << t.buildRotationAgrees << "\n"
+                  << indent << "  speed present: mobile " << t.speedPresentMobile << ", immobile " << t.speedPresentImmobile
+                  << "; absent: mobile " << t.speedAbsentMobile << ", immobile " << t.speedAbsentImmobile
+                  << "; within 1.1 x MaxVelocity " << pct(t.speedWithinMax, t.speedWithinMax + t.speedOverMax) << "\n"
+                  << indent << "  one cycle apart: immobile unmoved " << pct(t.immobileSame, t.immobileSame + t.immobileMoved)
+                  << ", mobile within MaxVelocity reach " << pct(t.mobileWithinReach, t.mobileWithinReach + t.mobileTooFar) << "\n"
+                  << indent << "  first waypoint to 0x0d shooter (<=10 ticks): " << buckets(t.waypointDistance) << "\n"
+                  << indent << "  another unit's waypoint, as control:        " << buckets(t.controlDistance) << "\n"
+                  << indent << "  immobile shooter, 0x0d origin to its position: exact " << t.shooterDistance[0]
+                  << ", <8 " << t.shooterDistance[1] << ", <32 " << t.shooterDistance[2] << ", further " << t.shooterDistance[3] << "\n"
+                  << indent << "  immobile target, 0x0d aim point to its position: exact " << t.targetDistance[0]
+                  << ", <8 " << t.targetDistance[1] << ", <32 " << t.targetDistance[2] << ", further " << t.targetDistance[3] << "\n";
+    }
+
     bool isDemo(const std::filesystem::path& path)
     {
         auto extension = path.extension().string();
@@ -3018,6 +3641,9 @@ int main(int argc, char* argv[])
                   << "  --window      isolation window for the weapon pass, ticks (default 300)\n"
                   << "  --min-pairings  pairings a weapon cell needs (default 30)\n"
                   << "  --weapon-slots  check the 0x0d trailing byte against each shooter's FBI\n"
+                  << "  --unit-state  decode every 0x2c and check it against the stream (needs --units)\n"
+                  << "  --emit-unit-state  also write the decoded full-state records as JSON Lines\n"
+                  << "  --with-updates  with --emit-unit-state, write the per-tick mover updates too\n"
                   << "  --max-types   distinct unit types an episode may carry (default 6)\n"
                   << "  --max-per-player  episodes to keep per player (default 3)\n"
                   << "  --max-cells   build-timing episodes to check in (default 25)\n"
@@ -3670,6 +4296,71 @@ int main(int argc, char* argv[])
         }
         file << j.dump(2) << "\n";
         std::cout << "wrote " << out << "\n";
+    }
+
+    if (args.contains("unit-state") || args.contains("emit-unit-state"))
+    {
+        if (loadOrder.empty())
+        {
+            std::cerr << "--unit-state needs --units: which serialiser wrote a unit's entry is"
+                      << " decided by its type's canfly, and a type index's width by the type count\n";
+            return 1;
+        }
+
+        std::ofstream json;
+        if (args.contains("emit-unit-state"))
+        {
+            json.open(args.getString("emit-unit-state"));
+            if (!json)
+            {
+                std::cerr << "cannot write " << args.getString("emit-unit-state") << "\n";
+                return 1;
+            }
+        }
+
+        UnitStateTally total;
+        for (const auto& path : paths)
+        {
+            std::ifstream stream(path, std::ios::binary);
+            UnitStateHandler handler(
+                loadOrder,
+                unitFacts,
+                json.is_open() ? &json : nullptr,
+                args.getBool("with-updates"),
+                path.filename().string());
+            try
+            {
+                rwe::readTad(stream, handler);
+            }
+            catch (const rwe::TadException& e)
+            {
+                std::cerr << path.filename().string() << ": " << e.what() << "\n";
+                return 1;
+            }
+
+            if (!handler.layout)
+            {
+                std::cout << path.filename().string() << ": unit state skipped, its type count "
+                          << (handler.unitTable ? handler.unitTable->restricted.size() : 0)
+                          << " is not --units' " << loadOrder.size() << "\n";
+                continue;
+            }
+
+            handler.check();
+            std::cout << path.filename().string() << ": map \"" << handler.header->mapName << "\""
+                      << ", full-state positions x " << rwe::tadFixedToDouble(handler.minX) << ".."
+                      << rwe::tadFixedToDouble(handler.maxX) << ", z " << rwe::tadFixedToDouble(handler.minZ)
+                      << ".." << rwe::tadFixedToDouble(handler.maxZ) << "\n";
+            printUnitStateTally(handler.tally, "  ");
+            total.add(handler.tally);
+        }
+
+        std::cout << "unit state, all demos:\n";
+        printUnitStateTally(total, "  ");
+        if (total.failed > 0)
+        {
+            return 1;
+        }
     }
 
     return 0;

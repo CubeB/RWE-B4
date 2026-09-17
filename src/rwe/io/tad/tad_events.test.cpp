@@ -373,4 +373,210 @@ namespace rwe
                     "ARMAAP", "ARMCK", "ARMMEX", "ARMWIN", "CORCV", "CORMEX", "CORRL", "CORWIN", "ZZZ"});
         }
     }
+
+    TEST_CASE("tadDecodeUnitState", "[tad]")
+    {
+        // Every fixture is from 14725, a ten-player TA: Escalation game with
+        // maxUnits 1000. The layout is Escalation's: 549 types, so a type index
+        // is ten bits wide, and the one aircraft these fixtures use is CORVENG
+        // at load-order index 521. The other types named are ARMCOM 54, ARMCK
+        // 53, ARMMEX 160 and ARMWIN 262 -- none of which fly, which is all the
+        // decoder needs to know about them.
+        std::vector<bool> canFly(549, false);
+        canFly[521 - 1] = true;
+        auto layout = tadUnitStateLayout(canFly, 1000);
+
+        SECTION("the type index is as wide as the type count needs")
+        {
+            REQUIRE(layout.typeIndexBits == 10);
+            REQUIRE(tadUnitStateLayout(std::vector<bool>(317, false), 1500).typeIndexBits == 9);
+        }
+
+        SECTION("a tick with nothing to say")
+        {
+            // Tick 2. The terminator, the sync bit, and a sync record whose
+            // type is zero because slot 2 is empty. This is exactly the packet
+            // a SmartPak 0xff expands to, which is an independent check that
+            // the terminator and the sync bit are where the builder puts them.
+            TadBytes s{0x2c, 0x0b, 0x00, 0x02, 0x00, 0x00, 0x00, 0xff, 0xff, 0x01, 0x00};
+
+            auto e = tadDecodeUnitState(s, layout);
+            REQUIRE(e);
+            REQUIRE(e->tick == 2);
+            REQUIRE(e->updates.empty());
+            REQUIRE(e->sync);
+            REQUIRE(e->sync->index == 2);
+            REQUIRE(e->sync->typeIndex == 0);
+        }
+
+        SECTION("a ground unit's three waypoints")
+        {
+            // Tick 182: the commander of block 0, walking.
+            // clang-format off
+            TadBytes s{
+                0x2c, 0x1a, 0x00, 0xb6, 0x00, 0x00, 0x00, 0x00, 0x00, 0x36, 0x18,
+                0x3a, 0x00, 0xfc, 0x04, 0x3a, 0x00, 0xfa, 0x04, 0x2a, 0x00, 0xea,
+                0xe4, 0xff, 0x3f, 0x00};
+            // clang-format on
+
+            auto e = tadDecodeUnitState(s, layout);
+            REQUIRE(e);
+            REQUIRE(e->tick == 182);
+            REQUIRE(e->updates.size() == 1);
+            const auto& u = e->updates[0];
+            REQUIRE(u.index == 0);
+            REQUIRE(tadUnitIdOfIndex(0, u.index, 1000) == 1);
+            REQUIRE(u.typeIndex == 54);
+            auto path = std::get_if<TadGroundPath>(&u.mover);
+            REQUIRE(path);
+            REQUIRE(!path->blocked);
+            REQUIRE(path->waypoints == std::vector<TadWaypoint>{{464, 10208}, {464, 10192}, {336, 10064}});
+            REQUIRE(e->sync);
+            REQUIRE(e->sync->typeIndex == 0);
+        }
+
+        SECTION("an aircraft's move goal")
+        {
+            // Tick 5262: a CORVENG whose goal carries only a position (flag
+            // 0x20), flying (movement mode 2). The goal's height is 220, under
+            // the 511 clamp 0x44E6C0 applies.
+            // clang-format off
+            TadBytes s{
+                0x2c, 0x1c, 0x00, 0x8e, 0x14, 0x00, 0x00, 0x0c, 0x00, 0x09, 0x06,
+                0x02, 0x00, 0x00, 0x18, 0x02, 0x00, 0xc0, 0x0d, 0x00, 0x00, 0x00,
+                0x71, 0xe1, 0xff, 0x7f, 0x00, 0x00};
+            // clang-format on
+
+            auto e = tadDecodeUnitState(s, layout);
+            REQUIRE(e);
+            REQUIRE(e->updates.size() == 1);
+            REQUIRE(e->updates[0].index == 12);
+            REQUIRE(e->updates[0].typeIndex == 521);
+            auto air = std::get_if<TadAirMover>(&e->updates[0].mover);
+            REQUIRE(air);
+            REQUIRE(air->movementMode == 2);
+            auto goal = std::get_if<TadMoveGoal>(&air->goal);
+            REQUIRE(goal);
+            REQUIRE(goal->flags == 0x20);
+            REQUIRE(!goal->attachedUnitId);
+            REQUIRE(!goal->tolerance);
+            REQUIRE(goal->position == TadPosition{562036736, 14417920, 386924544});
+            REQUIRE(tadFixedToDouble(goal->position->y) == 220.0);
+
+            SECTION("which serialiser follows is decided by the type, not the wire")
+            {
+                // The same bytes, with CORVENG taken for a ground unit, do not
+                // account for their own length.
+                REQUIRE(!tadDecodeUnitState(s, tadUnitStateLayout(std::vector<bool>(549, false), 1000)));
+            }
+        }
+
+        SECTION("a finished building's full state has no speed")
+        {
+            // Tick 1001, so slot 1 of the sender's block: an ARMMEX at
+            // (488, 85, 10248), which is where that unit's 0x09 put it. Health
+            // 170, complete, and a yaw of -30975 -- the 0x09's own
+            // rotation, once the wire's y, z, x order is put back.
+            // clang-format off
+            TadBytes s{
+                0x2c, 0x21, 0x00, 0xe9, 0x03, 0x00, 0x00, 0xff, 0xff, 0x41, 0x51,
+                0x05, 0x00, 0x08, 0x08, 0x00, 0x00, 0x7a, 0x00, 0x00, 0x40, 0x15,
+                0x00, 0x00, 0x00, 0x02, 0x4a, 0xc0, 0x21, 0x00, 0x00, 0x00, 0x00};
+            // clang-format on
+
+            auto e = tadDecodeUnitState(s, layout);
+            REQUIRE(e);
+            REQUIRE(e->updates.empty());
+            REQUIRE(e->sync);
+            const auto& u = *e->sync;
+            REQUIRE(u.index == 1);
+            REQUIRE(u.typeIndex == 160);
+            REQUIRE(u.health == 170);
+            REQUIRE(u.buildProgress == 0);
+            REQUIRE(u.motionState == 1);
+            REQUIRE(!u.carried);
+            REQUIRE(u.position == TadPosition{31981568, 5570560, 671612928});
+            REQUIRE(tadFixedToDouble(u.position.x) == 488.0);
+            REQUIRE(u.rotation == TadRotation{0, -30975, 0});
+            REQUIRE(!u.speed);
+        }
+
+        SECTION("a nanoframe carries its build progress")
+        {
+            // Tick 1005: an ARMWIN nanoframe at 17 health; 233 is
+            // 1 + trunc(254 * remaining), so about 9% built.
+            // clang-format off
+            TadBytes s{
+                0x2c, 0x21, 0x00, 0xed, 0x03, 0x00, 0x00, 0xff, 0xff, 0x0d, 0x8a,
+                0x00, 0x48, 0x07, 0x08, 0x00, 0x00, 0x48, 0x00, 0x00, 0x40, 0x15,
+                0x00, 0x00, 0x00, 0xb4, 0x49, 0x1e, 0x1e, 0x00, 0x00, 0x00, 0x00};
+            // clang-format on
+
+            auto e = tadDecodeUnitState(s, layout);
+            REQUIRE(e);
+            REQUIRE(e->sync->typeIndex == 262);
+            REQUIRE(e->sync->health == 17);
+            REQUIRE(e->sync->buildProgress == 233);
+            REQUIRE(!e->sync->speed);
+        }
+
+        SECTION("a mobile unit's full state ends with its speed")
+        {
+            // Tick 1000, slot 0: the commander, moving at 72089 / 65536 = 1.1
+            // world units a tick, which is ARMCOM's MaxVelocity.
+            // clang-format off
+            TadBytes s{
+                0x2c, 0x25, 0x00, 0xe8, 0x03, 0x00, 0x00, 0xff, 0xff, 0x6d, 0x20,
+                0x99, 0x00, 0x18, 0xc8, 0x69, 0xeb, 0xcf, 0x04, 0x00, 0x80, 0x15,
+                0x00, 0x66, 0xa5, 0x4f, 0x0a, 0xd7, 0x37, 0x00, 0x00, 0x00, 0x40,
+                0x66, 0x46, 0x00, 0x00};
+            // clang-format on
+
+            auto e = tadDecodeUnitState(s, layout);
+            REQUIRE(e);
+            REQUIRE(e->sync->index == 0);
+            REQUIRE(e->sync->typeIndex == 54);
+            REQUIRE(e->sync->health == 4900);
+            REQUIRE(e->sync->position == TadPosition{322940327, 5636096, 691967384});
+            REQUIRE(e->sync->speed == 72089);
+        }
+
+        SECTION("an attached unit carries its carrier in place of a position")
+        {
+            // Tick 2006: an ARMCK nanoframe, attached to unit 3006.
+            // clang-format off
+            TadBytes s{
+                0x2c, 0x12, 0x00, 0xd6, 0x07, 0x00, 0x00, 0xff, 0xff, 0x6b, 0xb0,
+                0x07, 0x30, 0x05, 0xa8, 0xef, 0x22, 0x00};
+            // clang-format on
+
+            auto e = tadDecodeUnitState(s, layout);
+            REQUIRE(e);
+            REQUIRE(e->sync->index == 6);
+            REQUIRE(e->sync->typeIndex == 53);
+            REQUIRE(e->sync->buildProgress == 166);
+            REQUIRE(e->sync->carried);
+            REQUIRE(e->sync->carried->carrierId == 3006);
+            REQUIRE(e->sync->carried->piece == 1);
+        }
+
+        SECTION("refuses what does not account for its own length")
+        {
+            TadBytes s{0x2c, 0x0b, 0x00, 0x02, 0x00, 0x00, 0x00, 0xff, 0xff, 0x01, 0x00};
+
+            auto shortened = s;
+            shortened.pop_back();
+            shortened[1] = 0x0a;
+            REQUIRE(!tadDecodeUnitState(shortened, layout));
+
+            auto padded = s;
+            padded.push_back(0);
+            padded[1] = 0x0c;
+            REQUIRE(!tadDecodeUnitState(padded, layout));
+
+            auto lying = s;
+            lying[1] = 0x0c;
+            REQUIRE(!tadDecodeUnitState(lying, layout));
+        }
+    }
 }
