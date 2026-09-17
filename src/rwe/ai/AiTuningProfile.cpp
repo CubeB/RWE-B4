@@ -197,6 +197,7 @@ namespace rwe
             || setInt("targetSeaTransportCount", p.targetSeaTransportCount)
             || setInt("targetSubmarineCount", p.targetSubmarineCount)
             || setInt("submarineMinDestroyerCount", p.submarineMinDestroyerCount)
+            || setInt("attackNavalSize", p.attackNavalSize)
             || setInt("saveUpSeconds", p.saveUpSeconds)
             || setInt("failedSiteMemorySeconds", p.failedSiteMemorySeconds)
             || setInt("buildPlannerTickInterval", p.buildPlannerTickInterval)

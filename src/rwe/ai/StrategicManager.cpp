@@ -40,7 +40,17 @@ namespace rwe
             }
             case GamePhase::Boom:
             {
-                if (bb.armySize >= profile.attackArmySize && (bb.enemyBasePosition || !bb.knownEnemies.empty()))
+                // A fleet may call the attack too, when the knob allows it.
+                // armySize counts combatUnits and hulls are deliberately kept
+                // out of those, so a side whose strength is all afloat never
+                // left Boom -- and the phase gates the army ferry, so on an
+                // island map the ferry could not run however many ships
+                // stood. The borrowed naval scout is subtracted for the same
+                // reason armySize subtracts the land one.
+                auto haveTarget = bb.enemyBasePosition || !bb.knownEnemies.empty();
+                auto fleet = static_cast<int>(bb.navalCombatUnits.size()) - (bb.navalScoutUnitId ? 1 : 0);
+                auto fleetReady = profile.attackNavalSize > 0 && fleet >= profile.attackNavalSize;
+                if ((bb.armySize >= profile.attackArmySize || fleetReady) && haveTarget)
                 {
                     bb.phase = GamePhase::Attack;
                 }

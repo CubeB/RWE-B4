@@ -2717,4 +2717,64 @@ namespace rwe
         REQUIRE(unloads.front().destination.x > -200_ss);
         REQUIRE(unloads.front().destination.x < -64_ss);
     }
+
+    TEST_CASE("a fleet can call the attack, but only when asked to", "[ai]")
+    {
+        // The phase machine counted armySize, which counts combatUnits, and
+        // hulls are deliberately not in those -- so a side whose whole
+        // strength was afloat stayed in Boom for ever. The phase gates the
+        // army ferry, so on an island map that alone stopped the ferry.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 0_ss, 0_ss), script);
+        // A shipyard, so the opening is over and the phase reaches Boom.
+        addUnit(sim, "ARMSY", ai, SimVector(-90_ss, 0_ss, 0_ss), script);
+        // Three hulls and not one land unit that fights.
+        for (auto z : {0_ss, 40_ss, 80_ss})
+        {
+            addUnit(sim, "ARMROY", ai, SimVector(-100_ss, 0_ss, z), script);
+        }
+        // Something to attack, so the target half of the gate is satisfied
+        // either way and only the strength half is under test. Far enough
+        // out not to count as an enemy at the door.
+        addUnit(sim, "ARMPW", human, SimVector(-450_ss, 0_ss, 300_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+        profile.defendRadius = 200_ss;
+
+        SECTION("off by default, so a fleet alone does not call one")
+        {
+            profile.navalScouting = false;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.navalCombatUnits.size() == 3);
+            REQUIRE(bb.armySize == 0);
+            REQUIRE(bb.phase != GamePhase::Attack);
+        }
+
+        SECTION("with the knob set, the fleet is enough on its own")
+        {
+            profile.navalScouting = false;
+            profile.attackNavalSize = 3;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.armySize == 0);
+            REQUIRE(bb.phase == GamePhase::Attack);
+        }
+    }
 }

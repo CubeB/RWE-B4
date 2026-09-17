@@ -287,6 +287,33 @@ namespace rwe
          * shoot back at whatever is shelling the coast.
          */
         int submarineMinDestroyerCount{3};
+        /**
+         * Hulls that will call the attack on their own, with no land army.
+         *
+         * armySize counts combatUnits, and warships are deliberately kept
+         * out of those: every gather/attack/raid rule in ArmyManager is
+         * written against combatUnits, and a hull in there would be rallied
+         * and marched at a land target. The cost of that decision is this --
+         * a side whose whole strength is afloat never leaves Boom, and the
+         * phase is what gates the army ferry, so on an island map the ferry
+         * cannot run however many ships are standing.
+         *
+         * Folding hulls into armySize was the alternative, and is rejected:
+         * it would change what the anti-air and destroyer tests pin, it
+         * needs both of armySize's write sites changed (EconomyManager and
+         * ScoutManager), and it contradicts what navalFleetSize's own
+         * documentation promises about the land army being unaffected.
+         *
+         * A borrowed naval scout does not count towards this, for the same
+         * reason armySize subtracts the land scout: eyes are not strength,
+         * and an AI that counted them would attack earlier for having built
+         * them.
+         *
+         * Zero -- the default -- is exactly the behaviour before this knob
+         * existed, and it stays there until the arena has played it against
+         * its own absence.
+         */
+        int attackNavalSize{0};
 
         // --- Site search ---
         /**

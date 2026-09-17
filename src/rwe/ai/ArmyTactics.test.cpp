@@ -7,6 +7,7 @@
 #include <rwe/ai/ArmyManager.h>
 #include <rwe/ai/AiBlackboard.h>
 #include <rwe/ai/AiTuningProfile.h>
+#include <rwe/ai/StrategicManager.h>
 #include <rwe/ai/ThreatMap.h>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/grid/Grid.h>
@@ -391,6 +392,50 @@ namespace rwe
             manager.update(sim, ai, profile, threatMap, bb, commands);
 
             REQUIRE(ordersFor<AttackOrder>(commands, soldier).empty());
+        }
+    }
+
+    TEST_CASE("the fleet trigger does not count a hull that is out scouting", "[ai]")
+    {
+        // Pinned here rather than through a controller, because a controller
+        // cannot reach this case at all: ScoutManager only borrows a hull
+        // while the enemy is unfound, and the Attack gate needs a target, so
+        // the two conditions exclude one another. The phase machine takes
+        // nothing but a profile and a blackboard, so the arithmetic can be
+        // asked directly.
+        auto profile = makeDefaultStandardProfile();
+        profile.attackNavalSize = 3;
+
+        AiBlackboard bb;
+        bb.phase = GamePhase::Boom;
+        // The target half of the gate, without needing a known enemy.
+        bb.enemyBasePosition = SimVector(2000_ss, 0_ss, 0_ss);
+        bb.armySize = 0;
+        bb.navalCombatUnits = {UnitId(1), UnitId(2), UnitId(3)};
+
+        StrategicManager strategic;
+
+        SECTION("three hulls, none of them borrowed, call the attack")
+        {
+            strategic.update(profile, bb);
+            REQUIRE(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("one of the three out scouting leaves two, and it waits")
+        {
+            // Eyes are not strength. Counting the borrowed hull would have
+            // the AI attack sooner for having built a scout, which is the
+            // same fault the anti-air bucket exists to avoid.
+            bb.navalScoutUnitId = UnitId(2);
+            strategic.update(profile, bb);
+            REQUIRE(bb.phase == GamePhase::Boom);
+        }
+
+        SECTION("at zero the knob is off and hulls are never enough")
+        {
+            profile.attackNavalSize = 0;
+            strategic.update(profile, bb);
+            REQUIRE(bb.phase == GamePhase::Boom);
         }
     }
 }
