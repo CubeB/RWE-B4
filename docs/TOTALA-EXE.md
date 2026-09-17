@@ -4095,8 +4095,10 @@ reduced rate.
 
 ### Build rate, `0x41BA60`
 
-Called as `(builder, target, amount)`. Every caller passes the same amount
-(`0x402A09`, `0x403E43`, `0x404139`, `0x414235`, `0x414656`):
+Called as `(builder, target, amount)`. Every mission that lathes passes the same
+amount (`0x402A09`, `0x403E43`, `0x404139`, `0x414235`, `0x414656`); the sixth
+caller, `0x41BCFB`, passes a negative one for nanoframe decay (§101 attributes
+all six):
 
 ```
 4029db  mov eax,0x88888889
@@ -4186,20 +4188,13 @@ Two things fall out of that for anyone reading this section:
   `float` in the simulation to close that is very likely a bad trade; see the
   determinism rules in `CLAUDE.md`.
 
-One thing does not fall out, and is left open: **a construction aircraft
-finishes one tick sooner than the replay allows.** Over the Escalation corpus
-that holds for all three airborne builders — `CORCA`, `CORACA` and `ARMCA`, 58
-of their 66 builds landing on exactly -1 with none faster, against 1 of 6,658
-ground builds. It is not a rate artifact (`CORACA` runs at p=5, the other two at
-p=2) and not the exactly-divisible case (both kinds appear, all at -1 alike), so
-what it reads as is an increment the model does not account for: an airborne
-builder credits its job once more over its life than a ground one.
-
-Five call sites reach `0x41BA60` (`0x402A09`, `0x403E43`, `0x404139`,
-`0x414235`, `0x414656`), and §23 above notes only that they all pass the same
-amount. Which of them an aircraft goes through, and whether it runs on a tick
-the ground path does not, is the thing to read out; none of the five has been
-attributed to a caller yet, so that attribution is step one.
+One thing did not fall out, and is now explained in §101: **a construction
+aircraft finishes one tick sooner than the replay allows**, 60 of its 68 builds
+in the Escalation corpus with none faster. It gets two increments on the
+creation tick where a factory gets one: `VTOL_MobileBuild` discards the answer
+of its stance wait, and the wait's wake mask lets a COB event left pending since
+the last `set` run the lathe a second time before the tick ends. The call-site
+list above is also short by one; §101 has all six, attributed to their missions.
 
 ### What counts as production
 
@@ -8932,14 +8927,13 @@ there is a regression test for it now.
 - **The anti-missile coverage ring** (§25) is decoded -- one dashed ring per
   `interceptor` weapon on an `antiweapons` unit, radius `coverage - 512` -- but
   not drawn.
-- **Why a construction aircraft finishes a build one tick early.** Over the demo
-  corpus every airborne builder does — 58 of 66 builds at exactly one tick under
-  the replay of §23's arithmetic, with none faster, against 1 of 6,658 ground
-  builds. Three builders at two different rates agree, so it is neither one unit
-  nor a rate artefact, and it reads as an increment credited once more over the
-  job than the ground path credits. Five call sites reach `0x41BA60` and none
-  has been attributed to a caller; that attribution is step one. RWE does not
-  reproduce it.
+- ~~Why a construction aircraft finishes a build one tick early~~ Resolved: two
+  increments on the creation tick, because `VTOL_MobileBuild` discards its stance
+  wait's answer and a pending COB event re-runs the lathe in the same tick; see
+  §101, which also accounts for the 8 builds off the model (late by whole
+  seconds). **RWE does not reproduce it**, and it credits a construction aircraft
+  only once it is in its build stance, which the original never waits for. Whether
+  to port the second increment or license it in the build fixture is open.
 - The exact tick at which the original commits a **bomb release** inside its
   weapon code is still not pinned down; RWE uses its own bombsight.
 - **`unit+0x110` bits 2–3.** They pick the loose 2000 default over the tight 150
@@ -10402,3 +10396,200 @@ lesson for the next dead end is the one this section was written to record: the
 thing the work was blocked on was not the thing it was chasing, and an hour
 spent testing whether the blocker was real would have been worth more than the
 day spent on the checksum.
+
+## 101. Why a construction aircraft finishes a build one tick early: a second lathe on the creation tick
+
+Over the demo corpus a construction aircraft finishes one tick sooner than §23's
+float32 replay allows, where a factory lands on it exactly. The cause is not a
+different build call, a different rate or a different place in the tick. It is
+the mission service loop running the aircraft's build state **twice on the tick
+the nanoframe is created**, so the job gets two increments on that tick where a
+factory gets one. What sets it off is a COB event nothing had consumed, and
+what lets it through is one discarded return value in `VTOL_MobileBuild`.
+
+### The two packets bound the increments exactly
+
+- The `0x09` is sent from inside the unit constructor `0x485F50`, at `0x486115`
+  (`call 0x456050`, which writes the 23-byte record and hands it to
+  `0x451DF0`). Every build mission creates its nanoframe through that
+  constructor, so the `0x09` goes out on the tick of creation, from inside the
+  mission handler.
+- The `0x12` is sent from inside `0x41BA60` itself: when a step leaves
+  `unit+0x104` at `0.0f` (`0x41BCAA`), it calls `0x41B8D0`, which sends it at
+  `0x41BA26` (`call 0x4560C0`, 5 bytes). `0x48612A` is the only other sender,
+  for a unit created already complete.
+
+So an episode's `finishTick - startTick` counts the increments between the two
+and nothing else; neither packet batching nor end-of-build bookkeeping can move
+it.
+
+### Six call sites, three missions
+
+`0x41BA60` has **six** callers, not the five §23 listed. Attributed through the
+mission tables (ground at `0x4FC490`, VTOL at `0x4FCA18`; 25-byte records,
+handler at `+4`, layout in `TOTALA-EXE-MISSIONS.md` §1):
+
+| Call | Mission | Handler |
+|---|---|---|
+| `0x402A09` | `BuildingBuild` (a factory) | `0x402640` |
+| `0x403E43` | `MobileBuild` (a ground constructor) | `0x403A20` |
+| `0x404139` | `HelpBuild` | `0x403F70` |
+| `0x414235` | `VTOL_MobileBuild` | `0x413D80` |
+| `0x414656` | `VTOL_HelpBuild` | `0x414380` |
+| `0x41BCFB` | `0x41BCD0`, a negative amount: the nanoframe decay `GetBuilt` runs at `0x402F6B` (§93) | — |
+
+The three that start a job order their states differently, and the difference
+is the finding:
+
+| Mission | Jump table | Order of events |
+|---|---|---|
+| `BuildingBuild` | `0x402B5C` | wait for `INBUILDSTANCE` (`0x4027CA`), **then** create (`0x4028EA`), return 1; lathe every tick (`0x4029CA`) |
+| `MobileBuild` | `0x403F5C` | create (`0x403D5B`) and start `StartBuilding`, return 1; wait for `INBUILDSTANCE` and **return its answer** (`0x403DF5`); lathe (`0x403E0C`) |
+| `VTOL_MobileBuild` | `0x414330` | create (`0x41409B`) and start `StartBuilding`, return 1; call the wait and **discard its answer**, falling straight into the lathe (`0x414136` → `0x414149` → `0x414235`) |
+
+The lathe tail is the same in all three: call `0x41BA60`, and if the job is not
+done set a one-tick timer (`0x439E80`, which also sets wake bit 0), OR `0xA`
+into the wake mask and return 2.
+
+### The pieces
+
+**The stance wait, `0x438700(unit, mission, mask)`.** If `unit+0x10F` bit 0
+(`INBUILDSTANCE`) is set it returns 1 and touches nothing. Otherwise it
+**writes the mission's wake mask** to `mask | 4` and returns 2. Bit 2 of a wake
+mask answers bit 2 of the unit's event word `unit+0xBA`.
+
+**Every COB `set` raises that bit.** `SET_VALUE` (`0x10082000`, dispatched at
+`0x4B1B48`, called at `0x4B1BD2`) goes through the unit callback's vtable slot
+at `0x4FD6D8`, which is `0x480B20`. That routine switches on the port, and every
+arm, the default included, ends in `or byte ptr [unit+0xBA], 4` (`0x480B57`,
+`0x480B73`, `0x480B97`, `0x480BB3`, `0x480BD2`, `0x480BF1`). Port 5,
+`INBUILDSTANCE`, is the arm at `0x480B62` that writes `unit+0x10F` bit 0; port
+20, `ARMORED`, calls `0x48B090` first. Nothing clears the bit except the service
+loop consuming it for a mission that waits on it, and `0x438700` and its sibling
+`0x438730` have eleven callers of which **`VTOL_MobileBuild` is the only VTOL
+mission**. So on an aircraft the bit is sticky: the first `set` after the last
+build leaves it pending until the next one.
+
+**`StartBuilding` is queued, not run.** `0x438590` starts it through `0x4B0B00`
+with the run-now argument zero (tested at `0x4B0B82`), so the script's own
+`set INBUILDSTANCE to 1` happens in a later COB pass, never inside the mission
+that asked for it. On the creation tick an aircraft's stance is still clear.
+
+**The service loop re-runs the head mission in the same tick** (`0x43B7C0`).
+After a handler returns it jumps back to the top (`0x43B99F` → `0x43B7DD`) and
+leaves only when the wake mask is non-zero **and** no pending bit matches it
+(`0x43B817`–`0x43B81D`). Pending means `mission+0x4E | unit+0xBA`; the matched
+bits are cleared and the mask zeroed before the handler runs (`0x43B831`,
+`0x43B83D`, `0x43B846`). A handler that returns 1 has left the mask at zero, so
+the next state runs at once, which is why every mission creates and lathes on
+the same tick.
+
+### The creation tick, for each
+
+A construction aircraft with a `set` pending from earlier:
+
+1. State 2 creates the nanoframe (`0x09` sent), queues `StartBuilding`, returns
+   1. The mask is zero, so the loop runs state 3 immediately.
+2. State 3: `0x438700` finds the stance clear and writes the mask to `0xE`; the
+   answer is discarded; `0x41BA60` lathes (**increment 1**); the timer and `0xA`
+   make the mask `0xF`; return 2.
+3. The loop checks: the timer is a tick away, but `unit+0xBA` bit 2 is pending
+   and the mask now has bit 2. It consumes the bit and runs state 3 again.
+4. State 3 again: stance still clear, mask `0xE`, **increment 2**, mask `0xF`,
+   return 2. Nothing is pending now; the loop leaves.
+
+From the next tick on there is one increment a tick. The queued `StartBuilding`
+has set the stance by then, raising bit 2 again, but that bit is consumed in the
+same pass as the timer's; and with the stance set `0x438700` stops putting bit 2
+in the mask at all. So the job gets exactly one extra increment over its life,
+on the creation tick.
+
+A **factory** waits for the stance *before* creating, so its lathe state never
+calls the wait and its mask stays `0xB`: one increment on the creation tick. A
+**ground constructor** does wait after creating, but its wait state returns the
+answer, so a stale bit 2 re-runs the *wait*, which lathes nothing, and the lathe
+starts only once the stance is set. That delay is the constructor's own script,
+which §23 and `TA-DEMOS.md` already treat as mod data.
+
+`tools/exe/buildloop.py` transcribes exactly these pieces and prints the three
+durations. For `CORCA` on `CORDRAG` (`BuildTime` 1130, p=2, 566 increments):
+factory 565, ground constructor 566 (with a `StartBuilding` that does not
+sleep), aircraft **564** with a stale event and 565 without. The answers are the
+same whichever order the COB and mission passes run in, which is not settled
+here.
+
+### Why the event is always there in Escalation
+
+The corpus's three airborne builders ship scripts (read with
+`tools/exe/coblist.py`) in which `StartBuilding` and `StopBuilding` are each one
+unconditional `set INBUILDSTANCE`, and `Activate` and `Deactivate` `set ARMORED`.
+So the previous job's `StopBuilding` leaves bit 2 pending and the stance clear.
+An aircraft's first build is covered too: `VTOL_MobileBuild`'s state 0 turns
+activation on (`0x413E40`, `0x48B090(1,1)`), which queues `Activate` through
+`0x4B0940` if the aircraft was not active, and `Activate` `set`s `ARMORED`. The
+prediction that follows, that an aircraft whose scripts had `set` nothing before
+its build would land on the factory model and not a tick under it, has no build
+in the corpus to test it.
+
+### Against the corpus
+
+Scoring airborne builders against `ticks_to_build - 2` instead of `- 1`, over
+the Escalation demos as `tad_episodes` emits them now (68 airborne builds under
+the -20..+120 cap; the "58 of 66" this was first reported as predates the id
+scoping):
+
+- **60 of 68 builds land on the model exactly, and none is early**, across all
+  three builders (`CORCA` 47 of 55, `CORACA` 9 of 9, `ARMCA` 4 of 4) and both
+  rates.
+- **All 15 (builder, product) modes agree**, including the 10 pairs whose
+  `BuildTime` divides exactly by p, where the float32 accumulator decides whether
+  one more increment is needed: `CORDRAG`, `CORMEX`, `CORMOHO`, `CORHP` and
+  `CORMAKR` take it, `ARMDRAG`, `ARMRL`, `CORARAD`, `CORSES` and `CORSMS` do
+  not, and the corpus follows each. So the aircraft's shortfall is a shift in the
+  count of the same accumulator, not a rate or a rounding of its own. Most of
+  those cells hold one to three builds, which makes this corroboration rather
+  than proof; the three `CORCA` cells with seven or more builds are what
+  `tools/tad-buildtime.py` scores by default.
+- **The other eight are late by whole seconds**: +30 twice, +60 three times,
+  +120 three times. That is not an aircraft effect. It reads as a resource stall
+  under §23's throttle, where a refused builder's debt is looked at only by the
+  once-a-second settle, and factories show the same shape: of the 384 factory
+  builds late against the model, **347 are late by an exact multiple of 30**.
+
+### Escalation's binary
+
+Escalation's patched `TotalA.exe` changes none of it. `tools/exe/patchdiff.py
+--range` finds no patched byte in `VTOL_MobileBuild` (`0x413D80`–`0x414350`),
+`VTOL_HelpBuild`, `BuildingBuild`, the service loop (`0x43B7C0`–`0x43BAD0`),
+`0x438590`–`0x438760`, `0x439E80`, the set callback (`0x480B20`–`0x480C30`) or
+its vtable, the VM's `SET_VALUE` dispatch, `0x4B08C0`–`0x4B0BB5`, `0x48B090`,
+`0x41B8D0`, the unit constructor `0x485F50` or the `0x09` sender. The nearest
+change on a build path is two bytes in the ground `MobileBuild` at `0x403D29`,
+retargeting a call made before the nanoframe exists (`0x4898B0` to `0x489800`).
+It is not on the lathe path and was not followed. The unit-initialisation patch
+at `0x485C69` moves the code around the write of `unit+0xBA` but still zeroes
+it.
+
+### What it means for RWE
+
+- **RWE does not reproduce the second increment.** `UnitBehaviorService` credits
+  a job once a tick, and it gates every builder on `inBuildStance`, where the
+  original never makes a construction aircraft wait for its stance at all
+  (`VTOL_MobileBuild` discards the answer, and `VTOL_HelpBuild` never asks).
+  With stock scripts, which set the stance without a sleep, that second
+  difference costs at most a tick.
+- **Airborne cells could now enter the build fixture** without writing an open
+  question into it, because there is no longer one. Driven through RWE's integer
+  accumulator the way `buildtime.test.cpp` drives it, their
+  `expectedDurationDelta` would be `ceil(BuildTime / p) - N + 1`, where `N` is
+  the float32 increment count: **+1** in general and **0** on a divisible pair
+  where float32 needs the extra increment. For the three cells scored by default
+  that is `CORDRAG` 0, `CORRAD` +1, `CORMEX` 0. A +1 would be the fixture's first
+  positive delta, and the test admits only -1 on a divisible pair, so this is a
+  decision, to license the difference or to credit a construction aircraft twice
+  on its creation tick, and not just a regeneration.
+
+It took one session. The discarded return value at `0x41413E` was visible as
+soon as the two mobile build handlers were read side by side; what took the time
+was finding what could make the service loop run a waiting mission again in the
+same tick, and that was the sticky event bit.
