@@ -62,6 +62,9 @@ namespace rwe
             units.destroyer = "CORROY";
             units.seaTransport = "CORTSHIP";
             units.submarine = "CORSUB";
+            units.tidalGenerator = "CORTIDE";
+            units.sonar = "CORSONAR";
+            units.torpedoLauncher = "CORTL";
         }
         else
         {
@@ -99,6 +102,9 @@ namespace rwe
             units.destroyer = "ARMROY";
             units.seaTransport = "ARMTSHIP";
             units.submarine = "ARMSUB";
+            units.tidalGenerator = "ARMTIDE";
+            units.sonar = "ARMSONAR";
+            units.torpedoLauncher = "ARMTL";
         }
 
         auto check = [&](std::string& name) {
@@ -141,6 +147,9 @@ namespace rwe
         check(units.destroyer);
         check(units.seaTransport);
         check(units.submarine);
+        check(units.tidalGenerator);
+        check(units.sonar);
+        check(units.torpedoLauncher);
         return units;
     }
 

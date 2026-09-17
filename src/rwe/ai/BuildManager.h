@@ -332,7 +332,7 @@ namespace rwe
          * `builderType` actually has a button for. Every rule reads as a need
          * of the base; the filter is what turns that into this builder's job.
          */
-        std::vector<std::string> buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::string& builderType) const;
+        std::vector<std::string> buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::string& builderType, bool enemyNavalSeen) const;
 
         void planFactories(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const;
     };

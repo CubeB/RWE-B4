@@ -1105,7 +1105,7 @@ namespace rwe
         return plan;
     }
 
-    std::vector<std::string> BuildManager::buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::string& builderType) const
+    std::vector<std::string> BuildManager::buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::string& builderType, bool enemyNavalSeen) const
     {
         const auto& s = bb.sideUnits;
         // Count what exists or is already going up, so we don't double up.
@@ -1343,6 +1343,45 @@ namespace rwe
         if (navalFleetTarget(profile, bb) > 0 && !s.shipyard.empty() && total(s.shipyard) < profile.targetShipyardCount)
         {
             want(s.shipyard);
+        }
+
+        // The water structures, behind the same navalFleetTarget gate as the
+        // yard above -- zero on a land map, zero when navalFleetSize is the
+        // kill switch -- so none of this can fire where ships do not matter.
+        //
+        // No builder test is needed here. Only the commander's pages 3 and 4
+        // and the construction ship carry these buttons; ARMCK's pages carry
+        // none of them. want() filters on buildTree.canBuild, so the jobs
+        // fall to whoever actually has the button.
+        if (navalFleetTarget(profile, bb) > 0)
+        {
+            // Energy a water map can actually site. ARMSOLAR is 5x5, 145
+            // metal and MaxWaterDepth=0, so every one of them competes for
+            // the dry ground the base, the factories and the extractors are
+            // already short of -- and on a 92% water map there is barely any.
+            // ARMTIDE is 3x3 and 82 metal (CORTIDE 4x4 and 81) and stands in
+            // water nothing else wants.
+            if (!s.tidalGenerator.empty() && total(s.tidalGenerator) < profile.targetTidalCount)
+            {
+                want(s.tidalGenerator);
+            }
+            // The cheapest building either side owns, at 20 metal, and it
+            // MAKES energy rather than costing any. It is also the only way
+            // the AI can see a submarine -- it has been building its own
+            // since the fleet work and has never been able to see one.
+            if (!s.sonar.empty() && total(s.sonar) < profile.targetSonarCount)
+            {
+                want(s.sonar);
+            }
+            // 804 metal (CORTL 831) is a destroyer's price for something that
+            // cannot move, so this waits until there is something for it to
+            // shoot: an enemy hull actually seen, not merely a wet map. That
+            // is the whole difference between a defence worth its cost and
+            // the kind that is built because the map looked dangerous.
+            if (enemyNavalSeen && !s.torpedoLauncher.empty() && total(s.torpedoLauncher) < profile.targetTorpedoLauncherCount)
+            {
+                want(s.torpedoLauncher);
+            }
         }
 
         // Growth, once the plan above is satisfied. The targets are where
@@ -1825,6 +1864,49 @@ namespace rwe
             siteReachable = [&](const SimVector& p) { return builderReachable(p) == builderAtBase; };
         }
 
+        // The structures that stand IN the water rather than beside it. They
+        // are exempt from siteReachable for the obvious reason: a builder on
+        // the shore cannot walk to any of their sites, so the test would
+        // refuse every one. Nothing is lost by skipping it, because
+        // canBeBuiltAt already enforces each one's own MinWaterDepth through
+        // isWaterDepthWithinBounds -- the ring walk can only ever land them
+        // on water that suits them.
+        auto isWaterStructure = [&](const std::string& t) {
+            return !t.empty()
+                && ((!sideUnits.tidalGenerator.empty() && t == sideUnits.tidalGenerator)
+                    || (!sideUnits.sonar.empty() && t == sideUnits.sonar)
+                    || (!sideUnits.torpedoLauncher.empty() && t == sideUnits.torpedoLauncher));
+        };
+
+        // Has the enemy actually put a hull in the water? The test is the one
+        // ScoutManager already uses to tell a boat from a walker -- a movement
+        // class with a minimum water depth can only float -- and buildings are
+        // excluded, because a torpedo launcher of theirs is a thing in the
+        // water but is not a ship.
+        //
+        // Worked out here rather than kept on the blackboard because this
+        // scope has both sim and bb, while buildPriorities has no sim to look
+        // a unit definition up with. It joins builderAtBase and outpost as
+        // one more thing computed for it rather than by it.
+        auto enemyNavalSeen = false;
+        for (const auto& [_, enemy] : bb.knownEnemies)
+        {
+            if (enemy.isAir || enemy.isBuilding)
+            {
+                continue;
+            }
+            auto enemyDefIt = sim.unitDefinitions.find(enemy.unitType);
+            if (enemyDefIt == sim.unitDefinitions.end())
+            {
+                continue;
+            }
+            if (sim.getAdHocMovementClass(enemyDefIt->second.movementCollisionInfo).minWaterDepth > 0)
+            {
+                enemyNavalSeen = true;
+                break;
+            }
+        }
+
         // Extractors and makers are exempt from the affordability test
         // below: they are what makes the next thing affordable, and a
         // stalled extractor still finishes, just later. A solar collector
@@ -1833,7 +1915,8 @@ namespace rwe
         // in surplus.
         auto energyWanted = bb.energyStalled || (bb.energyStorage.value > 0.0f && bb.currentEnergy.value < bb.energyStorage.value * 0.5f);
         auto isEconomy = [&](const std::string& t) {
-            return t == sideUnits.metalExtractor || t == sideUnits.metalMaker || (energyWanted && t == sideUnits.solar);
+            return t == sideUnits.metalExtractor || t == sideUnits.metalMaker
+                || (energyWanted && (t == sideUnits.solar || t == sideUnits.tidalGenerator));
         };
 
         // A frame left standing comes before anything new. Its metal is
@@ -2104,7 +2187,7 @@ namespace rwe
             outpost = planOutpostDefence(sim, aiOwner, profile, bb);
         }
 
-        for (const auto& next : buildPriorities(profile, bb, builderAtBase, outpost, builder.unitType))
+        for (const auto& next : buildPriorities(profile, bb, builderAtBase, outpost, builder.unitType, enemyNavalSeen))
         {
             auto nextDefIt = sim.unitDefinitions.find(next);
             if (nextDefIt == sim.unitDefinitions.end())
@@ -2334,6 +2417,15 @@ namespace rwe
                 auto towards = (*bb.enemyBasePosition - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
                 auto towerAnchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
                 site = chooseBuildSite(sim, profile, next, towerAnchor, rng, siteReachable);
+            }
+            else if (isWaterStructure(next))
+            {
+                // Deliberately without siteReachable -- see where it is
+                // defined. These stand in the water, so every site they have
+                // is ground the builder cannot walk to, and the gate that
+                // stops the commander crossing to another island would
+                // otherwise refuse the lot of them.
+                site = chooseBuildSite(sim, profile, next, anchor, rng);
             }
             else if (!sideUnits.shipyard.empty() && next == sideUnits.shipyard)
             {

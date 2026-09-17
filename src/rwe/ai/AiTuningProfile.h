@@ -278,6 +278,51 @@ namespace rwe
          */
         int targetShipyardCount{2};
         /**
+         * Tidal generators wanted on a map where the water is worth
+         * something -- the same navalFleetTarget gate the shipyard is
+         * behind, so this is dead on a land map and dead when
+         * navalFleetSize is zeroed.
+         *
+         * This is the water map's solar collector, and the shipped numbers
+         * are not close. ARMSOLAR is 5x5 and 145 metal (CORSOLAR 141) with
+         * MaxWaterDepth=0, so it must have dry ground -- the same ground the
+         * base, the factories and every extractor are already competing for,
+         * and on a 92% water map there is hardly any. ARMTIDE is 3x3 and 82
+         * metal (CORTIDE 4x4 and 81) at MinWaterDepth=20, so it is cheaper,
+         * smaller, and stands where nothing else wants to.
+         *
+         * Only the commander and the construction ship carry the button
+         * (ARMCOM3/CORCOM3); no constructor page has it. want() filters on
+         * buildTree.canBuild, so the job falls to the commander by itself.
+         */
+        int targetTidalCount{6};
+        /**
+         * Sonar stations wanted, behind the same gate.
+         *
+         * One is almost free: ARMSONAR/CORSONAR are 2x2 and 20 metal, the
+         * cheapest building either side owns, and they MAKE energy (9 and 8)
+         * rather than costing any. SonarDistance 1180/1223 is also the only
+         * way the AI can see a submarine at all -- it already builds
+         * submarines and has never been able to see one.
+         */
+        int targetSonarCount{1};
+        /**
+         * Torpedo launchers wanted -- and unlike the two above, this one is
+         * gated on an enemy hull having actually been SEEN, not merely on
+         * the map being wet.
+         *
+         * ARMTL is 804 metal and CORTL 831, which is a destroyer's price for
+         * something that cannot move. Building one because the map is watery
+         * is exactly the defence that is not worth what it costs; building
+         * one because there are enemy ships in the water is a Guardian's
+         * worth of reasoning. MinWaterDepth=1 puts it in the shallows off a
+         * shore rather than out where the shipyard goes.
+         *
+         * Unmeasured: the count and the gate are both first guesses, and the
+         * arena has not been run on them yet.
+         */
+        int targetTorpedoLauncherCount{1};
+        /**
          * Whether the shipyard is wanted EARLY on a map where ships matter --
          * directly after the first lab, above the anti-air, the metal maker,
          * the radar, the towers, the advanced lab, the air plant and the

@@ -154,7 +154,14 @@ namespace rwe
         AiBuildTree makeBuildTree()
         {
             AiBuildTree tree;
-            tree.buildableBy["ARMCOM"] = {"ARMSOLAR", "ARMMEX", "ARMLAB", "ARMVP", "ARMAP", "ARMLLT", "ARMRAD", "ARMMAKR", "ARMSY"};
+            // The water structures are on the COMMANDER's pages and nowhere
+            // else that matters here: ARMCOM3 carries the tidal generator and
+            // sonar, ARMCOM4 the torpedo launcher. ARMCK's three pages carry
+            // none of the three, and neither the v3.1 patch nor the expansion
+            // ships an ARMCK menu that adds them -- so the omission from
+            // ARMCK below is the shipped data, not an oversight.
+            tree.buildableBy["ARMCOM"] = {"ARMSOLAR", "ARMMEX", "ARMLAB", "ARMVP", "ARMAP", "ARMLLT", "ARMRAD", "ARMMAKR", "ARMSY",
+                "ARMTIDE", "ARMSONAR", "ARMTL"};
             tree.buildableBy["ARMCK"] = {"ARMSOLAR", "ARMMEX", "ARMLAB", "ARMVP", "ARMAP", "ARMLLT", "ARMRAD", "ARMMAKR",
                 "ARMALAB", "ARMHLT", "ARMGUARD", "ARMRL", "ARMSY"};
             tree.buildableBy["ARMACK"] = {"ARMLAB", "ARMARAD", "ARMFUS", "ARMMOHO"};
@@ -2413,6 +2420,80 @@ namespace rwe
         });
         REQUIRE(matched != mapIntel.shipyardSites.end());
         REQUIRE(matched->tile.x >= 14);
+    }
+
+    TEST_CASE("naval: a water map takes its energy out of the water", "[ai]")
+    {
+        // The AI had no vocabulary for a water structure at all: AiSideUnits
+        // carried the shipyard, the hulls and the construction ship, and not
+        // one of the things that stand in the water. On a 92% water map that
+        // left it competing with its own factories and extractors for the
+        // little dry ground there is, to plant 5x5 solar collectors on it.
+        //
+        // Shipped numbers, which are what make this worth doing: ARMSOLAR is
+        // 5x5, 145 metal, MaxWaterDepth=0. ARMTIDE is 3x3, 82 metal,
+        // MinWaterDepth=20. Cheaper, nine cells against twenty-five, and it
+        // stands where nothing else wants to.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+        REQUIRE(mapIntel.character == MapCharacter::Water);
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        // The tidal generator at its shipped shape. Defined here rather than
+        // in defineWorld so that the thirty-odd tests which know nothing
+        // about water carry on resolving it to empty and skipping the rule.
+        auto tide = makeDef(false, false, false, "", 100u);
+        tide.movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 3u, 255u, 255u, 20u, 255u};
+        tide.buildCostMetal = Metal(82.0f);
+        sim.unitDefinitions["ARMTIDE"] = tide;
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        // The lab pre-placed, because it is wanted above the water block and
+        // would otherwise be the only thing this test ever saw ordered.
+        addUnit(sim, "ARMLAB", ai, SimVector(-400_ss, 90_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.openingMetalExtractorCount = 0;
+        profile.openingSolarCount = 0;
+        profile.targetMetalExtractorCount = 0;
+        profile.targetSolarCount = 0;
+        profile.targetMetalMakerCount = 0;
+        profile.targetRadarCount = 0;
+        profile.targetDefenceCount = 0;
+        profile.baseAntiAirTowerCount = 0;
+        profile.reactiveAntiAirTowerCount = 0;
+        profile.outpostDefenceCount = 0;
+        profile.targetAirPlantCount = 0;
+        profile.targetVehiclePlantCount = 0;
+        profile.surplusLabCount = 0;
+        // The yard and the sonar silenced so the tidal generator is what is
+        // left in the water block, not what happens to win a race with them.
+        profile.targetShipyardCount = 0;
+        profile.targetSonarCount = 0;
+        profile.targetTorpedoLauncherCount = 0;
+
+        AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 31, commands);
+
+        auto builds = ordersFor<BuildOrder>(commands, commanderId);
+        auto tidal = std::find_if(builds.begin(), builds.end(), [](const BuildOrder& b) { return b.unitType == "ARMTIDE"; });
+        REQUIRE(tidal != builds.end());
+
+        // And it is IN the water, which is the half that proves the siting
+        // rather than the wanting. A tidal generator is exempt from the
+        // build-site reachability gate on purpose -- every site it has is
+        // ground the builder cannot walk to, so the gate that stops the
+        // commander crossing to another island would otherwise refuse the
+        // lot. canBeBuiltAt is what keeps it honest, through the same
+        // MinWaterDepth test the shipyard sites go through.
+        REQUIRE(sim.terrain.getHeightAt(tidal->position.x, tidal->position.z) < sim.terrain.getSeaLevel());
     }
 
     TEST_CASE("naval: the shipyard comes before the rest of the base on a water map", "[ai]")

@@ -74,9 +74,36 @@ namespace rwe
         // water, not beside it. And the commander and both ordinary land
         // constructors (ARMCK/ARMCV, CORCK/CORCV) already carry it on page
         // two of their build menu, so a construction ship is never required
-        // just to start a navy -- it exists to build the things a shipyard
-        // cannot: the moho platform, the tidal generator, sonar, and the
-        // seabed's own light laser tower and torpedo launcher.
+        // just to start a navy.
+        //
+        // The rest of what this comment used to say was wrong, and the
+        // shipped build menus corrected it. They were read out of
+        // rev31.gp3, which is what a real load resolves to:
+        // CompositeVirtualFileSystem::readFile returns the FIRST match and
+        // addToVfs adds the extensions in reverse, so the v3.1 patch
+        // outranks ccdata.ccx, which outranks totala1.hpi.
+        //
+        // The construction ship does NOT gate the seabed structures. Page
+        // three of the commander's own menu (ARMCOM3/CORCOM3) carries the
+        // tidal generator, sonar, the underwater metal extractor, the
+        // floating metal maker and underwater storage; page four
+        // (ARMCOM4/CORCOM4) is the torpedo launcher by itself. The
+        // commander builds every one of them directly, and ARMCS/CORCS
+        // duplicates that list rather than unlocking it.
+        //
+        // The shipyard claim above is verified and stands: ARMCOM2, ARMCK2
+        // and ARMCV2 each carry ARMSY, and ARMCS1 carries it as well.
+        //
+        // What does NOT follow, and is the constraint that matters here, is
+        // that a constructor can build what the commander builds. ARMCK's
+        // three pages carry no tidal generator, no sonar and no torpedo
+        // launcher, and neither the patch nor the expansion ships an ARMCK
+        // menu to add one. The water structures below are the commander's
+        // and the construction ship's alone. buildPriorities needs no gate
+        // for that -- want() already filters on buildTree.canBuild, so the
+        // jobs fall to whichever builder has the button -- but it does mean
+        // a base that has lost its commander and has no construction ship
+        // will quietly stop wanting any of them.
 
         /** Shipyard. ARMSY 615 metal, CORSY 600, 8x8, MinWaterDepth=30 -- floats in the water it needs rather than standing beside it. Everything else on this list is built from one. */
         std::string shipyard;
@@ -90,6 +117,46 @@ namespace rwe
         std::string seaTransport;
         /** Submarine. ARMSUB 1151 metal (3x3), CORSUB 1199 (4x4), MinWaterDepth=20 -- the two do not even share a footprint. */
         std::string submarine;
+
+        // Water structures, all of them on the COMMANDER's own build pages
+        // -- see the note above for why that is not what this file used to
+        // say. Values below are out of the shipped FBIs, and the two sides
+        // agree on less than you would expect, so neither footprint nor
+        // depth may be assumed from the other.
+
+        /**
+         * Tidal generator. ARMTIDE 3x3 and 82 metal, CORTIDE 4x4 and 81,
+         * both MinWaterDepth=20 and TidalGenerator=1.
+         *
+         * The case for it on a water map is not marginal. A solar collector
+         * is 5x5 and 145 metal (CORSOLAR 141) with MaxWaterDepth=0, so it
+         * wants the same dry ground the base, the factories and the
+         * extractors are already competing for -- and on a 92% water map
+         * there is barely any. The tidal generator is cheaper, smaller, and
+         * stands in the water nobody else wants. Nine cells against
+         * twenty-five on the Arm side; sixteen against twenty-five on Core's.
+         */
+        std::string tidalGenerator;
+
+        /**
+         * Sonar station. ARMSONAR/CORSONAR, 2x2 and 20 metal both sides,
+         * MinWaterDepth 8 and 10 respectively.
+         *
+         * The cheapest building either side owns, and it MAKES energy (9 and
+         * 8) rather than costing any to run. SonarDistance 1180/1223 is the
+         * only way the AI can see a submarine at all.
+         */
+        std::string sonar;
+
+        /**
+         * Torpedo launcher. ARMTL 3x3 and 804 metal, CORTL 3x3 and 831 --
+         * and MinWaterDepth=1, so it sits in the shallows off a shore rather
+         * than out in the deep where the shipyard goes.
+         *
+         * Expensive enough that it must not be built speculatively: it costs
+         * about what a destroyer does, and a destroyer can go somewhere.
+         */
+        std::string torpedoLauncher;
     };
 
     /** Looks up the side's unit names; anything the game data does not define is left empty and never built. */
