@@ -161,7 +161,7 @@ namespace rwe
             // ships an ARMCK menu that adds them -- so the omission from
             // ARMCK below is the shipped data, not an oversight.
             tree.buildableBy["ARMCOM"] = {"ARMSOLAR", "ARMMEX", "ARMLAB", "ARMVP", "ARMAP", "ARMLLT", "ARMRAD", "ARMMAKR", "ARMSY",
-                "ARMTIDE", "ARMSONAR", "ARMTL"};
+                "ARMTIDE", "ARMSONAR", "ARMTL", "ARMUWMEX", "ARMFMKR"};
             tree.buildableBy["ARMCK"] = {"ARMSOLAR", "ARMMEX", "ARMLAB", "ARMVP", "ARMAP", "ARMLLT", "ARMRAD", "ARMMAKR",
                 "ARMALAB", "ARMHLT", "ARMGUARD", "ARMRL", "ARMSY"};
             tree.buildableBy["ARMACK"] = {"ARMLAB", "ARMARAD", "ARMFUS", "ARMMOHO"};
@@ -2494,6 +2494,83 @@ namespace rwe
         // lot. canBeBuiltAt is what keeps it honest, through the same
         // MinWaterDepth test the shipyard sites go through.
         REQUIRE(sim.terrain.getHeightAt(tidal->position.x, tidal->position.z) < sim.terrain.getSeaLevel());
+    }
+
+    TEST_CASE("naval: the metal under the water is worth taking once the dry patches are gone", "[ai]")
+    {
+        // Every submerged metal patch on a water map was worth nothing to the
+        // AI, because the only extractor it knew about is MaxWaterDepth=0.
+        // ARMUWMEX is the same ExtractsMetal=0.001 for 130 metal instead of
+        // 50 -- not better metal, metal that was otherwise unreachable.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+        REQUIRE(mapIntel.character == MapCharacter::Water);
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        // The ordinary extractor at its REAL draught. makeDef leaves
+        // maxWaterDepth at 255, which would let a 50-metal ARMMEX sit on the
+        // seabed and take the patch before the underwater one was ever
+        // reached -- the test would pass with none of this code running.
+        // ARMMEX is MaxWaterDepth=0 in the shipped data.
+        sim.unitDefinitions.at("ARMMEX").movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 3u, 255u, 255u, 0u, 0u};
+
+        auto uwmex = makeDef(false, false, false, "", 50u);
+        uwmex.movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 3u, 255u, 255u, 19u, 255u};
+        uwmex.buildCostMetal = Metal(130.0f);
+        sim.unitDefinitions["ARMUWMEX"] = uwmex;
+
+        // A patch out in the deep, east of the shelf. Heightmap x >= 14 is
+        // height 0 against sea level 60, so the water there is 60 deep --
+        // comfortably past ARMUWMEX's MinWaterDepth of 19 and impossible for
+        // anything with MaxWaterDepth=0.
+        for (int y = 30; y <= 33; ++y)
+        {
+            for (int x = 20; x <= 23; ++x)
+            {
+                sim.metalGrid.set(x, y, static_cast<unsigned char>(200));
+            }
+        }
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-400_ss, 90_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.openingSolarCount = 0;
+        profile.targetSolarCount = 0;
+        profile.targetMetalMakerCount = 0;
+        profile.targetRadarCount = 0;
+        profile.targetDefenceCount = 0;
+        profile.baseAntiAirTowerCount = 0;
+        profile.reactiveAntiAirTowerCount = 0;
+        profile.outpostDefenceCount = 0;
+        profile.targetAirPlantCount = 0;
+        profile.targetVehiclePlantCount = 0;
+        profile.surplusLabCount = 0;
+        profile.targetShipyardCount = 0;
+        profile.targetTidalCount = 0;
+        profile.targetSonarCount = 0;
+        profile.targetTorpedoLauncherCount = 0;
+
+        AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 31, commands);
+
+        auto builds = ordersFor<BuildOrder>(commands, commanderId);
+        auto submerged = std::find_if(builds.begin(), builds.end(), [](const BuildOrder& b) { return b.unitType == "ARMUWMEX"; });
+        REQUIRE(submerged != builds.end());
+
+        // On the patch, and under the sea. Both halves matter: the first says
+        // it went where the metal is, the second that the reachability gate
+        // was skipped rather than the site being dry after all.
+        auto tile = sim.terrain.worldToHeightmapCoordinate(submerged->position);
+        REQUIRE(sim.metalGrid.get(tile.x, tile.y) > sim.surfaceMetal);
+        REQUIRE(sim.terrain.getHeightAt(submerged->position.x, submerged->position.z) < sim.terrain.getSeaLevel());
     }
 
     TEST_CASE("naval: the torpedo launcher waits for something to shoot at", "[ai]")

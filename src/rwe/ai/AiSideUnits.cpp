@@ -65,6 +65,8 @@ namespace rwe
             units.tidalGenerator = "CORTIDE";
             units.sonar = "CORSONAR";
             units.torpedoLauncher = "CORTL";
+            units.underwaterMetalExtractor = "CORUWMEX";
+            units.floatingMetalMaker = "CORFMKR";
         }
         else
         {
@@ -105,6 +107,8 @@ namespace rwe
             units.tidalGenerator = "ARMTIDE";
             units.sonar = "ARMSONAR";
             units.torpedoLauncher = "ARMTL";
+            units.underwaterMetalExtractor = "ARMUWMEX";
+            units.floatingMetalMaker = "ARMFMKR";
         }
 
         auto check = [&](std::string& name) {
@@ -150,6 +154,8 @@ namespace rwe
         check(units.tidalGenerator);
         check(units.sonar);
         check(units.torpedoLauncher);
+        check(units.underwaterMetalExtractor);
+        check(units.floatingMetalMaker);
         return units;
     }
 

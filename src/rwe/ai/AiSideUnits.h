@@ -157,6 +157,39 @@ namespace rwe
          * about what a destroyer does, and a destroyer can go somewhere.
          */
         std::string torpedoLauncher;
+
+        /**
+         * Underwater metal extractor -- the "moho platform" the note above
+         * used to call it. ARMUWMEX 3x3 and 130 metal at MinWaterDepth=19,
+         * CORUWMEX 125 at depth 10, and both ExtractsMetal=0.001.
+         *
+         * That last figure is the point: it is the SAME extraction rate as
+         * the ordinary extractor, which is 3x3 and 50 metal. So this is
+         * strictly the worse buy -- two and a half times the metal and four
+         * times the energy for the same trickle -- and it is wanted only
+         * where the cheap one cannot go. Every submerged patch on a water map
+         * is worth nothing to the AI without it, which on Hundred Isles is a
+         * great many of them.
+         *
+         * Listed AFTER the ordinary extractor in buildPriorities on purpose:
+         * the planner takes the first thing it can find a site for, so the
+         * dry patches are taken first and this is reached exactly when they
+         * have run out.
+         */
+        std::string underwaterMetalExtractor;
+
+        /**
+         * Floating metal maker. ARMFMKR 3x3 and no metal at all (1480
+         * energy), CORFMKR the same for 1530, both MinWaterDepth=11 and
+         * EnergyUse=60.
+         *
+         * The same relationship to metalMaker as the extractor above has to
+         * its own: ARMMAKR is also free in metal and burns the same sixty
+         * energy a second, but at 687 energy to build and MaxWaterDepth=0 it
+         * needs dry ground. So the floating one is the fallback for a base
+         * that has none, and is listed after it for the same reason.
+         */
+        std::string floatingMetalMaker;
     };
 
     /** Looks up the side's unit names; anything the game data does not define is left empty and never built. */

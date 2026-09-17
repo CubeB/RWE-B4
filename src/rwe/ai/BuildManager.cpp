@@ -1237,9 +1237,17 @@ namespace rwe
         // tank that only looks full because nothing can afford to spend it.
         auto energySurplus = bb.energyIncome.value > bb.energyDemand.value;
         auto energyRich = bb.energyStorage.value > 0.0f && bb.currentEnergy.value >= bb.energyStorage.value * 0.8f && energySurplus;
-        if (metalShort && energyRich && total(s.metalMaker) < profile.targetMetalMakerCount && total(s.lab) >= 1)
+        if (metalShort && energyRich && total(s.metalMaker) + total(s.floatingMetalMaker) < profile.targetMetalMakerCount && total(s.lab) >= 1)
         {
             want(s.metalMaker);
+            // The floating one second, and counted against the same target,
+            // because it is the same building with a worse price: ARMMAKR and
+            // ARMFMKR both cost no metal at all and both burn sixty energy a
+            // second, but ARMMAKR is 687 energy to build against 1480, and it
+            // is MaxWaterDepth=0. So dry ground gets the cheap one and a base
+            // with none gets the other. The planner takes the first of the
+            // two it can find a site for, which is the whole mechanism.
+            want(s.floatingMetalMaker);
         }
         if (total(s.radar) < profile.targetRadarCount && total(s.solar) >= profile.openingSolarCount)
         {
@@ -1470,6 +1478,26 @@ namespace rwe
             want(s.lab);
         }
         want(s.metalExtractor);
+        // And the submerged patches, once the dry ones are gone. This sits
+        // directly below the land extractor because the planner takes the
+        // first entry it can find a SITE for: every dry patch is tried first,
+        // and this is reached exactly when there are none left -- which on a
+        // 92% water map is early and permanent.
+        //
+        // Worth having despite being the worse buy. ARMUWMEX is 130 metal
+        // against ARMMEX's 50 (CORUWMEX 125), and four times the energy, for
+        // ExtractsMetal=0.001 -- the very same trickle. It is not better
+        // metal, it is metal that was otherwise unreachable.
+        //
+        // Gated on the map actually having water rather than on
+        // navalFleetTarget: a lake map can have a submerged patch worth
+        // taking while wanting no navy at all, and without a gate of some
+        // kind every land map would pay for a patch scan a pass to be told
+        // there is nowhere to put one.
+        if (bb.mapIntel.valid && bb.mapIntel.waterFraction >= MixedMapWaterFraction)
+        {
+            want(s.underwaterMetalExtractor);
+        }
         // Replace what was just destroyed before getting on with the plan.
         //
         // Without this a razed base is rebuilt in generic priority order,
@@ -1885,7 +1913,12 @@ namespace rwe
             return !t.empty()
                 && ((!sideUnits.tidalGenerator.empty() && t == sideUnits.tidalGenerator)
                     || (!sideUnits.sonar.empty() && t == sideUnits.sonar)
-                    || (!sideUnits.torpedoLauncher.empty() && t == sideUnits.torpedoLauncher));
+                    || (!sideUnits.torpedoLauncher.empty() && t == sideUnits.torpedoLauncher)
+                    || (!sideUnits.floatingMetalMaker.empty() && t == sideUnits.floatingMetalMaker));
+            // The underwater extractor is NOT here. It stands in the water
+            // like the rest, but it also has to stand on a metal patch, so it
+            // goes through chooseMexSite with the moho extractor rather than
+            // through the ring walk -- see the branch that dispatches it.
         };
 
         // Has the enemy actually put a hull in the water? The test is the one
@@ -2262,8 +2295,18 @@ namespace rwe
             // ordinary site chooser deliberately refuses a patch, so a moho
             // routed through it would either find nowhere or stand somewhere
             // it produces nothing.
-            if (next == sideUnits.metalExtractor || (!sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor))
+            if (next == sideUnits.metalExtractor
+                || (!sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor)
+                || (!sideUnits.underwaterMetalExtractor.empty() && next == sideUnits.underwaterMetalExtractor))
             {
+                // The underwater extractor comes through here for the same
+                // reason the moho does -- it has to stand on a patch, and the
+                // ordinary site chooser deliberately refuses those -- but it
+                // needs one thing they do not, below: no reachability test,
+                // because a patch under twenty feet of water is not ground
+                // anybody walks to. canBeBuiltAt still holds it to its own
+                // MinWaterDepth, so it cannot land anywhere shallow.
+                auto submerged = !sideUnits.underwaterMetalExtractor.empty() && next == sideUnits.underwaterMetalExtractor;
                 // Nearby patches first; further afield if there are none.
                 // Only patches the builder can walk to: islands are for the transport.
                 // A builder that flies is not held to the ground's shape.
@@ -2306,7 +2349,7 @@ namespace rwe
                     {
                         return false;
                     }
-                    return !underGuns(p) && !siteFailedLately(sim, p) && (!siteReachable || siteReachable(p));
+                    return !underGuns(p) && !siteFailedLately(sim, p) && (submerged || !siteReachable || siteReachable(p));
                 };
                 site = chooseMexSite(sim, next, builder.position, profile.nearMexSearchRadius, rng, walkable);
                 if (!site && builderAtBase)
