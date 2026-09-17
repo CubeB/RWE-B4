@@ -132,6 +132,17 @@ function Invoke-ArenaGame {
 
     $text = $line.Line
     $row = [ordered]@{ seed = $seed; arm = $arm; tunedPlayer = $tunedPlayer }
+    # seconds= and ended= are game-level rather than per-side, and they are what
+    # makes two arms comparable at all. Every other figure in this row is a
+    # SNAPSHOT TAKEN AT GAME END, so an arm whose games finished early is being
+    # measured at a different moment from one that ran to the cap -- and a
+    # player who has just been wiped contributes units=0 to its mean. Averaging
+    # the two as though they were the same measurement reads a shorter game as
+    # a poorer AI. That is exactly what a control arm ending 'decided' around
+    # 1400s against a tuned arm running the full 1800s looked like, and it was
+    # read as an effect of the tune for most of an afternoon.
+    if ($text -match 'seconds=(\d+)') { $row['secs'] = [int]$Matches[1] }
+    if ($text -match 'ended=(\w+)') { $row['ended'] = $Matches[1] }
     foreach ($side in @(0, 1)) {
         # types= is appended last by AiArenaReport and is optional, so an older
         # binary still parses here rather than dropping the whole row.
@@ -169,6 +180,10 @@ function Get-Side {
         lost      = $row."p$side`_lost"
         metal     = $row."p$side`_metal"
         dead      = ($row."p$side`_status" -eq 'dead')
+        # Game-level, carried onto both sides so an arm can report how long its
+        # games actually lasted. See the note where these are parsed.
+        secs      = $row.secs
+        ended     = $row.ended
         types     = $t
     }
 }
@@ -179,6 +194,14 @@ function Show-Arm {
     $avg = [ordered]@{
         arm       = $name
         games     = $samples.Count
+        # Directly after games, because these two qualify every column that
+        # follows: all of them are read at game end, so an arm with a shorter
+        # mean length is not measured at the same moment as a longer one, and
+        # toCap says how much of that is games that reached the time limit
+        # rather than ending in a result. An arm at 1400s next to an arm at
+        # 1800s is not a weaker AI, it is a different measurement.
+        secs      = [math]::Round((($samples | Measure-Object -Property secs -Average).Average), 0)
+        toCap     = @($samples | Where-Object { $_.ended -eq 'timeout' }).Count
         units     = [math]::Round((($samples | Measure-Object -Property units -Average).Average), 1)
         buildings = [math]::Round((($samples | Measure-Object -Property buildings -Average).Average), 1)
         army      = [math]::Round((($samples | Measure-Object -Property army -Average).Average), 1)
