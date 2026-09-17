@@ -45,6 +45,16 @@
 // and not at it -- and it is what the demo's damage record marks. RWE moves a
 // projectile and then tests the occupied grid, in the same order, so the tick
 // count is the flight time with nothing added or taken away.
+//
+// WHAT THIS DOES NOT PIN. The projectile is spawned outside tick() and the
+// ticks are counted from there, so the step count and the stop are pinned and
+// where the FIRING sits relative to the first step is not. The original takes
+// that first step on the tick it fires, and an episode's flightTicks is a tick
+// wider than the flight because a demo stamps a shot from the other side of its
+// tick's 0x2c -- the two conventions cancel, which is why the numbers below
+// still stand. weaponfiretick.test.cpp is the one that pins the firing tick,
+// through the whole pipeline; see docs/TA-DEMOS.md, "Which tick a round first
+// moves on".
 
 namespace rwe
 {
