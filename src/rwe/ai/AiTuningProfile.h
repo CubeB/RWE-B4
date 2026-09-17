@@ -278,6 +278,42 @@ namespace rwe
          */
         int targetShipyardCount{2};
         /**
+         * Whether the shipyard is wanted EARLY on a map where ships matter --
+         * directly after the first lab, above the anti-air, the metal maker,
+         * the radar, the towers, the advanced lab, the air plant and the
+         * vehicle plant -- rather than thirteenth in buildPriorities where it
+         * used to sit.
+         *
+         * The reasoning is that on a map where navalFleetTarget is non-zero,
+         * the yard is what the lab is on land: the factory that makes the only
+         * units able to reach the enemy at all. Queuing it behind ten solars,
+         * eight extractors, radar and two tower types meant the yard the whole
+         * naval plan depends on was laid down nearly last. Yard timing is what
+         * was left of the fleet shortfall after its other two causes were
+         * fixed -- targetShipyardCount making the fleet arithmetically
+         * unreachable, and an uncapped water-blind lab outproducing the yards
+         * 55 to 1 -- and with both of those fixed the best fleet was still
+         * five of nine.
+         *
+         * It exists as a knob, defaulting to the new behaviour, for one
+         * reason: a code change cannot be measured by the arena, because
+         * -tune's control arm runs the same binary and would contain the
+         * change too. Setting it to 0 restores the old ordering exactly, which
+         * makes "-tune earlyShipyard=0" a genuine control measuring this one
+         * thing -- the same device, and the same wording, as navalFleetSize=0
+         * restoring today's behaviour exactly.
+         *
+         * No effect on a land map without needing its own gate: the want is
+         * behind navalFleetTarget, which is zero on MapCharacter::Land.
+         *
+         * The late want further down buildPriorities is deliberately kept
+         * whatever this is set to. want() de-duplicates, so the pair costs
+         * nothing, and the late one still catches the case where the early
+         * affordability test -- the OPENING solars and extractors, not the
+         * full targets the air plant waits for -- has not been met yet.
+         */
+        bool earlyShipyard{true};
+        /**
          * Land combat units the AI will go on making while there is
          * ground it cannot walk to. Above this every factory that makes
          * them goes quiet -- the kbot lab its raiders and rocket kbots,

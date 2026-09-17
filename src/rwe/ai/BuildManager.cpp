@@ -1134,6 +1134,41 @@ namespace rwe
             want(s.lab);
         }
 
+        // Naval, and it goes HERE -- above the anti-air, the maker, the radar,
+        // the towers, the advanced lab, the air plant and the vehicle plant --
+        // because on a map where navalFleetTarget is non-zero the shipyard is
+        // what the lab is on land: the factory that makes the only units able
+        // to reach the enemy at all. It used to sit thirteenth in this list, so
+        // the yard the entire naval plan depends on was laid down nearly last,
+        // and a fleet of nine was still a fleet of five when the game ended.
+        // Yard timing, not attrition and not affordability, was what was left
+        // after the fleet shortfall's other two causes were fixed.
+        //
+        // The map gate is not new and not widened: navalFleetTarget is already
+        // zero on Land and zero when navalFleetSize is the kill switch, so
+        // nothing here can fire on a map where ships do not matter. What is
+        // new is only WHEN it fires on a map where they do.
+        //
+        // The affordability bar is the OPENING economy rather than the full
+        // targets. The air plant above takes the stronger reading of the same
+        // idea -- airMatters skips its extractor test outright -- but a
+        // 615-metal ARMSY landing on top of a 705-metal lab with nothing built
+        // yet starves both, so the yard waits for the opening solars and
+        // extractors and no longer.
+        //
+        // The late call further down is deliberately kept: want() de-duplicates
+        // (see the anti-air note below), so the pair costs nothing, and the
+        // late one still catches the case where this opening test has not been
+        // met yet.
+        if (profile.earlyShipyard && navalFleetTarget(profile, bb) > 0 && !s.shipyard.empty()
+            && total(s.shipyard) < profile.targetShipyardCount
+            && total(s.lab) >= 1
+            && total(s.solar) >= profile.openingSolarCount
+            && total(s.metalExtractor) >= profile.openingMetalExtractorCount)
+        {
+            want(s.shipyard);
+        }
+
         // Anti-air, and it goes here -- above the radar, the towers and the
         // second factory -- whenever aircraft are actually in the picture.
         // The AI had no answer to air at all before this: nothing it built

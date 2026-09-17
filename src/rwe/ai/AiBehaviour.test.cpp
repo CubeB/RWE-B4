@@ -2326,6 +2326,92 @@ namespace rwe
         REQUIRE(matched->tile.x >= 14);
     }
 
+    TEST_CASE("naval: the shipyard comes before the rest of the base on a water map", "[ai]")
+    {
+        // The ordering test that the siting test above deliberately is not.
+        // That one zeroes every competing priority so the yard is the only
+        // thing the planner can reach, which answers "can it find water deep
+        // enough" and says nothing at all about WHEN a yard is wanted. This
+        // one leaves the competition standing -- radar, the towers, the air
+        // plant, the vehicle plant, the advanced lab, and the run up to ten
+        // solars -- and asserts the yard beats all of it.
+        //
+        // That matters because the yard used to sit thirteenth in
+        // buildPriorities, which is why a fleet of nine was still a fleet of
+        // five when the game ended: on a map where navalFleetTarget is
+        // non-zero the yard is what the lab is on land, the factory that
+        // makes the only units able to reach the enemy at all.
+        //
+        // The opening economy is pre-built rather than waited for. The
+        // opening extractors and solars are listed ABOVE the first lab, and
+        // the yard sits directly below it, so with the opening unmet the
+        // first want is an extractor and the ordering under test is never
+        // reached.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+        REQUIRE(mapIntel.character == MapCharacter::Water);
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        // The dry strip is heightmap x in [0, 10), which is world x -512 to
+        // -352, so everything below stands on land.
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-400_ss, 90_ss, 0_ss), script);
+        for (int i = 0; i < 3; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(SimScalar(-470.0f + static_cast<float>(i) * 24.0f), 90_ss, 48_ss), script);
+        }
+        for (int i = 0; i < 4; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(-470.0f + static_cast<float>(i) * 24.0f), 90_ss, -48_ss), script);
+        }
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        // The premise of the whole test: a zero here is the naval kill switch
+        // and every assertion below would pass or fail for the wrong reason.
+        REQUIRE(profile.navalFleetSize > 0);
+        // The three owned extractors already meet this. Left at its default of
+        // eight, the "don't sink the commander into a factory while metal is
+        // short" rule sits ABOVE the lab and would ask for a fourth extractor
+        // first -- pre-empting the ordering under test and failing the test
+        // for a reason that has nothing to do with it. The siting test above
+        // never met this only because it set the target to zero.
+        profile.targetMetalExtractorCount = 3;
+
+        SECTION("the yard is what the commander lays down next")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMSY");
+        }
+
+        SECTION("earlyShipyard=0 restores the old ordering exactly")
+        {
+            // The knob exists for this: a code change cannot be measured by
+            // the arena, whose control arm runs the same binary and would
+            // contain the change too. Something else has to come first here,
+            // or "-tune earlyShipyard=0" is not a control at all.
+            profile.earlyShipyard = false;
+
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType != "ARMSY");
+        }
+    }
+
     TEST_CASE("naval: no shipyard is ever wanted on a land map", "[ai]")
     {
         auto script = makeEmptyCobScript();
