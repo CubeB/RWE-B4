@@ -632,6 +632,21 @@ Note the consequence for an accelerating missile: `ARMKBOT_MISSILE` gets
 `604 / (650/30)` = 27 ticks of motor, and covers only about 447 units of its
 604 range under power before it starts coasting.
 
+**This section is now checked against real games.** Replaying exactly the above
+-- the launch speed picked the way `0x49C980` picks it, the cap and the
+acceleration as converted here, the burn as `0x49C920` times it, and coasting
+after -- reproduces the observed flight time in **11 of 13** (shooter, weapon)
+cells mined from a demo corpus, against **0 of 27** for a model that flies a
+missile at its `weaponvelocity` from the muzzle. Eleven of those are checked in
+as conformance episodes in `src/rwe/sim/tad_weapon_episodes.h`. Two details of
+this reading are what the corpus is agreeing with rather than incidental: a
+`startvelocity` of zero meaning full speed with no motor and a standstill with
+one, and the burn being range-derived unless `noautorange`. The burn is thinly
+covered: one checked-in episode outlives its own motor and coasts the last two
+ticks in, and the rest arrive before theirs stops, so that half is confirmed as
+arithmetic more than as an outcome. See `docs/TA-DEMOS.md`,
+"Pairing a `0x0d` to the `0x0b` it caused".
+
 ### Guidance, `0x49B520`
 
 Steering is gated on **`guidance` (bit 12), not `tracks`** (bit 13). The

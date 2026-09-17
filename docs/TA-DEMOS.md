@@ -783,7 +783,7 @@ weapon's damage. This also closes the older note in the `0x0b` section above:
 the damage field **is** the weapon's damage, now checked against a weapon
 definition rather than inferred from looking small.
 
-#### The model: `flight = ceil(distance / (weaponvelocity / 30)) - 1`
+#### Two models, one per scored class
 
 With the pairing done, the implied speed -- straight-line distance from the
 shot's origin to its aim point, over the paired flight time -- lands on the
@@ -796,14 +796,12 @@ listing: it exits non-zero if a scored cell moves.
 ```bash
 ./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc \
     --emit-shots /tmp/shots.jsonl
-tools/tad-weapontime.py --shots /tmp/shots.jsonl --units ~/ta-mods/x-esc --classes
+tools/tad-weapontime.py --shots /tmp/shots.jsonl --units ~/ta-mods/x-esc --classes --drift
 ```
 
-**Only one class is scored, and it lands on the model exactly.** A weapon whose
-`startvelocity` equals its `weaponvelocity` flies at one speed in a straight
-line, and for those the flight time is `ceil(d / v) - 1` in **23 of 25** cells
-with 30 or more pairings. The `-1` has no fudge in it: a projectile takes its
-first step on the tick it is fired, so it has covered the distance after
+**A round that flies at one speed: `flight = ceil(d / v) - 1`,** in **22 of 24**
+cells with 30 or more pairings. The `-1` has no fudge in it: a projectile takes
+its first step on the tick it is fired, so it has covered the distance after
 `ceil(d / v)` steps and the gap between the firing tick and the arrival tick is
 one less. It is the same off-by-one as the build accumulator's first increment
 landing on the `0x09`'s own tick, for the same reason.
@@ -816,25 +814,100 @@ how far past the aim point the projectile has travelled when the damage lands,
 and that scales with the weapon's speed: about 25 world units for a
 32-unit-a-tick laser and about 1 for a 15-unit-a-tick gauss. A projectile
 arrives partway through its final tick and the tick it arrives on is the only
-thing the stream can report. Restricting to victims that **cannot move** -- a
-building is where it was aimed -- sharpens every share, to `LIGHTNING_LATNK`
-86%, `LASER_MAK` 83%, `PARALYZER` 80%, at the cost of five sixths of the volume.
+thing the stream can report.
 
-**And 25 of the 25 scored cells carry their firing weapon's own `[DAMAGE]
-default` as their modal damage.** Nothing in the filters looks at the damage
-field, so that is the pairing checking itself against evidence it was not built
-from.
+**A round with a motor gets replayed a tick at a time.** A missile leaves the
+barrel at `startvelocity`, gains `weaponacceleration` up to `weaponvelocity`
+while its motor runs, and coasts after it stops. The replay is a **port of RWE's
+own `createProjectileFromWeapon` and `updateSelfPropelledProjectile`**, which are
+in turn a decoded reading of `0x49C980` and `0x49B9AE`, and not a guess at the
+shape from the TDF field names -- which is what it was while the class was only
+being scouted, and the difference is the point. Against the same corpus it lands
+on **11 of 13** cells, at shares of 41% to 61%.
 
-**The four classes the model does not describe** are listed by `--classes` and
-never scored. Each is explicable and each wants a model of its own:
+Three things that reading settled, none of them guessable from the field names:
 
-| class | cells | pairings | why the constant-speed model misses |
+* **`startvelocity = 0` means two different things.** With no acceleration it is
+  "off the rail at full speed"; with acceleration it is "from a standstill". The
+  engine asks it in that order and so does the script's `launch_speed`.
+* **The burn is real, and it changes pairings without changing a mode.** The
+  motor runs `range / weaponvelocity` ticks, or `weapontimer` where the weapon
+  says `noautorange`, and running out is not death -- without `burnblow` the
+  missile coasts on at whatever speed it reached. A `MISSILE_GF_HEAVY`'s motor
+  stops at tick 15 and one of the checked-in episodes arrives on step 17, so the
+  coast is exercised; but adding the term left **every cell's mode where it was
+  and moved no share by more than three points**, because most shots arrive
+  before the motor stops or are at the cap by then anyway. It is in both the
+  script and the port on the strength of being the engine's arithmetic rather
+  than of what it does to this corpus, which is the right way round.
+* **`cruise` and `twophase` are not the accelerating class**, and reading the
+  velocities alone hides that. `ROCKET_HRK` is `selfprop` with `cruise` and a
+  start speed equal to its cap, so the velocity test put it in the constant-speed
+  table -- where it sat at the worst share in it, 40%, because a cruise missile
+  climbs to a fixed altitude and flies over the aim point before coming down
+  (`0x49B455`) and that is not the straight line being measured. It is now its
+  own class and is not scored. `GAUSS_SNIPE` is the other `selfprop` round whose
+  start speed equals its cap; that one is genuinely a constant speed, and the
+  fixture flies it on the motor path anyway because that is the path the engine
+  puts it on.
+
+#### The drift bound: when a flight time stops measuring a flight
+
+The missile class needs a filter the constant-speed class does not, and the
+reason is the same fact the pairing rests on: **a `0x0d` records where the shot
+was AIMED**. A victim that moves while the round is in the air is not where the
+distance says it is when it arrives. Bucket every pairing by how far the victim
+could have gone -- its own FBI `maxvelocity` times the observed flight -- and
+both scored classes fall down one monotone curve (`--drift` reprints it):
+
+| drift, world units | constant speed | accelerating |
+|---|---|---|
+| 0 (immobile victim) | 65% (n=848) | 54% (n=567) |
+| 0-8 | 69% (n=2,129) | 58% (n=173) |
+| 8-16 | 62% (n=2,601) | 51% (n=836) |
+| 16-32 | 60% (n=3,709) | 42% (n=4,064) |
+| 32-64 | 43% (n=1,666) | 27% (n=4,121) |
+| 64-128 | 33% (n=203) | 17% (n=667) |
+| 128+ | 22% (n=203) | 9% (n=5,398) |
+
+(share of pairings landing on their class's model.) **The two classes sit on the
+same curve and differ only in where their mass lies:** two thirds of the
+constant-speed pairings drift less than 32 units and two thirds of the
+accelerating ones drift more. That is the whole of the difference between a class
+that can be scored over every victim and one that cannot. A laser crossing 200
+units in six ticks barely notices that its target moved; a missile spending
+thirty ticks getting there does, and missiles are what gets fired at aircraft.
+
+So a self-propelled cell is scored over the pairings whose victim **could not
+have outrun one step of the projectile**, which costs 7,130 of its pairings and
+leaves 13 cells. The bound is the projectile's own step rather than a constant
+because the quantity is quantised in steps: a drift under a step cannot move the
+arrival tick by more than one, and a drift of several can move it by several.
+
+**The bound is not tuned.** Half a step would put 10 of 10 surviving cells on the
+model and make both exceptions below disappear, which is exactly why it is not
+the bound -- a filter chosen for the disagreements it removes is not evidence.
+The constant-speed class keeps every victim for the mirror-image reason: it does
+not need the bound, and applying it anyway would cost two thirds of the largest
+oracle here to flip one thin near-tie cell (`ARMJAV`, 133 pairings at 42%) from
+one side of a coin to the other. Both choices are visible in the script, and
+`--drift` prints the measurement either could be argued from.
+
+**And 37 of the 37 scored cells carry their firing weapon's own `[DAMAGE]
+default` as their modal damage,** across both classes. Nothing in the filters
+looks at the damage field, so that is the pairing checking itself against
+evidence it was not built from.
+
+**The four classes neither model describes** are listed by `--classes` and never
+scored. Each is explicable and each wants a model of its own:
+
+| class | cells | pairings | why neither model fits |
 |---|---|---|---|
-| accelerating | 27 | 15,826 | leaves the rail at `startvelocity` and works up, so it arrives late |
 | ballistic | 18 | 4,946 | travels an arc, which is longer than the straight line measured |
-| `waterweapon` | 4 | 299 | a torpedo's path from a surface launcher to a submerged target is not that line either |
 | `vlaunch` | 3 | 807 | goes up before it goes anywhere; `ARMMERL` reads +138 |
+| `cruise` | 1 | 709 | climbs to a fixed altitude and crosses the aim point before descending |
 | `burst` | 6 | 312 | see below |
+| `waterweapon` | 4 | 299 | a torpedo's path from a surface launcher to a submerged target is not that line either |
 
 The `burst` exclusion is the one worth spelling out, because it is what turned
 eight failures into two. A burst weapon fires `burst` rounds `burstrate` seconds
@@ -846,50 +919,28 @@ the class existed are burst weapons -- both flamethrowers, both `EMG`s,
 `EMG_VTOL`, `GAUSS_SPRAY` -- excluded on a criterion that has nothing to do with
 flight time.
 
-**The two that remain are not explained.** `ARMAMPH` firing `GAUSS_MAV` reads -1
-over 221 pairings and `CORGEO` firing `RIOT_ALL` reads -1 over 53, both near-ties
-with the `+0` bucket (45% against 28% and 45% against 40%), and `ARMMAV` fires
-the same `GAUSS_MAV` and agrees. They are named in the script's
-`KNOWN_EXCEPTIONS`, printed on every run, and covered by the exit code the way
-`tad-buildtime.py` covers its airborne pool -- the run fails if a new cell
-disagrees *or* if either of those two stops reading what it reads today. An
-unexplained observation that says so is not a licensed divergence.
+**The four that remain are not explained.** Two are constant-speed: `ARMAMPH`
+firing `GAUSS_MAV` reads -1 over 221 pairings and `CORGEO` firing `RIOT_ALL`
+reads -1 over 53, both near-ties with the `+0` bucket (45% against 28% and 45%
+against 40%), and `ARMMAV` fires the same `GAUSS_MAV` and agrees. Two are
+missiles: `ARMFIG` firing `MISSILE_VTOL` reads -1 over 262 at 43%, where
+`CORVENG` is the same airframe at the same speed with the same weapon and lands
+on the model, and `CORVAMP` firing `MISSILE_VTOL_GF` reads -1 over 44, the
+thinnest scored cell there is. All four are named in the script's
+`KNOWN_EXCEPTIONS`, printed on every run, skipped by the emitter with a printed
+reason, and covered by the exit code the way `tad-buildtime.py` covers its
+airborne pool -- the run fails if a new cell disagrees *or* if one of those four
+stops reading what it reads today. An unexplained observation that says so is not
+a licensed divergence.
 
-
-#### The accelerating class: a motor replay, scouted and not yet pinned
-
-`--motor` is the first look at the biggest of the four -- 27 cells and 15,826
-pairings. It is a **listing and never a check**: it does not touch the exit code,
-because nobody has pinned this model and putting it in the status would make a
-guess look like a finding.
-
-Replaying a missile's speed the obvious way -- `speed = min(cap, speed + accel)`
-once a tick, out of `startvelocity`, `weaponacceleration` and `weaponvelocity` --
-takes the class from **0 of 27 cells landing on zero to 14 of 27**. The
-ground-fire missiles are the ones that land, at 46-53% shares; the anti-air ones
-sit at +1 or worse around 10-15%.
-
-**That split is about the victim, not the weapon**, which is the useful half.
-Filtering by what the victim could do sharpens the same model monotonically:
-
-| victims kept | cells | pairings | landing on zero |
-|---|---|---|---|
-| any | 27 | 15,826 | 27% |
-| cannot fly | 14 | 9,934 | 37% |
-| cannot move | 3 | 354 | **55%** |
-
-So the residual is mostly a **stale aim point** rather than a wrong motor: a
-`0x0d` records where the shot was aimed, and over a 20-to-40-tick missile flight
-a moving target has left. A laser crossing 200 units in six ticks barely
-notices. That is why the constant-speed class could be scored over every victim
-and this one probably cannot, and it is the same trade the storage and
-build-timing passes made: a sharper filter over less volume.
-
-What the replay ignores is the reason not to trust it yet -- the motor burns for
-a bounded time and then coasts (`weapontimer`, `flighttime`, `noautorange`), a
-missile steers rather than flying straight, and a two-phase one turns over.
-RWE's `updateSelfPropelledProjectile` is a decoded reading of the real routine;
-where the two differ that one is right, and the script is what should change.
+**What is still open in the residual.** Even at drift zero the mode takes only
+about half the pairings, and the second bucket is `-1` rather than `+1` -- the
+round arrives slightly before the model says. The shortfall grows with the
+victim's footprint (about +48 world units for a footprint-8 building against
+about -6 for a footprint-2 one), which points at the obvious thing: the round
+detonates on the victim's collision volume and the distance being measured is to
+its centre. Nobody has modelled that, and it is the next thing to try on this
+oracle.
 
 ### `0x10`, script call -- all 22 bytes
 
@@ -1280,19 +1331,34 @@ Settled by the economy oracle, and inherited by everything after it.
   reproduce is a distance being crossed, so the distance travels with the
   number.
 
-  **Only the 23 cells the model predicts are checked in.** The two that do not,
-  `ARMAMPH` firing `GAUSS_MAV` and `CORGEO` firing `RIOT_ALL`, are skipped with
-  a printed reason rather than checked in with their offset written into
-  `expectedFlightDelta` -- the same rule that keeps airborne builders out of the
-  build fixture. That field is for a divergence somebody decided on, never for
-  an observation nobody has explained.
+  **Only the 33 cells a model predicts are checked in** -- 22 constant-speed and
+  11 with a motor. The four that do not, `ARMAMPH` firing `GAUSS_MAV`, `CORGEO`
+  firing `RIOT_ALL`, `ARMFIG` firing `MISSILE_VTOL` and `CORVAMP` firing
+  `MISSILE_VTOL_GF`, are skipped with a printed reason rather than checked in
+  with their offset written into `expectedFlightDelta` -- the same rule that
+  keeps airborne builders out of the build fixture. That field is for a
+  divergence somebody decided on, never for an observation nobody has explained.
 
-  `expectedFlightDelta` is zero in all 23. RWE steps a line-of-sight projectile
-  after the behaviour pass that spawns it, so it takes its first step on the
-  firing tick exactly as the original does, and the prediction that it would
-  agree held on the first run. The field stays because a fixture that cannot
-  express a divergence is a fixture that gets disabled the week one is decided
-  on.
+  An episode carries the weapon's own launch speed, acceleration, range and
+  motor timer beside its `weaponvelocity`, and a flag for whether the engine
+  flies it on the motor path, so the test builds the same physics the loader
+  would. It also names the **victim**, because a self-propelled cell is scored
+  only over victims that could not outrun a step of the round and the row should
+  say which one that was. What it does not carry is `guidance`, `tracks` or
+  `turnrate`: every episode is a shot at a point along a heading the round is
+  already on, which is what the victim bound selects for, and steering towards a
+  point dead ahead is an identity.
+
+  `expectedFlightDelta` is zero in all 33. RWE steps a projectile after the
+  behaviour pass that spawns it, so it takes its first step on the firing tick
+  exactly as the original does, and the prediction that it would agree held on
+  the first run for both classes. What made that worth anything is that it was
+  mutated afterwards: stopping the missile motor accelerating fails 10 of the 11
+  motor episodes and none of the other 22 (the eleventh, `ARMSAM`, happens to
+  cross a distance both speeds reach in the same number of steps), and taking
+  away the projectile's first step of travel fails all 33. The field stays
+  because a fixture that cannot express a divergence is a fixture that gets
+  disabled the week one is decided on.
 
 Regenerating (Escalation; the paths are a local corpus, not a repository one):
 
@@ -1531,34 +1597,41 @@ They catch different things and should not share machinery.
       and the four classes that need their own models are in "Pairing a
       `0x0d` to the `0x0b` it caused" above.
 
-      **The fixture and the test exist.** `--emit-weapon-cpp` writes
-      `src/rwe/sim/tad_weapon_episodes.h`, 23 episodes over the cells the model
-      predicts, with `UnitFacts` widened to carry each FBI's `WeaponN` names and
-      a second reader over the data set's weapon TDFs going through the engine's
-      own `parseWeaponTdf`, so a fixture cannot disagree with the loader about
-      what a field means. `weaponflight.test.cpp` (`[weapon][corpus]`) spawns a
-      real `Projectile` through `spawnProjectile` and steps it with `tick()`, and
-      all 23 passed on the first run: `expectedFlightDelta` is zero throughout,
-      which was the prediction. Both mutations landed -- making a projectile skip
-      its first step moves **all 23**, which says the cases measure the stepping
-      and not a constant, and converting `weaponvelocity` to a per-tick step with
-      integer division instead of float moves **exactly the two** whose
-      representative distance sits near a tick boundary and none of the eighteen
-      whose velocity divides by 30 exactly, which says they measure the
-      fractional part of a step rather than a rounded one.
+      **The fixture and the test exist, over two classes.** `--emit-weapon-cpp`
+      writes `src/rwe/sim/tad_weapon_episodes.h`, 33 episodes over the cells a
+      model predicts -- 22 constant-speed and 11 with a motor -- with `UnitFacts`
+      widened to carry each FBI's `WeaponN` names and a second reader over the
+      data set's weapon TDFs going through the engine's own `parseWeaponTdf`, so
+      a fixture cannot disagree with the loader about what a field means.
+      `weaponflight.test.cpp` (`[weapon][corpus]`) spawns a real `Projectile`
+      through `spawnProjectile` and steps it with `tick()`, and every episode of
+      both classes passed on the first run: `expectedFlightDelta` is zero
+      throughout, which was the prediction each time.
 
-      **What is left** is the other four classes, each of which wants its own
-      model and its own cells: the missile motor (27 cells, 15,826 pairings, the
-      biggest prize and what the flight-model work in `TOTALA-EXE-MISSIONS.md`
-      would be checked against, and already scouted -- see "The accelerating
-      class" above, which takes it from 0 of 27 cells to 14), ballistics (18
-      cells, and the one with a decoding prize in it, because a ballistic shot is
-      where the `0x0d`'s rotation triple could be checked against the geometry),
-      `vlaunch` (3) and torpedoes (4). And the hit/miss half of the oracle, which
-      is a different statistic over the same pairings and where target type
-      probably does belong in the cell key -- but which has to answer why 53,706
-      shots drew no damage in the window before it can call any of them misses,
-      given that `0x0b` is not a complete ledger.
+      Mutations are what make that worth anything, and four have landed. On the
+      constant-speed pass: making a projectile skip its first step moved **all
+      23** of the episodes there were then, and converting `weaponvelocity` to a
+      per-tick step with integer division instead of float moved **exactly the
+      two** whose representative distance sits near a tick boundary. On the motor
+      pass: stopping the motor accelerating fails **10 of the 11** motor episodes
+      and **none** of the 22 others, which is the model's own subset and nothing
+      else; and taking away the projectile's first step of travel fails **all
+      33**, which says every episode measures the stepping and not a constant.
+
+      **What is left** is the three classes that still have no model, each of
+      which wants its own cells: ballistics (18 cells, and the one with a
+      decoding prize in it, because a ballistic shot is where the `0x0d`'s
+      rotation triple could be checked against the geometry), `vlaunch` (3) and
+      torpedoes (4) -- and `cruise`, now split out of the constant-speed table as
+      a class of one. The sub-tick residual is the other open end: even at drift
+      zero the mode takes only about half the pairings and the second bucket is
+      `-1`, with a shortfall that grows with the victim's footprint, which points
+      at the round detonating on the collision volume rather than at the aim
+      point. And the hit/miss half of the oracle, which is a different statistic
+      over the same pairings and where target type probably does belong in the
+      cell key -- but which has to answer why 53,706 shots drew no damage in the
+      window before it can call any of them misses, given that `0x0b` is not a
+      complete ledger.
 
    Every one of those carries the expected-difference annotation described in
    "The hazard to design in from the start". A corpus is an efficient machine

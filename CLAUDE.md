@@ -139,19 +139,21 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   the constant-speed weapons the paired flight time is
   `ceil(distance / (weaponvelocity / 30)) - 1`. See `docs/TA-DEMOS.md`,
   "Pairing a `0x0d` to the `0x0b` it caused", for the filters, the rejection
-  counts and the four classes that need models of their own.
+  counts and the classes that need models of their own.
 
   `--weapon-cells` prints the (shooter type, weapon slot) **flight-time** cells
-  — the same filters and the same model `tools/tad-weapontime.py` scores,
+  — the same filters and the same two models `tools/tad-weapontime.py` scores,
   ported and checked against it cell for cell — and `--emit-weapon-cpp` writes
   them as the third fixture, `src/rwe/sim/tad_weapon_episodes.h`, for the
-  `[weapon][corpus]` tests. Only constant-speed weapons become episodes, and
-  only the cells the model predicts: the two that do not are skipped with a
-  printed reason rather than checked in with their offset, the same rule that
-  keeps airborne builders out of the build fixture. Needs `--units`, which now
-  also reads the data set's `weapon*/*.tdf` through the engine's own
-  `parseWeaponTdf`. `--window` and `--min-pairings` are the script's two knobs
-  and mean the same things.
+  `[weapon][corpus]` tests. Two classes become episodes: rounds that fly at a
+  constant speed, and rounds with a motor, the second flown by a port of the
+  engine's own `updateSelfPropelledProjectile` and scored only over victims that
+  could not outrun a step of the round. Only the cells a model predicts: the four
+  that do not are skipped with a printed reason rather than checked in with their
+  offset, the same rule that keeps airborne builders out of the build fixture.
+  Needs `--units`, which also reads the data set's `weapon*/*.tdf` through the
+  engine's own `parseWeaponTdf`. `--window` and `--min-pairings` are the script's
+  two knobs and mean the same things.
 
   `--weapon-slots` is the evidence that a `0x0d`'s trailing byte is the
   shooter's **weapon slot**, a 0-based index into its FBI's
@@ -184,17 +186,22 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
 - **`tools/tad-weapontime.py`** — the reference for the weapon oracle, the same
   role `tad-buildtime.py` plays for build timing. It pairs each `0x0d` to the
   `0x0b` it caused (nothing in the stream links them, so the filters are the
-  work) and scores the result against
-  `flight = ceil(distance / (weaponvelocity / 30)) - 1`, which holds in 23 of 25
-  constant-speed cells; the `-1` is a projectile taking its first step on the
-  firing tick, the same off-by-one as the build accumulator. `--classes` lists
-  the five classes it deliberately does not score — accelerating, ballistic,
-  `vlaunch`, `waterweapon` and `burst` — each of which needs a model of its own.
-  Exits non-zero if a scored cell moves, including the two named, unexplained
-  exceptions it carries. `--motor` scouts the accelerating class, the largest
-  thing the constant-speed model leaves alone, against a missile-motor replay —
-  a listing that never touches the status, because nobody has pinned that model
-  yet. `docs/TA-DEMOS.md`, "Pairing a `0x0d` to the `0x0b` it caused".
+  work) and scores the result against two models. A round that flies at one
+  speed is
+  `flight = ceil(distance / (weaponvelocity / 30)) - 1`, which holds in 22 of 24
+  such cells; the `-1` is a projectile taking its first step on the firing tick,
+  the same off-by-one as the build accumulator. A round with a **motor** is
+  replayed a tick at a time out of `startvelocity`, `weaponacceleration` and the
+  burn — a port of the engine's own `createProjectileFromWeapon` and
+  `updateSelfPropelledProjectile`, not a guess from the field names — and holds
+  in 11 of 13 cells. The missile class is scored only over the pairings whose
+  victim could not have outrun **one step** of the round, because a `0x0d`
+  records where the shot was *aimed*; `--drift` prints the measurement that bound
+  comes from, which is one monotone curve both classes sit on. `--classes` lists
+  the five it deliberately does not score — ballistic, `vlaunch`, `cruise`,
+  `waterweapon` and `burst`. Exits non-zero if a scored cell moves, including the
+  four named, unexplained exceptions it carries. `docs/TA-DEMOS.md`, "Pairing a
+  `0x0d` to the `0x0b` it caused".
 - **`tools/visual-test.ps1`** — when only the renderer will do. It launches `build-release/rwe.exe`, finds the window, and then *drives* it: real clicks at client-relative coordinates, screenshots cropped and nearest-neighbour magnified around the thing under test. `-phase build|air|ship` are the scripted sequences already written; adding one is a few lines. Prefer this to ad-hoc screenshotting — a scripted click sequence is repeatable and an eyeballed one is not.
 - **`tools/crash-catch.cmd`** runs the Debug build under gdb and writes a backtrace to `crash.txt`. Play normally, reproduce the crash, close the window.
 - Environment switches, all pure observers: `RWE_AI_PROFILE=1` times each AI pass and logs anything over 2 ms; `RWE_DEBUG_SPAWN=ARMPW*12@0:8:1` spawns units on a timer (`<type>*<count>@<owner>:<seconds>[:<near player>]`); `RWE_DEBUG_SELF_DESTRUCT[=_PLAYER]`, `RWE_TRACE_BOMBER`, `RWE_TRACE_GUNSHIP`, `RWE_TRACE_MISSILE`.

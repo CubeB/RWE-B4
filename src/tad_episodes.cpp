@@ -628,10 +628,23 @@ namespace
         /** TDF weaponvelocity, in world units a SECOND; divide by 30 for a tick. */
         unsigned int velocity;
 
-        /** Zero in the TDF means "off the rail at full speed", not "stationary". */
+        /**
+         * Zero in the TDF means two different things, and which one depends on
+         * whether the weapon has a motor: with no acceleration it is "off the
+         * rail at full speed", and with acceleration it is "from a standstill".
+         * tadLaunchSpeed asks it the way createProjectileFromWeapon does.
+         */
         unsigned int startVelocity;
         unsigned int acceleration;
         unsigned int range;
+
+        /**
+         * How long the motor runs. `range / weaponvelocity` ticks normally, and
+         * `weapontimer` seconds where the weapon says `noautorange`; running out
+         * is not death, the missile coasts on at the speed it reached.
+         */
+        float weaponTimer;
+        bool noAutoRange;
 
         /** Rounds per trigger pull. Anything above 1 is why a shot cannot be isolated. */
         unsigned int burst;
@@ -640,6 +653,26 @@ namespace
         bool vLaunch;
         bool waterWeapon;
         bool lineOfSight;
+
+        /**
+         * Whether the engine flies this one on the motor path at all, and the
+         * two flags it reads only there. TA tests `selfprop` before anything
+         * else (0x49B9C2), so a weapon that also carries `lineofsight=1` --
+         * which most missiles do -- is flown by the motor; and `cruise` or
+         * `twophase` replace the flight with a shape no model here measures.
+         */
+        bool selfProp;
+        bool cruise;
+        bool twoPhase;
+
+        /**
+         * Detonate on running out of motor instead of coasting on, which is a
+         * different arrival and not a different speed. Nothing scored here is
+         * both burnblow and longer-lived than its motor, but a regeneration that
+         * produced one would fly a round the fixture had not described, so it
+         * travels with them.
+         */
+        bool burnBlow;
 
         /** The [DAMAGE] block's `default`, which is what a paired 0x0b should carry. */
         unsigned int defaultDamage;
@@ -722,11 +755,17 @@ namespace
                         weapon.startVelocity,
                         weapon.weaponAcceleration,
                         weapon.range,
+                        weapon.weaponTimer,
+                        weapon.noAutoRange,
                         weapon.burst,
                         weapon.ballistic,
                         weapon.vLaunch,
                         weapon.waterWeapon,
                         weapon.lineOfSight,
+                        weapon.selfProp,
+                        weapon.cruise,
+                        weapon.twoPhase,
+                        weapon.burnBlow,
                         defaultDamage};
                 }
             }
@@ -2260,14 +2299,30 @@ namespace rwe
         unsigned int slot;
         std::string weapon;
 
+        /** Which of the two models was scored against, from weaponClass. */
+        std::string weaponClass;
+
         /** The weapon's own TDF values, for transcribing into the fixture. */
+        bool selfProp;
+        bool burnBlow;
         unsigned int velocity;
+        unsigned int startVelocity;
+        unsigned int acceleration;
+        unsigned int range;
+        float weaponTimer;
+        bool noAutoRange;
         unsigned int damage;
 
+        /**
+         * Pairings the cell was scored over, and how many the class's victim
+         * bound threw away getting there. Zero dropped for a constant-speed
+         * cell, which is scored over every victim.
+         */
         unsigned int pairings;
         unsigned int pairingsAtMode;
+        unsigned int pairingsDropped;
 
-        /** Modal `flight - (ceil(d/v) - 1)`, which the model says is zero. */
+        /** Modal `flight - model`, which the model says is zero. */
         int modeDelta;
 
         /** The modal damage value, which should be the weapon's own. */
@@ -2279,6 +2334,7 @@ namespace rwe
         uint32_t damageTick;
         TadPosition origin;
         TadPosition target;
+        std::string victim;
     };
 
     /** One surviving (shot, damage) pairing. */
@@ -2293,6 +2349,14 @@ namespace rwe
         unsigned int damage;
         TadPosition origin;
         TadPosition target;
+
+        /**
+         * What was shot at, empty where the id's build was never seen. The
+         * drift bound reads its FBI `maxvelocity`, and an unnamed victim cannot
+         * be shown to have held still, so the bound rejects it rather than
+         * treating it as one that did.
+         */
+        std::string victim;
     };
 
     double tadDistance(const TadPosition& a, const TadPosition& b)
@@ -2328,6 +2392,7 @@ namespace rwe
             double distance;
             TadPosition origin;
             TadPosition target;
+            std::string victim;
         };
 
         std::map<std::pair<uint16_t, uint16_t>, std::vector<Fired>> fired;
@@ -2343,7 +2408,7 @@ namespace rwe
                 continue;
             }
             fired[std::make_pair(record.shot.shooterId, record.shot.targetId)].push_back(
-                Fired{record.tick, shooter, record.shot.weaponSlot, tadDistance(record.shot.origin, record.shot.target), record.shot.origin, record.shot.target});
+                Fired{record.tick, shooter, record.shot.weaponSlot, tadDistance(record.shot.origin, record.shot.target), record.shot.origin, record.shot.target, nameOf(record.shot.targetId, record.tick)});
         }
 
         std::map<std::pair<uint16_t, uint16_t>, std::vector<std::pair<uint32_t, unsigned int>>> landed;
@@ -2397,17 +2462,82 @@ namespace rwe
                 }
 
                 out.push_back(Pairing{
-                    handler.demo, shot.shooter, shot.slot, shot.tick, only->first, shot.distance, only->second, shot.origin, shot.target});
+                    handler.demo, shot.shooter, shot.slot, shot.tick, only->first, shot.distance, only->second, shot.origin, shot.target, shot.victim});
             }
         }
         return out;
     }
 
-    /** What the model predicts, and what excludes a weapon from being scored. */
+    /** What the constant-speed model predicts, in ticks. */
     int tadFlightModel(double distance, unsigned int velocity)
     {
         auto perTick = static_cast<double>(velocity) / 30.0;
         return static_cast<int>(std::ceil(distance / perTick)) - 1;
+    }
+
+    /**
+     * What a self-propelled round leaves the barrel at, in world units a tick.
+     *
+     * The same question createProjectileFromWeapon asks, in the same order: a
+     * `startvelocity` of zero is full speed for a weapon with no motor and a
+     * standstill for one with a motor.
+     */
+    double tadLaunchSpeed(const WeaponFacts& facts)
+    {
+        if (facts.startVelocity != 0)
+        {
+            return static_cast<double>(facts.startVelocity) / 30.0;
+        }
+        return facts.acceleration == 0 ? static_cast<double>(facts.velocity) / 30.0 : 0.0;
+    }
+
+    /**
+     * How many ticks the motor runs for, which is what motorOutFrame counts to.
+     *
+     * IT CHANGES PAIRINGS BUT NO CELL'S MODE. A missile fired far enough does
+     * run its motor out and coast -- a MISSILE_GF_HEAVY's stops at tick 15 and
+     * one checked-in episode arrives on step 17 -- but not often enough to move
+     * a mode: adding the term left every mode where it was and moved no share
+     * by more than three points. It is in the model on the strength of being
+     * the engine's arithmetic, not of what it does to this corpus.
+     */
+    unsigned int tadBurnTicks(const WeaponFacts& facts)
+    {
+        if (facts.velocity != 0 && !facts.noAutoRange)
+        {
+            return static_cast<unsigned int>(
+                static_cast<double>(facts.range) / (static_cast<double>(facts.velocity) / 30.0));
+        }
+        return static_cast<unsigned int>(facts.weaponTimer * 30.0f);
+    }
+
+    /**
+     * Flight ticks for a self-propelled round, flown as RWE's sim flies one.
+     *
+     * A port of updateSelfPropelledProjectile: gain the acceleration up to the
+     * cap while the motor runs, then move, and take the first step on the tick
+     * the shot is fired -- which is where the -1 comes from, the same off-by-one
+     * the constant-speed model carries.
+     */
+    int tadMotorFlight(double distance, const WeaponFacts& facts, unsigned int limit = 4000)
+    {
+        auto speed = tadLaunchSpeed(facts);
+        auto cap = static_cast<double>(facts.velocity) / 30.0;
+        auto acceleration = static_cast<double>(facts.acceleration) / 900.0;
+        auto burn = tadBurnTicks(facts);
+
+        double travelled = 0.0;
+        unsigned int ticks = 0;
+        while (travelled < distance && ticks < limit)
+        {
+            ++ticks;
+            if (ticks <= burn)
+            {
+                speed = std::min(cap, speed + acceleration);
+            }
+            travelled += speed;
+        }
+        return static_cast<int>(ticks) - 1;
     }
 
     /**
@@ -2437,13 +2567,79 @@ namespace rwe
         {
             return "no velocity";
         }
-        // The TDF's startvelocity is zero where the weapon leaves the rail at
-        // full speed, which is the constant-speed case and not a stationary one.
-        if (facts.startVelocity != 0 && facts.startVelocity != facts.velocity)
+        // `cruise` and `twophase` are read only on the self-propelled path, and
+        // each replaces the flight with a different shape -- a cruise missile
+        // climbs to a fixed altitude and flies over the aim point before coming
+        // down, a two-phase one turns over and restarts its motor -- so they are
+        // classes of their own rather than cells that happen to read badly.
+        // ROCKET_HRK is the one that matters over this corpus: `selfprop` with
+        // `cruise`, and a start speed equal to its cap, so reading the
+        // velocities alone put it in the constant-speed table.
+        if (facts.selfProp && facts.cruise)
+        {
+            return "cruise";
+        }
+        if (facts.selfProp && facts.twoPhase)
+        {
+            return "two phase";
+        }
+        // Whether the round leaves the barrel at the speed it will keep, asked
+        // the way the engine asks it rather than off the field alone -- see
+        // tadLaunchSpeed for why the field alone does not answer it.
+        if (std::abs(tadLaunchSpeed(facts) - static_cast<double>(facts.velocity) / 30.0) > 1e-6)
         {
             return "accelerating";
         }
         return "constant speed";
+    }
+
+    /**
+     * How far the victim could have travelled while the shot was in the air, or
+     * nothing where it could not be named.
+     *
+     * A 0x0d records WHERE THE SHOT WAS AIMED, so a victim that moves is not
+     * where the distance says it is when the round arrives. Bucketing the whole
+     * corpus by this number sorts both scored classes onto one monotone curve --
+     * tools/tad-weapontime.py --drift prints it -- and it is what makes the
+     * missile class scoreable: a laser crossing 200 units in six ticks barely
+     * notices that its target moved and a missile spending thirty ticks getting
+     * there does.
+     */
+    std::optional<double> tadVictimDrift(
+        const std::map<std::string, UnitFacts>& unitFacts, const Pairing& pairing)
+    {
+        auto victim = unitFacts.find(pairing.victim);
+        if (pairing.victim.empty() || victim == unitFacts.end())
+        {
+            return std::nullopt;
+        }
+        return static_cast<double>(victim->second.maxVelocity)
+            * static_cast<double>(pairing.damageTick - pairing.shotTick);
+    }
+
+    /**
+     * Whether a pairing may be scored, which depends on its weapon's class.
+     *
+     * A constant-speed cell is scored over every victim; its pairings are nearly
+     * all at the still end of the drift curve already. A self-propelled one is
+     * scored only where the victim could not have outrun ONE STEP of the
+     * projectile -- the projectile's own step and not a constant, because the
+     * quantity being measured is quantised in steps. The bound is not tuned:
+     * half a step would put every missile cell on the model, which is exactly
+     * why it is not the bound.
+     */
+    bool tadScoreablePairing(
+        const std::string& weaponClassName,
+        const WeaponFacts& facts,
+        const std::map<std::string, UnitFacts>& unitFacts,
+        const Pairing& pairing)
+    {
+        if (weaponClassName != "accelerating")
+        {
+            return true;
+        }
+        auto drift = tadVictimDrift(unitFacts, pairing);
+        return drift && *drift < static_cast<double>(facts.velocity) / 30.0;
     }
 
     std::vector<WeaponCell> mineWeaponCells(
@@ -2459,13 +2655,8 @@ namespace rwe
         }
 
         std::vector<WeaponCell> out;
-        for (const auto& [key, group] : grouped)
+        for (const auto& [key, everything] : grouped)
         {
-            if (group.size() < minPairings)
-            {
-                continue;
-            }
-
             auto unit = unitFacts.find(key.first);
             if (unit == unitFacts.end() || key.second > 2)
             {
@@ -2482,14 +2673,38 @@ namespace rwe
                 continue;
             }
 
+            auto className = weaponClass(weapon->second);
+
+            // The class picks both the model and the victims it may be scored
+            // over, and minPairings applies to what survives the second -- so a
+            // missile cell whose pairings were nearly all against aircraft drops
+            // out rather than being scored thin.
+            std::vector<const Pairing*> group;
+            for (const auto* p : everything)
+            {
+                if (tadScoreablePairing(className, weapon->second, unitFacts, *p))
+                {
+                    group.push_back(p);
+                }
+            }
+            if (group.size() < minPairings)
+            {
+                continue;
+            }
+
+            auto modelFor = [&](const Pairing& p) {
+                return className == "accelerating"
+                    ? tadMotorFlight(p.distance, weapon->second)
+                    : tadFlightModel(p.distance, weapon->second.velocity);
+            };
+
             std::map<int, unsigned int> deltas;
             std::map<unsigned int, unsigned int> damages;
             int mode = 0;
             unsigned int atMode = 0;
             for (const auto* p : group)
             {
-                auto delta = static_cast<int>(p->damageTick - p->shotTick)
-                    - tadFlightModel(p->distance, weapon->second.velocity);
+                auto delta = static_cast<int>(p->damageTick - p->shotTick) - modelFor(*p);
                 auto count = ++deltas[delta];
                 if (count > atMode)
                 {
@@ -2515,8 +2730,7 @@ namespace rwe
             const Pairing* representative = nullptr;
             for (const auto* p : group)
             {
-                auto delta = static_cast<int>(p->damageTick - p->shotTick)
-                    - tadFlightModel(p->distance, weapon->second.velocity);
+                auto delta = static_cast<int>(p->damageTick - p->shotTick) - modelFor(*p);
                 if (delta != mode)
                 {
                     continue;
@@ -2529,7 +2743,7 @@ namespace rwe
             }
 
             out.push_back(WeaponCell{
-                key.first, key.second, weaponName, weapon->second.velocity, weapon->second.defaultDamage, static_cast<unsigned int>(group.size()), atMode, mode, modalDamage, representative->demo, representative->shotTick, representative->damageTick, representative->origin, representative->target});
+                key.first, key.second, weaponName, className, weapon->second.selfProp, weapon->second.burnBlow, weapon->second.velocity, weapon->second.startVelocity, weapon->second.acceleration, weapon->second.range, weapon->second.weaponTimer, weapon->second.noAutoRange, weapon->second.defaultDamage, static_cast<unsigned int>(group.size()), atMode, static_cast<unsigned int>(everything.size() - group.size()), mode, modalDamage, representative->demo, representative->shotTick, representative->damageTick, representative->origin, representative->target, representative->victim});
         }
 
         std::sort(out.begin(), out.end(), [](const WeaponCell& a, const WeaponCell& b) {
@@ -2542,13 +2756,14 @@ namespace rwe
     /**
      * Writes the weapon-flight episodes.
      *
-     * One episode per scored cell, and only the cells the model predicts. The
-     * two that do not -- ARMAMPH firing GAUSS_MAV and CORGEO firing RIOT_ALL,
-     * both one tick low and both near-ties with the bucket the model names --
-     * are SKIPPED rather than checked in with their offset written into
-     * expectedFlightDelta, because that field is for a divergence somebody
-     * decided on and not for an observation nobody has explained. It is the same
-     * rule that keeps airborne builders out of the build fixture.
+     * One episode per scored cell, over both scored classes, and only the cells
+     * the model predicts. The four that do not -- ARMAMPH firing GAUSS_MAV,
+     * CORGEO firing RIOT_ALL, ARMFIG firing MISSILE_VTOL and CORVAMP firing
+     * MISSILE_VTOL_GF, all one tick low and all near-ties with the bucket the
+     * model names -- are SKIPPED rather than checked in with their offset
+     * written into expectedFlightDelta, because that field is for a divergence
+     * somebody decided on and not for an observation nobody has explained. It is
+     * the same rule that keeps airborne builders out of the build fixture.
      *
      * A THIRD HEADER, beside tad_economy_episodes.h and tad_build_episodes.h.
      * They share no struct, are mined by different passes over different
@@ -2565,7 +2780,11 @@ namespace rwe
         for (const auto& cell : cells)
         {
             auto weapon = weaponFacts.find(cell.weapon);
-            if (weapon == weaponFacts.end() || weaponClass(weapon->second) != "constant speed")
+            if (weapon == weaponFacts.end())
+            {
+                continue;
+            }
+            if (cell.weaponClass != "constant speed" && cell.weaponClass != "accelerating")
             {
                 continue;
             }
@@ -2620,24 +2839,35 @@ namespace rwe
 // The pairing is confirmed by a number no filter looks at: every cell's modal
 // damage is its weapon's own [DAMAGE] default, which is `weaponDamage` here.
 //
-// WHICH SHOTS MAY BE HERE. Only weapons that fly at a constant speed, which is
-// to say the ones this arithmetic describes. An accelerating missile leaves the
-// rail at `startvelocity` and works up, a ballistic round travels an arc longer
-// than the straight line, a vlaunch rocket goes up before it goes anywhere, a
-// torpedo travels through water, and a burst weapon fires several rounds from
-// one trigger so the isolation filter cannot mean what it means elsewhere. Those
-// five are five more oracles, not discrepancies. See docs/TA-DEMOS.md.
+// WHICH SHOTS MAY BE HERE. The two classes the models describe: weapons that fly
+// at a constant speed, and weapons with a motor. A ballistic round travels an
+// arc longer than the straight line, a vlaunch rocket goes up before it goes
+// anywhere, a torpedo travels through water, and a burst weapon fires several
+// rounds from one trigger so the isolation filter cannot mean what it means
+// elsewhere. Those four are four more oracles, not discrepancies. See
+// docs/TA-DEMOS.md.
 //
-// THE ARITHMETIC BEING PINNED. A projectile covers weaponVelocity / 30 world
-// units a tick -- the same conversion LoadingScene_util.cpp does -- and takes
-// its FIRST step on the tick it is fired, so it has covered the distance after
-// ceil(d / v) steps and the gap between the shot and the damage is one less.
-// RWE steps projectiles after the behaviour pass that spawns them, so it takes
-// that first step on the firing tick too, and expectedFlightDelta is zero
-// everywhere below. The field is kept because the fixture's whole purpose is to
-// survive a deliberate divergence; a non-zero value here would have to name the
-// docs/TOTALA-EXE.md section that licensed it, exactly as the build fixture's
-// does.
+// THE ARITHMETIC BEING PINNED. A constant-speed projectile covers
+// weaponVelocity / 30 world units a tick -- the same conversion
+// LoadingScene_util.cpp does -- and takes its FIRST step on the tick it is
+// fired, so it has covered the distance after ceil(d / v) steps and the gap
+// between the shot and the damage is one less. A self-propelled one leaves at
+// startVelocity, gains weaponAcceleration / 900 a tick up to the same cap while
+// its motor runs, and coasts after; its first step lands on the firing tick too.
+// RWE steps projectiles after the behaviour pass that spawns them, so
+// expectedFlightDelta is zero everywhere below. The field is kept because the
+// fixture's whole purpose is to survive a deliberate divergence; a non-zero
+// value here would have to name the docs/TOTALA-EXE.md section that licensed it,
+// exactly as the build fixture's does.
+//
+// WHY THE MISSILE ROWS NAME THEIR VICTIM. A 0x0d records where the shot was
+// AIMED, so a victim that moves while the round is in the air is not where the
+// distance says it is when it arrives. Over a missile's twenty to forty ticks
+// that is most of the error, so a self-propelled cell is scored only over the
+// pairings whose victim could not have outrun one step of the projectile --
+// `victimName` is the representative's, and it is a building or a slow ground
+// unit in every row here. A constant-speed cell needs no such bound and gets
+// none. tools/tad-weapontime.py --drift prints the measurement behind that.
 
 namespace rwe
 {
@@ -2648,6 +2878,9 @@ namespace rwe
         unsigned int weaponSlot;
         const char* weaponName;
 
+        /** What was shot at -- see the note on the victim bound above. */
+        const char* victimName;
+
         /** The tick the shot was fired on, and the tick its damage arrived. */
         uint32_t shotTick;
         uint32_t damageTick;
@@ -2656,8 +2889,43 @@ namespace rwe
         unsigned int pairings;
         unsigned int pairingsAtMode;
 
+        /**
+         * Whether the round has a motor, which decides which model it is being
+         * held to and which physics type the test builds for it.
+         */
+        bool selfPropelled;
+
         /** TDF weaponvelocity, in world units a SECOND. Divide by 30 for a tick. */
         unsigned int weaponVelocity;
+
+        /**
+         * TDF startvelocity and weaponacceleration, also per second (and per
+         * second squared). Both zero for a constant-speed round. A startVelocity
+         * of zero with an acceleration means the missile leaves from a
+         * standstill; with no acceleration it means full speed.
+         */
+        unsigned int startVelocity;
+        unsigned int weaponAcceleration;
+
+        /**
+         * What times the motor: `weaponRange / weaponVelocity` ticks, or
+         * `weaponTimerTicks` where the weapon says noAutoRange. One episode
+         * below outlives its own motor and coasts the rest of the way in --
+         * CORMIST's, seventeen steps against a fifteen-tick burn -- so these are
+         * load-bearing for that one and describe every other.
+         */
+        unsigned int weaponRange;
+        unsigned int weaponTimerTicks;
+        bool noAutoRange;
+
+        /**
+         * Whether running out of motor detonates the round where it is instead
+         * of letting it coast on. The one episode that does outlive its motor
+         * has it clear, so nothing here detonates early; it travels with them so
+         * that a regeneration producing a burnblow round that did could not
+         * quietly be flown as though it coasted.
+         */
+        bool burnBlow;
 
         /** The weapon's [DAMAGE] default, which the cell's modal damage matches. */
         unsigned int weaponDamage;
@@ -2687,10 +2955,15 @@ namespace rwe
         for (const auto* cell : scored)
         {
             out << "        {\"" << cell->demo << "\", \"" << cell->shooter << "\", "
-                << cell->slot << ", \"" << cell->weapon << "\",\n"
+                << cell->slot << ", \"" << cell->weapon << "\", \"" << cell->victim << "\",\n"
                 << "            " << cell->shotTick << ", " << cell->damageTick << ", "
                 << cell->pairings << ", " << cell->pairingsAtMode << ",\n"
-                << "            " << cell->velocity << ", " << cell->damage << ",\n"
+                << "            " << (cell->selfProp ? "true" : "false") << ", "
+                << cell->velocity << ", " << cell->startVelocity << ", " << cell->acceleration << ",\n"
+                << "            " << cell->range << ", "
+                << static_cast<unsigned int>(cell->weaponTimer * 30.0f) << ", "
+                << (cell->noAutoRange ? "true" : "false") << ", "
+                << (cell->burnBlow ? "true" : "false") << ", " << cell->damage << ",\n"
                 << "            " << cell->origin.x << ", " << cell->origin.y << ", " << cell->origin.z << ",\n"
                 << "            " << cell->target.x << ", " << cell->target.y << ", " << cell->target.z << ",\n"
                 << "            " << (cell->damageTick - cell->shotTick) << ", 0, nullptr},\n";
@@ -3252,54 +3525,88 @@ int main(int argc, char* argv[])
 
     if (args.contains("weapon-cells"))
     {
-        // The same table tools/tad-weapontime.py prints, in the same order, so
+        // The same tables tools/tad-weapontime.py prints, in the same order, so
         // the two can be diffed cell for cell. The script is the reference.
         std::map<std::string, std::vector<const WeaponCell*>> byClass;
         for (const auto& cell : weaponCells)
         {
-            auto weapon = weaponFacts.find(cell.weapon);
-            byClass[weapon == weaponFacts.end() ? "no weapon block" : weaponClass(weapon->second)]
-                .push_back(&cell);
+            byClass[cell.weaponClass].push_back(&cell);
         }
 
-        const auto& scored = byClass["constant speed"];
         std::cout << "\n"
                   << pairings.size() << " shots paired, " << weaponCells.size()
-                  << " cells with " << minPairings << "+ pairings\n"
-                  << "scoring the " << scored.size() << " whose weapon flies at a constant speed\n\n";
-        std::cout << "  " << std::left << std::setw(13) << "shooter" << " " << std::right << std::setw(2) << "sl"
-                  << " " << std::left << std::setw(22) << "weapon" << std::right
-                  << std::setw(7) << "v/30" << std::setw(6) << "n" << std::setw(7) << "delta"
-                  << std::setw(7) << "share" << std::setw(8) << "damage" << std::setw(7) << "decl" << "\n";
+                  << " cells with " << minPairings << "+ scoreable pairings\n";
 
         unsigned int agreeing = 0;
+        unsigned int scoredCells = 0;
         unsigned int damageAgreeing = 0;
-        std::vector<const WeaponCell*> sorted(scored.begin(), scored.end());
-        std::stable_sort(sorted.begin(), sorted.end(), [](const auto* a, const auto* b) {
-            return a->pairings > b->pairings;
-        });
-        for (const auto* cell : sorted)
+        for (const auto* className : {"constant speed", "accelerating"})
         {
-            agreeing += cell->modeDelta == 0 ? 1 : 0;
-            damageAgreeing += cell->modalDamage == cell->damage ? 1 : 0;
-            std::cout << "  " << std::left << std::setw(13) << cell->shooter << " "
-                      << std::right << std::setw(2) << cell->slot << " "
-                      << std::left << std::setw(22) << cell->weapon << std::right
-                      << std::setw(7) << std::fixed << std::setprecision(1) << (cell->velocity / 30.0)
-                      << std::setw(6) << cell->pairings
-                      << std::setw(6) << std::showpos << cell->modeDelta << std::noshowpos
-                      << std::setw(6) << static_cast<int>(std::lround(100.0 * cell->pairingsAtMode / cell->pairings)) << "%"
-                      << std::setw(8) << cell->modalDamage << std::setw(7) << cell->damage
-                      << (cell->modeDelta == 0 ? "" : "   <-- disagrees") << "\n";
+            auto group = byClass.find(className);
+            if (group == byClass.end())
+            {
+                continue;
+            }
+
+            std::vector<const WeaponCell*> sorted(group->second.begin(), group->second.end());
+            std::stable_sort(sorted.begin(), sorted.end(), [](const auto* a, const auto* b) {
+                return a->pairings > b->pairings;
+            });
+
+            unsigned int dropped = 0;
+            for (const auto* cell : sorted)
+            {
+                dropped += cell->pairingsDropped;
+            }
+
+            std::cout << "\n";
+            if (std::string(className) == "constant speed")
+            {
+                std::cout << "the " << sorted.size() << " cells whose weapon flies at a constant"
+                          << " speed, ceil(d / v) - 1, over every victim\n\n";
+            }
+            else
+            {
+                std::cout << "the " << sorted.size() << " cells whose weapon has a motor, flown as"
+                          << " RWE flies one, over the victims\nthat could not outrun a step of it ("
+                          << dropped << " pairings dropped by that bound)\n\n";
+            }
+
+            std::cout << "  " << std::left << std::setw(13) << "shooter" << " " << std::right << std::setw(2) << "sl"
+                      << " " << std::left << std::setw(22) << "weapon" << std::right
+                      << std::setw(7) << "v/30" << std::setw(6) << "n" << std::setw(7) << "delta"
+                      << std::setw(7) << "share" << std::setw(8) << "damage" << std::setw(7) << "decl" << "\n";
+
+            for (const auto* cell : sorted)
+            {
+                ++scoredCells;
+                agreeing += cell->modeDelta == 0 ? 1 : 0;
+                damageAgreeing += cell->modalDamage == cell->damage ? 1 : 0;
+                std::cout << "  " << std::left << std::setw(13) << cell->shooter << " "
+                          << std::right << std::setw(2) << cell->slot << " "
+                          << std::left << std::setw(22) << cell->weapon << std::right
+                          << std::setw(7) << std::fixed << std::setprecision(1) << (cell->velocity / 30.0)
+                          << std::setw(6) << cell->pairings
+                          << std::setw(6) << std::showpos << cell->modeDelta << std::noshowpos
+                          // The share is formed and rounded exactly as the
+                          // script forms it -- the division first, then a
+                          // half-to-even rounding -- so that a cell sitting on
+                          // a .5 does not read one point apart in two tables
+                          // that are meant to be diffed.
+                          << std::setw(6) << std::setprecision(0)
+                          << (100.0 * (static_cast<double>(cell->pairingsAtMode) / cell->pairings)) << "%"
+                          << std::setw(8) << cell->modalDamage << std::setw(7) << cell->damage
+                          << (cell->modeDelta == 0 ? "" : "   <-- disagrees") << "\n";
+            }
         }
 
         std::cout << "\n"
-                  << damageAgreeing << " of " << sorted.size()
+                  << damageAgreeing << " of " << scoredCells
                   << " scored cells carry their weapon's own [DAMAGE] default as the modal damage\n";
-        std::cout << "\nthe classes this model does not describe, listed and never scored:\n";
+        std::cout << "\nthe classes neither model describes, listed and never scored:\n";
         for (const auto& [kind, group] : byClass)
         {
-            if (kind == "constant speed")
+            if (kind == "constant speed" || kind == "accelerating")
             {
                 continue;
             }
@@ -3311,7 +3618,7 @@ int main(int argc, char* argv[])
             std::cout << "  " << kind << ": " << group.size() << " cells, " << pooled << " pairings\n";
         }
         std::cout << "\n"
-                  << (sorted.size() - agreeing) << " disagreement(s) with the model\n";
+                  << (scoredCells - agreeing) << " disagreement(s) with the model\n";
     }
 
 

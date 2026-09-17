@@ -21,6 +21,12 @@
 // behaviour moved, and one of these failing means the behaviour no longer
 // matches what the original did.
 //
+// TWO CLASSES ARE HERE. Rounds that fly at a constant speed, and rounds with a
+// motor -- a missile leaves at `startvelocity` and works up to `weaponvelocity`,
+// and the episode carries both along with what times the burn. A ballistic
+// round, a vertical launch, a torpedo, a cruise missile and a burst weapon are
+// each a different flight and none of them is here; see the fixture header.
+//
 // WHAT IS DRIVEN. The real GameSimulation and the real Projectile, spawned by
 // spawnProjectile and stepped by tick(), because what the corpus recorded is a
 // projectile crossing a distance and not a unit deciding to fire. The unit
@@ -69,6 +75,28 @@ namespace rwe
          * The weapon as the loader would build it from the episode's own TDF
          * values -- the same weaponVelocity / 30 conversion as
          * LoadingScene_util.cpp, which is the one number this test is about.
+         *
+         * WHICH PHYSICS. Whatever the weapon's own `selfprop` says, because that
+         * is what the engine tests first (0x49B9C2) and most missiles carry
+         * `lineofsight=1` as well. So a round with a motor is flown by the
+         * motor here too: it leaves at startVelocity, gains acceleration / 900 a
+         * tick up to the same cap while the motor runs, and coasts after.
+         *
+         * WHAT IS NOT TRANSCRIBED, and why it cannot matter. `guidance`,
+         * `tracks` and `turnrate` steer the round towards where its target IS,
+         * and every episode here is a shot at a point the model measures to
+         * along a heading the round is already on -- which is no accident, it is
+         * what the self-propelled cells' victim bound selects for. Steering
+         * towards a point already dead ahead is an identity, so the episode does
+         * not carry fields that could only be set to values with no effect.
+         *
+         * THE RANGE IS REAL FOR A MOTOR AND FAKE FOR A BEAM. A self-propelled
+         * round has no `dieOnFrame` at all and its range is what times the burn,
+         * so it gets the weapon's own. A line-of-sight one lives `range /
+         * velocity` ticks, and several episodes are shots at the very edge of
+         * their weapon's range where that expiry and the arrival fall on the
+         * same tick; the flight time is not what that would be measuring, so
+         * those keep a range nothing can reach.
          */
         void defineWeapon(GameSimulation& sim, const TadWeaponEpisode& episode)
         {
@@ -81,6 +109,32 @@ namespace rwe
             w.damageRadius = 16_ss;
             w.damage["DEFAULT"] = episode.weaponDamage;
             w.physicsType = ProjectilePhysicsTypeLineOfSight();
+
+            if (episode.selfPropelled)
+            {
+                w.maxRange = SimScalar(static_cast<float>(episode.weaponRange));
+                w.randomDecay = GameTime(0);
+                if (episode.weaponTimerTicks != 0)
+                {
+                    w.weaponTimer = GameTime(episode.weaponTimerTicks);
+                }
+
+                ProjectilePhysicsTypeSelfPropelled p;
+                p.startVelocity = SimScalar(static_cast<float>(episode.startVelocity)) / 30_ss;
+                p.acceleration = SimScalar(static_cast<float>(episode.weaponAcceleration)) / 900_ss;
+                p.maxVelocity = SimScalar(static_cast<float>(episode.weaponVelocity)) / 30_ss;
+                p.turnRate = SimAngle(0);
+                p.guidance = false;
+                p.tracks = false;
+                p.twoPhase = false;
+                p.vLaunch = false;
+                p.flightTime = GameTime(0);
+                p.burnBlow = episode.burnBlow;
+                p.cruise = false;
+                p.autoRange = !episode.noAutoRange && episode.weaponVelocity != 0;
+                w.physicsType = p;
+            }
+
             sim.weaponDefinitions["corpus"] = w;
         }
 
@@ -177,6 +231,23 @@ namespace rwe
             {
                 REQUIRE(episode.weaponVelocity > 0u);
                 REQUIRE(episode.weaponDamage > 0u);
+
+                // What the round leaves the barrel at, asked the way
+                // createProjectileFromWeapon asks it: a startVelocity of zero is
+                // full speed for a weapon with no motor and a standstill for one
+                // with a motor, so the field alone does not answer it. A row
+                // that leaves below its cap has to be one the engine flies with
+                // a motor -- otherwise the miner classified it one way and this
+                // test flies it another.
+                auto launchSpeed = episode.startVelocity != 0u
+                    ? episode.startVelocity
+                    : (episode.weaponAcceleration == 0u ? episode.weaponVelocity : 0u);
+                if (launchSpeed != episode.weaponVelocity)
+                {
+                    REQUIRE(episode.selfPropelled);
+                    REQUIRE(episode.weaponAcceleration > 0u);
+                    REQUIRE(launchSpeed < episode.weaponVelocity);
+                }
                 REQUIRE(episode.damageTick > episode.shotTick);
                 REQUIRE(episode.flightTicks == episode.damageTick - episode.shotTick);
                 REQUIRE(episode.pairingsAtMode <= episode.pairings);
