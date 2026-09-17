@@ -690,6 +690,32 @@ namespace rwe
          */
         SimScalar buildSiteGuardMinDistance{900_ss};
         /**
+         * Enemy anti-ground damage per second that has to be able to reach a
+         * build site before the builder placing something there is offered a
+         * guard, on top of the distance test above.
+         *
+         * Zero switches the test off and restores the distance-only trigger
+         * exactly, which is both the documented kill switch and the control
+         * arm: the guard's own audit measured it COSTING games with distance
+         * alone -- 71.7 units and 27.2 army with it off against 44.6 and 15.1
+         * with it on, repeated in the other slot -- because 69 of 81 guards
+         * ended with the builder simply finished and only 6 with it lost. The
+         * mechanism was kept on the grounds that the idea is right and the
+         * trigger is wrong; this is the trigger the entry asked for.
+         *
+         * Defaults to off, like the size knob it depends on, so nothing moves
+         * until it has been played against its own absence. To measure, set
+         * buildSiteGuardSize to 2 or 3 and run this at 0 and at a DPS floor.
+         */
+        float buildSiteGuardThreat{0.0f};
+        /**
+         * How far around a build site to look for that damage. Wide enough to
+         * catch something already on its way rather than only what is standing
+         * on the spot -- a guard summoned once the raider has arrived is too
+         * late to be worth the two units it costs.
+         */
+        float buildSiteGuardThreatRadius{600.0f};
+        /**
          * How long a guard will stand over a site with nothing to show for
          * it before it gives up and rejoins the reserve -- the builder
          * changed its mind, got stuck, or the order was dropped and never

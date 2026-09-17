@@ -384,7 +384,9 @@ namespace rwe
         // The makers go first: what they are switched to decides how much
         // energy the build pass below has to spend.
         timed("makers", [&] { metalMakers.update(sim, profile, blackboard, outCommands); });
-        timed("build", [&] { build.update(sim, playerId, profile, blackboard, reachability, rng, outCommands); });
+        // threatMap was rebuilt at step 3b, so the build pass reads it fresh in
+        // this same tick rather than a tick stale.
+        timed("build", [&] { build.update(sim, playerId, profile, threatMap, blackboard, reachability, rng, outCommands); });
 
         // 6. Eyes, lift and fists.
         timed("scout", [&] { scout.update(sim, profile, threatMap, reachability, blackboard, outCommands); });

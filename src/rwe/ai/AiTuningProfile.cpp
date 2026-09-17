@@ -194,6 +194,8 @@ namespace rwe
             || setInt("navalFleetSize", p.navalFleetSize)
             || setInt("targetShipyardCount", p.targetShipyardCount)
             || setBool("earlyShipyard", p.earlyShipyard)
+            || setFloat("buildSiteGuardThreat", p.buildSiteGuardThreat)
+            || setFloat("buildSiteGuardThreatRadius", p.buildSiteGuardThreatRadius)
             || setInt("isolatedLandArmyCap", p.isolatedLandArmyCap)
             || setInt("targetScoutShipCount", p.targetScoutShipCount)
             || setInt("targetSeaTransportCount", p.targetSeaTransportCount)

@@ -9,6 +9,7 @@
 #include <rwe/ai/AiSideUnits.h>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/ai/ReachabilityMap.h>
+#include <rwe/ai/ThreatMap.h>
 #include <rwe/game/PlayerCommand.h>
 #include <map>
 #include <rwe/grid/Point.h>
@@ -32,10 +33,19 @@ namespace rwe
     public:
         BuildManager() = default;
 
+        /**
+         * threatMap is here because a builder guard triggered on raw distance
+         * measurably costs games -- 69 of 81 guards ended with the builder
+         * simply finished and only 6 with it lost, so units were taken off the
+         * army to escort jobs nothing was threatening. Danger is what the
+         * trigger should read, and this was the one manager never given an
+         * influence map to read it from.
+         */
         void update(
             const GameSimulation& sim,
             PlayerId aiOwner,
             const AiTuningProfile& profile,
+            const ThreatMap& threatMap,
             AiBlackboard& bb,
             const ReachabilityMap& reachability,
             std::minstd_rand& rng,

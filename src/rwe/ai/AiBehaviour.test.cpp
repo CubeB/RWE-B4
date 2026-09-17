@@ -2125,6 +2125,58 @@ namespace rwe
         REQUIRE((builds.front().unitType == "ARMMOHO" || builds.front().unitType == "ARMARAD"));
     }
 
+    TEST_CASE("a building is not planted across a metal patch, anywhere under it", "[ai]")
+    {
+        // The rule existed; it only ever looked at ONE cell. collectBuildableSites
+        // tested metalGrid.get(rect.x, rect.y) -- the footprint's top-left corner
+        // -- so a building whose corner was clear sat straight down across a
+        // patch. ARMSOLAR is 5x5, which left 24 of its 25 cells unchecked, and a
+        // 145-metal solar parked on a patch denies a 50-metal extractor that spot
+        // for the rest of the game. Observed in play before it was found here.
+        GameSimulation sim(makeFlatTerrain(128, 128), /*surfaceMetal*/ 0u, 0, 0);
+        addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+
+        UnitDefinition solarDef;
+        solarDef.isMobile = false;
+        solarDef.builder = false;
+        // ARMSOLAR's own footprint, because the size is the whole point: the
+        // bigger it is, the more of it the old check could not see.
+        solarDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{5u, 5u, 255u, 255u, 0u, 255u};
+        sim.unitDefinitions["SOLAR"] = solarDef;
+
+        auto anchor = SimVector(0_ss, 0_ss, 0_ss);
+        auto profile = makeDefaultStandardProfile();
+
+        // Where it goes with nothing in the way.
+        BuildManager clean;
+        std::minstd_rand rngA(1u);
+        auto firstSite = clean.chooseBuildSite(sim, profile, "SOLAR", anchor, rngA);
+        REQUIRE(firstSite.has_value());
+        auto firstRect = sim.computeFootprintRegion(*firstSite, solarDef.movementCollisionInfo);
+
+        // A patch in the MIDDLE of that footprint -- deliberately not its
+        // top-left cell, which is the only one the old rule consulted. With the
+        // same seed and the same anchor, the old code returned this very site
+        // again; the corner it checked is still clear.
+        sim.metalGrid.set(firstRect.x + 2, firstRect.y + 2, static_cast<unsigned char>(200));
+
+        BuildManager retry;
+        std::minstd_rand rngB(1u);
+        auto secondSite = retry.chooseBuildSite(sim, profile, "SOLAR", anchor, rngB);
+        REQUIRE(secondSite.has_value());
+        auto secondRect = sim.computeFootprintRegion(*secondSite, solarDef.movementCollisionInfo);
+
+        // Not one cell of the chosen footprint may hold a patch.
+        for (int y = secondRect.y; y < secondRect.y + static_cast<int>(secondRect.height); ++y)
+        {
+            for (int x = secondRect.x; x < secondRect.x + static_cast<int>(secondRect.width); ++x)
+            {
+                INFO("cell " << x << "," << y);
+                REQUIRE(sim.metalGrid.get(x, y) <= sim.surfaceMetal);
+            }
+        }
+    }
+
     TEST_CASE("a building is not planted across a factory's exit", "[ai]")
     {
         // A unit a factory finishes has to walk off the pad before the next

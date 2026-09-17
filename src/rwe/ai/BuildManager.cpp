@@ -315,10 +315,36 @@ namespace rwe
                             continue;
                         }
                         // Don't plant a building on a metal patch; mexes want
-                        // those. Checked before canBeBuiltAt, which walks the
-                        // whole footprint and is much the more expensive test.
-                        if (rect.x < sim.metalGrid.getWidth() && rect.y < sim.metalGrid.getHeight()
-                            && sim.metalGrid.get(rect.x, rect.y) > sim.surfaceMetal)
+                        // those. Still checked before canBeBuiltAt, which is
+                        // much the more expensive test, and still cheap -- a
+                        // footprint is a few dozen cells at worst.
+                        //
+                        // THE WHOLE FOOTPRINT, not just its top-left cell,
+                        // which is all this used to test. ARMSOLAR is 5x5, so
+                        // 24 of its 25 cells went unchecked and it dodged a
+                        // patch only when the patch happened to sit exactly
+                        // under its corner. Observed in play: commanders
+                        // planting solars across metal spots. That costs the
+                        // patch for the rest of the game -- an extractor is 50
+                        // metal, and a 145-metal solar parked on top of one
+                        // denies it permanently -- which is where the "huge
+                        // metal losses" come from. chooseMexSite was never at
+                        // fault: it already takes the richest footprint it can
+                        // reach. The patches were buried before it looked.
+                        auto onMetalPatch = false;
+                        for (int my = rect.y; my < rect.y + static_cast<int>(rect.height) && !onMetalPatch; ++my)
+                        {
+                            for (int mx = rect.x; mx < rect.x + static_cast<int>(rect.width); ++mx)
+                            {
+                                if (mx >= 0 && my >= 0 && mx < sim.metalGrid.getWidth() && my < sim.metalGrid.getHeight()
+                                    && sim.metalGrid.get(mx, my) > sim.surfaceMetal)
+                                {
+                                    onMetalPatch = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (onMetalPatch)
                         {
                             continue;
                         }
@@ -1642,6 +1668,7 @@ namespace rwe
         const GameSimulation& sim,
         PlayerId aiOwner,
         const AiTuningProfile& profile,
+        const ThreatMap& threatMap,
         AiBlackboard& bb,
         const ReachabilityMap& reachability,
         std::minstd_rand& rng,
@@ -2329,11 +2356,31 @@ namespace rwe
                 // a builder reassigned to something at home simply stops
                 // refreshing it and the existing guard (if any) ages out on
                 // its own terms.
-                if (profile.buildSiteGuardSize > 0 && bb.baseAnchor && flatDistance(*site, *bb.baseAnchor) >= profile.buildSiteGuardMinDistance)
+                // Distance says the builder is on its own out there. It does
+                // NOT say anything is coming for it, and that is the whole
+                // fault measured in the guard's own audit: 69 of 81 guards
+                // ended with the builder simply finished and only 6 with it
+                // lost, so two units were taken off an army averaging 7.4 to
+                // escort jobs nothing was threatening, and the side with the
+                // guard on came out worse in both slots.
+                //
+                // So ask the influence map as well: is there enemy anti-ground
+                // damage that can actually reach this site? buildSiteGuardThreat
+                // is a DPS floor and zero switches the test off entirely,
+                // restoring the old distance-only trigger exactly -- the same
+                // kill-switch convention as navalFleetSize and earlyShipyard,
+                // and what makes "a threat-gated guard" playable against both
+                // the old guard and no guard at all.
+                auto siteThreat = threatMap.antiGroundInRadius(*site, profile.buildSiteGuardThreatRadius);
+                auto threatened = profile.buildSiteGuardThreat <= 0.0f || siteThreat >= profile.buildSiteGuardThreat;
+                if (profile.buildSiteGuardSize > 0 && bb.baseAnchor
+                    && flatDistance(*site, *bb.baseAnchor) >= profile.buildSiteGuardMinDistance
+                    && threatened)
                 {
                     bb.buildSiteGuardRequest = AiBlackboard::BuildSiteGuardRequest{*site, builderId, bb.now};
                     LOG_INFO << "AI build: unit " << builderId.value << " building " << next << " "
-                             << static_cast<int>(flatDistance(*site, *bb.baseAnchor).value) << " from base wants a guard";
+                             << static_cast<int>(flatDistance(*site, *bb.baseAnchor).value) << " from base wants a guard"
+                             << " (threat " << siteThreat << ")";
                 }
                 return;
             }
