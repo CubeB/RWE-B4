@@ -150,6 +150,22 @@ namespace rwe
 
         auto width = layer.components.getWidth();
         auto height = layer.components.getHeight();
+        // Deliberately NOT footprintOriginTile, though every query below uses
+        // it. Anchors do not all arrive in the convention queries do: the
+        // ground layer is homed on baseAnchor, which is a unit's CENTRE, but
+        // the naval layer is homed on a shipyard site's TOP-LEFT CORNER --
+        // AiPlayerController builds it with heightmapIndexToWorldCorner for
+        // exactly the reason this whole file cares about, that components are
+        // labelled by footprint top-left.
+        //
+        // Subtracting half a footprint here would therefore shift that corner
+        // a SECOND time: three whole tiles for a 6x6 hull. Tried, 2026-09-17 --
+        // it walked the naval anchor off the channel onto dry land, setAnchor
+        // found nothing there and nothing in its four neighbours, homeComponents
+        // came back empty, and the entire map became unreachable to the navy.
+        // It failed "the whole channel becomes home water for a hull" and took
+        // both sea-ferry tests down with it, navalLandingNear refusing every
+        // crossing once the naval layer had no home to probe towards.
         auto start = sim.terrain.worldToHeightmapCoordinate(from);
         if (start.x < 0 || start.y < 0 || start.x >= width || start.y >= height)
         {
@@ -217,13 +233,27 @@ namespace rwe
         return isWalkable(commander, sim, position);
     }
 
+    Point ReachabilityMap::footprintOriginTile(const Layer& layer, const GameSimulation& sim, const SimVector& position) const
+    {
+        // Before the layer has been labelled there is no footprint to offset
+        // by, and the centre's own tile is the only answer available.
+        if (!layer.labelledFor)
+        {
+            return sim.terrain.worldToHeightmapCoordinate(position);
+        }
+        auto halfFootprintX = SimScalar(layer.labelledFor->footprintX * MapTerrain::HeightTileWidthInWorldUnits.value / 2);
+        auto halfFootprintZ = SimScalar(layer.labelledFor->footprintZ * MapTerrain::HeightTileHeightInWorldUnits.value / 2);
+        return sim.terrain.worldToHeightmapCoordinateNearest(
+            SimVector(position.x - halfFootprintX, position.y, position.z - halfFootprintZ));
+    }
+
     bool ReachabilityMap::isReachable(const Layer& layer, const GameSimulation& sim, const SimVector& position) const
     {
         if (layer.components.getWidth() <= 0)
         {
             return true;
         }
-        auto p = sim.terrain.worldToHeightmapCoordinate(position);
+        auto p = footprintOriginTile(layer, sim, position);
         if (p.x < 0 || p.y < 0 || p.x >= layer.components.getWidth() || p.y >= layer.components.getHeight())
         {
             return false;
@@ -242,7 +272,7 @@ namespace rwe
         {
             return true;
         }
-        auto p = sim.terrain.worldToHeightmapCoordinate(position);
+        auto p = footprintOriginTile(layer, sim, position);
         if (p.x < 0 || p.y < 0 || p.x >= layer.components.getWidth() || p.y >= layer.components.getHeight())
         {
             return false;

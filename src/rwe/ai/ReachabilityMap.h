@@ -140,6 +140,31 @@ namespace rwe
         /** Works out which regions count as home, given where the base is. */
         void setAnchor(Layer& layer, const GameSimulation& sim, const SimVector& from) const;
 
+        /**
+         * The component-grid cell a mover standing CENTRED on this position
+         * occupies -- which is its footprint's top-left tile, not the tile its
+         * centre happens to fall in.
+         *
+         * labelComponents labels cell (x,y) by asking whether the footprint
+         * STARTING at (x,y) is walkable, so the grid is indexed by top-left
+         * tiles. Every query here is handed a unit's position, which is its
+         * CENTRE. Reading the grid at the centre's tile therefore asks about a
+         * footprint offset by half a footprint -- a whole tile each way for
+         * anything 2x2 -- and on a coast that shifted block is very often open
+         * water.
+         *
+         * Measured on Hundred Isles before this existed: every combat unit the
+         * AI owned was refused as a ferry passenger, 168,076 refusals in six
+         * games with not one other gate ever firing, and 63% of the sampled
+         * refusals were standing on ground this map called unwalkable while
+         * they were plainly standing on it.
+         *
+         * The conversion is GameSimulation::computeFootprintRegion's, followed
+         * exactly rather than re-derived -- subtract half the footprint in
+         * world units, then round to NEAREST -- so the two cannot drift.
+         */
+        Point footprintOriginTile(const Layer& layer, const GameSimulation& sim, const SimVector& position) const;
+
         bool isReachable(const Layer& layer, const GameSimulation& sim, const SimVector& position) const;
         bool isWalkable(const Layer& layer, const GameSimulation& sim, const SimVector& position) const;
 

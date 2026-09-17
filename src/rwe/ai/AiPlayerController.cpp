@@ -131,6 +131,20 @@ namespace rwe
                     reachability.rebuild(sim, moverDef->second.movementCollisionInfo, *blackboard.baseAnchor);
                     blackboard.groundReachabilityValid = reachability.isValid();
                     blackboard.hasUnreachableGround = reachability.walkableTileCount() > reachability.reachableTileCount() + 64;
+                    // A reachable count of 0 or 1 means setAnchor found no
+                    // component at the base and none beside it either, so
+                    // homeComponents is empty and EVERY position on the map
+                    // reads unreachable except the anchor tile itself. That is
+                    // indistinguishable from "the enemy is across water" at
+                    // every call site that asks, and it would switch off every
+                    // ferry the AI ever wants without saying so anywhere.
+                    // Logged because the alternative -- a healthy home
+                    // component with the army standing off it -- wants a
+                    // completely different fix, and the two cannot be told
+                    // apart from any figure the AI currently reports.
+                    LOG_INFO << "AI player " << playerId.value << ": ground reachability for " << mover
+                             << " walkable=" << reachability.walkableTileCount()
+                             << " reachable=" << reachability.reachableTileCount();
                 });
 
                 // 3b-ii. And where can the COMMANDER walk? Not the same

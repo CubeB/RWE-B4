@@ -411,6 +411,30 @@ namespace rwe
                     continue;
                 }
                 std::vector<UnitId> passengers;
+                // Why each candidate was turned away, counted so the blocked
+                // message below can name the gate rather than only the tally.
+                // Measured on Hundred Isles, sixteen combat units were refused
+                // against a capacity of twenty, 152 times in ten games, and
+                // which of these gates did it could not be told from the log
+                // at all -- the same silent gap every other blocked path in
+                // this file already avoids by saying what stopped it.
+                int refusedScout = 0;
+                int refusedCarried = 0;
+                int refusedUnreachable = 0;
+                int refusedBooked = 0;
+                int refusedCantBeTransported = 0;
+                int refusedFootprint = 0;
+                int refusedNeedsWater = 0;
+                // Where the first unreachable candidate was standing. The
+                // refusal counts said the gate; they cannot say WHY it fired,
+                // and the three candidate causes want three different fixes:
+                // the army standing off its own island (the rally point is
+                // 220 units seaward, and a ~360 tile island is only about 300
+                // world units across), the query disagreeing with the
+                // labelling for a position that is genuinely on it, or the
+                // unit sitting in the two-tile margin the components grid
+                // drops by being heightmap-minus-footprint in size.
+                std::optional<SimVector> firstUnreachable;
                 for (auto id : bb.combatUnits)
                 {
                     if (passengers.size() >= capacity)
@@ -419,12 +443,30 @@ namespace rwe
                     }
                     if (bb.scoutUnitId && *bb.scoutUnitId == id)
                     {
+                        ++refusedScout;
                         continue;
                     }
                     const auto& unit = sim.getUnitState(id);
                     const auto& def = sim.unitDefinitions.at(unit.unitType);
-                    if (unit.carriedBy || !reachability.isReachable(sim, unit.position) || bb.ferryPassengers.count(id.value) > 0)
+                    // Split out of one compound condition purely so each can be
+                    // counted; the behaviour is unchanged.
+                    if (unit.carriedBy)
                     {
+                        ++refusedCarried;
+                        continue;
+                    }
+                    if (!reachability.isReachable(sim, unit.position))
+                    {
+                        ++refusedUnreachable;
+                        if (!firstUnreachable)
+                        {
+                            firstUnreachable = unit.position;
+                        }
+                        continue;
+                    }
+                    if (bb.ferryPassengers.count(id.value) > 0)
+                    {
+                        ++refusedBooked;
                         continue;
                     }
                     // A unit the simulation will refuse to load must not be
@@ -466,8 +508,75 @@ namespace rwe
                 }
                 if (passengers.empty())
                 {
+                    int factoriesReachable = 0;
+                    for (auto factoryId : bb.factories)
+                    {
+                        if (reachability.isReachable(sim, sim.getUnitState(factoryId).position))
+                        {
+                            ++factoriesReachable;
+                        }
+                    }
                     LOG_DEBUG << "AI transport " << transportId.value << ": army ferry blocked, no eligible passenger out of "
-                              << bb.combatUnits.size() << " combat units (capacity " << capacity << ")";
+                              << bb.combatUnits.size() << " combat units (capacity " << capacity << ")"
+                              << " refused: scout=" << refusedScout
+                              << " carried=" << refusedCarried
+                              << " unreachable=" << refusedUnreachable
+                              << " booked=" << refusedBooked
+                              << " cantBeTransported=" << refusedCantBeTransported
+                              << " footprint=" << refusedFootprint
+                              << " needsWater=" << refusedNeedsWater
+                              << " anchorReachable=" << (bb.baseAnchor ? (reachability.isReachable(sim, *bb.baseAnchor) ? 1 : 0) : -1)
+                              << " anchorAt=" << (bb.baseAnchor ? static_cast<int>(bb.baseAnchor->x.value) : 0)
+                              << "," << (bb.baseAnchor ? static_cast<int>(bb.baseAnchor->z.value) : 0)
+                              << " firstRefusedAt=" << (firstUnreachable ? static_cast<int>(firstUnreachable->x.value) : 0)
+                              << "," << (firstUnreachable ? static_cast<int>(firstUnreachable->z.value) : 0)
+                              // Walkable-but-not-home means the labelling split a
+                              // region the unit demonstrably walked across, which
+                              // points at connectivity (the flood fills 4-way while
+                              // the pathfinder moves octile). Not walkable at all
+                              // means the footprint-origin margin instead. The two
+                              // want different fixes, and the refusal counts cannot
+                              // tell them apart.
+                              << " firstRefusedWalkable=" << (firstUnreachable ? (reachability.isWalkable(sim, *firstUnreachable) ? 1 : 0) : -1)
+                              // How much of our own BASE is on home ground.
+                              //
+                              // Counted across every factory rather than read
+                              // off the first one, because bb.factories is
+                              // "builder, not mobile, not commander" and that
+                              // includes the SHIPYARD -- which floats at
+                              // MinWaterDepth=30 where a land constructor can
+                              // never stand, so a single unreachable factory
+                              // proves nothing at all. The type of the first is
+                              // logged for the same reason.
+                              //
+                              // anchorWalkable is the other half: setAnchor has
+                              // a lenient branch for an anchor tile carrying no
+                              // component, which claims whatever its four
+                              // orthogonal neighbours belong to, and isReachable
+                              // returns true for the anchor tile itself
+                              // regardless. So anchorReachable=1 can be that
+                              // special case firing rather than a healthy home,
+                              // and the claimed component can be a neighbouring
+                              // piece that is not where the base actually is.
+                              << " factories=" << factoriesReachable << "/" << bb.factories.size()
+                              << " firstFactory=" << (bb.factories.empty() ? std::string("-") : sim.getUnitState(bb.factories.front()).unitType)
+                              << " anchorWalkable=" << (bb.baseAnchor ? (reachability.isWalkable(sim, *bb.baseAnchor) ? 1 : 0) : -1)
+                              // The commander wades to depth 100 where the
+                              // constructor the ground layer is labelled for
+                              // stops at 12. If the COMMANDER layer reaches our
+                              // own lab while the ground layer does not, the base
+                              // was built on an island the army can never leave,
+                              // and baseAnchor -- set from homePosition the first
+                              // tick the commander is seen, and never revised --
+                              // is still pointing at the spawn tile.
+                              << " cmdrValid=" << (reachability.isCommanderValid() ? 1 : 0)
+                              << " factoryCmdrReachable=" << (bb.factories.empty() ? -1 : (reachability.isCommanderReachable(sim, sim.getUnitState(bb.factories.front()).position) ? 1 : 0))
+                              // Plain coordinates rather than a distance: anchorAt
+                              // is right there on the same line, and a subtraction
+                              // the reader can do needs no <cmath> here and no
+                              // arithmetic of mine to get wrong.
+                              << " factoryAt=" << (bb.factories.empty() ? 0 : static_cast<int>(sim.getUnitState(bb.factories.front()).position.x.value))
+                              << "," << (bb.factories.empty() ? 0 : static_cast<int>(sim.getUnitState(bb.factories.front()).position.z.value));
                     continue;
                 }
                 Ferry ferry{passengers, *landing, sim.gameTime, false};
