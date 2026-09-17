@@ -4519,7 +4519,16 @@ namespace rwe
                 [&](const UnitCreationStatusFailed&) { return true; },
                 [&](const UnitCreationStatusDone& d) {
                     unit.buildOrderUnitId = d.unitId;
-                    return deployBuildArm(unitInfo, d.unitId);
+
+                    // This is the creation tick, as far as the builder is
+                    // concerned: RWE lays the frame down in spawnNewUnits at
+                    // the end of the tick the request went in, so the first
+                    // tick a builder can lathe it is this one, the tick it
+                    // picks the finished creation up. The original creates and
+                    // lathes in one handler on one tick; the two are a tick
+                    // apart here and the lathes still start on the first tick
+                    // there is a frame to lathe. TOTALA-EXE.md 101.
+                    return deployBuildArm(unitInfo, d.unitId, true);
                 });
         }
 
@@ -4620,7 +4629,59 @@ namespace rwe
         }
         unit.behaviourState = newState;
     }
-    bool UnitBehaviorService::deployBuildArm(UnitInfo unitInfo, UnitId targetUnitId)
+    bool UnitBehaviorService::latheNanoframe(UnitInfo unitInfo, UnitId targetUnitId)
+    {
+        auto targetUnitRef = sim->tryGetUnitState(targetUnitId);
+        if (!targetUnitRef)
+        {
+            return false;
+        }
+        auto& targetUnit = targetUnitRef->get();
+        const auto& targetUnitDefinition = sim->unitDefinitions.at(targetUnit.unitType);
+
+        auto buildingState = std::get_if<UnitBehaviorStateBuilding>(&unitInfo.state->behaviourState);
+        if (buildingState == nullptr || buildingState->targetUnit != targetUnitId)
+        {
+            return false;
+        }
+
+        // As in the factory path above: the builder claims the frame
+        // before the economy is consulted, so a builder waiting on
+        // metal still keeps the frame from decaying.
+        targetUnit.nanoframeWorkedOn = true;
+
+        auto costs = targetUnit.getBuildCostInfo(targetUnitDefinition, unitInfo.definition->workerTimePerTick);
+        auto gotResources = sim->addResourceDelta(
+            unitInfo.id,
+            -Energy(targetUnitDefinition.buildCostEnergy.value * static_cast<float>(unitInfo.definition->workerTimePerTick) / static_cast<float>(targetUnitDefinition.buildTime)),
+            -Metal(targetUnitDefinition.buildCostMetal.value * static_cast<float>(unitInfo.definition->workerTimePerTick) / static_cast<float>(targetUnitDefinition.buildTime)),
+            -costs.energyCost,
+            -costs.metalCost);
+
+        if (!gotResources)
+        {
+            // we don't have resources available to build -- wait
+            buildingState->nanoParticleOrigin = std::nullopt;
+            return false;
+        }
+        buildingState->nanoParticleOrigin = getNanoPoint(unitInfo.id);
+
+        if (targetUnit.addBuildProgress(targetUnitDefinition, unitInfo.definition->workerTimePerTick))
+        {
+            sim->events.push_back(UnitCompleteEvent{targetUnitId});
+
+            if (targetUnitDefinition.activateWhenBuilt)
+            {
+                sim->activateUnit(targetUnitId);
+            }
+
+            changeState(*unitInfo.state, UnitBehaviorStateIdle());
+            return true;
+        }
+        return false;
+    }
+
+    bool UnitBehaviorService::deployBuildArm(UnitInfo unitInfo, UnitId targetUnitId, bool frameJustCreated)
     {
         auto targetUnitRef = sim->tryGetUnitState(targetUnitId);
         if (!targetUnitRef || targetUnitRef->get().isDead() || !targetUnitRef->get().isBeingBuilt(sim->unitDefinitions.at(targetUnitRef->get().unitType)))
@@ -4629,7 +4690,6 @@ namespace rwe
             return true;
         }
         auto& targetUnit = targetUnitRef->get();
-        const auto& targetUnitDefinition = sim->unitDefinitions.at(targetUnit.unitType);
 
         if (!prepareBuilderForWork(unitInfo, targetUnit.position))
         {
@@ -4645,46 +4705,20 @@ namespace rwe
                     return buildExistingUnit(unitInfo, targetUnitId);
                 }
 
-                if (!unitInfo.state->inBuildStance)
+                // A construction aircraft does not wait: the original's two
+                // VTOL build missions never make it. VTOL_MobileBuild calls
+                // the INBUILDSTANCE wait and throws the answer away, and
+                // VTOL_HelpBuild does not call it at all (TOTALA-EXE.md 101).
+                // Only a ground builder and a factory wait, and what they are
+                // waiting for is their own script's deploy sequence, which is
+                // mod data rather than engine behaviour.
+                if (!unitInfo.definition->canFly && !unitInfo.state->inBuildStance)
                 {
                     // We are not in the correct stance to build the unit yet, wait.
                     return false;
                 }
 
-                // As in the factory path above: the builder claims the frame
-                // before the economy is consulted, so a builder waiting on
-                // metal still keeps the frame from decaying.
-                targetUnit.nanoframeWorkedOn = true;
-
-                auto costs = targetUnit.getBuildCostInfo(targetUnitDefinition, unitInfo.definition->workerTimePerTick);
-                auto gotResources = sim->addResourceDelta(
-                    unitInfo.id,
-                    -Energy(targetUnitDefinition.buildCostEnergy.value * static_cast<float>(unitInfo.definition->workerTimePerTick) / static_cast<float>(targetUnitDefinition.buildTime)),
-                    -Metal(targetUnitDefinition.buildCostMetal.value * static_cast<float>(unitInfo.definition->workerTimePerTick) / static_cast<float>(targetUnitDefinition.buildTime)),
-                    -costs.energyCost,
-                    -costs.metalCost);
-
-                if (!gotResources)
-                {
-                    // we don't have resources available to build -- wait
-                    buildingState.nanoParticleOrigin = std::nullopt;
-                    return false;
-                }
-                buildingState.nanoParticleOrigin = getNanoPoint(unitInfo.id);
-
-                if (targetUnit.addBuildProgress(targetUnitDefinition, unitInfo.definition->workerTimePerTick))
-                {
-                    sim->events.push_back(UnitCompleteEvent{buildingState.targetUnit});
-
-                    if (targetUnitDefinition.activateWhenBuilt)
-                    {
-                        sim->activateUnit(buildingState.targetUnit);
-                    }
-
-                    changeState(*unitInfo.state, UnitBehaviorStateIdle());
-                    return true;
-                }
-                return false;
+                return latheNanoframe(unitInfo, targetUnitId);
             },
             [&](const auto&) {
                 // An arm still being stowed by a StopBuilding thread sets
@@ -4703,7 +4737,28 @@ namespace rwe
 
                 changeState(*unitInfo.state, UnitBehaviorStateBuilding{targetUnitId, std::nullopt});
                 unitInfo.state->cobEnvironment->createThread("StartBuilding", {toCobAngle(heading).value, toCobAngle(pitch).value});
-                return false;
+
+                if (!frameJustCreated || !unitInfo.definition->canFly)
+                {
+                    return false;
+                }
+
+                // TOTALA-EXE.md 101: a construction aircraft lathes TWICE on
+                // the tick it creates its nanoframe. Its mission creates the
+                // frame, queues StartBuilding and returns 1, which lets the
+                // service loop run the lathe state in the same tick; that
+                // state calls the stance wait, whose side effect leaves event
+                // bit 4 in the wake mask, and the COB `set` every builder
+                // script has left pending matches it, so the loop runs the
+                // lathe a second time before the tick ends. This is the same
+                // three steps in the same order -- the deploy above, then two
+                // lathes -- and it is the whole of the tick a construction
+                // aircraft finishes ahead of a factory.
+                if (latheNanoframe(unitInfo, targetUnitId))
+                {
+                    return true;
+                }
+                return latheNanoframe(unitInfo, targetUnitId);
             });
     }
 
