@@ -981,11 +981,16 @@ Two things that could have made it later, and do not:
   and the parser at `0x42E619` defaults that key to **0**. A zero sends the
   record down the flying path at `0x49B9AE`; a non-zero one makes it a
   *template* that spawns one copy per `burstrate` and never flies itself. Only
-  four weapons in the Escalation data have a burst, and they are excluded from
-  the oracle anyway. A burst continuation **is** a tick later than the template
-  that made it, because `0x49B810` appends it past the trip count the pass had
-  already latched -- which is the one place this array walk's snapshot is
-  observable.
+  twenty-eight weapon definitions in the Escalation data name the key at all
+  and none of them is a scored cell -- the burst class is excluded from the
+  oracle for a different reason, further up. A burst continuation **is** a tick
+  later than the template that made it, because `0x49B810` appends it past the
+  trip count the pass had already latched -- which is the one place this array
+  walk's snapshot is observable. The consequence worth writing down is that
+  **`burst=1` is not the same as omitting the key**: it makes the record a
+  template all the same, so its single round is spawned by the projectile pass
+  and does not move until the tick after the trigger. One weapon in the data
+  set does that.
 * **No creation-tick guard exists.** The only per-round time test on the way in
   is the burst gate at `0x49B790` (`gameTick < proj+0x42 + burstrate`), and
   `proj+0x42` is the creation tick (`0x49C7AC`), so with `burstrate` at zero it
