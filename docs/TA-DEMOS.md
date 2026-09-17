@@ -750,10 +750,16 @@ the data before any of it is ported:
 ```
 
 It writes every `0x0d`, `0x0b` and `0x0c` as **JSON Lines** -- one object per
-line, about 1.5 million of them and 275 MB, which is why it is not a JSON array
+line, about 1.5 million of them and 320 MB, which is why it is not a JSON array
 -- with shooters, targets, victims and killers already named through the same
 scoped lookup `--weapon-slots` uses, so a consumer never has to redo the
 load-order work and can never do it differently.
+
+**Coordinates are written exactly**, each 16.16 value in its shortest exact
+decimal form. They were three decimals until the footprint model below, which
+floors positions onto sixteen-unit squares: a rounded coordinate on the wrong
+side of a boundary moved whole pairings, and `CORVAMP` read 52% in the script
+against 66% in the port. Regenerate an old dump before scoring it.
 
 #### A `0x0b` is sent by the attacker's owner, which is what makes this tractable
 
@@ -813,22 +819,19 @@ listing: it exits non-zero if a scored cell moves.
 tools/tad-weapontime.py --shots /tmp/shots.jsonl --units ~/ta-mods/x-esc --classes --drift
 ```
 
-**A round that flies at one speed: `flight = ceil(d / v) - 1`,** in **22 of 24**
-cells with 30 or more pairings. The `-1` has no fudge in it: a projectile takes
-its first step on the tick it is fired, so it has covered the distance after
-`ceil(d / v)` steps and the gap between the firing tick and the arrival tick is
-one less. It is the same off-by-one as the build accumulator's first increment
-landing on the `0x09`'s own tick, for the same reason.
+**Both classes stop the same way: on the victim's footprint, not at the aim
+point.** The two models below differ only in how far each step goes. Where the
+round stops is the section after them, "Where a round stops", and it is what
+makes all 37 scored cells land -- 24 constant-speed, 13 with a motor. Before it
+the constant-speed model was `flight = ceil(d / v) - 1`, landing on 22 of 24
+cells, and its `-1` was read as a projectile taking its first step on the tick
+it is fired. That reading is retired; the `-1` was the footprint.
 
-The mode's share runs 40% to 76% -- `LASER_LIGHT` 76%, `LASER_MAK` 69%,
-`PARALYZER` 68%, `LIGHTNING` 67%, `GAUSS_SNIPE` 60% over 4,356 pairings -- and
-the spread either side is quantisation rather than a second effect. Measuring
-how far past the aim point the projectile has travelled when the damage lands,
-`d - (flight + 1) * v`, gives an overshoot that is **always less than one step**
-and that scales with the weapon's speed: about 25 world units for a
-32-unit-a-tick laser and about 1 for a 15-unit-a-tick gauss. A projectile
-arrives partway through its final tick and the tick it arrives on is the only
-thing the stream can report.
+**A round that flies at one speed** covers `weaponvelocity / 30` world units a
+step. The mode's share now runs 43% to 93% -- `CORFAV` 93%, `ARMFAV` 92%,
+`CORFAST` 91%, `PARALYZER` 90%, `GAUSS_SNIPE` 58% over 4,348 pairings -- against
+40% to 76% under the aim-point model, and what is left of the spread is mostly
+drift: a victim that moved is not where its footprint was stamped.
 
 **A round with a motor gets replayed a tick at a time.** A missile leaves the
 barrel at `startvelocity`, gains `weaponacceleration` up to `weaponvelocity`
@@ -836,8 +839,8 @@ while its motor runs, and coasts after it stops. The replay is a **port of RWE's
 own `createProjectileFromWeapon` and `updateSelfPropelledProjectile`**, which are
 in turn a decoded reading of `0x49C980` and `0x49B9AE`, and not a guess at the
 shape from the TDF field names -- which is what it was while the class was only
-being scouted, and the difference is the point. Against the same corpus it lands
-on **11 of 13** cells, at shares of 41% to 61%.
+being scouted, and the difference is the point. Against the same corpus, stopped
+on the footprint, it lands on **13 of 13** cells, at shares of 41% to 76%.
 
 Three things that reading settled, none of them guessable from the field names:
 
@@ -865,6 +868,90 @@ Three things that reading settled, none of them guessable from the field names:
   fixture flies it on the motor path anyway because that is the path the engine
   puts it on.
 
+#### Where a round stops: the victim's footprint
+
+A projectile does not detonate on reaching the point it was aimed at. The
+per-tick update `0x49B720` moves it and then calls `0x49B090`, and that routine
+takes the map square the round is now in (`0x4815A0`, `pos >> 20`, sixteen
+world units) and reads the square's two unit slots:
+
+```
+49b1c7  ax = WORD [sq+0x0]             ; the unit standing in this square
+49b1f4  cmp cl,[esi+0x66]              ; same owner as the round -> ignore
+49b1f9  edx = unit's def ; ebp = unit+0x6E (its y)
+49b202  ecx = [def+0x16E] + y          ; the top of its model
+49b20d  cmp proj.y, ecx ; jge miss     ; below the top -> 0x499EB0, detonate
+49b222  ax = WORD [sq+0x2]             ; the second slot: the same test with a
+49b25b  ...                            ;   floor as well, def+0x162 <= dy <= def+0x16E
+```
+
+then features (`0x49B2B3`, the `hitdensity` finding in `docs/TOTALA-EXE.md`
+§24), then the ground. A unit is in a square's slot when its footprint covers
+it: `FootprintX` by `FootprintZ` squares, the same box `def+0x15E..0x172` holds
+at a half-extent of `footprint * 8` (§27). So the round stops on the **first
+step that puts it in one of the victim's squares** and below its top.
+
+The model scores the footprint half of that and not the height half: flight is
+the first step `k` at which the round, flown along the line from its origin to
+its aim point, stands in the victim's footprint, stamped at the aim point with
+the left edge rounded to the nearest square -- which is RWE's
+`computeFootprintRegion` -- and the shot-to-damage interval is `k` itself.
+`tools/tad-weapontime.py --footprint` prints the evidence, over victims that
+cannot move so nothing but geometry is being scored:
+
+| larger footprint side | constant speed: aim point | at -1 | footprint | accelerating: aim point | at -1 | footprint |
+|---|---|---|---|---|---|---|
+| 2 | 66% | 4% | **98%** (n=160) | 74% | 20% | **79%** (n=171) |
+| 3 | 72% | 18% | **98%** (n=343) | 58% | 38% | **80%** (n=226) |
+| 4 | 80% | 18% | **98%** (n=173) | 31% | 58% | **84%** (n=45) |
+| 5 | 37% | 48% | **99%** (n=99) | 26% | 61% | **90%** (n=31) |
+| 6-8 | 6% | 67% | **94%** (n=33) | 15% | 15% | **59%** (n=27) |
+| all | 65% | 21% | **98%** (n=810) | 56% | 34% | **79%** (n=503) |
+
+The aim-point column falls as the victim grows and its `-1` column climbs to
+meet it, which is the residual the earlier model carried; the footprint column
+does not move. **792 of 810** still constant-speed pairings land on it.
+
+Two measurements back the stamping, neither tuned to the table. The aim point is
+the victim's position: for a victim that cannot move, the footprint edge
+computed from it falls on a square boundary to a tenth of a unit on both axes in
+904 of 1,313 still pairings. And rounding that edge to the nearest square is the
+rule that fits -- over the constant-speed class at drift zero it takes 97.8%,
+against 88.6% for flooring it, 84.1% for ceiling it and 94.6% for flooring the
+centre square and counting half the footprint either side, and the margin
+widens once the victim moves (87.9% against 65.6%, 66.9% and 74.4% under eight
+units of drift). RWE already stamps a unit that way.
+
+**What stays open.**
+
+* **The height half.** A round that passes over a short victim's top keeps
+  going in the original. Nothing here scores it, and the fixture's victims are
+  made too tall to fly over so that it cannot decide a tick. The two fighter
+  cells are where it would show -- `ARMFIG`, `CORVAMP` and `CORVENG` all fire
+  from about 130 units above their aim point -- and `ARMFIG` still reads 41%
+  against `CORVENG`'s 61%, same airframe, same weapon, same height, so the
+  height half alone does not explain it.
+* **47 scored pairings step over the footprint without landing in it** -- a
+  fast round crossing the corner of a small victim between two steps. They are
+  counted against their cell's share rather than dropped.
+* **Which tick the first step lands on.** The interval is `k`, and before this
+  the `-1` in `ceil(d / v) - 1` was taken to say the first step lands on the
+  firing tick. Retiring it reopens that, and a first reading of the binary
+  points the wrong way: the fire routines create the projectile and build the
+  `0x0d` in one go (`0x49D69E` calls `0x49C9C0`, then writes the `0x0d`), they
+  are reached through the weapon's own pointer `[wdef+0x60]` from the per-tick
+  weapon update `0x49E1A0`, that runs inside the unit pass `0x48AD30`, and the
+  sim step calls the unit pass before the projectile pass `0x49B720`
+  (`0x4954ED`, `0x495513`) -- with no creation-tick guard visible on the
+  non-burst path. Taken at face value a round fired on tick T would move on T
+  and its damage would land on `T + k - 1`, where the corpus says `T + k`.
+  Something in that chain is a tick later than it reads -- the fire deferred
+  through a COB thread, the damage record emitted from a queue, or a guard not
+  yet found -- and it is not settled. **It matters for RWE**: the fixture
+  spawns the projectile outside `tick()` and counts `k`, so it pins the stepping
+  and the stop, and it does not pin where RWE's own firing sits relative to the
+  first step in play.
+
 #### The drift bound: when a flight time stops measuring a flight
 
 The missile class needs a filter the constant-speed class does not, and the
@@ -872,20 +959,24 @@ reason is the same fact the pairing rests on: **a `0x0d` records where the shot
 was AIMED**. A victim that moves while the round is in the air is not where the
 distance says it is when it arrives. Bucket every pairing by how far the victim
 could have gone -- its own FBI `maxvelocity` times the observed flight -- and
-both scored classes fall down one monotone curve (`--drift` reprints it):
+both scored classes fall down one curve (`--drift` reprints it):
 
 | drift, world units | constant speed | accelerating |
 |---|---|---|
-| 0 (immobile victim) | 65% (n=848) | 54% (n=567) |
-| 0-8 | 69% (n=2,129) | 58% (n=173) |
-| 8-16 | 62% (n=2,601) | 51% (n=836) |
-| 16-32 | 60% (n=3,709) | 42% (n=4,064) |
-| 32-64 | 43% (n=1,666) | 27% (n=4,121) |
-| 64-128 | 33% (n=203) | 17% (n=667) |
-| 128+ | 22% (n=203) | 9% (n=5,398) |
+| 0 (immobile victim) | 98% (n=810) | 78% (n=515) |
+| 0-8 | 88% (n=2,091) | 71% (n=173) |
+| 8-16 | 77% (n=2,523) | 56% (n=836) |
+| 16-32 | 61% (n=3,415) | 43% (n=4,064) |
+| 32-64 | 39% (n=1,383) | 26% (n=4,121) |
+| 64-128 | 47% (n=194) | 18% (n=667) |
+| 128+ | 21% (n=198) | 9% (n=5,398) |
 
-(share of pairings landing on their class's model.) **The two classes sit on the
-same curve and differ only in where their mass lies:** two thirds of the
+(share of pairings landing on their class's model, the footprint stop; victims
+that cannot be named are left out of both columns. Under the aim-point model the
+top row read 65% and 54% and the curve was much flatter: the footprint is what
+lifted the still end, and drift is what is left below it. The constant-speed
+64-128 row, 194 pairings, is the one place the curve rises.) **The two classes
+sit on the same curve and differ only in where their mass lies:** two thirds of the
 constant-speed pairings drift less than 32 units and two thirds of the
 accelerating ones drift more. That is the whole of the difference between a class
 that can be scored over every victim and one that cannot. A laser crossing 200
@@ -898,14 +989,14 @@ leaves 13 cells. The bound is the projectile's own step rather than a constant
 because the quantity is quantised in steps: a drift under a step cannot move the
 arrival tick by more than one, and a drift of several can move it by several.
 
-**The bound is not tuned.** Half a step would put 10 of 10 surviving cells on the
-model and make both exceptions below disappear, which is exactly why it is not
-the bound -- a filter chosen for the disagreements it removes is not evidence.
-The constant-speed class keeps every victim for the mirror-image reason: it does
-not need the bound, and applying it anyway would cost two thirds of the largest
-oracle here to flip one thin near-tie cell (`ARMJAV`, 133 pairings at 42%) from
-one side of a coin to the other. Both choices are visible in the script, and
-`--drift` prints the measurement either could be argued from.
+**The bound is not tuned.** It was set under the aim-point model, when half a
+step would have put every surviving cell on that model and made its two missile
+exceptions disappear -- which is exactly why it was not the bound, since a filter
+chosen for the disagreements it removes is not evidence -- and the footprint
+model was scored under it unchanged. The constant-speed class keeps every
+victim it can name for the mirror-image reason: it does not need the bound.
+Both choices are visible in the script, and `--drift` prints the measurement
+either could be argued from.
 
 **And 37 of the 37 scored cells carry their firing weapon's own `[DAMAGE]
 default` as their modal damage,** across both classes. Nothing in the filters
@@ -933,28 +1024,37 @@ the class existed are burst weapons -- both flamethrowers, both `EMG`s,
 `EMG_VTOL`, `GAUSS_SPRAY` -- excluded on a criterion that has nothing to do with
 flight time.
 
-**The four that remain are not explained.** Two are constant-speed: `ARMAMPH`
-firing `GAUSS_MAV` reads -1 over 221 pairings and `CORGEO` firing `RIOT_ALL`
-reads -1 over 53, both near-ties with the `+0` bucket (45% against 28% and 45%
-against 40%), and `ARMMAV` fires the same `GAUSS_MAV` and agrees. Two are
-missiles: `ARMFIG` firing `MISSILE_VTOL` reads -1 over 262 at 43%, where
-`CORVENG` is the same airframe at the same speed with the same weapon and lands
-on the model, and `CORVAMP` firing `MISSILE_VTOL_GF` reads -1 over 44, the
-thinnest scored cell there is. All four are named in the script's
-`KNOWN_EXCEPTIONS`, printed on every run, skipped by the emitter with a printed
-reason, and covered by the exit code the way `tad-buildtime.py` covers its
-airborne pool -- the run fails if a new cell disagrees *or* if one of those four
-stops reading what it reads today. An unexplained observation that says so is not
-a licensed divergence.
+**The four exceptions the aim-point model carried all land on the footprint
+model**, and `KNOWN_EXCEPTIONS` is empty. Each read one tick low, and how firmly
+each now lands is worth keeping apart:
 
-**What is still open in the residual.** Even at drift zero the mode takes only
-about half the pairings, and the second bucket is `-1` rather than `+1` -- the
-round arrives slightly before the model says. The shortfall grows with the
-victim's footprint (about +48 world units for a footprint-8 building against
-about -6 for a footprint-2 one), which points at the obvious thing: the round
-detonates on the victim's collision volume and the distance being measured is to
-its centre. Nobody has modelled that, and it is the next thing to try on this
-oracle.
+| cell | aim point | footprint | the runner-up now |
+|---|---|---|---|
+| `ARMAMPH`, `GAUSS_MAV` (221) | -1 at 45% | **+0 at 71%** | -1 at 15% |
+| `CORVAMP`, `MISSILE_VTOL_GF` (44) | -1 at 41% | **+0 at 66%** | -1 at 32% |
+| `CORGEO`, `RIOT_ALL` (53) | -1 at 45% | +0 at 47% | -1 at 38% |
+| `ARMFIG`, `MISSILE_VTOL` (262) | -1 at 43% | +0 at 41% | +1 at 35% |
+
+`ARMAMPH` is explained outright, and so is why it differed from `ARMMAV` firing
+the same weapon: its victims are bigger, a mean footprint side of 3.0 against
+2.3, so a round stopped on the footprint arrives earlier against the aim point.
+`CORVAMP` lands clearly too. `CORGEO` and `ARMFIG` land as near-ties, and
+`ARMFIG` still sits twenty points under `CORVENG` -- that is the open question
+under "Where a round stops", not a closed one. The exit code still covers a new
+disagreement, and a cell named in `KNOWN_EXCEPTIONS` that stops reading what it
+read, exactly as before.
+
+**Mutations, and what they moved.** Each was predicted before it was run, by
+replaying the checked-in episodes under the model with the one change, and each
+moved exactly the predicted episodes and no others:
+
+* stamping a unit's footprint with its edge **truncated** rather than rounded to
+  the nearest square (`computeFootprintRegion`) fails **14 of 37**, the fourteen
+  whose aim point sits where the two rules pick different squares;
+* testing the occupied grid at the round's position **before** its move rather
+  than after fails **all 37**;
+* a motor that **never accelerates** fails **10 of the 13** motor episodes and
+  none of the 24 others.
 
 ### `0x10`, script call -- all 22 bytes
 
@@ -1537,34 +1637,40 @@ Settled by the economy oracle, and inherited by everything after it.
   reproduce is a distance being crossed, so the distance travels with the
   number.
 
-  **Only the 33 cells a model predicts are checked in** -- 22 constant-speed and
-  11 with a motor. The four that do not, `ARMAMPH` firing `GAUSS_MAV`, `CORGEO`
-  firing `RIOT_ALL`, `ARMFIG` firing `MISSILE_VTOL` and `CORVAMP` firing
-  `MISSILE_VTOL_GF`, are skipped with a printed reason rather than checked in
-  with their offset written into `expectedFlightDelta` -- the same rule that
-  keeps airborne builders out of the build fixture. That field is for a
-  divergence somebody decided on, never for an observation nobody has explained.
+  **Only the cells a model predicts are checked in**, and since the footprint
+  model that is all 37 -- 24 constant-speed and 13 with a motor. Under the
+  aim-point model it was 33, and the four it did not predict were skipped with
+  a printed reason rather than checked in with their offset written into
+  `expectedFlightDelta` -- the same rule that keeps airborne builders out of the
+  build fixture. That field is for a divergence somebody decided on, never for an
+  observation nobody has explained, and the rule still stands for the next
+  cell that disagrees.
 
   An episode carries the weapon's own launch speed, acceleration, range and
   motor timer beside its `weaponvelocity`, and a flag for whether the engine
   flies it on the motor path, so the test builds the same physics the loader
-  would. It also names the **victim**, because a self-propelled cell is scored
-  only over victims that could not outrun a step of the round and the row should
-  say which one that was. What it does not carry is `guidance`, `tracks` or
+  would. It also names the **victim** and carries its `FootprintX` and
+  `FootprintZ`, because the round stops on that footprint and because a
+  self-propelled cell is scored only over victims that could not outrun a step
+  of the round, and the row should say which one that was. What it does not carry is `guidance`, `tracks` or
   `turnrate`: every episode is a shot at a point along a heading the round is
   already on, which is what the victim bound selects for, and steering towards a
   point dead ahead is an identity.
 
-  `expectedFlightDelta` is zero in all 33. RWE steps a projectile after the
-  behaviour pass that spawns it, so it takes its first step on the firing tick
-  exactly as the original does, and the prediction that it would agree held on
-  the first run for both classes. What made that worth anything is that it was
-  mutated afterwards: stopping the missile motor accelerating fails 10 of the 11
-  motor episodes and none of the other 22 (the eleventh, `ARMSAM`, happens to
-  cross a distance both speeds reach in the same number of steps), and taking
-  away the projectile's first step of travel fails all 33. The field stays
-  because a fixture that cannot express a divergence is a fixture that gets
-  disabled the week one is decided on.
+  `expectedFlightDelta` is zero in all 37. The test stands a victim at the aim
+  point with the episode's footprint, stamped into the occupied grid by
+  `tryAddUnit`, fires through `spawnProjectile`, and counts ticks until the
+  projectile dies on one of that victim's squares. RWE moves a projectile and
+  then tests the grid, the order `0x49B720` uses, and every episode agreed on
+  the first run. The mutations that make that worth anything are listed under
+  "Pairing a `0x0d` to the `0x0b` it caused": truncating the footprint edge
+  fails exactly the 14 predicted, testing before the move fails all 37, and a
+  motor that never accelerates fails exactly the 10 predicted. What the test
+  does **not** pin is where RWE's own firing sits against the first step in
+  play, because it spawns the round outside `tick()`; that is open, and it is
+  written up under "Where a round stops". The field stays because a fixture
+  that cannot express a divergence is a fixture that gets disabled the week one
+  is decided on.
 
 Regenerating (Escalation; the paths are a local corpus, not a repository one):
 

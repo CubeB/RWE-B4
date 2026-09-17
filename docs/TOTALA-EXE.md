@@ -635,9 +635,10 @@ Note the consequence for an accelerating missile: `ARMKBOT_MISSILE` gets
 **This section is now checked against real games.** Replaying exactly the above
 -- the launch speed picked the way `0x49C980` picks it, the cap and the
 acceleration as converted here, the burn as `0x49C920` times it, and coasting
-after -- reproduces the observed flight time in **11 of 13** (shooter, weapon)
-cells mined from a demo corpus, against **0 of 27** for a model that flies a
-missile at its `weaponvelocity` from the muzzle. Eleven of those are checked in
+after -- reproduces the observed flight time in **13 of 13** (shooter, weapon)
+cells mined from a demo corpus once the round is stopped on the victim's
+footprint (below), against **0 of 27** for a model that flies a missile at its
+`weaponvelocity` from the muzzle to its aim point. All thirteen are checked in
 as conformance episodes in `src/rwe/sim/tad_weapon_episodes.h`. Two details of
 this reading are what the corpus is agreeing with rather than incidental: a
 `startvelocity` of zero meaning full speed with no motor and a standstill with
@@ -646,6 +647,23 @@ covered: one checked-in episode outlives its own motor and coasts the last two
 ticks in, and the rest arrive before theirs stops, so that half is confirmed as
 arithmetic more than as an outcome. See `docs/TA-DEMOS.md`,
 "Pairing a `0x0d` to the `0x0b` it caused".
+
+### Where a round stops, `0x49B090`
+
+Called at `0x49BD88`, after every kind's move. It takes the map square the round
+now stands in (`0x4815A0`) and tests, in order: the square's first unit slot
+(`WORD sq+0x0`) -- a unit not owned by the round's owner, with the round below
+`unit+0x6E + def+0x16E`, the top of its model; the second slot (`WORD sq+0x2`),
+the same with a floor at `def+0x162`; the feature (§24); then the ground. Any hit
+goes to `0x499EB0`. A unit fills the slots of the squares its footprint covers,
+so a round detonates **on the victim's footprint, about half a footprint short
+of the point it was aimed at**, and not at that point. Against the demo corpus
+that stop takes 792 of 810 constant-speed pairings on still victims where the
+aim point took 65%, flat across footprints 2 to 8. RWE's
+`checkProjectileCollision` is already this shape -- move, then the occupied
+grid, then the model-height test -- and `weaponflight.test.cpp` now drives it
+against a victim with the episode's own footprint. What is not settled is on
+which tick a new round first moves: `docs/TA-DEMOS.md`, "Where a round stops".
 
 ### Guidance, `0x49B520`
 
