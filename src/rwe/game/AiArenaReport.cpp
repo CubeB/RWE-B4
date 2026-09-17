@@ -266,6 +266,29 @@ namespace rwe
             + " seconds=" + std::to_string(sim.gameTime.value / ticksPerSecond);
 
         auto playerCount = getSize(sim.players);
+
+        // What each player actually owns, by type. The aggregate counts
+        // above answer "how big", and every interesting question about an
+        // AI change turned out to be "of what": whether the yards produced
+        // hulls, whether an island side ever built an air plant, what the
+        // land-to-naval ratio was. Answering those by grepping the log
+        // afterwards is where the mistakes were -- counts that silently
+        // truncated, loops that ignored which player they were counting --
+        // so they are computed here, once, beside the definitions.
+        //
+        // Sorted, because std::map is: a diff between two runs should be a
+        // diff of behaviour and not of iteration order.
+        std::vector<std::map<std::string, int>> typeCounts(static_cast<std::size_t>(playerCount));
+        for (const auto& [unitId, unit] : sim.units)
+        {
+            auto owner = static_cast<int>(unit.owner.value);
+            if (owner < 0 || owner >= static_cast<int>(typeCounts.size()) || !unit.isAlive())
+            {
+                continue;
+            }
+            ++typeCounts[static_cast<std::size_t>(owner)][unit.unitType];
+        }
+
         for (Index i = 0; i < playerCount; ++i)
         {
             const Row* last = nullptr;
@@ -287,6 +310,21 @@ namespace rwe
                 + " army=" + std::to_string(last->army)
                 + " lost=" + std::to_string(last->unitsLost + last->buildingsLost)
                 + " metalIncome=" + std::to_string(static_cast<int>(last->metalIncome));
+
+            // Appended last, so every field a reader already parses keeps
+            // its position and its meaning. A dash rather than an empty
+            // value when a player owns nothing, so the field is always
+            // present and a parser never has to special-case its absence.
+            std::string types;
+            for (const auto& [unitType, count] : typeCounts[static_cast<std::size_t>(i)])
+            {
+                if (!types.empty())
+                {
+                    types += ';';
+                }
+                types += unitType + "x" + std::to_string(count);
+            }
+            summary += " types=" + (types.empty() ? std::string("-") : types);
         }
         return summary;
     }
