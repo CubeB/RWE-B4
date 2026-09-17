@@ -218,6 +218,17 @@ namespace rwe
      */
     SimVector toMissileDirection(SimAngle heading, SimAngle pitch);
 
+    /**
+     * The map's wind, as a per-tick displacement in world units.
+     *
+     * Ballistic and dropped projectiles have this added to their position
+     * every tick, on top of gravity (TotalA.exe 0x49BD10). `speed` is the raw
+     * OTA figure -- minwindspeed/maxwindspeed, which run into the thousands --
+     * and not a world-unit speed, so the conversion lives in here. Strictly
+     * horizontal: the original never writes the vector's Y word.
+     */
+    SimVector computeWindVector(SimAngle direction, int speed);
+
     struct PathRequest
     {
         UnitId unitId;
@@ -627,6 +638,19 @@ namespace rwe
         std::vector<GameEvent> events;
 
         SimScalar currentWindGenerationFactor{0_ss};
+
+        /**
+         * The wind as a per-tick displacement for ballistic and dropped
+         * projectiles. Rebuilt only when the wind changes; the speed and
+         * direction it came from are not retained anywhere, so this is the
+         * only form of the wind the simulation keeps -- which is why it is
+         * saved and hashed rather than treated as derived state.
+         *
+         * Explicitly zeroed: Vector3x default-constructs its components, so
+         * leaving this bare would put three uninitialised floats into the
+         * simulation and desync the first shot of the game.
+         */
+        SimVector currentWindVector{0_ss, 0_ss, 0_ss};
 
         const int minWindSpeed;
 

@@ -392,6 +392,7 @@ namespace rwe
             simulation.units,
             simulation.projectiles,
             simulation.features,
+            simulation.currentWindVector,
             simulation.featureRegrowthCursor);
     }
 }

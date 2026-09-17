@@ -358,6 +358,7 @@ namespace rwe
             {"players", dumpJson(simulation.players)},
             {"units", dumpJson(simulation.units)},
             {"projectiles", dumpJson(simulation.projectiles)},
+            {"currentWindVector", dumpJson(simulation.currentWindVector)},
             {"featureRegrowthCursor", simulation.featureRegrowthCursor},
         };
     }

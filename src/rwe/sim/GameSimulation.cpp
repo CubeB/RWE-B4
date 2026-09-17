@@ -2725,6 +2725,37 @@ namespace rwe
         return SimVector(sin(heading) * horizontal, sin(pitch), cos(heading) * horizontal);
     }
 
+    SimVector computeWindVector(SimAngle direction, int speed)
+    {
+        // The original builds the map's wind vector once, each time the wind
+        // changes (0x490CA4-0x490D35): X from the routine at 0x4b70ef, Z from
+        // the one at 0x4b7123, each negated and then doubled.
+        //
+        // Which of those is sin and which is cos is worth spelling out,
+        // because docs/TOTALA-EXE.md had it backwards until this was ported.
+        // The two routines are identical but for the table index, which the
+        // second advances by 0x4000 -- a quarter turn. Both read 0x509f00,
+        // whose first entry is 0 and which peaks at 0x2000, so that table is a
+        // SINE table of amplitude 8192: the first routine is sin and the
+        // second cos, not the reverse. Each multiplies by the speed and then
+        // does shrd ..., 0xd -- a >>13 that exactly cancels the 8192 -- so a
+        // routine returns trig(direction) * speed.
+        //
+        // That happens to be RWE's own convention too; see toMissileDirection
+        // directly above, which puts sin in X and cos in Z for the same reason.
+        //
+        // The components the original stores are 16.16 fixed point, like a
+        // position, which is what the 65536 converts out of. At Brain Coral's
+        // maxwindspeed of 3000 the wind carries a shell 0.092 world units a
+        // tick -- around six units over a Crusader shell's flight, against a
+        // damage radius of 24. Enough to matter, not enough to dominate.
+        //
+        // There is no Y term. The word at globals+0x37ED0 is never written
+        // anywhere in the binary, so the wind is strictly horizontal.
+        auto magnitude = SimScalar(-2 * speed) / 65536_ss;
+        return SimVector(sin(direction) * magnitude, 0_ss, cos(direction) * magnitude);
+    }
+
     /**
      * TA hangs a cruise missile on two constants of its own rather than on
      * anything the weapon says: it holds 700 world units up and only gives up
@@ -4169,12 +4200,22 @@ namespace rwe
             match(
                 weaponDefinition.physicsType,
                 [&](const ProjectilePhysicsTypeBallistic&) {
+                    // Wind goes onto the position and gravity onto the
+                    // velocity, which is the shape of 0x49BD10: the wind is a
+                    // displacement the shell never accumulates, so a long
+                    // flight drifts linearly rather than curving away.
+                    projectile.position += currentWindVector;
                     projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
                 },
                 [&](const ProjectilePhysicsTypeBomb&) {
                     // Bombs follow the same gravity model as ballistic
                     // projectiles. Their initial velocity is inherited from
                     // the aircraft at release time; gravity does the rest.
+                    // They take the wind from that same branch of 0x49BD10,
+                    // which is why a bomber's aim is now slightly off downwind
+                    // -- predictBombImpactPoint does not model the wind, and
+                    // neither does the original's own bombsight.
+                    projectile.position += currentWindVector;
                     projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
                 },
                 [&](const ProjectilePhysicsTypeLineOfSight&) {
@@ -4392,6 +4433,11 @@ namespace rwe
             // considers a full gale, and no more than all of it however hard
             // the map says the wind blows (TotalA.exe 0x490D5E).
             currentWindGenerationFactor = rweMin(1_ss, SimScalar(currentWindSpeed) / SimScalar(MaxUtilizableWindSpeed));
+
+            // The same draw also aims the wind that pushes shells about. The
+            // speed and direction above are locals, so this vector is the only
+            // thing that outlives the change.
+            currentWindVector = computeWindVector(currentWindDirection, currentWindSpeed);
 
             UnitBehaviorService(this).updateWind(currentWindGenerationFactor, currentWindDirection);
         }

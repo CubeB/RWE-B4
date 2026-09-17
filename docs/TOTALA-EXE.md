@@ -965,22 +965,50 @@ have to dive to reach its cruise height.
 
 Ballistic and dropped projectiles have the map's wind vector added to their
 position every tick (`0x49BD10`, the three words at `globals+0x37ECC`), on top
-of gravity. Not ported; recorded because it is easy to miss.
+of gravity. **Ported** — `computeWindVector`, and the `currentWindVector` the
+simulation now retains.
 
 The vector is built once at `0x490CA4`–`0x490D35`: the speed is
 `minwindspeed + rand(maxwindspeed − minwindspeed)` straight out of the OTA, the
 direction is `rand(0x10000)`, and the two components stored are
-`−2·cos(dir)·speed` and `−2·sin(dir)·speed` in the same 16.16 units as a
-position. Smoke uses the same two words, scaled by 8 per tick (§4), which is the
-one place the missing wind is actually conspicuous — every puff in the original
-leans downwind together. Porting it needs a map-wide wind vector RWE does not
-have yet, so the smoke rises straight up for now.
+`−2·sin(dir)·speed` in X and `−2·cos(dir)·speed` in Z, in the same 16.16 units
+as a position.
+
+That is the opposite way round from what this section said until 2026-09-17,
+and the table settles it. X comes from the routine at `0x4b70ef` and Z from
+`0x4b7123`; the two are identical but for the index, which the second advances
+by `0x4000` — a quarter turn. Both read the table at `0x509f00`, whose first
+entry is `0` and which climbs to a peak of `0x2000`, so it is a **sine** table
+of amplitude 8192. The first routine is therefore sin and the second cos, not
+the reverse. (Each multiplies by the speed and then does `shrd …, 0xd`, a `>>13`
+that exactly cancels the 8192, so a routine returns `trig(dir)·speed`.) The
+error was invisible in play — against a uniformly random direction the two
+conventions produce the same distribution — which is why it survived the first
+reading, and why the test that pins it asserts fixed cardinal directions rather
+than sampling.
+
+There is no Y term: the word at `globals+0x37ED0` is never written anywhere in
+the binary, so the wind is strictly horizontal.
+
+At Brain Coral's `maxwindspeed` of 3000 this is 0.092 world units a tick, which
+carries a Crusader shell about six units over its flight against a damage radius
+of 24 — a real nudge rather than a dominant force. Note that nothing compensates
+for it: the original's bombsight does not model the wind either, so a bomber's
+aim drifts very slightly downwind, and `predictBombImpactPoint` matches it by
+also ignoring it.
+
+Smoke uses the same two words, scaled by 8 per tick (§4), and that is still not
+ported — every puff in the original leans downwind together. Nothing about it is
+undecoded now; it wants only the particle code wired to the vector the
+simulation already keeps.
 
 ---
 
 ### Decoded but not ported
 
-- **Wind on ballistic projectiles** (`0x49BD10`) is decoded but not ported.
+- **Smoke drifting with the wind** (§4 — the same two words the projectiles
+  use, scaled by 8 a tick) is decoded but not ported. The wind on the
+  projectiles themselves, which used to head this list, is ported now.
 - The `meteor` projectile kind (`0x49BD46`, flag bit 5) adds a per-tick spin to
   the projectile's own heading and pitch from two words at `proj+0x1E` and
   `proj+0x26`, each shifted left by 8. Only `METEORS.TDF` uses it and RWE has no

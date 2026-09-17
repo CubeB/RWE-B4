@@ -2054,6 +2054,7 @@ namespace rwe
 
         j["gameStatus"] = saveWinStatus(sim.gameStatus);
         j["currentWindGenerationFactor"] = saveSimScalar(sim.currentWindGenerationFactor);
+        j["currentWindVector"] = saveSimVector(sim.currentWindVector);
         j["tidalStrength"] = sim.tidalStrength;
         j["killMul"] = sim.killMul;
         j["timeMul"] = sim.timeMul;
@@ -2182,6 +2183,13 @@ namespace rwe
         }
         sim.gameStatus = loadWinStatus(j.at("gameStatus"));
         sim.currentWindGenerationFactor = loadSimScalar(j.at("currentWindGenerationFactor"));
+        if (j.contains("currentWindVector"))
+        {
+            // Absent from saves written before the wind was ported. Leaving
+            // those at zero is harmless -- the next wind change rebuilds it
+            // within fourteen seconds.
+            sim.currentWindVector = loadSimVector(j.at("currentWindVector"));
+        }
         sim.tidalStrength = j.at("tidalStrength").get<int>();
         if (j.contains("killMul"))
         {
