@@ -28,41 +28,58 @@ that shooter to that victim lands in the WINDOW after it. That keeps 35,535 of
 each (shooter, slot) cell's modal `damage` is that weapon's own [DAMAGE]
 default.
 
-TWO MODELS, ONE PER SCORED CLASS.
+WHERE THE ROUND STOPS: ON THE VICTIM'S FOOTPRINT, NOT AT THE AIM POINT.
 
-For a projectile that flies at a constant speed:
+A projectile does not detonate on reaching the point it was aimed at. It
+detonates on the first tick its move puts it in a map square the victim
+occupies (0x49B090, called straight after the move in 0x49B720), and a unit
+occupies its footprint -- FootprintX by FootprintZ squares of sixteen world
+units, stamped at the unit's position with the left edge rounded to the nearest
+square, which is RWE's computeFootprintRegion. So:
 
-    flight = ceil(distance / (weaponvelocity / 30)) - 1
+    flight = the first step k at which the round, flown along the line from
+             where it was fired to where it was aimed, is inside the victim's
+             footprint squares
 
-The -1 is not a fudge. A projectile takes its first step on the tick it is
-fired, so it has covered the distance after ceil(d/v) steps and the gap between
-the firing tick and the arrival tick is one less -- the same off-by-one as the
-build accumulator's first increment landing on the 0x09's own tick. The spread
-either side of the mode is quantisation: the overshoot past the aim point when
-the damage lands is always less than one step.
+and the shot-to-damage interval is k itself. At drift zero that takes 792 of
+810 constant-speed pairings (98%), at every footprint from 2 to 8, where the
+aim-point model it replaced took 65% and fell to nothing on large buildings.
 
-For a self-propelled one -- a missile -- the speed is not a constant and the
-flight has to be replayed a tick at a time: leave the barrel at `startvelocity`,
-gain `weaponacceleration` up to `weaponvelocity` while the motor runs, coast
-after it stops, and take the first step on the firing tick as before. That
-replay is a PORT OF RWE'S OWN createProjectileFromWeapon and
+THE RETIRED -1. The model this replaced was `ceil(d / v) - 1`, and the -1 was
+explained as a projectile taking its first step on the firing tick. It was the
+footprint: a round stops about a footprint's half-width short of the aim point,
+which for the common cases is about one step, so the aim-point model sat a tick
+high on a small target and more on a big one -- which is exactly the residual
+that model carried, a second bucket at -1 growing with the victim's footprint.
+Nothing in the corpus says which tick the first step lands on; the interval is
+k, and where the shot record sits relative to that first step is a separate
+question the corpus cannot answer (docs/TA-DEMOS.md).
+
+HOW FAST THE ROUND FLIES, ONE MODEL PER SCORED CLASS. A constant-speed round
+covers weaponvelocity / 30 a tick. A self-propelled one -- a missile -- is
+replayed a tick at a time: leave the barrel at `startvelocity`, gain
+`weaponacceleration` up to `weaponvelocity` while the motor runs, coast after it
+stops. That replay is a PORT OF RWE'S OWN createProjectileFromWeapon and
 updateSelfPropelledProjectile, which are themselves a decoded reading of
-0x49C980 and 0x49B9AE, rather than a guess from the TDF field names.
+0x49C980 and 0x49B9AE, rather than a guess from the TDF field names. The two
+classes differ only in the speed each step covers; the stopping rule is the
+same.
 
 The missile class also needs a filter the constant-speed one does not, and the
 reason is the same thing that makes the pairing work at all: a 0x0d records
 WHERE THE SHOT WAS AIMED. A victim that moves while the round is in the air is
 not where the distance says it is. Bucketing every pairing by how far the victim
 could have gone -- its FBI `maxvelocity` times the observed flight -- puts both
-classes on one monotone curve (--drift prints it), and the classes differ only
+classes on one falling curve (--drift prints it), and the classes differ only
 in where their mass sits on it: a laser crossing 200 units in six ticks barely
 notices, a missile spending thirty ticks getting there does. So a missile cell
 is scored over the pairings whose victim could not have outrun ONE STEP of the
 projectile, and the constant-speed cells, whose pairings are nearly all at the
-still end of that curve already, keep every victim. The bound is the
-projectile's own step because the quantity is quantised in steps; it is not
-tuned, and the two cells it leaves off the model are named below rather than
-filtered away by tightening it.
+still end of that curve already, keep every victim that can be named -- a
+footprint needs a name, so a victim whose build was never seen is not scored in
+either class. The bound is the projectile's own step because the quantity is
+quantised in steps, and it is not tuned: it was fixed before the footprint model
+existed and the model was scored under it unchanged.
 
 WHICH CELLS ARE SCORED. The two classes above, and not:
 
@@ -86,15 +103,22 @@ WHICH CELLS ARE SCORED. The two classes above, and not:
 Those five are listed by --classes rather than scored. They are not
 discrepancies to explain away; they are four more oracles.
 
-FOUR SCORED CELLS DISAGREE AND ARE NOT EXPLAINED. They are named in
-KNOWN_EXCEPTIONS below with what they read, they are printed on every run, and
-the exit code covers them the way tools/tad-buildtime.py covers its airborne
-pool: the run fails if a NEW cell disagrees or if one of those four stops
-reading what it reads today. All four sit one tick low against a model the other
-33 cells hit and all four are near-ties with the +0 bucket, and two of them are
-firing a weapon that another cell fires and lands on the model with -- ARMAMPH
-against ARMMAV, and ARMFIG against CORVENG, which is the same airframe at the
-same speed. Nothing is laundered by this; what is unexplained says so.
+NO SCORED CELL DISAGREES. Under the aim-point model four did -- ARMAMPH and
+CORGEO among the constant-speed cells, ARMFIG and CORVAMP among the missiles,
+each one tick low -- and all four land on the footprint model. Only one of them
+is explained outright: ARMAMPH goes from 45% at -1 to 69% at +0, and it read low
+where ARMMAV firing the same GAUSS_MAV did not because its victims are bigger
+(a mean footprint side of 3.0 against 2.3). The other three land as near-ties
+still -- CORGEO 47% against 38% at -1, CORVAMP 52% against 45% at -1, ARMFIG 41%
+against 35% at +1 -- and ARMFIG still sits twenty points under CORVENG, the same
+airframe with the same weapon. All three fighters fire from about 130 units up,
+which is where the half of the collision test this model leaves out -- the
+round must also be below the victim's model top -- would bite; but CORVENG fires
+from the same height, so that half alone does not separate ARMFIG from it.
+KNOWN_EXCEPTIONS
+is kept, empty, so that the next disagreement is named rather than tolerated:
+the run fails if a NEW cell disagrees or if a named one stops reading what it
+read.
 
 Exits non-zero if a scored cell's modal flight time stops agreeing with the
 model, so this is a check and not a listing. Neither demos nor mod files are in
@@ -117,17 +141,13 @@ import sys
 # so a fixture can never disagree with the loader about what a field means.
 
 
-# The scored cells that do not land on the model, with what they read instead.
-# Carried by name so a new disagreement is distinguishable from these two, which
-# are an open question rather than a licensed divergence -- see the docstring.
-KNOWN_EXCEPTIONS = {
-    ("ARMAMPH", 0): (-1, "amphibious shooter, GAUSS_MAV; ARMMAV fires the same weapon and agrees"),
-    ("CORGEO", 0): (-1, "a geothermal plant firing RIOT_ALL, 45% at -1 against 40% at +0"),
-    ("ARMFIG", 0): (-1, "a fighter firing MISSILE_VTOL; CORVENG is the same airframe at the"
-                        " same speed with the same weapon and lands on the model"),
-    ("CORVAMP", 0): (-1, "a fighter firing MISSILE_VTOL_GF, the thinnest scored cell at 44"
-                         " pairings and the only one under 150"),
-}
+# The scored cells that do not land on the model, with what they read instead:
+# {(shooter, slot): (mode, why)}. Carried by name so a new disagreement is
+# distinguishable from a known one, which is an open question rather than a
+# licensed divergence -- see the docstring. Empty since the footprint model: the
+# four the aim-point model left here (ARMAMPH, CORGEO, ARMFIG, CORVAMP, each -1)
+# all land on it.
+KNOWN_EXCEPTIONS = {}
 
 
 def _strip_comments(raw):
@@ -275,16 +295,19 @@ def weapon_class(block):
     return "constant speed"
 
 
-# --- the two models ---------------------------------------------------------
+# --- the model: how fast the round flies, and where it stops -----------------
 #
-# A constant-speed round is ceil(d / v) - 1 and there is nothing else to it. A
-# self-propelled one needs a replay, and the replay here is a PORT OF RWE'S OWN
-# createProjectileFromWeapon and updateSelfPropelledProjectile, which are in
-# turn a decoded reading of 0x49C980 and 0x49B9AE. It is not a guess at the
-# shape from the TDF field names, which is what it was when the class was only
-# being scouted: where the two differed the engine's reading won, exactly as
-# tools/tad-buildtime.py takes its completion arithmetic from the binary rather
-# than from what the field is called.
+# Two classes differ only in the speed each step covers. A constant-speed round
+# covers weaponvelocity / 30 every step. A self-propelled one needs a replay, and
+# the replay here is a PORT OF RWE'S OWN createProjectileFromWeapon and
+# updateSelfPropelledProjectile, which are in turn a decoded reading of 0x49C980
+# and 0x49B9AE. It is not a guess at the shape from the TDF field names, which is
+# what it was when the class was only being scouted: where the two differed the
+# engine's reading won, exactly as tools/tad-buildtime.py takes its completion
+# arithmetic from the binary rather than from what the field is called.
+#
+# Both classes stop the same way: on the first step that puts the round in a
+# map square the victim's footprint covers (0x49B090, straight after the move).
 
 
 def launch_speed(block):
@@ -312,12 +335,11 @@ def burn_ticks(block):
     far edge of its range arrives slower than one fired up close.
 
     THE BURN CHANGES PAIRINGS BUT NO CELL'S MODE. A missile fired far enough
-    does run its motor out and coast -- a MISSILE_GF_HEAVY's stops at tick 15,
-    and one of the checked-in episodes arrives on step 17 -- but not often
-    enough to move a mode: adding this term left every cell's mode where it was
-    and moved no share by more than three points. So it is in the model on the
-    strength of being the engine's arithmetic rather than on the strength of
-    what it does to this corpus, which is the right way round.
+    does run its motor out and coast -- a MISSILE_GF_HEAVY's stops at tick 15 --
+    but not often enough to move a mode: adding this term left every cell's
+    mode where it was and moved no share by more than three points. So it is in
+    the model on the strength of being the engine's arithmetic rather than on
+    the strength of what it does to this corpus, which is the right way round.
     """
     velocity = num(block, "weaponvelocity", 0.0) or 0.0
     no_auto_range = (block.get("noautorange") or "0").strip() not in ("0", "")
@@ -326,74 +348,132 @@ def burn_ticks(block):
     return int((num(block, "weapontimer", 0.0) or 0.0) * 30.0)
 
 
-def motor_flight(distance, block, limit=4000):
-    """Flight ticks for a self-propelled projectile, flown as RWE flies one.
+def steps(kind, block):
+    """The distance each successive step covers, forever.
 
-    One tick is: gain `weaponacceleration` up to the cap if the motor is still
-    running, then move. The projectile takes its first step on the tick it is
-    fired -- the same off-by-one the constant-speed model's -1 carries -- so the
-    answer is one less than the number of steps it takes to cover the distance.
+    One tick of a self-propelled round is: gain `weaponacceleration` up to the
+    cap if the motor is still running, then move.
     """
+    if kind != "accelerating":
+        per_tick = num(block, "weaponvelocity") / 30.0
+        while True:
+            yield per_tick
     speed = launch_speed(block)
     cap = (num(block, "weaponvelocity", 0.0) or 0.0) / 30.0
     accel = (num(block, "weaponacceleration", 0.0) or 0.0) / 900.0
     burn = burn_ticks(block)
-    travelled = 0.0
-    ticks = 0
-    while travelled < distance and ticks < limit:
-        ticks += 1
-        if ticks <= burn:
+    tick = 0
+    while True:
+        tick += 1
+        if tick <= burn:
             speed = min(cap, speed + accel)
-        travelled += speed
-    return ticks - 1
+        yield speed
 
 
-def flight_model(kind, distance, block):
-    """What the model for this class predicts, in ticks."""
-    if kind == "accelerating":
-        return motor_flight(distance, block)
-    return math.ceil(distance / (num(block, "weaponvelocity") / 30.0)) - 1
+def footprint_of(units, victim):
+    """The victim's (FootprintX, FootprintZ) in map squares, or None if unnamed.
+
+    Absent keys read as zero, which is what the engine's own FBI parser gives
+    them; a unit with no footprint occupies no square and nothing hits it.
+    """
+    unit = units.get(victim)
+    if not unit:
+        return None
+    try:
+        return (int(float(unit.get("footprintx", 0) or 0)),
+                int(float(unit.get("footprintz", 0) or 0)))
+    except ValueError:
+        return None
+
+
+def footprint_squares(target, footprint):
+    """The (x0, z0) map square the victim's footprint starts at.
+
+    Stamped at the aim point with the left edge rounded to the NEAREST square,
+    which is RWE's computeFootprintRegion. The aim point is taken as the
+    victim's own position: for a victim that cannot move, the footprint's edge
+    computed from it lands on a square boundary, to a tenth of a world unit on
+    both axes, in 904 of the 1,313 still pairings the scored cells hold. Over the
+    constant-speed class at drift zero, rounding the edge puts 98% of pairings on
+    the model, against 89% for flooring it, 84% for ceiling it and 95% for
+    flooring the centre and counting half the footprint either side -- and the
+    gap widens as the victim moves (88% against 66%, 67% and 74% for drift under
+    eight units).
+    """
+    fx, fz = footprint
+    return (math.floor((target[0] - fx * 8.0) / 16.0 + 0.5),
+            math.floor((target[2] - fz * 8.0) / 16.0 + 0.5))
+
+
+def flight_model(kind, origin, target, footprint, block):
+    """The step on which the round first stands in one of the victim's squares.
+
+    That step number IS the flight time: the shot-to-damage interval is the
+    number of moves it took. None if the round passes the footprint without
+    ever being in it -- a small footprint can be stepped over by a fast round --
+    which the scoring counts as a disagreement rather than dropping.
+    """
+    fx, fz = footprint
+    x0, z0 = footprint_squares(target, footprint)
+    distance = math.dist(origin, target)
+    ux, uz = ((target[0] - origin[0]) / distance, (target[2] - origin[2]) / distance) \
+        if distance > 0 else (0.0, 0.0)
+    # Past this the line has left any square the footprint could cover.
+    give_up = distance + 16.0 * (fx + fz + 2)
+    travelled = 0.0
+    for k, step in enumerate(steps(kind, block), 1):
+        travelled += step
+        sx = math.floor((origin[0] + ux * travelled) / 16.0)
+        sz = math.floor((origin[2] + uz * travelled) / 16.0)
+        if x0 <= sx < x0 + fx and z0 <= sz < z0 + fz:
+            return k
+        if travelled > give_up or k >= 4000:
+            return None
+
+
+def aim_point_flight(kind, distance, block):
+    """THE RETIRED MODEL: the step on which the round reaches the aim point, - 1.
+
+    Kept only so --footprint can print what it scored beside what replaced it.
+    Its -1 was read as a first step on the firing tick; it was the footprint.
+    """
+    travelled = 0.0
+    for k, step in enumerate(steps(kind, block), 1):
+        travelled += step
+        if travelled >= distance or k >= 4000:
+            return k - 1
 
 
 def travelled_by(kind, flight, block):
-    """How far the model says the projectile had flown when the damage landed.
-
-    The arrival tick is the flight time plus the step taken on the firing tick.
-    """
-    if kind != "accelerating":
-        return (flight + 1) * (num(block, "weaponvelocity") / 30.0)
-    speed = launch_speed(block)
-    cap = (num(block, "weaponvelocity", 0.0) or 0.0) / 30.0
-    accel = (num(block, "weaponacceleration", 0.0) or 0.0) / 900.0
-    burn = burn_ticks(block)
+    """How far the model says the projectile had flown when the damage landed."""
     travelled = 0.0
-    for tick in range(1, flight + 2):
-        if tick <= burn:
-            speed = min(cap, speed + accel)
-        travelled += speed
+    for k, step in zip(range(flight), steps(kind, block)):
+        travelled += step
     return travelled
 
 
 # --- the drift bound, which is what makes the second class scoreable ---------
 #
-# A 0x0d records WHERE THE SHOT WAS AIMED, and the distance every model here
-# measures is the distance to that point. A victim that moves while the round is
-# in the air is somewhere else when it arrives, so the measurement is wrong by
-# however far it went -- and that error is not a property of the weapon but of
-# the pair. Bucketing every pairing in the corpus by how far the victim COULD
-# have gone (its own FBI `maxvelocity` times the observed flight) sorts both
-# scored classes onto one monotone curve:
+# A 0x0d records WHERE THE SHOT WAS AIMED, and the model stamps the victim's
+# footprint at that point. A victim that moves while the round is in the air is
+# somewhere else when it arrives, so the measurement is wrong by however far it
+# went -- and that error is not a property of the weapon but of the pair.
+# Bucketing every pairing in the corpus by how far the victim COULD have gone
+# (its own FBI `maxvelocity` times the observed flight) sorts both scored classes
+# onto one falling curve:
 #
 #     drift (world units)   constant speed      accelerating
-#     0 (immobile victim)    65% (n=848)         54% (n=567)
-#     0-8                    69% (n=2129)        58% (n=173)
-#     8-16                   62% (n=2601)        51% (n=836)
-#     16-32                  60% (n=3709)        42% (n=4064)
-#     32-64                  43% (n=1666)        27% (n=4121)
-#     64-128                 33% (n=203)         17% (n=667)
-#     128+                   22% (n=203)          9% (n=5398)
+#     0 (immobile victim)    98% (n=810)         78% (n=515)
+#     0-8                    88% (n=2091)        69% (n=173)
+#     8-16                   77% (n=2523)        55% (n=836)
+#     16-32                  61% (n=3415)        43% (n=4064)
+#     32-64                  39% (n=1383)        26% (n=4121)
+#     64-128                 47% (n=194)         17% (n=667)
+#     128+                   21% (n=198)          9% (n=5398)
 #
-# (share of pairings landing on the model's tick; --drift reprints it.)
+# (share of pairings landing on the model's tick; --drift reprints it. Under the
+# retired aim-point model the still row read 65% and 56%: the footprint is what
+# lifted the top of the curve, and drift is what is left below it.)
 #
 # The two classes sit on the SAME curve and differ only in where their mass
 # lies: two thirds of the constant-speed pairings drift less than 32 units,
@@ -408,18 +488,17 @@ def travelled_by(kind, flight, block):
 # steps: a drift of less than a step cannot move the arrival tick by more than
 # one, and a drift of several can move it by several.
 #
-# THE BOUND IS NOT TUNED. Half a step would put 10 of 10 accelerating cells on
-# the model and make both exceptions below disappear, which is exactly why it is
-# not the bound: a filter chosen for the disagreements it removes is not
-# evidence. One step is the statement the mechanism makes, and the two cells it
-# leaves off the model are named rather than filtered away.
+# THE BOUND IS NOT TUNED. It was set at one step under the aim-point model, when
+# half a step would have made that model's two missile exceptions disappear --
+# which is exactly why it was not the bound -- and the footprint model was
+# scored under it unchanged. A filter chosen for the disagreements it removes is
+# not evidence, and one chosen before the model it is applied to cannot be.
 
 
 def drift_of(units, victim, flight):
     """How far the victim could have travelled while the shot was in the air.
 
-    None where the victim could not be named -- 160 pairings over the corpus,
-    where the id's build was not seen. That is not the same as a drift of zero
+    None where the victim could not be named -- the id's build was not seen. That is not the same as a drift of zero
     and must not be scored as though it were, so the bound rejects it.
     """
     unit = units.get(victim)
@@ -432,22 +511,51 @@ def drift_of(units, victim, flight):
 
 
 def within_drift_bound(units, block, observation):
-    flight, _distance, _damage, _demo, _tick, victim = observation
-    drift = drift_of(units, victim, flight)
+    drift = drift_of(units, observation.victim, observation.flight)
     return drift is not None and drift < num(block, "weaponvelocity") / 30.0
 
 
 def scoreable(kind, units, block, observations):
-    """The pairings a class may be scored over: all of them, or the still ones."""
+    """The pairings a class may be scored over.
+
+    Every pairing needs its victim named, because the model stops the round on
+    the victim's footprint. A constant-speed class keeps every such victim; a
+    self-propelled one keeps the ones inside the drift bound.
+    """
+    named = [o for o in observations if footprint_of(units, o.victim) is not None]
     if kind != "accelerating":
-        return observations
-    return [o for o in observations if within_drift_bound(units, block, o)]
+        return named
+    return [o for o in named if within_drift_bound(units, block, o)]
+
+
+def predict(kind, units, block, observation):
+    """What the model says this pairing's flight time is, or None if it misses."""
+    return flight_model(kind, observation.origin, observation.target,
+                        footprint_of(units, observation.victim), block)
+
+
+def delta(kind, units, block, observation):
+    """flight - model, or None where the model has the round miss the footprint."""
+    predicted = predict(kind, units, block, observation)
+    return None if predicted is None else observation.flight - predicted
+
+
+def modal(counter):
+    """The most common non-None key and its count; None never wins a mode."""
+    for key, count in counter.most_common():
+        if key is not None:
+            return key, count
+    return None, 0
 
 # --- the pairing ------------------------------------------------------------
 
 
+Observation = collections.namedtuple(
+    "Observation", "flight distance damage demo tick victim origin target")
+
+
 def pair(path, window, still_only, units):
-    """(shooter type, slot) -> [(flight, distance, damage, demo, tick, victim type)].
+    """(shooter type, slot) -> [Observation].
 
     Everything is keyed on (attacker, victim) because that is the only join the
     stream offers. A shot survives when it is alone in its window and draws
@@ -460,12 +568,11 @@ def pair(path, window, still_only, units):
         kind = record["kind"]
         if kind == "shot":
             if record["target"] and record["shooterName"]:
-                distance = math.dist(
-                    (record["ox"], record["oy"], record["oz"]),
-                    (record["tx"], record["ty"], record["tz"]))
+                origin = (record["ox"], record["oy"], record["oz"])
+                aimed = (record["tx"], record["ty"], record["tz"])
                 shots[record["demo"]][(record["shooter"], record["target"])].append(
-                    (record["tick"], record["shooterName"], record["slot"], distance,
-                     record["targetName"]))
+                    (record["tick"], record["shooterName"], record["slot"],
+                     math.dist(origin, aimed), record["targetName"], origin, aimed))
         elif kind == "damage":
             hits[record["demo"]][(record["attacker"], record["victim"])].append(
                 (record["tick"], record["damage"]))
@@ -481,7 +588,7 @@ def pair(path, window, still_only, units):
             fired.sort()
             landed = sorted(hits[demo].get(key, []))
             ticks = [f[0] for f in fired]
-            for i, (tick, shooter, slot, distance, target) in enumerate(fired):
+            for i, (tick, shooter, slot, distance, target, origin, aimed) in enumerate(fired):
                 if i > 0 and tick - ticks[i - 1] < window:
                     rejections["another shot at the same victim just before"] += 1
                     continue
@@ -498,8 +605,9 @@ def pair(path, window, still_only, units):
                 if len(inside) > 1:
                     rejections["several damage events in the window"] += 1
                     continue
-                cells[(shooter, slot)].append(
-                    (inside[0][0] - tick, distance, inside[0][1], demo, tick, target))
+                cells[(shooter, slot)].append(Observation(
+                    inside[0][0] - tick, distance, inside[0][1], demo, tick, target,
+                    origin, aimed))
     return cells, rejections
 
 
@@ -534,13 +642,12 @@ def report_drift(cells, units, weapons, min_n):
         if kind not in buckets:
             continue
         for observation in observations:
-            flight, distance, _damage, _demo, _tick, victim = observation
-            drift = drift_of(units, victim, flight)
-            if drift is None:
+            drift = drift_of(units, observation.victim, observation.flight)
+            if drift is None or footprint_of(units, observation.victim) is None:
                 continue
             for index, (low, high) in enumerate(edges):
                 if low <= drift < high:
-                    buckets[kind][index][flight - flight_model(kind, distance, block)] += 1
+                    buckets[kind][index][delta(kind, units, block, observation)] += 1
                     break
 
     for index, (low, high) in enumerate(edges):
@@ -556,6 +663,52 @@ def report_drift(cells, units, weapons, min_n):
 
     print("\n  the bound the accelerating class is scored under is one step of the")
     print("  projectile: a victim that could have outrun it is not measuring a flight.")
+
+
+def report_footprint(cells, units, weapons, min_n):
+    """Still victims by footprint: the retired aim-point model against this one.
+
+    The measurement the footprint model rests on. Only victims that cannot move,
+    so nothing but the geometry is being scored, and only cells that would be
+    scored. What to look at: the aim-point column falls as the footprint grows,
+    because a bigger target stops the round further short of where it was
+    aimed, and the footprint column does not.
+    """
+    print("\n--footprint: victims that cannot move, by the larger side of their footprint --")
+    print("the share landing on the retired aim-point model, and on this one.\n")
+    print(f"  {'':<22}{'aim point':>10}{'(at -1)':>9}{'footprint':>11}")
+    table = collections.defaultdict(lambda: [0, 0, 0, 0])
+    for (shooter, slot), observations in cells.items():
+        _name, block = weapon_of(units, weapons, shooter, slot)
+        if not block or not num(block, "weaponvelocity"):
+            continue
+        kind = weapon_class(block)
+        if kind not in SCORED_CLASSES or len(scoreable(kind, units, block, observations)) < min_n:
+            continue
+        for o in observations:
+            footprint = footprint_of(units, o.victim)
+            if footprint is None or drift_of(units, o.victim, o.flight) != 0:
+                continue
+            row = table[(kind, max(footprint))]
+            row[0] += 1
+            aim = o.flight - aim_point_flight(kind, o.distance, block)
+            row[1] += aim == 0
+            row[2] += aim == -1
+            row[3] += delta(kind, units, block, o) == 0
+    for kind in SCORED_CLASSES:
+        print(f"  {kind}")
+        totals = [0, 0, 0, 0]
+        for (k, side), row in sorted(table.items()):
+            if k != kind:
+                continue
+            totals = [a + b for a, b in zip(totals, row)]
+            label = f"footprint {side} (n={row[0]})"
+            print(f"    {label:<20}{100 * row[1] / row[0]:>9.0f}%{100 * row[2] / row[0]:>8.0f}%"
+                  f"{100 * row[3] / row[0]:>10.0f}%")
+        if totals[0]:
+            label = f"all (n={totals[0]})"
+            print(f"    {label:<20}{100 * totals[1] / totals[0]:>9.0f}%"
+                  f"{100 * totals[2] / totals[0]:>8.0f}%{100 * totals[3] / totals[0]:>10.0f}%")
 
 
 def score(cells, units, weapons, min_n):
@@ -577,17 +730,15 @@ def score(cells, units, weapons, min_n):
         if len(subset) < min_n:
             continue
         per_tick = velocity / 30.0
-        errors = collections.Counter(
-            flight - flight_model(kind, distance, block)
-            for flight, distance, _damage, _demo, _tick, _victim in subset)
-        mode, at_mode = errors.most_common(1)[0]
-        damage, damage_at = collections.Counter(
-            d for _f, _dist, d, _demo, _t, _v in subset).most_common(1)[0]
-        # The overshoot past the aim point when the damage lands, which is what
-        # says the spread either side of the mode is quantisation: it is always
-        # less than one step.
-        overshoot = sorted(distance - travelled_by(kind, flight, block)
-                           for flight, distance, _d, _demo, _t, _victim in subset)
+        errors = collections.Counter(delta(kind, units, block, o) for o in subset)
+        mode, at_mode = modal(errors)
+        if mode is None:
+            continue
+        damage, damage_at = collections.Counter(o.damage for o in subset).most_common(1)[0]
+        # How far short of the aim point the round was when the damage landed:
+        # about the footprint's half-width, which is the whole of what the
+        # retired aim-point model's -1 had been absorbing.
+        short = sorted(o.distance - travelled_by(kind, o.flight, block) for o in subset)
         rows.append(dict(
             shooter=shooter, slot=slot, weapon=name or "-",
             kind=kind, velocity=velocity, per_tick=per_tick,
@@ -595,7 +746,7 @@ def score(cells, units, weapons, min_n):
             mode=mode, share=at_mode / len(subset),
             damage=damage, damage_share=damage_at / len(subset),
             declared_damage=num(block["_damage"], "default") if block else None,
-            overshoot=overshoot[len(overshoot) // 2]))
+            misses=errors[None], short=short[len(short) // 2]))
     return rows
 
 
@@ -604,7 +755,7 @@ SCORED_CLASSES = ("constant speed", "accelerating")
 
 def print_table(rows):
     print(f"  {'shooter':<13} {'sl':>2} {'weapon':<22} {'v/30':>6} {'n':>5} {'delta':>6}"
-          f" {'share':>6} {'over':>6} {'damage':>7} {'decl':>6}")
+          f" {'share':>6} {'short':>6} {'damage':>7} {'decl':>6}")
     # (-n, shooter, slot), which is the order the port prints in too: two cells
     # with the same count would otherwise sort by whichever dict filled first and
     # a diff against --weapon-cells would show a phantom difference.
@@ -612,7 +763,7 @@ def print_table(rows):
         flag = "" if r["mode"] == 0 else "   <-- disagrees"
         declared = int(r["declared_damage"]) if r["declared_damage"] else 0
         print(f"  {r['shooter']:<13} {r['slot']:>2} {r['weapon']:<22} {r['per_tick']:>6.1f}"
-              f" {r['n']:>5} {r['mode']:>+6} {100 * r['share']:>5.0f}% {r['overshoot']:>6.1f}"
+              f" {r['n']:>5} {r['mode']:>+6} {100 * r['share']:>5.0f}% {r['short']:>6.1f}"
               f" {r['damage']:>7} {declared:>6}{flag}")
 
 
@@ -628,6 +779,8 @@ def main():
                          " applied to every class at once")
     ap.add_argument("--drift", action="store_true",
                     help="print the evidence behind the accelerating class's victim bound")
+    ap.add_argument("--footprint", action="store_true",
+                    help="print the evidence that a round stops on the victim's footprint")
     ap.add_argument("--classes", action="store_true",
                     help="also list the classes neither model describes")
     args = ap.parse_args()
@@ -654,14 +807,17 @@ def main():
             continue
         print()
         if kind == "constant speed":
-            print(f"the {len(group)} cells whose weapon flies at a constant speed,"
-                  f" ceil(d / v) - 1, over every victim"
-                  + (", victims that cannot move only" if args.still_victim else "") + "\n")
+            dropped = sum(r["dropped"] for r in group)
+            print(f"the {len(group)} cells whose weapon flies at a constant speed, stopped on"
+                  f" the victim's\nfootprint, over every victim that can be named"
+                  + (", victims that cannot move only" if args.still_victim else "")
+                  + f" ({dropped} could not)\n")
         else:
             dropped = sum(r["dropped"] for r in group)
             print(f"the {len(group)} cells whose weapon has a motor, flown as RWE flies"
-                  f" one, over the victims\nthat could not outrun a step of it"
-                  f" ({dropped} pairings dropped by that bound)\n")
+                  f" one and stopped on the\nvictim's footprint, over the victims"
+                  f" that could not outrun a step of it\n({dropped} pairings dropped by"
+                  f" that bound or an unnamed victim)\n")
         print_table(group)
 
     # The damage figure is the independent check on the pairing: no filter looks
@@ -672,12 +828,15 @@ def main():
     print(f"\n{len(agreeing)} of {len(checkable)} scored cells carry their weapon's own"
           f" [DAMAGE] default as the modal damage")
 
-    overshoots = sorted(r["overshoot"] for r in scored)
-    print(f"median overshoot past the aim point: {overshoots[len(overshoots) // 2]:.1f}"
-          f" world units, never a whole step")
+    misses = sum(r["misses"] for r in scored)
+    print(f"{misses} scored pairing(s) the model has stepping over the victim's footprint"
+          f" without landing in it, counted against their cell's share")
 
     if args.drift:
         report_drift(cells, units, weapons, args.min_n)
+
+    if args.footprint:
+        report_footprint(cells, units, weapons, args.min_n)
 
     if args.classes:
         print("\nthe classes neither model describes, listed and never scored:")
@@ -715,7 +874,8 @@ def main():
         if known is None:
             model = (f"a motor replay from {launch_speed(weapons.get(r['weapon'], {})) :.1f}"
                      f" up to {r['per_tick']:.1f} a tick" if r["kind"] == "accelerating"
-                     else f"ceil(d / {r['per_tick']:.1f}) - 1")
+                     else f"{r['per_tick']:.1f} a tick")
+            model += " until it stands on the victim's footprint"
             print(f"MISS {r['shooter']} slot {r['slot']} ({r['weapon']}): model says"
                   f" {model}, corpus is {r['mode']:+} off it"
                   f" over {r['n']} pairings ({100 * r['share']:.0f}% at the mode)")
