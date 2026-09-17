@@ -15,8 +15,10 @@ namespace rwe
 {
     // Every case here comes out of a real game -- the episodes in
     // tad_build_episodes.h, mined from the demo corpus by tad_episodes
-    // --emit-build-cpp. Each is one (factory, product) pair of the corpus,
-    // consumed as the modal duration of every build of that pair.
+    // --emit-build-cpp. Each is one (builder, product) pair of the corpus,
+    // consumed as the modal duration of every build of that pair. The builders
+    // are factories and construction aircraft: the two classes whose duration is
+    // the nanolathe and nothing else.
     //
     // WHAT IS DELIBERATELY NOT TESTED HERE. Not the factory pipeline. RWE's
     // factory path does not credit build progress on the tick the nanoframe
@@ -25,13 +27,19 @@ namespace rwe
     // without building, and nothing is credited until the script sets
     // INBUILDSTANCE. The corpus number has the opposite convention and
     // deliberately so -- TA's first increment lands on the 0x09's own tick, and
-    // a builder's deploy sequence before INBUILDSTANCE is mod data rather than
-    // engine behaviour, which is why tools/tad-buildtime.py scores only immobile
-    // builders. So a pipeline-driven measurement would carry RWE's scheduling
-    // latency plus whatever a test script did, and compare it against a number
-    // chosen to exclude TA's. These cases drive the accumulator directly instead.
-    // A pipeline test is a worthwhile separate thing, under a separate name and
-    // with no corpus number in it.
+    // a factory's or ground builder's deploy before INBUILDSTANCE is mod data
+    // rather than engine behaviour, which is why tools/tad-buildtime.py never
+    // scores a ground mobile builder. So a pipeline-driven measurement would
+    // carry RWE's scheduling latency plus whatever a test script did, and
+    // compare it against a number chosen to exclude TA's. These cases drive the
+    // accumulator directly instead.
+    //
+    // The pipeline half lives in aircraftbuild.test.cpp, under [aircraftbuild]
+    // and with no corpus number in its name: it is where the engine is shown to
+    // hand the accumulator the increments these cases assume -- two on the
+    // creation tick for an aircraft and one for a factory -- through the real
+    // simulation. Nothing here can see that, so a change to it moves those cases
+    // and not these.
 
     namespace
     {

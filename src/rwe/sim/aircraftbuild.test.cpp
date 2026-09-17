@@ -279,7 +279,9 @@ namespace rwe
         REQUIRE(work.progress == 4u);
 
         // And one a tick from there on.
-        auto frameId = *findNanoframe(sim, "CORDRAG");
+        auto frameRef = findNanoframe(sim, "CORDRAG");
+        REQUIRE(frameRef.has_value());
+        auto frameId = *frameRef;
         sim.tick();
         REQUIRE(sim.getUnitState(frameId).buildTimeCompleted == 6u);
         sim.tick();
@@ -311,16 +313,35 @@ namespace rwe
         REQUIRE(work.tick > 0);
         REQUIRE(work.progress == 4u);
 
-        auto frameId = *findNanoframe(sim, "CORRAD");
+        auto frameRef = findNanoframe(sim, "CORRAD");
+        REQUIRE(frameRef.has_value());
+        auto frameId = *frameRef;
         const auto& productDefinition = sim.unitDefinitions.at("CORRAD");
 
+        // A frame nobody is lathing falls apart and is deleted, so the walk
+        // has to ask whether it is still there -- otherwise a change that
+        // stopped the aircraft building would end this test in a crash inside
+        // the simulation rather than in a failed expectation here.
+        auto frameDecayed = false;
         int ticksLathing = 0;
-        while (sim.getUnitState(frameId).isBeingBuilt(productDefinition) && ticksLathing < 2000)
+        while (ticksLathing < 2000)
         {
+            auto frame = sim.tryGetUnitState(frameId);
+            if (!frame)
+            {
+                frameDecayed = true;
+                break;
+            }
+            if (!frame->get().isBeingBuilt(productDefinition))
+            {
+                break;
+            }
             sim.tick();
             ++ticksLathing;
         }
 
+        INFO("the nanoframe decayed away, which means nothing was lathing it");
+        REQUIRE_FALSE(frameDecayed);
         REQUIRE_FALSE(sim.getUnitState(frameId).isBeingBuilt(productDefinition));
         REQUIRE(sim.getUnitState(frameId).buildTimeCompleted == 1137u);
         REQUIRE(ticksLathing == 567);
@@ -357,7 +378,9 @@ namespace rwe
         // One increment, at CORLAB's rate of WorkerTime 120 / 30 = 4.
         REQUIRE(work.progress == 4u);
 
-        auto frameId = *findNanoframe(sim, "CORDRAG");
+        auto frameRef = findNanoframe(sim, "CORDRAG");
+        REQUIRE(frameRef.has_value());
+        auto frameId = *frameRef;
         sim.tick();
         REQUIRE(sim.getUnitState(frameId).buildTimeCompleted == 8u);
     }
