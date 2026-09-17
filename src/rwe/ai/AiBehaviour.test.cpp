@@ -203,6 +203,34 @@ namespace rwe
             return MapTerrain(std::move(heights), 60_ss);
         }
 
+        /**
+         * Two dry shores with open water between them: heightmap x in
+         * [0, 10) to the west, [54, 64) to the east, everything between 60
+         * deep. World space is centred, so the west shore is world x
+         * -512..-352 and the east island 352..512 -- the water between them
+         * straddles zero, which is the whole point of the fixture.
+         *
+         * makeWaterMapTerrain will not do for this: it has a single dry
+         * strip, so both sides stand on the same ground and nothing is ever
+         * across water from anything.
+         */
+        MapTerrain makeTwoShoresTerrain()
+        {
+            Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
+            for (int y = 0; y < 64; ++y)
+            {
+                for (int x = 0; x < 10; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(90));
+                }
+                for (int x = 54; x < 64; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(90));
+                }
+            }
+            return MapTerrain(std::move(heights), 60_ss);
+        }
+
         template <typename Order>
         std::vector<Order> ordersFor(const std::vector<PlayerCommand>& commands, UnitId unit)
         {
@@ -2520,5 +2548,173 @@ namespace rwe
             // switch.
             REQUIRE_FALSE(controller.getBlackboard().navalScoutUnitId);
         }
+    }
+
+    TEST_CASE("a sea transport finds the landing on the far shore", "[ai]")
+    {
+        // The army ferry is the only caller of the landing search, and on
+        // this map the walk-back from the target runs west, through negative
+        // world x. That is ordinary map space -- the world is centred, so it
+        // spans -512..512 here -- but the search used to test its candidates
+        // against 0..width and read the whole western half as off the map.
+        // The walk-back gave up at its first step, and the fallback's water
+        // probes were skipped for the same reason, so the ferry was refused
+        // outright: "army ferry blocked, no landing near ... (sea)".
+        auto script = makeEmptyCobScript();
+        auto terrain = makeTwoShoresTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        // Nothing that walks may cross 60-deep water. makeDef leaves
+        // maxWaterDepth at 255, which would wade the whole ocean and leave
+        // the enemy shore perfectly reachable -- no ferry would ever be
+        // wanted and this test would pin nothing.
+        for (auto* type : {"ARMCOM", "ARMCK", "ARMPW"})
+        {
+            sim.unitDefinitions.at(type).movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 20u};
+        }
+        // The side's sea transport at its shipped shape -- 6x6,
+        // MinWaterDepth=12, twenty slots, transport size 3 (AiSideUnits.h).
+        // Defined here rather than in defineWorld deliberately: resolving
+        // seaTransport promotes it ahead of the destroyer as the mover the
+        // naval layer is flooded for, which would quietly relabel the map
+        // under the two naval cases above.
+        auto tship = makeDef(false, false, true, "", 200u);
+        tship.movementCollisionInfo = UnitDefinition::AdHocMovementClass{6u, 6u, 255u, 255u, 12u, 255u};
+        tship.transportCapacity = 20;
+        tship.transportSize = 3;
+        tship.buildCostMetal = Metal(919.0f);
+        sim.unitDefinitions["ARMTSHIP"] = tship;
+
+        addUnit(sim, "ARMCOM", ai, SimVector(400_ss, 90_ss, 0_ss), script);
+        // Both hulls sit where their whole FOOTPRINT is afloat. Components
+        // are labelled by a footprint top-left tile, so an 8x8 shipyard at
+        // tile 50 spans 50-57 and runs onto the island at 54; anchoring the
+        // naval layer there homed it on a single tile and left every real
+        // water tile unreachable. Water is tiles 10-53, so the shipyard
+        // starts at 44 (world 192) and the transport at 46 (world 224).
+        addUnit(sim, "ARMSY", ai, SimVector(192_ss, 0_ss, 0_ss), script);
+        auto transportId = addUnit(sim, "ARMTSHIP", ai, SimVector(224_ss, 0_ss, 0_ss), script);
+        for (auto z : {0_ss, 24_ss, 48_ss, 72_ss})
+        {
+            addUnit(sim, "ARMPW", ai, SimVector(400_ss, 90_ss, z), script);
+        }
+        auto enemyId = addUnit(sim, "ARMPW", human, SimVector(-400_ss, 90_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+        profile.attackArmySize = 2;
+        // Keep the phase in Attack for the length of the test: with waves on
+        // it flips back to Boom the moment the wave is spent, and the ferry
+        // is only considered in Attack.
+        profile.attackInWaves = false;
+        // Never fall back to Boom. EconomyManager drops ferry passengers
+        // from combatUnits, so the moment the army is aboard armySize is 0
+        // and the phase would leave Attack -- taking the ferry branch with
+        // it -- before the assertions below ever run. The drop is correct
+        // behaviour; it just must not happen inside the measurement window.
+        profile.retreatArmySize = 0;
+        // The enemy is far across the water, and defendRadius is the only gate
+        // on enemiesNearBase (PerceptionManager) -- which puts the AI in
+        // Defend ahead of the whole phase switch, where the ferry is
+        // never considered at all.
+        profile.defendRadius = 200_ss;
+
+        AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 40, commands);
+
+        const auto& bb = controller.getBlackboard();
+        // Guards first, so a refusal for some unrelated reason cannot pass
+        // itself off as the behaviour under test. navalLandingNear returns
+        // nothing immediately when the naval layer was never built, and the
+        // ferry is not considered at all outside the Attack phase.
+        REQUIRE(controller.getReachabilityMap().isNavalValid());
+        REQUIRE(bb.knownEnemies.count(enemyId.value) == 1);
+        REQUIRE(bb.phase == GamePhase::Attack);
+        REQUIRE(bb.enemyAcrossWater);
+        REQUIRE(std::find(bb.transports.begin(), bb.transports.end(), transportId) != bb.transports.end());
+
+        auto unloads = ordersFor<UnloadOrder>(commands, transportId);
+        REQUIRE(!unloads.empty());
+        // Set down on the enemy's own shore, west of the water's edge.
+        REQUIRE(unloads.front().destination.x < -352_ss);
+        REQUIRE(!ordersFor<LoadOrder>(commands, transportId).empty());
+        REQUIRE(controller.getTransportManager().getFerries().count(transportId.value) == 1);
+    }
+
+    TEST_CASE("an air ferry sets the army down short of the target", "[ai]")
+    {
+        // The other half of the same fault, on the other side of the
+        // canFly branch. Here the walk-back has somewhere to stop -- the
+        // near bank of the channel -- and the point of walking back at all
+        // is to land the army short of the enemy rather than on top of it.
+        // Reading negative world x as off the map broke the walk at its
+        // first step and left the unguarded fallback to set the army down
+        // on the target itself.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeChannelTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        // The channel is 30 deep; a kbot stopping at 20 cannot wade it.
+        for (auto* type : {"ARMCOM", "ARMCK", "ARMPW"})
+        {
+            sim.unitDefinitions.at(type).movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 20u};
+        }
+
+        // Base on the east bank, enemy on the west bank, channel between at
+        // world x -64..64.
+        addUnit(sim, "ARMCOM", ai, SimVector(300_ss, 60_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(280_ss, 60_ss, 40_ss), script);
+        auto atlasId = addUnit(sim, "ARMATLAS", ai, SimVector(260_ss, 120_ss, 0_ss), script);
+        for (auto z : {0_ss, 24_ss, 48_ss, 72_ss})
+        {
+            addUnit(sim, "ARMPW", ai, SimVector(300_ss, 60_ss, z), script);
+        }
+        auto enemyId = addUnit(sim, "ARMPW", human, SimVector(-300_ss, 60_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+        profile.attackArmySize = 2;
+        profile.attackInWaves = false;
+        // Never fall back to Boom. EconomyManager drops ferry passengers
+        // from combatUnits, so the moment the army is aboard armySize is 0
+        // and the phase would leave Attack -- taking the ferry branch with
+        // it -- before the assertions below ever run. The drop is correct
+        // behaviour; it just must not happen inside the measurement window.
+        profile.retreatArmySize = 0;
+        // The enemy is far across the water, and defendRadius is the only gate
+        // on enemiesNearBase (PerceptionManager) -- which puts the AI in
+        // Defend ahead of the whole phase switch, where the ferry is
+        // never considered at all.
+        profile.defendRadius = 200_ss;
+
+        AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 40, commands);
+
+        const auto& bb = controller.getBlackboard();
+        REQUIRE(bb.knownEnemies.count(enemyId.value) == 1);
+        REQUIRE(bb.phase == GamePhase::Attack);
+        REQUIRE(bb.enemyAcrossWater);
+        REQUIRE(std::find(bb.transports.begin(), bb.transports.end(), atlasId) != bb.transports.end());
+
+        auto unloads = ordersFor<UnloadOrder>(commands, atlasId);
+        REQUIRE(!unloads.empty());
+        // Short of the enemy, on the west bank but well back from the
+        // target at -300: the first step of the walk-back lands near -108.
+        REQUIRE(unloads.front().destination.x > -200_ss);
+        REQUIRE(unloads.front().destination.x < -64_ss);
     }
 }

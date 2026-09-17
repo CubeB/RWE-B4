@@ -183,17 +183,32 @@ namespace rwe
         for (int step = 4; step <= 12; ++step)
         {
             auto candidate = target + (direction * SimScalar(static_cast<float>(step) * 48.0f));
-            if (candidate.x < 0_ss || candidate.z < 0_ss || candidate.x >= sim.terrain.getWidthInWorldUnits() || candidate.z >= sim.terrain.getHeightInWorldUnits())
+            // tryGetHeightAt is the terrain's own answer to "is this point on
+            // the map", and it is asked here rather than compared against the
+            // width because world space is CENTRED: x runs from -width/2 to
+            // +width/2. Testing against 0..width, as this did, is a window
+            // shifted by half a map -- and since the walk-back is a ray
+            // leaving a rectangle, the break below meant a target anywhere in
+            // the negative half gave up at its very first step.
+            auto height = sim.terrain.tryGetHeightAt(candidate.x, candidate.z);
+            if (!height)
             {
                 break;
             }
-            candidate.y = sim.terrain.getHeightAt(candidate.x, candidate.z);
+            candidate.y = *height;
             if (candidate.y >= sim.terrain.getSeaLevel() && reachability.isWalkable(sim, candidate))
             {
                 return candidate;
             }
         }
-        SimVector fallback(target.x, sim.terrain.getHeightAt(target.x, target.z), target.z);
+        // getHeightAt would answer 0 for a point off the map, which on a map
+        // at sea level 0 passes the test below and lands the cargo nowhere.
+        auto fallbackHeight = sim.terrain.tryGetHeightAt(target.x, target.z);
+        if (!fallbackHeight)
+        {
+            return std::nullopt;
+        }
+        SimVector fallback(target.x, *fallbackHeight, target.z);
         if (fallback.y >= sim.terrain.getSeaLevel() && reachability.isWalkable(sim, fallback))
         {
             return fallback;
@@ -234,11 +249,12 @@ namespace rwe
             for (float stepsTowardsHome : {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f})
             {
                 auto probe = dry + (direction * SimScalar(stepsTowardsHome * 48.0f));
-                if (probe.x < 0_ss || probe.z < 0_ss || probe.x >= sim.terrain.getWidthInWorldUnits() || probe.z >= sim.terrain.getHeightInWorldUnits())
+                auto probeHeight = sim.terrain.tryGetHeightAt(probe.x, probe.z);
+                if (!probeHeight)
                 {
                     continue;
                 }
-                probe.y = sim.terrain.getHeightAt(probe.x, probe.z);
+                probe.y = *probeHeight;
                 if (probe.y < sim.terrain.getSeaLevel() && reachability.isNavalReachable(sim, probe))
                 {
                     return true;
@@ -250,17 +266,24 @@ namespace rwe
         for (int step = 4; step <= 12; ++step)
         {
             auto candidate = target + (direction * SimScalar(static_cast<float>(step) * 48.0f));
-            if (candidate.x < 0_ss || candidate.z < 0_ss || candidate.x >= sim.terrain.getWidthInWorldUnits() || candidate.z >= sim.terrain.getHeightInWorldUnits())
+            // Same bounds reasoning as landingNear above.
+            auto height = sim.terrain.tryGetHeightAt(candidate.x, candidate.z);
+            if (!height)
             {
                 break;
             }
-            candidate.y = sim.terrain.getHeightAt(candidate.x, candidate.z);
+            candidate.y = *height;
             if (candidate.y >= sim.terrain.getSeaLevel() && reachability.isWalkable(sim, candidate) && hasReachableWaterNearby(candidate))
             {
                 return candidate;
             }
         }
-        SimVector fallback(target.x, sim.terrain.getHeightAt(target.x, target.z), target.z);
+        auto fallbackHeight = sim.terrain.tryGetHeightAt(target.x, target.z);
+        if (!fallbackHeight)
+        {
+            return std::nullopt;
+        }
+        SimVector fallback(target.x, *fallbackHeight, target.z);
         if (fallback.y >= sim.terrain.getSeaLevel() && reachability.isWalkable(sim, fallback) && hasReachableWaterNearby(fallback))
         {
             return fallback;
