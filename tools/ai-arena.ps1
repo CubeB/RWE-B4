@@ -19,12 +19,25 @@
 # mirror match cannot show whether a change helped, because both sides get
 # it, so play the change against its absence in the same game -- and give
 # both sides the same faction, or the faction difference is measured too.
+#
+# Seats are DEALT by default (-startLocation random), and that is not a
+# cosmetic choice. The engine defaults to fixed start positions, meaning
+# player 0 always takes the map's StartPos 0 and player 1 StartPos 1, on
+# every seed -- so before this was passed, every table this script printed
+# compared one seat against another seat rather than one behaviour against
+# another. On Hundred Isles those two seats differ by more than any AI knob
+# measured so far (player 0 averaged 16.9 buildings and 12.5 metal a second
+# and died once in ten games; player 1 averaged 4.6 and 6.6 and died seven
+# times in ten -- with no tune on either side), and it produced a false
+# positive that only a control run caught. Pass -startLocation fixed to get
+# the old behaviour back, and if you do, run the control.
 
 param(
     [int]$games = 10,
     [int]$seconds = 1800,   # a cap, not the length: a game ends when somebody wins
     [string]$map = "Coast To Coast",
     [string]$difficulty = "standard",
+    [string]$startLocation = "random",
     [string]$sideA = "ARM",
     [string]$sideB = "CORE",
     [string]$tuneA = "",
@@ -54,7 +67,8 @@ for ($seed = 1; $seed -le $games; $seed++) {
         '--map', ('"' + $map + '"'),
         '--player', ('"A;Computer;' + $sideA + ';0"'),
         '--player', ('"B;Computer;' + $sideB + ';1"'),
-        '--ai-difficulty', $difficulty
+        '--ai-difficulty', $difficulty,
+        '--start-location', $startLocation
     )
     foreach ($t in ($tuneA -split ',' | Where-Object { $_ })) { $gameArgs += @('--ai-tune', ('0:' + $t)) }
     foreach ($t in ($tuneB -split ',' | Where-Object { $_ })) { $gameArgs += @('--ai-tune', ('1:' + $t)) }
@@ -95,7 +109,7 @@ $sw.Stop()
 if ($results.Count -eq 0) { Write-Error "no games produced a result"; exit 1 }
 
 Write-Host ""
-Write-Host ("=== {0} games, {1}s each, {2}, {3} -- {4:n0}s wall ===" -f $results.Count, $seconds, $map, $difficulty, $sw.Elapsed.TotalSeconds)
+Write-Host ("=== {0} games, {1}s each, {2}, {3}, seats {4} -- {5:n0}s wall ===" -f $results.Count, $seconds, $map, $difficulty, $startLocation, $sw.Elapsed.TotalSeconds)
 
 # "Alive at the cap" is not a win on its own: at ten minutes both sides
 # usually still stand. What separates them is what they built and kept, so

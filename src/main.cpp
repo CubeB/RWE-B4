@@ -262,6 +262,27 @@ int main(int argc, char* argv[])
                 {
                     gameParameters->aiDifficulty = rwe::AiDifficulty::Standard;
                 }
+                // Fixed -- player n takes the map's StartPos n -- is the
+                // right default for a lobby, where people pick their seat,
+                // and the wrong one for a batch of computer-versus-computer
+                // games: it hands both sides the same two positions on every
+                // seed, so a change given to one side is measured on top of
+                // the gap between those seats rather than on its own. On
+                // Hundred Isles that gap is larger than any AI knob measured
+                // so far, and it manufactured a false positive before anyone
+                // noticed -- see docs/ROADMAP.md. "random" deals them
+                // instead, through the same StartLocationMode::Random the
+                // skirmish menu uses. The default stays "fixed", so every
+                // existing invocation behaves exactly as it did.
+                auto startLocation = args.getString("start-location", "fixed");
+                for (auto& c : startLocation)
+                {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                if (startLocation == "random")
+                {
+                    gameParameters->startLocation = rwe::StartLocationMode::Random;
+                }
                 for (const auto& tuning : args.getMulti("ai-tune"))
                 {
                     gameParameters->aiTuning.push_back(tuning);
