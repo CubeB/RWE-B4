@@ -279,7 +279,8 @@ namespace rwe
             const UnitDefinition& def,
             const SimVector& anchor,
             bool nearestRingOnly,
-            SimScalar radius)
+            SimScalar radius,
+            const std::function<bool(const SimVector&)>& accept = {})
         {
             const auto mc = sim.getAdHocMovementClass(def.movementCollisionInfo);
             auto footprint = sim.getFootprintXZ(def.movementCollisionInfo);
@@ -311,6 +312,16 @@ namespace rwe
 
                         auto rect = sim.computeFootprintRegion(candidate, def.movementCollisionInfo);
                         if (rect.x < 0 || rect.y < 0)
+                        {
+                            continue;
+                        }
+                        // Asked here, inside the ring walk, rather than of
+                        // the finished list: nearestRingOnly breaks at the
+                        // first ring with anything on it, so a caller that
+                        // filtered afterwards would be handed a ring that
+                        // emptied and would give up, where this walks on to
+                        // the next ring instead.
+                        if (accept && !accept(candidate))
                         {
                             continue;
                         }
@@ -472,7 +483,8 @@ namespace rwe
         const AiTuningProfile& profile,
         const std::string& unitType,
         const SimVector& anchor,
-        std::minstd_rand& rng) const
+        std::minstd_rand& rng,
+        const std::function<bool(const SimVector&)>& accept) const
     {
         const auto defIt = sim.unitDefinitions.find(unitType);
         if (defIt == sim.unitDefinitions.end())
@@ -482,10 +494,10 @@ namespace rwe
         // Normal budget first; widen only if nothing fits at all, not even
         // a crowded site. A base with room never reaches the wide scan --
         // see buildSiteFallbackRadius for why it is conditional.
-        auto sites = collectBuildableSites(sim, defIt->second, anchor, true, profile.maxMexSearchRadius);
+        auto sites = collectBuildableSites(sim, defIt->second, anchor, true, profile.maxMexSearchRadius, accept);
         if (sites.empty() && profile.buildSiteFallbackRadius > profile.maxMexSearchRadius)
         {
-            sites = collectBuildableSites(sim, defIt->second, anchor, true, profile.buildSiteFallbackRadius);
+            sites = collectBuildableSites(sim, defIt->second, anchor, true, profile.buildSiteFallbackRadius, accept);
             LOG_DEBUG << "AI build: widened site search for " << unitType << " at "
                       << static_cast<int>(anchor.x.value) << "," << static_cast<int>(anchor.z.value)
                       << (sites.empty() ? " -- still nothing" : " -- found one");
@@ -1786,6 +1798,33 @@ namespace rwe
         bool builderAtBase = builderDef.canFly || !bb.groundReachabilityValid || builderReachable(builder.position);
         auto anchor = builderAtBase ? *bb.baseAnchor : builder.position;
 
+        // Ground the builder can actually get to, and the one test that
+        // stops the commander crossing to another island to put up a single
+        // solar collector. Every site chooser but this one already had it:
+        // the extractor search below, chooseDefenceSite and chooseRadarSite
+        // all refuse ground the builder cannot walk to, while the ordinary
+        // ring walk that sites solars, labs, the air plant and the vehicle
+        // plant asked nothing at all, and cheerfully returned a spot across
+        // water. Observed in play, and the walk there is most of a minute of
+        // the opening spent moving rather than building.
+        //
+        // Compared against builderAtBase rather than simply required to be
+        // true, which is what makes the same predicate right for a stranded
+        // outpost builder: that one wants the island it is standing on, and
+        // "reachable from base" is false for every site it should take.
+        //
+        // A builder that flies is exempt for the reason the extractor search
+        // gives at length: holding the one builder that can cross water to
+        // the ground everything else can already walk to is exactly
+        // backwards. The shipyard is unaffected -- it has its own chooser,
+        // since an 8x8 hull needing MinWaterDepth=30 is never on ground
+        // anybody walks to.
+        std::function<bool(const SimVector&)> siteReachable;
+        if (bb.groundReachabilityValid && !builderDef.canFly)
+        {
+            siteReachable = [&](const SimVector& p) { return builderReachable(p) == builderAtBase; };
+        }
+
         // Extractors and makers are exempt from the affordability test
         // below: they are what makes the next thing affordable, and a
         // stalled extractor still finishes, just later. A solar collector
@@ -2140,11 +2179,8 @@ namespace rwe
                 // water to the patches everything else can already walk to,
                 // and leave the island patch -- the one nobody is contesting,
                 // and the reason to own an air constructor at all -- refused.
-                std::function<bool(const SimVector&)> reachable;
-                if (bb.groundReachabilityValid && !builderDef.canFly)
-                {
-                    reachable = [&](const SimVector& p) { return builderReachable(p) == builderAtBase; };
-                }
+                // siteReachable, hoisted above: the same test, and it is the
+                // reasoning in this comment that it carries.
                 // Not under the enemy's guns. The nearest free patch stays
                 // the nearest free patch after the frame on it is shot, so
                 // without this the builder puts the same frame down again:
@@ -2177,7 +2213,7 @@ namespace rwe
                     {
                         return false;
                     }
-                    return !underGuns(p) && !siteFailedLately(sim, p) && (!reachable || reachable(p));
+                    return !underGuns(p) && !siteFailedLately(sim, p) && (!siteReachable || siteReachable(p));
                 };
                 site = chooseMexSite(sim, next, builder.position, profile.nearMexSearchRadius, rng, walkable);
                 if (!site && builderAtBase)
@@ -2275,7 +2311,7 @@ namespace rwe
                 // been raided; the count includes the outpost towers, so a
                 // base rule that is still short of its target is the
                 // tie-break in the base's favour.
-                site = chooseBuildSite(sim, profile, next, outpost->anchor, rng);
+                site = chooseBuildSite(sim, profile, next, outpost->anchor, rng, siteReachable);
                 isOutpostTower = true;
                 if (site)
                 {
@@ -2297,7 +2333,7 @@ namespace rwe
                 // Defences go on the side of the base that faces the enemy.
                 auto towards = (*bb.enemyBasePosition - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
                 auto towerAnchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
-                site = chooseBuildSite(sim, profile, next, towerAnchor, rng);
+                site = chooseBuildSite(sim, profile, next, towerAnchor, rng, siteReachable);
             }
             else if (!sideUnits.shipyard.empty() && next == sideUnits.shipyard)
             {
@@ -2308,7 +2344,7 @@ namespace rwe
             }
             else
             {
-                site = chooseBuildSite(sim, profile, next, anchor, rng);
+                site = chooseBuildSite(sim, profile, next, anchor, rng, siteReachable);
             }
 
             if (site)

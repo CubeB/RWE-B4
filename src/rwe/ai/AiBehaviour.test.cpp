@@ -2125,6 +2125,43 @@ namespace rwe
         REQUIRE((builds.front().unitType == "ARMMOHO" || builds.front().unitType == "ARMARAD"));
     }
 
+    TEST_CASE("the site search walks outward past a ring the builder cannot reach", "[ai]")
+    {
+        // The ring walk stops at the NEAREST ring with room on it, which is
+        // right for a solar collector and is exactly what makes filtering
+        // its result the wrong way to refuse a site: the ring empties and
+        // the search gives up, so a base whose first ring happened to sit
+        // across water would refuse to build at all rather than build
+        // further out on its own ground.
+        //
+        // So the predicate is asked inside the walk. This test discriminates
+        // between the two: everything within the first two rings is refused,
+        // and a search that filtered afterwards would return nothing here.
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+
+        UnitDefinition solarDef;
+        solarDef.isMobile = false;
+        solarDef.builder = false;
+        solarDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{5u, 5u, 255u, 255u, 0u, 255u};
+        sim.unitDefinitions["SOLAR"] = solarDef;
+
+        auto anchor = SimVector(0_ss, 0_ss, 0_ss);
+        auto profile = makeDefaultStandardProfile();
+
+        // Spacing is (max(footprint) + 2) tiles, so 7 tiles or 112 world
+        // units for a 5x5: rings 1 and 2 reach x = -112 and -224, and only
+        // ring 3 reaches past -300.
+        auto farSideOnly = [](const SimVector& p) { return p.x < -300_ss; };
+
+        BuildManager buildManager;
+        std::minstd_rand rng(1u);
+        auto site = buildManager.chooseBuildSite(sim, profile, "SOLAR", anchor, rng, farSideOnly);
+
+        REQUIRE(site.has_value());
+        REQUIRE(site->x < -300_ss);
+    }
+
     TEST_CASE("a building is not planted across a metal patch, anywhere under it", "[ai]")
     {
         // The rule existed; it only ever looked at ONE cell. collectBuildableSites

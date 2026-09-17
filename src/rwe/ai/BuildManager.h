@@ -146,12 +146,21 @@ namespace rwe
             const AiTuningProfile& profile,
             const AiBlackboard& bb) const;
 
+        /**
+         * `accept`, when set, is asked about every candidate before the ring
+         * walk counts it -- which is the whole point of passing it down
+         * rather than filtering the result. nearestRingOnly stops at the
+         * first ring that has room, so a filter applied afterwards would
+         * empty that ring and give up, where this one walks outward until it
+         * finds a ring with somewhere the builder can actually get to.
+         */
         std::optional<SimVector> chooseBuildSite(
             const GameSimulation& sim,
             const AiTuningProfile& profile,
             const std::string& unitType,
             const SimVector& anchor,
-            std::minstd_rand& rng) const;
+            std::minstd_rand& rng,
+            const std::function<bool(const SimVector&)>& accept = {}) const;
 
         /**
          * A site's worth, compared lexicographically: the first element
