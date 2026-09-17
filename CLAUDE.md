@@ -174,9 +174,9 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   listing — but also when there is *nothing* to score, so read the message and
   not just the status. The single ProTA demo hits that: it has one scoreable
   immobile pair and needs `--min-builds 3`. Builders split three ways and the split matters: **immobile** ones
-  are scored cell by cell, **airborne** ones are pooled and scored at -1 because
-  a construction aircraft consistently finishes a tick early (58 of 66 builds,
-  three builders, two rates — unexplained, and the open lead in §23), and
+  are scored cell by cell, **airborne** ones are scored pair by pair against
+  two increments on the nanoframe's own tick, because a construction aircraft's
+  mission runs its build step twice on that tick (`docs/TOTALA-EXE.md` §101), and
   **ground mobile** ones are never scored at all, because they pay their own COB
   deploy before `INBUILDSTANCE` and that belongs to the mod rather than the
   engine. `--overheads` lists those. `docs/TOTALA-EXE.md` §23 and
@@ -277,7 +277,8 @@ of `TotalA.exe` instead of guessed at.
   plays (§97), and the Resurrect mission nothing in the shipped data can use
   (§98), and the `0x1a` unit-table packet builder together with the checksum
   behind it that got away (§100 — included because it *failed*, and the shape
-  of the failure is what stops the next attempt repeating it). §88 and §91 are
+  of the failure is what stops the next attempt repeating it), and why a
+  construction aircraft finishes a build a tick before a factory would (§101). §88 and §91 are
   the ones to read first if
   you are about to change something — where RWE **deliberately** differs, so
   those do not get "corrected" back, and what is decoded but not ported.
