@@ -53,7 +53,7 @@
 //                 shooter's own FBI fills; the evidence that it is a weapon index
 //   --max-types   distinct unit types an episode may carry (default 6)
 //   --max-per-player  episodes to keep per player (default 3)
-//   --max-cells   build-timing episodes to check in (default 25)
+//   --max-cells   build-timing episodes to check in (default 28)
 //   --min-builds  builds a cell needs before its mode is used (default 5)
 //   --all         emit rejected episodes too, each with its reasons
 
@@ -1462,7 +1462,11 @@ namespace rwe
     // TA's completion arithmetic: a builder contributes p = WorkerTime / 30
     // build units a tick, the first increment lands on the 0x09's own tick, and
     // the job finishes when a single-precision fraction counted up by
-    // p / BuildTime passes 1.0f. tools/tad-buildtime.py is the same arithmetic
+    // p / BuildTime passes 1.0f. A construction aircraft gets a SECOND
+    // increment on that first tick, because its mission runs the lathe twice
+    // before the tick ends (docs/TOTALA-EXE.md section 101), so its duration is
+    // two less than its increment count where everything else is one less.
+    // tools/tad-buildtime.py is the same arithmetic
     // and is the re-runnable check; this is the port that feeds the fixture.
     //
     // This is a corpus-wide pass, unlike the storage miner, because a cell pools
@@ -1673,7 +1677,16 @@ namespace rwe
                 continue;
             }
 
-            auto floatModel = tadTicksToBuild(productFacts.buildTime, p) - 1;
+            // The increments that do not show up as duration: one for the tick
+            // the 0x09 is sent, and a second for the construction aircraft's
+            // repeat of its own lathe state on that tick (section 101). The
+            // reference script subtracts the same number in the same place, and
+            // it has to be subtracted BEFORE the outlier cap, or an airborne
+            // cell would keep a different set of builds than the script does.
+            auto kind = builderClass(builderFacts);
+            auto increment = kind == "airborne" ? 2u : 1u;
+
+            auto floatModel = tadTicksToBuild(productFacts.buildTime, p) - increment;
 
             // Assisted builds are the bulk of a competitive game and only ever
             // shorten; a cap either side keeps them and the badly stalled ones
@@ -1732,8 +1745,8 @@ namespace rwe
                 atMode,
                 mode,
                 floatModel,
-                rweTicksToBuild(productFacts.buildTime, p) - 1,
-                builderClass(builderFacts),
+                rweTicksToBuild(productFacts.buildTime, p) - increment,
+                kind,
                 representative->demo,
                 representative->startTick,
                 representative->finishTick});
@@ -1772,7 +1785,10 @@ namespace rwe
         unsigned int unexplained = 0;
         for (auto& cell : cells)
         {
-            if (cell.kind != "immobile")
+            // Immobile and airborne builders both have a model. A ground mobile
+            // one does not: it pays its own COB deploy before INBUILDSTANCE,
+            // which is the mod's data rather than the engine's behaviour.
+            if (cell.kind != "immobile" && cell.kind != "airborne")
             {
                 continue;
             }
@@ -1787,7 +1803,13 @@ namespace rwe
         }
 
         std::stable_sort(scored.begin(), scored.end(), [](const BuildCell& a, const BuildCell& b) {
-            auto rank = [](const BuildCell& c) { return c.buildTime % c.p == 0 ? 0 : 1; };
+            // Ahead of the cap: every cell whose BuildTime divides exactly by
+            // the rate, because those are the ones carrying a delta, and every
+            // airborne cell, because there are only three of them and they are
+            // the fixture's whole evidence for the second lathe -- including
+            // the one that carries no delta, which is what says the class is
+            // not uniformly a tick out.
+            auto rank = [](const BuildCell& c) { return c.buildTime % c.p == 0 || c.kind == "airborne" ? 0 : 1; };
             return std::make_tuple(rank(a), b.builds, a.builder, a.product)
                 < std::make_tuple(rank(b), a.builds, b.builder, b.product);
         });
@@ -1803,12 +1825,15 @@ namespace rwe
         });
 
         unsigned int divergent = 0;
+        unsigned int airborne = 0;
         for (const auto& cell : scored)
         {
             divergent += cell.integerModel == cell.mode ? 0 : 1;
+            airborne += cell.kind == "airborne" ? 1 : 0;
         }
-        std::cout << scored.size() << " build episode(s), " << divergent
-                  << " of them where RWE is expected to differ";
+        std::cout << scored.size() << " build episode(s), " << airborne
+                  << " of them airborne, " << divergent
+                  << " where RWE is expected to differ";
         if (unexplained != 0)
         {
             std::cout << ", " << unexplained << " cell(s) skipped as unexplained";
@@ -1839,25 +1864,26 @@ namespace rwe
 // and a missed micro-stall lengthens it -- so the modal duration is the
 // unassisted, unimpeded one and the spread either side is the interference.
 //
-// WHICH BUILDS MAY BE HERE. Only builds by an IMMOBILE builder, which is to say
-// a factory: there is nothing for it to walk to and nothing for it to deploy, so
-// the duration is the nanolathe and nothing else. A ground mobile builder pays
-// its own COB deploy sequence before INBUILDSTANCE, which is the mod's data
-// rather than the engine's behaviour. An airborne one finishes consistently one
-// tick early against the model, for a reason nobody has yet read out of the
-// binary (docs/TOTALA-EXE.md section 91), and writing that into
-// expectedDurationDelta would launder an open question into a licensed
-// divergence, which is the one thing that field exists to prevent. See
-// docs/TA-DEMOS.md.
+// WHICH BUILDS MAY BE HERE. Builds by an IMMOBILE builder, which is to say a
+// factory: there is nothing for it to walk to and nothing for it to deploy, so
+// the duration is the nanolathe and nothing else. And builds by an AIRBORNE one,
+// which has nothing to deploy either -- the original never makes a construction
+// aircraft wait for its stance -- and whose extra tick is no longer a mystery:
+// it lathes twice on the tick it creates the nanoframe (docs/TOTALA-EXE.md
+// section 101), which RWE now does too. A ground mobile builder pays its own COB
+// deploy sequence before INBUILDSTANCE, which is the mod's data rather than the
+// engine's behaviour, and is never an episode. See docs/TA-DEMOS.md.
 //
 // THE ARITHMETIC BEING PINNED. A builder contributes p = WorkerTime / 30 build
 // units a tick -- integer division, in the engine and in the demo tooling alike.
 // The first increment lands on the tick the nanoframe appears, so an episode's
-// duration is one less than the number of increments. The original finishes when
-// a single-precision fraction counted up by p / BuildTime passes 1.0f; RWE adds
-// p to an unsigned counter and finishes at BuildTime. Those two agree except
-// where BuildTime divides exactly by p, and expectedDurationDelta is where they
-// do not.
+// duration is one less than the number of increments -- and two less for a
+// construction aircraft, because that first tick pays two of them. The original
+// finishes when a single-precision fraction counted up by p / BuildTime passes
+// 1.0f; RWE adds p to an unsigned counter and finishes at BuildTime. Those two
+// agree except where BuildTime divides exactly by p, and expectedDurationDelta
+// is where they do not. The two classes carry the same convention, so a -1 here
+// always means that difference and never the aircraft's second lathe.
 
 namespace rwe
 {
@@ -1882,6 +1908,13 @@ namespace rwe
         /** The builder's own WorkerTime and the product's own BuildTime, from the FBI. */
         unsigned int workerTime;
         unsigned int buildTime;
+
+        /**
+         * Whether the builder is a construction aircraft, from its own FBI's
+         * Canfly. It decides how many increments the first tick pays -- two
+         * rather than one -- so a test cannot count them without it.
+         */
+        bool builderFlies;
 
         /** Observed: finishTick - startTick, at the mode. */
         unsigned int modeDurationTicks;
@@ -1919,6 +1952,7 @@ namespace rwe
                 << "            " << cell.startTick << ", " << cell.finishTick << ", "
                 << cell.builds << ", " << cell.buildsAtMode << ",\n"
                 << "            " << cell.workerTime << ", " << cell.buildTime << ", "
+                << (cell.kind == "airborne" ? "true" : "false") << ", "
                 << cell.mode << ",\n"
                 << "            " << delta << ", "
                 << (delta == 0
@@ -4521,7 +4555,7 @@ int main(int argc, char* argv[])
                   << "  --with-updates  with --emit-unit-state, write the per-tick mover updates too\n"
                   << "  --max-types   distinct unit types an episode may carry (default 6)\n"
                   << "  --max-per-player  episodes to keep per player (default 3)\n"
-                  << "  --max-cells   build-timing episodes to check in (default 25)\n"
+                  << "  --max-cells   build-timing episodes to check in (default 28)\n"
                   << "  --min-builds  builds a cell needs before its mode is used (default 5)\n"
                   << "  --all         emit rejected episodes too, each with its reasons\n"
                   << "\n"
@@ -4607,7 +4641,7 @@ int main(int argc, char* argv[])
     // the first three did not.
     std::size_t maxTypes = args.contains("max-types") ? std::stoul(args.getString("max-types")) : 6;
     std::size_t maxPerPlayer = args.contains("max-per-player") ? std::stoul(args.getString("max-per-player")) : 3;
-    std::size_t maxCells = args.contains("max-cells") ? std::stoul(args.getString("max-cells")) : 25;
+    std::size_t maxCells = args.contains("max-cells") ? std::stoul(args.getString("max-cells")) : 28;
 
     // How many builds a (builder, product) cell needs before its mode is worth
     // consuming. The same default, and the same meaning, as
@@ -4947,11 +4981,16 @@ int main(int argc, char* argv[])
     if (args.contains("cells"))
     {
         std::vector<const BuildCell*> scored;
+        std::vector<const BuildCell*> airborne;
         for (const auto& cell : buildCells)
         {
             if (cell.kind == "immobile")
             {
                 scored.push_back(&cell);
+            }
+            else if (cell.kind == "airborne")
+            {
+                airborne.push_back(&cell);
             }
         }
 
@@ -4968,12 +5007,11 @@ int main(int argc, char* argv[])
             std::cout << " " << count << " " << kind;
         }
 
-        // Only the immobile class may become an episode. A ground mobile
-        // builder pays its own COB deploy before INBUILDSTANCE, which is mod
-        // data; an airborne one finishes a tick early for a reason nobody has
-        // read out of the binary yet (TOTALA-EXE.md section 91), and writing
-        // that into expectedDifference would launder an open question into a
-        // licensed divergence. docs/TA-DEMOS.md.
+        // Two classes are scored, each against its own model, and the third is
+        // not scored at all: a ground mobile builder pays its own COB deploy
+        // before INBUILDSTANCE, which is mod data rather than engine behaviour.
+        // The reference script splits the same three ways and prints the same
+        // two tables. docs/TA-DEMOS.md.
         std::cout << "\nscoring the " << scored.size() << " whose builder is immobile\n\n"
                   << "  builder    product      BuildTime   p   BT/p  extra   mode     n  share  delta\n";
 
@@ -5001,6 +5039,34 @@ int main(int argc, char* argv[])
                       << std::setw(6) << std::showpos << delta << std::noshowpos
                       << (agrees ? "" : "   <-- disagrees with the float32 model") << "\n";
         }
+
+        // The airborne table, against two increments on the 0x09's tick
+        // (TOTALA-EXE.md section 101). Its model column is already two less
+        // than the increment count, which is why it is printed rather than the
+        // immobile table's "extra": the two would not mean the same thing.
+        std::sort(airborne.begin(), airborne.end(), [](const BuildCell* a, const BuildCell* b) {
+            return std::tie(b->builds, a->builder, a->product) < std::tie(a->builds, b->builder, b->product);
+        });
+        std::cout << "\nthe " << airborne.size()
+                  << " pairs whose builder flies, against two increments on the 0x09's tick:\n\n"
+                  << "  builder    product      BuildTime   p  model   mode     n  share  delta\n";
+        for (const auto* cell : airborne)
+        {
+            auto delta = static_cast<int>(cell->integerModel) - static_cast<int>(cell->mode);
+            auto agrees = cell->mode == cell->floatModel;
+            misses += agrees ? 0 : 1;
+            std::cout << "  " << std::left << std::setw(10) << cell->builder << " "
+                      << std::setw(12) << cell->product << std::right
+                      << std::setw(10) << cell->buildTime
+                      << std::setw(4) << cell->p
+                      << std::setw(7) << cell->floatModel
+                      << std::setw(7) << cell->mode
+                      << std::setw(6) << cell->builds
+                      << std::setw(6) << (100 * cell->buildsAtMode / cell->builds) << "%"
+                      << std::setw(6) << std::showpos << delta << std::noshowpos
+                      << (agrees ? "" : "   <-- disagrees with the float32 model") << "\n";
+        }
+
         std::cout << "\n"
                   << misses << " disagreement(s) with the float32 model\n";
     }

@@ -305,7 +305,26 @@ namespace rwe
 
         void changeState(UnitState& unit, const UnitBehaviorState& newState);
 
-        bool deployBuildArm(UnitInfo unitInfo, UnitId targetUnitId);
+        /**
+         * Gets the arm out, and lathes once the builder is in a position to.
+         *
+         * frameJustCreated says this is the tick the builder's own build order
+         * laid the nanoframe down, which is the tick TOTALA-EXE.md 101's second
+         * lathe lands on for a construction aircraft. Every other caller --
+         * assisting, finishing somebody else's frame, coming back into range --
+         * leaves it false.
+         */
+        bool deployBuildArm(UnitInfo unitInfo, UnitId targetUnitId, bool frameJustCreated = false);
+
+        /**
+         * One lathe pass over a nanoframe: the claim on the frame, the economy
+         * request and the increment, returning true if the job is finished.
+         *
+         * Separate from deployBuildArm because a construction aircraft runs it
+         * twice on one tick, exactly as the original's mission service loop
+         * does (TOTALA-EXE.md 101).
+         */
+        bool latheNanoframe(UnitInfo unitInfo, UnitId targetUnitId);
 
         bool deployReclaimArm(UnitInfo unitInfo, std::variant<UnitId, FeatureId> target);
 
