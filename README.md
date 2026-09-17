@@ -15,8 +15,8 @@ and pinning them to what the original executable actually does. That is a long
 tail of small fidelity work, and it is the easy end of the problem — the
 foundation was already there.
 
-422 commits ahead of upstream `master`, and the suite stands at **646 cases /
-72,563 assertions**, green on Debug and Release.
+422 commits ahead of upstream `master`, and the suite stands at **647 cases /
+72,568 assertions**, green on Debug and Release.
 
 ## What is different here
 
