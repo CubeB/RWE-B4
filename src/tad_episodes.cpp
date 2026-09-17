@@ -3028,6 +3028,11 @@ namespace rwe
         std::array<unsigned long, 4> waypointDistance{};
         std::array<unsigned long, 4> controlDistance{};
 
+        // A 0x0d's origin and aim point against the full-state position of an
+        // immobile shooter or target: exact, under 8, under 32, further.
+        std::array<unsigned long, 4> shooterDistance{};
+        std::array<unsigned long, 4> targetDistance{};
+
         void add(const UnitStateTally& o)
         {
             decoded += o.decoded;
@@ -3056,6 +3061,8 @@ namespace rwe
             {
                 waypointDistance[i] += o.waypointDistance[i];
                 controlDistance[i] += o.controlDistance[i];
+                shooterDistance[i] += o.shooterDistance[i];
+                targetDistance[i] += o.targetDistance[i];
             }
         }
     };
@@ -3102,6 +3109,9 @@ namespace rwe
 
         /** Every 0x0d shooter position, by global id, in tick order. */
         std::map<uint16_t, std::vector<std::pair<uint32_t, TadPosition>>> shooters;
+
+        /** Every 0x0d aimed at a unit: (target id, aim point). */
+        std::vector<std::pair<uint16_t, TadPosition>> aims;
 
         UnitStateTally tally;
         int32_t minX = INT32_MAX, maxX = INT32_MIN, minZ = INT32_MAX, maxZ = INT32_MIN;
@@ -3188,6 +3198,10 @@ namespace rwe
                     if (auto e = tadDecodeShot(s); e && tick.count(packet.sender))
                     {
                         shooters[e->shooterId].emplace_back(tick[packet.sender], e->origin);
+                        if (e->targetId != 0)
+                        {
+                            aims.emplace_back(e->targetId, e->target);
+                        }
                     }
                     continue;
                 }
@@ -3441,6 +3455,67 @@ namespace rwe
                 std::stable_sort(list.begin(), list.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
             }
 
+            // An immobile unit's position is the same in every full-state record,
+            // so any of them will do: compare a shot's origin and aim point to it
+            // horizontally. The origin is the firing piece, not the unit's
+            // origin, so it lands near rather than on.
+            std::map<unsigned int, uint8_t> senderOfBlock;
+            for (const auto& [sender, block] : blockOf)
+            {
+                senderOfBlock[block] = sender;
+            }
+            auto immobilePosition = [&](uint16_t id) -> std::optional<TadPosition> {
+                auto block = tadOwnerBlockOfUnitId(id, maxUnits);
+                if (!block || !senderOfBlock.count(*block))
+                {
+                    return std::nullopt;
+                }
+                auto it = syncs.find({senderOfBlock[*block], static_cast<uint16_t>(id - 1 - *block * maxUnits)});
+                if (it == syncs.end() || it->second.size() < 2)
+                {
+                    return std::nullopt;
+                }
+                // Only a slot that held one immobile type, unmoved, all game,
+                // so that a recycled id cannot put the shot at the wrong unit.
+                const auto& first = it->second.front().state;
+                auto f = facts(first.typeIndex);
+                if (!f || f->maxVelocity > 0.0f || first.carried)
+                {
+                    return std::nullopt;
+                }
+                for (const auto& s : it->second)
+                {
+                    if (s.state.typeIndex != first.typeIndex || s.state.carried || !(s.state.position == first.position))
+                    {
+                        return std::nullopt;
+                    }
+                }
+                return first.position;
+            };
+            auto exactBucket = [](const TadPosition& a, const TadPosition& b) -> std::size_t {
+                auto d = std::max(
+                    std::abs(tadFixedToDouble(a.x) - tadFixedToDouble(b.x)),
+                    std::abs(tadFixedToDouble(a.z) - tadFixedToDouble(b.z)));
+                return d == 0.0 ? 0 : d < 8.0 ? 1 : d < 32.0 ? 2 : 3;
+            };
+            for (const auto& [id, list] : shooters)
+            {
+                if (auto p = immobilePosition(id))
+                {
+                    for (const auto& shot : list)
+                    {
+                        ++tally.shooterDistance[exactBucket(shot.second, *p)];
+                    }
+                }
+            }
+            for (const auto& [id, aim] : aims)
+            {
+                if (auto p = immobilePosition(id))
+                {
+                    ++tally.targetDistance[exactBucket(aim, *p)];
+                }
+            }
+
             // A fixed stride through the waypoints stands in for a random control,
             // so a re-run prints the same numbers.
             std::size_t control = waypoints.size() / 2 + 1;
@@ -3515,7 +3590,11 @@ namespace rwe
                   << indent << "  one cycle apart: immobile unmoved " << pct(t.immobileSame, t.immobileSame + t.immobileMoved)
                   << ", mobile within MaxVelocity reach " << pct(t.mobileWithinReach, t.mobileWithinReach + t.mobileTooFar) << "\n"
                   << indent << "  first waypoint to 0x0d shooter (<=10 ticks): " << buckets(t.waypointDistance) << "\n"
-                  << indent << "  another unit's waypoint, as control:        " << buckets(t.controlDistance) << "\n";
+                  << indent << "  another unit's waypoint, as control:        " << buckets(t.controlDistance) << "\n"
+                  << indent << "  immobile shooter, 0x0d origin to its position: exact " << t.shooterDistance[0]
+                  << ", <8 " << t.shooterDistance[1] << ", <32 " << t.shooterDistance[2] << ", further " << t.shooterDistance[3] << "\n"
+                  << indent << "  immobile target, 0x0d aim point to its position: exact " << t.targetDistance[0]
+                  << ", <8 " << t.targetDistance[1] << ", <32 " << t.targetDistance[2] << ", further " << t.targetDistance[3] << "\n";
     }
 
     bool isDemo(const std::filesystem::path& path)
