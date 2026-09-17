@@ -272,17 +272,22 @@ Everything tagged `[tad]` alone is still a decoder test.
       mission runs the build step twice on the tick it creates the nanoframe,
       and never waits for `INBUILDSTANCE` (`TOTALA-EXE.md` §101); 60 of 68
       builds land on that model and the rest are whole-second stalls.
-- [ ] Match that in RWE and put airborne builders in the build fixture. Decided:
-      match TA, not license a `+1`.
 - [x] The weapon-event oracle -- the flight-time half, over two classes. A
       `0x0d`'s trailing byte is the shooter's weapon slot, a `0x0b` is sent by
       the attacker's owner, and a round stops on the first step that puts it in
       one of the victim's footprint squares. All 37 scored cells land on +0 and
       the four former exceptions are gone; `tad_weapon_episodes.h` fires 37
       episodes at a real victim. `tools/tad-weapontime.py` is the reference.
-- [ ] Settle which tick a new round first steps on, in TA and in RWE. The
-      footprint model retired the only evidence for the old reading, and a first
-      read of the binary disagrees with the corpus. Blocks the classes below.
+- [x] Which tick a new round first steps on (2026-09-17). TA fires and steps on
+      the same tick, and so does RWE -- the corpus's extra tick is the demo
+      clock, because a `0x0d` is queued before its tick's `0x2c` and a `0x0b`
+      after it (121,624 of 122,637 runs). `weaponfiretick.test.cpp` pins it
+      through `tick()`; the fixture and its convention did not move.
+- [x] Match §101 in RWE and put airborne builders in the build fixture
+      (2026-09-17). A `canfly` builder lathes twice on the tick its nanoframe
+      appears and never waits for `INBUILDSTANCE`; three CORCA cells joined the
+      fixture on the ordinary delta convention, and `aircraftbuild.test.cpp`
+      covers the behaviour in the real simulation.
 - [ ] The weapon classes with no model yet: ballistic (18 cells), `vlaunch` (3),
       torpedoes (4) and `cruise` (1). They should reuse the footprint stop.
 - [ ] The hit/miss half of the weapon oracle. 53,706 shots drew no damage in the
@@ -293,8 +298,10 @@ Everything tagged `[tad]` alone is still a decoder test.
       (`tadDecodeUnitState`, `tad_episodes --unit-state`). No kinematic corpus --
       positions go out once every `maxUnits` ticks -- but a replicated-path
       stream and the shape puppet playback would need.
-- [ ] Decide whether to act on the ten RWE settle differences in §102, including
-      weapon `energypershot` being charged through the request pool.
+- [ ] The ten RWE settle differences in §102. Decided 2026-09-17: recorded, not
+      acted on. The weapon `energypershot` one reads as a bug and wants a pass of
+      its own; the make-and-use gate waits on flag bit 29, which is not being
+      chased.
 
 Demos and mod files never enter the repository; only extracted numbers do, and
 `rwe_test` goes on reading no files. Every demo-derived test asserts the known

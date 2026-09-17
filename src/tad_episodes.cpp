@@ -3663,9 +3663,10 @@ namespace rwe
      * the model predicts. A cell that does not is SKIPPED rather than checked
      * in with its offset written into expectedFlightDelta, because that field
      * is for a divergence somebody decided on and not for an observation nobody
-     * has explained -- the same rule that keeps airborne builders out of the
-     * build fixture. Under the footprint model there are none; under the
-     * aim-point model it replaced there were four.
+     * has explained -- the same rule that once kept airborne builders out of
+     * the build fixture, until TOTALA-EXE.md §101 explained their tick and RWE
+     * was changed to match. Under the footprint model there are no skipped
+     * cells; under the aim-point model it replaced there were four.
      *
      * A THIRD HEADER, beside tad_economy_episodes.h and tad_build_episodes.h.
      * They share no struct, are mined by different passes over different
