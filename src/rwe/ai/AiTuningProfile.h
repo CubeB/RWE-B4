@@ -385,9 +385,10 @@ namespace rwe
          * read: a land army is worth building right up until there is
          * nowhere for it to walk.
          *
-         * Zero -- the default -- is off, and that is now a measured
-         * choice rather than a cautious one. Played at 12 against its own
-         * absence, twenty 1800s games a map with the seats dealt, the
+         * Twelve is the measured value, and it is now the default -- but
+         * only above isolatedLandArmyCapMinWaterFraction, which is the
+         * gate the table below turned out to need. Played at 12 against its
+         * own absence, twenty 1800s games a map with the seats dealt, the
          * capped side against the untouched one:
          *
          *   Hundred Isles  (92% water)  hulls 33 v 23, yards 29 v 17,
@@ -402,9 +403,14 @@ namespace rwe
          *
          * So it pays where the water dominates and does not where it does
          * not, and on Evad it bought no fleet at all while costing most of
-         * the army. A default would have to be gated on how much water
-         * there is, not merely on whether some ground is out of reach, and
-         * that is a knob nobody has needed yet.
+         * the army. The conclusion that used to end here -- that a default
+         * would have to be gated on how much water there is, not merely on
+         * whether some ground is out of reach -- is what
+         * isolatedLandArmyCapMinWaterFraction now is. The knob nobody had
+         * needed yet was needed the moment someone watched the AI ferry
+         * kbots around Hundred Isles and asked why it was not simply
+         * building aircraft and hulls, which is the same conclusion this
+         * table reached from the other side.
          *
          * The harm this was held back for did not appear: the case where
          * the cap fires while the enemy is still walkable happened in 0 of
@@ -413,7 +419,31 @@ namespace rwe
          * there was no unreachable ground at all. Rare, not impossible --
          * and with the knob off it cannot bite regardless.
          */
-        int isolatedLandArmyCap{0};
+        int isolatedLandArmyCap{12};
+        /**
+         * How much of the map must be water before the cap above is allowed
+         * to fire, as a fraction of the heightmap.
+         *
+         * This is the gate the measurement above said a default would need,
+         * and it is deliberately NOT MapCharacter::Water. That threshold is
+         * 0.40 (MixedMapWaterFraction is 0.12, WaterMapWaterFraction 0.40),
+         * which would take in Coast To Coast at 54% -- the one map where
+         * capping measurably HURT, army 29.5 against 87.1 and income 9.8
+         * against 11.2. Reusing the map character here would have shipped
+         * the regression the table already found.
+         *
+         * 0.80 puts the line between the two measured points rather than on
+         * either of them: it admits Hundred Isles (92%), Anteer Strait (94%)
+         * and Caldera's Rim (98%), and excludes Coast To Coast (54%), Kill
+         * The Middle (41%), Evad River (23%) and The Cold Place (20%). Two
+         * Continents at 75% falls just outside and is the untested case, so
+         * it is excluded rather than assumed.
+         *
+         * Set it to 1.1 to make the cap unreachable on any map, which is the
+         * old zero-default behaviour without having to know what the cap
+         * itself was set to.
+         */
+        float isolatedLandArmyCapMinWaterFraction{0.80f};
         /**
          * Scout ships kept once a shipyard stands. Cheap eyes on the water
          * the way a scout plane is cheap eyes on the ground -- ARMPT is 100

@@ -179,6 +179,7 @@ namespace rwe
             || setInt("targetMetalMakerCount", p.targetMetalMakerCount)
             || setInt("targetAirPlantCount", p.targetAirPlantCount)
             || setInt("targetVehiclePlantCount", p.targetVehiclePlantCount)
+            || setFloat("isolatedLandArmyCapMinWaterFraction", p.isolatedLandArmyCapMinWaterFraction)
             || setInt("targetTidalCount", p.targetTidalCount)
             || setInt("targetSonarCount", p.targetSonarCount)
             || setInt("targetTorpedoLauncherCount", p.targetTorpedoLauncherCount)

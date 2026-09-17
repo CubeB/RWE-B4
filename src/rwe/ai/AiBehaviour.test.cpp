@@ -2803,9 +2803,30 @@ namespace rwe
             return countQueueCommands(commands, "ARMPW") + countQueueCommands(commands, "ARMROCK");
         };
 
-        SECTION("off by default, so it keeps making them")
+        // The cap asks how much of the map is water as well as whether some
+        // ground is out of reach, so the map has to say so. The channel
+        // fixture supplies the unreachable ground and this supplies the
+        // water: they are separate inputs, because MapIntel is computed from
+        // the map at load and handed to the AI rather than derived from the
+        // terrain here.
+        //
+        // A default-constructed MapIntel is not merely low on water, it is
+        // invalid, and that keeps the cap off outright -- the same
+        // conservative reading navalFleetTarget already takes. Without the
+        // map's own analysis the AI does not know it is on an island map, so
+        // it does not behave as though it were.
+        MapIntel islandMap;
+        islandMap.valid = true;
+        islandMap.character = MapCharacter::Water;
+        islandMap.waterFraction = 0.92f;
+
+        SECTION("an army below the cap keeps being made")
         {
-            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            // Three kbots against a default cap of twelve. This section read
+            // "off by default" until the default became 12 above
+            // isolatedLandArmyCapMinWaterFraction; what it pins is unchanged
+            // either way, that an army under the cap is not capped.
+            AiPlayerController controller(ai, profile, 42u, islandMap);
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 31, commands);
 
@@ -2813,10 +2834,34 @@ namespace rwe
             REQUIRE(kbotsQueued(commands) >= 1);
         }
 
+        SECTION("a map that is merely half water does not earn the cap")
+        {
+            // The gate, and the reason it is deliberately not
+            // MapCharacter::Water: that threshold is 0.40, which would take
+            // in Coast To Coast at 54% -- the one map where capping was
+            // measurably a regression, army 29.5 against 87.1 and income 9.8
+            // against 11.2 over twenty games. So a half-water map keeps its
+            // land army even with the cap set and the army over it.
+            MapIntel halfWater;
+            halfWater.valid = true;
+            halfWater.character = MapCharacter::Water;
+            halfWater.waterFraction = 0.54f;
+
+            profile.isolatedLandArmyCap = 2;
+            AiPlayerController controller(ai, profile, 42u, halfWater);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.hasUnreachableGround);
+            REQUIRE(bb.armySize >= 3);
+            REQUIRE(kbotsQueued(commands) >= 1);
+        }
+
         SECTION("with the cap set, the lab goes quiet and the income is freed")
         {
             profile.isolatedLandArmyCap = 2;
-            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            AiPlayerController controller(ai, profile, 42u, islandMap);
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 31, commands);
 
@@ -2837,7 +2882,7 @@ namespace rwe
             profile.targetScoutVehicleCount = 0;
 
             profile.isolatedLandArmyCap = 2;
-            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            AiPlayerController controller(ai, profile, 42u, islandMap);
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 31, commands);
 

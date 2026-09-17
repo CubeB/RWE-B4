@@ -1515,7 +1515,17 @@ namespace rwe
         // plant its tanks, the advanced lab its assault kbots -- and a cap
         // that guarded only one of them would quietly do nothing the
         // moment a second factory type existed.
-        auto landArmyCapped = profile.isolatedLandArmyCap > 0 && bb.hasUnreachableGround
+        // Unreachable ground is necessary but not sufficient. Capping the
+        // land army pays on a map that is nearly all water and costs more
+        // than it buys on one that is merely half water -- measured, and the
+        // numbers are in isolatedLandArmyCapMinWaterFraction's own comment --
+        // so how much water there is has to be part of the question. The map
+        // character would be the obvious thing to ask and is the wrong one:
+        // its Water threshold is 0.40, which takes in the very map where
+        // capping was a regression.
+        auto waterDominates = bb.mapIntel.valid
+            && bb.mapIntel.waterFraction >= profile.isolatedLandArmyCapMinWaterFraction;
+        auto landArmyCapped = profile.isolatedLandArmyCap > 0 && bb.hasUnreachableGround && waterDominates
             && bb.armySize >= profile.isolatedLandArmyCap;
 
         for (auto factoryId : bb.factories)
