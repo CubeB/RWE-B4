@@ -1441,8 +1441,8 @@ still for the whole flight. That is a zero-drift filter over mobile victims, and
 it does not cost the missile class its fast targets by assumption. It has not
 been built. It does not help against aircraft, whose entries are goals rather
 than positions. The footprint residual, which this section left as the only
-reading remaining, has since been settled that way: see "Where a round stops". *Hit or miss*: health
-is sampled once a cycle, so a victim's health across the two records bracketing a
+reading remaining, has since been settled that way: see "Where a round stops".
+*Hit or miss*: health is sampled once a cycle, so a victim's health across the two records bracketing a
 shot, against the `0x0b` damage recorded between them, is a direct test of how
 incomplete `0x0b` is and of whether a shot with no damage record really missed
 -- but only at 33-second resolution, so only for victims hit by little else in
@@ -1833,6 +1833,8 @@ cd build && make -j$(nproc) tad_episodes && cd ..
     --emit-build-cpp src/rwe/sim/tad_build_episodes.h
 ./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc \
     --emit-weapon-cpp src/rwe/sim/tad_weapon_episodes.h
+./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc \
+    --emit-stall-cpp src/rwe/sim/tad_stall_episodes.h
 ```
 
 The build-timing and weapon ones take the whole directory because their cells
@@ -1983,13 +1985,19 @@ They catch different things and should not share machinery.
       both halves bite: crediting a nanoframe, or taking the base from the
       commander's own FBI, each break them.
 
-      **The stall half is still open**, and the sampling interval is why: the
-      corpus samples every 120 ticks and the settle runs every 30, so a single
-      settle cannot be observed and the throttle fractions, the debt mechanism
-      and the order of operations inside one settle are not assertable from
-      `0x28` alone. What is: a stall's onset and recovery across several
-      samples, and the trajectory of a stockpile over a window with a known
-      composition. Both need the production model as well as the storage one.
+      ~~**The stall half.**~~ Done, through build lateness rather than the
+      stockpile path, and "What a stalled settle costs a factory" above says why.
+      A stall costs a factory whole seconds on a settle every player shares
+      (`TOTALA-EXE.md` §102, which also struck the staggered-settle entry from
+      §88). `tools/tad-stalltime.py` is the reference: 73 of 77 scored builds
+      land on their residue, the four short ones are named exceptions, and the
+      same pattern over settles that did not stall predicts 0 of 449.
+      `--emit-stall-cpp` writes `src/rwe/sim/tad_stall_episodes.h`, 24 episodes
+      replayed through `GameSimulation::tick` by three `[economy][corpus]` cases,
+      and four mutations each moved exactly the subset their mechanism predicts.
+      What stays unassertable is the fractions inside one settle, because the
+      corpus samples one settle in four. §102 also lists ten places RWE's settle
+      differs from TA's, none changed yet.
    4. ~~**The build-timing oracle.**~~ Done.
       `tad_episodes --emit-build-cpp` writes `src/rwe/sim/tad_build_episodes.h`
       -- 25 (factory, product) cells of the Escalation corpus, each consumed as
@@ -2030,10 +2038,11 @@ They catch different things and should not share machinery.
       fails **exactly the ten** and no others, which says the deltas are
       precisely the divergence §88 describes rather than a per-episode fudge.
 
-      Airborne builders are still not episodes and must not become them until
-      §91 says why a construction aircraft finishes a tick early; writing that
-      `-1` into `expectedDurationDelta` would launder an open question into a
-      licensed divergence.
+      Airborne builders are still not episodes. Why a construction aircraft
+      finishes a tick early is now explained -- its mission runs the build step
+      twice on the nanoframe's tick (`TOTALA-EXE.md` §101) -- and the decision
+      is to match that in RWE rather than license a `+1`, so they become
+      episodes together with that change and not before it.
    5. **The weapon-event oracle.** `0x0d` shot to `0x0b` damage or `0x0c` death
       gives time-of-flight and hit/miss with the shot as an explicit input,
       aimed at the missile motor model and the ballistics work. Remember `0x0b`
@@ -2086,11 +2095,15 @@ They catch different things and should not share machinery.
       decoding prize in it, because a ballistic shot is where the `0x0d`'s
       rotation triple could be checked against the geometry), `vlaunch` (3) and
       torpedoes (4) -- and `cruise`, now split out of the constant-speed table as
-      a class of one. The sub-tick residual is the other open end: even at drift
-      zero the mode takes only about half the pairings and the second bucket is
-      `-1`, with a shortfall that grows with the victim's footprint, which points
-      at the round detonating on the collision volume rather than at the aim
-      point. And the hit/miss half of the oracle, which is a different statistic
+      a class of one. ~~The sub-tick residual~~ is closed: a round stops on the
+      first step that puts it in one of the victim's footprint squares ("Where a
+      round stops"), every scored cell now lands on +0, the four named
+      exceptions are gone, and the fixture is 37 episodes fired at a real victim.
+      What that reopened is **which tick a new round first steps on**: the old
+      `-1` was the only evidence, and a first read of the binary disagrees with
+      the corpus. It has to be settled before any of the classes above, and is
+      being. The height half of the collision test is not modelled either. And
+      the hit/miss half of the oracle, which is a different statistic
       over the same pairings and where target type probably does belong in the
       cell key -- but which has to answer why 53,706 shots drew no damage in the
       window before it can call any of them misses, given that `0x0b` is not a
@@ -2099,12 +2112,14 @@ They catch different things and should not share machinery.
    Every one of those carries the expected-difference annotation described in
    "The hazard to design in from the start". A corpus is an efficient machine
    for regressing intentional decisions if it is allowed to be.
-3. Decide on `0x2c` once the stream has been stared at. If the decode falls
-   out of the binary in a day or two of probing -- pivot on `0x44F4A0`, the
-   three-waypoint bit-serialiser, and on the emitter `0x451DF0` -- the
-   kinematic corpus and tier-2 playback both open up. If it does not, stop;
-   the event oracles already justify the parser. Note it is 60% of the stream
-   by count and rather more by volume, so this is where the information is.
+3. ~~Decide on `0x2c` once the stream has been stared at.~~ **Decoded**, bit
+   for bit over all 7,422,196 of them -- see "`0x2c`, unit state". It did not
+   open the kinematic corpus: positions go out once every `maxUnits` ticks, so
+   acceleration and turn rate cannot be fitted. What it did open is a
+   replicated-path stream that could become a pathfinding oracle, a zero-drift
+   filter over mobile victims for the weapon oracle, per-cycle health for the
+   hit/miss half, and the design of puppet playback: steer along the replicated
+   waypoints and correct at each full-state record, as a receiving TA does.
 
 ## Open questions
 

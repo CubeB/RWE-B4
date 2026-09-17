@@ -168,6 +168,24 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   that the byte is a slot at all, and the second is what unit-id recycling costs
   anything that names a unit from its id. The build cells scope the same way
   now; `docs/TA-DEMOS.md`, the `0x0d` section, says what that bought.
+
+  `--stall-episodes` prints the **stall** report -- where every sender's settles
+  fall, how many late factory builds are late by whole seconds, and the scored
+  episodes, in which a factory refused into its next job by a stalled settle is
+  late by exactly `30 - start % 30` plus whole seconds -- line for line with
+  `tools/tad-stalltime.py`, and `--emit-stall-cpp` writes the fourth fixture,
+  `src/rwe/sim/tad_stall_episodes.h`, for `[economy][corpus]` cases that replay
+  each episode through `GameSimulation::tick`. `docs/TOTALA-EXE.md` §102 is the
+  settle it rests on.
+
+  `--unit-state` decodes every `0x2c` and holds the decode to the rest of the
+  stream -- a `0x09`'s type and position, `MaxVelocity`, a building staying put,
+  where a `0x0d` aims -- and exits non-zero if one fails to decode;
+  `--emit-unit-state` dumps the result as JSON Lines, with `--with-updates` for
+  the per-tick path and goal half. A `0x2c` is a bit stream: every tick, the
+  path or goal of each unit that changed it, and one unit's full state
+  round-robin, so a position is sent once every `maxUnits` ticks and there is no
+  kinematic corpus in it. `docs/TA-DEMOS.md`, "`0x2c`, unit state".
 - **`tools/tad-buildtime.py`** — scores the corpus's modal build durations
   against TA's own completion arithmetic, which is a **float32** fraction and
   not `ceil(BuildTime / (WorkerTime/30))`; the difference is a tick, and where
@@ -206,6 +224,13 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   `waterweapon` and `burst`; `--footprint` prints the evidence for the stop.
   Exits non-zero if a scored cell moves. `docs/TA-DEMOS.md`, "Pairing a
   `0x0d` to the `0x0b` it caused" and "Where a round stops".
+- **`tools/tad-stalltime.py`** — the reference for the stall oracle. It imports
+  `tad-buildtime.py`'s model rather than copying it, uses the `0x28` stream
+  only as the witness that a settle stalled, and scores factory builds whose
+  lateness a stall should fix to a residue. Exits non-zero on a miss, on a
+  named exception moving, or on nothing to score. It needs the episodes with
+  `--all` and `--emit-resources` beside them; `docs/TA-DEMOS.md`, "What a
+  stalled settle costs a factory".
 - **`tools/visual-test.ps1`** — when only the renderer will do. It launches `build-release/rwe.exe`, finds the window, and then *drives* it: real clicks at client-relative coordinates, screenshots cropped and nearest-neighbour magnified around the thing under test. `-phase build|air|ship` are the scripted sequences already written; adding one is a few lines. Prefer this to ad-hoc screenshotting — a scripted click sequence is repeatable and an eyeballed one is not.
 - **`tools/crash-catch.cmd`** runs the Debug build under gdb and writes a backtrace to `crash.txt`. Play normally, reproduce the crash, close the window.
 - Environment switches, all pure observers: `RWE_AI_PROFILE=1` times each AI pass and logs anything over 2 ms; `RWE_DEBUG_SPAWN=ARMPW*12@0:8:1` spawns units on a timer (`<type>*<count>@<owner>:<seconds>[:<near player>]`); `RWE_DEBUG_SELF_DESTRUCT[=_PLAYER]`, `RWE_TRACE_BOMBER`, `RWE_TRACE_GUNSHIP`, `RWE_TRACE_MISSILE`.
@@ -282,7 +307,8 @@ of `TotalA.exe` instead of guessed at.
   (§98), and the `0x1a` unit-table packet builder together with the checksum
   behind it that got away (§100 — included because it *failed*, and the shape
   of the failure is what stops the next attempt repeating it), and why a
-  construction aircraft finishes a build a tick before a factory would (§101). §88 and §91 are
+  construction aircraft finishes a build a tick before a factory would (§101),
+  and what one resource settle does and where every player's falls (§102). §88 and §91 are
   the ones to read first if
   you are about to change something — where RWE **deliberately** differs, so
   those do not get "corrected" back, and what is decoded but not ported.
