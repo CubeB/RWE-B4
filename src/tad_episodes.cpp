@@ -39,6 +39,9 @@
 //                 weapon-event pairing work; see writeShotJson
 //   --emit-cpp    write the storage episodes as a C++ header for rwe_test
 //   --emit-build-cpp  write the build-timing episodes as a C++ header
+//   --stall-episodes  print the stall pass, which is what
+//                 tools/tad-stalltime.py scores
+//   --emit-stall-cpp  write the stall episodes as a C++ header
 //   --cells       print the (builder, product) build-timing cells, which is
 //                 what tools/tad-buildtime.py scores
 //   --unit-state  decode every 0x2c and hold it to the rest of the stream: the
@@ -62,6 +65,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -79,6 +83,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace rwe
@@ -626,6 +631,14 @@ namespace
          * what turns a shot into a *weapon* rather than merely a shooter.
          */
         std::array<std::string, 3> weaponNames;
+
+        /**
+         * BuildCostMetal and BuildCostEnergy. Only the stall episodes read them:
+         * a factory asks for a product's cost a tick at a time, and the size of
+         * the ask is what a stalled settle turns into debt.
+         */
+        unsigned int buildCostMetal;
+        unsigned int buildCostEnergy;
     };
 
     /**
@@ -829,7 +842,9 @@ namespace
                     static_cast<unsigned int>(
                         (fbi.weapon1.empty() ? 0u : 1u) | (fbi.weapon2.empty() ? 0u : 2u)
                         | (fbi.weapon3.empty() ? 0u : 4u)),
-                    std::array<std::string, 3>{fbi.weapon1, fbi.weapon2, fbi.weapon3}};
+                    std::array<std::string, 3>{fbi.weapon1, fbi.weapon2, fbi.weapon3},
+                    fbi.buildCostMetal,
+                    fbi.buildCostEnergy};
             }
             catch (const std::exception&)
             {
@@ -892,6 +907,15 @@ namespace
         j["numPlayers"] = handler.header.numPlayers;
         j["maxUnits"] = handler.header.maxUnits;
         j["mapName"] = handler.header.mapName;
+
+        // How many unit types the demo's own 0x1a table declares, so a consumer
+        // can drop a demo recorded on another data set the way the build cells
+        // do (wrongDataSet) rather than naming its units out of the wrong load
+        // order. tools/tad-stalltime.py reads it.
+        if (handler.unitTable)
+        {
+            j["unitTypes"] = handler.unitTable->restricted.size();
+        }
 
         j["players"] = nlohmann::json::array();
         for (const auto& p : handler.players)
@@ -1896,6 +1920,761 @@ namespace rwe
                 << cell.builds << ", " << cell.buildsAtMode << ",\n"
                 << "            " << cell.workerTime << ", " << cell.buildTime << ", "
                 << cell.mode << ",\n"
+                << "            " << delta << ", "
+                << (delta == 0
+                           ? std::string("nullptr")
+                           : "\"TOTALA-EXE.md 88: build progress is an integer accumulator, not the original's float\"")
+                << "},\n";
+        }
+
+        out << "    };\n"
+            << "    // clang-format on\n"
+            << "}\n";
+    }
+
+    // --- --stall-episodes, --emit-stall-cpp: what a stalled settle costs -----
+    //
+    // The stall half of the economy oracle. TA settles each player's resources
+    // once a second and carries whatever a consumer was granted and not paid for
+    // as DEBT on that consumer; between settles a unit in debt is refused
+    // outright (docs/TOTALA-EXE.md section 23, and section 102 for the decode
+    // this pass rests on). The corpus samples a player's stores one settle in
+    // four, so a settle's fractions cannot be read off it -- but the debt rule
+    // leaves a shape on factory build timings that can be, with the 0x28 stream
+    // as the independent witness that a stall happened.
+    //
+    // tools/tad-stalltime.py is the reference and this is its port. The two
+    // print the same three sections and the same episode list, and must agree
+    // line for line; if they part company it is the port that is wrong.
+
+    /** What the stall pass keeps of one demo once the walk has moved on. */
+    struct StallDemo
+    {
+        std::string demo;
+        std::vector<Episode> episodes;
+        std::vector<EpisodeHandler::ResourceRecord> records;
+        std::map<uint8_t, unsigned int> senderBlock;
+    };
+
+    constexpr long long stallSettleTicks = 30;
+
+    /**
+     * How far a 0x28's tick may sit from the settle it reports: a sender stamps
+     * it with the last 0x2c serial it sent, which runs a few ticks behind.
+     */
+    constexpr long long stallSampleLag = 6;
+
+    /** The share of one sender's samples that must sit that close to a settle. */
+    constexpr double stallPhaseShare = 0.95;
+
+    /**
+     * The scored builds that do not land on their residue, and how many ticks
+     * SHORT of it each falls. The same four, for the same reason, as
+     * KNOWN_EXCEPTIONS in tools/tad-stalltime.py: all short and none long, and a
+     * debt only lengthens a job where an assist only shortens one.
+     */
+    struct StallKnownException
+    {
+        const char* demo;
+        uint16_t builderId;
+        uint32_t startTick;
+        long long shortfall;
+    };
+
+    constexpr StallKnownException stallKnownExceptions[] = {
+        {"14725.ted", 2008, 56516, 19},
+        {"14727.ted", 8056, 25783, 2},
+        {"14728.ted", 6064, 26139, 18},
+        {"14730.ted", 7653, 81332, 4},
+    };
+
+    long long nearestSettle(long long tick)
+    {
+        return ((tick + stallSettleTicks / 2) / stallSettleTicks) * stallSettleTicks;
+    }
+
+    bool isWatcherRecord(const TadResourceStats& stats)
+    {
+        return stats.metalStorage == 0.0f && stats.energyStorage == 0.0f;
+    }
+
+    /** One paired build by an immobile builder, named, with its lateness. */
+    struct FactoryBuild
+    {
+        const Episode* episode;
+        std::string builder;
+        std::string product;
+        unsigned int model;
+        unsigned int rweModel;
+        long long late;
+        bool spoilt;
+        bool scoredCell;
+    };
+
+    struct StallEpisode
+    {
+        std::string demo;
+        unsigned int ownerBlock;
+        uint16_t builderId;
+        std::string builder;
+        unsigned int workerTime;
+
+        std::string previousProduct;
+        unsigned int previousBuildTime;
+        unsigned int previousCostMetal;
+        unsigned int previousCostEnergy;
+        uint32_t previousStart;
+        uint32_t previousFinish;
+
+        long long settle;
+        bool metalEmpty;
+        uint32_t sampleTick;
+
+        std::string product;
+        unsigned int buildTime;
+        unsigned int costMetal;
+        unsigned int costEnergy;
+        uint32_t start;
+        uint32_t finish;
+        unsigned int model;
+        unsigned int rweModel;
+        long long late;
+        long long residue;
+        bool hit;
+        long long furtherStalls;
+    };
+
+    struct StallReport
+    {
+        std::vector<std::tuple<std::string, unsigned int, std::size_t, std::size_t>> senders;
+        unsigned int agreeingCells = 0;
+        std::map<std::string, unsigned int> shape;
+        std::map<std::pair<std::string, bool>, unsigned int> shapeWithEmptySample;
+        std::map<std::string, unsigned int> tally;
+        std::vector<StallEpisode> scored;
+    };
+
+    StallReport mineStalls(
+        const std::vector<StallDemo>& demos,
+        const std::vector<std::string>& loadOrder,
+        const std::map<std::string, UnitFacts>& unitFacts,
+        const std::set<std::string>& wrongDataSet,
+        unsigned int minBuilds)
+    {
+        StallReport report;
+
+        // 1. The phase, per sender, watchers dropped.
+        for (const auto& d : demos)
+        {
+            if (wrongDataSet.count(d.demo) != 0)
+            {
+                continue;
+            }
+            std::map<uint8_t, std::pair<std::size_t, std::size_t>> perSender;
+            for (const auto& r : d.records)
+            {
+                if (isWatcherRecord(r.stats))
+                {
+                    continue;
+                }
+                auto& [n, near] = perSender[r.sender];
+                ++n;
+                auto t = static_cast<long long>(r.tick);
+                near += std::llabs(t - nearestSettle(t)) <= stallSampleLag ? 1 : 0;
+            }
+            for (const auto& [sender, counts] : perSender)
+            {
+                report.senders.emplace_back(d.demo, sender, counts.first, counts.second);
+            }
+        }
+
+        // The build cells, over the clean episodes as tools/tad-buildtime.py sees
+        // them, and only the ones whose mode the float32 model explains.
+        std::vector<Episode> clean;
+        std::vector<const Episode*> everything;
+        for (const auto& d : demos)
+        {
+            if (wrongDataSet.count(d.demo) != 0)
+            {
+                continue;
+            }
+            for (const auto& e : d.episodes)
+            {
+                everything.push_back(&e);
+                if (e.clean())
+                {
+                    clean.push_back(e);
+                }
+            }
+        }
+        std::set<std::pair<std::string, std::string>> agreeing;
+        for (const auto& cell : mineBuildCells(clean, loadOrder, unitFacts, wrongDataSet, minBuilds))
+        {
+            if (cell.kind == "immobile" && cell.mode == cell.floatModel)
+            {
+                agreeing.emplace(cell.builder, cell.product);
+            }
+        }
+        report.agreeingCells = static_cast<unsigned int>(agreeing.size());
+
+        // Builders named the way the build cells name them: the most recent build
+        // of that id to finish by the time this one started.
+        std::map<std::pair<std::string, uint16_t>, std::vector<std::pair<uint32_t, std::string>>> lives;
+        for (const auto* e : everything)
+        {
+            if (auto name = tadUnitNameForTypeIndex(loadOrder, e->typeIndex))
+            {
+                lives[std::make_pair(e->demo, e->unitId)].emplace_back(e->finishTick, *name);
+            }
+        }
+        for (auto& [id, list] : lives)
+        {
+            std::sort(list.begin(), list.end());
+        }
+
+        static const std::set<std::string> spoiling{
+            "frame took damage", "builder took damage", "speed change", "builder in another owner block", "no elapsed ticks"};
+
+        std::vector<FactoryBuild> builds;
+        for (const auto* e : everything)
+        {
+            auto life = lives.find(std::make_pair(e->demo, e->builderId));
+            if (life == lives.end())
+            {
+                continue;
+            }
+            auto builder = buildAtTick(life->second, e->startTick);
+            auto product = tadUnitNameForTypeIndex(loadOrder, e->typeIndex);
+            if (!builder || !product)
+            {
+                continue;
+            }
+            auto builderFacts = unitFacts.find(builder->second);
+            auto productFacts = unitFacts.find(*product);
+            if (builderFacts == unitFacts.end() || productFacts == unitFacts.end())
+            {
+                continue;
+            }
+            if (builderClass(builderFacts->second) != "immobile")
+            {
+                continue;
+            }
+            auto p = builderFacts->second.workerTime / 30;
+            if (p == 0 || productFacts->second.buildTime == 0)
+            {
+                continue;
+            }
+            auto model = tadTicksToBuild(productFacts->second.buildTime, p) - 1;
+            auto spoilt = std::any_of(e->rejections.begin(), e->rejections.end(), [](const std::string& r) { return spoiling.count(r) != 0; });
+            builds.push_back(FactoryBuild{
+                e,
+                builder->second,
+                *product,
+                model,
+                rweTicksToBuild(productFacts->second.buildTime, p) - 1,
+                static_cast<long long>(e->durationTicks()) - static_cast<long long>(model),
+                spoilt,
+                agreeing.count(std::make_pair(builder->second, *product)) != 0});
+        }
+
+        std::map<std::pair<std::string, unsigned int>, std::vector<std::tuple<uint32_t, float, float>>> samples;
+        for (const auto& d : demos)
+        {
+            if (wrongDataSet.count(d.demo) != 0)
+            {
+                continue;
+            }
+            for (const auto& r : d.records)
+            {
+                if (isWatcherRecord(r.stats))
+                {
+                    continue;
+                }
+                auto block = d.senderBlock.find(r.sender);
+                if (block == d.senderBlock.end())
+                {
+                    continue;
+                }
+                samples[std::make_pair(d.demo, block->second)].emplace_back(r.tick, r.stats.metalStored, r.stats.energyStored);
+            }
+        }
+        for (auto& [key, rows] : samples)
+        {
+            std::sort(rows.begin(), rows.end());
+        }
+        static const std::vector<std::tuple<uint32_t, float, float>> noSamples;
+        auto samplesOf = [&](const std::string& demo, unsigned int block) -> const std::vector<std::tuple<uint32_t, float, float>>& {
+            auto it = samples.find(std::make_pair(demo, block));
+            return it == samples.end() ? noSamples : it->second;
+        };
+        auto empty = [](const std::tuple<uint32_t, float, float>& s) {
+            return std::get<1>(s) == 0.0f || std::get<2>(s) == 0.0f;
+        };
+
+        // 2. The quantum.
+        for (const auto& b : builds)
+        {
+            if (b.spoilt || !b.scoredCell)
+            {
+                continue;
+            }
+            std::string kind = b.late < 0 ? "early"
+                : b.late == 0             ? "on the model"
+                : b.late % stallSettleTicks == 0 ? "late by 30k"
+                                                 : "late otherwise";
+            ++report.shape[kind];
+            auto start = static_cast<long long>(b.episode->startTick);
+            auto finish = static_cast<long long>(b.episode->finishTick);
+            bool stalled = false;
+            for (const auto& s : samplesOf(b.episode->demo, b.episode->ownerBlock))
+            {
+                auto settle = nearestSettle(std::get<0>(s));
+                if (start <= settle - stallSettleTicks && settle + stallSettleTicks <= finish && empty(s))
+                {
+                    stalled = true;
+                    break;
+                }
+            }
+            ++report.shapeWithEmptySample[std::make_pair(kind, stalled)];
+        }
+
+        // 3. The episodes.
+        std::map<std::pair<std::string, uint16_t>, std::vector<const FactoryBuild*>> byBuilder;
+        for (const auto& b : builds)
+        {
+            byBuilder[std::make_pair(b.episode->demo, b.episode->builderId)].push_back(&b);
+        }
+
+        for (auto& [key, runs] : byBuilder)
+        {
+            std::stable_sort(runs.begin(), runs.end(), [](const FactoryBuild* a, const FactoryBuild* b) {
+                return std::make_pair(a->episode->startTick, a->episode->finishTick)
+                    < std::make_pair(b->episode->startTick, b->episode->finishTick);
+            });
+
+            for (std::size_t i = 1; i < runs.size(); ++i)
+            {
+                const auto& prev = *runs[i - 1];
+                const auto& cur = *runs[i];
+                const auto* next = i + 1 < runs.size() ? runs[i + 1] : nullptr;
+
+                auto start = static_cast<long long>(cur.episode->startTick);
+                if (start % stallSettleTicks == 0)
+                {
+                    continue;
+                }
+                auto settle = start - start % stallSettleTicks;
+                auto prevFinish = static_cast<long long>(prev.episode->finishTick);
+                if (!(settle - stallSettleTicks <= prevFinish && prevFinish <= settle - 1))
+                {
+                    continue;
+                }
+                if (prev.builder != cur.builder)
+                {
+                    continue;
+                }
+
+                std::vector<const std::tuple<uint32_t, float, float>*> near;
+                const std::tuple<uint32_t, float, float>* firstEmpty = nullptr;
+                for (const auto& s : samplesOf(cur.episode->demo, cur.episode->ownerBlock))
+                {
+                    auto t = static_cast<long long>(std::get<0>(s));
+                    if (t >= settle - stallSampleLag && t <= settle + stallSampleLag)
+                    {
+                        near.push_back(&s);
+                        if (firstEmpty == nullptr && empty(s))
+                        {
+                            firstEmpty = &s;
+                        }
+                    }
+                }
+                if (near.empty())
+                {
+                    continue;
+                }
+
+                auto residue = stallSettleTicks - start % stallSettleTicks;
+                auto lands = cur.late >= residue && (cur.late - residue) % stallSettleTicks == 0;
+                auto neighboursUnassisted = prev.late >= 0 && (next == nullptr || next->late >= 0);
+
+                // The control: the same pattern over a settle the sample says did
+                // not stall. If the residue came from the selection rather than
+                // from the debt, it would show up here too.
+                if (firstEmpty == nullptr)
+                {
+                    if (!cur.spoilt && cur.scoredCell && neighboursUnassisted && cur.late >= 0)
+                    {
+                        ++report.tally[std::string("control: settle not stalled, residue ") + (lands ? "predicted" : "not predicted")];
+                    }
+                    continue;
+                }
+
+                ++report.tally["candidates"];
+                if (cur.spoilt)
+                {
+                    ++report.tally["rejected: damage or speed change"];
+                    continue;
+                }
+                if (!cur.scoredCell)
+                {
+                    ++report.tally["rejected: cell not explained by the build model"];
+                    continue;
+                }
+                if (!neighboursUnassisted)
+                {
+                    ++report.tally["rejected: a neighbouring build was assisted"];
+                    continue;
+                }
+                if (cur.late < 0)
+                {
+                    ++report.tally["rejected: assisted"];
+                    continue;
+                }
+
+                const auto& builderFacts = unitFacts.at(cur.builder);
+                const auto& productFacts = unitFacts.at(cur.product);
+                const auto& previousFacts = unitFacts.at(prev.product);
+                report.scored.push_back(StallEpisode{
+                    cur.episode->demo,
+                    cur.episode->ownerBlock,
+                    cur.episode->builderId,
+                    cur.builder,
+                    builderFacts.workerTime,
+                    prev.product,
+                    previousFacts.buildTime,
+                    previousFacts.buildCostMetal,
+                    previousFacts.buildCostEnergy,
+                    prev.episode->startTick,
+                    prev.episode->finishTick,
+                    settle,
+                    std::get<1>(*firstEmpty) == 0.0f,
+                    std::get<0>(*firstEmpty),
+                    cur.product,
+                    productFacts.buildTime,
+                    productFacts.buildCostMetal,
+                    productFacts.buildCostEnergy,
+                    cur.episode->startTick,
+                    cur.episode->finishTick,
+                    cur.model,
+                    cur.rweModel,
+                    cur.late,
+                    residue,
+                    lands,
+                    lands ? (cur.late - residue) / stallSettleTicks : -1});
+            }
+        }
+
+        return report;
+    }
+
+    const StallKnownException* stallKnownException(const StallEpisode& e)
+    {
+        for (const auto& known : stallKnownExceptions)
+        {
+            if (e.demo == known.demo && e.builderId == known.builderId && e.start == known.startTick)
+            {
+                return &known;
+            }
+        }
+        return nullptr;
+    }
+
+    /** Prints the report in the reference script's layout, so the two diff. Returns the failure count. */
+    unsigned int printStalls(const StallReport& report, bool list)
+    {
+        unsigned int failures = 0;
+
+        std::size_t total = 0;
+        std::size_t near = 0;
+        const std::tuple<std::string, unsigned int, std::size_t, std::size_t>* worst = nullptr;
+        for (const auto& s : report.senders)
+        {
+            total += std::get<2>(s);
+            near += std::get<3>(s);
+            if (worst == nullptr
+                || static_cast<double>(std::get<3>(s)) / static_cast<double>(std::get<2>(s))
+                    < static_cast<double>(std::get<3>(*worst)) / static_cast<double>(std::get<2>(*worst)))
+            {
+                worst = &s;
+            }
+        }
+        std::cout << "\n1. settle phase: " << near << " of " << total << " resource samples, from "
+                  << report.senders.size() << " senders,\n"
+                  << "   sit within " << stallSampleLag << " ticks of a multiple of " << stallSettleTicks << " of the demo clock\n";
+        if (worst != nullptr)
+        {
+            std::cout << "   least aligned sender: " << std::get<0>(*worst) << " sender " << std::get<1>(*worst)
+                      << ", " << std::get<3>(*worst) << " of " << std::get<2>(*worst) << "\n";
+        }
+        for (const auto& [demo, sender, n, k] : report.senders)
+        {
+            if (static_cast<double>(k) / static_cast<double>(n) < stallPhaseShare)
+            {
+                std::cout << "MISS phase: " << demo << " sender " << sender << ": only " << k << " of " << n
+                          << " samples near a settle\n";
+                ++failures;
+            }
+        }
+
+        auto shape = [&](const std::string& kind) {
+            auto it = report.shape.find(kind);
+            return it == report.shape.end() ? 0u : it->second;
+        };
+        auto withEmpty = [&](const std::string& kind) {
+            auto it = report.shapeWithEmptySample.find(std::make_pair(kind, true));
+            return it == report.shapeWithEmptySample.end() ? 0u : it->second;
+        };
+        std::cout << "\n2. factory builds on the " << report.agreeingCells << " cells the build model explains:\n";
+        for (const auto* kind : {"on the model", "late by 30k", "late otherwise", "early"})
+        {
+            std::cout << "   " << std::left << std::setw(15) << kind << std::right << " " << std::setw(6) << shape(kind)
+                      << "   with an empty store sampled inside: " << std::setw(5) << withEmpty(kind) << "\n";
+        }
+        auto late = shape("late by 30k") + shape("late otherwise");
+        if (late != 0)
+        {
+            std::cout << "   " << shape("late by 30k") << " of " << late
+                      << " late builds are late by whole seconds, where chance gives 1 in " << stallSettleTicks << "\n";
+        }
+
+        std::cout << "\n3. a factory refused into its next job by a stall the 0x28 stream saw:\n";
+        for (const auto& [key, count] : report.tally)
+        {
+            std::cout << "   " << std::left << std::setw(50) << key << std::right << " " << std::setw(5) << count << "\n";
+        }
+        std::set<long long> residues;
+        std::set<std::pair<std::string, unsigned int>> players;
+        std::set<std::string> demosHit;
+        std::size_t hits = 0;
+        for (const auto& e : report.scored)
+        {
+            if (e.hit)
+            {
+                ++hits;
+                residues.insert(e.residue);
+                players.emplace(e.demo, e.ownerBlock);
+                demosHit.insert(e.demo);
+            }
+        }
+        std::cout << "   scored " << report.scored.size() << ", residue predicted exactly in " << hits << "\n"
+                  << "   " << residues.size() << " distinct residues, " << players.size() << " players, "
+                  << demosHit.size() << " demos\n";
+
+        if (list)
+        {
+            for (const auto& e : report.scored)
+            {
+                std::cout << "   " << e.demo << " block " << e.ownerBlock << " " << e.builder << " " << e.previousProduct
+                          << "->" << e.product << " finish " << e.previousFinish << " settle " << e.settle << " ("
+                          << (e.metalEmpty ? "metal" : "energy") << " empty at " << e.sampleTick << ") start " << e.start
+                          << " late " << e.late << " residue " << e.residue << (e.hit ? "" : "   <-- MISS") << "\n";
+            }
+        }
+
+        std::size_t seen = 0;
+        for (const auto& e : report.scored)
+        {
+            auto shortfall = ((e.residue - e.late) % stallSettleTicks + stallSettleTicks) % stallSettleTicks;
+            if (const auto* known = stallKnownException(e))
+            {
+                ++seen;
+                if (!e.hit && shortfall == known->shortfall)
+                {
+                    std::cout << "KNOWN " << e.demo << " " << e.builder << " -> " << e.product << " at " << e.start << ": "
+                              << shortfall << " ticks short of its residue, which only an assist can make\n";
+                    continue;
+                }
+                std::cout << "MOVED " << e.demo << " " << e.builder << " -> " << e.product << " at " << e.start
+                          << ": was " << known->shortfall << " short, now late " << e.late << " against residue "
+                          << e.residue << "\n";
+                ++failures;
+                continue;
+            }
+            if (!e.hit)
+            {
+                std::cout << "MISS " << e.demo << " " << e.builder << " " << e.builderId << " -> " << e.product
+                          << ": start " << e.start << ", late " << e.late << ", predicted " << e.residue << " + 30k ("
+                          << shortfall << " short)\n";
+                ++failures;
+            }
+        }
+        if (seen != std::size(stallKnownExceptions))
+        {
+            std::cout << "MOVED: " << (std::size(stallKnownExceptions) - seen)
+                      << " build(s) named as known exceptions are no longer scored\n";
+            ++failures;
+        }
+
+        if (report.scored.empty())
+        {
+            std::cout << "nothing to score\n";
+            return failures + 1;
+        }
+        if (failures != 0)
+        {
+            std::cout << "\n" << failures << " disagreement(s)\n";
+            return failures;
+        }
+        std::cout << "\nevery sender settles on the common phase; " << hits << " of " << report.scored.size()
+                  << " scored builds land on their residue and the " << (report.scored.size() - hits)
+                  << " known exception(s) still read what they read\n";
+        return failures;
+    }
+
+    /**
+     * Picks the stall episodes worth checking in, and writes them.
+     *
+     * Variety, not volume: what an episode asserts beyond "a stall costs whole
+     * seconds" is the residue, 30 - start % 30, so the rule is one episode per
+     * distinct residue. Of the builds that share one, the one with the fewest
+     * further stalled seconds wins -- it is the shortest run and the least of
+     * it rests on settles no sample saw -- then the earliest by provenance.
+     */
+    void writeStallEpisodes(std::ostream& out, const StallReport& report)
+    {
+        std::map<long long, const StallEpisode*> byResidue;
+        for (const auto& e : report.scored)
+        {
+            if (!e.hit)
+            {
+                continue;
+            }
+            auto& slot = byResidue[e.residue];
+            if (slot == nullptr
+                || std::make_tuple(e.furtherStalls, e.demo, e.ownerBlock, e.start)
+                    < std::make_tuple(slot->furtherStalls, slot->demo, slot->ownerBlock, slot->start))
+            {
+                slot = &e;
+            }
+        }
+
+        unsigned int divergent = 0;
+        for (const auto& [residue, e] : byResidue)
+        {
+            divergent += e->rweModel == e->model ? 0 : 1;
+        }
+        std::cout << byResidue.size() << " stall episode(s), " << divergent << " of them where RWE is expected to differ\n";
+
+        out << R"(#pragma once
+
+// GENERATED FILE -- do not edit by hand. Regenerate with tad_episodes
+// --emit-stall-cpp; the command, and the corpus it needs, are in
+// docs/TA-DEMOS.md.
+//
+// Episodes mined from real Total Annihilation games, for the stall cases in
+// economy.test.cpp. Its siblings hold the storage, build-timing and weapon
+// episodes; they share no struct and regenerate independently.
+//
+// WHY THIS IS A HEADER OF STRUCTS AND NOT A DATA FILE. rwe_test is hermetic --
+// it reads no files, mounts no VFS and opens no archive -- and it stays that
+// way. Demos and mod files never enter the repository either. So the numbers
+// travel as source: each unit's own FBI values are transcribed inline beside the
+// observation they explain, and a test can be read without either.
+//
+// WHAT AN EPISODE IS. A factory finishes one product in a second whose settle a
+// 0x28 sample shows stalled -- a store read exactly empty -- and starts its next
+// product before the following settle. It was granted resources in the stalled
+// second, so the settle left it in debt, so the new job is refused from its
+// first tick until a settle pays the debt off. TA settles every player on the
+// same ticks, multiples of 30 of the demo clock (docs/TOTALA-EXE.md section
+// 102), so the job starts late by exactly 30 - startTick % 30, plus a whole 30
+// for every further settle the player stayed stalled.
+//
+// WHAT IS PREDICTED AND WHAT IS READ. residueTicks comes from the start tick and
+// the settle cadence alone; nothing about it is read from the build it
+// predicts, and over settles the sample says did NOT stall the same selection
+// predicts no build at all (tools/tad-stalltime.py prints the control).
+// furtherStalledSettles IS read from the observation, because the corpus sees
+// one settle in four and the ones between samples are not observed; a test
+// replays that many and asserts the rest.
+//
+// WHICH BUILDS MAY BE HERE. Only an immobile builder, on a (builder, product)
+// cell whose modal duration the float32 build model already explains, with
+// neither the build nor the builder's jobs either side of it early against the
+// model: an early build means something assisted it, and an assist moves a
+// duration by an amount nothing in the stream records. One episode per residue.
+
+namespace rwe
+{
+    struct TadStallEpisode
+    {
+        /** Provenance: the demo, the owner block, and the factory's unit id in it. */
+        const char* demo;
+        unsigned int ownerBlock;
+        unsigned int builderId;
+
+        /** The factory, with its own WorkerTime from the FBI. */
+        const char* builderName;
+        unsigned int workerTime;
+
+        /**
+         * The job the factory finished in the stalled second, with its FBI
+         * figures. All a test needs of it is that the factory was granted a
+         * tick's worth of it before the settle; previousFinishTick is that tick.
+         */
+        const char* previousProductName;
+        unsigned int previousBuildTime;
+        unsigned int previousBuildCostMetal;
+        unsigned int previousBuildCostEnergy;
+        unsigned int previousStartTick;
+        unsigned int previousFinishTick;
+
+        /**
+         * The settle that stalled, and the 0x28 that saw it: the sample's tick
+         * and which store read empty. The sample lags the settle by the few
+         * ticks a sender's clock runs behind.
+         */
+        unsigned int stalledSettleTick;
+        bool metalEmpty;
+        unsigned int sampleTick;
+
+        /** The job that was refused into, with its FBI figures. */
+        const char* productName;
+        unsigned int buildTime;
+        unsigned int buildCostMetal;
+        unsigned int buildCostEnergy;
+        unsigned int startTick;
+        unsigned int finishTick;
+
+        /** The float32 build model's duration for this job, unimpeded. */
+        unsigned int modelDurationTicks;
+
+        /** Observed: (finishTick - startTick) - modelDurationTicks. */
+        unsigned int lateTicks;
+
+        /** Predicted: 30 - startTick % 30. lateTicks is this plus 30 * furtherStalledSettles. */
+        unsigned int residueTicks;
+
+        /** Read from the observation: settles after the sampled one that also stalled. */
+        unsigned int furtherStalledSettles;
+
+        /**
+         * What RWE is expected to differ by, and why. Computed, as the build
+         * episodes' is: RWE's integer accumulator against TA's float32 fraction,
+         * which part company only where BuildTime divides exactly by the rate.
+         * A settle is not in it -- RWE settles every player on the same ticks,
+         * and so, it turns out, does TA.
+         */
+        int expectedDurationDelta;
+        const char* expectedDifference;
+    };
+
+    // clang-format off
+    inline constexpr TadStallEpisode tadStallEpisodes[] = {
+)";
+
+        for (const auto& [residue, e] : byResidue)
+        {
+            auto delta = static_cast<int>(e->rweModel) - static_cast<int>(e->model);
+            out << "        {\"" << e->demo << "\", " << e->ownerBlock << ", " << e->builderId << ",\n"
+                << "            \"" << e->builder << "\", " << e->workerTime << ",\n"
+                << "            \"" << e->previousProduct << "\", " << e->previousBuildTime << ", "
+                << e->previousCostMetal << ", " << e->previousCostEnergy << ", " << e->previousStart << ", "
+                << e->previousFinish << ",\n"
+                << "            " << e->settle << ", " << (e->metalEmpty ? "true" : "false") << ", " << e->sampleTick << ",\n"
+                << "            \"" << e->product << "\", " << e->buildTime << ", " << e->costMetal << ", "
+                << e->costEnergy << ", " << e->start << ", " << e->finish << ",\n"
+                << "            " << e->model << ", " << e->late << ", " << e->residue << ", " << e->furtherStalls << ",\n"
                 << "            " << delta << ", "
                 << (delta == 0
                            ? std::string("nullptr")
@@ -3729,6 +4508,8 @@ int main(int argc, char* argv[])
                   << "  --emit-shots  write every 0x0d, 0x0b and 0x0c as JSON Lines (needs --units)\n"
                   << "  --emit-cpp    write the storage episodes as a C++ header (needs --units)\n"
                   << "  --emit-build-cpp  write the build-timing episodes as a C++ header (needs --units)\n"
+                  << "  --stall-episodes  print the settle phase, the stall quantum and the stall episodes\n"
+                  << "  --emit-stall-cpp  write the stall episodes as a C++ header (needs --units)\n"
                   << "  --cells       print the (builder, product) build-timing cells\n"
                   << "  --weapon-cells  print the (shooter, weapon slot) flight-time cells\n"
                   << "  --emit-weapon-cpp  write the weapon-flight episodes as a C++ header\n"
@@ -3891,6 +4672,12 @@ int main(int argc, char* argv[])
     /** Demos whose own type count disagrees with --units; see mineBuildCells. */
     std::set<std::string> wrongDataSet;
 
+    // The stall pass needs every build, rejected or not -- the builds it is about
+    // are the ones marked "owner stalled" -- and every resource sample, so it
+    // keeps its own copy of each demo rather than depending on --all.
+    auto wantStalls = args.contains("stall-episodes") || args.contains("emit-stall-cpp");
+    std::vector<StallDemo> stallDemos;
+
     WeaponSlotTally weaponSlots;
 
     // A weapon cell pools across demos for the same reason a build cell does,
@@ -3982,6 +4769,11 @@ int main(int argc, char* argv[])
             auto mined = mineStorageEpisodes(handler, loadOrder, unitFacts, maxTypes, maxPerPlayer);
             std::cout << "  " << mined.size() << " storage episode(s)\n";
             storageEpisodes.insert(storageEpisodes.end(), mined.begin(), mined.end());
+        }
+
+        if (wantStalls)
+        {
+            stallDemos.push_back(StallDemo{handler.demo, handler.episodes, handler.resourceRecords, handler.senderBlock});
         }
 
         if (args.contains("emit-resources"))
@@ -4234,6 +5026,38 @@ int main(int argc, char* argv[])
         {
             std::cerr << "cannot write " << out << "\n";
             return 1;
+        }
+    }
+
+    if (wantStalls)
+    {
+        if (loadOrder.empty())
+        {
+            std::cerr << "--stall-episodes and --emit-stall-cpp need --units: a build is scored only on a"
+                      << " cell the build model explains, and an episode carries its units' FBI values\n";
+            return 1;
+        }
+
+        auto report = mineStalls(stallDemos, loadOrder, unitFacts, wrongDataSet, minBuilds);
+        if (args.contains("stall-episodes"))
+        {
+            for (const auto& demo : wrongDataSet)
+            {
+                std::cout << "excluding " << demo << ": its unit table disagrees with --units\n";
+            }
+            printStalls(report, true);
+        }
+
+        if (args.contains("emit-stall-cpp"))
+        {
+            auto out = args.getString("emit-stall-cpp");
+            std::ostringstream generated;
+            writeStallEpisodes(generated, report);
+            if (!writeGeneratedHeader(out, generated.str()))
+            {
+                std::cerr << "cannot write " << out << "\n";
+                return 1;
+            }
         }
     }
 

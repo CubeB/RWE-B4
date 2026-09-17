@@ -125,6 +125,34 @@ def builder_class(unit):
     return "airborne" if flies(unit) else "ground"
 
 
+def unit_namer(episodes):
+    """name_at(demo, unit id, tick): the most recent build of that id to finish by then.
+
+    Scoped in time because TA recycles unit ids; see cells(). A function of its
+    own so that tools/tad-stalltime.py names builders exactly the way the cells
+    here do rather than with a copy of the rule.
+    """
+    lives = collections.defaultdict(list)
+    for e in episodes:
+        name = e.get("unitName")
+        if name is not None:
+            lives[(e["demo"], e["unitId"])].append((e["finishTick"], name))
+    for entries in lives.values():
+        entries.sort()
+
+    def name_at(demo, unit_id, tick):
+        entries = lives.get((demo, unit_id))
+        if not entries:
+            return None
+        best = None
+        for finish, name in entries:
+            if finish <= tick:
+                best = name
+        return best
+
+    return name_at
+
+
 def cells(episodes, units, min_builds):
     """(builder type, product type) -> the durations of every build of that pair.
 
@@ -148,23 +176,7 @@ def cells(episodes, units, min_builds):
     What it buys is evidence: builds roughly double and four more pairs clear
     --min-builds.
     """
-    lives = collections.defaultdict(list)
-    for e in episodes:
-        name = e.get("unitName")
-        if name is not None:
-            lives[(e["demo"], e["unitId"])].append((e["finishTick"], name))
-    for entries in lives.values():
-        entries.sort()
-
-    def name_at(demo, unit_id, tick):
-        entries = lives.get((demo, unit_id))
-        if not entries:
-            return None
-        best = None
-        for finish, name in entries:
-            if finish <= tick:
-                best = name
-        return best
+    name_at = unit_namer(episodes)
 
     grouped = collections.defaultdict(list)
     for e in episodes:

@@ -1128,6 +1128,147 @@ the number that would overturn the reading if a demo ever produced one.
 and they are attributable. Recovering expenditure by difference still waits on
 naming the last six.
 
+#### What a stalled settle costs a factory, and where the settles fall
+
+The stall half of the economy oracle. `docs/TOTALA-EXE.md` §23 has the settle
+and §102 the re-reading this rests on. The rule that matters: between settles a
+consumer's only gate is its own debt, only a settle writes debt, and a settle
+that can pay a debt leaves it at exactly zero. So a builder granted anything in
+a second whose settle falls short is refused every tick until a settle pays,
+and a stall costs whole seconds.
+
+**Which episode, and why not the stockpile path.** Two shapes were on the table.
+
+- *The stockpile path*: predict slots 0 and 1 across a window from the player's
+  composition. That needs a production model the stream cannot supply. Wind
+  speed is not in it. What an extractor makes depends on the metal under its
+  footprint, which is map data. Reclaim income is not recorded at all. Spending
+  needs every builder's rate, the mobile builders' and the assists' included,
+  plus every shot's charge. The last six floats that might carry production and
+  spending are still unnamed. And a sample lands on one settle in four, so the
+  three between are guessed. Not attempted: it cannot be made hermetic, and it
+  would test the model of the game rather than the engine.
+- *Build lateness*: what the debt rule does to a factory's build timings, with
+  the `0x28` stream only as the witness that a settle stalled. The build model is
+  already solved (`tools/tad-buildtime.py`), a factory has nothing to walk to or
+  deploy, and the test can call the lathe and let the engine's own settle decide.
+  This is the one taken.
+
+Of 60,760 non-watcher samples over the twelve Escalation demos, 6,268 read an
+empty metal store and 1,538 an empty energy store (227 both). Those are what a
+stall looks like from outside.
+
+`tools/tad-stalltime.py` is the reference. It reuses `tad-buildtime.py`'s model
+and builder naming, and `tad_episodes --stall-episodes` prints the same report
+line for line. It measures three things:
+
+1. **Where the settles fall.** Every `0x28` comes from the settle pass, so its
+   tick marks a settle. 60,588 of the 60,760 samples, from all 86 senders, sit
+   within 6 ticks of a multiple of 30 of the demo clock, and the least aligned
+   sender still has 208 of 211 there. The few ticks are how far a sender's clock
+   runs behind. Settles are not staggered per player, and §102 found why: every
+   player's counter starts on the same tick. Scored per sender at 95%.
+2. **The quantum.** Over factory builds on the 45 cells the build model
+   explains, 3,546 land on the model and 2,653 are late. **2,011 of the late ones
+   are late by an exact multiple of 30**, where chance gives one in thirty. Only
+   4 of the on-time builds have an empty store sampled inside them, against 1,388
+   of the whole-second ones. Printed, not scored. Assists shorten a build by an
+   amount nothing records, so 7,578 builds are early and no filter can clean that
+   population.
+3. **The episodes, scored.** A factory finishes a job in the second before a
+   settle whose sample reads an empty store. It starts its next job before the
+   following settle. It was granted resources in the stalled second, so it owes,
+   so the new job is refused until a settle pays. The prediction is that the job
+   is late by exactly `30 - start % 30` plus a whole 30 per further stalled
+   settle. The residue comes only from the start tick and the settle cadence.
+   Nothing about it is read from the build it predicts.
+
+The filters, with what each took out of 138 candidates:
+
+| Filter | Removed |
+|---|---|
+| The (builder, product) cell's mode is not explained by the build model | 14 |
+| The builder's build before or after this one is early, so something was assisting it | 45 |
+| This build is early | 1 |
+| Frame or builder damaged, or a speed change | 1 |
+
+That leaves **77 scored builds, and 73 land exactly on their residue**. The four
+that do not are all *short* of it, by 19, 2, 18 and 4 ticks, and none is long. A
+debt can only lengthen a job, while an assist can only shorten one, so they read
+as assists the neighbour guard missed. That is a reading, not a proof, so the
+script names them in `KNOWN_EXCEPTIONS` and fails if they move. They never
+become episodes.
+
+**The control is what makes the residue mean anything.** The same pattern over a
+settle whose sample reads a *non*-empty store predicts the residue in **0 of
+449** builds. The finish-then-start pattern alone does not produce it; the
+stall does.
+
+**The fixture.** `tad_episodes --emit-stall-cpp` writes
+`src/rwe/sim/tad_stall_episodes.h`: 24 episodes, one per distinct residue. Where
+several builds share a residue, the one with the fewest further stalled settles
+wins, because it is the shortest replay and rests least on settles no sample saw.
+They come from 6 demos and 7 owner blocks, with both an empty metal store and an
+empty energy store among them. Each carries the factory's `WorkerTime` and both
+jobs' `BuildTime`, `BuildCostMetal` and `BuildCostEnergy`, the stalled settle
+and the sample that saw it, the model duration, the residue, and
+`furtherStalledSettles`. That last one is **read from the observation**: the
+corpus sees one settle in four, so how long a stall ran is taken from the build,
+and what is asserted is everything else. Two episodes carry
+`expectedDurationDelta = -1`, the two `CORLAB -> CORCRASH` builds, whose
+`BuildTime` of 1820 divides exactly by 4 (§88, the integer accumulator). Nothing
+about the settle needs a delta.
+
+**The tests.** Three `[economy][corpus]` cases in `economy.test.cpp`. Each
+replays an episode through `GameSimulation::tick` with one player per owner block
+up to the episode's. The sampled store is emptied for exactly the stalled
+settles and refilled after. The test calls the factory path's two calls itself
+-- `GameSimulation::addResourceDelta` with the step's cost, then
+`UnitState::addBuildProgress` if accepted -- once per tick, after `tick()`
+returns, which is where the behaviour pass runs relative to `updateResources`.
+It does not go through `UnitBehaviorService`, for the reason
+`buildtime.test.cpp` gives. The settle's cadence, its phase and the debt gate
+are all the engine's own. The cases assert that the job finishes on the demo's
+duration plus the delta; that the first accepted tick is a multiple of 30 and
+exactly `residue + 30 * furtherStalledSettles` after the start; and that the
+fixture spans at least 20 residues, three owner blocks, both resources, and
+deltas only on divisible pairs. All 24 passed on the first run.
+
+**Mutations**, each run against the whole `[economy]` and `[build][corpus]` sets:
+
+| Mutation | Episodes moved |
+|---|---|
+| Settle on `gameTime % 30 == 1` instead of `0` | all 24, in both the duration and the first-accepted-tick case |
+| `UnitState::inResourceDebt` always false, so debt never refuses | all 24, in both |
+| Settle each player on its own phase, `(gameTime + playerIndex) % 30 == 0` | 22: every episode except the two owned by block 0 (`14726` `ARMVP -> ARMFAV` at 61193, `14727` `ARMVP -> ARMFAV` at 67434) |
+| Forgive the carried debt at each settle, keeping only the new shortfall | 21: every episode except the three with no further stalled settle (`14725` `ARMLAB -> ARMCK` at 105832, `14734` `ARMLAB -> ARMPW` at 63576, `14734` `CORAP -> CORFINK` at 71614) |
+
+None of the four moved a `[build][corpus]` case or a storage episode. Each moved
+exactly the subset its mechanism predicts, which says the episodes measure the
+cadence, the phase, the debt gate and the debt's persistence rather than a
+constant.
+
+**What is still not assertable.** The fractions a single settle computes: how a
+partial shortfall splits between debt and new asks, and how much a stalled
+factory owes. A debt the next settle pays costs one second whatever its size, so
+the corpus cannot see the size. That needs a sample on every settle, and the
+stream gives one in four.
+
+Regenerating (Escalation; the paths are a local corpus):
+
+```bash
+./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc \
+    --emit-stall-cpp src/rwe/sim/tad_stall_episodes.h
+./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc --all \
+    --emit-json /tmp/ep.json --emit-resources /tmp/res.json
+tools/tad-stalltime.py --episodes /tmp/ep.json --resources /tmp/res.json \
+    --units ~/ta-mods/x-esc
+```
+
+The first drops the ProTA demo, 14724, because its unit table declares 317 types
+against the 549 `--units` gives. The script drops it the same way, from the
+`unitTypes` field `--emit-resources` now records.
+
 ### `0x2c`, unit state -- every bit, read out of `TotalA.exe`
 
 Unlike the sections above, this one was decoded from the binary first and held
@@ -1299,8 +1440,8 @@ carried **no waypoints**, with none between the shot and the damage, was standin
 still for the whole flight. That is a zero-drift filter over mobile victims, and
 it does not cost the missile class its fast targets by assumption. It has not
 been built. It does not help against aircraft, whose entries are goals rather
-than positions. The footprint residual stays open: the aim point *is* the centre,
-so the collision-volume reading is now the only one left. *Hit or miss*: health
+than positions. The footprint residual, which this section left as the only
+reading remaining, has since been settled that way: see "Where a round stops". *Hit or miss*: health
 is sampled once a cycle, so a victim's health across the two records bracketing a
 shot, against the `0x0b` damage recorded between them, is a direct test of how
 incomplete `0x0b` is and of whether a shot with no damage record really missed
@@ -1623,6 +1764,16 @@ Settled by the economy oracle, and inherited by everything after it.
   from the cells rather than printing a warning and hoping -- which is what lets
   the regeneration below be a plain `--dir` over the whole corpus with the one
   ProTA recording in it.
+
+- **A stall episode predicts part of its observation and reads the rest, and
+  says which is which.** The fourth fixture, `tad_stall_episodes.h`, asserts a
+  factory's lateness after a stalled settle. The residue, `30 - start % 30`, is
+  predicted. The number of further stalled settles is read from the build,
+  because the corpus samples one settle in four. The script's control shows the
+  predicted half is real: the same selection over settles that did *not* stall
+  predicts no build. One episode per residue is the variety rule. The episodes,
+  the filters and the mutations are under `0x28`, "What a stalled settle costs a
+  factory".
 
 - **A weapon-flight cell is a shot, not an aggregate, and it says how much
   company it had.** There are three fixtures now, one per oracle, in three
