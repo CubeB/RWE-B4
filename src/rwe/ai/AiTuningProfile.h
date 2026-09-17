@@ -512,8 +512,24 @@ namespace rwe
          * stands rather than walks into a fight it chose, so a guard of one
          * is still worth having where a raid of one was called a gift.
          * Zero switches the whole feature off.
+         *
+         * **Off by default, because it was measured and it costs more than
+         * it saves.** Painted Desert, ten games, each slot run both ways:
+         * with the guard off a side took 71.7 units and army 27.2 against
+         * 44.6 and 15.1 with it on, and 76.9 and 34.5 against 68.0 and 29.0
+         * in the other slot -- worse in both. The release reasons say why:
+         * 69 of 81 guards ended with the builder having simply finished and
+         * only 6 with it lost, so two units were being taken off an army
+         * averaging 7.4 to escort jobs nothing was threatening.
+         *
+         * The mechanism is kept rather than deleted because the idea is
+         * right and the trigger is what is wrong -- it is raw distance, with
+         * no notion of danger. Triggering on the influence map instead wants
+         * the ThreatMap threaded into BuildManager, which is the one manager
+         * that does not receive it. Set this to 2 or 3 to play the old
+         * behaviour against its own absence.
          */
-        int buildSiteGuardSize{2};
+        int buildSiteGuardSize{0};
         /**
          * How far a build site has to be from the base anchor before the
          * builder placing something there is offered a guard. Short enough

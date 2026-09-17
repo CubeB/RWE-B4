@@ -1919,6 +1919,11 @@ namespace rwe
         // The ordinary front-of-base tower -- 160 out, per layOutBase's
         // world -- already qualifies as "away from the base" for this test.
         profile.buildSiteGuardMinDistance = 50_ss;
+        // The feature ships off, having measured worse than not having it,
+        // so this asks for it by name. What it pins -- that a guard is
+        // detached to the site and released when the job ends -- is the
+        // behaviour anyone switching it back on would be relying on.
+        profile.buildSiteGuardSize = 2;
 
         SECTION("a guard is detached to the site, and released once the tower stands")
         {
