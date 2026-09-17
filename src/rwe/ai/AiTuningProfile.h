@@ -304,9 +304,33 @@ namespace rwe
          * read: a land army is worth building right up until there is
          * nowhere for it to walk.
          *
-         * Zero -- the default -- is off, and is exactly the behaviour
-         * before this knob existed. It stays there until the arena has
-         * played it against its own absence.
+         * Zero -- the default -- is off, and that is now a measured
+         * choice rather than a cautious one. Played at 12 against its own
+         * absence, twenty 1800s games a map with the seats dealt, the
+         * capped side against the untouched one:
+         *
+         *   Hundred Isles  (92% water)  hulls 33 v 23, yards 29 v 17,
+         *                               died 4 of 20 v 7, income 12.4 v 8.0
+         *   Coast To Coast (54% water)  hulls 80 v 51, but army 29.5 v 87.1
+         *                               and income 9.8 v 11.2, nobody died
+         *   Evad River     (23% mixed)  hulls 22 v 19 -- nothing -- while the
+         *                               army fell to 19.4 v 84.3 and losses
+         *                               rose to 45.4 v 27.4
+         *   The Cold Place (20% mixed)  inert: no unreachable ground in any
+         *                               of the twenty, so it never fired
+         *
+         * So it pays where the water dominates and does not where it does
+         * not, and on Evad it bought no fleet at all while costing most of
+         * the army. A default would have to be gated on how much water
+         * there is, not merely on whether some ground is out of reach, and
+         * that is a knob nobody has needed yet.
+         *
+         * The harm this was held back for did not appear: the case where
+         * the cap fires while the enemy is still walkable happened in 0 of
+         * 40 games across both mixed maps the shipped set has. On Evad the
+         * enemy was across water in all twenty anyway; on The Cold Place
+         * there was no unreachable ground at all. Rare, not impossible --
+         * and with the knob off it cannot bite regardless.
          */
         int isolatedLandArmyCap{0};
         /**
@@ -366,8 +390,16 @@ namespace rwe
          * them.
          *
          * Zero -- the default -- is exactly the behaviour before this knob
-         * existed, and it stays there until the arena has played it against
-         * its own absence.
+         * existed, and it stays there because the arena could not exercise
+         * it. Twenty 1800s games on Hundred Isles, ten with it at 3 and ten
+         * with it off: both players reached Boom -> Attack in 10 games of 10
+         * in BOTH runs, and in neither run was there a single game where a
+         * player failed to reach Attack. On that map armySize crosses
+         * attackArmySize unaided, both seats having land to fight on, so the
+         * condition this widens is never the binding one. Raising it wants a
+         * map where a side really is fleet-only, which the shipped set may
+         * not contain: of seventeen maps probed, nine are 0% water and six
+         * are above 40%, and even at 92% both sides field a land army.
          */
         int attackNavalSize{0};
 
