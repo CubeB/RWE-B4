@@ -336,6 +336,18 @@ namespace rwe
             SimVector position;
             UnitId builderId;
             GameTime requestedAt;
+            /**
+             * What the influence map said could reach this site when the
+             * request was made.
+             *
+             * Kept because there is only one slot: without it the slot goes
+             * to whichever distant build order came last, so a tower going up
+             * under fire loses its guard to the next extractor started in an
+             * empty corner of the map. With it, the slot is held by the most
+             * threatened site instead. Zero when the threat test is switched
+             * off, which is what makes that case fall back to recency.
+             */
+            float threat{0.0f};
         };
         std::optional<BuildSiteGuardRequest> buildSiteGuardRequest;
         /**

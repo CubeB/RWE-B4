@@ -2008,6 +2008,65 @@ namespace rwe
         }
     }
 
+    TEST_CASE("the one guard slot is held by the most threatened site, not the most recent", "[ai]")
+    {
+        // There is a single buildSiteGuardRequest, and it used to be taken by
+        // whichever qualifying build order came last. Ten games at hard
+        // difficulty made 346 requests and produced 55 guards, so most were
+        // overwritten before anyone stood anywhere -- and the four builders
+        // that actually died were at sites reading 14988, 13560, 0 and 0.
+        // Recency was throwing away exactly the requests worth keeping.
+        //
+        // Measured over the same games, a tower is where the danger is: 12 of
+        // 21 laser tower sites had an enemy that could reach them against 25
+        // of 325 extractor sites, and a tower builder died at four times the
+        // rate. So the slot should end up on the tower under fire rather than
+        // on the next extractor started in an empty corner.
+        const SimVector somewhere(500_ss, 0_ss, 500_ss);
+
+        SECTION("an empty slot takes whatever asks for it")
+        {
+            std::optional<AiBlackboard::BuildSiteGuardRequest> held;
+            REQUIRE(BuildManager::guardRequestDisplaces(held, 0.0f));
+            REQUIRE(BuildManager::guardRequestDisplaces(held, 14988.0f));
+        }
+
+        SECTION("a more threatened site takes the slot off a quieter one")
+        {
+            std::optional<AiBlackboard::BuildSiteGuardRequest> held(
+                AiBlackboard::BuildSiteGuardRequest{somewhere, UnitId(1), GameTime(0), 0.0f});
+            REQUIRE(BuildManager::guardRequestDisplaces(held, 13560.0f));
+        }
+
+        SECTION("a quieter site does not take it off a threatened one")
+        {
+            // The case the measurement found: a tower going up under fire
+            // must not lose its guard to an extractor nothing is near.
+            std::optional<AiBlackboard::BuildSiteGuardRequest> held(
+                AiBlackboard::BuildSiteGuardRequest{somewhere, UnitId(1), GameTime(0), 14988.0f});
+            REQUIRE_FALSE(BuildManager::guardRequestDisplaces(held, 0.0f));
+            REQUIRE_FALSE(BuildManager::guardRequestDisplaces(held, 13560.0f));
+        }
+
+        SECTION("with the threat test switched off every site ties, and recency decides as before")
+        {
+            // buildSiteGuardThreat at zero leaves every site reading zero.
+            // Equal threat has to keep displacing or the slot would freeze on
+            // the first request until it timed out -- the kill switch is meant
+            // to restore the old behaviour exactly, not a new one.
+            std::optional<AiBlackboard::BuildSiteGuardRequest> held(
+                AiBlackboard::BuildSiteGuardRequest{somewhere, UnitId(1), GameTime(0), 0.0f});
+            REQUIRE(BuildManager::guardRequestDisplaces(held, 0.0f));
+        }
+
+        SECTION("an equally threatened site also displaces, for the same reason")
+        {
+            std::optional<AiBlackboard::BuildSiteGuardRequest> held(
+                AiBlackboard::BuildSiteGuardRequest{somewhere, UnitId(1), GameTime(0), 825.0f});
+            REQUIRE(BuildManager::guardRequestDisplaces(held, 825.0f));
+        }
+    }
+
     TEST_CASE("a builder assisting a factory is offered to the planner again", "[ai]")
     {
         // The bug this pins: a builder sent to lend a hand at a factory

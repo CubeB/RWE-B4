@@ -119,6 +119,15 @@ namespace rwe
         return static_cast<float>(def.maxHitPoints) * bestDps / metal;
     }
 
+    bool BuildManager::guardRequestDisplaces(const std::optional<AiBlackboard::BuildSiteGuardRequest>& held, float siteThreat)
+    {
+        if (!held)
+        {
+            return true;
+        }
+        return siteThreat >= held->threat;
+    }
+
     bool BuildManager::towerCostJustified(const AiTuningProfile& profile, const AiBlackboard& bb, const UnitDefinition& towerDef, int extractorsCovered)
     {
         if (profile.defenceValueMaxPaybackSeconds <= 0)
@@ -2603,10 +2612,31 @@ namespace rwe
                     && flatDistance(*site, *bb.baseAnchor) >= profile.buildSiteGuardMinDistance
                     && threatened)
                 {
-                    bb.buildSiteGuardRequest = AiBlackboard::BuildSiteGuardRequest{*site, builderId, bb.now};
-                    LOG_INFO << "AI build: unit " << builderId.value << " building " << next << " "
-                             << static_cast<int>(flatDistance(*site, *bb.baseAnchor).value) << " from base wants a guard"
-                             << " (threat " << siteThreat << ")";
+                    // There is one slot, and it used to be taken by whichever
+                    // qualifying build order came last. Measured over ten
+                    // games at hard difficulty, 346 requests produced 55
+                    // guards: most were overwritten before anybody stood
+                    // anywhere, and the one that won was chosen by recency,
+                    // which is not a priority at all. In the same run the four
+                    // builders that actually died were at sites reading
+                    // 14988, 13560, 0 and 0 -- so recency was throwing away
+                    // exactly the requests worth keeping.
+                    //
+                    // A standing request is therefore only displaced by a site
+                    // at least as threatened as it is. The comparison is >=
+                    // rather than > deliberately: with buildSiteGuardThreat
+                    // switched off every site reads zero, every request ties,
+                    // and recency decides exactly as it did before, so the
+                    // kill switch still restores the old behaviour whole. With
+                    // > the slot would instead freeze on the first request
+                    // until it timed out, which is a change nobody asked for.
+                    if (guardRequestDisplaces(bb.buildSiteGuardRequest, siteThreat))
+                    {
+                        bb.buildSiteGuardRequest = AiBlackboard::BuildSiteGuardRequest{*site, builderId, bb.now, siteThreat};
+                        LOG_INFO << "AI build: unit " << builderId.value << " building " << next << " "
+                                 << static_cast<int>(flatDistance(*site, *bb.baseAnchor).value) << " from base wants a guard"
+                                 << " (threat " << siteThreat << ")";
+                    }
                 }
                 return;
             }

@@ -117,6 +117,28 @@ namespace rwe
         static bool towerCostJustified(const AiTuningProfile& profile, const AiBlackboard& bb, const UnitDefinition& towerDef, int extractorsCovered = 0);
 
         /**
+         * Whether a build site wanting a guard should take the one guard slot
+         * off whatever is already holding it.
+         *
+         * There is a single `buildSiteGuardRequest`, and it used to go to
+         * whichever qualifying build order came last. Measured over ten games
+         * at hard difficulty, 346 requests produced 55 guards -- most were
+         * overwritten before anybody stood anywhere -- and in the same run the
+         * four builders that actually died were at sites the influence map
+         * read as 14988, 13560, 0 and 0. Recency was discarding precisely the
+         * requests worth keeping, so the slot goes to the most threatened site
+         * instead.
+         *
+         * The comparison is >= rather than > on purpose. With
+         * buildSiteGuardThreat switched off every site reads zero, every
+         * request ties, and recency decides exactly as it did before, so the
+         * kill switch still restores the old behaviour whole. With > the slot
+         * would freeze on the first request until it timed out, which is a
+         * behaviour change nobody asked for.
+         */
+        static bool guardRequestDisplaces(const std::optional<AiBlackboard::BuildSiteGuardRequest>& held, float siteThreat);
+
+        /**
          * An extractor cluster of ours that nothing defends, and where a
          * tower should go to cover it. See planOutpostDefence.
          */
