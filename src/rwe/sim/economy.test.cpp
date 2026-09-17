@@ -1,5 +1,5 @@
-#include <catch2/catch_approx.hpp>
 #include <algorithm>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <optional>
@@ -648,7 +648,7 @@ namespace rwe
             DYNAMIC_SECTION(stallEpisodeName(episode))
             {
                 auto replay = replayStall(episode);
-                REQUIRE(replay.settleStalled);
+                CHECK(replay.settleStalled);
                 REQUIRE(replay.finishTick.has_value());
 
                 auto duration = static_cast<int>(*replay.finishTick) - static_cast<int>(episode.startTick);

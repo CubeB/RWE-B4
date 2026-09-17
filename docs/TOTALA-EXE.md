@@ -4011,7 +4011,9 @@ reaches `0x465077`:
 
 `global+0x38A47` is the game tick counter. `player+0xF0` is pushed thirty ticks
 ahead every time it fires, so the settle at `0x46555A -> 0x401360` runs **once a
-second per player**, staggered by whatever each player's counter started at. The
+second per player**, on whatever tick each player's counter started at -- which
+§102 finds is the same tick for every player of a game, so in practice they all
+settle together. The
 gate the call itself sits behind (`0x46554F`, a word at `global+0x39239` that
 must be negative) is initialised to `0xFFFF` at `0x498199` and only ever moved by
 the endgame sequences, so in ordinary play it is always open.
@@ -8766,19 +8768,19 @@ original:
   runs a move mission first and its footer says `Moving`; RWE's single
   `BuildOrder` covers the walk and the work, so the mission line changes one
   order earlier (S:99).
-- **Every player's economy settles on the same tick.** The original's is
-  staggered: `player+0xF0` is pushed thirty ticks ahead each time it fires and
-  starts at whatever each player's counter started at (S:23), so ten players
-  settle on ten different ticks of the second. RWE settles the whole table when
-  `gameTime % 30 == 0`. Nothing observable hangs on which tick of a second a
-  player's settle lands, since nothing between settles is spent -- a consumer's
-  only gate in between is its own debt -- and staggering would mean carrying a
-  per-player phase through the game hash and the save to buy nothing. What it
-  does mean is that two players' states are **not comparable tick for tick**,
-  which matters when reading the demo corpus rather than when playing: a `0x28`
-  sample from one player and one from another, on the same tick, are up to a
-  second apart in their economies. The storage episodes in
-  `src/rwe/sim/tad_economy_episodes.h` are per player for that reason.
+- ~~**Every player's economy settles on the same tick.**~~ **Not a divergence
+  after all** (§102). This entry said the original staggers the settle per
+  player because `player+0xF0` starts at whatever each player's counter started
+  at. It starts at the current game tick, written for all ten player slots in
+  one loop (`0x464990` -> `0x464700`), so every player of a game settles on the
+  same tick, as RWE's `gameTime % 30 == 0` does. Only a saved game that
+  recorded different `UpdateTime`s could stagger them. The demo corpus agrees:
+  60,588 of 60,760 `0x28` samples from all 86 senders sit within 6 ticks of a
+  multiple of 30, and the stall episodes in `src/rwe/sim/tad_stall_episodes.h`
+  would move for every player but the first under a per-player phase. Two
+  players' `0x28` samples on nearby ticks can therefore be compared, within the
+  few ticks each sender's clock lags. The storage episodes stay per player
+  because a sample is its sender's own state, not because of the phase.
 
 ---
 
@@ -10593,3 +10595,129 @@ It took one session. The discarded return value at `0x41413E` was visible as
 soon as the two mobile build handlers were read side by side; what took the time
 was finding what could make the service loop run a waiting mission again in the
 same tick, and that was the sticky event bit.
+
+## 102. The settle, re-read: one phase for every player, and what a refusal costs
+
+§23 decoded the once-a-second settle and RWE ported it. This section is the
+second reading, done to check §23 against the demo corpus's stall evidence
+before anything was asserted from it. It confirms the arithmetic, corrects the
+claim that players settle on staggered ticks, and lists everywhere RWE's port
+still differs. The corpus side is in [TA-DEMOS.md](TA-DEMOS.md), under `0x28`,
+"What a stalled settle costs a factory".
+
+**Escalation did not touch any of it.** `tools/exe/patchdiff.py --range` finds
+no patched byte in `0x4011C0`–`0x401360` (the request and the three direct
+charges), `0x401360`–`0x401C20` (the settle), `0x464F80`–`0x4655B0` (the
+per-player pass), `0x402640`–`0x402B80` (`BuildingBuild`) or `0x41BA60`–`0x41BCD0`
+(the lathe). So the Escalation demos are valid evidence for everything below.
+
+### One settle, in order
+
+`0x401360(player)`:
+
+1. **Unit sweep**, every unit with `unit+0x110` bit 28, stride `0x118`:
+   - **`EnergyUse` is asked for here, once, for the whole second**, not a tick
+     at a time. On the switch path (bit 29, unit on) and on the no-switch path
+     (on or moving, bits 2-3) alike, `EnergyUse > 0` adds to *asked*
+     (`+0xC0`) and, only if the unit's **energy** owed (`+0xC8`) is not
+     positive, to *granted* (`+0xC4`) and sets the powered flag
+     (`0x4013F9`, `0x40164F`). That gate reads energy owed only; the request
+     routine `0x4011C0` a builder uses tests both.
+   - `EnergyUse < 0` is production, handicapped for a computer player, and
+     **leaves the powered flag clear** (`0x40147E`), so such a unit never takes
+     the extraction or metal-maker branch that follows.
+   - The extraction / `makesmetal` / wind / tidal chain is on the switch path
+     only; the no-switch path jumps straight to `0x4016C5`. §23 reads bit 29 as
+     "has a switch". That reading is not confirmed here -- the constructor does
+     not copy `onoffable` (`def+0x245` bit 2, stored at `0x42C8C9`) into it
+     directly -- and it matters for four Escalation metal makers that declare
+     no `OnOffable` (ARMFORGE, CORVAULT, ARMUWMFUS, CORUWMFUS).
+   - `EnergyMake`, `MetalMake` and both storage figures, for `unit+0x104 == 0`.
+   - **Cloak** (`0x4017D9`): the cost is truncated (`0x4E43A0`), compared with
+     the player's energy **stockpile** and, if covered, *subtracted from the
+     stockpile on the spot* (`0x40184A`), with the amount added to *asked* for
+     the display only. It never enters *granted*, so it is never throttled and
+     never becomes debt.
+   - The unit's eight live figures are added to the running totals.
+2. **Player block** `player+0xEC`, the same layout, added to the totals; then
+   the per-player base storage when `player+0x149` bit 0.
+3. Display copies and the lifetime totals (the qwords at `player+0xAC`-`+0xC4`).
+4. `S = stockpile + produced` per resource (`0x401A1D`, `0x401A25`).
+5. **The fractions**, energy then metal, `0x401A4D`, exactly as §23 has them.
+   The arithmetic runs on the x87 stack at 80 bits, but the two fractions are
+   stored as 4-byte floats (`fstp dword` at `0x401A72` and `0x401A9F`) before
+   the per-unit pass reads them back.
+6. Stockpile clamped to the storage **this same settle** rebuilt, the excess
+   added to the waste total.
+7. **Per-unit debt** `0x401B37`, then the player block's at `0x401BAE`:
+   `owed' = (granted - granted * newFraction) + (owed - owed * debtFraction)`,
+   the display copies taken, and produced, asked and granted zeroed.
+
+### What a refusal costs
+
+A factory's lathe charges its own block through `0x4011C0` (`0x41BC60`), which
+refuses when **either** resource is owed, records the ask for the display, and
+applies no progress. Nothing but step 7 writes *owed*, so:
+
+- A builder granted anything in a second whose settle falls short carries debt
+  out of it and is refused **every tick** until a settle pays it.
+- A settle that can pay it all has `debtFraction = 1.0`, and `owed - owed * 1.0`
+  is exactly zero, so the refusal ends **on** that settle and on no other tick.
+- A settle that cannot pay it leaves `debtFraction < 1` and the builder still
+  owes, so a long stall costs a whole second per settle.
+
+So a stall delays a job by whole seconds, and a job started while its factory
+still owes for the one before is delayed to the next settle that pays. The
+corpus shows both; see TA-DEMOS.md.
+
+### Every player settles on the same tick
+
+§23 and §88 said the settle is staggered per player "by whatever each player's
+counter started at". The counter is `player+0xF0`, and it has exactly two
+writers besides the `+= 30` at `0x465092`:
+
+- `0x464715`, in `0x464700(player)`, which stores the current game tick
+  (`global+0x38A47`). Its one caller, `0x464990`, walks **all ten player slots
+  in one loop** (`global+0x1B63`, stride `0x14B`), so every player of a game
+  gets the same tick.
+- `0x46623F`, which reads `UpdateTime` back out of a saved game.
+
+So in a game started normally every player settles on the same tick, and the
+stagger exists only if a saved game recorded different `UpdateTime`s. The corpus
+agrees without exception worth the name: 60,588 of the 60,760 non-watcher `0x28`
+samples, from all 86 senders in the twelve Escalation demos, are stamped within
+6 ticks of a multiple of 30 of the demo clock, and the least aligned sender still
+has 208 of 211 there.
+
+**Inside a tick**, the step at `0x4954BD` increments the game tick, then runs
+`0x48AD30` -- the unit pass, which reaches the mission service loop `0x43B7C0`
+at `0x48AF98` -- and only after the projectile (`0x49B720`) and feature
+(`0x420F30`) passes calls the per-player pass `0x464F80`. So a tick's lathe is
+counted into that same tick's settle. The corpus puts a stalled factory's first
+accepted increment on demo ticks that are multiples of 30, which with that order
+means either the settle runs at internal ticks one short of a multiple of 30 or
+the demo clock is stamped a tick behind the internal one. The corpus cannot tell
+those apart, and nothing depends on it: either way the seconds partition the
+lathes the same way.
+
+### Where RWE's economy differs
+
+Checked against `GameSimulation::updateResources`, `settleResourcePool`,
+`UnitState::addResourceDelta` / `settleResources` and the builder paths in
+`UnitBehaviorService`.
+
+| # | Difference | Documented before? | Effect |
+|---|---|---|---|
+| 1 | RWE settles every player when `gameTime % 30 == 0`. | §88, as a deliberate divergence from a stagger. | **None in a normal game** -- the original does the same, above. §88 is updated. |
+| 2 | RWE settles before the behaviour pass in a tick; the original after the unit pass. | No. | None: both count a tick's lathe into the same second (RWE's settle at 30 closes ticks 0-29). The stall episodes replay RWE's order and land on the corpus. |
+| 3 | RWE's `EnergyUse` request goes through `UnitState::addResourceDelta`, which refuses a unit owing **metal** as well; the original's settle sweep checks energy owed only. | No. | A unit with `EnergyUse` that also owes metal goes unpowered for a second in RWE. Small; not changed. |
+| 4 | RWE treats a negative `EnergyUse` as production **and** reports the unit powered, so it still extracts or makes metal; the original leaves it unpowered. | No. | None on Escalation's data: no unit has both a negative `EnergyUse` and an extractor or metal maker. |
+| 5 | RWE runs the make-and-use pass for any `activated` unit; the original runs the extraction/maker/wind/tidal chain only on the bit-29 path and charges a no-switch unit's `EnergyUse` while it is on **or moving**. | No. | Open while bit 29 is unconfirmed; see the four Escalation metal makers above. |
+| 6 | **Cloak**: RWE compares the untruncated cost with the stockpile and then *requests* it through `addResourceDelta`, so a cloak joins the throttled pool, can become debt, and is not charged at all while the unit already owes. The original subtracts the truncated cost from the stockpile directly. The comment in `updateResources` describes the original, not the code under it. | No. | Small. Not changed: nothing in the corpus pins it. |
+| 7 | **Weapons** (`energypershot`, `metalpershot`): RWE checks the stockpile, then *requests* the cost through `addResourceDelta` rather than subtracting it (`UnitBehaviorService.cpp`, the non-stockpile fire path). Several shots in one second each see the unreduced stockpile and can overdraw it into a throttle for every builder, and a shooter that already owes fires for **free**, because the refused request's return value is ignored. The original takes it from the stockpile on the spot (`0x401220`, `0x401260`, `0x4012A0`). | No; the comment at the call site says it is asked against the stores directly, which the code does not do. | **Reads as a bug.** Heavy energy-weapon fire can overdraw the stockpile and throttle every builder the player has for a second. Not changed here: the corpus tests do not cover it, and it moves every energy weapon's economy. |
+| 8 | Debt carried as `owed * (1 - f)` in float against the original's `owed - owed * f` at 80 bits. | No. | Sub-ulp. A fully paid debt is exactly zero in both. |
+| 9 | RWE clamps a negative supply to zero before settling. | In the code. | None: the original's stockpile cannot go negative. |
+| 10 | The computer player's production handicap. | §23, not ported. | Tuning, not compatibility. |
+
+Nothing in the table was changed. Row 7 is the one worth a decision.
+

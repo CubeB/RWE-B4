@@ -77,6 +77,8 @@ import json
 import os
 import sys
 
+sys.dont_write_bytecode = True  # importing tad-buildtime.py must not leave a __pycache__ in tools/
+
 _here = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location("tad_buildtime", os.path.join(_here, "tad-buildtime.py"))
 bt = importlib.util.module_from_spec(_spec)
