@@ -167,9 +167,21 @@ namespace rwe
          * the ordinary extractor, which is 3x3 and 50 metal. So this is
          * strictly the worse buy -- two and a half times the metal and four
          * times the energy for the same trickle -- and it is wanted only
-         * where the cheap one cannot go. Every submerged patch on a water map
-         * is worth nothing to the AI without it, which on Hundred Isles is a
-         * great many of them.
+         * where the cheap one cannot go.
+         *
+         * Which is far more often than it sounds. Censused across all 52
+         * shipped maps, 29 of them have metal under water, and on three the
+         * figure is EVERY patch they have: Brain Coral (1170 of 1170), Icy
+         * Bergs (1584 of 1584) and Polyp Fields (1080 of 1080). On those the
+         * AI cannot extract a gram of metal without this unit. Depths run 47
+         * to 85, comfortably past either side's requirement.
+         *
+         * The other 23 have none at all -- Hundred Isles is 92% water with
+         * 531 patches and not one of them wet -- because a Total Annihilation
+         * map puts its metal on land unless the designer meant otherwise. So
+         * BuildManager counts the submerged patches once and asks that,
+         * rather than asking how much water there is: the two are barely
+         * related, and Crystal Maze is 3% water with 36 submerged patches.
          *
          * Listed AFTER the ordinary extractor in buildPriorities on purpose:
          * the planner takes the first thing it can find a site for, so the

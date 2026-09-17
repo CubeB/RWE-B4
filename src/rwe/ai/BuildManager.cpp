@@ -152,6 +152,10 @@ namespace rwe
         }
         metalPatchesIndexed = true;
         const auto& metalGrid = sim.metalGrid;
+        const auto& heights = sim.terrain.getHeightMap();
+        const auto seaLevel = static_cast<int>(sim.terrain.getSeaLevel().value);
+        int submerged = 0;
+        int deepest = 0;
         for (int y = 0; y < metalGrid.getHeight(); ++y)
         {
             for (int x = 0; x < metalGrid.getWidth(); ++x)
@@ -159,9 +163,28 @@ namespace rwe
                 if (metalGrid.get(x, y) > sim.surfaceMetal)
                 {
                     metalPatches.emplace_back(x, y);
+                    // The heightmap is one larger than the metal grid on each
+                    // axis, so cell (x,y) reads its own top-left corner and
+                    // is always in bounds.
+                    auto depth = seaLevel - static_cast<int>(heights.get(x, y));
+                    if (depth > 0)
+                    {
+                        ++submerged;
+                        deepest = std::max(deepest, depth);
+                    }
                 }
             }
         }
+        // Once a game, and it answers a question that cost a whole arena run
+        // to ask: has the underwater extractor anything to stand on at all?
+        // ARMUWMEX needs MinWaterDepth=19 and CORUWMEX 10, so a map whose
+        // deepest patch is shallower than that can never use one however much
+        // water it has -- and the mex search cannot say so itself, because a
+        // patch it refuses lands in the same "taken or unbuildable" bucket as
+        // one that simply already has an extractor on it.
+        submergedMetalPatches = submerged;
+        LOG_INFO << "AI map: " << metalPatches.size() << " metal patches, " << submerged
+                 << " under water, deepest " << deepest;
     }
 
     namespace
@@ -1494,7 +1517,24 @@ namespace rwe
         // taking while wanting no navy at all, and without a gate of some
         // kind every land map would pay for a patch scan a pass to be told
         // there is nowhere to put one.
-        if (bb.mapIntel.valid && bb.mapIntel.waterFraction >= MixedMapWaterFraction)
+        // ...and only where there is actually metal under the water, which is
+        // asked directly rather than guessed at from how wet the map is.
+        //
+        // Both halves of that matter, and a census of all 52 shipped maps is
+        // what settled them. Wanting it unconditionally is dear: on a map
+        // with no submerged patch it cost about 3500 failed site searches and
+        // 4473 log lines in one game, every one asking the same question and
+        // getting the same answer -- and 23 of the 52 are such maps, Hundred
+        // Isles among them at 92% water with 531 patches and not one wet.
+        //
+        // But the water fraction is the WRONG test for it, which is worth
+        // saying plainly because it was the first thing tried. Metal under
+        // water has little to do with how much water there is: Crystal Maze
+        // is 3% water with 36 submerged patches, Sector 410b 4% with 81, Town
+        // & Country 8% with 135, Eastside Westside 9% with 261. A
+        // MixedMapWaterFraction gate would have refused every one of them.
+        // The count is exact where the fraction is a proxy, so the proxy goes.
+        if (submergedMetalPatches > 0)
         {
             want(s.underwaterMetalExtractor);
         }
@@ -1774,6 +1814,11 @@ namespace rwe
         {
             return;
         }
+        // Once a game, and cheap after that: buildPriorities reads
+        // submergedMetalPatches off this object to decide whether an
+        // underwater extractor has anywhere to stand, and it has no sim of
+        // its own to work that out with.
+        indexMetalPatches(sim);
         const auto& sideUnits = bb.sideUnits;
 
         planFactories(sim, profile, bb, outCommands);

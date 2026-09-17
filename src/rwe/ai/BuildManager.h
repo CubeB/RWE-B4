@@ -324,6 +324,17 @@ namespace rwe
         mutable std::vector<Point> metalPatches;
         mutable bool metalPatchesIndexed{false};
 
+        /**
+         * How many of those patches have water over them, counted on the same
+         * pass. Zero is the ordinary answer and the reason this is kept: a
+         * Total Annihilation map puts its metal on land, so a map can be 98%
+         * water and still have every one of its 315 patches dry. Without this
+         * the underwater extractor is wanted on every water map and its site
+         * search fails every time -- measured on Hundred Isles, 4473 mentions
+         * and about 3500 failed searches in a single game.
+         */
+        mutable int submergedMetalPatches{0};
+
         void indexMetalPatches(const GameSimulation& sim) const;
 
         /** What the next idle builder should build, most wanted first. */
