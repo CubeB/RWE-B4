@@ -890,6 +890,7 @@ set(TEST_FILES
     src/rwe/sim/burning.test.cpp
     src/rwe/sim/waterbuilding.test.cpp
     src/rwe/sim/weaponflight.test.cpp
+    src/rwe/sim/weaponfiretick.test.cpp
     src/rwe/setup/TaInstall.test.cpp
     src/rwe/sim/wreckcollision.test.cpp
     src/rwe/sim/wreckage.test.cpp
