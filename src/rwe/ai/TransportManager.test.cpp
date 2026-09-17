@@ -280,6 +280,74 @@ namespace rwe
         }
     }
 
+    TEST_CASE("the ground layer homes on the base, not on the tile the commander spawned on", "[ai]")
+    {
+        // The commander wades where the constructor the ground layer is
+        // labelled for cannot -- TANKDS2 to depth 100 against TANKSH2's 12 --
+        // so it walks off its spawn island and builds the whole base on ground
+        // no kbot it produces can ever leave. baseAnchor is homePosition, which
+        // EconomyManager sets the first tick it sees the commander and never
+        // revises, so the layer stayed homed on the island the AI abandoned,
+        // and every unit it owned read as unreachable from it.
+        //
+        // Measured on Hundred Isles before this: anchor at 2128,-1600, the AI's
+        // own lab at 592,-1216, both factories unreachable on this layer and
+        // the lab reachable on the commander's; 168,076 passenger refusals over
+        // six games, every one of them this gate, and not one ferry of either
+        // kind ever started. After: ferries start and complete.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeChannelTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineLandUnits(sim);
+        defineSeaTransport(sim);
+
+        // Only the commander may cross: the channel is 30 deep, and makeDef
+        // leaves every other land unit unable to wade at all. This is the
+        // asymmetry the whole defect rests on, so it is made explicit rather
+        // than inherited.
+        sim.unitDefinitions.at("ARMCOM").movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 100u};
+
+        auto commanderPosition = SimVector(-300_ss, 60_ss, 0_ss);
+        addUnit(sim, "ARMCOM", ai, commanderPosition, script);
+        auto mapIntel = analyseMap(sim.terrain, {});
+
+        SECTION("a base across water the constructor cannot cross becomes home")
+        {
+            auto labPosition = SimVector(400_ss, 60_ss, 0_ss);
+            addUnit(sim, "ARMLAB", ai, labPosition, script);
+
+            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, mapIntel);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 5, commands);
+
+            const auto& reach = controller.getReachabilityMap();
+            REQUIRE(reach.isValid());
+            // Without the re-homing this is false, and with it false every
+            // unit built here is refused a lift for the rest of the game.
+            REQUIRE(reach.isReachable(sim, labPosition));
+        }
+
+        SECTION("a base on the anchor's own island leaves the homing alone")
+        {
+            // The fallback fires only when NOT ONE factory is reachable, so on
+            // an ordinary map it must not fire at all: the far bank stays
+            // unreachable, which is what tells hasUnreachableGround and
+            // enemyAcrossWater there is water in the way.
+            auto labPosition = SimVector(-400_ss, 60_ss, 0_ss);
+            addUnit(sim, "ARMLAB", ai, labPosition, script);
+
+            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, mapIntel);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 5, commands);
+
+            const auto& reach = controller.getReachabilityMap();
+            REQUIRE(reach.isReachable(sim, labPosition));
+            REQUIRE(reach.isReachable(sim, commanderPosition));
+            REQUIRE_FALSE(reach.isReachable(sim, SimVector(400_ss, 60_ss, 0_ss)));
+        }
+    }
+
     TEST_CASE("a sea transport ferries the army across water it cannot walk", "[ai]")
     {
         auto script = makeEmptyCobScript();

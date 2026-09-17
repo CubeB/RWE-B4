@@ -129,6 +129,59 @@ namespace rwe
             {
                 timed("reachability", [&] {
                     reachability.rebuild(sim, moverDef->second.movementCollisionInfo, *blackboard.baseAnchor);
+
+                    // Home on the base we ACTUALLY have, not on the tile the
+                    // commander happened to spawn on.
+                    //
+                    // baseAnchor is homePosition, which EconomyManager sets the
+                    // first tick it sees the commander and never revises. The
+                    // commander's TANKDS2 wades to water depth 100 and climbs
+                    // slope 32 where the constructor's TANKSH2 -- which this
+                    // layer is labelled for -- stops at 12 and 15, so it walks
+                    // off its spawn island and builds the whole base on ground
+                    // no kbot it produces can ever leave. Nothing bounds that:
+                    // commanderMexSearchRadius leashes only the mex search.
+                    //
+                    // Measured on Hundred Isles: anchor at 2128,-1600, the AI's
+                    // own lab at 592,-1216, both factories unreachable on this
+                    // layer and the lab reachable on the commander's. Every unit
+                    // the AI owns is born out there, so TransportManager refused
+                    // every passenger it was ever offered -- 168,076 refusals in
+                    // six games and not one ferry, army or builder -- and
+                    // hasUnreachableGround, enemyAcrossWater, the land-army cap
+                    // and tower siting were all answering about an island the AI
+                    // abandoned in its opening minutes.
+                    //
+                    // Only fires when NOT ONE factory is reachable, which is the
+                    // unambiguous case: the base is somewhere this labelling
+                    // cannot see. Where the base really is on the anchor's
+                    // island the test passes on the first factory and nothing
+                    // changes. The shipyard excludes itself without a special
+                    // case, floating at MinWaterDepth=30 where no land mover can
+                    // stand. baseAnchor itself is deliberately left alone -- the
+                    // rally point, the defence facing and the mex leash keep
+                    // their present meaning; moving those is a bigger change and
+                    // is kept separate.
+                    if (!blackboard.factories.empty())
+                    {
+                        auto reachableFactory = std::any_of(
+                            blackboard.factories.begin(),
+                            blackboard.factories.end(),
+                            [&](UnitId id) { return reachability.isReachable(sim, sim.getUnitState(id).position); });
+                        if (!reachableFactory)
+                        {
+                            for (auto factoryId : blackboard.factories)
+                            {
+                                const auto& factoryPosition = sim.getUnitState(factoryId).position;
+                                if (reachability.isWalkable(sim, factoryPosition))
+                                {
+                                    reachability.rebuild(sim, moverDef->second.movementCollisionInfo, factoryPosition);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
                     blackboard.groundReachabilityValid = reachability.isValid();
                     blackboard.hasUnreachableGround = reachability.walkableTileCount() > reachability.reachableTileCount() + 64;
                     // A reachable count of 0 or 1 means setAnchor found no
