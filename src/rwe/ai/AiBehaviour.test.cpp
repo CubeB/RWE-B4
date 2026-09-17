@@ -2428,6 +2428,89 @@ namespace rwe
         }
     }
 
+    TEST_CASE("the lab stops making kbots for ground they cannot reach", "[ai]")
+    {
+        // makeChannelTerrain is the fixture that actually produces
+        // hasUnreachableGround -- the ferry test above asserts it on this
+        // same terrain -- but only once the kbots cannot wade the channel,
+        // which is what the movement class override below is for. Without
+        // it the far bank is reachable on foot and the cap never engages.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeChannelTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        for (auto* type : {"ARMCOM", "ARMCK", "ARMPW"})
+        {
+            sim.unitDefinitions.at(type).movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 20u};
+        }
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-300_ss, 60_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-250_ss, 60_ss, 0_ss), script);
+        // Three of them, so armySize clears a cap of two.
+        for (auto z : {0_ss, 30_ss, 60_ss})
+        {
+            addUnit(sim, "ARMPW", ai, SimVector(-200_ss, 60_ss, z), script);
+        }
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        // Straight to the raider branch: the lab makes its constructors first
+        // and would otherwise never reach the units under test.
+        profile.targetConstructorCount = 0;
+
+        // The branch picks rocket kbots here, not raiders -- with three
+        // raiders owned and no rocket kbots, "raiders <= rockets * 2" is
+        // false -- so both are counted, or the test would pass for the wrong
+        // reason.
+        auto kbotsQueued = [](const std::vector<PlayerCommand>& commands) {
+            return countQueueCommands(commands, "ARMPW") + countQueueCommands(commands, "ARMROCK");
+        };
+
+        SECTION("off by default, so it keeps making them")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            REQUIRE(controller.getBlackboard().hasUnreachableGround);
+            REQUIRE(kbotsQueued(commands) >= 1);
+        }
+
+        SECTION("with the cap set, the lab goes quiet and the income is freed")
+        {
+            profile.isolatedLandArmyCap = 2;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.hasUnreachableGround);
+            REQUIRE(bb.armySize >= 3);
+            REQUIRE(kbotsQueued(commands) == 0);
+        }
+
+        SECTION("the vehicle plant is capped too, not just the kbot lab")
+        {
+            // The cap guarded one of the three branches that make land combat
+            // units, and a knob that stops the lab while the plant beside it
+            // goes on making tanks has not capped anything. Pinned here
+            // because every other assertion in this test would still pass
+            // with the plant's guard removed.
+            addUnit(sim, "ARMVP", ai, SimVector(-250_ss, 60_ss, 60_ss), script);
+            profile.targetScoutVehicleCount = 0;
+
+            profile.isolatedLandArmyCap = 2;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            REQUIRE(controller.getBlackboard().hasUnreachableGround);
+            REQUIRE(countQueueCommands(commands, "ARMFLASH") == 0);
+            REQUIRE(kbotsQueued(commands) == 0);
+        }
+    }
+
     TEST_CASE("naval: a warship is never sent inland", "[ai]")
     {
         // Without MapIntel::sameWaterBody filtering the target, the land

@@ -1396,6 +1396,16 @@ namespace rwe
         const auto& s = bb.sideUnits;
         auto total = [&](const std::string& t) { return t.empty() ? 0 : countOf(bb.ownedTotalCounts, t); };
 
+        // Every factory that makes land combat units asks this, so it is
+        // asked once: it depends on the profile and the blackboard and not
+        // on which factory is being planned. Three branches below make
+        // them -- the kbot lab its raiders and rocket kbots, the vehicle
+        // plant its tanks, the advanced lab its assault kbots -- and a cap
+        // that guarded only one of them would quietly do nothing the
+        // moment a second factory type existed.
+        auto landArmyCapped = profile.isolatedLandArmyCap > 0 && bb.hasUnreachableGround
+            && bb.armySize >= profile.isolatedLandArmyCap;
+
         for (auto factoryId : bb.factories)
         {
             const auto& factory = sim.getUnitState(factoryId);
@@ -1457,8 +1467,11 @@ namespace rwe
                 {
                     next = s.scoutVehicle;
                 }
-                else
+                else if (!landArmyCapped)
                 {
+                    // A tank cannot cross water either. The scout above is
+                    // exempt for the same reason the constructor is: eyes
+                    // and builders are not the raiding army.
                     next = s.tank;
                 }
             }
@@ -1510,8 +1523,12 @@ namespace rwe
                 {
                     next = s.advancedConstructor;
                 }
-                else
+                else if (!landArmyCapped)
                 {
+                    // And neither can a Zeus or a Can, however good the
+                    // metal-for-metal trade is on land. The advanced
+                    // constructor above stays exempt with the other
+                    // builders.
                     next = s.advancedAssault;
                 }
             }
@@ -1528,6 +1545,27 @@ namespace rwe
                     // this lab can already build it, so the answer to being
                     // bombed does not need a second factory or a tech step.
                     next = s.antiAirKbot;
+                }
+                else if (landArmyCapped)
+                {
+                    // Deliberately nothing. The army is as large as it is
+                    // worth being on a map it cannot walk off, and the
+                    // income is wanted by the shipyards, which are the
+                    // only thing here that can reach the enemy at all.
+                    //
+                    // This branch sits below the constructor and anti-air
+                    // cases on purpose: the cap is about the raiding army,
+                    // not about stopping the base from working. A base
+                    // that cannot replace a lost constructor, or cannot
+                    // answer aircraft, has been capped into helplessness
+                    // rather than steered.
+                    //
+                    // Leaving next empty is what declines the order: the
+                    // guard below only queues when it is non-empty. The
+                    // lab is not told to stop, it is simply not topped up,
+                    // so it finishes what it holds and then idles -- and
+                    // an idle factory is not spending, which is the whole
+                    // point.
                 }
                 else if (!s.raider.empty() && !s.rocketKbot.empty())
                 {

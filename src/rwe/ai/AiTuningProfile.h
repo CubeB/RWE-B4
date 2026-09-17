@@ -251,8 +251,64 @@ namespace rwe
          * what it built on a water map before a navy existed.
          */
         int navalFleetSize{6};
-        /** Shipyards wanted, once the fleet target above is not zero. One is the whole navy's factory. */
-        int targetShipyardCount{1};
+        /**
+         * Shipyards wanted, once the fleet target above is not zero.
+         *
+         * One used to be the whole navy's factory, and one cannot deliver the
+         * fleet this profile asks for. A shipyard's WorkerTime is 100, the
+         * same as the kbot lab's, and a single factory gets through roughly
+         * 110,000 BuildTime in a whole 1800-second game -- while
+         * navalFleetSize=9 with targetSubmarineCount=3 means a Skeeter, a
+         * Hulk, six Crusaders and three Lurkers, which is 126,628 BuildTime
+         * from the shipped FBI data. The target was out of reach by
+         * arithmetic before a shot was fired, and the yard is only standing
+         * for the last 40% of the game besides.
+         *
+         * Two rather than three, measured over twenty 1800s games on Hundred
+         * Isles with the seats dealt, one side tuned against the other left
+         * alone: destroyers per game-with-a-yard went 0.70 -> 1.82 at two and
+         * 0.89 -> 2.09 at three. Two built 18 yards to three's 19 and more
+         * submarines (3 against 2), with the same best fleet of five. Three
+         * buys about one extra yard in twenty games and meets "cannot afford
+         * ARMSY" more often, so the smaller step takes nearly all of it.
+         *
+         * A land map is unaffected without needing its own gate: the want in
+         * buildPriorities is behind navalFleetTarget, which is zero on
+         * MapCharacter::Land.
+         */
+        int targetShipyardCount{2};
+        /**
+         * Land combat units the AI will go on making while there is
+         * ground it cannot walk to. Above this every factory that makes
+         * them goes quiet -- the kbot lab its raiders and rocket kbots,
+         * the vehicle plant its tanks, the advanced lab its assault kbots
+         * -- and the income goes to the yards instead. Scouts, builders
+         * and anti-air are exempt: they are not the raiding army, and a
+         * base that cannot replace a constructor or answer aircraft has
+         * been capped into helplessness rather than steered.
+         *
+         * The lab branch of planFactories is the only production branch
+         * with no idea what kind of map it is on: the air plant asks
+         * airMatters, the shipyard asks navalFleetTarget, and the lab
+         * asks nothing and makes raiders for ever. Measured over twenty
+         * 1800s games on Hundred Isles, a 92% water map, with the seats
+         * dealt: 1879 land units started against 34 hulls, about 55 to
+         * one, on a map where not one of those kbots can reach the enemy.
+         * Raising targetShipyardCount lifted hull starts from 5 to 34 and
+         * left that ratio almost where it was, because the yards and the
+         * lab draw on the same income and only one of them ever stops
+         * asking.
+         *
+         * Gated on hasUnreachableGround rather than on map character, so
+         * it is the same signal the ferry and the air transport already
+         * read: a land army is worth building right up until there is
+         * nowhere for it to walk.
+         *
+         * Zero -- the default -- is off, and is exactly the behaviour
+         * before this knob existed. It stays there until the arena has
+         * played it against its own absence.
+         */
+        int isolatedLandArmyCap{0};
         /**
          * Scout ships kept once a shipyard stands. Cheap eyes on the water
          * the way a scout plane is cheap eyes on the ground -- ARMPT is 100

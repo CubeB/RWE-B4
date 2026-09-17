@@ -193,6 +193,7 @@ namespace rwe
             || setInt("targetScoutVehicleCount", p.targetScoutVehicleCount)
             || setInt("navalFleetSize", p.navalFleetSize)
             || setInt("targetShipyardCount", p.targetShipyardCount)
+            || setInt("isolatedLandArmyCap", p.isolatedLandArmyCap)
             || setInt("targetScoutShipCount", p.targetScoutShipCount)
             || setInt("targetSeaTransportCount", p.targetSeaTransportCount)
             || setInt("targetSubmarineCount", p.targetSubmarineCount)
