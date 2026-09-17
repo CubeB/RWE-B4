@@ -2496,6 +2496,86 @@ namespace rwe
         REQUIRE(sim.terrain.getHeightAt(tidal->position.x, tidal->position.z) < sim.terrain.getSeaLevel());
     }
 
+    TEST_CASE("naval: the torpedo launcher waits for something to shoot at", "[ai]")
+    {
+        // ARMTL is 804 metal and CORTL 831 -- a destroyer's price for
+        // something that cannot move. A wet map is not on its own a reason to
+        // spend it; an enemy hull in the water is. This is the difference
+        // between a defence worth what it costs and one built because the map
+        // looked dangerous, and it is the half of this feature that is a
+        // judgement rather than a fact, so it gets pinned.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        // The torpedo launcher at its shipped shape. MinWaterDepth=1, so it
+        // sits in the shallows off a shore rather than out where the shipyard
+        // goes.
+        auto tl = makeDef(false, false, false, "LASER", 200u);
+        tl.movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 3u, 255u, 255u, 1u, 255u};
+        tl.buildCostMetal = Metal(804.0f);
+        sim.unitDefinitions["ARMTL"] = tl;
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-400_ss, 90_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.openingMetalExtractorCount = 0;
+        profile.openingSolarCount = 0;
+        profile.targetMetalExtractorCount = 0;
+        profile.targetSolarCount = 0;
+        profile.targetMetalMakerCount = 0;
+        profile.targetRadarCount = 0;
+        profile.targetDefenceCount = 0;
+        profile.baseAntiAirTowerCount = 0;
+        profile.reactiveAntiAirTowerCount = 0;
+        profile.outpostDefenceCount = 0;
+        profile.targetAirPlantCount = 0;
+        profile.targetVehiclePlantCount = 0;
+        profile.surplusLabCount = 0;
+        profile.targetShipyardCount = 0;
+        profile.targetTidalCount = 0;
+        profile.targetSonarCount = 0;
+        profile.targetTorpedoLauncherCount = 1;
+        // knownEnemies is what the gate reads, and omniscience is what fills
+        // it without waiting for a scout to fly. makeDefaultStandardProfile
+        // leaves it off -- only the brutal profile sets it -- so it is set
+        // here by hand.
+        profile.cheatModeOmniscient = true;
+
+        SECTION("a wet map on its own does not earn one")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(std::none_of(builds.begin(), builds.end(), [](const BuildOrder& b) { return b.unitType == "ARMTL"; }));
+        }
+
+        SECTION("an enemy hull in the water does")
+        {
+            // A destroyer, out in the deep. ARMROY is mobile, does not fly,
+            // and its movement class has MinWaterDepth=12 -- which is the
+            // whole test: a movement class with a minimum water depth can
+            // only float.
+            addUnit(sim, "ARMROY", human, SimVector(200_ss, 0_ss, 0_ss), script);
+
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(std::any_of(builds.begin(), builds.end(), [](const BuildOrder& b) { return b.unitType == "ARMTL"; }));
+        }
+    }
+
     TEST_CASE("naval: the shipyard comes before the rest of the base on a water map", "[ai]")
     {
         // The ordering test that the siting test above deliberately is not.
