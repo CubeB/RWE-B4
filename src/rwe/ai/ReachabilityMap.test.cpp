@@ -47,6 +47,12 @@ namespace rwe
         {
             return UnitDefinition::AdHocMovementClass{1u, 1u, 255u, 255u, 1u, 255u};
         }
+
+        /** A 1x1 mover that wades: dry land, or water down to depth 60, the way a commander does. */
+        UnitDefinition::MovementCollisionInfo wadingMover()
+        {
+            return UnitDefinition::AdHocMovementClass{1u, 1u, 255u, 255u, 0u, 60u};
+        }
     }
 
     TEST_CASE("ReachabilityMap ground and naval layers")
@@ -92,6 +98,43 @@ namespace rwe
             REQUIRE_FALSE(reach.isReachable(sim, eastBank));
         }
 
+        SECTION("a commander that wades reaches the far bank the constructor's labelling calls unreachable")
+        {
+            // The same land - lake - land shape. The constructor cannot get
+            // its feet wet; the commander wades the channel.
+            auto terrain = terrainFromRows(
+                {
+                    "LLLLwwwwLLLL",
+                    "LLLLwwwwLLLL",
+                    "LLLLwwwwLLLL",
+                },
+                100, 0, 50_ss);
+            GameSimulation sim(std::move(terrain), 0u, 0, 0);
+
+            ReachabilityMap reach;
+            auto westBank = sim.terrain.heightmapIndexToWorldCenter(1, 1);
+            auto eastBank = sim.terrain.heightmapIndexToWorldCenter(9, 1);
+
+            // The ground layer is labelled for the constructor, and says the
+            // far bank is another world.
+            reach.rebuild(sim, groundMover(), westBank);
+            REQUIRE_FALSE(reach.isReachable(sim, eastBank));
+
+            // The commander, from the very same base, reaches it. Asking the
+            // constructor's labelling this question is what refused 504 of
+            // 531 patch cells on Hundred Isles, and then ran the commander
+            // that walked out anyway as a stranded outpost builder.
+            reach.rebuildCommander(sim, wadingMover(), westBank);
+            REQUIRE(reach.isCommanderValid());
+            REQUIRE(reach.isCommanderReachable(sim, westBank));
+            REQUIRE(reach.isCommanderReachable(sim, eastBank));
+            REQUIRE(reach.isCommanderWalkable(sim, sim.terrain.heightmapIndexToWorldCenter(5, 1)));
+
+            // Neither labelling has disturbed the other.
+            REQUIRE_FALSE(reach.isReachable(sim, eastBank));
+            REQUIRE_FALSE(reach.isWalkable(sim, sim.terrain.heightmapIndexToWorldCenter(5, 1)));
+        }
+
         SECTION("a land bridge blocks a ship from crossing it, but a tank can cross the same bridge")
         {
             // The reverse shape: lake - land - lake. The tank crosses the
@@ -130,6 +173,7 @@ namespace rwe
             auto somewhere = sim.terrain.heightmapIndexToWorldCenter(2, 2);
             REQUIRE_FALSE(reach.isValid());
             REQUIRE_FALSE(reach.isNavalValid());
+            REQUIRE_FALSE(reach.isCommanderValid());
             REQUIRE(reach.isReachable(sim, somewhere));
             REQUIRE(reach.isWalkable(sim, somewhere));
             REQUIRE(reach.isNavalReachable(sim, somewhere));

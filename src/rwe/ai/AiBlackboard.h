@@ -198,10 +198,16 @@ namespace rwe
          * in id order. Kept out of combatUnits entirely: every one of
          * ArmyManager's gather/attack/raid rules is written in terms of
          * combatUnits, so a hull that landed in there would be rallied and
-         * marched at a land target the moment the phase called for it. Read
-         * only by ArmyManager::updateNavy, which is also why the scout ship
-         * is here rather than in scoutUnits -- ScoutManager's routes are
-         * built for the ground the rest of the AI walks on.
+         * marched at a land target the moment the phase called for it.
+         * Ordered by ArmyManager::updateNavy, which is also why the scout
+         * ship is here rather than in scoutUnits: ScoutManager's routes were
+         * built for the ground the rest of the AI walks on, and a hull put
+         * in there would have been marched at dry land.
+         *
+         * ScoutManager may now BORROW one of these (see navalScoutUnitId)
+         * while the enemy is unfound, because sendScout knows the difference
+         * between a scout that walks and one that floats. The hull it takes
+         * is skipped by updateNavy for as long as it is scouting.
          */
         std::vector<UnitId> navalCombatUnits;
         /**
@@ -253,6 +259,23 @@ namespace rwe
         // --- Army ---
         /** A combat unit pressed into scouting while there is no dedicated scout. */
         std::optional<UnitId> scoutUnitId;
+        /**
+         * A warship borrowed for scouting while the enemy has not been found.
+         *
+         * On an island map nothing else can go and look: the ground scout
+         * cannot leave its island and the air plant is rarely up early. Left
+         * unborrowed, knownEnemies stays empty for the whole game, so the
+         * Attack phase -- which wants (enemyBasePosition ||
+         * !knownEnemies.empty()) as well as the army size -- never fires, and
+         * everything hanging off it stays switched off, the army ferry
+         * included. Measured on Hundred Isles before this existed: a side
+         * holding a scout ship, three destroyers and a transport never saw
+         * the enemy once in nine hundred seconds.
+         *
+         * ArmyManager::updateNavy skips this hull, the way the land side
+         * skips scoutUnitId, so two managers never order the same ship.
+         */
+        std::optional<UnitId> navalScoutUnitId;
         /** Where each scout is heading, keyed by raw unit id, so two scouts do not chase the same ground. */
         std::map<unsigned int, SimVector> scoutTargets;
         /** Units booked onto a transport, keyed by raw unit id; the other managers leave them alone. */

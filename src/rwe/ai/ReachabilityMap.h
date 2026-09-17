@@ -24,16 +24,24 @@ namespace rwe
      * reused. Re-homing the map on a different base anchor afterwards is a
      * handful of lookups.
      *
-     * There are two independent labellings, ground and naval, rather than
-     * one that gets replaced. BuildManager, TransportManager and
+     * There are three independent labellings -- ground, naval and commander --
+     * rather than one that gets replaced. BuildManager, TransportManager and
      * ScoutManager use the original unsuffixed API
      * (rebuild/isValid/isReachable/isWalkable/reachableTileCount/
      * walkableTileCount) exactly as before, for whatever ground movement
      * class they pass it -- that behaviour is unchanged down to the call
      * signature. A navy needs its own labelling answered at the same time
      * without evicting that one, so rebuildNaval and its isNaval-/naval-
-     * prefixed counterparts label and query a second, separate cache. Calling one
-     * side never invalidates the other; each still only re-floods the whole
+     * prefixed counterparts label and query a second, separate cache.
+     *
+     * The third exists because a commander is not the builder the ground
+     * layer is labelled for. The ground labelling is built for the side's
+     * constructor, and ARMCOM's TANKDS2 wades to water depth 100 and climbs
+     * slope 32 where ARMCK's TANKSH2 stops at 12 and 15 -- so asking the
+     * constructor's labelling about a commander calls every island across
+     * water unreachable while the commander walks there. rebuildCommander
+     * and its isCommander- prefixed counterparts answer for that class
+     * instead. Calling any one of them never invalidates the others; each still only re-floods the whole
      * heightmap when it is asked for a movement class different from the one
      * it last labelled.
      */
@@ -81,6 +89,25 @@ namespace rwe
         int navalReachableTileCount() const { return naval.reachableTiles; }
         int navalWalkableTileCount() const { return naval.walkableTiles; }
 
+        /**
+         * The commander's counterpart of rebuild(): a third independent
+         * cache, for the commander's own movement class rather than the
+         * constructor's the ground layer is labelled for. Everything said
+         * above about rebuildNaval's independence holds here too.
+         */
+        void rebuildCommander(const GameSimulation& sim, const UnitDefinition::MovementCollisionInfo& mover, const SimVector& from);
+
+        bool isCommanderValid() const { return commander.components.getWidth() > 0; }
+
+        /** True when the commander, from its base, can reach this point. */
+        bool isCommanderReachable(const GameSimulation& sim, const SimVector& position) const;
+
+        /** True when the commander can stand here at all. */
+        bool isCommanderWalkable(const GameSimulation& sim, const SimVector& position) const;
+
+        int commanderReachableTileCount() const { return commander.reachableTiles; }
+        int commanderWalkableTileCount() const { return commander.walkableTiles; }
+
     private:
         /**
          * One movement class's labelling: which tiles it can stand on, which
@@ -118,5 +145,6 @@ namespace rwe
 
         Layer ground;
         Layer naval;
+        Layer commander;
     };
 }

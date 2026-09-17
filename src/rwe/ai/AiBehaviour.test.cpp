@@ -2337,4 +2337,79 @@ namespace rwe
             REQUIRE(order.destination.x.value > -352.0f);
         }
     }
+
+    TEST_CASE("a warship goes looking for an enemy the AI has not found")
+    {
+        // The counterpart of the section above. That one pins that a hull is
+        // never sent inland; this one pins that a hull is sent out at all.
+        //
+        // Nothing that walks can find an enemy across water, so on an island
+        // map knownEnemies stays empty for the whole game -- and the Attack
+        // phase wants (enemyBasePosition || !knownEnemies.empty()) as well as
+        // the army size, so it never fires and every army ferry stays
+        // switched off with it. Measured on Hundred Isles before this: a side
+        // holding a scout ship, three destroyers and a transport never saw
+        // the enemy once in nine hundred seconds.
+        //
+        // scoutCount is left at its default ON PURPOSE. The naval sections
+        // above set it to zero, and ScoutManager::update returns immediately
+        // when it is -- before any scout is chosen -- so a test that copied
+        // that line would pass without executing one line of what it claims
+        // to pin.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        // No enemy unit anywhere: knownEnemies stays empty, which is the
+        // condition the borrow is gated on.
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMSY", ai, SimVector(-90_ss, 0_ss, 0_ss), script);
+        auto destroyerId = addUnit(sim, "ARMROY", ai, SimVector(-100_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.tacticalTickInterval = 1;
+        profile.scoutTickInterval = 1;
+
+        SECTION("the hull is borrowed, and sent somewhere it can actually float")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 4, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.knownEnemies.empty());
+            REQUIRE(bb.navalScoutUnitId);
+            REQUIRE(*bb.navalScoutUnitId == destroyerId);
+
+            auto moves = ordersFor<MoveOrder>(commands, destroyerId);
+            REQUIRE(!moves.empty());
+            for (const auto& order : moves)
+            {
+                // East of the shore at world x -352, so on water. A scout
+                // target chosen off the ground layer would sit on the dry
+                // strip and the ship would never arrive -- the same
+                // wrong-mover mistake the commander's own layer exists for.
+                REQUIRE(order.destination.x.value > -352.0f);
+            }
+        }
+
+        SECTION("navalScouting=false leaves the fleet alone")
+        {
+            profile.navalScouting = false;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 4, commands);
+
+            // No borrow. Deliberately NOT asserting the destroyer receives no
+            // move at all: with the knob off it is an ordinary hull again and
+            // updateNavy is free to station it, which is the point of the
+            // switch.
+            REQUIRE_FALSE(controller.getBlackboard().navalScoutUnitId);
+        }
+    }
 }

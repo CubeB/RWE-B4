@@ -286,6 +286,15 @@ namespace rwe
             {
                 continue;
             }
+            // The hull ScoutManager borrowed is not ours to order. The land
+            // side guards its own stand-in scout this way in six places; the
+            // naval side had no such guard, so without this both managers
+            // would command the same ship on the same tick, each undoing the
+            // other's order.
+            if (bb.navalScoutUnitId && *bb.navalScoutUnitId == shipId)
+            {
+                continue;
+            }
             const auto& ship = shipRef->get();
 
             // Anything on our own sea gets shot at, whatever else is

@@ -226,6 +226,8 @@ namespace rwe
             || setScalar("waveMeetEnemyRadius", p.waveMeetEnemyRadius)
             || setInt("waveMeetEnemyCount", p.waveMeetEnemyCount)
             || setBool("spreadDefences", p.spreadDefences)
+            || setBool("commanderUsesOwnReachability", p.commanderUsesOwnReachability)
+            || setBool("navalScouting", p.navalScouting)
             || setBool("defenceFacesRecentLosses", p.defenceFacesRecentLosses)
             || setInt("defenceValueMaxPaybackSeconds", p.defenceValueMaxPaybackSeconds)
             || setInt("outpostDefenceValueSecondsPerExtractor", p.outpostDefenceValueSecondsPerExtractor)

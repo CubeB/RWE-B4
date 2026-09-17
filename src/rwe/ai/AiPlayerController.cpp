@@ -132,6 +132,39 @@ namespace rwe
                     blackboard.groundReachabilityValid = reachability.isValid();
                     blackboard.hasUnreachableGround = reachability.walkableTileCount() > reachability.reachableTileCount() + 64;
                 });
+
+                // 3b-ii. And where can the COMMANDER walk? Not the same
+                // question, and the ground layer above cannot answer it: it
+                // is labelled for the constructor, and ARMCOM's TANKDS2
+                // wades to depth 100 and climbs slope 32 where ARMCK's
+                // TANKSH2 stops at 12 and 15.
+                //
+                // Measured on Hundred Isles before this existed: 504 of the
+                // 531 patch cells in range were refused as unreachable,
+                // leaving three extractors and a commander idle for two
+                // thirds of the game. Worse, on the side that did walk out
+                // -- the shipyard being the one errand whose site search is
+                // not bounded by a radius -- the commander ended up standing
+                // on ground its own base supposedly could not reach, which
+                // flips builderAtBase false and runs it as a stranded
+                // outpost builder, whose want-list is extractors and solars
+                // and no factory at all. That is why neither side built a
+                // single factory in twenty games on that map.
+                //
+                // One more flood per game, not one per rebuild: rebuildLayer
+                // relabels only when the movement class changes, and a
+                // side's commander does not change class mid-game.
+                if (profile.commanderUsesOwnReachability && blackboard.commanderUnitId)
+                {
+                    const auto& commanderUnit = sim.getUnitState(*blackboard.commanderUnitId);
+                    auto commanderDefIt = sim.unitDefinitions.find(commanderUnit.unitType);
+                    if (commanderDefIt != sim.unitDefinitions.end())
+                    {
+                        timed("commanderReachability", [&] {
+                            reachability.rebuildCommander(sim, commanderDefIt->second.movementCollisionInfo, *blackboard.baseAnchor);
+                        });
+                    }
+                }
             }
 
             // 3c. Where can our navy float? Same gate and the same reset of
@@ -266,7 +299,14 @@ namespace rwe
                      << ", energy " << blackboard.currentEnergy.value << (blackboard.energyStalled ? "(stalled)" : "")
                      << " (+" << player.previousEnergyProductionBuffer.value << "/-" << player.previousDesiredEnergyConsumptionBuffer.value << " per s)"
                      << ", idle builders " << blackboard.idleBuilderCount << ", army " << blackboard.armySize
-                     << ", known enemies " << blackboard.knownEnemies.size() << ", units:" << counts << "; " << commanderDoing;
+                     << ", known enemies " << blackboard.knownEnemies.size()
+                     // Both gate whether a ferry can run at all: hasUnreachableGround
+                     // gates refreshExpansionSite, wantsTransport is what BuildManager
+                     // reads before building one. Each was computed every pass and
+                     // discarded, so a ferry that never fired left nothing to read.
+                     << ", unreachable ground " << (blackboard.hasUnreachableGround ? "yes" : "no")
+                     << ", wants transport " << (blackboard.wantsTransport ? "yes" : "no")
+                     << ", units:" << counts << "; " << commanderDoing;
         }
 
         // 5. Economy and production.

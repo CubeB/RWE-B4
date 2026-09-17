@@ -364,6 +364,37 @@ namespace rwe
          * other side's fifty.
          */
         bool expansionStaysOnOurSide{true};
+        /**
+         * Whether the commander is judged by its OWN movement class, rather
+         * than the constructor's, when asking what ground it can reach.
+         *
+         * On, because it is the truth: ARMCOM's TANKDS2 wades to water depth
+         * 100 and climbs slope 32 where ARMCK's TANKSH2 stops at 12 and 15,
+         * and the ground labelling is built for the constructor. Measured
+         * off, on Hundred Isles over twenty games: 504 of the 531 patch
+         * cells in range refused as unreachable, three extractors, and a
+         * commander idle for two thirds of the game. The one side that got
+         * out did it by accident -- the shipyard is the only build whose
+         * site search is not bounded by a radius, so it walks the commander
+         * to the coast -- and was then classified as a stranded outpost
+         * builder, so it took 26 patches and still never built a factory.
+         * Off restores both of those behaviours, which is what makes it
+         * worth keeping as a knob.
+         */
+        bool commanderUsesOwnReachability{true};
+        /**
+         * Whether a warship may be borrowed to go and find the enemy while
+         * none is known.
+         *
+         * On, because on an island map nothing else can: measured on Hundred
+         * Isles with it off, both sides ended every one of twenty games with
+         * `known enemies 0`, which holds the AI out of the Attack phase
+         * however large its army grows -- 15 to 17 units against a threshold
+         * of 8 -- and so keeps the army ferry switched off for the whole
+         * game. The cost is one hull doing something other than fighting,
+         * and only until the enemy is found.
+         */
+        bool navalScouting{true};
         SimScalar defenceDistanceFromBase{160_ss};
         /**
          * How far out from the base anchor the radar's post stands, towards

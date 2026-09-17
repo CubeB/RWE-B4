@@ -1638,10 +1638,30 @@ namespace rwe
             it = (bb.now.value - it->second.value > raidTicks) ? raidedSites.erase(it) : std::next(it);
         }
 
+        // Which labelling answers for THIS builder. The ground layer is
+        // flooded for the side's constructor, and a commander is not one:
+        // ARMCOM's TANKDS2 wades to water depth 100 and climbs slope 32
+        // where ARMCK's TANKSH2 stops at 12 and 15. Asking the constructor's
+        // labelling about a commander calls ground unreachable that the
+        // commander walks across -- and then, because the commander is
+        // standing somewhere its own base supposedly cannot reach, flips
+        // builderAtBase false and runs it as a stranded outpost builder,
+        // which wants extractors and solars and no factory at all. It is the
+        // same correction the air constructor already gets further down.
+        //
+        // Falls back to the ground layer whenever the commander layer was
+        // never built -- which is what commanderUsesOwnReachability=false
+        // leaves behind, so the knob needs no second branch here.
+        auto builderReachable = [&](const SimVector& p) {
+            return builderDef.commander && reachability.isCommanderValid()
+                ? reachability.isCommanderReachable(sim, p)
+                : reachability.isReachable(sim, p);
+        };
+
         // A builder that cannot walk home is running an outpost: it builds
         // around itself. One that flies is always at home, because the ground
         // it happens to be over decides nothing about where it can go next.
-        bool builderAtBase = builderDef.canFly || !bb.groundReachabilityValid || reachability.isReachable(sim, builder.position);
+        bool builderAtBase = builderDef.canFly || !bb.groundReachabilityValid || builderReachable(builder.position);
         auto anchor = builderAtBase ? *bb.baseAnchor : builder.position;
 
         // Extractors and makers are exempt from the affordability test
@@ -1660,7 +1680,7 @@ namespace rwe
         for (auto frameId : bb.orphanedFrames)
         {
             const auto& frame = sim.getUnitState(frameId);
-            if (bb.groundReachabilityValid && reachability.isReachable(sim, frame.position) != builderAtBase)
+            if (bb.groundReachabilityValid && builderReachable(frame.position) != builderAtBase)
             {
                 continue;
             }
@@ -1700,7 +1720,7 @@ namespace rwe
                 {
                     continue;
                 }
-                if (bb.groundReachabilityValid && reachability.isReachable(sim, unit.position) != builderAtBase)
+                if (bb.groundReachabilityValid && builderReachable(unit.position) != builderAtBase)
                 {
                     continue;
                 }
@@ -2001,7 +2021,7 @@ namespace rwe
                 std::function<bool(const SimVector&)> reachable;
                 if (bb.groundReachabilityValid && !builderDef.canFly)
                 {
-                    reachable = [&](const SimVector& p) { return reachability.isReachable(sim, p) == builderAtBase; };
+                    reachable = [&](const SimVector& p) { return builderReachable(p) == builderAtBase; };
                 }
                 // Not under the enemy's guns. The nearest free patch stays
                 // the nearest free patch after the frame on it is shot, so

@@ -112,6 +112,52 @@ namespace rwe
             bb.scoutUnitId.reset();
         }
 
+        // Nothing that walks can find an enemy across water. While no
+        // enemy is known and we own a hull, one goes and looks -- the scout
+        // ship for preference, since that is what the yard builds first and
+        // what it is for, but any warship rather than none, because eyes
+        // matter more than one destroyer's patrol while the map is blank.
+        if (profile.navalScouting && !bb.enemyBasePosition && bb.knownEnemies.empty() && !bb.navalCombatUnits.empty())
+        {
+            if (bb.navalScoutUnitId)
+            {
+                auto existing = sim.tryGetUnitState(*bb.navalScoutUnitId);
+                if (!existing || existing->get().isDead())
+                {
+                    bb.navalScoutUnitId.reset();
+                }
+            }
+            if (!bb.navalScoutUnitId)
+            {
+                for (auto shipId : bb.navalCombatUnits)
+                {
+                    auto shipRef = sim.tryGetUnitState(shipId);
+                    if (!shipRef || shipRef->get().isDead())
+                    {
+                        continue;
+                    }
+                    if (!bb.navalScoutUnitId)
+                    {
+                        bb.navalScoutUnitId = shipId;
+                    }
+                    if (!bb.sideUnits.scoutShip.empty() && shipRef->get().unitType == bb.sideUnits.scoutShip)
+                    {
+                        bb.navalScoutUnitId = shipId;
+                        break;
+                    }
+                }
+            }
+            if (bb.navalScoutUnitId)
+            {
+                scouts.push_back(*bb.navalScoutUnitId);
+            }
+        }
+        else
+        {
+            // Enemy found, or the knob is off: the hull goes back to the fleet.
+            bb.navalScoutUnitId.reset();
+        }
+
         for (auto scoutId : scouts)
         {
             sendScout(sim, threatMap, reachability, bb, scoutId, outCommands);
@@ -129,6 +175,12 @@ namespace rwe
         const auto& scout = sim.getUnitState(scoutId);
         const auto& def = sim.unitDefinitions.at(scout.unitType);
         bool flies = def.canFly;
+        // Needs water under it. Taken from the movement class rather than the
+        // FBI's Floater flag because the naval reachability layer is labelled
+        // by this same field, so the test and the map that answers it cannot
+        // drift apart -- which is exactly how the ground layer came to be
+        // answering questions about an amphibious commander.
+        bool floats = !flies && sim.getAdHocMovementClass(def.movementCollisionInfo).minWaterDepth > 0;
 
         // Hurt: head home, where the base can look after it.
         if (isBadlyHurt(scout, def) && bb.baseAnchor)
@@ -168,7 +220,23 @@ namespace rwe
             {
                 return false;
             }
-            if (!flies)
+            if (floats)
+            {
+                // A hull is the mirror image of a ground scout: it wants the
+                // water and cannot leave it. Judged by the naval labelling,
+                // never the ground one -- asking a land mover's map about a
+                // ship is the same mistake that had the ground layer telling
+                // an amphibious commander every island was out of reach.
+                if (reachability.isNavalValid() && !reachability.isNavalReachable(sim, center))
+                {
+                    return false;
+                }
+                if (sim.terrain.getHeightAt(center.x, center.z) >= sim.terrain.getSeaLevel())
+                {
+                    return false;
+                }
+            }
+            else if (!flies)
             {
                 // Ground scouts keep to land they can reach.
                 if (bb.groundReachabilityValid && !reachability.isReachable(sim, center))
