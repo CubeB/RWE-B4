@@ -52,6 +52,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -596,6 +597,14 @@ namespace
         bool canFly;
 
         /**
+         * FootprintX and FootprintZ, in map squares of sixteen world units. What
+         * a projectile stops on: it detonates the first tick it stands in a
+         * square the victim occupies (0x49B090), and a unit occupies these.
+         */
+        unsigned int footprintX;
+        unsigned int footprintZ;
+
+        /**
          * Which of Weapon1/Weapon2/Weapon3 the FBI actually fills, as bits 0-2.
          * A mask and not a count: the standard TA convention puts a unit's
          * anti-air weapon in slot 3 and leaves slot 2 empty, so counting weapons
@@ -808,6 +817,8 @@ namespace
                     fbi.workerTime,
                     fbi.maxVelocity,
                     fbi.canFly,
+                    fbi.footprintX,
+                    fbi.footprintZ,
                     static_cast<unsigned int>(
                         (fbi.weapon1.empty() ? 0u : 1u) | (fbi.weapon2.empty() ? 0u : 2u)
                         | (fbi.weapon3.empty() ? 0u : 4u)),
@@ -2032,10 +2043,25 @@ namespace rwe
             return build ? build->second : std::string();
         };
 
-        auto position = [](std::ostream& o, const char* prefix, const TadPosition& p) {
-            o << ",\"" << prefix << "x\":" << tadFixedToDouble(p.x)
-              << ",\"" << prefix << "y\":" << tadFixedToDouble(p.y)
-              << ",\"" << prefix << "z\":" << tadFixedToDouble(p.z);
+        // EXACT, not three decimals. A 16.16 coordinate is exactly representable
+        // in a double, and the shortest round-trip form hands the script the
+        // same number the port reads. Three decimals was enough while the models
+        // measured a distance; the footprint model floors positions onto
+        // sixteen-unit squares, and a rounded coordinate on the wrong side of a
+        // square boundary moved whole pairings -- CORVAMP's share read 52% in the
+        // script and 66% in the port until this changed.
+        auto exact = [](std::ostream& o, int32_t fixed) {
+            std::array<char, 32> buffer;
+            auto [end, ec] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), tadFixedToDouble(fixed));
+            o.write(buffer.data(), end - buffer.data());
+        };
+        auto position = [&exact](std::ostream& o, const char* prefix, const TadPosition& p) {
+            o << ",\"" << prefix << "x\":";
+            exact(o, p.x);
+            o << ",\"" << prefix << "y\":";
+            exact(o, p.y);
+            o << ",\"" << prefix << "z\":";
+            exact(o, p.z);
         };
 
         out << std::fixed << std::setprecision(3);
@@ -2281,13 +2307,12 @@ namespace rwe
     // Keyed on (attacker, victim), a shot survives only where it is the only
     // shot from that shooter at that victim within +-window ticks and exactly
     // one damage record from that shooter to that victim lands in the window
-    // after it. The survivors are scored against
-    //
-    //     flight = ceil(distance / (weaponvelocity / 30)) - 1
-    //
-    // where the -1 is a projectile taking its first step on the tick it is
-    // fired -- the same off-by-one as the build accumulator's first increment
-    // landing on the 0x09's own tick.
+    // after it. The survivors are scored against the first step on which the
+    // round, flown along its aim line, stands in a map square of the victim's
+    // footprint -- which is where TA detonates it (0x49B090), and not at the
+    // aim point. The step number is the flight time. The aim-point model this
+    // replaced, `ceil(distance / (weaponvelocity / 30)) - 1`, had a -1 read as a
+    // first step on the firing tick; it was the footprint.
     //
     // THIS AND THE SCRIPT MUST KEEP AGREEING, cell for cell, and the script is
     // the reference. --weapon-cells prints the same table the script prints.
@@ -2335,6 +2360,8 @@ namespace rwe
         TadPosition origin;
         TadPosition target;
         std::string victim;
+        unsigned int victimFootprintX;
+        unsigned int victimFootprintZ;
     };
 
     /** One surviving (shot, damage) pairing. */
@@ -2468,13 +2495,6 @@ namespace rwe
         return out;
     }
 
-    /** What the constant-speed model predicts, in ticks. */
-    int tadFlightModel(double distance, unsigned int velocity)
-    {
-        auto perTick = static_cast<double>(velocity) / 30.0;
-        return static_cast<int>(std::ceil(distance / perTick)) - 1;
-    }
-
     /**
      * What a self-propelled round leaves the barrel at, in world units a tick.
      *
@@ -2495,11 +2515,11 @@ namespace rwe
      * How many ticks the motor runs for, which is what motorOutFrame counts to.
      *
      * IT CHANGES PAIRINGS BUT NO CELL'S MODE. A missile fired far enough does
-     * run its motor out and coast -- a MISSILE_GF_HEAVY's stops at tick 15 and
-     * one checked-in episode arrives on step 17 -- but not often enough to move
-     * a mode: adding the term left every mode where it was and moved no share
-     * by more than three points. It is in the model on the strength of being
-     * the engine's arithmetic, not of what it does to this corpus.
+     * run its motor out and coast -- a MISSILE_GF_HEAVY's stops at tick 15 --
+     * but not often enough to move a mode: adding the term left every mode
+     * where it was and moved no share by more than three points. It is in the
+     * model on the strength of being the engine's arithmetic, not of what it
+     * does to this corpus.
      */
     unsigned int tadBurnTicks(const WeaponFacts& facts)
     {
@@ -2512,32 +2532,74 @@ namespace rwe
     }
 
     /**
-     * Flight ticks for a self-propelled round, flown as RWE's sim flies one.
+     * The step on which the round first stands in one of the victim's squares,
+     * or nothing if it passes the footprint without landing in one.
      *
-     * A port of updateSelfPropelledProjectile: gain the acceleration up to the
-     * cap while the motor runs, then move, and take the first step on the tick
-     * the shot is fired -- which is where the -1 comes from, the same off-by-one
-     * the constant-speed model carries.
+     * A port of tools/tad-weapontime.py's flight_model, which is the reference.
+     * How far each step goes depends on the class: a constant-speed round
+     * covers weaponvelocity / 30 every step, and a self-propelled one gains its
+     * acceleration up to the cap while the motor runs and then moves, as
+     * updateSelfPropelledProjectile flies one. Where it stops does not: TA
+     * detonates a round the first tick its move puts it in a map square an
+     * enemy unit occupies (0x49B090, straight after the move in 0x49B720), and
+     * a unit occupies its footprint, stamped at its position with the left
+     * edge rounded to the nearest square -- computeFootprintRegion. The aim
+     * point stands in for the victim's position.
+     *
+     * The step number IS the flight time: the shot-to-damage interval is the
+     * number of moves it took.
      */
-    int tadMotorFlight(double distance, const WeaponFacts& facts, unsigned int limit = 4000)
+    std::optional<int> tadFootprintFlight(
+        const std::string& weaponClassName,
+        const WeaponFacts& facts,
+        const TadPosition& originFixed,
+        const TadPosition& targetFixed,
+        unsigned int footprintX,
+        unsigned int footprintZ)
     {
-        auto speed = tadLaunchSpeed(facts);
+        const double origin[3] = {tadFixedToDouble(originFixed.x), tadFixedToDouble(originFixed.y), tadFixedToDouble(originFixed.z)};
+        const double target[3] = {tadFixedToDouble(targetFixed.x), tadFixedToDouble(targetFixed.y), tadFixedToDouble(targetFixed.z)};
+
+        auto x0 = static_cast<long long>(std::floor((target[0] - footprintX * 8.0) / 16.0 + 0.5));
+        auto z0 = static_cast<long long>(std::floor((target[2] - footprintZ * 8.0) / 16.0 + 0.5));
+
+        auto dx = target[0] - origin[0];
+        auto dy = target[1] - origin[1];
+        auto dz = target[2] - origin[2];
+        auto distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+        auto ux = distance > 0.0 ? dx / distance : 0.0;
+        auto uz = distance > 0.0 ? dz / distance : 0.0;
+
+        // Past this the line has left any square the footprint could cover.
+        auto giveUp = distance + 16.0 * static_cast<double>(footprintX + footprintZ + 2);
+
+        auto accelerating = weaponClassName == "accelerating";
         auto cap = static_cast<double>(facts.velocity) / 30.0;
+        auto speed = accelerating ? tadLaunchSpeed(facts) : cap;
         auto acceleration = static_cast<double>(facts.acceleration) / 900.0;
         auto burn = tadBurnTicks(facts);
 
         double travelled = 0.0;
-        unsigned int ticks = 0;
-        while (travelled < distance && ticks < limit)
+        for (unsigned int k = 1;; ++k)
         {
-            ++ticks;
-            if (ticks <= burn)
+            if (accelerating && k <= burn)
             {
                 speed = std::min(cap, speed + acceleration);
             }
             travelled += speed;
+
+            auto sx = static_cast<long long>(std::floor((origin[0] + ux * travelled) / 16.0));
+            auto sz = static_cast<long long>(std::floor((origin[2] + uz * travelled) / 16.0));
+            if (sx >= x0 && sx < x0 + static_cast<long long>(footprintX)
+                && sz >= z0 && sz < z0 + static_cast<long long>(footprintZ))
+            {
+                return static_cast<int>(k);
+            }
+            if (travelled > giveUp || k >= 4000)
+            {
+                return std::nullopt;
+            }
         }
-        return static_cast<int>(ticks) - 1;
     }
 
     /**
@@ -2620,13 +2682,15 @@ namespace rwe
     /**
      * Whether a pairing may be scored, which depends on its weapon's class.
      *
-     * A constant-speed cell is scored over every victim; its pairings are nearly
-     * all at the still end of the drift curve already. A self-propelled one is
+     * Every class needs its victim named, because the round stops on the
+     * victim's footprint. A constant-speed cell is then scored over every such
+     * victim; its pairings are nearly all at the still end of the drift curve
+     * already. A self-propelled one is
      * scored only where the victim could not have outrun ONE STEP of the
      * projectile -- the projectile's own step and not a constant, because the
-     * quantity being measured is quantised in steps. The bound is not tuned:
-     * half a step would put every missile cell on the model, which is exactly
-     * why it is not the bound.
+     * quantity being measured is quantised in steps. The bound is not tuned: it
+     * was fixed under the aim-point model, and the footprint model was scored
+     * under it unchanged.
      */
     bool tadScoreablePairing(
         const std::string& weaponClassName,
@@ -2634,12 +2698,16 @@ namespace rwe
         const std::map<std::string, UnitFacts>& unitFacts,
         const Pairing& pairing)
     {
+        auto drift = tadVictimDrift(unitFacts, pairing);
+        if (!drift)
+        {
+            return false;
+        }
         if (weaponClassName != "accelerating")
         {
             return true;
         }
-        auto drift = tadVictimDrift(unitFacts, pairing);
-        return drift && *drift < static_cast<double>(facts.velocity) / 30.0;
+        return *drift < static_cast<double>(facts.velocity) / 30.0;
     }
 
     std::vector<WeaponCell> mineWeaponCells(
@@ -2692,10 +2760,17 @@ namespace rwe
                 continue;
             }
 
-            auto modelFor = [&](const Pairing& p) {
-                return className == "accelerating"
-                    ? tadMotorFlight(p.distance, weapon->second)
-                    : tadFlightModel(p.distance, weapon->second.velocity);
+            // flight - model, or nothing where the model has the round step
+            // over the footprint without landing in it. A miss counts against
+            // the cell's share and never wins its mode.
+            auto deltaFor = [&](const Pairing& p) -> std::optional<int> {
+                const auto& victim = unitFacts.at(p.victim);
+                auto model = tadFootprintFlight(className, weapon->second, p.origin, p.target, victim.footprintX, victim.footprintZ);
+                if (!model)
+                {
+                    return std::nullopt;
+                }
+                return static_cast<int>(p.damageTick - p.shotTick) - *model;
             };
 
             std::map<int, unsigned int> deltas;
@@ -2704,14 +2779,22 @@ namespace rwe
             unsigned int atMode = 0;
             for (const auto* p : group)
             {
-                auto delta = static_cast<int>(p->damageTick - p->shotTick) - modelFor(*p);
-                auto count = ++deltas[delta];
+                ++damages[p->damage];
+                auto delta = deltaFor(*p);
+                if (!delta)
+                {
+                    continue;
+                }
+                auto count = ++deltas[*delta];
                 if (count > atMode)
                 {
-                    mode = delta;
+                    mode = *delta;
                     atMode = count;
                 }
-                ++damages[p->damage];
+            }
+            if (atMode == 0)
+            {
+                continue;
             }
 
             unsigned int modalDamage = 0;
@@ -2730,8 +2813,8 @@ namespace rwe
             const Pairing* representative = nullptr;
             for (const auto* p : group)
             {
-                auto delta = static_cast<int>(p->damageTick - p->shotTick) - modelFor(*p);
-                if (delta != mode)
+                auto delta = deltaFor(*p);
+                if (!delta || *delta != mode)
                 {
                     continue;
                 }
@@ -2743,7 +2826,7 @@ namespace rwe
             }
 
             out.push_back(WeaponCell{
-                key.first, key.second, weaponName, className, weapon->second.selfProp, weapon->second.burnBlow, weapon->second.velocity, weapon->second.startVelocity, weapon->second.acceleration, weapon->second.range, weapon->second.weaponTimer, weapon->second.noAutoRange, weapon->second.defaultDamage, static_cast<unsigned int>(group.size()), atMode, static_cast<unsigned int>(everything.size() - group.size()), mode, modalDamage, representative->demo, representative->shotTick, representative->damageTick, representative->origin, representative->target, representative->victim});
+                key.first, key.second, weaponName, className, weapon->second.selfProp, weapon->second.burnBlow, weapon->second.velocity, weapon->second.startVelocity, weapon->second.acceleration, weapon->second.range, weapon->second.weaponTimer, weapon->second.noAutoRange, weapon->second.defaultDamage, static_cast<unsigned int>(group.size()), atMode, static_cast<unsigned int>(everything.size() - group.size()), mode, modalDamage, representative->demo, representative->shotTick, representative->damageTick, representative->origin, representative->target, representative->victim, unitFacts.at(representative->victim).footprintX, unitFacts.at(representative->victim).footprintZ});
         }
 
         std::sort(out.begin(), out.end(), [](const WeaponCell& a, const WeaponCell& b) {
@@ -2757,13 +2840,12 @@ namespace rwe
      * Writes the weapon-flight episodes.
      *
      * One episode per scored cell, over both scored classes, and only the cells
-     * the model predicts. The four that do not -- ARMAMPH firing GAUSS_MAV,
-     * CORGEO firing RIOT_ALL, ARMFIG firing MISSILE_VTOL and CORVAMP firing
-     * MISSILE_VTOL_GF, all one tick low and all near-ties with the bucket the
-     * model names -- are SKIPPED rather than checked in with their offset
-     * written into expectedFlightDelta, because that field is for a divergence
-     * somebody decided on and not for an observation nobody has explained. It is
-     * the same rule that keeps airborne builders out of the build fixture.
+     * the model predicts. A cell that does not is SKIPPED rather than checked
+     * in with its offset written into expectedFlightDelta, because that field
+     * is for a divergence somebody decided on and not for an observation nobody
+     * has explained -- the same rule that keeps airborne builders out of the
+     * build fixture. Under the footprint model there are none; under the
+     * aim-point model it replaced there were four.
      *
      * A THIRD HEADER, beside tad_economy_episodes.h and tad_build_episodes.h.
      * They share no struct, are mined by different passes over different
@@ -2847,18 +2929,21 @@ namespace rwe
 // elsewhere. Those four are four more oracles, not discrepancies. See
 // docs/TA-DEMOS.md.
 //
-// THE ARITHMETIC BEING PINNED. A constant-speed projectile covers
-// weaponVelocity / 30 world units a tick -- the same conversion
-// LoadingScene_util.cpp does -- and takes its FIRST step on the tick it is
-// fired, so it has covered the distance after ceil(d / v) steps and the gap
-// between the shot and the damage is one less. A self-propelled one leaves at
-// startVelocity, gains weaponAcceleration / 900 a tick up to the same cap while
-// its motor runs, and coasts after; its first step lands on the firing tick too.
-// RWE steps projectiles after the behaviour pass that spawns them, so
-// expectedFlightDelta is zero everywhere below. The field is kept because the
-// fixture's whole purpose is to survive a deliberate divergence; a non-zero
-// value here would have to name the docs/TOTALA-EXE.md section that licensed it,
-// exactly as the build fixture's does.
+// THE ARITHMETIC BEING PINNED. A round does not stop at the point it was aimed
+// at. It detonates the first tick its move puts it in a map square an enemy unit
+// occupies (0x49B090, straight after the move in 0x49B720), and a unit occupies
+// its FootprintX by FootprintZ squares -- so the flight time is the number of
+// steps until the round stands on the victim's footprint, which is about half a
+// footprint short of the aim point. How far a step goes depends on the class: a
+// constant-speed projectile covers weaponVelocity / 30 world units -- the same
+// conversion LoadingScene_util.cpp does -- and a self-propelled one leaves at
+// startVelocity and gains weaponAcceleration / 900 a tick up to the same cap
+// while its motor runs, and coasts after. RWE moves a projectile and then tests
+// it against the occupied grid, in that order, so expectedFlightDelta is zero
+// everywhere below. The field is kept because the fixture's whole purpose is to
+// survive a deliberate divergence; a non-zero value here would have to name the
+// docs/TOTALA-EXE.md section that licensed it, exactly as the build fixture's
+// does.
 //
 // WHY THE MISSILE ROWS NAME THEIR VICTIM. A 0x0d records where the shot was
 // AIMED, so a victim that moves while the round is in the air is not where the
@@ -2880,6 +2965,13 @@ namespace rwe
 
         /** What was shot at -- see the note on the victim bound above. */
         const char* victimName;
+
+        /**
+         * The victim's FBI FootprintX and FootprintZ, in map squares: what the
+         * round stops on. The victim stands at the aim point.
+         */
+        unsigned int victimFootprintX;
+        unsigned int victimFootprintZ;
 
         /** The tick the shot was fired on, and the tick its damage arrived. */
         uint32_t shotTick;
@@ -2909,10 +3001,11 @@ namespace rwe
 
         /**
          * What times the motor: `weaponRange / weaponVelocity` ticks, or
-         * `weaponTimerTicks` where the weapon says noAutoRange. One episode
-         * below outlives its own motor and coasts the rest of the way in --
-         * CORMIST's, seventeen steps against a fifteen-tick burn -- so these are
-         * load-bearing for that one and describe every other.
+         * `weaponTimerTicks` where the weapon says noAutoRange. Two episodes
+         * below outlive their motor and coast the rest of the way in --
+         * CORMIST's, seventeen steps against a fifteen-tick burn, and
+         * ARMAABOT's, sixteen against the same -- so these are load-bearing for
+         * those two and describe every other.
          */
         unsigned int weaponRange;
         unsigned int weaponTimerTicks;
@@ -2920,8 +3013,8 @@ namespace rwe
 
         /**
          * Whether running out of motor detonates the round where it is instead
-         * of letting it coast on. The one episode that does outlive its motor
-         * has it clear, so nothing here detonates early; it travels with them so
+         * of letting it coast on. The two episodes that do outlive their motor
+         * have it clear, so nothing here detonates early; it travels with them so
          * that a regeneration producing a burnblow round that did could not
          * quietly be flown as though it coasted.
          */
@@ -2955,7 +3048,8 @@ namespace rwe
         for (const auto* cell : scored)
         {
             out << "        {\"" << cell->demo << "\", \"" << cell->shooter << "\", "
-                << cell->slot << ", \"" << cell->weapon << "\", \"" << cell->victim << "\",\n"
+                << cell->slot << ", \"" << cell->weapon << "\", \"" << cell->victim << "\", "
+                << cell->victimFootprintX << ", " << cell->victimFootprintZ << ",\n"
                 << "            " << cell->shotTick << ", " << cell->damageTick << ", "
                 << cell->pairings << ", " << cell->pairingsAtMode << ",\n"
                 << "            " << (cell->selfProp ? "true" : "false") << ", "
@@ -3563,13 +3657,15 @@ int main(int argc, char* argv[])
             if (std::string(className) == "constant speed")
             {
                 std::cout << "the " << sorted.size() << " cells whose weapon flies at a constant"
-                          << " speed, ceil(d / v) - 1, over every victim\n\n";
+                          << " speed, stopped on the victim's\nfootprint, over every victim that can be named ("
+                          << dropped << " could not)\n\n";
             }
             else
             {
                 std::cout << "the " << sorted.size() << " cells whose weapon has a motor, flown as"
-                          << " RWE flies one, over the victims\nthat could not outrun a step of it ("
-                          << dropped << " pairings dropped by that bound)\n\n";
+                          << " RWE flies one and stopped on the\nvictim's footprint, over the victims that"
+                          << " could not outrun a step of it\n(" << dropped
+                          << " pairings dropped by that bound or an unnamed victim)\n\n";
             }
 
             std::cout << "  " << std::left << std::setw(13) << "shooter" << " " << std::right << std::setw(2) << "sl"

@@ -4,10 +4,15 @@
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
+#include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/UnitModelDefinition.h>
+#include <rwe/sim/UnitState.h>
 #include <rwe/sim/UnitWeapon.h>
 #include <rwe/sim/WeaponDefinition.h>
+#include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/tad_weapon_episodes.h>
 #include <string>
+#include <variant>
 
 // Conformance cases: how long a projectile takes to reach what it was aimed at,
 // against how long it took in a real Total Annihilation game.
@@ -28,47 +33,46 @@
 // each a different flight and none of them is here; see the fixture header.
 //
 // WHAT IS DRIVEN. The real GameSimulation and the real Projectile, spawned by
-// spawnProjectile and stepped by tick(), because what the corpus recorded is a
-// projectile crossing a distance and not a unit deciding to fire. The unit
-// behaviour that picks a target, the aim, the reload and the hit test are all
-// out of scope here and have their own tests; putting a corpus number in one of
-// those would be asserting something the corpus did not measure.
+// spawnProjectile and stepped by tick(), fired at a real victim standing at the
+// aim point with the victim's own footprint, because what the corpus recorded is
+// a projectile crossing a distance until it hits something and not a unit
+// deciding to fire. Target selection, the aim and the reload are out of scope
+// here and have their own tests.
 //
-// Arrival is the first tick the projectile has covered the distance from where
-// it was fired to where it was aimed. That is what the demo's damage record
-// marks, to within the tick it lands on: a projectile arrives partway through
-// its final tick, and over the corpus the overshoot past the aim point is always
-// less than one step.
+// Arrival is the tick the projectile detonates on the victim. That is where TA
+// stops it -- the first tick its move puts it in a map square the victim
+// occupies (0x49B090), which is about half a footprint short of the aim point
+// and not at it -- and it is what the demo's damage record marks. RWE moves a
+// projectile and then tests the occupied grid, in the same order, so the tick
+// count is the flight time with nothing added or taken away.
 
 namespace rwe
 {
     namespace
     {
+        /**
+         * Map squares on a side. Large enough that no episode's geometry leaves
+         * it, flat at zero so nothing intersects the ground. A shot's real map
+         * is not reproducible here and is not what is being measured.
+         */
+        constexpr int MapSquares = 1024;
+
         MapTerrain makeFlatTerrain()
         {
-            // Large enough that no episode's geometry leaves it, and flat at
-            // zero so nothing intersects the ground. A shot's real map is not
-            // reproducible here and is not what is being measured.
-            Grid<unsigned char> heights(1024, 1024, static_cast<unsigned char>(0));
+            Grid<unsigned char> heights(MapSquares, MapSquares, static_cast<unsigned char>(0));
             return MapTerrain(std::move(heights), 0_ss);
         }
 
-        PlayerId addShooter(GameSimulation& sim)
+        /**
+         * Where a demo coordinate is in RWE's world. TA measures from the map's
+         * corner and RWE from its centre, and the difference is half the map --
+         * a whole number of sixteen-unit squares, so a square boundary in the
+         * demo is a square boundary here, which is the property the footprint
+         * test depends on.
+         */
+        SimScalar toWorld(int32_t fixed)
         {
-            GamePlayerInfo p{
-                std::optional<std::string>("us"),
-                GamePlayerType::Human,
-                PlayerColorIndex(0),
-                GamePlayerStatus::Alive,
-                std::string("ARM"),
-                Metal(1000.0f),
-                Energy(1000.0f),
-                Metal(1000.0f),
-                Energy(1000.0f),
-                Metal(1000.0f),
-                Energy(1000.0f),
-            };
-            return sim.addPlayer(p);
+            return SimScalar(static_cast<float>(tadFixedToDouble(fixed) - MapSquares * 8.0));
         }
 
         /**
@@ -140,31 +144,70 @@ namespace rwe
 
         SimVector originOf(const TadWeaponEpisode& e)
         {
-            return SimVector(
-                SimScalar(static_cast<float>(tadFixedToDouble(e.originX))),
-                SimScalar(static_cast<float>(tadFixedToDouble(e.originY))),
-                SimScalar(static_cast<float>(tadFixedToDouble(e.originZ))));
+            return SimVector(toWorld(e.originX), SimScalar(static_cast<float>(tadFixedToDouble(e.originY))), toWorld(e.originZ));
         }
 
         SimVector targetOf(const TadWeaponEpisode& e)
         {
-            return SimVector(
-                SimScalar(static_cast<float>(tadFixedToDouble(e.targetX))),
-                SimScalar(static_cast<float>(tadFixedToDouble(e.targetY))),
-                SimScalar(static_cast<float>(tadFixedToDouble(e.targetZ))));
+            return SimVector(toWorld(e.targetX), SimScalar(static_cast<float>(tadFixedToDouble(e.targetY))), toWorld(e.targetZ));
         }
 
         /**
-         * How many ticks it takes the projectile to cover the distance, which is
-         * the flight time plus one: like the build accumulator's first increment
-         * landing on the nanoframe's own tick, a projectile takes its first step
-         * on the tick it is fired.
+         * The victim, standing at the aim point on the ground with its own FBI
+         * footprint, stamped into the occupied grid by tryAddUnit -- the real
+         * spawn path, and the same computeFootprintRegion the miner's model
+         * ports.
+         *
+         * ITS HEIGHT IS NOT WHAT IS MEASURED. The collision test has a second
+         * half, that the round be below the victim's model top, and the corpus
+         * model does not score it; so the victim is given a model tall enough
+         * that no episode's round passes over it, and only the footprint can
+         * decide the tick.
          */
-        unsigned int ticksToArrive(const TadWeaponEpisode& episode)
+        UnitId addVictim(GameSimulation& sim, const TadWeaponEpisode& episode, PlayerId owner)
+        {
+            UnitDefinition d{};
+            d.objectName = "corpus_victim";
+            d.isMobile = true;
+            d.maxHitPoints = 1000000;
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{
+                episode.victimFootprintX, episode.victimFootprintZ, 255u, 255u, 0u, 255u};
+            sim.unitDefinitions["CORPUS_VICTIM"] = d;
+
+            UnitModelDefinition model{};
+            model.height = 100000_ss;
+            sim.unitModelDefinitions["corpus_victim"] = model;
+
+            auto script = makeEmptyCobScript();
+            auto env = std::make_unique<CobEnvironment>(script.get());
+            std::vector<UnitMesh> pieces;
+            UnitState unit(pieces, std::move(env));
+            unit.unitType = "CORPUS_VICTIM";
+            unit.owner = owner;
+            auto at = targetOf(episode);
+            unit.position = SimVector(at.x, 0_ss, at.z);
+            unit.previousPosition = unit.position;
+            unit.hitPoints = 1000000;
+            unit.buildTimeCompleted = 0;
+            auto id = sim.tryAddUnit(std::move(unit));
+            REQUIRE(id.has_value());
+            return *id;
+        }
+
+        /**
+         * How many ticks until the projectile detonates on the victim, or zero
+         * if it never does -- including if it goes off anywhere else, which
+         * would be a hit on something that is not being measured.
+         */
+        unsigned int ticksToHit(const TadWeaponEpisode& episode)
         {
             GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-            addShooter(sim);
+            auto shooter = addPlayer(sim, "shooter");
+            auto target = addPlayer(sim, "target");
             defineWeapon(sim, episode);
+            auto victimId = addVictim(sim, episode, target);
+            auto footprint = sim.computeFootprintRegion(
+                sim.getUnitState(victimId).position, episode.victimFootprintX, episode.victimFootprintZ);
 
             auto from = originOf(episode);
             auto at = targetOf(episode);
@@ -174,19 +217,23 @@ namespace rwe
             UnitWeapon weapon;
             weapon.weaponType = "corpus";
             sim.spawnProjectile(
-                PlayerId(0), weapon, from, toTarget.normalized(), distance, std::nullopt, std::nullopt, std::nullopt, at);
+                shooter, weapon, from, toTarget.normalized(), distance, std::nullopt, std::nullopt, std::nullopt, at);
 
             for (unsigned int ticks = 1; ticks <= 4000u; ++ticks)
             {
+                sim.events.clear();
                 sim.tick();
-                if (sim.projectiles.begin() == sim.projectiles.end())
+                for (const auto& e : sim.events)
                 {
-                    return 0;
-                }
-                const auto& p = sim.projectiles.begin()->second;
-                if ((p.position - from).length() >= distance)
-                {
-                    return ticks;
+                    const auto* died = std::get_if<ProjectileDiedEvent>(&e);
+                    if (died == nullptr)
+                    {
+                        continue;
+                    }
+                    auto square = sim.terrain.worldToHeightmapCoordinate(died->position);
+                    auto onVictim = died->deathType == ProjectileDiedEvent::DeathType::NormalImpact
+                        && footprint.contains(square);
+                    return onVictim ? ticks : 0;
                 }
             }
 
@@ -207,11 +254,10 @@ namespace rwe
         {
             DYNAMIC_SECTION(episodeName(episode))
             {
-                auto ticks = ticksToArrive(episode);
+                auto ticks = ticksToHit(episode);
                 REQUIRE(ticks > 0u);
 
-                auto flight = static_cast<int>(ticks) - 1;
-                REQUIRE(flight
+                REQUIRE(static_cast<int>(ticks)
                     == static_cast<int>(episode.flightTicks) + episode.expectedFlightDelta);
             }
         }
@@ -231,6 +277,12 @@ namespace rwe
             {
                 REQUIRE(episode.weaponVelocity > 0u);
                 REQUIRE(episode.weaponDamage > 0u);
+
+                // A victim with no footprint occupies no square and nothing
+                // could hit it; a row that had one would be the miner scoring a
+                // pairing its model cannot stop.
+                REQUIRE(episode.victimFootprintX > 0u);
+                REQUIRE(episode.victimFootprintZ > 0u);
 
                 // What the round leaves the barrel at, asked the way
                 // createProjectileFromWeapon asks it: a startVelocity of zero is

@@ -105,20 +105,25 @@ discrepancies to explain away; they are four more oracles.
 
 NO SCORED CELL DISAGREES. Under the aim-point model four did -- ARMAMPH and
 CORGEO among the constant-speed cells, ARMFIG and CORVAMP among the missiles,
-each one tick low -- and all four land on the footprint model. Only one of them
-is explained outright: ARMAMPH goes from 45% at -1 to 69% at +0, and it read low
+each one tick low -- and all four land on the footprint model. Two of them are
+explained outright. ARMAMPH goes from 45% at -1 to 71% at +0, and it read low
 where ARMMAV firing the same GAUSS_MAV did not because its victims are bigger
-(a mean footprint side of 3.0 against 2.3). The other three land as near-ties
-still -- CORGEO 47% against 38% at -1, CORVAMP 52% against 45% at -1, ARMFIG 41%
-against 35% at +1 -- and ARMFIG still sits twenty points under CORVENG, the same
-airframe with the same weapon. All three fighters fire from about 130 units up,
-which is where the half of the collision test this model leaves out -- the
-round must also be below the victim's model top -- would bite; but CORVENG fires
-from the same height, so that half alone does not separate ARMFIG from it.
-KNOWN_EXCEPTIONS
-is kept, empty, so that the next disagreement is named rather than tolerated:
-the run fails if a NEW cell disagrees or if a named one stops reading what it
-read.
+(a mean footprint side of 3.0 against 2.3). CORVAMP goes from 41% at -1 to 66%
+at +0. The other two land as near-ties still -- CORGEO 47% against 38% at -1,
+ARMFIG 41% against 35% at +1 -- and ARMFIG still sits twenty points under
+CORVENG (61%), the same airframe with the same weapon. Both fighters fire from
+about 130 units up, which is where the half of the collision test this model
+leaves out -- the round must also be below the victim's model top -- would
+bite; but CORVENG fires from the same height, so that half alone does not
+separate ARMFIG from it. KNOWN_EXCEPTIONS is kept, empty, so that the next
+disagreement is named rather than tolerated: the run fails if a NEW cell
+disagrees or if a named one stops reading what it read.
+
+THE DUMP MUST CARRY EXACT COORDINATES. This model floors positions onto
+sixteen-unit squares, so a coordinate rounded to three decimals can land on the
+wrong side of a boundary and move a whole pairing. --emit-shots writes each
+16.16 coordinate in its shortest exact decimal form for that reason; against a
+three-decimal dump CORVAMP read 52% here and 66% in the port.
 
 Exits non-zero if a scored cell's modal flight time stops agreeing with the
 model, so this is a check and not a listing. Neither demos nor mod files are in
@@ -398,7 +403,8 @@ def footprint_squares(target, footprint):
     the model, against 89% for flooring it, 84% for ceiling it and 95% for
     flooring the centre and counting half the footprint either side -- and the
     gap widens as the victim moves (88% against 66%, 67% and 74% for drift under
-    eight units).
+    eight units). (Measured on the pairing alone, before the named-victim
+    filter, so the denominators are this function's and not the table's.)
     """
     fx, fz = footprint
     return (math.floor((target[0] - fx * 8.0) / 16.0 + 0.5),
@@ -464,11 +470,11 @@ def travelled_by(kind, flight, block):
 #
 #     drift (world units)   constant speed      accelerating
 #     0 (immobile victim)    98% (n=810)         78% (n=515)
-#     0-8                    88% (n=2091)        69% (n=173)
-#     8-16                   77% (n=2523)        55% (n=836)
+#     0-8                    88% (n=2091)        71% (n=173)
+#     8-16                   77% (n=2523)        56% (n=836)
 #     16-32                  61% (n=3415)        43% (n=4064)
 #     32-64                  39% (n=1383)        26% (n=4121)
-#     64-128                 47% (n=194)         17% (n=667)
+#     64-128                 47% (n=194)         18% (n=667)
 #     128+                   21% (n=198)          9% (n=5398)
 #
 # (share of pairings landing on the model's tick; --drift reprints it. Under the
