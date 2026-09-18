@@ -697,6 +697,20 @@ namespace
         bool twoPhase;
 
         /**
+         * Whether the round's heading and pitch can change in flight at all.
+         *
+         * updateSelfPropelledProjectile asks for an aim point only inside
+         * `twoPhase ? secondPhase : guidance`, and then moves the attitude with
+         * turnTowards, which cannot move it by less than one angle unit a tick.
+         * So a round with neither flag, or a `turnrate` that truncates to zero
+         * ticks' worth, flies wherever it was pointed at launch -- and nothing
+         * read only through the aim point, which is what `cruise` is, can reach
+         * it. That is what makes ROCKET_HRK scoreable; see weaponClass.
+         */
+        bool guidance;
+        unsigned int turnRate;
+
+        /**
          * Detonate on running out of motor instead of coasting on, which is a
          * different arrival and not a different speed. Nothing scored here is
          * both burnblow and longer-lived than its motor, but a regeneration that
@@ -811,6 +825,8 @@ namespace
                         weapon.selfProp,
                         weapon.cruise,
                         weapon.twoPhase,
+                        weapon.guidance,
+                        weapon.turnRate,
                         weapon.burnBlow,
                         weapon.accuracy,
                         weapon.sprayAngle,
@@ -3480,9 +3496,14 @@ namespace rwe
         // Past this the line has left any square the footprint could cover.
         auto giveUp = span + 16.0 * static_cast<double>(footprintX + footprintZ + 2);
 
-        auto accelerating = weaponClassName == "accelerating";
+        // A round with a motor: it leaves at tadLaunchSpeed and gains its
+        // acceleration up to the cap while the motor burns. `cruise` is here
+        // for the same reason `accelerating` is -- it is a selfprop round, and
+        // the one thing its flag would have changed is read from a guidance
+        // step this class of weapon never takes. See weaponClass.
+        auto motor = weaponClassName == "accelerating" || weaponClassName == "cruise";
         auto cap = static_cast<double>(facts.velocity) / 30.0;
-        auto speed = accelerating ? tadLaunchSpeed(facts) : cap;
+        auto speed = motor ? tadLaunchSpeed(facts) : cap;
         if (ballistic)
         {
             auto pitch = tadBallisticPitch(facts, origin, target);
@@ -3498,7 +3519,7 @@ namespace rwe
         double travelled = 0.0;
         for (unsigned int k = 1;; ++k)
         {
-            if (accelerating && k <= burn)
+            if (motor && k <= burn)
             {
                 speed = std::min(cap, speed + acceleration);
             }
@@ -3700,17 +3721,31 @@ namespace rwe
         {
             return "no velocity";
         }
-        // `cruise` and `twophase` are read only on the self-propelled path, and
-        // each replaces the flight with a different shape -- a cruise missile
-        // climbs to a fixed altitude and flies over the aim point before coming
-        // down, a two-phase one turns over and restarts its motor -- so they are
-        // classes of their own rather than cells that happen to read badly.
-        // ROCKET_HRK is the one that matters over this corpus: `selfprop` with
-        // `cruise`, and a start speed equal to its cap, so reading the
-        // velocities alone put it in the constant-speed table.
+        // `cruise` and `twophase` are read only on the self-propelled path.
+        //
+        // `cruise` IS NOT A SHAPE OF FLIGHT, though it was read as one until
+        // 2026-09-19 ("climbs to a fixed altitude, crosses the aim point and
+        // comes down on it"). The clause lives in the AIM POINT (0x49B3E0), and
+        // the aim point is asked for from exactly one place: the guidance step
+        // of updateSelfPropelledProjectile. A round that cannot steer never
+        // reaches it, so its `cruise` flag is inert and it is an ordinary motor
+        // round. ROCKET_HRK is that -- no `guidance`, no `twophase`, no
+        // `turnrate` -- and what its exclusion was really costing it was the
+        // motor class's drift bound, not a model: with the bound it reads +0
+        // over 291 pairings where unbounded it read +0 over 709 at a far worse
+        // share, and not one pairing's answer changed. tad-weapontime.py
+        // --replay prints the measurement, which is the full replay of
+        // updateSelfPropelledProjectile agreeing with the step-length model on
+        // every one of that cell's pairings.
+        //
+        // One that CAN steer keeps its own name and stays unscored, exactly as
+        // "ballistic selfprop" does. Nothing in this data set is one, and that
+        // is why the guard has to be here: the model is only known to be right
+        // about a cruise weapon that cannot turn.
         if (facts.selfProp && facts.cruise)
         {
-            return "cruise";
+            auto steers = (facts.twoPhase || facts.guidance) && facts.turnRate / 30u > 0u;
+            return steers ? "cruise steering" : "cruise";
         }
         if (facts.selfProp && facts.twoPhase)
         {
@@ -3767,6 +3802,12 @@ namespace rwe
      * tadWithinAimConeBound gives: its flights are three to ten times longer,
      * so the drift bound bites far harder, and a pitch error is a range error
      * rather than a speed error.
+     *
+     * A `cruise` cell takes the drift bound and nothing else. It is a motor
+     * round and wants its class's bound for the same reason; it does not want
+     * the aim cone, which is about a pitch error becoming a range error on an
+     * arc. Withholding that bound is exactly what had kept the class looking
+     * unmodellable -- see weaponClass.
      */
     bool tadScoreablePairing(
         const std::string& weaponClassName,
@@ -3779,7 +3820,8 @@ namespace rwe
         {
             return false;
         }
-        if (weaponClassName != "accelerating" && weaponClassName != "ballistic")
+        if (weaponClassName != "accelerating" && weaponClassName != "ballistic"
+            && weaponClassName != "cruise")
         {
             return true;
         }
@@ -3952,8 +3994,12 @@ namespace rwe
             {
                 continue;
             }
+            // `cruise` is here because it is a motor round whose flag is inert
+            // (weaponClass), so the test flies it down the self-propelled path
+            // with cruise, guidance and turnRate off -- which is not an
+            // approximation of the weapon but a transcription of it.
             if (cell.weaponClass != "constant speed" && cell.weaponClass != "accelerating"
-                && cell.weaponClass != "ballistic")
+                && cell.weaponClass != "ballistic" && cell.weaponClass != "cruise")
             {
                 continue;
             }
@@ -4008,13 +4054,28 @@ namespace rwe
 // The pairing is confirmed by a number no filter looks at: every cell's modal
 // damage is its weapon's own [DAMAGE] default, which is `weaponDamage` here.
 //
-// WHICH SHOTS MAY BE HERE. The three classes the models describe: weapons that
-// fly at a constant speed, weapons with a motor, and weapons that lob a shell. A
-// vlaunch rocket goes up before it goes anywhere, a cruise missile climbs and
-// crosses the aim point before coming down, a torpedo travels through water, and
-// a burst weapon fires several rounds from one trigger so the isolation filter
-// cannot mean what it means elsewhere. Those four are four more oracles, not
-// discrepancies. See docs/TA-DEMOS.md.
+// WHICH SHOTS MAY BE HERE. The classes the models describe: weapons that fly at
+// a constant speed, weapons with a motor -- including one carrying `cruise`,
+// whose clause is read only through an aim point a round that cannot steer
+// never asks for, so it is a motor round wearing the flag -- and weapons that
+// lob a shell.
+//
+// Three classes are still excluded, and each for its own reason rather than for
+// reading badly. A VLAUNCH rocket goes up before it goes anywhere: the same
+// replay that settled the cruise class flies these too and they still do not
+// land, spending about 190 ticks in the air with a twenty-tick spread and no
+// mode even over victims that cannot move at all. A TORPEDO is a selfprop round
+// with one clause nothing here models -- above sea level it takes gravity and
+// has its pitch forced to zero (0x49B9EB) -- but the class is lost to
+// arithmetic rather than to that: after the drift bound no torpedo cell has
+// --min-pairings left, whatever sea level was, and the one fired from below the
+// surface reads the best share in the corpus on 19 pairings. A BURST weapon's
+// record is a template that never flies (0x49CB79) and emits one 0x0d for
+// several rounds, so the single damage record that survives the isolation
+// filter belongs to an unidentifiable one of them and the delta is drawn from a
+// comb rather than from a value. Those three are three more oracles, not
+// discrepancies. tools/tad-weapontime.py --unmodelled prints the evidence for
+// each; see docs/TA-DEMOS.md.
 //
 // THE ARITHMETIC BEING PINNED. A round does not stop at the point it was aimed
 // at. It detonates the first tick its move puts it in a map square an enemy unit
@@ -6248,7 +6309,7 @@ int main(int argc, char* argv[])
         unsigned int agreeing = 0;
         unsigned int scoredCells = 0;
         unsigned int damageAgreeing = 0;
-        for (const auto* className : {"constant speed", "accelerating", "ballistic"})
+        for (const auto* className : {"constant speed", "accelerating", "ballistic", "cruise"})
         {
             auto group = byClass.find(className);
             if (group == byClass.end())
@@ -6282,6 +6343,14 @@ int main(int argc, char* argv[])
                           << " victims that could not outrun a step of it and\nthe shots the weapon's own aim"
                           << " cone could not have moved\n(" << dropped
                           << " pairings dropped by those two bounds or an unnamed victim)\n\n";
+            }
+            else if (std::string(className) == "cruise")
+            {
+                std::cout << "the " << sorted.size() << " cells whose weapon carries `cruise` but"
+                          << " cannot steer, so the clause is\ninert and the round is an ordinary motor"
+                          << " round: flown as RWE flies one and\nstopped on the victim's footprint, over"
+                          << " the victims that could not outrun a\nstep of it\n(" << dropped
+                          << " pairings dropped by that bound or an unnamed victim)\n\n";
             }
             else
             {
@@ -6322,10 +6391,14 @@ int main(int argc, char* argv[])
         std::cout << "\n"
                   << damageAgreeing << " of " << scoredCells
                   << " scored cells carry their weapon's own [DAMAGE] default as the modal damage\n";
-        std::cout << "\nthe classes neither model describes, listed and never scored:\n";
+        std::cout << "\nthe classes no model describes, listed and never scored:\n";
         for (const auto& [kind, group] : byClass)
         {
-            if (kind == "constant speed" || kind == "accelerating")
+            // Every class printed as a scored table above, so that a scored one
+            // is not also listed here as though it were not -- which `ballistic`
+            // was, from the day it became scored until this line named it.
+            if (kind == "constant speed" || kind == "accelerating"
+                || kind == "ballistic" || kind == "cruise")
             {
                 continue;
             }

@@ -110,6 +110,15 @@ namespace rwe
          * towards a point already dead ahead is an identity, so the episode does
          * not carry fields that could only be set to values with no effect.
          *
+         * AND `cruise` IS OFF FOR THE SAME REASON, which is worth spelling out
+         * because one episode's weapon declares it. The cruise clause lives in
+         * the aim point (0x49B3E0) and the aim point is asked for only from the
+         * guidance step, so a round that cannot steer never reaches it. The
+         * miner will not emit a cruise cell whose weapon can steer -- such a
+         * weapon is classed "cruise steering" and left unscored -- so these
+         * three zeroes are a transcription of ROCKET_HRK, which names none of
+         * the three, and not an approximation of it.
+         *
          * THE RANGE IS REAL FOR A MOTOR AND FAKE FOR A BEAM. A self-propelled
          * round has no `dieOnFrame` at all and its range is what times the burn,
          * so it gets the weapon's own. A line-of-sight one lives `range /
