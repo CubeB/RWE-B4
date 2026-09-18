@@ -138,6 +138,16 @@ namespace rwe
          * does with it is build the means to spend it.
          */
         bool surplusExpansion{true};
+        /** An armed enemy this close to the commander, seen lately, puts it in danger; so does any loss of hit points. Zero switches commander safety off. */
+        SimScalar commanderDangerRadius{450_ss};
+        /** Combat units and hulls within this distance of an endangered commander go to it. */
+        SimScalar commanderGuardRadius{1500_ss};
+        /** Radar contacts count as incoming inside this many defendRadius of the base, when closing. Zero switches the radar warning off. */
+        float radarWarningRings{2.5f};
+        /** Contacts that must be closing before the army forms up; one blip is a scout. */
+        int radarWarningMinContacts{2};
+        /** Seconds a hull may fire at one target without hurting it before it is moved to try from somewhere else. Zero switches it off. */
+        int navalStalledAttackSeconds{12};
         /**
          * How far from a known armed enemy, or from where a building of ours
          * was lost lately, a builder will still put something down. The

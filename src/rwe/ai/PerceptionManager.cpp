@@ -100,6 +100,73 @@ namespace rwe
             bb.enemyBasePosition = SimVector(sum.x / SimScalar(static_cast<float>(buildings)), 0_ss, sum.z / SimScalar(static_cast<float>(buildings)));
         }
 
+        // What the radar says is coming. A contact is an enemy we cannot see
+        // standing where our radar reaches -- the dot on a player's minimap,
+        // with no name on it -- and one that is inside the warning ring and
+        // nearer than it was last pass is closing. Enough of those and the
+        // army is told where from. Seen enemies that are armed, mobile and
+        // closing count too: a column in plain view is no less a column.
+        if (bb.incomingAttackFrom && bb.now.value >= bb.incomingAttackUntil.value)
+        {
+            bb.incomingAttackFrom.reset();
+        }
+        if (bb.baseAnchor && profile.radarWarningRings > 0.0f && bb.now.value >= bb.radarSampleAt.value + SimTicksPerSecond)
+        {
+            bb.radarSampleAt = bb.now;
+            auto ring = profile.defendRadius * SimScalar(profile.radarWarningRings);
+            auto ringSquared = ring * ring;
+            std::map<unsigned int, SimScalar> distances;
+            float sumX = 0.0f;
+            float sumZ = 0.0f;
+            int closing = 0;
+            for (const auto& [unitId, unit] : sim.units)
+            {
+                if (unit.isDead() || unit.isOwnedBy(aiOwner))
+                {
+                    continue;
+                }
+                auto distance = bb.baseAnchor->distanceSquared(unit.position);
+                if (distance > ringSquared)
+                {
+                    continue;
+                }
+                const auto& def = sim.unitDefinitions.at(unit.unitType);
+                if (!def.isMobile)
+                {
+                    continue;
+                }
+                bool seen = profile.cheatModeOmniscient || sim.canSeeUnit(aiOwner, unitId);
+                if (seen)
+                {
+                    if (def.weapon1.empty() && def.weapon2.empty() && def.weapon3.empty())
+                    {
+                        continue;
+                    }
+                }
+                else if (!sim.isOnRadarOf(aiOwner, unit.position))
+                {
+                    continue;
+                }
+                distances[unitId.value] = distance;
+                auto before = bb.radarContactDistance.find(unitId.value);
+                // Squared distances, so the margin is taken on the roots:
+                // eight units in the second is a walk, less is milling about.
+                if (before != bb.radarContactDistance.end() && rweSqrt(distance) + 8_ss < rweSqrt(before->second))
+                {
+                    ++closing;
+                    sumX += unit.position.x.value;
+                    sumZ += unit.position.z.value;
+                }
+            }
+            bb.radarContactDistance = std::move(distances);
+            if (closing >= profile.radarWarningMinContacts)
+            {
+                auto count = static_cast<float>(closing);
+                bb.incomingAttackFrom = SimVector(SimScalar(sumX / count), 0_ss, SimScalar(sumZ / count));
+                bb.incomingAttackUntil = GameTime(bb.now.value + (10u * SimTicksPerSecond));
+            }
+        }
+
         // Anyone knocking on the door?
         bb.enemiesNearBase.clear();
         if (bb.baseAnchor)

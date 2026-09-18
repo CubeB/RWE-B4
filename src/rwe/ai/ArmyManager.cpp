@@ -306,6 +306,123 @@ namespace rwe
         return best;
     }
 
+    void ArmyManager::updateCommanderSafety(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        AiBlackboard& bb,
+        std::vector<PlayerCommand>& outCommands) const
+    {
+        (void)aiOwner;
+        bb.commanderThreat.reset();
+        bb.commanderFleeing = false;
+        if (profile.commanderDangerRadius <= 0_ss || !bb.commanderUnitId)
+        {
+            bb.commanderInDanger = false;
+            return;
+        }
+        auto commanderRef = sim.tryGetUnitState(*bb.commanderUnitId);
+        if (!commanderRef || commanderRef->get().isDead())
+        {
+            bb.commanderInDanger = false;
+            return;
+        }
+        const auto& commander = commanderRef->get();
+
+        // Two causes: it has lost hit points since the last pass, or there
+        // is something armed beside it. Either keeps the alarm up for ten
+        // seconds, so a lull between salvoes does not send it back to work.
+        bool hurt = bb.commanderLastHitPoints > 0 && commander.hitPoints < bb.commanderLastHitPoints;
+        bb.commanderLastHitPoints = commander.hitPoints;
+
+        auto radiusSquared = profile.commanderDangerRadius * profile.commanderDangerRadius;
+        SimScalar nearest = 0_ss;
+        int threats = 0;
+        for (const auto& [_, enemy] : bb.knownEnemies)
+        {
+            // Not aircraft: there is no running from a bomber, and the
+            // answer to one is the anti-air the commander is about to build.
+            if (!enemy.isArmed || enemy.isAir || !inSightRecently(bb, profile, enemy))
+            {
+                continue;
+            }
+            auto enemyRef = sim.tryGetUnitState(enemy.unitId);
+            if (!enemyRef || enemyRef->get().isDead() || isNanoframe(sim, enemyRef->get()))
+            {
+                continue;
+            }
+            auto d = commander.position.distanceSquared(enemy.lastKnownPosition);
+            if (d > radiusSquared)
+            {
+                continue;
+            }
+            ++threats;
+            if (!bb.commanderThreat || d < nearest)
+            {
+                nearest = d;
+                bb.commanderThreat = enemy.unitId;
+            }
+        }
+        if (hurt || bb.commanderThreat)
+        {
+            bb.commanderDangerUntil = GameTime(bb.now.value + (10u * SimTicksPerSecond));
+        }
+        bool was = bb.commanderInDanger;
+        bb.commanderInDanger = bb.now.value < bb.commanderDangerUntil.value;
+        if (bb.commanderInDanger && !was)
+        {
+            LOG_INFO << "AI player " << aiOwner.value << ": the commander is in danger (" << (hurt ? "taking damage" : "armed enemy close")
+                     << ") at " << static_cast<int>(commander.position.x.value) << "," << static_cast<int>(commander.position.z.value);
+        }
+        if (!bb.commanderInDanger)
+        {
+            return;
+        }
+
+        // A lone raider it can shoot is already answered further down, and a
+        // commander is the best gun the base owns: it runs only from what it
+        // cannot fight -- more than it may take on alone, something it
+        // cannot fire at from where it stands, or a fight it is losing.
+        auto maxHitPoints = sim.unitDefinitions.at(commander.unitType).maxHitPoints;
+        bool losing = commander.hitPoints * 2u < maxHitPoints;
+        bool canFight = canFireFrom(sim, commander)
+            && std::max(threats, static_cast<int>(bb.enemiesNearBase.size())) <= std::max(1, profile.commanderDefendsAloneMaxIntruders) && !losing;
+        if (canFight)
+        {
+            return;
+        }
+
+        // Where to: home if it is away from home, since home is where the
+        // towers and the army are; and if it is already there, straight away
+        // from whatever is shooting, toward the rally point failing that.
+        std::optional<SimVector> refuge;
+        if (bb.baseAnchor && commander.position.distanceSquared(*bb.baseAnchor) > (300_ss * 300_ss))
+        {
+            refuge = *bb.baseAnchor;
+        }
+        else if (bb.commanderThreat)
+        {
+            auto threat = bb.knownEnemies.find(bb.commanderThreat->value);
+            if (threat != bb.knownEnemies.end())
+            {
+                auto away = (commander.position - threat->second.lastKnownPosition).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+                refuge = commander.position + (away * 350_ss);
+            }
+        }
+        else if (bb.rallyPoint)
+        {
+            refuge = *bb.rallyPoint;
+        }
+        if (refuge)
+        {
+            bb.commanderFleeing = true;
+            if (!isMovingTo(commander, *refuge))
+            {
+                outCommands.push_back(moveCommand(*bb.commanderUnitId, *refuge));
+            }
+        }
+    }
+
     void ArmyManager::updateNavy(
         const GameSimulation& sim,
         PlayerId aiOwner,
@@ -523,6 +640,47 @@ namespace rwe
             const bool atHome = ship.position.distanceSquared(*navalHome) <= gatherRadiusSquared;
             const bool sails = fleetReady && (!atHome || homeGroupSails);
 
+            // On its way to somewhere it can hit from; see NavalTargetProgress.
+            if (auto moving = navalRepositioning.find(shipId.value); moving != navalRepositioning.end())
+            {
+                bool arrived = ship.position.distanceSquared(moving->second.first) <= (64_ss * 64_ss);
+                if (arrived || bb.now.value >= moving->second.second.value)
+                {
+                    navalRepositioning.erase(moving);
+                }
+                else
+                {
+                    if (!isMovingTo(ship, moving->second.first))
+                    {
+                        outCommands.push_back(moveCommand(shipId, moving->second.first));
+                    }
+                    continue;
+                }
+            }
+
+            // The commander comes first. A hull near enough goes for what is
+            // shooting it, or to it if that is not known.
+            if (bb.commanderInDanger && bb.commanderUnitId)
+            {
+                auto commanderRef = sim.tryGetUnitState(*bb.commanderUnitId);
+                if (commanderRef && ship.position.distanceSquared(commanderRef->get().position) <= (profile.commanderGuardRadius * profile.commanderGuardRadius)
+                    && sameWaterBody(bb.mapIntel, sim.terrain, ship.position, commanderRef->get().position))
+                {
+                    if (bb.commanderThreat)
+                    {
+                        if (!isAttackingUnit(ship, *bb.commanderThreat))
+                        {
+                            outCommands.push_back(attackCommand(shipId, *bb.commanderThreat));
+                        }
+                    }
+                    else if (!isMovingTo(ship, commanderRef->get().position))
+                    {
+                        outCommands.push_back(moveCommand(shipId, commanderRef->get().position));
+                    }
+                    continue;
+                }
+            }
+
             if (sails && enemyCommander && !bb.sideUnits.submarine.empty() && ship.unitType == bb.sideUnits.submarine)
             {
                 auto commanderRef = sim.tryGetUnitState(enemyCommander->unitId);
@@ -545,6 +703,85 @@ namespace rwe
             // rule, just asked with nearestNavalEnemy instead.
             if (auto enemy = nearestNavalEnemy(sim, profile, bb, ship.position, profile.engageRadius))
             {
+                // Is it getting hurt? If nothing we have thrown at it in
+                // navalStalledAttackSeconds has moved its hit points, the
+                // shots are not arriving -- a torpedo stopped by a shelf, a
+                // shell by a cliff -- and firing on from the same place will
+                // not change that. Move round it to deep water with deep
+                // water all the way in, a different side each attempt.
+                //
+                // Not asked only of a hull that still holds the attack order:
+                // the simulation drops an order it cannot carry out, and a
+                // hull being handed the same target every pass is exactly the
+                // one that is getting nowhere.
+                auto targetRef = sim.tryGetUnitState(*enemy);
+                if (profile.navalStalledAttackSeconds > 0 && targetRef)
+                {
+                    const auto& target = targetRef->get();
+                    auto& progress = navalTargetProgress[enemy->value];
+                    if (progress.since.value == 0 || target.hitPoints != progress.hitPoints)
+                    {
+                        progress.hitPoints = target.hitPoints;
+                        progress.since = bb.now;
+                    }
+                    else if (bb.now.value - progress.since.value > static_cast<unsigned int>(profile.navalStalledAttackSeconds) * SimTicksPerSecond)
+                    {
+                        ++progress.attempt;
+                        progress.since = bb.now;
+                    }
+
+                    auto& answered = navalAttemptAnswered[std::make_pair(shipId.value, enemy->value)];
+                    if (progress.attempt > answered)
+                    {
+                        answered = progress.attempt;
+                        // Eight bearings round the target, starting somewhere
+                        // different for each attempt and each ship.
+                        static const float bearings[8][2] = {
+                            {1.0f, 0.0f}, {0.7071f, 0.7071f}, {0.0f, 1.0f}, {-0.7071f, 0.7071f},
+                            {-1.0f, 0.0f}, {-0.7071f, -0.7071f}, {0.0f, -1.0f}, {0.7071f, -0.7071f}};
+                        auto seaLevel = sim.terrain.getSeaLevel();
+                        auto deepAt = [&](const SimVector& p, SimScalar depth) {
+                            auto ground = sim.terrain.tryGetHeightAt(p.x, p.z);
+                            return ground && *ground <= seaLevel - depth;
+                        };
+                        std::optional<SimVector> spot;
+                        for (int k = 0; k < 8 && !spot; ++k)
+                        {
+                            const auto& b = bearings[(progress.attempt * 3 + static_cast<int>(shipId.value % 8u) + k) % 8];
+                            for (float range : {240.0f, 340.0f, 160.0f})
+                            {
+                                SimVector candidate(target.position.x + SimScalar(b[0] * range), seaLevel, target.position.z + SimScalar(b[1] * range));
+                                if (!deepAt(candidate, 25_ss) || !sameWaterBody(bb.mapIntel, sim.terrain, ship.position, candidate))
+                                {
+                                    continue;
+                                }
+                                // Deep water all the way in: four samples
+                                // along the torpedo's run.
+                                bool clearRun = true;
+                                for (int step = 1; step <= 4 && clearRun; ++step)
+                                {
+                                    auto t = SimScalar(static_cast<float>(step) / 5.0f);
+                                    SimVector sample(candidate.x + ((target.position.x - candidate.x) * t), seaLevel, candidate.z + ((target.position.z - candidate.z) * t));
+                                    clearRun = deepAt(sample, 12_ss);
+                                }
+                                if (clearRun)
+                                {
+                                    spot = candidate;
+                                    break;
+                                }
+                            }
+                        }
+                        if (spot)
+                        {
+                            LOG_DEBUG << "AI navy: ship " << shipId.value << " is not hurting " << target.unitType << " " << enemy->value
+                                      << "; moving round to " << static_cast<int>(spot->x.value) << "," << static_cast<int>(spot->z.value) << " (attempt " << progress.attempt << ")";
+                            navalRepositioning[shipId.value] = std::make_pair(*spot, GameTime(bb.now.value + (20u * SimTicksPerSecond)));
+                            outCommands.push_back(moveCommand(shipId, *spot));
+                            continue;
+                        }
+                    }
+                }
+
                 if (!isAttackingUnit(ship, *enemy))
                 {
                     outCommands.push_back(attackCommand(shipId, *enemy));
@@ -670,6 +907,7 @@ namespace rwe
             }
         }
 
+        updateCommanderSafety(sim, aiOwner, profile, bb, outCommands);
         updateAntiAir(sim, profile, bb, outCommands);
         updateNavy(sim, aiOwner, profile, bb, outCommands);
 
@@ -991,6 +1229,7 @@ namespace rwe
             && bb.combatUnits.empty()
             && intruder
             && bb.commanderUnitId
+            && !bb.commanderFleeing
             && static_cast<int>(bb.enemiesNearBase.size()) <= profile.commanderDefendsAloneMaxIntruders)
         {
             // Only if it could actually hurt the intruder from where it
@@ -1025,6 +1264,29 @@ namespace rwe
                     outCommands.push_back(attackCommand(unitId, *enemy));
                 }
                 continue;
+            }
+
+            // The commander comes first: what is shooting it if that is
+            // known, otherwise to its side. Only units near enough to matter,
+            // so a wave at the enemy's gates is not turned round for it.
+            if (bb.commanderInDanger && bb.commanderUnitId)
+            {
+                auto commanderRef = sim.tryGetUnitState(*bb.commanderUnitId);
+                if (commanderRef && unit.position.distanceSquared(commanderRef->get().position) <= (profile.commanderGuardRadius * profile.commanderGuardRadius))
+                {
+                    if (bb.commanderThreat)
+                    {
+                        if (!isAttackingUnit(unit, *bb.commanderThreat))
+                        {
+                            outCommands.push_back(attackCommand(unitId, *bb.commanderThreat));
+                        }
+                    }
+                    else if (!isMovingTo(unit, commanderRef->get().position) && unit.position.distanceSquared(commanderRef->get().position) > (160_ss * 160_ss))
+                    {
+                        outCommands.push_back(moveCommand(unitId, commanderRef->get().position));
+                    }
+                    continue;
+                }
             }
 
             // A guard stands over the builder it was sent to protect
@@ -1120,6 +1382,24 @@ namespace rwe
                 }
                 default:
                 {
+                    // Radar says something is coming: form a line across its
+                    // path, three fifths of the way out to the defend radius,
+                    // instead of standing in a knot at the rally point until
+                    // the first shell lands among the solar collectors. Each
+                    // unit takes a place along the line by its own number, so
+                    // they spread out rather than all claim the middle.
+                    if (bb.incomingAttackFrom && bb.baseAnchor && !intruder)
+                    {
+                        auto towards = (*bb.incomingAttackFrom - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+                        SimVector across(towards.z, 0_ss, 0_ss - towards.x);
+                        auto place = static_cast<int>(unitId.value % 7u) - 3;
+                        auto post = *bb.baseAnchor + (towards * (profile.defendRadius * SimScalar(0.6f))) + (across * SimScalar(static_cast<float>(place) * 56.0f));
+                        if (!isMovingTo(unit, post) && unit.position.distanceSquared(post) > (72_ss * 72_ss))
+                        {
+                            outCommands.push_back(moveCommand(unitId, post));
+                        }
+                        break;
+                    }
                     // Gather at the rally point and wait.
                     if (bb.rallyPoint && unit.orders.empty() && unit.position.distanceSquared(*bb.rallyPoint) > (96_ss * 96_ss))
                     {

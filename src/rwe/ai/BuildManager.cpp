@@ -358,6 +358,37 @@ namespace rwe
                         {
                             continue;
                         }
+                        // Nor on a geothermal vent, unless it is the plant
+                        // that wants one. A vent blocks nothing, so the
+                        // placement test is perfectly happy to put a solar
+                        // collector on it -- watched in a replay -- and the
+                        // 250 energy under it is then gone for good.
+                        if (!def.yardMapContainsGeo)
+                        {
+                            // The simulation's own vent grid, a tile wider
+                            // than the footprint all round.
+                            bool onVent = false;
+                            const int geoWidth = sim.geoGrid.getWidth();
+                            const int geoHeight = sim.geoGrid.getHeight();
+                            for (int gy = std::max(0, rect.y - 1); gy < std::min(geoHeight, rect.y + rect.height + 1) && !onVent; ++gy)
+                            {
+                                for (int gx = std::max(0, rect.x - 1); gx < std::min(geoWidth, rect.x + rect.width + 1); ++gx)
+                                {
+                                    // Through the vector, as the simulation reads it:
+                                    // Grid<bool>::get cannot return a reference into a
+                                    // vector<bool>.
+                                    if (sim.geoGrid.getVector()[static_cast<std::size_t>((gy * geoWidth) + gx)])
+                                    {
+                                        onVent = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (onVent)
+                            {
+                                continue;
+                            }
+                        }
                         // Don't plant a building on a metal patch; mexes want
                         // those. Still checked before canBeBuiltAt, which is
                         // much the more expensive test, and still cheap -- a
@@ -2172,6 +2203,13 @@ namespace rwe
         ++plannerCursor;
         const auto& builder = sim.getUnitState(builderId);
         const auto& builderDef = sim.unitDefinitions.at(builder.unitType);
+
+        // A commander being shot at is ArmyManager's to move, and is not
+        // handed a solar collector to go and build while it runs.
+        if (builderDef.commander && bb.commanderFleeing)
+        {
+            return;
+        }
 
         // Did this builder's last order come to anything? It is idle again;
         // if nothing of ours stands where it was sent, the order was

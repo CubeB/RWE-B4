@@ -922,6 +922,152 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a commander in danger is got out of it, and what is near goes to it", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+
+        SECTION("a raiding party beside it: it runs the other way, builds nothing, and the army goes for the nearest of them")
+        {
+            auto nearId = addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 0_ss), script);
+            addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 60_ss), script);
+            auto defenderId = addUnit(sim, "ARMPW", ai, SimVector(-200_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(controller.getBlackboard().commanderInDanger);
+            REQUIRE(controller.getBlackboard().commanderFleeing);
+            auto moves = ordersFor<MoveOrder>(commands, commanderId);
+            REQUIRE(!moves.empty());
+            REQUIRE(moves.front().destination.x.value < -200.0f);
+            REQUIRE(ordersFor<BuildOrder>(commands, commanderId).empty());
+
+            auto attacks = ordersFor<AttackOrder>(commands, defenderId);
+            REQUIRE(!attacks.empty());
+            auto target = std::get_if<UnitId>(&attacks.front().target);
+            REQUIRE(target != nullptr);
+            REQUIRE(*target == nearId);
+        }
+
+        SECTION("a lone raider it can shoot is fought, not fled")
+        {
+            addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(controller.getBlackboard().commanderInDanger);
+            REQUIRE(!controller.getBlackboard().commanderFleeing);
+            REQUIRE(ordersFor<MoveOrder>(commands, commanderId).empty());
+        }
+
+        SECTION("unless it is losing")
+        {
+            addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 0_ss), script);
+            sim.getUnitState(commanderId).hitPoints = 40;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(controller.getBlackboard().commanderFleeing);
+            REQUIRE(!ordersFor<MoveOrder>(commands, commanderId).empty());
+            REQUIRE(ordersFor<AttackOrder>(commands, commanderId).empty());
+        }
+
+        SECTION("switched off, none of it")
+        {
+            addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 0_ss), script);
+            addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 60_ss), script);
+            profile.commanderDangerRadius = 0_ss;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(!controller.getBlackboard().commanderInDanger);
+            REQUIRE(ordersFor<MoveOrder>(commands, commanderId).empty());
+        }
+    }
+
+    TEST_CASE("contacts closing on the base put the army in a line across their path", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+        auto defenderId = addUnit(sim, "ARMPW", ai, SimVector(-100_ss, 0_ss, 0_ss), script);
+
+        // Brutal sees everything, which stands in for a radar the fixture
+        // has no definition for; the rule counts a column in plain view the
+        // same way it counts blips.
+        auto profile = makeDefaultBrutalProfile();
+        profile.scoutCount = 0;
+        profile.attackArmySize = 50;
+        // The fixture's map is 1024 across, so the rings are drawn to fit it.
+        profile.defendRadius = 200_ss;
+        // And short enough sighted that the defender does not simply go for them.
+        profile.engageRadius = 150_ss;
+        // Nor is this the commander's alarm, which would send him at them too.
+        profile.commanderDangerRadius = 0_ss;
+        auto outside = 450_ss;
+
+        SECTION("two of them, walking in")
+        {
+            auto a = addUnit(sim, "ARMPW", human, SimVector(outside, 0_ss, 0_ss), script);
+            auto b = addUnit(sim, "ARMPW", human, SimVector(outside, 0_ss, 80_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 35, commands);
+            REQUIRE(!controller.getBlackboard().incomingAttackFrom.has_value());
+
+            // runTicks applies no orders, so they are walked by hand.
+            sim.getUnitState(a).position.x -= 60_ss;
+            sim.getUnitState(b).position.x -= 60_ss;
+            commands.clear();
+            // A second for the contacts to be read again, and the army's own pass after it.
+            runTicks(sim, controller, 70, commands);
+
+            REQUIRE(controller.getBlackboard().incomingAttackFrom.has_value());
+            auto moves = ordersFor<MoveOrder>(commands, defenderId);
+            REQUIRE(!moves.empty());
+            // On the enemy's side of the base, inside the defended ring.
+            REQUIRE(moves.back().destination.x.value > 60.0f);
+            REQUIRE(moves.back().destination.x.value < profile.defendRadius.value);
+        }
+
+        SECTION("standing still, they are not an attack")
+        {
+            addUnit(sim, "ARMPW", human, SimVector(outside, 0_ss, 0_ss), script);
+            addUnit(sim, "ARMPW", human, SimVector(outside, 0_ss, 80_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 40, commands);
+            REQUIRE(!controller.getBlackboard().incomingAttackFrom.has_value());
+        }
+
+        SECTION("one is a scout")
+        {
+            auto a = addUnit(sim, "ARMPW", human, SimVector(outside, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 35, commands);
+            sim.getUnitState(a).position.x -= 60_ss;
+            runTicks(sim, controller, 35, commands);
+            REQUIRE(!controller.getBlackboard().incomingAttackFrom.has_value());
+        }
+    }
+
     TEST_CASE("an attack is ordered at the factory, not at the frame on its pad", "[ai]")
     {
         // A frame on a factory's pad stands where the factory stands, so a
@@ -2562,6 +2708,51 @@ namespace rwe
             REQUIRE(geo->position.z.value == where.z.value);
         }
 
+        SECTION("and nothing else does")
+        {
+            // A vent blocks nothing, so the placement test would let a solar
+            // collector stand on it. Vents all round the builder, and no
+            // button for the plant: whatever is built, none of it may
+            // overlap one.
+            FeatureDefinition vent{};
+            vent.name = "steamvent";
+            vent.footprintX = 2;
+            vent.footprintZ = 2;
+            vent.geothermal = true;
+            // As every shipped vent is, and it is what puts one in the sim's vent grid.
+            vent.indestructible = true;
+            auto ventDef = sim.featureDefinitions.insert(vent);
+            std::vector<SimVector> vents;
+            for (int z = 14; z <= 34; z += 5)
+            {
+                for (int x = 10; x <= 34; x += 5)
+                {
+                    if (auto id = sim.addFeature(ventDef, x, z))
+                    {
+                        vents.push_back(sim.getFeature(*id).position);
+                    }
+                }
+            }
+            REQUIRE(vents.size() >= 6);
+            auto hungry = profile;
+            hungry.targetSolarCount += 4;
+            AiPlayerController controller(ai, hungry, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 61, commands);
+            auto builds = ordersFor<BuildOrder>(commands, kbotId);
+            REQUIRE(!builds.empty());
+            for (const auto& order : builds)
+            {
+                for (const auto& v : vents)
+                {
+                    auto dx = std::abs(order.position.x.value - v.x.value);
+                    auto dz = std::abs(order.position.z.value - v.z.value);
+                    INFO(order.unitType << " at " << order.position.x.value << "," << order.position.z.value << " vent " << v.x.value << "," << v.z.value);
+                    REQUIRE((dx >= 32.0f || dz >= 32.0f));
+                }
+            }
+        }
+
         SECTION("nothing, with no vent on the map")
         {
             AiPlayerController controller(ai, profile, 42u, MapIntel{}, tree);
@@ -3656,6 +3847,67 @@ namespace rwe
             // x -352): a ship allowed to walk to bb.rallyPoint or
             // bb.attackTarget -- both on the dry strip -- would fail this.
             REQUIRE(order.destination.x.value > -352.0f);
+        }
+    }
+
+    TEST_CASE("naval: a hull whose shots are not landing moves round to deep water with a clear run in", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        // Shots that arrive and do nothing, which is what a torpedo into a
+        // shelf amounts to: the target's hit points never move.
+        sim.weaponDefinitions["LASER"].damage["DEFAULT"] = 0u;
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 0_ss, 300_ss), script);
+        addUnit(sim, "ARMSY", ai, SimVector(200_ss, 0_ss, 300_ss), script);
+        auto destroyerId = addUnit(sim, "ARMROY", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        // At the foot of the shelf, with the shallows and the shore right behind it:
+        // half the bearings round it are no place for a hull.
+        auto targetId = addUnit(sim, "ARMSOLAR", human, SimVector(-270_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+        profile.commanderDangerRadius = 0_ss;
+
+        SECTION("after navalStalledAttackSeconds of nothing")
+        {
+            profile.navalStalledAttackSeconds = 2;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 30, commands);
+            REQUIRE(ordersFor<MoveOrder>(commands, destroyerId).empty());
+
+            runTicks(sim, controller, 3 * static_cast<int>(SimTicksPerSecond), commands);
+            auto moves = ordersFor<MoveOrder>(commands, destroyerId);
+            REQUIRE(!moves.empty());
+            const auto& spot = moves.front().destination;
+            // Deep water, not the shelf (tiles 10-14, world x below -288) and not the shore.
+            REQUIRE(spot.x.value > -288.0f);
+            auto ground = sim.terrain.tryGetHeightAt(spot.x, spot.z);
+            REQUIRE(ground.has_value());
+            REQUIRE(ground->value <= sim.terrain.getSeaLevel().value - 25.0f);
+            // And within a torpedo's reach of the target.
+            const auto& target = sim.getUnitState(targetId);
+            auto dx = spot.x.value - target.position.x.value;
+            auto dz = spot.z.value - target.position.z.value;
+            REQUIRE((dx * dx) + (dz * dz) <= 345.0f * 345.0f);
+        }
+
+        SECTION("switched off, it fires on from where it is")
+        {
+            profile.navalStalledAttackSeconds = 0;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 4 * static_cast<int>(SimTicksPerSecond), commands);
+            REQUIRE(ordersFor<MoveOrder>(commands, destroyerId).empty());
         }
     }
 

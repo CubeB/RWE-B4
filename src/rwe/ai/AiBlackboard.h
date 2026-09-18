@@ -295,6 +295,39 @@ namespace rwe
          * after another to be sunk one after another.
          */
         bool navalSortieActive{false};
+
+        /**
+         * The commander is being shot at, or has something armed close
+         * enough to start. Set by ArmyManager and kept for a few seconds past
+         * the last cause so it does not flicker; while it stands the
+         * commander is ArmyManager's to move and BuildManager leaves it
+         * alone, and whatever can reach it goes to it.
+         */
+        bool commanderInDanger{false};
+        /** In danger AND running from it, rather than standing to fight. Only then is it taken off BuildManager's hands. */
+        bool commanderFleeing{false};
+        GameTime commanderDangerUntil{0};
+        unsigned int commanderLastHitPoints{0};
+        /** What is threatening it, if that is known: the nearest armed enemy seen lately. */
+        std::optional<UnitId> commanderThreat;
+
+        /**
+         * Enemy units our radar can see and our eyes cannot, by unit id, with
+         * how far each stood from the base on the last pass. A player reads a
+         * blip's drift off the minimap; this is the same reading.
+         */
+        std::map<unsigned int, SimScalar> radarContactDistance;
+        /**
+         * Where an attack is coming from, when radar says one is: the middle
+         * of the contacts that are inside the warning ring and closing. The
+         * army forms up facing it rather than standing at the rally point
+         * until the first shot lands.
+         */
+        std::optional<SimVector> incomingAttackFrom;
+        /** When the contacts were last read -- once a second, since a blip's drift over one tick is noise. */
+        GameTime radarSampleAt{0};
+        /** The warning stands until here: a column that pauses has not gone home. */
+        GameTime incomingAttackUntil{0};
         /** Where each scout is heading, keyed by raw unit id, so two scouts do not chase the same ground. */
         std::map<unsigned int, SimVector> scoutTargets;
         /** Units booked onto a transport, keyed by raw unit id; the other managers leave them alone. */
