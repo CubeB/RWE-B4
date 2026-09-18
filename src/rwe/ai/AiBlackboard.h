@@ -58,6 +58,44 @@ namespace rwe
     };
 
     /**
+     * One of ours that is not a standing building: a mobile unit, finished
+     * or half-built, or a building frame that is not up yet.
+     *
+     * The complement of StandingBuilding, kept for the same reason and
+     * diffed the same way. Nothing tracked these before, so an entire
+     * production run could be destroyed as fast as it was made and no part
+     * of the AI would ever hear about it -- which is exactly what a scout
+     * ship parked off a shipyard does. See ROADMAP Phase 2, the all-water
+     * entry.
+     */
+    struct StandingUnit
+    {
+        std::string unitType;
+        SimVector position;
+        bool underConstruction;
+    };
+
+    /** One of those, gone since last tick. */
+    struct LostUnit
+    {
+        std::string unitType;
+        SimVector position;
+        GameTime lostAt;
+        /**
+         * Whether it died as a nanoframe.
+         *
+         * This is the whole signal on a harassed production site: a frame
+         * spawns with zero hit points (hit points are trunc(progress *
+         * maxdamage), TOTALA-EXE.md S:23 and the takeDamage path), so any
+         * damage at all kills it, and a factory that keeps feeding hulls to
+         * one gun loses the price of every one of them. A finished unit
+         * dying is an ordinary fight; a frame dying where it was born is a
+         * siege.
+         */
+        bool underConstruction;
+    };
+
+    /**
      * How long the memory of enemy aircraft keeps anti-air worth building,
      * in ticks. Aircraft are fast and rarely sit still to be counted, so the
      * AI would otherwise put up a tower, lose sight of the bomber, and drop
@@ -76,6 +114,20 @@ namespace rwe
 
     /** Losses remembered at once. A razed base should not crowd out everything else. */
     constexpr std::size_t MaxRememberedLosses = 8;
+
+    /**
+     * How long a mobile or nanoframe loss stays worth reacting to, in
+     * ticks. Much shorter than LossMemoryTicks because it answers a
+     * different question: a building lost steers what gets rebuilt for a
+     * while, where a unit lost is only evidence that something is shooting
+     * at a place *now*. A shipyard refills a destroyer frame in about
+     * twenty-nine ticks, so thirty seconds covers tens of cycles and still
+     * clears within a second or two of the gun leaving.
+     */
+    constexpr unsigned int UnitLossMemoryTicks = 30u * 30u;
+
+    /** Unit losses remembered at once. A lost battle should not crowd out the rest. */
+    constexpr std::size_t MaxRememberedUnitLosses = 16;
 
     /**
      * Shared scratch state between the AI's managers. Rebuilt from the sim
@@ -165,6 +217,19 @@ namespace rwe
         int idleBuilderCount{0};
         std::optional<UnitId> commanderUnitId;
         std::optional<SimVector> commanderPosition;
+        /**
+         * Whether the build pass has already given the commander something
+         * to do this tick.
+         *
+         * A PlayerCommand takes at least a tick to reach the unit's own
+         * order queue, so a later pass in the same tick cannot tell a
+         * commander that was just handed a job from one that is genuinely
+         * idle -- it would issue over the top of an order that has not
+         * landed yet. Written by AiPlayerController around the build pass,
+         * because that is the one place that knows where that pass's
+         * commands begin.
+         */
+        bool commanderTasked{false};
         /** Where the commander first stood. Buildings are laid out around this, not around the wandering commander. */
         std::optional<SimVector> homePosition;
         std::optional<SimVector> baseAnchor;
@@ -235,6 +300,31 @@ namespace rwe
         std::map<unsigned int, StandingBuilding> standingBuildings;
         /** What we have lost lately, most recent first, aged out after LossMemoryTicks. */
         std::vector<LostBuilding> recentLosses;
+        /**
+         * Everything of ours that is not a standing building, keyed by raw
+         * unit id: mobile units, and frames of any kind. Diffed against the
+         * next tick's exactly as standingBuildings is.
+         */
+        std::map<unsigned int, StandingUnit> standingUnits;
+        /** Mobile and nanoframe losses, most recent first, aged out after UnitLossMemoryTicks. */
+        std::vector<LostUnit> recentUnitLosses;
+        /**
+         * Our factories that have lately lost a frame where it was born, in
+         * id order. Memory only: it says something was killing our
+         * production, not that anything still is.
+         */
+        std::vector<UnitId> harassedFactories;
+        /**
+         * Of those, the ones with an armed enemy sitting on them right now,
+         * in id order. This is the live signal -- a factory here is being
+         * besieged, and topping its queue up only feeds the gun another
+         * frame.
+         *
+         * Written by PerceptionManager, because the memory half comes from
+         * EconomyManager and the enemy half from this pass, and read by
+         * BuildManager and ArmyManager.
+         */
+        std::vector<UnitId> besiegedFactories;
 
         // --- Enemy ---
         /** Keyed by the enemy unit's raw id so iteration is deterministic. */

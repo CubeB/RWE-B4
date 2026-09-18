@@ -513,6 +513,7 @@ namespace rwe
     std::optional<SimVector> BuildManager::chooseBuildSite(
         const GameSimulation& sim,
         const AiTuningProfile& profile,
+        const AiBlackboard& bb,
         const std::string& unitType,
         const SimVector& anchor,
         std::minstd_rand& rng,
@@ -523,13 +524,24 @@ namespace rwe
         {
             return std::nullopt;
         }
+        // Nowhere a gun is already pointing. Asked here, inside the search,
+        // rather than of the site it returns: the ring walk stops at the
+        // first ring with room, so a filter applied afterwards would throw
+        // that ring's one site away and give up for the pass, and the
+        // planner would be offered the same place next pass and the pass
+        // after. Asked here it simply walks outward to a ring that is not
+        // covered. The extractor search has said this about a metal patch
+        // since the Crystal Maze measurement; see siteUnderEnemyGuns.
+        auto acceptable = [&](const SimVector& p) {
+            return (!accept || accept(p)) && !siteUnderEnemyGuns(profile, bb, p);
+        };
         // Normal budget first; widen only if nothing fits at all, not even
         // a crowded site. A base with room never reaches the wide scan --
         // see buildSiteFallbackRadius for why it is conditional.
-        auto sites = collectBuildableSites(sim, defIt->second, anchor, true, profile.maxMexSearchRadius, accept);
+        auto sites = collectBuildableSites(sim, defIt->second, anchor, true, profile.maxMexSearchRadius, acceptable);
         if (sites.empty() && profile.buildSiteFallbackRadius > profile.maxMexSearchRadius)
         {
-            sites = collectBuildableSites(sim, defIt->second, anchor, true, profile.buildSiteFallbackRadius, accept);
+            sites = collectBuildableSites(sim, defIt->second, anchor, true, profile.buildSiteFallbackRadius, acceptable);
             LOG_DEBUG << "AI build: widened site search for " << unitType << " at "
                       << static_cast<int>(anchor.x.value) << "," << static_cast<int>(anchor.z.value)
                       << (sites.empty() ? " -- still nothing" : " -- found one");
@@ -544,6 +556,7 @@ namespace rwe
     std::optional<SimVector> BuildManager::chooseScoredBuildSite(
         const GameSimulation& sim,
         const AiTuningProfile& profile,
+        const AiBlackboard& bb,
         const std::string& unitType,
         const SimVector& anchor,
         std::minstd_rand& rng,
@@ -568,6 +581,13 @@ namespace rwe
         for (const auto& site : scored)
         {
             if (accept && !accept(site.position))
+            {
+                continue;
+            }
+            // As chooseBuildSite: nowhere a gun is already pointing. This
+            // walk scores every ring rather than stopping at the first, so
+            // refusing one site here simply leaves the rest to compete.
+            if (siteUnderEnemyGuns(profile, bb, site.position))
             {
                 continue;
             }
@@ -616,7 +636,7 @@ namespace rwe
         const auto range = weaponRange(sim, defIt->second);
         if (range <= 0_ss)
         {
-            return chooseBuildSite(sim, profile, unitType, *bb.baseAnchor, rng);
+            return chooseBuildSite(sim, profile, bb, unitType, *bb.baseAnchor, rng);
         }
         const auto rangeSquared = range * range;
 
@@ -688,7 +708,7 @@ namespace rwe
                     uncovered.push_back(building);
                 }
             }
-            return chooseScoredBuildSite(sim, profile, unitType, *bb.baseAnchor, rng, [&](const SimVector& site, int) {
+            return chooseScoredBuildSite(sim, profile, bb, unitType, *bb.baseAnchor, rng, [&](const SimVector& site, int) {
                 int newlyCovered = 0;
                 for (const auto& building : uncovered)
                 {
@@ -716,7 +736,7 @@ namespace rwe
         // side of the map, which recentLosses says nothing about.
         auto towards = profile.defenceFacesRecentLosses ? defenceFacingDirection(bb) : threatDirection(bb);
         auto post = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
-        return chooseScoredBuildSite(sim, profile, unitType, post, rng, [&](const SimVector& site, int) {
+        return chooseScoredBuildSite(sim, profile, bb, unitType, post, rng, [&](const SimVector& site, int) {
             auto forward = std::min((site - *bb.baseAnchor).dot(towards), profile.defenceDistanceFromBase);
             return SiteScore{spread(site), forward.value, -flatDistance(site, *bb.baseAnchor).value};
         },
@@ -743,7 +763,7 @@ namespace rwe
         // Nearest ring to the post, and the highest ground on it.
         auto post = *bb.baseAnchor + (threatDirection(bb) * profile.radarDistanceFromBase);
         return chooseScoredBuildSite(
-            sim, profile, unitType, post, rng, [](const SimVector& site, int ring) {
+            sim, profile, bb, unitType, post, rng, [](const SimVector& site, int ring) {
                 return SiteScore{-static_cast<float>(ring), site.y.value, 0.0f};
             },
             walkable);
@@ -944,6 +964,27 @@ namespace rwe
         }
         auto cell = sim.terrain.worldToHeightmapCoordinate(site);
         return failedSites.count(std::make_pair(cell.x, cell.y)) != 0;
+    }
+
+    bool BuildManager::siteUnderEnemyGuns(const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& site) const
+    {
+        if (!profile.noticeProductionHarassment || profile.productionHarassRadius <= 0_ss)
+        {
+            return false;
+        }
+        auto radiusSquared = profile.productionHarassRadius * profile.productionHarassRadius;
+        for (const auto& [_, enemy] : bb.knownEnemies)
+        {
+            // Aircraft are excluded for the reason the extractor rule
+            // excludes them: an aeroplane is over the site for a moment and
+            // somewhere else by the time the builder arrives, so refusing
+            // ground on account of one refuses the whole map in turn.
+            if (enemy.isArmed && !enemy.isAir && enemy.lastKnownPosition.distanceSquared(site) <= radiusSquared)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     std::optional<BuildManager::OutpostDefencePlan> BuildManager::planOutpostDefence(
@@ -1608,6 +1649,45 @@ namespace rwe
         for (auto factoryId : bb.factories)
         {
             const auto& factory = sim.getUnitState(factoryId);
+
+            // A besieged factory's queue is EMPTIED, not merely left alone.
+            //
+            // This is the whole of the all-water soft-lock and it is why
+            // declining to top the queue up was worth nothing: a factory
+            // does not lose its queue entry when the frame on the slipway
+            // dies. It starts the next one from the same entry, so a yard
+            // holding one queued destroyer produces a frame every
+            // twenty-nine ticks for the rest of the game, and the planner
+            // is never consulted again because the queue is never empty.
+            // Instrumented on Brain Coral, seed 3: two queue entries
+            // between them, 283 and 229 ARMROY frames born and shot.
+            //
+            // So the queue has to be taken off it, which is the same
+            // command a player cancelling a build order sends -- a negative
+            // count into ModifyBuildQueue. The yard idles until the gun has
+            // gone, and then the planner fills it again on the ordinary
+            // path below.
+            if (profile.noticeProductionHarassment && !factory.buildQueue.empty()
+                && std::find(bb.besiegedFactories.begin(), bb.besiegedFactories.end(), factoryId) != bb.besiegedFactories.end())
+            {
+                // Walked as the queue itself is held, an ordered vector, and
+                // not through getBuildQueueTotals, which is an unordered_map
+                // -- this runs inside the simulation, so the order commands
+                // come out in has to be the same on every peer.
+                for (const auto& [queuedType, queuedCount] : factory.buildQueue)
+                {
+                    if (queuedCount <= 0)
+                    {
+                        continue;
+                    }
+                    LOG_INFO << "AI factory: " << factory.unitType << " " << factoryId.value
+                             << " stops building " << queuedType << " (" << queuedCount
+                             << " queued); an armed enemy is sitting on it and every frame dies as it is born";
+                    outCommands.emplace_back(PlayerUnitCommand(factoryId, PlayerUnitCommand::ModifyBuildQueue{-queuedCount, queuedType}));
+                }
+                continue;
+            }
+
             if (!factory.buildQueue.empty())
             {
                 // A factory is only topped up once its queue drains, so a
@@ -1615,6 +1695,25 @@ namespace rwe
                 // asked for anything again. Nothing recorded that until now.
                 LOG_DEBUG << "AI factory: " << factory.unitType << " " << factoryId.value
                           << " skipped, queue holds " << factory.buildQueue.size();
+                continue;
+            }
+
+            // Not while something is standing over it shooting.
+            //
+            // A nanoframe has zero hit points the tick it is born, so a
+            // single gun parked off a shipyard kills every hull the yard
+            // makes, one at a time, for as long as the yard keeps making
+            // them. Topping the queue up there is not production, it is the
+            // whole economy being handed to a hundred-metal scout ship a
+            // frame at a time -- measured at 1408 destroyer frames in ten
+            // games. The yard is not told to stop; it is simply not asked
+            // for anything more until the gun has gone, which is what makes
+            // this self-clearing rather than a permanent shutdown.
+            if (profile.noticeProductionHarassment
+                && std::find(bb.besiegedFactories.begin(), bb.besiegedFactories.end(), factoryId) != bb.besiegedFactories.end())
+            {
+                LOG_DEBUG << "AI factory: " << factory.unitType << " " << factoryId.value
+                          << " not topped up, an armed enemy is sitting on it";
                 continue;
             }
 
@@ -2501,7 +2600,7 @@ namespace rwe
                 // been raided; the count includes the outpost towers, so a
                 // base rule that is still short of its target is the
                 // tie-break in the base's favour.
-                site = chooseBuildSite(sim, profile, next, outpost->anchor, rng, siteReachable);
+                site = chooseBuildSite(sim, profile, bb, next, outpost->anchor, rng, siteReachable);
                 isOutpostTower = true;
                 if (site)
                 {
@@ -2523,7 +2622,7 @@ namespace rwe
                 // Defences go on the side of the base that faces the enemy.
                 auto towards = (*bb.enemyBasePosition - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
                 auto towerAnchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
-                site = chooseBuildSite(sim, profile, next, towerAnchor, rng, siteReachable);
+                site = chooseBuildSite(sim, profile, bb, next, towerAnchor, rng, siteReachable);
             }
             else if (isWaterStructure(next))
             {
@@ -2532,7 +2631,7 @@ namespace rwe
                 // is ground the builder cannot walk to, and the gate that
                 // stops the commander crossing to another island would
                 // otherwise refuse the lot of them.
-                site = chooseBuildSite(sim, profile, next, anchor, rng);
+                site = chooseBuildSite(sim, profile, bb, next, anchor, rng);
             }
             else if (!sideUnits.shipyard.empty() && next == sideUnits.shipyard)
             {
@@ -2543,7 +2642,7 @@ namespace rwe
             }
             else
             {
-                site = chooseBuildSite(sim, profile, next, anchor, rng, siteReachable);
+                site = chooseBuildSite(sim, profile, bb, next, anchor, rng, siteReachable);
             }
 
             if (site)
@@ -2575,6 +2674,24 @@ namespace rwe
                 // search already skips these; anything else is laid out by
                 // ring and would be offered the same place every pass.
                 LOG_DEBUG << "AI build: " << next << " would go where an order was just dropped; skipping it this pass";
+                site.reset();
+            }
+            if (site && siteUnderEnemyGuns(profile, bb, *site))
+            {
+                // Not under a gun. A frame is born with no hit points at
+                // all, so anything put down here dies before it is anything
+                // -- and the site is still the best one by every test the
+                // planner applies, so without this the builder puts the
+                // same frame down again for the rest of the game. Measured
+                // on Brain Coral before this: 286 and 232 units lost in one
+                // game, nearly all of them tidal generators the two
+                // commanders kept replacing under an enemy scout ship.
+                //
+                // This is the extractor search's own rule, which has said
+                // exactly this about a metal patch since the Crystal Maze
+                // measurement, applied to every site instead of one kind.
+                LOG_DEBUG << "AI build: " << next << " would go under an enemy gun at "
+                          << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value) << "; skipping it this pass";
                 site.reset();
             }
             if (site)

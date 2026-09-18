@@ -321,6 +321,20 @@ namespace rwe
                      << ", aircraft known " << blackboard.knownEnemyAirCount;
         }
 
+        // And the same for a production site under siege, for the same
+        // reason: it is reacted to rather than planned for, and a log that
+        // shows a shipyard going quiet should say why. One line per
+        // transition, not per tick.
+        if (!blackboard.besiegedFactories.empty() != loggedProductionSiege)
+        {
+            loggedProductionSiege = !blackboard.besiegedFactories.empty();
+            LOG_INFO << "AI player " << playerId.value << ": production site siege "
+                     << (loggedProductionSiege ? "detected" : "lifted")
+                     << " at tick " << sim.gameTime.value
+                     << ", besieged factories " << blackboard.besiegedFactories.size()
+                     << ", frames lost lately " << blackboard.recentUnitLosses.size();
+        }
+
         // 4. Which phase of the game are we in?
         auto previousPhase = blackboard.phase;
         strategic.update(profile, blackboard);
@@ -386,7 +400,26 @@ namespace rwe
         timed("makers", [&] { metalMakers.update(sim, profile, blackboard, outCommands); });
         // threatMap was rebuilt at step 3b, so the build pass reads it fresh in
         // this same tick rather than a tick stale.
+        //
+        // What the build pass emitted is remembered for the commander's
+        // sake: a job given to it here has not reached its order queue by
+        // the time the army pass runs, so without this the two passes can
+        // issue over each other. See AiBlackboard::commanderTasked.
+        auto commandsBeforeBuild = outCommands.size();
         timed("build", [&] { build.update(sim, playerId, profile, threatMap, blackboard, reachability, rng, outCommands); });
+        blackboard.commanderTasked = false;
+        if (blackboard.commanderUnitId)
+        {
+            for (auto i = commandsBeforeBuild; i < outCommands.size(); ++i)
+            {
+                auto unitCommand = std::get_if<PlayerUnitCommand>(&outCommands[i]);
+                if (unitCommand && unitCommand->unit == *blackboard.commanderUnitId)
+                {
+                    blackboard.commanderTasked = true;
+                    break;
+                }
+            }
+        }
 
         // 6. Eyes, lift and fists.
         timed("scout", [&] { scout.update(sim, profile, threatMap, reachability, blackboard, outCommands); });
