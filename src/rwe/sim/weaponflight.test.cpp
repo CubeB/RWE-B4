@@ -34,9 +34,18 @@
 // hands the engine's OWN firing solution the muzzle and the aim point and fires
 // along whatever it returns, so what the case pins is not a speed but
 // computeBallisticHeadingAndPitch itself -- the flat root, the gravity it solves
-// against, and the cosine that falls out of the angle. A vertical launch, a
-// torpedo, a cruise missile and a burst weapon are each a different flight and
-// none of them is here; see the fixture header.
+// against, and the cosine that falls out of the angle.
+//
+// ONE EPISODE'S WEAPON CARRIES `cruise`, and it is in the motor class rather
+// than a class of its own, because the flag is inert for it: the cruise clause
+// is read only through the aim point and the aim point only from the guidance
+// step, which a round with no `guidance` and no `turnrate` never takes. What
+// the corpus can and cannot say about that is worth knowing before trusting it
+// -- every episode here is inside the 1024-unit handover, so turning `cruise`
+// AND `guidance` on in defineWeapon moves none of them. The episode pins the
+// round's speed and where it stops, as every other one does, and it pins
+// nothing about cruising. A vertical launch, a torpedo and a burst weapon are
+// each a different flight and none of them is here; see the fixture header.
 //
 // WHAT IS DRIVEN. The real GameSimulation and the real Projectile, spawned by
 // spawnProjectile and stepped by tick(), fired at a real victim standing at the
