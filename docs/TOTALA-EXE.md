@@ -872,6 +872,21 @@ otherwise **zero**. So `startvelocity` is the launch speed and
 `weaponvelocity` is the cap — never the other way round, and a missile with an
 acceleration and no `startvelocity` starts from a standstill.
 
+**Both comparisons are unsigned**, and that is load-bearing rather than
+incidental: `jae` and `jbe`, not `jge` and `jle`. A weapon whose
+`weaponvelocity` is **negative** — fourteen blocks in the Escalation data write
+one — therefore has a cap near 2^32 after the conversion, so the clamp can never
+fire. Its entire function is to *disable the ceiling*, which is what lets the
+negative `weaponacceleration` those same blocks carry decelerate the round from
+a large positive `startvelocity` for as long as the motor burns. `VSPAM_ALL` is
+the pattern: 480 off the rail, losing 0.083 a tick. A decelerating missile has
+no other spelling in this format. (`BOMB_MS` and `BOMB_SHOCK` are the degenerate
+case — `startvelocity` negative and equal to the cap, so the first `jae` is
+taken and the speed never changes, leaving a round that flies backward along its
+nose, which for a vertical launch is straight down.) None of the fourteen is
+ported or scored; `docs/TA-DEMOS.md`, "Fourteen weapon blocks declare a negative
+`weaponvelocity`", has what it cost the miner before the guard.
+
 Velocity is rebuilt from the missile's own attitude every tick rather than
 being steered as a vector (`0x49BA74`): `vy = sin(pitch)·speed`, and the
 horizontal `cos(pitch)·speed` is split by heading. A missile therefore flies
@@ -1001,6 +1016,17 @@ overwrites the high half of the aim point's Y), which is what makes a nuke fly
 in flat and then come down; otherwise a target projectile if it has one (that
 is the anti-nuke intercepting), then a target unit, then the fixed point it was
 fired at.
+
+**This routine is reached from one place only: the guidance step of the motor
+update**, the `twoPhase ? secondPhase : guidance` test at `0x49BA44`. So every
+behaviour in it — the cruise clause included — is unreachable for a round that
+cannot steer, meaning one with neither `guidance` nor `twophase`, or with a
+`turnrate` that truncates to nothing per tick. Such a round flies wherever it
+was pointed at launch whatever flags it carries. That is not a curiosity:
+`ROCKET_HRK` is exactly it, and reading `cruise=1` as a shape of flight rather
+than as a clause of the aim point is what had its demo cells excluded from the
+weapon oracle for nothing. `docs/TA-DEMOS.md`, "And `cruise` has left the table
+altogether".
 
 ### Vertical launch, `0x49CC20`
 

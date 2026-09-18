@@ -123,33 +123,107 @@ either class. The bound is the projectile's own step because the quantity is
 quantised in steps, and it is not tuned: it was fixed before the footprint model
 existed and the model was scored under it unchanged.
 
-WHICH CELLS ARE SCORED. The three classes above, and not:
+A FOURTH CLASS: **cruise**, which turns out not to need a model at all. The
+exclusion said a cruise missile "climbs to a fixed altitude, crosses the aim
+point and comes down on it, and that is not the straight line being measured".
+THAT READING IS WRONG FOR THE ONLY CELL IT EVER APPLIED TO. The cruise clause
+lives in the aim point (0x49B3E0), and the aim point is asked for from exactly
+one place: the guidance step of updateSelfPropelledProjectile. A weapon that
+never steers never reaches it. ROCKET_HRK declares no `guidance`, no `twophase`
+and no `turnrate`, so it does not steer, so the clause is inert and the round
+flies the straight line every other motor round flies.
 
-  * **vlaunch** ones, which go up before they go anywhere (ARMMERL reads +138).
-  * **cruise** ones, which climb to a fixed altitude, cross the aim point and
-    come down on it (0x49B455). ROCKET_HRK is the only one over this corpus and
-    reading the velocities alone had it in the constant-speed table, at the
-    worst share in it.
-  * **waterweapon** ones -- torpedoes -- whose path from a surface launcher to a
-    submerged target is not the straight line either.
-  * **burst** ones. A burst weapon fires `burst` rounds `burstrate` seconds
-    apart from one trigger, each its own 0x0d and each thrown off the aim line
-    by `sprayangle`, so the isolation filter cannot mean what it means
-    everywhere else -- the shot that survives it is one round of several and the
-    damage that arrives need not be its own. Six of the eight cells that failed
-    this model before the exclusion existed are burst weapons, on a criterion
-    that has nothing to do with flight time. `burst` is now asked BEFORE
-    `ballistic`, which it has to be once the ballistic class is scored:
-    CANNON_FIDO is both, and it sat in the ballistic table reading +5 while it
-    was really six shells from one trigger thrown off the aim line by a 1536
-    `sprayangle`.
+What it was really missing was the DRIFT BOUND. It is a `selfprop` cell and
+wanted the motor class's victim bound like any other; it did not get one
+because `scoreable` gave an unbounded pass to every class that was not
+`accelerating` or `ballistic`. With the bound it reads **+0 at 65% over 291
+pairings**, against +0 at 41% over 709 unbounded -- squarely inside the motor
+class's own 41-76% range. Not one pairing of the 709 moved; only which ones
+were scored.
 
-Those four are listed by --classes rather than scored. They are not
-discrepancies to explain away; they are four more oracles. (A fifth name appears
-there, "ballistic selfprop": TA dispatches on `selfprop` first at 0x49B9C2, so a
-weapon carrying both flags is flown by the motor off a ballistic launch angle,
-which is neither model. ROCKET_HEAVY is the only one in this data set and
-nothing in the corpus fires it.)
+That correction was not argued, it was measured, and the instrument is
+`selfprop_replay`: the whole of updateSelfPropelledProjectile written out --
+the launch of 0x49C980 and 0x49CC20, the motor of 0x49BA16, the two-phase
+turnover of 0x49BAE1, the aim point of 0x49B3E0, the burnblow abort, and the
+SimAngle quantisation RWE's heading and pitch carry. Run over ROCKET_HRK it
+gives back the step-length model's answer on all 709 pairings, which is what
+says the cruise clause does nothing here. Run over the accelerating class it
+gives back the stepper's answer on all 3,537 pairings of all thirteen cells,
+which is what says the replay is the same model and not a rival. `--replay`
+reprints both. The replay is therefore NOT what scores anything -- `steps()`
+still is, with `cruise` added to its motor branch -- it is what established
+that nothing more was needed, and what `--unmodelled` uses below.
+
+A cruise weapon that DOES steer is still unscored, under the name "cruise
+steering", on the same principle that names "ballistic selfprop": nothing in
+this data set is one, and the guard is there so that a corpus containing one
+cannot be scored by a model that was only ever right about a weapon which
+could not turn.
+
+WHICH CELLS ARE SCORED. The four classes above, and not:
+
+  * **vlaunch** ones, which go up before they go anywhere. The replay flies
+    these too -- a vertical launch is one more branch of the same routine -- and
+    they still do not land, which is the result rather than a gap: see
+    --unmodelled. The two VLAUNCH_TRUCK cells spend about 190 ticks in the air,
+    thirty times a laser's flight, and even over victims THAT CANNOT MOVE AT ALL
+    the residual scatters across an interquartile range of twenty ticks with no
+    mode (6% and 8%). RADIATION_CLOUD, whose climb is zero ticks and whose turn
+    rate is effectively instant, sits on the replay at the median at every
+    distance but still has no mode either (15% over 41). A flight that long is
+    not a flight time an engine can be checked against.
+  * **waterweapon** ones -- torpedoes. The flag is NOT a flight kind: the
+    dispatch at 0x49B9AE names five and this is not one of them. It enters a
+    flight only inside the selfprop branch, at 0x49B9EB, where a waterweapon
+    ABOVE SEA LEVEL takes gravity and has its pitch forced to zero, and
+    otherwise it is a target-eligibility rule (0x49ABE3). The replay confirms
+    that reading from the other end: CORAMPH's TORPEDO_LIGHT, which is fired
+    from below the surface and never has an above-water segment, reads **+0 at
+    95%** -- the best share anywhere in this corpus -- and ARMLANCE's, dropped
+    from an aircraft 185 units up, is the worst. But the class still cannot be
+    scored, and the reason is arithmetic rather than a missing model: see
+    --unmodelled. Sea level is a per-map byte (world+0x1427f) that a demo does
+    not carry, and it would not matter if it did, because after the drift bound
+    the two ARMLANCE cells keep ZERO pairings and CORAMPH keeps 19 against a
+    --min-n of 30. There is no value of sea level that adds a scoreable cell.
+  * **burst** ones. A burst weapon's record is a TEMPLATE that never flies
+    (0x49CB79); the projectile pass spawns one copy per `burstrate` and appends
+    it past the trip count it had already latched (0x49B810). Only the trigger
+    emits a 0x0d. So one shot record stands for `burst` rounds and the single
+    damage record that survives the isolation filter belongs to an
+    unidentifiable one of them: a cell's delta is drawn from a COMB with teeth
+    at 1 + j*burstrate, not from a single value, and the teeth are themselves
+    smeared because `sprayangle` throws each copy off the aim line the model
+    measures. --unmodelled prints the combs. Where the comb is short and the
+    spray is not the dominant term it is plainly visible -- GAUSS_SPRAY puts 86%
+    of its deltas on its three teeth, in the decaying order later rounds
+    predict, and FLAMETHROWER 81% on its ten -- and where it is long it is not,
+    CANNON_FIDO spreading over twenty values against six teeth. This is not a
+    flight-time model with a residual to chase; it is a class where the quantity
+    the filters isolate is not a flight time at all.
+
+Those three are listed by --classes rather than scored, and --unmodelled prints
+the evidence behind each. They are not discrepancies to explain away. (A fourth
+name appears there, "ballistic selfprop": TA dispatches on `selfprop` first at
+0x49B9C2, so a weapon carrying both flags is flown by the motor off a ballistic
+launch angle, which is neither model. ROCKET_HEAVY is the only one in this data
+set and nothing in the corpus fires it.)
+
+WHAT A NEGATIVE `weaponvelocity` MEANS. Fourteen blocks in this data set declare
+one -- BOMB_SHOCK -400, VSPAM_ALL -10, NUKE_SUB_ARM -8 -- and every one of them
+is `vlaunch`. It is not a speed. The motor's two comparisons at 0x49BA1E and
+0x49BA2D are `jae` and `jbe`, which are UNSIGNED, so a negative cap is read as a
+number near 2^32 and the clamp can never fire. Its whole effect is to disable
+the ceiling, which is what lets the NEGATIVE `weaponacceleration` these blocks
+carry alongside it decelerate the round from a large positive `startvelocity`
+for as long as the motor burns -- a decelerating missile, which TA has no other
+way to write down. (BOMB_MS and BOMB_SHOCK are the other shape: `startvelocity`
+is negative too and equals the cap, so the first comparison takes the `jae` and
+the speed never moves at all, leaving a round that flies BACKWARD along its
+nose -- and since a vertical launch points its nose straight up, downward.)
+Nothing here is scored from one, so nothing checked in depends on it; the
+reading matters because the field is unsigned in `parseWeaponTdf` and therefore
+in `WeaponFacts`, and a bound computed from it as a speed is nonsense.
 
 NO SCORED CELL DISAGREES. Under the aim-point model four did -- ARMAMPH and
 CORGEO among the constant-speed cells, ARMFIG and CORVAMP among the missiles,
@@ -311,6 +385,21 @@ def flag(block, key):
     return bool(block) and (block.get(key) or "0").strip() not in ("0", "")
 
 
+def steers(block):
+    """Whether this round's heading and pitch can change in flight at all.
+
+    updateSelfPropelledProjectile asks for an aim point only inside
+    `twoPhase ? secondPhase : guidance`, and then moves the heading and pitch
+    with turnTowards, which cannot move them by less than one angle unit a tick.
+    So a round with neither flag, or with a `turnrate` that truncates to zero
+    ticks' worth, flies wherever it was pointed at launch whatever it was fired
+    at -- and nothing that is read only through the aim point can reach it.
+    """
+    if not (flag(block, "twophase") or flag(block, "guidance")):
+        return False
+    return int(int(num(block, "turnrate", 0.0) or 0.0) // 30) > 0
+
+
 def weapon_class(block):
     """Which of the models describes this weapon, or why none of them does."""
     if not block:
@@ -351,7 +440,20 @@ def weapon_class(block):
     # velocities alone put it in the constant-speed table at the worst share in
     # it.
     if flag(block, "selfprop") and flag(block, "cruise"):
-        return "cruise"
+        # The cruise clause is in the AIM POINT (0x49B3E0), and the aim point is
+        # asked for from exactly one place: the guidance step of
+        # updateSelfPropelledProjectile. So a weapon that never steers can never
+        # reach it, and its `cruise` flag is inert -- it is an ordinary motor
+        # round wearing the flag, and is scored as one. ROCKET_HRK is that:
+        # no `guidance`, no `twophase`, no `turnrate`. The replay confirms it
+        # rather than the other way round, giving the step-length model's answer
+        # on all 709 of its pairings; --replay prints that.
+        #
+        # One that does steer keeps its own name and stays unscored, exactly as
+        # "ballistic selfprop" does. Nothing here is one, and that is precisely
+        # why the guard has to exist: the model below is only known to be right
+        # about a cruise weapon that cannot turn.
+        return "cruise steering" if steers(block) else "cruise"
     if flag(block, "selfprop") and flag(block, "twophase"):
         return "two phase"
     # Whether the round leaves the barrel at the speed it will keep, asked the
@@ -495,7 +597,11 @@ def steps(kind, block, pitch=None):
         per_tick = (num(block, "weaponvelocity") / 30.0) * math.cos(pitch)
         while True:
             yield per_tick
-    if kind != "accelerating":
+    # `cruise` steps with the motor for the same reason `accelerating` does: it
+    # is a selfprop round, and the only thing its flag would have changed --
+    # the aim point -- is read from a guidance step this class of weapon never
+    # takes. See weapon_class.
+    if kind not in ("accelerating", "cruise"):
         per_tick = num(block, "weaponvelocity") / 30.0
         while True:
             yield per_tick
@@ -509,6 +615,182 @@ def steps(kind, block, pitch=None):
         if tick <= burn:
             speed = min(cap, speed + accel)
         yield speed
+
+
+# --- the replay: the whole of the self-propelled flight, for the classes a
+#     step length cannot express -----------------------------------------------
+#
+# `steps()` above says how far a round goes each tick and flight_model walks it
+# along a fixed line. That is enough for a missile flown straight at what it was
+# fired at, and it is not enough for a CRUISE missile, which ignores its target
+# until it is nearly there and steers at the aim point held at Y=700 instead
+# (0x49B455, 0x49B3E0) -- the round's heading and pitch change every tick, so
+# there is no line to walk along.
+#
+# So this is the rest of the routine, written out: the launch of 0x49C980 and
+# the vertical-launch spawn of 0x49CC20, the motor of 0x49BA16, the two-phase
+# turnover of 0x49BAE1, the aim point of 0x49B3E0, the burnblow abort, and the
+# move and footprint test updateProjectiles runs after them. It is a port of
+# RWE's createProjectileFromWeapon and updateSelfPropelledProjectile, which are
+# in turn the decoded reading of those addresses -- the same provenance the
+# `accelerating` stepper has, and deliberately so.
+#
+# WHAT LICENSES USING IT. It is not a second model set against the first: run
+# over the accelerating class it gives back the stepper's own answer on every
+# one of the 3,537 pairings of all thirteen motor cells, not merely the same
+# mode. `--replay` reprints that measurement. A replay that reproduced the cells
+# but not the pairings would be a different model that happened to agree.
+#
+# THE ANGLES ARE QUANTISED, because RWE's are: a heading and a pitch are
+# uint16 SimAngles, and turnTowards steps them by whole units. That matters here
+# and not in flight_model, which never has an angle to round.
+
+HALF_TURN = 1 << 15
+QUARTER_TURN = 1 << 14
+
+# `angleBetween(heading, wantHeading) > this` and a `burnblow` round gives up
+# and detonates rather than turning after a target that got behind it.
+BURN_BLOW_ABORT = 27000
+
+# A cruise missile more than this far from its aim point steers at that point
+# held at CRUISE_ALTITUDE instead, which is the flat run before the drop.
+CRUISE_HANDOVER = 1024.0
+CRUISE_ALTITUDE = 700.0
+
+
+def _from_radians(a):
+    """SimAngle::fromRadians -- round to nearest, then wrap into the uint16."""
+    v = (a / math.pi) * 32768.0
+    r = math.floor(abs(v) + 0.5)
+    return int(r if v >= 0 else -r) & 0xFFFF
+
+
+def _sim_atan2(a, b):
+    return _from_radians(math.atan2(a, b))
+
+
+def _sim_cos(u):
+    return math.cos(u / 32768.0 * math.pi)
+
+
+def _sim_sin(u):
+    return math.sin(u / 32768.0 * math.pi)
+
+
+def _angle_between(a, b):
+    turn = (b - a) & 0xFFFF
+    return (-turn) & 0xFFFF if turn > HALF_TURN else turn
+
+
+def _turn_towards(current, target, max_turn):
+    turn = (target - current) & 0xFFFF
+    if turn > HALF_TURN:
+        anticlockwise, delta = False, (-turn) & 0xFFFF
+    else:
+        anticlockwise, delta = True, turn
+    if delta <= max_turn:
+        return target
+    return (current + max_turn) & 0xFFFF if anticlockwise else (current - max_turn) & 0xFFFF
+
+
+def _missile_direction(heading, pitch):
+    horizontal = _sim_cos(pitch)
+    return (_sim_sin(heading) * horizontal, _sim_sin(pitch), _sim_cos(heading) * horizontal)
+
+
+def selfprop_replay(origin, target, footprint, block, max_ticks=4000):
+    """(step, position) where the round first stands on the victim's footprint.
+
+    None where it never does -- it stepped over, it ran out of patience, or a
+    `burnblow` round aborted -- which the scoring counts as a disagreement
+    rather than dropping, exactly as flight_model's None is counted.
+
+    The aim point is the point the 0x0d recorded, so the replay flies at where
+    the shot was AIMED and not after the victim. That is the same assumption
+    every model here makes and the same one the drift bound exists to police.
+    """
+    fx, fz = footprint
+    x0, z0 = footprint_squares(target, footprint)
+
+    cap = (num(block, "weaponvelocity", 0.0) or 0.0) / 30.0
+    accel = (num(block, "weaponacceleration", 0.0) or 0.0) / 900.0
+    # p.turnRate = SimAngle(static_cast<uint16_t>(tdf.turnRate / 30u)): an
+    # integer divide of an unsigned field, truncated into the uint16.
+    turn_rate = int(int(num(block, "turnrate", 0.0) or 0.0) // 30) & 0xFFFF
+    flight_time = int((num(block, "flighttime", 0.0) or 0.0) * 30.0)
+    guidance = flag(block, "guidance")
+    two_phase = flag(block, "twophase")
+    v_launch = flag(block, "vlaunch")
+    burn_blow = flag(block, "burnblow")
+    cruise = flag(block, "cruise")
+
+    speed = launch_speed(block)
+    if v_launch:
+        # 0x49CC20: heading 0, pitch straight up, and NOT MOVING -- the whole
+        # climb comes out of the motor.
+        heading, pitch = 0, QUARTER_TURN
+        vx, vy, vz = 0.0, 0.0, 0.0
+    else:
+        dx = target[0] - origin[0]
+        dy = target[1] - origin[1]
+        dz = target[2] - origin[2]
+        heading = _sim_atan2(dx, dz)
+        pitch = _sim_atan2(dy, math.sqrt(dx * dx + dz * dz))
+        ux, uy, uz = _missile_direction(heading, pitch)
+        vx, vy, vz = ux * speed, uy * speed, uz * speed
+
+    burn = burn_ticks(block)
+    x, y, z = origin
+    second_phase = False
+    for k in range(1, max_ticks + 1):
+        # RWE spawns the round during the behaviour pass and updateProjectiles
+        # walks it in the same tick, so the k-th update sees gameTime = t0+k-1.
+        now = k - 1
+        if burn <= now:
+            if burn_blow:
+                return None
+            # The changeover takes one tick of gravity WITHOUT rebuilding the
+            # velocity from the attitude, so a vertical launch is still climbing
+            # on the tick it turns over -- and a coasting round keeps taking it.
+            vy -= GRAVITY
+            if two_phase and not second_phase:
+                second_phase = True
+                burn = now + flight_time
+        else:
+            if speed < cap:
+                speed = min(speed + accel, cap)
+            if second_phase if two_phase else guidance:
+                aim = target
+                if cruise:
+                    d2 = ((x - target[0]) ** 2 + (y - target[1]) ** 2 + (z - target[2]) ** 2)
+                    if d2 > CRUISE_HANDOVER * CRUISE_HANDOVER:
+                        aim = (target[0], CRUISE_ALTITUDE, target[2])
+                tx, ty, tz = aim[0] - x, aim[1] - y, aim[2] - z
+                want_heading = _sim_atan2(tx, tz)
+                want_pitch = _sim_atan2(ty, math.sqrt(tx * tx + tz * tz))
+                if burn_blow and (_angle_between(heading, want_heading) > BURN_BLOW_ABORT
+                                  or _angle_between(pitch, want_pitch) > BURN_BLOW_ABORT):
+                    return None
+                heading = _turn_towards(heading, want_heading, turn_rate)
+                pitch = _turn_towards(pitch, want_pitch, turn_rate)
+            ux, uy, uz = _missile_direction(heading, pitch)
+            vx, vy, vz = ux * speed, uy * speed, uz * speed
+
+        x += vx
+        y += vy
+        z += vz
+        if x0 <= math.floor(x / 16.0) < x0 + fx and z0 <= math.floor(z / 16.0) < z0 + fz:
+            return k, (x, y, z)
+    return None
+
+
+# The classes reported through selfprop_replay rather than through a step
+# length. NONE OF THEM IS SCORED: the replay is an instrument here, not a model,
+# and what it bought is that these two exclusions are measurements instead of
+# guesses. A vertical launch and a torpedo genuinely do not fly the line a step
+# length is walked along, which is why the short form cannot even state what
+# they do; `cruise` looked like a third of them and was not.
+REPLAYED_CLASSES = ("vlaunch", "waterweapon")
 
 
 def footprint_of(units, victim):
@@ -802,22 +1084,33 @@ def scoreable(kind, units, block, observations):
     self-propelled one keeps the ones inside the drift bound; a ballistic one
     keeps the ones inside the drift bound AND the aim cone, because its flights
     are three to ten times longer and because a pitch error is a range error.
+
+    A `cruise` cell takes the drift bound and nothing else. It is a motor round
+    and wants its class's bound for the same reason; it does not want the aim
+    cone, which is the ballistic class's and is about a pitch error becoming a
+    range error on an arc. ROCKET_HRK's start speed equals its cap, so the bound
+    is `weaponvelocity / 30` as it is everywhere else and no new rule is needed
+    to admit it.
     """
     named = [o for o in observations if footprint_of(units, o.victim) is not None]
-    if kind not in ("accelerating", "ballistic"):
+    if kind not in ("accelerating", "ballistic", "cruise"):
         return named
     inside = [o for o in named if within_drift_bound(units, block, o)]
-    if kind == "accelerating":
+    if kind != "ballistic":
         return inside
     return [o for o in inside if within_aim_cone_bound(units, block, o)]
 
 
 def predict(kind, units, block, observation):
     """What the model says this pairing's flight time is, or None if it misses."""
+    footprint = footprint_of(units, observation.victim)
+    if kind in REPLAYED_CLASSES:
+        arrival = selfprop_replay(observation.origin, observation.target, footprint, block)
+        return None if arrival is None else arrival[0]
     pitch = ballistic_pitch(block, observation.origin, observation.target) \
         if kind == "ballistic" else None
     return flight_model(kind, observation.origin, observation.target,
-                        footprint_of(units, observation.victim), block, pitch)
+                        footprint, block, pitch)
 
 
 def delta(kind, units, block, observation):
@@ -1090,6 +1383,164 @@ def report_footprint(cells, units, weapons, min_n):
                   f"{100 * totals[2] / totals[0]:>8.0f}%{100 * totals[3] / totals[0]:>10.0f}%")
 
 
+def report_replay(cells, units, weapons, min_n):
+    """The two things the replay establishes, both of them negative results.
+
+    ONE: it is the same model as the step-length one, not a rival. Run over the
+    accelerating class, where the stepper is known right, the two agree on every
+    pairing rather than merely on every cell's mode -- which a different model
+    that happened to land on the same modes would not do.
+
+    TWO: `cruise` needed no model. The clause that had the class excluded is
+    read only through the aim point, the aim point only from the guidance step,
+    and ROCKET_HRK does not steer -- so the replay, which would fly the clause
+    if it applied, gives the straight-line answer on every one of its pairings.
+    What the class was missing was its drift bound, and the last two rows are
+    the whole of the difference that made.
+
+    Printed rather than described because a number in a comment goes stale.
+    What to look at is the `differ` column, which is zero on every row.
+    """
+    print("\n--replay: the full self-propelled replay against the step-length model, pairing")
+    print("by pairing. Zero in the last column is the point of the table.\n")
+    print(f"  {'shooter':<13} {'sl':>2} {'weapon':<22} {'n':>6} {'stepper':>8} {'replay':>8} {'differ':>7}")
+    total = differ_total = 0
+    for wanted in ("accelerating", "cruise"):
+        for (shooter, slot), observations in sorted(cells.items(), key=lambda kv: -len(kv[1])):
+            name, block = weapon_of(units, weapons, shooter, slot)
+            if not block or weapon_class(block) != wanted:
+                continue
+            subset = scoreable(wanted, units, block, observations)
+            if len(subset) < min_n:
+                continue
+            stepper = collections.Counter()
+            replayed = collections.Counter()
+            differ = 0
+            for o in subset:
+                footprint = footprint_of(units, o.victim)
+                a = flight_model(wanted, o.origin, o.target, footprint, block)
+                arrival = selfprop_replay(o.origin, o.target, footprint, block)
+                b = None if arrival is None else arrival[0]
+                stepper[None if a is None else o.flight - a] += 1
+                replayed[None if b is None else o.flight - b] += 1
+                differ += a != b
+            total += len(subset)
+            differ_total += differ
+            print(f"  {shooter:<13} {slot:>2} {name or '-':<22} {len(subset):>6}"
+                  f" {modal(stepper)[0]:>+8} {modal(replayed)[0]:>+8} {differ:>7}")
+    print(f"\n  {differ_total} of {total} pairings disagree between the two.")
+
+    print("\n  and what the cruise cell's exclusion really cost it, which was its bound:\n")
+    for (shooter, slot), observations in cells.items():
+        name, block = weapon_of(units, weapons, shooter, slot)
+        if not block or weapon_class(block) != "cruise":
+            continue
+        named = [o for o in observations if footprint_of(units, o.victim) is not None]
+        inside = [o for o in named if within_drift_bound(units, block, o)]
+        for label, subset in (("every named victim", named), ("inside the drift bound", inside)):
+            if not subset:
+                continue
+            errors = collections.Counter(delta("cruise", units, block, o) for o in subset)
+            mode, at = modal(errors)
+            print(f"  {shooter:<13} {name or '-':<22} {label:<24} n={len(subset):<5}"
+                  f" {mode:>+3} at {100 * at / len(subset):3.0f}%")
+
+
+def report_unmodelled(cells, units, weapons, min_n):
+    """Why vlaunch, the torpedoes and burst are not scored, in numbers.
+
+    Each of the three is excluded for a different reason and each reason is a
+    measurement rather than an argument, so each is printed. A class that cannot
+    be scored is a result; what would not be a result is leaving the reason as
+    a sentence nothing reruns.
+    """
+    print("\n--unmodelled: the three classes the replay reaches and still cannot score.")
+
+    print("\n  vlaunch: flown by the same replay, and it does not land. The bound column")
+    print("  is the drift bound; `still` is victims that cannot move at all, which for")
+    print("  these flights is nearly the same set -- so the spread is not drift.\n")
+    print(f"  {'shooter':<13} {'weapon':<22} {'flight':>7} {'bounded':>8} {'mode':>6}"
+          f" {'share':>6} {'still':>6} {'IQR':>12}")
+    for (shooter, slot), observations in sorted(cells.items(), key=lambda kv: -len(kv[1])):
+        name, block = weapon_of(units, weapons, shooter, slot)
+        if not block or weapon_class(block) != "vlaunch" or len(observations) < min_n:
+            continue
+        named = [o for o in observations if footprint_of(units, o.victim) is not None]
+        inside = [o for o in named if within_drift_bound(units, block, o)]
+        still = [o for o in named if drift_of(units, o.victim, o.flight) == 0]
+        errors = collections.Counter(delta("vlaunch", units, block, o) for o in inside)
+        mode, at = modal(errors)
+        spread = sorted(e for e in (delta("vlaunch", units, block, o) for o in inside)
+                        if e is not None)
+        if not spread:
+            continue
+        flights = sorted(o.flight for o in inside)
+        iqr = f"{spread[len(spread) // 4]:+d}..{spread[3 * len(spread) // 4]:+d}"
+        print(f"  {shooter:<13} {name or '-':<22} {flights[len(flights) // 2]:>7}"
+              f" {len(inside):>8} {mode:>+6} {100 * at / len(inside):>5.0f}%"
+              f" {len(still):>6} {iqr:>12}")
+    print("\n  a flight of ~190 ticks with an interquartile range of twenty and no mode is")
+    print("  not a flight time an engine can be checked against.")
+
+    print("\n  waterweapon: the replay reaches these too, and the class is lost to")
+    print("  arithmetic rather than to a missing model -- after the drift bound there is")
+    print("  not a cell left with --min-n pairings, whatever sea level was.\n")
+    print(f"  {'shooter':<13} {'sl':>2} {'weapon':<22} {'named':>6} {'bounded':>8}"
+          f" {'mode':>6} {'share':>6}")
+    for (shooter, slot), observations in sorted(cells.items(), key=lambda kv: -len(kv[1])):
+        name, block = weapon_of(units, weapons, shooter, slot)
+        if not block or weapon_class(block) != "waterweapon" or len(observations) < min_n:
+            continue
+        named = [o for o in observations if footprint_of(units, o.victim) is not None]
+        inside = [o for o in named if within_drift_bound(units, block, o)]
+        errors = collections.Counter(delta("waterweapon", units, block, o) for o in inside)
+        mode, at = modal(errors)
+        share = f"{100 * at / len(inside):.0f}%" if inside else "-"
+        print(f"  {shooter:<13} {slot:>2} {name or '-':<22} {len(named):>6} {len(inside):>8}"
+              f" {(f'{mode:+d}' if mode is not None else '-'):>6} {share:>6}")
+    print("\n  CORAMPH's torpedo is fired from below the surface, never has an above-water")
+    print("  segment, and reads the best share in this corpus -- which is the evidence")
+    print("  that the model is right and the corpus is what is missing.")
+
+    print("\n  burst: one 0x0d per trigger and `burst` rounds in the air, so a delta is")
+    print("  drawn from a comb with teeth at 1 + j*burstrate rather than from one value,")
+    print("  and `sprayangle` smears the teeth by throwing each copy off the aim line.\n")
+    print(f"  {'shooter':<13} {'weapon':<22} {'burst':>6} {'teeth':>9} {'spray':>6}"
+          f" {'on a tooth':>11}")
+    for (shooter, slot), observations in sorted(cells.items(), key=lambda kv: -len(kv[1])):
+        name, block = weapon_of(units, weapons, shooter, slot)
+        if not block or weapon_class(block) != "burst" or len(observations) < min_n:
+            continue
+        burst = int(num(block, "burst", 0) or 0)
+        rate = num(block, "burstrate", 0.0) or 0.0
+        # The spawn gate is `gameTick < created + burstrate`, so a burstrate
+        # under a tick does not hold the next copy back at all.
+        gap = max(1, int(rate * 30.0))
+        teeth = [1 + j * gap for j in range(burst)]
+        # The round itself is an ordinary round; ask what it would be without
+        # the burst key, and score the copies against that.
+        inner = weapon_class({k: v for k, v in block.items() if k != "burst"})
+        errors = collections.Counter()
+        for o in observations:
+            footprint = footprint_of(units, o.victim)
+            if footprint is None:
+                continue
+            pitch = ballistic_pitch(block, o.origin, o.target) if inner == "ballistic" else None
+            if inner == "ballistic" and pitch is None:
+                continue
+            model = flight_model(inner, o.origin, o.target, footprint, block, pitch)
+            errors[None if model is None else o.flight - model] += 1
+        total = sum(errors.values())
+        if not total:
+            continue
+        on = sum(v for k, v in errors.items() if k in teeth)
+        print(f"  {shooter:<13} {name or '-':<22} {burst:>6}"
+              f" {f'+{teeth[0]}..+{teeth[-1]}':>9} {int(num(block, 'sprayangle', 0) or 0):>6}"
+              f" {f'{on}/{total} ({100 * on / total:.0f}%)':>11}")
+    print("\n  the quantity the filters isolate here is not a flight time, so there is no")
+    print("  residual to chase.")
+
+
 def score(cells, units, weapons, min_n):
     """Every cell with enough pairings, scored by whichever model its class has.
 
@@ -1119,13 +1570,23 @@ def score(cells, units, weapons, min_n):
         # How far short of the aim point the round was when the damage landed:
         # about the footprint's half-width, which is the whole of what the
         # retired aim-point model's -1 had been absorbing. Measured along the
-        # class's own span, so a ballistic shell's is a horizontal distance.
-        short = sorted(
-            span_of(kind, o.origin, o.target)
-            - travelled_by(kind, o.flight, block,
-                           ballistic_pitch(block, o.origin, o.target)
-                           if kind == "ballistic" else None)
-            for o in subset)
+        # class's own span, so a ballistic shell's is a horizontal distance --
+        # and for a replayed class, where there is no line to measure along,
+        # straight from where the replay left the round to the aim point.
+        if kind in REPLAYED_CLASSES:
+            short = sorted(
+                math.dist(selfprop_replay(o.origin, o.target,
+                                          footprint_of(units, o.victim), block)[1], o.target)
+                for o in subset
+                if selfprop_replay(o.origin, o.target,
+                                   footprint_of(units, o.victim), block) is not None)
+        else:
+            short = sorted(
+                span_of(kind, o.origin, o.target)
+                - travelled_by(kind, o.flight, block,
+                               ballistic_pitch(block, o.origin, o.target)
+                               if kind == "ballistic" else None)
+                for o in subset)
         rows.append(dict(
             shooter=shooter, slot=slot, weapon=name or "-",
             kind=kind, velocity=velocity, per_tick=per_tick,
@@ -1137,7 +1598,7 @@ def score(cells, units, weapons, min_n):
     return rows
 
 
-SCORED_CLASSES = ("constant speed", "accelerating", "ballistic")
+SCORED_CLASSES = ("constant speed", "accelerating", "ballistic", "cruise")
 
 
 def print_table(rows):
@@ -1171,7 +1632,12 @@ def main():
     ap.add_argument("--cone", action="store_true",
                     help="print the evidence behind the ballistic class's aim-cone bound")
     ap.add_argument("--classes", action="store_true",
-                    help="also list the classes neither model describes")
+                    help="also list the classes no model describes")
+    ap.add_argument("--replay", action="store_true",
+                    help="print the measurement that licenses scoring a class by replay:"
+                         " the replay against the step-length model over the accelerating cells")
+    ap.add_argument("--unmodelled", action="store_true",
+                    help="print why vlaunch, the torpedoes and burst are not scored")
     args = ap.parse_args()
 
     units = load_units(args.units)
@@ -1209,6 +1675,13 @@ def main():
                   f" the victims that could not outrun a step of it and\nthe shots the weapon's"
                   f" own aim cone could not have moved\n({dropped} pairings dropped by those two"
                   f" bounds or an unnamed victim)\n")
+        elif kind == "cruise":
+            dropped = sum(r["dropped"] for r in group)
+            print(f"the {len(group)} cells whose weapon carries `cruise` but cannot steer, so the"
+                  f" clause is\ninert and the round is an ordinary motor round: flown as RWE flies"
+                  f" one and\nstopped on the victim's footprint, over the victims that could not"
+                  f" outrun a\nstep of it\n({dropped} pairings dropped by that bound or an unnamed"
+                  f" victim)\n")
         else:
             dropped = sum(r["dropped"] for r in group)
             print(f"the {len(group)} cells whose weapon has a motor, flown as RWE flies"
@@ -1240,8 +1713,16 @@ def main():
     if args.cone:
         report_cone(cells, units, weapons)
 
+    if args.replay:
+        report_replay(cells, units, weapons, args.min_n)
+
+    if args.unmodelled:
+        report_unmodelled(cells, units, weapons, args.min_n)
+
     if args.classes:
-        print("\nthe classes neither model describes, listed and never scored:")
+        print("\nthe classes no model describes, listed and never scored. The deltas below"
+              "\nare what the replay says, since it flies all three -- --unmodelled has the"
+              "\nmeasurement that says why none of them is a flight time worth checking in:")
         by_kind = collections.defaultdict(list)
         for r in rows:
             if r["kind"] not in SCORED_CLASSES:
@@ -1279,6 +1760,10 @@ def main():
                          f" up to {r['per_tick']:.1f} a tick")
             elif r["kind"] == "ballistic":
                 model = f"{r['per_tick']:.1f} a tick times the cosine of its launch pitch"
+            elif r["kind"] == "cruise":
+                model = (f"a motor replay from {launch_speed(weapons.get(r['weapon'], {})) :.1f}"
+                         f" up to {r['per_tick']:.1f} a tick, its `cruise` flag inert"
+                         f" because it cannot steer")
             else:
                 model = f"{r['per_tick']:.1f} a tick"
             model += " until it stands on the victim's footprint"

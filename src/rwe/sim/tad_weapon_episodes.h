@@ -31,13 +31,28 @@
 // The pairing is confirmed by a number no filter looks at: every cell's modal
 // damage is its weapon's own [DAMAGE] default, which is `weaponDamage` here.
 //
-// WHICH SHOTS MAY BE HERE. The three classes the models describe: weapons that
-// fly at a constant speed, weapons with a motor, and weapons that lob a shell. A
-// vlaunch rocket goes up before it goes anywhere, a cruise missile climbs and
-// crosses the aim point before coming down, a torpedo travels through water, and
-// a burst weapon fires several rounds from one trigger so the isolation filter
-// cannot mean what it means elsewhere. Those four are four more oracles, not
-// discrepancies. See docs/TA-DEMOS.md.
+// WHICH SHOTS MAY BE HERE. The classes the models describe: weapons that fly at
+// a constant speed, weapons with a motor -- including one carrying `cruise`,
+// whose clause is read only through an aim point a round that cannot steer
+// never asks for, so it is a motor round wearing the flag -- and weapons that
+// lob a shell.
+//
+// Three classes are still excluded, and each for its own reason rather than for
+// reading badly. A VLAUNCH rocket goes up before it goes anywhere: the same
+// replay that settled the cruise class flies these too and they still do not
+// land, spending about 190 ticks in the air with a twenty-tick spread and no
+// mode even over victims that cannot move at all. A TORPEDO is a selfprop round
+// with one clause nothing here models -- above sea level it takes gravity and
+// has its pitch forced to zero (0x49B9EB) -- but the class is lost to
+// arithmetic rather than to that: after the drift bound no torpedo cell has
+// --min-pairings left, whatever sea level was, and the one fired from below the
+// surface reads the best share in the corpus on 19 pairings. A BURST weapon's
+// record is a template that never flies (0x49CB79) and emits one 0x0d for
+// several rounds, so the single damage record that survives the isolation
+// filter belongs to an unidentifiable one of them and the delta is drawn from a
+// comb rather than from a value. Those three are three more oracles, not
+// discrepancies. tools/tad-weapontime.py --unmodelled prints the evidence for
+// each; see docs/TA-DEMOS.md.
 //
 // THE ARITHMETIC BEING PINNED. A round does not stop at the point it was aimed
 // at. It detonates the first tick its move puts it in a map square an enemy unit
@@ -365,6 +380,13 @@ namespace rwe
             481451865, 8661188, 440837149,
             477592297, 5830673, 437620146,
             3, 0, nullptr},
+        {"14726.ted", "CORHRK", 0, "ROCKET_HRK", "ARMJETH", 2, 2,
+            54140, 54155, 291, 188,
+            true, false, 800, 800, 0,
+            720, 90, false, true, 160,
+            248843037, 7071586, 465573320,
+            273121813, 6279167, 478110681,
+            15, 0, nullptr},
         {"14726.ted", "CORLEVLR", 0, "RIOT_LEVLR", "ARMROCK", 2, 2,
             20270, 20278, 56, 36,
             false, false, 500, 0, 0,

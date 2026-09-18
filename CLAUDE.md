@@ -147,20 +147,23 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   counts and the classes that need models of their own.
 
   `--weapon-cells` prints the (shooter type, weapon slot) **flight-time** cells
-  — the same filters and the same three models `tools/tad-weapontime.py` scores,
+  — the same filters and the same four models `tools/tad-weapontime.py` scores,
   ported and checked against it cell for cell — and `--emit-weapon-cpp` writes
   them as the third fixture, `src/rwe/sim/tad_weapon_episodes.h`, for the
-  `[weapon][corpus]` tests. Three classes become episodes: rounds that fly at a
+  `[weapon][corpus]` tests. Four classes become episodes: rounds that fly at a
   constant speed, rounds with a motor (flown by a port of the engine's own
   `updateSelfPropelledProjectile` and scored only over victims that could not
-  outrun a step of the round), and rounds that are **lobbed**, stepped
+  outrun a step of the round), rounds that are **lobbed**, stepped
   horizontally at `weaponvelocity / 30 * cos(pitch)` off the flat root of the
   engine's own firing solution and scored only where the weapon's own aim cone
-  could not have moved the answer. Only the cells a model predicts -- all 39 of
-  them; a cell that does not is skipped with a printed reason rather than
-  checked in with its offset, the same rule that keeps airborne builders out of
-  the build fixture, and fifteen of the seventeen ballistic cells are skipped
-  that way.
+  could not have moved the answer, and one carrying an **inert `cruise`** — the
+  clause is read only through an aim point a round that cannot steer never asks
+  for, so such a weapon is a motor round wearing the flag, and one that *can*
+  steer is named "cruise steering" and left unscored. Only the cells a model
+  predicts -- all 40 of them; a cell that does not is skipped with a printed
+  reason rather than checked in with its offset, the same rule that keeps
+  airborne builders out of the build fixture, and fifteen of the seventeen
+  ballistic cells are skipped that way.
   Needs `--units`, which also reads the data set's `weapon*/*.tdf` through the
   engine's own `parseWeaponTdf`. `--window` and `--min-pairings` are the script's
   two knobs and mean the same things.
@@ -237,7 +240,7 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   `updateSelfPropelledProjectile` -- and for a **shell** that same
   `weaponvelocity / 30` times the cosine of the angle the gun elevated to, which
   is the flat root of the solution at `0x49A890` and the only way gravity
-  reaches a flight time at all. All 39 scored cells land on it. The missile
+  reaches a flight time at all. All 40 scored cells land on it. The missile
   class is scored only over the pairings whose victim could not have outrun
   **one step** of the round, because a `0x0d` records where the shot was
   *aimed*; `--drift` prints the measurement that bound comes from, which is one
@@ -245,11 +248,23 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   second one of its own -- the original jitters every turret shot's pitch, which
   for a shell is a *range* error rather than a speed error -- and `--cone` prints
   the split it makes and the cells it costs. `--classes` lists
-  the four it deliberately does not score — `vlaunch`, `cruise`,
-  `waterweapon` and `burst`; `--footprint` prints the evidence for the stop.
+  the three it deliberately does not score — `vlaunch`, `waterweapon` and
+  `burst` — and `--unmodelled` is the measurement behind each, which is what
+  makes those exclusions results rather than sentences: a vertical launch spends
+  about 190 ticks in the air and arrives with a twenty-tick spread and no mode
+  even over victims that cannot move at all; no torpedo cell keeps `--min-n`
+  pairings after the drift bound, whatever sea level was, though the one fired
+  from below the surface reads the best share in the corpus; and a burst
+  weapon's deltas come off a **comb**, because one `0x0d` stands for several
+  rounds. `--replay` prints the instrument behind all three — the whole of
+  `updateSelfPropelledProjectile`, which scores nothing and gives the
+  step-length model's own answer on every pairing it is run over, and which is
+  what caught `cruise` being excluded for a clause its one cell cannot reach.
+  `--footprint` prints the evidence for the stop.
   Exits non-zero if a scored cell moves. `docs/TA-DEMOS.md`, "Pairing a
-  `0x0d` to the `0x0b` it caused", "Where a round stops" and "A shell: the flat
-  root, and the cosine that falls out of it".
+  `0x0d` to the `0x0b` it caused", "Where a round stops", "A shell: the flat
+  root, and the cosine that falls out of it" and "The three classes no model
+  describes".
 - **`tools/tad-stalltime.py`** — the reference for the stall oracle. It imports
   `tad-buildtime.py`'s model rather than copying it, uses the `0x28` stream
   only as the witness that a settle stalled, and scores factory builds whose
