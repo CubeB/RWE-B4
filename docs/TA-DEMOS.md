@@ -1308,12 +1308,25 @@ at about nine in ten; 4,197 (7.8%) are misses the drift bound does **not**
 explain, of which the health test again says about nine in ten really are
 misses. **So what is unexplained is the mechanism behind those 4,197, not their
 disposition** -- they are misses, and nothing here says why. Their shape points
-at things this document already has open, and `--miss-buckets` prints it:
-**1,963** are constant-speed rounds at mobile ground victims, **351** are
-ballistic rounds at *immobile* ones -- which is the ballistic arc no model here
-flies -- **452** are `vlaunch`, **380** are accelerating rounds at victims that
-cannot outrun them, and the height half of `0x49B090`, which nothing scores,
-would show exactly here.
+at things this document already has open, and `--miss-buckets` prints it by
+(weapon class, victim kind). By class: **2,187** constant speed, of which 1,963
+are at mobile ground victims and are the largest single cell in the residue;
+**855** accelerating, **452** `vlaunch`, **447** ballistic, **202** burst,
+**53** `cruise` and one torpedo.
+
+The slice that says the most is the other axis. **1,023 of the 4,197 were fired
+at a victim that cannot move at all**, so no amount of drift is available to
+explain them and the round was sent at a footprint that was still there when it
+arrived. Those are where the two unmodelled pieces of `0x49B090` have to be:
+351 of them are ballistic and 211 `vlaunch`, neither of which flies the straight
+line every model here measures, and the **height** half -- a round passing over
+a victim's top, which nothing scores and which the flight-time fixture
+deliberately makes impossible by building its victims too tall -- would show
+exactly here and nowhere else. The remaining 3,174 are at victims that can move
+but not far enough to clear one step of the round, where the bound is a worst
+case from `maxvelocity` rather than an observation; the zero-drift filter the
+`0x2c` path stream could supply, and which has never been built, is what would
+sharpen those.
 
 **And the ledger gaps are real but small.** 119 shots across both open buckets
 have a clean bracket in which the victim demonstrably lost health with nothing
