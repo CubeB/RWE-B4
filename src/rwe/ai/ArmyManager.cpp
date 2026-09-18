@@ -346,7 +346,45 @@ namespace rwe
         // loan to ScoutManager is not part of it -- it is already busy, and
         // counting it would send the rest off a ship short.
         auto fleetSize = static_cast<int>(bb.navalCombatUnits.size()) - (bb.navalScoutUnitId ? 1 : 0);
-        auto fleetReady = profile.navalAttackFleetSize > 0 && fleetSize >= profile.navalAttackFleetSize;
+
+        // Gathered is not the same as owned. A fleet of six with four of them
+        // already dead in the enemy's harbour is two ships at home, and
+        // sending those two after the four is how a side spends a whole game
+        // feeding the other one hull at a time. So: count what is actually
+        // at the yard, sail when that is a fleet, and let later hulls follow
+        // only in groups.
+        auto gatherRadiusSquared = (profile.rallyDistance * 2_ss) * (profile.rallyDistance * 2_ss);
+        int gatheredAtHome = 0;
+        for (auto shipId : bb.navalCombatUnits)
+        {
+            if (bb.navalScoutUnitId && *bb.navalScoutUnitId == shipId)
+            {
+                continue;
+            }
+            auto shipRef = sim.tryGetUnitState(shipId);
+            if (shipRef && shipRef->get().position.distanceSquared(*navalHome) <= gatherRadiusSquared)
+            {
+                ++gatheredAtHome;
+            }
+        }
+        auto reinforcementSize = std::max(2, profile.navalAttackFleetSize / 2);
+        if (profile.navalAttackFleetSize <= 0)
+        {
+            bb.navalSortieActive = false;
+        }
+        else if (!bb.navalSortieActive && gatheredAtHome >= profile.navalAttackFleetSize)
+        {
+            bb.navalSortieActive = true;
+            LOG_INFO << "AI player " << aiOwner.value << " navy: " << gatheredAtHome << " hulls gathered, the fleet sails";
+        }
+        else if (bb.navalSortieActive && fleetSize < reinforcementSize)
+        {
+            bb.navalSortieActive = false;
+            LOG_INFO << "AI player " << aiOwner.value << " navy: " << fleetSize << " hull(s) left, the fleet is recalled";
+        }
+        auto fleetReady = bb.navalSortieActive;
+        // Hulls still at the yard join a fleet that is out only as a group.
+        auto homeGroupSails = fleetReady && gatheredAtHome >= reinforcementSize;
 
         // An upper bound on any distance on this map, so "the nearest one
         // anywhere" costs no knob of its own. It is only ever handed to
@@ -379,11 +417,77 @@ namespace rwe
                 {
                     continue;
                 }
-                auto d = navalHome->distanceSquared(enemy.lastKnownPosition);
+                // Nearest to THEIR base once that is known, not to ours. The
+                // nearest thing to our own yard is whatever wandered closest,
+                // and a fleet sent after that spends the game drifting from
+                // one stray hull to the next and never arrives anywhere; what
+                // is in the way gets shot by the engage rule regardless.
+                const auto& measureFrom = bb.enemyBasePosition ? *bb.enemyBasePosition : *navalHome;
+                auto d = measureFrom.distanceSquared(enemy.lastKnownPosition);
                 if (d <= bestDistanceSquared)
                 {
                     bestDistanceSquared = d;
                     fleetObjective = enemy.lastKnownPosition;
+                }
+            }
+
+            // Nothing remembered on our sea: sail for the deep water nearest
+            // their base -- or, before that is found, nearest the start
+            // position furthest from us -- rather than sit at home with a
+            // fleet and a full store, which is how one two-hour game ended.
+            // A shipyard site is used because it is known to be water a hull
+            // can reach and lie in, and theirs is likely to be beside it.
+            if (!fleetObjective && bb.baseAnchor)
+            {
+                std::optional<SimVector> towards = bb.enemyBasePosition;
+                if (!towards)
+                {
+                    auto furthest = 0_ss;
+                    for (const auto& start : bb.mapIntel.startPositions)
+                    {
+                        auto d = bb.baseAnchor->distanceSquared(start);
+                        if (d > furthest)
+                        {
+                            furthest = d;
+                            towards = start;
+                        }
+                    }
+                }
+                if (towards)
+                {
+                    auto best = wholeMap * wholeMap;
+                    for (const auto& site : bb.mapIntel.shipyardSites)
+                    {
+                        if (!sameWaterBody(bb.mapIntel, sim.terrain, *navalHome, site.position))
+                        {
+                            continue;
+                        }
+                        auto d = towards->distanceSquared(site.position);
+                        if (d < best)
+                        {
+                            best = d;
+                            fleetObjective = site.position;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Their commander, if it is somewhere a torpedo can reach. It walks
+        // the seabed, where nothing but a waterweapon can touch it, and a
+        // submarine has nothing but a waterweapon: the one hull built for
+        // exactly the target that ends the game.
+        std::optional<KnownEnemy> enemyCommander;
+        if (fleetReady && bb.mapIntel.valid)
+        {
+            for (const auto& [_, enemy] : bb.knownEnemies)
+            {
+                auto defIt = sim.unitDefinitions.find(enemy.unitType);
+                if (defIt != sim.unitDefinitions.end() && defIt->second.commander
+                    && sameWaterBody(bb.mapIntel, sim.terrain, *navalHome, enemy.lastKnownPosition))
+                {
+                    enemyCommander = enemy;
+                    break;
                 }
             }
         }
@@ -405,6 +509,25 @@ namespace rwe
                 continue;
             }
             const auto& ship = shipRef->get();
+            const bool atHome = ship.position.distanceSquared(*navalHome) <= gatherRadiusSquared;
+            const bool sails = fleetReady && (!atHome || homeGroupSails);
+
+            if (sails && enemyCommander && !bb.sideUnits.submarine.empty() && ship.unitType == bb.sideUnits.submarine)
+            {
+                auto commanderRef = sim.tryGetUnitState(enemyCommander->unitId);
+                if (commanderRef && !commanderRef->get().isDead() && inSightRecently(bb, profile, *enemyCommander))
+                {
+                    if (!isAttackingUnit(ship, enemyCommander->unitId))
+                    {
+                        outCommands.push_back(attackCommand(shipId, enemyCommander->unitId));
+                    }
+                }
+                else if (!isMovingTo(ship, enemyCommander->lastKnownPosition))
+                {
+                    outCommands.push_back(moveCommand(shipId, enemyCommander->lastKnownPosition));
+                }
+                continue;
+            }
 
             // Anything on our own sea gets shot at, whatever else is
             // happening -- the land army's own "anything within reach"
@@ -427,7 +550,7 @@ namespace rwe
             // phase turns on attackArmySize, which counts units that walk,
             // and on an all-water map it is never reached -- so a fleet
             // waiting for it would be waiting on an army that cannot exist.
-            if (fleetObjective)
+            if (fleetObjective && sails)
             {
                 // Sail at it rather than attack-order it: the memory is a
                 // place, and the unit that was there may be gone or unseen.
@@ -443,8 +566,11 @@ namespace rwe
             // Nothing worth fighting: hold the coast at home instead of
             // drifting, so the fleet is already where the next thing worth
             // shooting turns up.
-            if (ship.position.distanceSquared(*navalHome) > (profile.rallyDistance * profile.rallyDistance)
-                && ship.orders.empty())
+            // A hull still out after the recall comes back whatever it was
+            // doing; one that is merely idle comes back when it has drifted.
+            bool recalled = !fleetReady && !atHome && !isMovingTo(ship, *navalHome);
+            if (recalled
+                || (ship.position.distanceSquared(*navalHome) > (profile.rallyDistance * profile.rallyDistance) && ship.orders.empty()))
             {
                 outCommands.push_back(moveCommand(shipId, *navalHome));
             }

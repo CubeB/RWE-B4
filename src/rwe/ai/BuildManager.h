@@ -306,6 +306,30 @@ namespace rwe
         std::map<unsigned int, IssuedOrder> issuedOrders;
 
         /**
+         * The one extractor being replaced by a moho, if any.
+         *
+         * The original refuses a building placed over a standing unit of any
+         * kind (TOTALA-EXE.md, the footprint test at 0x47D547), so an upgrade
+         * is two jobs: reclaim the old extractor, then build on the patch it
+         * leaves. Between the two the patch earns nothing, which is why there
+         * is only ever one of these: a base that reclaimed its extractors
+         * together would have no income to build their replacements with.
+         *
+         * While it stands, the patch is kept for the moho -- no builder is
+         * offered it for an ordinary extractor -- and it is given up after
+         * extractorUpgradeTimeoutSeconds, or if the builder dies, so a job
+         * that went wrong costs one patch for a while and not for good.
+         */
+        struct ExtractorUpgrade
+        {
+            UnitId builder;
+            UnitId oldExtractor;
+            SimVector site;
+            GameTime at{0};
+        };
+        std::optional<ExtractorUpgrade> extractorUpgrade;
+
+        /**
          * Sites whose orders were dropped, by heightmap cell, with when.
          * A builder handed a site it cannot reach, or that is occupied when
          * it arrives, drops the order and is idle again at the next pass --

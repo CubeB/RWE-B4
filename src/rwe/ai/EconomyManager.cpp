@@ -331,6 +331,12 @@ namespace rwe
                 {
                     continue;
                 }
+                if (bb.ownReclaimTarget && bb.ownReclaimTarget->value == unitId)
+                {
+                    // Taken down by us, on purpose. See ownReclaimTarget.
+                    bb.ownReclaimTarget.reset();
+                    continue;
+                }
                 bb.recentLosses.insert(bb.recentLosses.begin(), LostBuilding{standing.unitType, standing.position, bb.now});
             }
             if (bb.recentLosses.size() > MaxRememberedLosses)

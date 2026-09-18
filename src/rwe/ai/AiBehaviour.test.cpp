@@ -2405,6 +2405,103 @@ namespace rwe
         }
     }
 
+    TEST_CASE("with no free patch left, an extractor is reclaimed for a moho -- one, and only with the metal in hand", "[ai]")
+    {
+        // The original refuses a building placed over a standing unit
+        // (TOTALA-EXE.md, 0x47D547), so an upgrade is a reclaim and then a
+        // build, and the patch earns nothing in between.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        auto profile = makeDefaultStandardProfile();
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(commanderId).addOrder(MoveOrder(SimVector(600_ss, 0_ss, 600_ss)));
+        addUnit(sim, "ARMLAB", ai, SimVector(400_ss, 0_ss, -400_ss), script);
+        addUnit(sim, "ARMALAB", ai, SimVector(-400_ss, 0_ss, -400_ss), script);
+        auto advancedId = addUnit(sim, "ARMACK", ai, SimVector(-300_ss, 0_ss, 100_ss), script);
+
+        // Well apart, so a 5x5 has room where each 3x3 stands. No metal is
+        // painted anywhere: there is no free patch, which is the point.
+        sim.unitDefinitions["ARMMEX"].metalMake = Metal(2.0f);
+        std::vector<UnitId> extractors;
+        for (int i = 0; i < profile.targetMetalExtractorCount; ++i)
+        {
+            extractors.push_back(addUnit(sim, "ARMMEX", ai, SimVector(SimScalar(-200.0f + i * 160.0f), 0_ss, 200_ss), script));
+        }
+        sim.unitDefinitions["ARMMOHO"].buildCostMetal = Metal(1508.0f);
+        sim.getPlayer(ai).maxMetal = Metal(2000.0f);
+
+        auto reclaimedUnits = [&](const std::vector<PlayerCommand>& commands) {
+            std::set<unsigned int> targets;
+            for (const auto& order : ordersFor<ReclaimOrder>(commands, advancedId))
+            {
+                if (auto unit = std::get_if<UnitId>(&order.target))
+                {
+                    targets.insert(unit->value);
+                }
+            }
+            return targets;
+        };
+
+        SECTION("the nearest one, and no other however many passes go by")
+        {
+            sim.getPlayer(ai).metal = Metal(1200.0f);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 200, commands);
+
+            auto targets = reclaimedUnits(commands);
+            REQUIRE(targets.size() == 1);
+            // The builder stands at x -300; the first extractor is at -200.
+            REQUIRE(*targets.begin() == extractors.front().value);
+            REQUIRE(ordersFor<BuildOrder>(commands, advancedId).empty());
+        }
+
+        SECTION("then the moho, where the extractor stood, and the loss is not read as a raid")
+        {
+            sim.getPlayer(ai).metal = Metal(1200.0f);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 61, commands);
+            REQUIRE(reclaimedUnits(commands).size() == 1);
+
+            auto where = sim.getUnitState(extractors.front()).position;
+            sim.quietlyKillUnit(extractors.front());
+            commands.clear();
+            runTicks(sim, controller, 91, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, advancedId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMMOHO");
+            REQUIRE(builds.front().position.x.value == where.x.value);
+            REQUIRE(builds.front().position.z.value == where.z.value);
+            REQUIRE(controller.getBlackboard().recentLosses.empty());
+        }
+
+        SECTION("not on an empty store: the patch would stand idle while the moho was saved for")
+        {
+            sim.getPlayer(ai).metal = Metal(300.0f);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 200, commands);
+            REQUIRE(reclaimedUnits(commands).empty());
+        }
+
+        SECTION("and not at all with the knob off")
+        {
+            sim.getPlayer(ai).metal = Metal(1200.0f);
+            profile.extractorUpgrades = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 200, commands);
+            REQUIRE(reclaimedUnits(commands).empty());
+        }
+    }
+
     TEST_CASE("the site search walks outward past a ring the builder cannot reach", "[ai]")
     {
         // The ring walk stops at the NEAREST ring with room on it, which is

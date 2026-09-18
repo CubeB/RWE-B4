@@ -124,6 +124,26 @@ namespace rwe
          * player buys with a surplus.
          */
         int surplusLabCount{1};
+        /**
+         * Whether a full metal store buys more of the base: more factories
+         * as income grows, the tech step whatever techLevelTwo says, and a
+         * fleet past navalFleetSize.
+         *
+         * Every target above is where the base starts. Watched in two long
+         * replays on water maps, it was also where the base stopped: at
+         * ninety minutes and at two hours both sides sat on a full store at
+         * fifty to a hundred metal a second with idle builders and the same
+         * two shipyards they had at minute ten, and neither game ended. A
+         * store that stays full is income thrown away, and what a player
+         * does with it is build the means to spend it.
+         */
+        bool surplusExpansion{true};
+        /** One more factory of a kind is allowed for every this much metal income a second, while the store is full. */
+        int surplusFactoryIncomeStep{20};
+        /** And never more than this many of one kind, however rich. */
+        int surplusFactoryCap{4};
+        /** With the store full, the fleet's size targets are multiplied by this. */
+        int surplusFleetMultiplier{3};
 
         // --- Level two ---
         /**
@@ -949,6 +969,23 @@ namespace rwe
          * standing there to have moved; the ground itself does not change.
          */
         int failedSiteMemorySeconds{120};
+        /**
+         * Whether a builder with the moho's button replaces a standing
+         * extractor once there is no free patch left to put a moho on. One at
+         * a time, and see BuildManager::ExtractorUpgrade for why. A moho on a
+         * free patch is always preferred: it costs the base no income while
+         * it goes up.
+         */
+        bool extractorUpgrades{true};
+        /**
+         * How much of the moho's price must already be in the store before
+         * the old extractor is taken down. The patch earns nothing from the
+         * reclaim until the moho finishes, so the reclaim waits until the
+         * moho can follow it promptly rather than when it is merely wanted.
+         */
+        float extractorUpgradeMinMetalFraction{0.5f};
+        /** How long an upgrade may run from the reclaim order to the moho's build order before the patch is released. */
+        int extractorUpgradeTimeoutSeconds{180};
 
         // --- Cadence (ticks) ---
         int buildPlannerTickInterval{30};

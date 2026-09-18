@@ -235,6 +235,14 @@ namespace rwe
         std::map<unsigned int, StandingBuilding> standingBuildings;
         /** What we have lost lately, most recent first, aged out after LossMemoryTicks. */
         std::vector<LostBuilding> recentLosses;
+        /**
+         * A building of our own that BuildManager has ordered reclaimed --
+         * the extractor a moho is about to replace. Its disappearance is not
+         * a loss: read as one, it would put the base on a war footing and
+         * ask for the very extractor back that was just taken down on
+         * purpose. Written by BuildManager, read where losses are diffed.
+         */
+        std::optional<UnitId> ownReclaimTarget;
 
         // --- Enemy ---
         /** Keyed by the enemy unit's raw id so iteration is deterministic. */
@@ -276,6 +284,17 @@ namespace rwe
          * skips scoutUnitId, so two managers never order the same ship.
          */
         std::optional<UnitId> navalScoutUnitId;
+        /**
+         * Whether the fleet is out. Set when navalAttackFleetSize hulls have
+         * gathered at the yard, cleared when fewer than half that are left.
+         *
+         * It has to be remembered rather than worked out each pass. Asked
+         * afresh, "are enough hulls together" stops being true the moment the
+         * first of them sails, and what that looked like from the other side
+         * of the water, watched in a replay, was single ships arriving one
+         * after another to be sunk one after another.
+         */
+        bool navalSortieActive{false};
         /** Where each scout is heading, keyed by raw unit id, so two scouts do not chase the same ground. */
         std::map<unsigned int, SimVector> scoutTargets;
         /** Units booked onto a transport, keyed by raw unit id; the other managers leave them alone. */
