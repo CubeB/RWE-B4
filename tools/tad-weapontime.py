@@ -75,9 +75,37 @@ replayed a tick at a time: leave the barrel at `startvelocity`, gain
 `weaponacceleration` up to `weaponvelocity` while the motor runs, coast after it
 stops. That replay is a PORT OF RWE'S OWN createProjectileFromWeapon and
 updateSelfPropelledProjectile, which are themselves a decoded reading of
-0x49C980 and 0x49B9AE, rather than a guess from the TDF field names. The two
-classes differ only in the speed each step covers; the stopping rule is the
+0x49C980 and 0x49B9AE, rather than a guess from the TDF field names. A BALLISTIC
+one -- a shell -- is launched at the flat root of the firing solution 0x49A890
+solves (RWE's computeFiringAngles, `pitches->second`) and then stepped
+HORIZONTALLY at weaponvelocity / 30 * cos(pitch): the ballistic branch of
+updateProjectiles touches only `velocity.y`, so the round's horizontal motion is
+constant for ever and the arc's fall never enters the flight time. The three
+classes differ only in the distance each step covers; the stopping rule is the
 same.
+
+WHY THE BALLISTIC CLASS NEEDS A SECOND BOUND AND THE OTHERS DO NOT. The original
+perturbs every turret shot before it spawns (0x49D6D7): heading and pitch each
+take `rand(accuracy) - accuracy/2`, widened by however hurt the shooter is. For
+a round that flies level a pitch error costs tan(pitch)*d of its speed, under
+one percent. For a shell it is a RANGE error of 2*cot(2*pitch)*d, because the
+range goes as sin(2*pitch) -- ten percent of the flight at
+CANNON_ART_MEDIUM's `accuracy=750`, which is six or seven ticks -- and nothing
+in a demo records the draw. So a ballistic pairing is scored only where
+replaying the whole arc at the corners of the weapon's own cone gives the same
+answer. That is the bound, it has nothing in it to tune, and --cone prints the
+split it makes: 42% of the pairings it keeps land on the model against 17% of
+the ones it rejects. It is a LOWER bound on the jitter, because the health term
+opens the cone for a damaged shooter and hit points are not in the stream, and
+that is most of what is left between the 42% here and the 98% the constant-speed
+class reaches at drift zero.
+
+WHAT THAT LEAVES. Two of the seventeen ballistic cells -- CORMORT and ARMBULL --
+keep enough pairings to be scored, and both land on the model. The other fifteen
+are printed with what took them rather than dropped: the artillery cells lose
+nearly everything to the cone, and the short-ranged tank cannons, whose cone is
+zero at full health, lose it to the drift bound instead, because a shell
+spending forty ticks in the air gives even a slow victim time to leave.
 
 The missile class also needs a filter the constant-speed one does not, and the
 reason is the same thing that makes the pairing work at all: a 0x0d records
@@ -95,10 +123,8 @@ either class. The bound is the projectile's own step because the quantity is
 quantised in steps, and it is not tuned: it was fixed before the footprint model
 existed and the model was scored under it unchanged.
 
-WHICH CELLS ARE SCORED. The two classes above, and not:
+WHICH CELLS ARE SCORED. The three classes above, and not:
 
-  * **ballistic** ones, which travel an arc longer than the straight line this
-    measures (modal +0 but only 11% of 4,946).
   * **vlaunch** ones, which go up before they go anywhere (ARMMERL reads +138).
   * **cruise** ones, which climb to a fixed altitude, cross the aim point and
     come down on it (0x49B455). ROCKET_HRK is the only one over this corpus and
@@ -112,10 +138,18 @@ WHICH CELLS ARE SCORED. The two classes above, and not:
     everywhere else -- the shot that survives it is one round of several and the
     damage that arrives need not be its own. Six of the eight cells that failed
     this model before the exclusion existed are burst weapons, on a criterion
-    that has nothing to do with flight time.
+    that has nothing to do with flight time. `burst` is now asked BEFORE
+    `ballistic`, which it has to be once the ballistic class is scored:
+    CANNON_FIDO is both, and it sat in the ballistic table reading +5 while it
+    was really six shells from one trigger thrown off the aim line by a 1536
+    `sprayangle`.
 
-Those five are listed by --classes rather than scored. They are not
-discrepancies to explain away; they are four more oracles.
+Those four are listed by --classes rather than scored. They are not
+discrepancies to explain away; they are four more oracles. (A fifth name appears
+there, "ballistic selfprop": TA dispatches on `selfprop` first at 0x49B9C2, so a
+weapon carrying both flags is flown by the motor off a ballistic launch angle,
+which is neither model. ROCKET_HEAVY is the only one in this data set and
+nothing in the corpus fires it.)
 
 NO SCORED CELL DISAGREES. Under the aim-point model four did -- ARMAMPH and
 CORGEO among the constant-speed cells, ARMFIG and CORVAMP among the missiles,
@@ -150,6 +184,7 @@ import json
 import math
 import os
 import re
+import struct
 import sys
 
 
@@ -284,10 +319,24 @@ def weapon_class(block):
         return "vlaunch"
     if block.get("waterweapon"):
         return "waterweapon"
-    if block.get("ballistic"):
-        return "ballistic"
+    # `burst` is asked BEFORE `ballistic`, and it has to be. A burst weapon's
+    # isolation filter cannot mean what it means elsewhere whatever shape its
+    # rounds fly, so a weapon that is both has to fall on the excluded side.
+    # CANNON_FIDO is the one in this data set -- `burst=6` at `burstrate=0.001`
+    # with a 1536 `sprayangle`, six shells from one trigger thrown off the aim
+    # line -- and it sat in the ballistic table until the ballistic class became
+    # scored, where it was merely unscored for the wrong reason.
     if block.get("burst"):
         return "burst"
+    if block.get("ballistic"):
+        # TA dispatches a round's flight on `selfprop` first (0x49B9C2), so a
+        # weapon carrying both flags is flown by the motor and not by the arc --
+        # its launch angle is still the ballistic solver's, which is a fourth
+        # shape and not either model. ROCKET_HEAVY is the only one here and
+        # nothing in the corpus fires it, so it is named rather than modelled.
+        if flag(block, "selfprop"):
+            return "ballistic selfprop"
+        return "ballistic"
     velocity = num(block, "weaponvelocity")
     if not velocity:
         return "no velocity"
@@ -367,12 +416,85 @@ def burn_ticks(block):
     return int((num(block, "weapontimer", 0.0) or 0.0) * 30.0)
 
 
-def steps(kind, block):
+# The per-tick gravity every ballistic round in the game falls under, which is
+# the map's own `gravity` (112 in nearly everything shipped) over 30 squared:
+# 0x49BD10 takes it off velocity.y each tick, and the ballistic branch of RWE's
+# updateProjectiles is the same line. The smoke emitter reads the same word and
+# lifts a puff by four times it, which is what pins the scale (TOTALA-EXE.md §7).
+GRAVITY = 112.0 / (30.0 * 30.0)
+
+# One unit of TA's 16-bit angle, in radians.
+ANGLE_UNIT = 2.0 * math.pi / 65536.0
+
+
+def flat_distance(origin, target):
+    """The horizontal distance, as a plain square root of the sum of squares.
+
+    DELIBERATELY NOT math.dist, which the other two classes use. CPython's is a
+    scaled summation accurate to within an ulp and C++'s `sqrt(dx*dx + dz*dz)`
+    is not, and the ballistic model floors the result onto sixteen-unit squares:
+    a last-place difference on a square boundary moves a whole pairing, and
+    src/tad_episodes.cpp read one more ARMBULL pairing than this file did until
+    the two computed it the same way. The straight-flying classes were never
+    exposed to it -- they measure along a line rather than stepping a solved
+    angle -- so their spans are left alone rather than churned.
+    """
+    dx = target[0] - origin[0]
+    dz = target[2] - origin[2]
+    return math.sqrt(dx * dx + dz * dz)
+
+
+def ballistic_pitch(block, origin, target):
+    """The angle a ballistic gun elevates to, or None where it cannot reach.
+
+    THE FLAT ROOT, ALWAYS. 0x49A890 solves the standard ballistic quadratic --
+    the same discriminant RWE's computeFiringAngles forms, arrived at by a
+    different factoring -- and picks between the two roots at 0x49AA11 against
+    `minbarrelangle` as a floor and pi/4 as a ceiling. The high root exceeds 45
+    degrees for every target inside the gun's range and equals it only at the
+    range itself, so the ceiling rejects it every time and the original always
+    fires the flat one. That is RWE's `pitches->second`, and TOTALA-EXE.md,
+    "The ballistic firing solution", is the reading.
+
+    No solution means the weapon does not fire at all (`cmp ax,0x8000` at
+    0x49D61B), so a pairing whose geometry has none is not a shot this model can
+    account for.
+    """
+    speed = (num(block, "weaponvelocity", 0.0) or 0.0) / 30.0
+    flat = flat_distance(origin, target)
+    if speed <= 0.0 or flat <= 0.0:
+        return None
+    rise = target[1] - origin[1]
+    inner = (GRAVITY * flat * flat) + (2.0 * speed * speed * rise)
+    discriminant = (speed ** 4) - (GRAVITY * inner)
+    if discriminant < 0.0:
+        return None
+    return math.atan(((speed * speed) - math.sqrt(discriminant)) / (GRAVITY * flat))
+
+
+def steps(kind, block, pitch=None):
     """The distance each successive step covers, forever.
 
     One tick of a self-propelled round is: gain `weaponacceleration` up to the
     cap if the motor is still running, then move.
+
+    A BALLISTIC ROUND'S STEP IS CONSTANT, and that is the whole of what gravity
+    does to a flight time. createProjectileFromWeapon launches it at
+    `direction * weaponvelocity` with `direction` rebuilt from the solved
+    heading and pitch, and the ballistic branch of updateProjectiles touches
+    only `velocity.y` afterwards -- so the round's HORIZONTAL motion is
+    `weaponvelocity / 30 * cos(pitch)` every tick for ever, and the stop is a
+    horizontal test. The arc is longer than the straight line the other two
+    classes fly, which is exactly the cosine, and the falling half never enters
+    the answer. (The wind is the one term left out: 0x49BD10 adds the map's
+    vector to a ballistic round's position every tick, a demo does not record
+    it, and at the 3000 `maxwindspeed` of a typical map it is 0.09 world units
+    a tick -- six units over a Crusader's whole flight.)
     """
+    if kind == "ballistic":
+        per_tick = (num(block, "weaponvelocity") / 30.0) * math.cos(pitch)
+        while True:
+            yield per_tick
     if kind != "accelerating":
         per_tick = num(block, "weaponvelocity") / 30.0
         while True:
@@ -425,7 +547,21 @@ def footprint_squares(target, footprint):
             math.floor((target[2] - fz * 8.0) / 16.0 + 0.5))
 
 
-def flight_model(kind, origin, target, footprint, block):
+def span_of(kind, origin, target):
+    """The distance the class's own step is measured along.
+
+    A straight-flying round covers its step along the line in space, so its span
+    is the three-dimensional distance. A ballistic one is stepped horizontally,
+    because that is the only part of its velocity that never changes, so its
+    span is the horizontal distance -- and the two agree wherever the shot is
+    level.
+    """
+    if kind == "ballistic":
+        return flat_distance(origin, target)
+    return math.dist(origin, target)
+
+
+def flight_model(kind, origin, target, footprint, block, pitch=None):
     """The step on which the round first stands in one of the victim's squares.
 
     That step number IS the flight time: the shot-to-damage interval is the
@@ -435,13 +571,15 @@ def flight_model(kind, origin, target, footprint, block):
     """
     fx, fz = footprint
     x0, z0 = footprint_squares(target, footprint)
-    distance = math.dist(origin, target)
-    ux, uz = ((target[0] - origin[0]) / distance, (target[2] - origin[2]) / distance) \
-        if distance > 0 else (0.0, 0.0)
+    span = span_of(kind, origin, target)
+    ux, uz = ((target[0] - origin[0]) / span, (target[2] - origin[2]) / span) \
+        if span > 0 else (0.0, 0.0)
+    if kind == "ballistic" and pitch is None:
+        return None
     # Past this the line has left any square the footprint could cover.
-    give_up = distance + 16.0 * (fx + fz + 2)
+    give_up = span + 16.0 * (fx + fz + 2)
     travelled = 0.0
-    for k, step in enumerate(steps(kind, block), 1):
+    for k, step in enumerate(steps(kind, block, pitch), 1):
         travelled += step
         sx = math.floor((origin[0] + ux * travelled) / 16.0)
         sz = math.floor((origin[2] + uz * travelled) / 16.0)
@@ -451,23 +589,23 @@ def flight_model(kind, origin, target, footprint, block):
             return None
 
 
-def aim_point_flight(kind, distance, block):
+def aim_point_flight(kind, distance, block, pitch=None):
     """THE RETIRED MODEL: the step on which the round reaches the aim point, - 1.
 
     Kept only so --footprint can print what it scored beside what replaced it.
     Its -1 was read as a first step on the firing tick; it was the footprint.
     """
     travelled = 0.0
-    for k, step in enumerate(steps(kind, block), 1):
+    for k, step in enumerate(steps(kind, block, pitch), 1):
         travelled += step
         if travelled >= distance or k >= 4000:
             return k - 1
 
 
-def travelled_by(kind, flight, block):
+def travelled_by(kind, flight, block, pitch=None):
     """How far the model says the projectile had flown when the damage landed."""
     travelled = 0.0
-    for k, step in zip(range(flight), steps(kind, block)):
+    for k, step in zip(range(flight), steps(kind, block, pitch)):
         travelled += step
     return travelled
 
@@ -520,14 +658,26 @@ def drift_of(units, victim, flight):
 
     None where the victim could not be named -- the id's build was not seen. That is not the same as a drift of zero
     and must not be scored as though it were, so the bound rejects it.
+
+    `maxvelocity` IS ROUNDED TO A FLOAT FIRST, which looks like pedantry and is
+    not. The engine's own FBI parser keeps the field in a float and the C++
+    miner reads it through that parser, so the two ran the same bound over two
+    slightly different numbers -- and the bound is a product compared against a
+    step, which lands exactly on the boundary sooner or later. It did: CORGOL's
+    0.9 over a ten-tick ARMBULL shell is 9.0 against a step of 9.0, which a
+    double rejects and the float's 8.99999976 keeps, and the port read one more
+    ARMBULL pairing than this file until they rounded alike. Nothing else in the
+    model needs it, because nothing else compares a parsed field to a computed
+    one.
     """
     unit = units.get(victim)
     if not unit:
         return None
     try:
-        return float(unit.get("maxvelocity", 0) or 0) * flight
+        rounded = struct.unpack("f", struct.pack("f", float(unit.get("maxvelocity", 0) or 0)))[0]
     except ValueError:
         return None
+    return rounded * flight
 
 
 def within_drift_bound(units, block, observation):
@@ -535,23 +685,139 @@ def within_drift_bound(units, block, observation):
     return drift is not None and drift < num(block, "weaponvelocity") / 30.0
 
 
+# --- the aim cone, which is what the ballistic class needs and the others do not
+#
+# The original perturbs every turret shot before it spawns the round
+# (0x49D6D7): `heading += rand(acc) - acc/2` and `pitch += rand(acc) - acc/2`,
+# where `acc` is the weapon's `accuracy` in sixteen-bit angle units, widened by
+# however hurt the shooter is and narrowed by its kills. `sprayangle` is a
+# second draw on the heading alone. Both are read by the turret fire handler
+# and nothing else (0x49E010), and every ballistic weapon in this data set but
+# three is `turret=1`.
+#
+# WHY THAT MATTERS HERE AND NOWHERE ELSE. For a round that flies in a straight
+# line, a pitch error of d changes the horizontal speed by tan(pitch)*d -- under
+# one percent for anything the other two classes fire, because they are aimed
+# almost level. For a ballistic round it is a RANGE error of 2*cot(2*pitch)*d,
+# because the range goes as sin(2*pitch): at CANNON_ART_MEDIUM's `accuracy=750`
+# and an 18-degree elevation that is ten percent of the flight, six or seven
+# ticks on a sixty-five-tick shell. So the same jitter that the constant-speed
+# class can ignore is the dominant term here, and it is not recorded anywhere in
+# a demo.
+#
+# So a ballistic pairing is scored only where the jitter CANNOT MOVE THE ANSWER:
+# replay the round at the corners of its own cone and keep the pairing only if
+# every corner gives the same step. The bound is the weapon's own declared
+# `accuracy` run through the original's own formula -- there is nothing in it to
+# tune -- and it separates: over the drift-bounded ballistic pairings the ones
+# it keeps land on the model 41% of the time against 16% for the ones it
+# rejects. `--cone` prints that table.
+#
+# IT IS A LOWER BOUND ON THE JITTER, not the whole of it. The health term opens
+# the cone for a damaged shooter and a demo does not carry hit points, so a
+# pairing this bound keeps may still have been fired through a wider cone than
+# the weapon asked for. That is most of what is left between the 41% here and
+# the 98% the constant-speed class reaches at drift zero.
+
+
+def aim_cone(block):
+    """(pitch half-width, heading half-width) in radians, at full health.
+
+    The health term cancels exactly at full health and veterancy only narrows,
+    so the weapon's own `accuracy` is the floor of the cone and the width either
+    side of the aim is half of it. `sprayangle` is drawn on the heading only --
+    changeDirectionByRandomAngle rotates in XZ -- and adds to that half.
+    """
+    accuracy = num(block, "accuracy", 0.0) or 0.0
+    spray = num(block, "sprayangle", 0.0) or 0.0
+    return (accuracy / 2.0) * ANGLE_UNIT, ((accuracy + spray) / 2.0) * ANGLE_UNIT
+
+
+def ballistic_arc(origin, target, footprint, block, pitch, heading_error):
+    """The step the round stops on when flown as a whole arc, jitter included.
+
+    The same horizontal stop as flight_model, with two things flight_model does
+    not need: the heading may be off the aim line, and the round is followed in
+    y as well, so that a shell the jitter sends into the ground SHORT of the
+    victim is reported as not having been stopped by the footprint at all. That
+    second clause is why the bound rejects ARMVULC, whose shells land thirty to
+    fifty units below their aim point and reach their victim through the blast
+    rather than by arriving.
+    """
+    fx, fz = footprint
+    x0, z0 = footprint_squares(target, footprint)
+    flat = flat_distance(origin, target)
+    if flat <= 0.0:
+        return None
+    speed = num(block, "weaponvelocity") / 30.0
+    bearing = math.atan2(target[0] - origin[0], target[2] - origin[2]) + heading_error
+    ux, uz = math.sin(bearing), math.cos(bearing)
+    horizontal = speed * math.cos(pitch)
+    rise = speed * math.sin(pitch)
+    x, y, z = origin
+    give_up = flat + 16.0 * (fx + fz + 2)
+    for k in range(1, 4000):
+        # updateProjectiles' ballistic branch, then the move: gravity onto the
+        # velocity, and the position after it.
+        rise -= GRAVITY
+        x += ux * horizontal
+        y += rise
+        z += uz * horizontal
+        if x0 <= math.floor(x / 16.0) < x0 + fx and z0 <= math.floor(z / 16.0) < z0 + fz:
+            return k
+        # Coming down past the height the victim stands at, before reaching it:
+        # the ground took the round and the footprint did not.
+        if rise < 0.0 and y < target[1]:
+            return None
+        if flat_distance(origin, (x, 0.0, z)) > give_up:
+            return None
+    return None
+
+
+def within_aim_cone_bound(units, block, observation):
+    """Whether the weapon's own aim jitter could move this pairing's answer."""
+    footprint = footprint_of(units, observation.victim)
+    pitch = ballistic_pitch(block, observation.origin, observation.target)
+    if footprint is None or pitch is None:
+        return False
+    answer = flight_model("ballistic", observation.origin, observation.target,
+                          footprint, block, pitch)
+    if answer is None:
+        return False
+    dpitch, dheading = aim_cone(block)
+    for pitch_error in (-dpitch, 0.0, dpitch):
+        for heading_error in (-dheading, 0.0, dheading):
+            arc = ballistic_arc(observation.origin, observation.target, footprint,
+                                block, pitch + pitch_error, heading_error)
+            if arc != answer:
+                return False
+    return True
+
+
 def scoreable(kind, units, block, observations):
     """The pairings a class may be scored over.
 
     Every pairing needs its victim named, because the model stops the round on
     the victim's footprint. A constant-speed class keeps every such victim; a
-    self-propelled one keeps the ones inside the drift bound.
+    self-propelled one keeps the ones inside the drift bound; a ballistic one
+    keeps the ones inside the drift bound AND the aim cone, because its flights
+    are three to ten times longer and because a pitch error is a range error.
     """
     named = [o for o in observations if footprint_of(units, o.victim) is not None]
-    if kind != "accelerating":
+    if kind not in ("accelerating", "ballistic"):
         return named
-    return [o for o in named if within_drift_bound(units, block, o)]
+    inside = [o for o in named if within_drift_bound(units, block, o)]
+    if kind == "accelerating":
+        return inside
+    return [o for o in inside if within_aim_cone_bound(units, block, o)]
 
 
 def predict(kind, units, block, observation):
     """What the model says this pairing's flight time is, or None if it misses."""
+    pitch = ballistic_pitch(block, observation.origin, observation.target) \
+        if kind == "ballistic" else None
     return flight_model(kind, observation.origin, observation.target,
-                        footprint_of(units, observation.victim), block)
+                        footprint_of(units, observation.victim), block, pitch)
 
 
 def delta(kind, units, block, observation):
@@ -685,6 +951,94 @@ def report_drift(cells, units, weapons, min_n):
     print("  projectile: a victim that could have outrun it is not measuring a flight.")
 
 
+def report_unscored_ballistic(cells, units, weapons, min_n):
+    """Every ballistic cell the bounds left too thin to score, and what took it.
+
+    A ballistic cell that cannot be scored is a result and not an omission, so
+    it is printed rather than silently dropped -- the same discipline as the
+    MISS lines below, one step earlier. The column that matters is `cone`: the
+    two artillery cells with more pairings than anything else in the corpus,
+    ARMMART and CORMART, lose nearly all of theirs to it, because
+    CANNON_ART_MEDIUM's `accuracy=750` is a ten-percent range error on a
+    sixty-five-tick shell.
+    """
+    rows = []
+    for (shooter, slot), observations in cells.items():
+        name, block = weapon_of(units, weapons, shooter, slot)
+        if not block or weapon_class(block) != "ballistic" or not num(block, "weaponvelocity"):
+            continue
+        named = [o for o in observations if footprint_of(units, o.victim) is not None]
+        drifted = [o for o in named if within_drift_bound(units, block, o)]
+        kept = [o for o in drifted if within_aim_cone_bound(units, block, o)]
+        if len(kept) >= min_n:
+            continue
+        if len(named) < min_n:
+            continue
+        rows.append((len(named), shooter, slot, name or "-",
+                     len(observations) - len(named), len(named) - len(drifted),
+                     len(drifted) - len(kept), len(kept)))
+    if not rows:
+        return
+    print(f"\nthe {len(rows)} ballistic cell(s) with {min_n}+ pairings that the two bounds left too")
+    print("thin to score, and what took them:\n")
+    print(f"  {'shooter':<13} {'sl':>2} {'weapon':<22} {'named':>6} {'unnamed':>8}"
+          f" {'drift':>7} {'cone':>6} {'left':>6}")
+    for r in sorted(rows, key=lambda r: -r[0]):
+        print(f"  {r[1]:<13} {r[2]:>2} {r[3]:<22} {r[0]:>6} {r[4]:>8} {r[5]:>7} {r[6]:>6} {r[7]:>6}")
+
+
+def report_cone(cells, units, weapons):
+    """The evidence behind the ballistic class's second bound.
+
+    Every drift-bounded ballistic pairing, split by whether the weapon's own aim
+    cone could move the model's answer. It is printed rather than described
+    because a number in a comment goes stale. What to look at: the two rows are
+    the same model over the same corpus and differ only in whether the jitter
+    can reach them, and the split is better than two to one -- which is the
+    argument that the spread this class carries is the original's own aim error
+    and not the model being wrong.
+    """
+    print("\n--cone: the drift-bounded ballistic pairings, split by whether the weapon's")
+    print("own aim jitter (accuracy, and sprayangle on the heading) could move the")
+    print("model's answer.\n")
+    rows = {True: collections.Counter(), False: collections.Counter()}
+    by_accuracy = collections.defaultdict(lambda: {True: [0, 0], False: [0, 0]})
+    for (shooter, slot), observations in cells.items():
+        _name, block = weapon_of(units, weapons, shooter, slot)
+        if not block or weapon_class(block) != "ballistic":
+            continue
+        accuracy = int(num(block, "accuracy", 0.0) or 0.0)
+        for o in observations:
+            if footprint_of(units, o.victim) is None or not within_drift_bound(units, block, o):
+                continue
+            error = delta("ballistic", units, block, o)
+            if error is None:
+                continue
+            stable = within_aim_cone_bound(units, block, o)
+            rows[stable][error] += 1
+            bucket = by_accuracy[accuracy][stable]
+            bucket[0] += 1
+            bucket[1] += error == 0
+
+    for stable, label in ((True, "the aim cone cannot move it"), (False, "it can")):
+        counts = rows[stable]
+        total = sum(counts.values())
+        if not total:
+            continue
+        top = " ".join(f"{k:+d}:{v}" for k, v in counts.most_common(6))
+        print(f"  {label:<28} n={total:<6} at +0: {100 * counts[0] / total:3.0f}%   {top}")
+
+    print(f"\n  {'weapon accuracy':<18}{'kept':>8}{'at +0':>8}{'rejected':>10}{'at +0':>8}")
+    for accuracy in sorted(by_accuracy):
+        kept, rejected = by_accuracy[accuracy][True], by_accuracy[accuracy][False]
+        print(f"  {accuracy:<18}{kept[0]:>8}"
+              f"{(f'{100 * kept[1] / kept[0]:.0f}%' if kept[0] else '-'):>8}"
+              f"{rejected[0]:>10}"
+              f"{(f'{100 * rejected[1] / rejected[0]:.0f}%' if rejected[0] else '-'):>8}")
+    print("\n  a weapon with no `accuracy` has a zero cone at full health, so nothing")
+    print("  but its `sprayangle` can reject one of its pairings.")
+
+
 def report_footprint(cells, units, weapons, min_n):
     """Still victims by footprint: the retired aim-point model against this one.
 
@@ -709,13 +1063,18 @@ def report_footprint(cells, units, weapons, min_n):
             footprint = footprint_of(units, o.victim)
             if footprint is None or drift_of(units, o.victim, o.flight) != 0:
                 continue
+            pitch = ballistic_pitch(block, o.origin, o.target) if kind == "ballistic" else None
+            if kind == "ballistic" and pitch is None:
+                continue
             row = table[(kind, max(footprint))]
             row[0] += 1
-            aim = o.flight - aim_point_flight(kind, o.distance, block)
+            aim = o.flight - aim_point_flight(kind, span_of(kind, o.origin, o.target), block, pitch)
             row[1] += aim == 0
             row[2] += aim == -1
             row[3] += delta(kind, units, block, o) == 0
     for kind in SCORED_CLASSES:
+        if not any(k == kind for k, _ in table):
+            continue
         print(f"  {kind}")
         totals = [0, 0, 0, 0]
         for (k, side), row in sorted(table.items()):
@@ -736,8 +1095,10 @@ def score(cells, units, weapons, min_n):
 
     A cell is scored over the pairings its class allows -- all of them for a
     constant-speed weapon, the ones inside the drift bound for a self-propelled
-    one -- and `min_n` applies to what survives that, so a cell whose pairings
-    were nearly all against aircraft drops out rather than being scored thin.
+    one, and those inside the drift bound and the aim cone for a ballistic one --
+    and `min_n` applies to what survives that, so a cell whose pairings were
+    nearly all against aircraft, or nearly all fired through a cone wide enough
+    to move the answer, drops out rather than being scored thin.
     """
     rows = []
     for (shooter, slot), observations in cells.items():
@@ -757,8 +1118,14 @@ def score(cells, units, weapons, min_n):
         damage, damage_at = collections.Counter(o.damage for o in subset).most_common(1)[0]
         # How far short of the aim point the round was when the damage landed:
         # about the footprint's half-width, which is the whole of what the
-        # retired aim-point model's -1 had been absorbing.
-        short = sorted(o.distance - travelled_by(kind, o.flight, block) for o in subset)
+        # retired aim-point model's -1 had been absorbing. Measured along the
+        # class's own span, so a ballistic shell's is a horizontal distance.
+        short = sorted(
+            span_of(kind, o.origin, o.target)
+            - travelled_by(kind, o.flight, block,
+                           ballistic_pitch(block, o.origin, o.target)
+                           if kind == "ballistic" else None)
+            for o in subset)
         rows.append(dict(
             shooter=shooter, slot=slot, weapon=name or "-",
             kind=kind, velocity=velocity, per_tick=per_tick,
@@ -770,7 +1137,7 @@ def score(cells, units, weapons, min_n):
     return rows
 
 
-SCORED_CLASSES = ("constant speed", "accelerating")
+SCORED_CLASSES = ("constant speed", "accelerating", "ballistic")
 
 
 def print_table(rows):
@@ -801,6 +1168,8 @@ def main():
                     help="print the evidence behind the accelerating class's victim bound")
     ap.add_argument("--footprint", action="store_true",
                     help="print the evidence that a round stops on the victim's footprint")
+    ap.add_argument("--cone", action="store_true",
+                    help="print the evidence behind the ballistic class's aim-cone bound")
     ap.add_argument("--classes", action="store_true",
                     help="also list the classes neither model describes")
     args = ap.parse_args()
@@ -832,6 +1201,14 @@ def main():
                   f" the victim's\nfootprint, over every victim that can be named"
                   + (", victims that cannot move only" if args.still_victim else "")
                   + f" ({dropped} could not)\n")
+        elif kind == "ballistic":
+            dropped = sum(r["dropped"] for r in group)
+            print(f"the {len(group)} cells whose weapon lobs a shell, launched at the flat root"
+                  f" of TA's own\nfiring solution and stepped horizontally at"
+                  f" weaponvelocity/30 * cos(pitch), stopped on\nthe victim's footprint, over"
+                  f" the victims that could not outrun a step of it and\nthe shots the weapon's"
+                  f" own aim cone could not have moved\n({dropped} pairings dropped by those two"
+                  f" bounds or an unnamed victim)\n")
         else:
             dropped = sum(r["dropped"] for r in group)
             print(f"the {len(group)} cells whose weapon has a motor, flown as RWE flies"
@@ -852,11 +1229,16 @@ def main():
     print(f"{misses} scored pairing(s) the model has stepping over the victim's footprint"
           f" without landing in it, counted against their cell's share")
 
+    report_unscored_ballistic(cells, units, weapons, args.min_n)
+
     if args.drift:
         report_drift(cells, units, weapons, args.min_n)
 
     if args.footprint:
         report_footprint(cells, units, weapons, args.min_n)
+
+    if args.cone:
+        report_cone(cells, units, weapons)
 
     if args.classes:
         print("\nthe classes neither model describes, listed and never scored:")
@@ -892,9 +1274,13 @@ def main():
             continue
         failures += 1
         if known is None:
-            model = (f"a motor replay from {launch_speed(weapons.get(r['weapon'], {})) :.1f}"
-                     f" up to {r['per_tick']:.1f} a tick" if r["kind"] == "accelerating"
-                     else f"{r['per_tick']:.1f} a tick")
+            if r["kind"] == "accelerating":
+                model = (f"a motor replay from {launch_speed(weapons.get(r['weapon'], {})) :.1f}"
+                         f" up to {r['per_tick']:.1f} a tick")
+            elif r["kind"] == "ballistic":
+                model = f"{r['per_tick']:.1f} a tick times the cosine of its launch pitch"
+            else:
+                model = f"{r['per_tick']:.1f} a tick"
             model += " until it stands on the victim's footprint"
             print(f"MISS {r['shooter']} slot {r['slot']} ({r['weapon']}): model says"
                   f" {model}, corpus is {r['mode']:+} off it"

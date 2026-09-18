@@ -334,12 +334,31 @@ Everything tagged `[tad]` alone is still a decoder test.
       mission runs the build step twice on the tick it creates the nanoframe,
       and never waits for `INBUILDSTANCE` (`TOTALA-EXE.md` §107); 60 of 68
       builds land on that model and the rest are whole-second stalls.
-- [x] The weapon-event oracle -- the flight-time half, over two classes. A
+- [x] The weapon-event oracle -- the flight-time half, over three classes. A
       `0x0d`'s trailing byte is the shooter's weapon slot, a `0x0b` is sent by
       the attacker's owner, and a round stops on the first step that puts it in
-      one of the victim's footprint squares. All 37 scored cells land on +0 and
-      the four former exceptions are gone; `tad_weapon_episodes.h` fires 37
+      one of the victim's footprint squares. All 39 scored cells land on +0 and
+      the four former exceptions are gone; `tad_weapon_episodes.h` fires 39
       episodes at a real victim. `tools/tad-weapontime.py` is the reference.
+- [x] The ballistic class (2026-09-18). A shell is stepped **horizontally** at
+      `weaponvelocity / 30 * cos(pitch)` for ever, with the pitch the flat root
+      of the firing solution `0x49A890` finds -- the π/4 ceiling rejects the high
+      root for every target in range, so there is no lofted arc in the game --
+      and stopped on the same footprint. Gravity reaches a flight time only
+      through that angle: the ballistic branch of `updateProjectiles` touches
+      only `velocity.y`, and halving it moves **no** episode. What limits the
+      class is not the model but the original's own aim jitter, which for a
+      shell is a **range** error of `2·cot(2·pitch)·δ` rather than a speed error
+      -- ten percent of the flight at `CANNON_ART_MEDIUM`'s `accuracy=750`. So a
+      pairing is scored only where replaying the arc at the corners of the
+      weapon's own cone gives the same answer, and **2 of the 17 cells** keep
+      enough pairings at `--min-n 30`: `CORMORT` and `ARMBULL`, both landing on
+      +0. The other 15 are printed with what took them -- the artillery to the
+      cone, the tank cannons to the drift bound -- rather than checked in with an
+      offset. Two reclassifications came with it: `burst` is asked before
+      `ballistic` (`CANNON_FIDO` is both), and a `selfprop` `ballistic` weapon is
+      named rather than modelled. The height half of the collision test was tried
+      as the explanation for the class's spread and **refuted**.
 - [x] Which tick a new round first steps on (2026-09-17). TA fires and steps on
       the same tick, and so does RWE -- the corpus's extra tick is the demo
       clock, because a `0x0d` is queued before its tick's `0x2c` and a `0x0b`
@@ -350,8 +369,13 @@ Everything tagged `[tad]` alone is still a decoder test.
       appears and never waits for `INBUILDSTANCE`; three CORCA cells joined the
       fixture on the ordinary delta convention, and `aircraftbuild.test.cpp`
       covers the behaviour in the real simulation.
-- [ ] The weapon classes with no model yet: ballistic (18 cells), `vlaunch` (3),
-      torpedoes (4) and `cruise` (1). They should reuse the footprint stop.
+- [ ] The weapon classes with no model yet: `vlaunch` (3 cells), torpedoes (4),
+      `cruise` (1) and `burst` (7, now including `CANNON_FIDO`, which the
+      ballistic pass reclassified out of its table -- six shells off one
+      trigger were never a flight time). A sixth is listed and not modelled:
+      **ballistic selfprop**, flown by the motor off a ballistic launch angle,
+      of which `ROCKET_HEAVY` is the only one and nothing in the corpus fires
+      it. They should reuse the footprint stop.
 - [x] Why 53,706 shots drew no damage, which was blocking the hit/miss half
       (2026-09-18). `tad_episodes --miss-buckets` sorts them: **36% structural**,
       the largest single bucket being 13,991 rounds whose victim died before
@@ -365,6 +389,16 @@ Everything tagged `[tad]` alone is still a decoder test.
       shots are ledger gaps demonstrated on units that *lived*, which is the
       first such measurement. `docs/TA-DEMOS.md`, "Why 53,706 shots drew no
       damage".
+- [ ] Check the firing solution against the `0x0d`'s **rotation triple**. The
+      triple is identified -- it is the shot's own launch attitude, `ry` a yaw
+      correlating 0.984 with the bearing to the aim point and `rx` a pitch --
+      and `--emit-shots` carries it now, so the collection half is done. What
+      has not been done is the use the ballistic pass wanted it for: a shell's
+      launch angle is *solved*, so the triple is the one place the corpus could
+      pin `computeBallisticHeadingAndPitch` against its **output** rather than
+      through a flight time. Two measured cautions for whoever takes it:
+      the triple carries a real aiming error (median 1.8 degrees, p90 7), and
+      bucketing by that departure does not decide whether a shot draws damage.
 - [ ] The hit/miss half of the weapon oracle itself. Unblocked, and its shape is
       now settled rather than guessed: it is a **rate** and never a per-shot
       prediction, because where the victim stood when the round arrived is in

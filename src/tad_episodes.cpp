@@ -705,6 +705,21 @@ namespace
          */
         bool burnBlow;
 
+        /**
+         * How wide the original's own aim jitter is, in sixteen-bit angle units.
+         *
+         * 0x49D6D7 adds `rand(accuracy) - accuracy/2` to BOTH the heading and
+         * the pitch of every turret shot, and `sprayangle` is a second draw on
+         * the heading alone. Only the ballistic class reads them: for a round
+         * that flies level a pitch error is under a percent of its speed, and
+         * for a shell it is a range error several ticks wide. `turret` says
+         * whether the handler that draws at all is the one this weapon gets
+         * (0x49E010).
+         */
+        unsigned int accuracy;
+        unsigned int sprayAngle;
+        bool turret;
+
         /** The [DAMAGE] block's `default`, which is what a paired 0x0b should carry. */
         unsigned int defaultDamage;
     };
@@ -797,6 +812,9 @@ namespace
                         weapon.cruise,
                         weapon.twoPhase,
                         weapon.burnBlow,
+                        weapon.accuracy,
+                        weapon.sprayAngle,
+                        weapon.turret,
                         defaultDamage};
                 }
             }
@@ -3362,19 +3380,71 @@ namespace rwe
     }
 
     /**
+     * The per-tick gravity every ballistic round in the game falls under: the
+     * map's own `gravity`, 112 in nearly everything shipped, over 30 squared.
+     * 0x49BD10 takes it off velocity.y each tick and the ballistic branch of
+     * RWE's updateProjectiles is the same line. TOTALA-EXE.md section 7 pins
+     * the scale: the smoke emitter reads the same word and lifts a puff by
+     * four times it.
+     */
+    constexpr double tadGravity = 112.0 / (30.0 * 30.0);
+
+    /** One unit of TA's sixteen-bit angle, in radians. */
+    constexpr double tadAngleUnit = 2.0 * 3.14159265358979323846 / 65536.0;
+
+    /**
+     * The angle a ballistic gun elevates to, or nothing where it cannot reach.
+     *
+     * THE FLAT ROOT, ALWAYS. 0x49A890 solves the standard ballistic quadratic --
+     * the same discriminant RWE's computeFiringAngles forms, arrived at by a
+     * different factoring -- and picks between the roots at 0x49AA11 against
+     * `minbarrelangle` as a floor and pi/4 as a ceiling. The high root exceeds
+     * 45 degrees for every target inside the gun's range and equals it only at
+     * the range itself, so the ceiling rejects it every time and the original
+     * always fires the flat one. That is RWE's `pitches->second`.
+     *
+     * No solution means the weapon does not fire at all (`cmp ax,0x8000` at
+     * 0x49D61B), so a geometry with none is not a shot this model accounts for.
+     */
+    std::optional<double> tadBallisticPitch(
+        const WeaponFacts& facts, const double origin[3], const double target[3])
+    {
+        auto speed = static_cast<double>(facts.velocity) / 30.0;
+        auto dx = target[0] - origin[0];
+        auto dz = target[2] - origin[2];
+        auto flat = std::sqrt(dx * dx + dz * dz);
+        if (speed <= 0.0 || flat <= 0.0)
+        {
+            return std::nullopt;
+        }
+        auto rise = target[1] - origin[1];
+        auto inner = (tadGravity * flat * flat) + (2.0 * speed * speed * rise);
+        auto discriminant = (speed * speed * speed * speed) - (tadGravity * inner);
+        if (discriminant < 0.0)
+        {
+            return std::nullopt;
+        }
+        return std::atan(((speed * speed) - std::sqrt(discriminant)) / (tadGravity * flat));
+    }
+
+    /**
      * The step on which the round first stands in one of the victim's squares,
      * or nothing if it passes the footprint without landing in one.
      *
      * A port of tools/tad-weapontime.py's flight_model, which is the reference.
      * How far each step goes depends on the class: a constant-speed round
-     * covers weaponvelocity / 30 every step, and a self-propelled one gains its
+     * covers weaponvelocity / 30 every step, a self-propelled one gains its
      * acceleration up to the cap while the motor runs and then moves, as
-     * updateSelfPropelledProjectile flies one. Where it stops does not: TA
-     * detonates a round the first tick its move puts it in a map square an
-     * enemy unit occupies (0x49B090, straight after the move in 0x49B720), and
-     * a unit occupies its footprint, stamped at its position with the left
-     * edge rounded to the nearest square -- computeFootprintRegion. The aim
-     * point stands in for the victim's position.
+     * updateSelfPropelledProjectile flies one, and a ballistic one covers
+     * weaponvelocity / 30 * cos(pitch) HORIZONTALLY -- the ballistic branch of
+     * updateProjectiles touches only velocity.y, so the horizontal half of the
+     * launch vector never changes and the arc's fall never enters a flight
+     * time. Where it stops does not depend on the class: TA detonates a round
+     * the first tick its move puts it in a map square an enemy unit occupies
+     * (0x49B090, straight after the move in 0x49B720), and a unit occupies its
+     * footprint, stamped at its position with the left edge rounded to the
+     * nearest square -- computeFootprintRegion. The aim point stands in for the
+     * victim's position.
      *
      * The step number IS the flight time: the shot-to-damage interval is the
      * number of moves it took.
@@ -3393,19 +3463,35 @@ namespace rwe
         auto x0 = static_cast<long long>(std::floor((target[0] - footprintX * 8.0) / 16.0 + 0.5));
         auto z0 = static_cast<long long>(std::floor((target[2] - footprintZ * 8.0) / 16.0 + 0.5));
 
+        auto ballistic = weaponClassName == "ballistic";
         auto dx = target[0] - origin[0];
         auto dy = target[1] - origin[1];
         auto dz = target[2] - origin[2];
-        auto distance = std::sqrt(dx * dx + dy * dy + dz * dz);
-        auto ux = distance > 0.0 ? dx / distance : 0.0;
-        auto uz = distance > 0.0 ? dz / distance : 0.0;
+
+        // The span the class's own step is measured along: the line in space
+        // for a round that flies straight, and the horizontal distance for a
+        // shell, whose horizontal speed is the only part that never changes.
+        auto span = ballistic
+            ? std::sqrt(dx * dx + dz * dz)
+            : std::sqrt(dx * dx + dy * dy + dz * dz);
+        auto ux = span > 0.0 ? dx / span : 0.0;
+        auto uz = span > 0.0 ? dz / span : 0.0;
 
         // Past this the line has left any square the footprint could cover.
-        auto giveUp = distance + 16.0 * static_cast<double>(footprintX + footprintZ + 2);
+        auto giveUp = span + 16.0 * static_cast<double>(footprintX + footprintZ + 2);
 
         auto accelerating = weaponClassName == "accelerating";
         auto cap = static_cast<double>(facts.velocity) / 30.0;
         auto speed = accelerating ? tadLaunchSpeed(facts) : cap;
+        if (ballistic)
+        {
+            auto pitch = tadBallisticPitch(facts, origin, target);
+            if (!pitch)
+            {
+                return std::nullopt;
+            }
+            speed = cap * std::cos(*pitch);
+        }
         auto acceleration = static_cast<double>(facts.acceleration) / 900.0;
         auto burn = tadBurnTicks(facts);
 
@@ -3433,6 +3519,146 @@ namespace rwe
     }
 
     /**
+     * The step the round stops on when the whole arc is flown, jitter included.
+     *
+     * The same horizontal stop as tadFootprintFlight, with two things it does
+     * not need: the heading may be off the aim line, and the round is followed
+     * in y as well, so that a shell the jitter sends into the ground SHORT of
+     * the victim is reported as not having been stopped by the footprint at
+     * all. A port of the script's ballistic_arc.
+     */
+    std::optional<int> tadBallisticArc(
+        const WeaponFacts& facts,
+        const double origin[3],
+        const double target[3],
+        unsigned int footprintX,
+        unsigned int footprintZ,
+        double pitch,
+        double headingError)
+    {
+        auto x0 = static_cast<long long>(std::floor((target[0] - footprintX * 8.0) / 16.0 + 0.5));
+        auto z0 = static_cast<long long>(std::floor((target[2] - footprintZ * 8.0) / 16.0 + 0.5));
+
+        auto dx = target[0] - origin[0];
+        auto dz = target[2] - origin[2];
+        auto flat = std::sqrt(dx * dx + dz * dz);
+        if (flat <= 0.0)
+        {
+            return std::nullopt;
+        }
+
+        auto speed = static_cast<double>(facts.velocity) / 30.0;
+        auto bearing = std::atan2(dx, dz) + headingError;
+        auto ux = std::sin(bearing);
+        auto uz = std::cos(bearing);
+        auto horizontal = speed * std::cos(pitch);
+        auto rise = speed * std::sin(pitch);
+
+        auto x = origin[0];
+        auto y = origin[1];
+        auto z = origin[2];
+        auto giveUp = flat + 16.0 * static_cast<double>(footprintX + footprintZ + 2);
+
+        for (unsigned int k = 1; k < 4000; ++k)
+        {
+            // updateProjectiles' ballistic branch, then the move: gravity onto
+            // the velocity, and the position after it.
+            rise -= tadGravity;
+            x += ux * horizontal;
+            y += rise;
+            z += uz * horizontal;
+
+            auto sx = static_cast<long long>(std::floor(x / 16.0));
+            auto sz = static_cast<long long>(std::floor(z / 16.0));
+            if (sx >= x0 && sx < x0 + static_cast<long long>(footprintX)
+                && sz >= z0 && sz < z0 + static_cast<long long>(footprintZ))
+            {
+                return static_cast<int>(k);
+            }
+            // Coming down past the height the victim stands at, before reaching
+            // it: the ground took the round and the footprint did not.
+            if (rise < 0.0 && y < target[1])
+            {
+                return std::nullopt;
+            }
+            auto travelledX = x - origin[0];
+            auto travelledZ = z - origin[2];
+            if (std::sqrt(travelledX * travelledX + travelledZ * travelledZ) > giveUp)
+            {
+                return std::nullopt;
+            }
+        }
+        return std::nullopt;
+    }
+
+    /**
+     * Whether the weapon's own aim jitter could move this pairing's answer.
+     *
+     * THE BALLISTIC CLASS'S SECOND BOUND, and the reason its cells read badly
+     * without one. The original perturbs every turret shot before it spawns
+     * (0x49D6D7): heading and pitch each take `rand(accuracy) - accuracy/2`,
+     * widened by however hurt the shooter is and narrowed by its kills, and
+     * `sprayangle` is a second draw on the heading alone. For a round that
+     * flies level a pitch error of d costs tan(pitch)*d of the horizontal
+     * speed, under one percent. For a shell it is a RANGE error of
+     * 2*cot(2*pitch)*d, because the range goes as sin(2*pitch) -- ten percent
+     * of the flight at CANNON_ART_MEDIUM's accuracy of 750, six or seven ticks
+     * on a sixty-five-tick shell -- and nothing in a demo records the draw.
+     *
+     * So a ballistic pairing is scored only where replaying the whole arc at
+     * the corners of the weapon's own cone gives the same answer. There is
+     * nothing in the bound to tune: it is the weapon's declared `accuracy` run
+     * through the original's own formula. It is a LOWER bound on the jitter,
+     * because the health term opens the cone for a damaged shooter and hit
+     * points are not in the stream.
+     *
+     * tools/tad-weapontime.py --cone prints the split it makes, and this is a
+     * port of that script's within_aim_cone_bound.
+     */
+    bool tadWithinAimConeBound(
+        const WeaponFacts& facts,
+        const Pairing& pairing,
+        unsigned int footprintX,
+        unsigned int footprintZ)
+    {
+        const double origin[3] = {tadFixedToDouble(pairing.origin.x), tadFixedToDouble(pairing.origin.y), tadFixedToDouble(pairing.origin.z)};
+        const double target[3] = {tadFixedToDouble(pairing.target.x), tadFixedToDouble(pairing.target.y), tadFixedToDouble(pairing.target.z)};
+
+        auto pitch = tadBallisticPitch(facts, origin, target);
+        if (!pitch)
+        {
+            return false;
+        }
+        auto answer = tadFootprintFlight("ballistic", facts, pairing.origin, pairing.target, footprintX, footprintZ);
+        if (!answer)
+        {
+            return false;
+        }
+
+        // The health term cancels exactly at full health and veterancy only
+        // narrows, so the weapon's own `accuracy` is the floor of the cone and
+        // the width either side of the aim is half of it. `sprayangle` is drawn
+        // on the heading only -- changeDirectionByRandomAngle rotates in XZ.
+        auto pitchHalf = (static_cast<double>(facts.accuracy) / 2.0) * tadAngleUnit;
+        auto headingHalf = (static_cast<double>(facts.accuracy + facts.sprayAngle) / 2.0) * tadAngleUnit;
+
+        const double pitchErrors[3] = {-pitchHalf, 0.0, pitchHalf};
+        const double headingErrors[3] = {-headingHalf, 0.0, headingHalf};
+        for (auto pitchError : pitchErrors)
+        {
+            for (auto headingError : headingErrors)
+            {
+                auto arc = tadBallisticArc(facts, origin, target, footprintX, footprintZ, *pitch + pitchError, headingError);
+                if (!arc || *arc != *answer)
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
      * Which model describes this weapon, or why none of them does. The strings
      * match tools/tad-weapontime.py's weapon_class so the two tables can be
      * compared row for row.
@@ -3447,13 +3673,28 @@ namespace rwe
         {
             return "waterweapon";
         }
-        if (facts.ballistic)
-        {
-            return "ballistic";
-        }
+        // `burst` is asked BEFORE `ballistic`, and it has to be. A burst
+        // weapon's isolation filter cannot mean what it means elsewhere
+        // whatever shape its rounds fly, so a weapon that is both falls on the
+        // excluded side. CANNON_FIDO is the one in this data set -- six shells
+        // from one trigger, thrown off the aim line by a 1536 `sprayangle` --
+        // and it sat in the ballistic table until that class became scored.
         if (facts.burst > 1)
         {
             return "burst";
+        }
+        if (facts.ballistic)
+        {
+            // TA dispatches a round's flight on `selfprop` first (0x49B9C2), so
+            // a weapon carrying both flags is flown by the motor and not by the
+            // arc, off a launch angle the ballistic solver chose. That is a
+            // fourth shape and neither model. ROCKET_HEAVY is the only one here
+            // and nothing in the corpus fires it, so it is named not modelled.
+            if (facts.selfProp)
+            {
+                return "ballistic selfprop";
+            }
+            return "ballistic";
         }
         if (facts.velocity == 0)
         {
@@ -3521,6 +3762,11 @@ namespace rwe
      * quantity being measured is quantised in steps. The bound is not tuned: it
      * was fixed under the aim-point model, and the footprint model was scored
      * under it unchanged.
+     *
+     * A ballistic cell takes that same bound AND the aim cone, for the reasons
+     * tadWithinAimConeBound gives: its flights are three to ten times longer,
+     * so the drift bound bites far harder, and a pitch error is a range error
+     * rather than a speed error.
      */
     bool tadScoreablePairing(
         const std::string& weaponClassName,
@@ -3533,11 +3779,20 @@ namespace rwe
         {
             return false;
         }
-        if (weaponClassName != "accelerating")
+        if (weaponClassName != "accelerating" && weaponClassName != "ballistic")
         {
             return true;
         }
-        return *drift < static_cast<double>(facts.velocity) / 30.0;
+        if (*drift >= static_cast<double>(facts.velocity) / 30.0)
+        {
+            return false;
+        }
+        if (weaponClassName != "ballistic")
+        {
+            return true;
+        }
+        const auto& victim = unitFacts.at(pairing.victim);
+        return tadWithinAimConeBound(facts, pairing, victim.footprintX, victim.footprintZ);
     }
 
     std::vector<WeaponCell> mineWeaponCells(
@@ -3697,7 +3952,8 @@ namespace rwe
             {
                 continue;
             }
-            if (cell.weaponClass != "constant speed" && cell.weaponClass != "accelerating")
+            if (cell.weaponClass != "constant speed" && cell.weaponClass != "accelerating"
+                && cell.weaponClass != "ballistic")
             {
                 continue;
             }
@@ -3752,13 +4008,13 @@ namespace rwe
 // The pairing is confirmed by a number no filter looks at: every cell's modal
 // damage is its weapon's own [DAMAGE] default, which is `weaponDamage` here.
 //
-// WHICH SHOTS MAY BE HERE. The two classes the models describe: weapons that fly
-// at a constant speed, and weapons with a motor. A ballistic round travels an
-// arc longer than the straight line, a vlaunch rocket goes up before it goes
-// anywhere, a torpedo travels through water, and a burst weapon fires several
-// rounds from one trigger so the isolation filter cannot mean what it means
-// elsewhere. Those four are four more oracles, not discrepancies. See
-// docs/TA-DEMOS.md.
+// WHICH SHOTS MAY BE HERE. The three classes the models describe: weapons that
+// fly at a constant speed, weapons with a motor, and weapons that lob a shell. A
+// vlaunch rocket goes up before it goes anywhere, a cruise missile climbs and
+// crosses the aim point before coming down, a torpedo travels through water, and
+// a burst weapon fires several rounds from one trigger so the isolation filter
+// cannot mean what it means elsewhere. Those four are four more oracles, not
+// discrepancies. See docs/TA-DEMOS.md.
 //
 // THE ARITHMETIC BEING PINNED. A round does not stop at the point it was aimed
 // at. It detonates the first tick its move puts it in a map square an enemy unit
@@ -3767,23 +4023,43 @@ namespace rwe
 // steps until the round stands on the victim's footprint, which is about half a
 // footprint short of the aim point. How far a step goes depends on the class: a
 // constant-speed projectile covers weaponVelocity / 30 world units -- the same
-// conversion LoadingScene_util.cpp does -- and a self-propelled one leaves at
+// conversion LoadingScene_util.cpp does -- a self-propelled one leaves at
 // startVelocity and gains weaponAcceleration / 900 a tick up to the same cap
-// while its motor runs, and coasts after. RWE moves a projectile and then tests
-// it against the occupied grid, in that order, so expectedFlightDelta is zero
-// everywhere below. The field is kept because the fixture's whole purpose is to
-// survive a deliberate divergence; a non-zero value here would have to name the
-// docs/TOTALA-EXE.md section that licensed it, exactly as the build fixture's
-// does.
+// while its motor runs, and coasts after, and a BALLISTIC one covers
+// weaponVelocity / 30 times the cosine of the angle its gun elevated to,
+// horizontally, every tick. That angle is the flat root of the firing solution
+// 0x49A890 solves and computeBallisticHeadingAndPitch reproduces; the pi/4
+// ceiling at 0x49AA11 rejects the high root for every target inside the gun's
+// range, so there is no lofted artillery arc in the game. The falling half of
+// the arc never enters a flight time, because the ballistic branch of
+// updateProjectiles touches only velocity.y. RWE moves a projectile and then
+// tests it against the occupied grid, in that order, so expectedFlightDelta is
+// zero everywhere below. The field is kept because the fixture's whole purpose
+// is to survive a deliberate divergence; a non-zero value here would have to
+// name the docs/TOTALA-EXE.md section that licensed it, exactly as the build
+// fixture's does.
 //
-// WHY THE MISSILE ROWS NAME THEIR VICTIM. A 0x0d records where the shot was
-// AIMED, so a victim that moves while the round is in the air is not where the
-// distance says it is when it arrives. Over a missile's twenty to forty ticks
-// that is most of the error, so a self-propelled cell is scored only over the
-// pairings whose victim could not have outrun one step of the projectile --
-// `victimName` is the representative's, and it is a building or a slow ground
-// unit in every row here. A constant-speed cell needs no such bound and gets
-// none. tools/tad-weapontime.py --drift prints the measurement behind that.
+// WHY THE MISSILE AND SHELL ROWS NAME THEIR VICTIM. A 0x0d records where the
+// shot was AIMED, so a victim that moves while the round is in the air is not
+// where the distance says it is when it arrives. Over a missile's twenty to
+// forty ticks, or a shell's thirty to sixty, that is most of the error, so those
+// two classes are scored only over the pairings whose victim could not have
+// outrun one step of the projectile -- `victimName` is the representative's, and
+// it is a building or a slow ground unit in every such row here. A
+// constant-speed cell needs no such bound and gets none.
+// tools/tad-weapontime.py --drift prints the measurement behind that.
+//
+// AND WHY THERE ARE SO FEW SHELL ROWS. A ballistic cell carries a second bound
+// the other two do not need. The original jitters every turret shot's heading
+// AND pitch by rand(accuracy) - accuracy/2 (0x49D6D7); for a round that flies
+// level a pitch error costs under a percent of its horizontal speed, but for a
+// shell it is a range error of 2*cot(2*pitch) times the error, ten percent of
+// the flight at CANNON_ART_MEDIUM's accuracy of 750. Nothing in a demo records
+// the draw, so a ballistic pairing is scored only where replaying the arc at the
+// corners of the weapon's own cone gives the same answer -- which leaves the
+// artillery cells, the ones with by far the most pairings in the corpus, with
+// nothing to be scored over. tools/tad-weapontime.py --cone prints that split
+// and the cells it costs.
 
 namespace rwe
 {
@@ -3813,10 +4089,13 @@ namespace rwe
         unsigned int pairingsAtMode;
 
         /**
-         * Whether the round has a motor, which decides which model it is being
-         * held to and which physics type the test builds for it.
+         * Whether the round has a motor, and whether it is a shell. The two are
+         * exclusive and either may be false, which is the constant-speed class.
+         * Between them they decide which model the episode is held to and which
+         * physics type the test builds for it.
          */
         bool selfPropelled;
+        bool ballistic;
 
         /** TDF weaponvelocity, in world units a SECOND. Divide by 30 for a tick. */
         unsigned int weaponVelocity;
@@ -3884,6 +4163,7 @@ namespace rwe
                 << "            " << cell->shotTick << ", " << cell->damageTick << ", "
                 << cell->pairings << ", " << cell->pairingsAtMode << ",\n"
                 << "            " << (cell->selfProp ? "true" : "false") << ", "
+                << (cell->weaponClass == "ballistic" ? "true" : "false") << ", "
                 << cell->velocity << ", " << cell->startVelocity << ", " << cell->acceleration << ",\n"
                 << "            " << cell->range << ", "
                 << static_cast<unsigned int>(cell->weaponTimer * 30.0f) << ", "
@@ -5968,7 +6248,7 @@ int main(int argc, char* argv[])
         unsigned int agreeing = 0;
         unsigned int scoredCells = 0;
         unsigned int damageAgreeing = 0;
-        for (const auto* className : {"constant speed", "accelerating"})
+        for (const auto* className : {"constant speed", "accelerating", "ballistic"})
         {
             auto group = byClass.find(className);
             if (group == byClass.end())
@@ -5993,6 +6273,15 @@ int main(int argc, char* argv[])
                 std::cout << "the " << sorted.size() << " cells whose weapon flies at a constant"
                           << " speed, stopped on the victim's\nfootprint, over every victim that can be named ("
                           << dropped << " could not)\n\n";
+            }
+            else if (std::string(className) == "ballistic")
+            {
+                std::cout << "the " << sorted.size() << " cells whose weapon lobs a shell, launched"
+                          << " at the flat root of TA's own\nfiring solution and stepped horizontally at"
+                          << " weaponvelocity/30 * cos(pitch), stopped on\nthe victim's footprint, over the"
+                          << " victims that could not outrun a step of it and\nthe shots the weapon's own aim"
+                          << " cone could not have moved\n(" << dropped
+                          << " pairings dropped by those two bounds or an unnamed victim)\n\n";
             }
             else
             {

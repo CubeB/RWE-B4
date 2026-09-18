@@ -147,16 +147,20 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   counts and the classes that need models of their own.
 
   `--weapon-cells` prints the (shooter type, weapon slot) **flight-time** cells
-  — the same filters and the same two models `tools/tad-weapontime.py` scores,
+  — the same filters and the same three models `tools/tad-weapontime.py` scores,
   ported and checked against it cell for cell — and `--emit-weapon-cpp` writes
   them as the third fixture, `src/rwe/sim/tad_weapon_episodes.h`, for the
-  `[weapon][corpus]` tests. Two classes become episodes: rounds that fly at a
-  constant speed, and rounds with a motor, the second flown by a port of the
-  engine's own `updateSelfPropelledProjectile` and scored only over victims that
-  could not outrun a step of the round. Only the cells a model predicts -- all 37
-  since the footprint stop; a cell that does not is skipped with a printed
-  reason rather than checked in with its offset, the same rule that keeps
-  airborne builders out of the build fixture.
+  `[weapon][corpus]` tests. Three classes become episodes: rounds that fly at a
+  constant speed, rounds with a motor (flown by a port of the engine's own
+  `updateSelfPropelledProjectile` and scored only over victims that could not
+  outrun a step of the round), and rounds that are **lobbed**, stepped
+  horizontally at `weaponvelocity / 30 * cos(pitch)` off the flat root of the
+  engine's own firing solution and scored only where the weapon's own aim cone
+  could not have moved the answer. Only the cells a model predicts -- all 39 of
+  them; a cell that does not is skipped with a printed reason rather than
+  checked in with its offset, the same rule that keeps airborne builders out of
+  the build fixture, and fifteen of the seventeen ballistic cells are skipped
+  that way.
   Needs `--units`, which also reads the data set's `weapon*/*.tdf` through the
   engine's own `parseWeaponTdf`. `--window` and `--min-pairings` are the script's
   two knobs and mean the same things.
@@ -227,18 +231,25 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   **footprint** -- 792 of 810 constant-speed pairings against still victims,
   where the old aim-point model `ceil(distance / (weaponvelocity / 30)) - 1` took
   65% and its `-1` was really the footprint. How far a step goes is the class:
-  `weaponvelocity / 30` for a constant-speed round, and for one with a **motor**
+  `weaponvelocity / 30` for a constant-speed round, for one with a **motor**
   a tick-by-tick replay out of `startvelocity`, `weaponacceleration` and the
   burn -- a port of the engine's own `createProjectileFromWeapon` and
-  `updateSelfPropelledProjectile`. All 37 scored cells land on it. The missile
+  `updateSelfPropelledProjectile` -- and for a **shell** that same
+  `weaponvelocity / 30` times the cosine of the angle the gun elevated to, which
+  is the flat root of the solution at `0x49A890` and the only way gravity
+  reaches a flight time at all. All 39 scored cells land on it. The missile
   class is scored only over the pairings whose victim could not have outrun
   **one step** of the round, because a `0x0d` records where the shot was
   *aimed*; `--drift` prints the measurement that bound comes from, which is one
-  falling curve both classes sit on. `--classes` lists
-  the five it deliberately does not score — ballistic, `vlaunch`, `cruise`,
+  falling curve both classes sit on. The shell class takes that bound and a
+  second one of its own -- the original jitters every turret shot's pitch, which
+  for a shell is a *range* error rather than a speed error -- and `--cone` prints
+  the split it makes and the cells it costs. `--classes` lists
+  the four it deliberately does not score — `vlaunch`, `cruise`,
   `waterweapon` and `burst`; `--footprint` prints the evidence for the stop.
   Exits non-zero if a scored cell moves. `docs/TA-DEMOS.md`, "Pairing a
-  `0x0d` to the `0x0b` it caused" and "Where a round stops".
+  `0x0d` to the `0x0b` it caused", "Where a round stops" and "A shell: the flat
+  root, and the cosine that falls out of it".
 - **`tools/tad-stalltime.py`** — the reference for the stall oracle. It imports
   `tad-buildtime.py`'s model rather than copying it, uses the `0x28` stream
   only as the witness that a settle stalled, and scores factory builds whose
