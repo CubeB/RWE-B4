@@ -1162,12 +1162,46 @@ namespace rwe
             }
         };
 
+        // Metal, of whichever kind this map's patches will take.
+        //
+        // Every extractor rule below used to name the dry one alone, and on a
+        // map where every patch is submerged that is a rule which can never be
+        // satisfied: ARMMEX is MaxWaterDepth=0, so it finds no site at all.
+        // The opening then falls through to the first thing that CAN stand on
+        // water -- the shipyard, and then tidal generators -- and never
+        // recovers, because by the time the submerged extractor is reached at
+        // the bottom of this list the starting stockpile is spent and income
+        // is the metal a commander makes by itself. Watched on Brain Coral
+        // (1170 patches, all 1170 of them under water) that is exactly the
+        // opening the AI plays: a naval yard, then tidals, then warships that
+        // idle by the yard, and 449 'cannot afford ARMUWMEX, skipping' in a
+        // single game against an income of one to two a second.
+        //
+        // Listing the submerged one directly after the dry one costs a land
+        // map nothing. The planner takes the first entry it can find a site
+        // for, so wherever there is a dry patch the dry extractor still wins
+        // and this is never reached -- it is the same rule that already sits
+        // at the foot of this function, applied where the opening can use it.
+        auto wantMetalExtractor = [&]() {
+            want(s.metalExtractor);
+            if (submergedMetalPatches > 0)
+            {
+                want(s.underwaterMetalExtractor);
+            }
+        };
+
+        // Both kinds count toward the extractor targets. Counting only the dry
+        // ones leaves every gate below permanently unsatisfied on a map with
+        // no dry patch to take: it reads as "still no metal extractors"
+        // however many are actually mining, so the opening never finishes.
+        auto totalExtractors = [&]() { return total(s.metalExtractor) + total(s.underwaterMetalExtractor); };
+
         // A builder ferried to an island the base cannot walk to runs an
         // outpost: it takes the metal there and powers its own extractors,
         // but leaves the factories and towers to the main base.
         if (!builderAtBase)
         {
-            want(s.metalExtractor);
+            wantMetalExtractor();
             want(s.solar);
             return wanted;
         }
@@ -1181,9 +1215,9 @@ namespace rwe
         {
             want(s.solar);
         }
-        if (total(s.metalExtractor) < profile.openingMetalExtractorCount)
+        if (totalExtractors() < profile.openingMetalExtractorCount)
         {
-            want(s.metalExtractor);
+            wantMetalExtractor();
         }
         if (total(s.solar) < profile.openingSolarCount)
         {
@@ -1195,9 +1229,9 @@ namespace rwe
 
         // Don't sink the commander into a factory while metal is short; more
         // extractors first, as long as there are patches to take.
-        if (metalShort && total(s.metalExtractor) < profile.targetMetalExtractorCount)
+        if (metalShort && totalExtractors() < profile.targetMetalExtractorCount)
         {
-            want(s.metalExtractor);
+            wantMetalExtractor();
         }
         if (total(s.lab) < 1)
         {
