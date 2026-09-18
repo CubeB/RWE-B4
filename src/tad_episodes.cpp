@@ -51,6 +51,8 @@
 //                 --with-updates adds the per-tick mover updates
 //   --weapon-slots  check a 0x0d's trailing byte against the slots the
 //                 shooter's own FBI fills; the evidence that it is a weapon index
+//   --miss-buckets  sort the isolated shots that drew no damage into named
+//                 buckets and check what is left against 0x2c health. Needs --units
 //   --max-types   distinct unit types an episode may carry (default 6)
 //   --max-per-player  episodes to keep per player (default 3)
 //   --max-cells   build-timing episodes to check in (default 28)
@@ -2898,7 +2900,15 @@ namespace rwe
                 << ",\"targetName\":\"" << nameOf(record.shot.targetId, record.tick) << "\"";
             position(out, "o", record.shot.origin);
             position(out, "t", record.shot.target);
-            out << "}\n";
+            // The rotation triple rides along raw. It is not identified, and
+            // the hit/miss question turns on whether it is the ROUND's heading
+            // -- which would record where a shot actually went -- or the
+            // shooter's own facing, which would not. Nothing can tell them
+            // apart without the numbers beside the two positions.
+            out << ",\"rx\":" << record.shot.rotation.x
+                << ",\"ry\":" << record.shot.rotation.y
+                << ",\"rz\":" << record.shot.rotation.z
+                << "}\n";
         }
 
         for (const auto& record : handler.damageRecords)
@@ -3889,6 +3899,734 @@ namespace rwe
             << "}\n";
     }
 
+    // --- --miss-buckets: why an isolated shot drew no damage --------------
+    //
+    // The flight-time half of the weapon oracle keeps 35,535 of 631,578 shots.
+    // The largest rejection that is not simply sustained fire is "no damage
+    // recorded in the window", 53,706 of them, and the hit/miss half of the
+    // oracle cannot exist until those are accounted for: 0x0b IS NOT A COMPLETE
+    // DAMAGE LEDGER, so absence is unknown rather than zero and no shot may be
+    // called a miss on silence alone.
+    //
+    // This pass sorts them into named buckets and then asks two independent
+    // instruments what is left:
+    //
+    //  * THE DRIFT AXIS, the same one tools/tad-weapontime.py --drift scores
+    //    flight times on. If a no-damage shot is a miss, its rate has to climb
+    //    with how far the victim could leave the square the round was sent to.
+    //    If the ledger were simply dropping records, the rate would have no
+    //    reason to depend on the victim's speed at all.
+    //  * THE 0x2c HEALTH BRACKET. A unit's full state goes out once every
+    //    maxUnits ticks, so a shot can be bracketed by the victim's own records
+    //    either side of it. Where the bracket is clean -- same type at both
+    //    ends, a finished unit, the unit id not recycled inside it, the round's
+    //    arrival inside it, and NO damage record against that victim anywhere
+    //    in it -- the health difference is the whole truth about what the victim
+    //    absorbed, and the ledger says nothing happened. Health unchanged is
+    //    then a miss; health fallen is a ledger gap, demonstrated rather than
+    //    argued. The same bracket over the shots that DID draw damage is the
+    //    control, and it is what says how often the instrument misses a hit it
+    //    is known to be looking at.
+    //
+    // Everything here is a measurement and not a filter: no bucket removes a
+    // shot from any other pass.
+
+    /** One 0x2c full-state record, reduced to what the health bracket reads. */
+    struct MissSync
+    {
+        uint32_t tick;
+        uint16_t typeIndex;
+        uint16_t health;
+        uint8_t buildProgress;
+    };
+
+    /** The bucket names, in the priority order a shot is tested against. */
+    const std::array<const char*, 10> missBucketNames = {
+        "1. the slot names no weapon, or one that cannot fly a round",
+        "2. the recording ends inside the window",
+        "3. the victim died before the round could arrive",
+        "4. the shot killed the victim; only the 0x0c records it",
+        "5. the round damaged a bystander instead",
+        "6. the victim cannot be named, or has no footprint to occupy",
+        "7. the round steps over the victim's footprint",
+        "8. the damage arrived just outside the window",
+        "9. the victim could outrun the round (outside the drift bound)",
+        "10. UNEXPLAINED: the victim could not outrun the round",
+    };
+
+    /** Edges of the drift axis, in world units; the last is open. */
+    const std::array<double, 8> missDriftEdges = {0.0, 1e-9, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0};
+
+    struct MissBucketReport
+    {
+        unsigned long isolated = 0;
+        unsigned long drewDamage = 0;
+        unsigned long several = 0;
+        std::array<unsigned long, 10> buckets{};
+
+        /** (isolated shots, of which drew no damage) per drift bucket. */
+        std::array<std::pair<unsigned long, unsigned long>, 8> drift{};
+
+        /** Bucket 9 and bucket 10's health verdicts: (flat, fell). */
+        std::array<std::pair<unsigned long, unsigned long>, 2> health{};
+
+        /**
+         * Buckets 9 and 10 broken down by (weapon class, victim kind), which is
+         * what says where the unexplained ones are: a class with no model and a
+         * victim that cannot dodge is the ballistic arc, not a ledger gap.
+         */
+        std::map<std::tuple<std::size_t, std::string, std::string>, unsigned long> openCells;
+
+        /**
+         * Every isolated shot by (weapon class, victim kind), and how many of
+         * them drew no damage. This is the argument for what a hit/miss cell
+         * should be keyed on: a flight time depends on the weapon and the
+         * geometry, but a hit RATE depends on the victim as much as on the
+         * weapon, and this is the table that shows by how much.
+         */
+        std::map<std::pair<std::string, std::string>, std::pair<unsigned long, unsigned long>> rateCells;
+
+        /** The control: brackets over shots known to have drawn damage. */
+        unsigned long controlDetected = 0;
+        unsigned long controlMissed = 0;
+
+        void add(const MissBucketReport& o)
+        {
+            isolated += o.isolated;
+            drewDamage += o.drewDamage;
+            several += o.several;
+            for (std::size_t i = 0; i < buckets.size(); ++i)
+            {
+                buckets[i] += o.buckets[i];
+            }
+            for (std::size_t i = 0; i < drift.size(); ++i)
+            {
+                drift[i].first += o.drift[i].first;
+                drift[i].second += o.drift[i].second;
+            }
+            for (std::size_t i = 0; i < health.size(); ++i)
+            {
+                health[i].first += o.health[i].first;
+                health[i].second += o.health[i].second;
+            }
+            controlDetected += o.controlDetected;
+            controlMissed += o.controlMissed;
+            for (const auto& [key, n] : o.openCells)
+            {
+                openCells[key] += n;
+            }
+            for (const auto& [key, n] : o.rateCells)
+            {
+                rateCells[key].first += n.first;
+                rateCells[key].second += n.second;
+            }
+        }
+    };
+
+    void reportMissBuckets(
+        const EpisodeHandler& handler,
+        const std::map<uint16_t, std::vector<MissSync>>& syncs,
+        unsigned int maxUnits,
+        const std::vector<std::string>& loadOrder,
+        const std::map<std::string, UnitFacts>& unitFacts,
+        const std::map<std::string, WeaponFacts>& weaponFacts,
+        unsigned int window,
+        MissBucketReport& total)
+    {
+        MissBucketReport report;
+
+        auto lives = unitLives(handler, loadOrder);
+        auto nameOf = [&](uint16_t id, uint32_t at) -> std::string {
+            auto it = lives.find(id);
+            if (it == lives.end())
+            {
+                return "";
+            }
+            auto build = buildAtTick(it->second, at);
+            return build ? build->second : std::string();
+        };
+
+        // The last tick each sender stamped anything. A peer that quits stops
+        // stamping, and a shot inside one window of that has nowhere for its
+        // damage to land.
+        std::map<uint8_t, uint32_t> lastTick;
+        for (const auto& r : handler.shots)
+        {
+            lastTick[r.sender] = std::max(lastTick[r.sender], r.tick);
+        }
+        for (const auto& r : handler.damageRecords)
+        {
+            lastTick[r.sender] = std::max(lastTick[r.sender], r.tick);
+        }
+        for (const auto& r : handler.deathRecords)
+        {
+            lastTick[r.sender] = std::max(lastTick[r.sender], r.tick);
+        }
+
+        // Damage indexed three ways: by pair, by attacker (for the bystander
+        // test) and by victim (for the health bracket's ledger).
+        std::map<std::pair<uint16_t, uint16_t>, std::vector<uint32_t>> byPair;
+        std::map<uint16_t, std::vector<std::pair<uint32_t, uint16_t>>> byAttacker;
+        std::map<uint16_t, std::vector<uint32_t>> byVictim;
+        for (const auto& r : handler.damageRecords)
+        {
+            byPair[{r.damage.attackerId, r.damage.victimId}].push_back(r.tick);
+            byAttacker[r.damage.attackerId].emplace_back(r.tick, r.damage.victimId);
+            byVictim[r.damage.victimId].push_back(r.tick);
+        }
+        for (auto& [k, v] : byPair)
+        {
+            std::sort(v.begin(), v.end());
+        }
+        for (auto& [k, v] : byAttacker)
+        {
+            std::sort(v.begin(), v.end());
+        }
+        for (auto& [k, v] : byVictim)
+        {
+            std::sort(v.begin(), v.end());
+        }
+
+        std::map<uint16_t, std::vector<std::pair<uint32_t, uint16_t>>> deathsOf;
+        for (const auto& r : handler.deathRecords)
+        {
+            deathsOf[r.death.unitId].emplace_back(r.tick, r.death.killerId);
+        }
+        for (auto& [k, v] : deathsOf)
+        {
+            std::sort(v.begin(), v.end());
+        }
+
+        // Every shot keyed on (shooter, target), which is the only join the
+        // stream offers, and the same key pairShots uses.
+        struct Fired
+        {
+            uint32_t tick;
+            uint8_t sender;
+            std::string shooter;
+            unsigned int slot;
+            TadPosition origin;
+            TadPosition target;
+            std::string victim;
+        };
+        std::map<std::pair<uint16_t, uint16_t>, std::vector<Fired>> fired;
+        std::map<std::pair<uint16_t, uint16_t>, std::vector<uint32_t>> aimedAt;
+        for (const auto& r : handler.shots)
+        {
+            if (r.shot.targetId == 0)
+            {
+                continue;
+            }
+            aimedAt[{r.shot.shooterId, r.shot.targetId}].push_back(r.tick);
+            auto shooter = nameOf(r.shot.shooterId, r.tick);
+            if (shooter.empty())
+            {
+                continue;
+            }
+            fired[{r.shot.shooterId, r.shot.targetId}].push_back(
+                Fired{r.tick, r.sender, shooter, r.shot.weaponSlot, r.shot.origin, r.shot.target, nameOf(r.shot.targetId, r.tick)});
+        }
+        for (auto& [k, v] : aimedAt)
+        {
+            std::sort(v.begin(), v.end());
+        }
+
+        /**
+         * The bracket: the victim's own full-state records either side of the
+         * shot, or nothing where the join cannot be trusted. Every condition
+         * below is there because a bracket that fails it reads a different unit
+         * at one end, or reads health that the round's damage had no chance to
+         * be in yet.
+         */
+        auto bracket = [&](uint16_t victim, uint32_t tick, std::optional<uint32_t> arrival)
+            -> std::optional<std::pair<const MissSync*, const MissSync*>> {
+            auto it = syncs.find(victim);
+            if (it == syncs.end())
+            {
+                return std::nullopt;
+            }
+            const MissSync* before = nullptr;
+            const MissSync* after = nullptr;
+            for (const auto& s : it->second)
+            {
+                if (s.tick <= tick)
+                {
+                    before = &s;
+                }
+                else
+                {
+                    after = &s;
+                    break;
+                }
+            }
+            if (before == nullptr || after == nullptr)
+            {
+                return std::nullopt;
+            }
+            if (after->tick - before->tick != maxUnits)
+            {
+                return std::nullopt;
+            }
+            if (before->typeIndex != after->typeIndex)
+            {
+                return std::nullopt;
+            }
+            if (before->buildProgress != 0 || after->buildProgress != 0)
+            {
+                return std::nullopt;
+            }
+            if (!arrival || *arrival > after->tick)
+            {
+                return std::nullopt;
+            }
+            // A unit id that died inside the bracket is a different unit at the
+            // far end even where the type reads the same -- ARMFAV and ARMPEEP
+            // are rebuilt into their own slots constantly -- and that is what
+            // most of this instrument's false negatives were before the guard.
+            if (auto d = deathsOf.find(victim); d != deathsOf.end())
+            {
+                for (const auto& [t, killer] : d->second)
+                {
+                    if (t > before->tick && t <= after->tick)
+                    {
+                        return std::nullopt;
+                    }
+                }
+            }
+            return std::make_pair(before, after);
+        };
+
+        for (auto& [key, shots] : fired)
+        {
+            std::stable_sort(shots.begin(), shots.end(), [](const Fired& a, const Fired& b) {
+                return a.tick < b.tick;
+            });
+            std::vector<uint32_t> landed;
+            if (auto it = byPair.find(key); it != byPair.end())
+            {
+                landed = it->second;
+            }
+
+            for (std::size_t i = 0; i < shots.size(); ++i)
+            {
+                const auto& shot = shots[i];
+                if (i > 0 && shot.tick - shots[i - 1].tick < window)
+                {
+                    continue;
+                }
+                if (i + 1 < shots.size() && shots[i + 1].tick - shot.tick < window)
+                {
+                    continue;
+                }
+                ++report.isolated;
+
+                unsigned int inside = 0;
+                for (auto t : landed)
+                {
+                    if (t >= shot.tick && t <= shot.tick + window)
+                    {
+                        ++inside;
+                    }
+                }
+
+                // The weapon, which decides how far a step goes and therefore
+                // when the round arrives. A shot whose (type, slot) names no
+                // weapon is not a weapon firing and is bucket 1.
+                //
+                // SO IS ONE WHOSE `weaponvelocity` IS NEGATIVE. Fourteen blocks
+                // in the Escalation data write one -- BOMB_SHOCK -400,
+                // VSPAM_ALL -10, NUKE_SUB_ARM -8 and friends -- and every one of
+                // them is `vlaunch`, whose round goes up before it goes
+                // anywhere and which no model here flies. WeaponFacts holds the
+                // field unsigned because parseWeaponTdf does, so a negative
+                // arrives as a value above INT32_MAX rather than as a small
+                // number: that is the exact test, not a threshold. Reading it as
+                // 4,294,967,286 would give a drift bound of five million world
+                // units a tick and put every shot from such a weapon on the
+                // wrong side of it, which is what it did for 311 shots before
+                // this guard. The flight-time cells are untouched by the same
+                // bug only because vlaunch is never scored.
+                const WeaponFacts* weapon = nullptr;
+                if (auto u = unitFacts.find(shot.shooter); u != unitFacts.end() && shot.slot < 3)
+                {
+                    const auto& weaponName = u->second.weaponNames[shot.slot];
+                    if (!weaponName.empty())
+                    {
+                        if (auto w = weaponFacts.find(weaponName); w != weaponFacts.end()
+                            && w->second.velocity <= static_cast<unsigned int>(INT32_MAX))
+                        {
+                            weapon = &w->second;
+                        }
+                    }
+                }
+
+                std::string className = weapon ? weaponClass(*weapon) : std::string();
+                const UnitFacts* victim = nullptr;
+                if (!shot.victim.empty())
+                {
+                    if (auto v = unitFacts.find(shot.victim); v != unitFacts.end())
+                    {
+                        victim = &v->second;
+                    }
+                }
+
+                // Where the round stops. The footprint model where a model
+                // applies; otherwise the straight line at the weapon's own
+                // speed, which is a floor for an arcing round rather than a
+                // model of it -- and being a floor is what makes it safe here,
+                // since it can only put a shot into a later bucket than it
+                // belongs in, never an earlier one.
+                std::optional<int> steps;
+                bool stepsOver = false;
+                auto hasFootprint = victim != nullptr && victim->footprintX != 0 && victim->footprintZ != 0;
+                if (weapon && hasFootprint
+                    && (className == "constant speed" || className == "accelerating"))
+                {
+                    steps = tadFootprintFlight(className, *weapon, shot.origin, shot.target, victim->footprintX, victim->footprintZ);
+                    stepsOver = !steps.has_value();
+                }
+                if (!steps && weapon && weapon->velocity != 0)
+                {
+                    auto d = tadDistance(shot.origin, shot.target);
+                    steps = std::max(1, static_cast<int>(std::ceil(d / (static_cast<double>(weapon->velocity) / 30.0))));
+                }
+                auto arrival = steps ? std::optional<uint32_t>(shot.tick + static_cast<uint32_t>(*steps))
+                                     : std::nullopt;
+
+                if (weapon != nullptr)
+                {
+                    std::string kind = "victim unnamed";
+                    if (victim != nullptr)
+                    {
+                        kind = victim->maxVelocity == 0.0f ? "immobile"
+                            : victim->canFly                ? "aircraft"
+                                                            : "mobile ground";
+                    }
+                    auto& cell = report.rateCells[{weaponClass(*weapon), kind}];
+                    ++cell.first;
+                    if (inside == 0)
+                    {
+                        ++cell.second;
+                    }
+                }
+
+                // The drift axis, over every isolated shot with a named victim
+                // and a modellable speed -- the population the table is about.
+                if (weapon && victim && steps)
+                {
+                    auto drift = static_cast<double>(victim->maxVelocity) * static_cast<double>(*steps);
+                    std::size_t slot = missDriftEdges.size() - 1;
+                    for (std::size_t j = 0; j + 1 < missDriftEdges.size(); ++j)
+                    {
+                        if (drift >= missDriftEdges[j] && drift < missDriftEdges[j + 1])
+                        {
+                            slot = j;
+                            break;
+                        }
+                    }
+                    ++report.drift[slot].first;
+                    if (inside == 0)
+                    {
+                        ++report.drift[slot].second;
+                    }
+                }
+
+                if (inside == 1)
+                {
+                    ++report.drewDamage;
+                    // The control for the health instrument: a shot known to
+                    // have drawn damage, bracketed the same way, asked whether
+                    // the bracket shows it.
+                    if (auto b = bracket(key.second, shot.tick, arrival))
+                    {
+                        unsigned int within = 0;
+                        if (auto v = byVictim.find(key.second); v != byVictim.end())
+                        {
+                            for (auto t : v->second)
+                            {
+                                if (t > b->first->tick && t <= b->second->tick)
+                                {
+                                    ++within;
+                                }
+                            }
+                        }
+                        if (within == 1)
+                        {
+                            if (b->second->health < b->first->health)
+                            {
+                                ++report.controlDetected;
+                            }
+                            else
+                            {
+                                ++report.controlMissed;
+                            }
+                        }
+                    }
+                    continue;
+                }
+                if (inside > 1)
+                {
+                    ++report.several;
+                    continue;
+                }
+
+                // --- the buckets, in priority order ---
+                std::size_t bucket = 0;
+                if (weapon == nullptr)
+                {
+                    bucket = 0;
+                }
+                else if (shot.tick + window > lastTick[shot.sender])
+                {
+                    bucket = 1;
+                }
+                else
+                {
+                    bucket = missBucketNames.size(); // not yet decided
+                    auto arriveBy = arrival ? *arrival : shot.tick;
+
+                    // A round in flight when its victim dies flies on: the
+                    // square's unit slot is empty by the time 0x49B090 reads
+                    // it, so there is nothing to damage and no record to emit.
+                    if (auto d = deathsOf.find(key.second); d != deathsOf.end())
+                    {
+                        for (const auto& [t, killer] : d->second)
+                        {
+                            if (t >= shot.tick && t <= arriveBy + 1)
+                            {
+                                bucket = killer == key.first ? 3 : 2;
+                                break;
+                            }
+                        }
+                        if (bucket == missBucketNames.size())
+                        {
+                            for (const auto& [t, killer] : d->second)
+                            {
+                                if (t >= shot.tick && t <= shot.tick + window && killer == key.first)
+                                {
+                                    bucket = 3;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // A round stops on the FIRST enemy footprint it enters, not
+                    // on the one it was aimed at, so a bystander in the way
+                    // takes the damage and the ledger records it against a
+                    // different victim.
+                    if (bucket == missBucketNames.size())
+                    {
+                        if (auto a = byAttacker.find(key.first); a != byAttacker.end())
+                        {
+                            for (const auto& [t, other] : a->second)
+                            {
+                                if (other == key.second || t < shot.tick || t > arriveBy + 2)
+                                {
+                                    continue;
+                                }
+                                bool alsoAimedAt = false;
+                                if (auto s = aimedAt.find({key.first, other}); s != aimedAt.end())
+                                {
+                                    for (auto st : s->second)
+                                    {
+                                        if (st + window >= t && t + window >= st)
+                                        {
+                                            alsoAimedAt = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (!alsoAimedAt)
+                                {
+                                    bucket = 4;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (bucket == missBucketNames.size() && !hasFootprint)
+                    {
+                        bucket = 5;
+                    }
+                    if (bucket == missBucketNames.size() && stepsOver)
+                    {
+                        bucket = 6;
+                    }
+                    if (bucket == missBucketNames.size())
+                    {
+                        for (auto t : landed)
+                        {
+                            if (t > shot.tick + window && t <= shot.tick + 2 * window)
+                            {
+                                bucket = 7;
+                                break;
+                            }
+                        }
+                    }
+                    if (bucket == missBucketNames.size())
+                    {
+                        // The drift bound the missile class already uses, and
+                        // for the same reason: a victim that can leave the
+                        // square the round was sent to before the round gets
+                        // there is one the geometry cannot convict.
+                        auto drift = victim != nullptr && steps
+                            ? static_cast<double>(victim->maxVelocity) * static_cast<double>(*steps)
+                            : 0.0;
+                        bucket = drift >= static_cast<double>(weapon->velocity) / 30.0 ? 8 : 9;
+                    }
+                }
+                ++report.buckets[bucket];
+
+                // The health verdict, over the two buckets that are still open.
+                if (bucket == 8 || bucket == 9)
+                {
+                    std::string kind = "victim unnamed";
+                    if (victim != nullptr)
+                    {
+                        kind = victim->maxVelocity == 0.0f ? "immobile"
+                            : victim->canFly                ? "aircraft"
+                                                            : "mobile ground";
+                    }
+                    ++report.openCells[{bucket, weaponClass(*weapon), kind}];
+                }
+                if (bucket == 8 || bucket == 9)
+                {
+                    if (auto b = bracket(key.second, shot.tick, arrival))
+                    {
+                        bool ledger = false;
+                        if (auto v = byVictim.find(key.second); v != byVictim.end())
+                        {
+                            for (auto t : v->second)
+                            {
+                                if (t > b->first->tick && t <= b->second->tick)
+                                {
+                                    ledger = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!ledger)
+                        {
+                            auto& slot = report.health[bucket - 8];
+                            if (b->second->health == b->first->health)
+                            {
+                                ++slot.first;
+                            }
+                            else if (b->second->health < b->first->health)
+                            {
+                                ++slot.second;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        total.add(report);
+    }
+
+    void printMissBuckets(const MissBucketReport& r)
+    {
+        auto noDamage = std::accumulate(r.buckets.begin(), r.buckets.end(), 0UL);
+        std::cout << "\n--miss-buckets: why an isolated shot drew no damage in the window\n\n"
+                  << "  " << r.isolated << " isolated shot(s): " << r.drewDamage
+                  << " drew exactly one damage record, " << r.several << " drew several, "
+                  << noDamage << " drew none.\n\n";
+        std::cout << "  " << std::left << std::setw(62) << "bucket" << std::right
+                  << std::setw(9) << "shots" << std::setw(8) << "share" << "\n";
+        for (std::size_t i = 0; i < r.buckets.size(); ++i)
+        {
+            std::cout << "  " << std::left << std::setw(62) << missBucketNames[i] << std::right
+                      << std::setw(9) << r.buckets[i] << std::setw(7)
+                      << std::fixed << std::setprecision(1)
+                      << (noDamage ? 100.0 * static_cast<double>(r.buckets[i]) / static_cast<double>(noDamage) : 0.0)
+                      << "%\n";
+        }
+
+        std::cout << "\n  the drift axis: the no-damage rate of an isolated shot against how far\n"
+                  << "  its victim could have moved while the round was in the air.\n\n"
+                  << "  " << std::left << std::setw(24) << "drift (world units)" << std::right
+                  << std::setw(10) << "shots" << std::setw(10) << "no damage" << std::setw(8) << "rate" << "\n";
+        for (std::size_t i = 0; i < r.drift.size(); ++i)
+        {
+            std::ostringstream label;
+            if (i == 0)
+            {
+                label << "0 (immobile victim)";
+            }
+            else if (i + 1 == r.drift.size())
+            {
+                label << static_cast<int>(missDriftEdges[i]) << "+";
+            }
+            else if (i == 1)
+            {
+                label << "0-" << static_cast<int>(missDriftEdges[i + 1]);
+            }
+            else
+            {
+                label << static_cast<int>(missDriftEdges[i]) << "-" << static_cast<int>(missDriftEdges[i + 1]);
+            }
+            auto [n, z] = r.drift[i];
+            std::cout << "  " << std::left << std::setw(24) << label.str() << std::right
+                      << std::setw(10) << n << std::setw(10) << z << std::setw(7)
+                      << (n ? 100.0 * static_cast<double>(z) / static_cast<double>(n) : 0.0) << "%\n";
+        }
+
+        auto seen = r.controlDetected + r.controlMissed;
+        std::cout << "\n  the 0x2c health bracket. The control first: over shots KNOWN to have\n"
+                  << "  drawn damage, a clean bracket shows the loss " << r.controlDetected
+                  << " times of " << seen << " ("
+                  << (seen ? 100.0 * static_cast<double>(r.controlDetected) / static_cast<double>(seen) : 0.0)
+                  << "%).\n  That is this instrument's sensitivity: a cycle is 33 seconds, which is long\n"
+                  << "  enough for a repairer to put back what a round took.\n\n";
+        for (std::size_t i = 0; i < r.health.size(); ++i)
+        {
+            auto [flat, fell] = r.health[i];
+            auto n = flat + fell;
+            std::cout << "  " << missBucketNames[i + 8] << "\n"
+                      << "    " << n << " clean bracket(s): " << flat << " flat ("
+                      << (n ? 100.0 * static_cast<double>(flat) / static_cast<double>(n) : 0.0)
+                      << "%), " << fell << " fell\n";
+            if (n != 0 && seen != 0 && r.controlDetected != 0)
+            {
+                auto sensitivity = static_cast<double>(r.controlDetected) / static_cast<double>(seen);
+                auto lost = static_cast<double>(fell) / sensitivity / static_cast<double>(n);
+                std::cout << "    corrected for that sensitivity, " << 100.0 * lost
+                          << "% really lost health, so " << 100.0 * (1.0 - lost)
+                          << "% are genuine misses\n";
+            }
+        }
+
+        std::cout << "\n  the no-damage rate of an isolated shot by weapon class and victim kind.\n"
+                  << "  This is the argument for what a hit/miss cell is keyed on: a flight time\n"
+                  << "  depends on the weapon, a hit rate depends on the victim as well.\n\n"
+                  << "  " << std::left << std::setw(18) << "weapon class" << std::setw(16) << "victim"
+                  << std::right << std::setw(9) << "shots" << std::setw(11) << "no damage"
+                  << std::setw(8) << "rate" << "\n";
+        for (const auto& [key, cell] : r.rateCells)
+        {
+            std::cout << "  " << std::left << std::setw(18) << key.first << std::setw(16) << key.second
+                      << std::right << std::setw(9) << cell.first << std::setw(11) << cell.second
+                      << std::setw(7)
+                      << (cell.first ? 100.0 * static_cast<double>(cell.second) / static_cast<double>(cell.first) : 0.0)
+                      << "%\n";
+        }
+
+        std::cout << "\n  buckets 9 and 10 by weapon class and victim kind. A class with no\n"
+                  << "  model and a victim that cannot dodge is where an unexplained miss sits.\n\n"
+                  << "  " << std::left << std::setw(8) << "bucket" << std::setw(18) << "weapon class"
+                  << std::setw(16) << "victim" << std::right << std::setw(9) << "shots" << "\n";
+        for (const auto& [key, n] : r.openCells)
+        {
+            const auto& [bucket, className, kind] = key;
+            std::cout << "  " << std::left << std::setw(8) << (bucket + 1) << std::setw(18) << className
+                      << std::setw(16) << kind << std::right << std::setw(9) << n << "\n";
+        }
+        std::cout << std::defaultfloat;
+    }
+
     // --- --unit-state: decode every 0x2c and check it against the stream ---
     //
     // The decode came out of TotalA.exe (docs/TA-DEMOS.md, "0x2c, unit state"),
@@ -4238,6 +4976,62 @@ namespace rwe
             return d < 8.0 ? 0 : d < 32.0 ? 1 : d < 128.0 ? 2 : 3;
         }
 
+        /**
+         * Which owner block each sender's units live in, voted on by its own
+         * 0x09s. A sender only builds into its own block, so the vote is
+         * unanimous in practice; it is a vote rather than a lookup because a
+         * recycled id with no build of its own would otherwise decide it.
+         */
+        std::map<uint8_t, unsigned int> blocksBySender() const
+        {
+            std::map<uint8_t, std::map<unsigned int, unsigned int>> votes;
+            for (const auto& b : builds)
+            {
+                if (auto block = tadOwnerBlockOfUnitId(b.event.unitId, header->maxUnits))
+                {
+                    ++votes[b.sender][*block];
+                }
+            }
+            std::map<uint8_t, unsigned int> out;
+            for (const auto& [sender, tally] : votes)
+            {
+                auto best = std::max_element(tally.begin(), tally.end(), [](const auto& a, const auto& b) {
+                    return a.second < b.second;
+                });
+                out[sender] = best->first;
+            }
+            return out;
+        }
+
+        /**
+         * Every full-state record, rekeyed from (sender, block index) onto the
+         * global unit id the rest of the stream names units by, which is what
+         * lets a 0x0d's victim be looked up in the 0x2c stream at all.
+         */
+        std::map<uint16_t, std::vector<MissSync>> syncsByUnitId() const
+        {
+            auto blockOf = blocksBySender();
+            std::map<uint16_t, std::vector<MissSync>> out;
+            for (const auto& [key, list] : syncs)
+            {
+                auto block = blockOf.find(key.first);
+                if (block == blockOf.end())
+                {
+                    continue;
+                }
+                auto id = static_cast<uint16_t>(block->second * header->maxUnits + key.second + 1);
+                auto& into = out[id];
+                for (const auto& s : list)
+                {
+                    into.push_back(MissSync{s.tick, s.state.typeIndex, s.state.health, s.state.buildProgress});
+                }
+                std::sort(into.begin(), into.end(), [](const MissSync& a, const MissSync& b) {
+                    return a.tick < b.tick;
+                });
+            }
+            return out;
+        }
+
         /** Runs the checks once the whole demo is in. */
         void check()
         {
@@ -4246,24 +5040,7 @@ namespace rwe
                 return;
             }
             auto maxUnits = header->maxUnits;
-
-            // Which block each sender's own units live in, learned from its builds.
-            std::map<uint8_t, std::map<unsigned int, unsigned int>> blockVotes;
-            for (const auto& b : builds)
-            {
-                if (auto block = tadOwnerBlockOfUnitId(b.event.unitId, maxUnits))
-                {
-                    ++blockVotes[b.sender][*block];
-                }
-            }
-            std::map<uint8_t, unsigned int> blockOf;
-            for (const auto& [sender, votes] : blockVotes)
-            {
-                auto best = std::max_element(votes.begin(), votes.end(), [](const auto& a, const auto& b) {
-                    return a.second < b.second;
-                });
-                blockOf[sender] = best->first;
-            }
+            auto blockOf = blocksBySender();
 
             // The first sync of the built unit's slot after its 0x09.
             for (const auto& b : builds)
@@ -4547,6 +5324,8 @@ int main(int argc, char* argv[])
                   << "  --emit-stall-cpp  write the stall episodes as a C++ header (needs --units)\n"
                   << "  --cells       print the (builder, product) build-timing cells\n"
                   << "  --weapon-cells  print the (shooter, weapon slot) flight-time cells\n"
+                  << "  --miss-buckets  sort the isolated shots that drew no damage into named\n"
+                  << "                buckets, and check the residue against 0x2c health (needs --units)\n"
                   << "  --emit-weapon-cpp  write the weapon-flight episodes as a C++ header\n"
                   << "  --window      isolation window for the weapon pass, ticks (default 300)\n"
                   << "  --min-pairings  pairings a weapon cell needs (default 30)\n"
@@ -4668,6 +5447,13 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    if (args.contains("miss-buckets") && loadOrder.empty())
+    {
+        std::cerr << "--miss-buckets needs --units: every bucket turns on the shooter's weapon,"
+                  << " the victim's footprint or the victim's MaxVelocity\n";
+        return 1;
+    }
+
     // Opened before the walk and written per demo, because the corpus is about
     // 1.5 million records and holding them all to serialise at the end would be
     // a needless peak. --emit-shots does not need --units, but without it every
@@ -4720,6 +5506,8 @@ int main(int argc, char* argv[])
     std::vector<Pairing> pairings;
     std::map<std::string, unsigned int> rejectionCounts;
     unsigned int cleanCount = 0;
+
+    MissBucketReport missBuckets;
 
     for (const auto& path : paths)
     {
@@ -4787,6 +5575,30 @@ int main(int argc, char* argv[])
             auto mined = pairShots(handler, loadOrder, window);
             std::cout << "  " << mined.size() << " shot(s) paired\n";
             pairings.insert(pairings.end(), mined.begin(), mined.end());
+        }
+
+        if (args.contains("miss-buckets"))
+        {
+            // A second read of the same file, because the health half needs the
+            // 0x2c stream and the buckets need the events, and the two handlers
+            // are separate. The alternative -- one handler that collects both --
+            // would couple the unit-state checks to a pass that has nothing to
+            // do with them, for a walk that costs seconds.
+            std::map<uint16_t, std::vector<MissSync>> syncs;
+            unsigned int maxUnits = handler.header.maxUnits;
+            {
+                std::ifstream again(path, std::ios::binary);
+                UnitStateHandler stateHandler(loadOrder, unitFacts, nullptr, false, path.filename().string());
+                rwe::readTad(again, stateHandler);
+                if (stateHandler.header)
+                {
+                    syncs = stateHandler.syncsByUnitId();
+                    maxUnits = stateHandler.header->maxUnits;
+                }
+            }
+            reportMissBuckets(handler, syncs, maxUnits, loadOrder, unitFacts, weaponFacts, window, missBuckets);
+            std::cout << "  " << handler.shots.size() << " shot(s), "
+                      << syncs.size() << " unit(s) with a 0x2c full-state record\n";
         }
 
         if (shotFile.is_open())
@@ -5132,6 +5944,11 @@ int main(int argc, char* argv[])
     if (!pairings.empty())
     {
         weaponCells = mineWeaponCells(pairings, unitFacts, weaponFacts, minPairings);
+    }
+
+    if (args.contains("miss-buckets"))
+    {
+        printMissBuckets(missBuckets);
     }
 
     if (args.contains("weapon-cells"))
