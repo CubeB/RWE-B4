@@ -116,8 +116,50 @@ namespace rwe
         /** Tuning profile given to every computer player in this game. */
         AiDifficulty aiDifficulty{AiDifficulty::Standard};
 
+        /**
+         * Single AI knobs overridden for one player, each as
+         * "<player>:<knob>=<value>", from --ai-tune. For the arena: a
+         * behaviour change cannot be judged in a mirror match, so this is
+         * how one setting is played against the other in the same game.
+         */
+        std::vector<std::string> aiTuning;
+
         /** Set when this game is a saved game being resumed rather than a fresh start. */
         std::optional<std::string> loadFromSaveFile;
+
+        /**
+         * Seconds of game time to run before writing an AI report and
+         * quitting, when this is a computer-versus-computer measurement run
+         * rather than a game anyone is watching. See AiArenaReport.
+         */
+        std::optional<unsigned int> aiArenaSeconds;
+
+        /** Write every command to this replay file as the game is played. */
+        std::optional<std::string> recordReplayFile;
+
+        /**
+         * Watch this replay instead of playing. The parameters around it are
+         * rebuilt from the replay's own header, so the simulation stands up
+         * exactly as it did when the game was recorded; this field is what
+         * tells the loader to idle the computer players and feed the recorded
+         * commands instead of live ones.
+         */
+        std::optional<std::string> replayFile;
+
+        /**
+         * Start a replay already wound forward to here. Seeking backwards
+         * means starting the simulation again, because a lockstep game can
+         * only be run forwards, and this is how the viewer asks for that.
+         */
+        unsigned int replaySeekToTick{0};
+
+        /**
+         * Mixed into the simulation's seed when set. Without it the seed
+         * comes from the map and the players alone, so two arena runs of the
+         * same match-up are the same game -- fine for reproducing one, no use
+         * for averaging over twenty.
+         */
+        std::optional<unsigned int> randomSeed;
 
         /** The skirmish screen's own options, as chosen in the lobby. */
         LineOfSightMode lineOfSight{LineOfSightMode::True};

@@ -44,6 +44,9 @@ namespace rwe
 
         std::optional<int> quickKey;
 
+        /** Whether the caption gets the original's drop shadow: bit 3 of the gadget's attribs (0x4A59A4, S:99). */
+        bool captionShadow{false};
+
         /** True if the button is currently pressed down. */
         bool pressed{false};
 
@@ -74,6 +77,16 @@ namespace rwe
 
         Subject<ButtonClickEvent> clickSubject;
 
+        /**
+         * True as the pointer arrives, false as it leaves.
+         *
+         * Separate from the pressed state the two handlers already keep,
+         * because a caller can want to know the pointer is over a control
+         * without wanting it to look pressed -- the skirmish screen's help
+         * line, which describes the option under the pointer.
+         */
+        Subject<bool> hoverSubject;
+
     public:
         UiStagedButton(
             int posX,
@@ -83,6 +96,9 @@ namespace rwe
             std::vector<StageInfo> stages,
             std::shared_ptr<Sprite> pressedSprite,
             std::shared_ptr<SpriteSeries> labelFont);
+
+        /** Hands back this component's subscriptions while its own subjects are still alive; see UiComponent::releaseSubscriptions. */
+        ~UiStagedButton() override { releaseSubscriptions(); }
 
         void render(UiRenderService& graphics) const override;
 
@@ -98,7 +114,11 @@ namespace rwe
 
         void keyDown(KeyEvent event) override;
 
+        bool matchesQuickKey(int keyCode) const override;
+
         Observable<ButtonClickEvent>& onClick();
+
+        Observable<bool>& onHover();
 
         void setStage(unsigned int newStage);
 
@@ -117,6 +137,8 @@ namespace rwe
         void setBehaviorMode(BehaviorMode mode);
 
         void setQuickKey(int quickKey);
+
+        void setCaptionShadow(bool shadow);
 
         void setDisabledSprite(const std::shared_ptr<Sprite>& sprite);
 

@@ -224,6 +224,17 @@ namespace rwe
          */
         bool noShadow{false};
 
+        /**
+         * The FBI's ZBuffer. In the original it decides whether a finished
+         * unit's cached bitmap gets a height plane, and the textured span
+         * filler only shades when there is one (TOTALA-EXE-SHADING.md S:23):
+         * a finished ZBuffer=0 unit is drawn with its texels untouched. Two
+         * of the 189 shipped units say 0, CORFAV and CORTRUCK. The per-pixel
+         * sort it also switches off has no counterpart here, where the
+         * depth buffer sorts everything.
+         */
+        bool zBuffer{true};
+
         /** Distance above the ground that the unit flies at. */
         SimScalar cruiseAltitude;
 

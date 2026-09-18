@@ -183,7 +183,7 @@ namespace rwe
         }
     }
 
-    void RenderService::drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel)
+    void RenderService::drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel, TextureIdentifier shadeTableTexture)
     {
         // Finished models first: a nanoframe's see-through parts still write
         // depth, so drawing it after the lab it sits in leaves the lab's bay
@@ -194,11 +194,30 @@ namespace rwe
             graphics->bindShader(textureShader.handle.get());
             graphics->setUniformFloat(textureShader.seaLevel, seaLevel);
             graphics->setUniformFloat(textureShader.alpha, 1.0f);
+
+            // Three samplers, one per texture unit: the colour atlas on 0, the
+            // palette-index copy of it on 1 and the shade table on 2. Every
+            // sampler has to be told which unit it is on -- one left unset
+            // reads zero and lands on slot 0 with the colour atlas, which is
+            // what the terrain's fog sampler explains at length above. The
+            // shade table is bound once for the whole block because it is the
+            // same image for every mesh. Each pass through the loop ends on
+            // slot 0, because every other bindTexture in the renderer assumes
+            // slot 0 is the current one.
+            graphics->setUniformInt(textureShader.paletteIndexSampler, 1);
+            graphics->setUniformInt(textureShader.shadeTableSampler, 2);
+            graphics->setActiveTextureSlot2();
+            graphics->bindTexture(shadeTableTexture);
+
             for (const auto& m : batch.meshes)
             {
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
-                graphics->setUniformBool(textureShader.shade, m.shaded && shadingEnabled);
+                graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
+                graphics->setUniformFloat(textureShader.maskValue, m.maskValue);
+                graphics->setActiveTextureSlot1();
+                graphics->bindTexture(m.paletteIndexTexture);
+                graphics->setActiveTextureSlot0();
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -209,13 +228,17 @@ namespace rwe
             const auto& buildShader = shaders->unitBuild;
             graphics->bindShader(buildShader.handle.get());
             graphics->setUniformFloat(buildShader.seaLevel, seaLevel);
+            graphics->setUniformInt(buildShader.paletteIndexSampler, 1);
+            graphics->setUniformInt(buildShader.shadeTableSampler, 2);
+            graphics->setActiveTextureSlot2();
+            graphics->bindTexture(shadeTableTexture);
             for (const auto& m : batch.buildingMeshes)
             {
                 graphics->setUniformMatrix(buildShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(buildShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformFloat(buildShader.unitY, m.unitY);
                 graphics->setUniformFloat(buildShader.unitHeight, m.unitHeight);
-                graphics->setUniformBool(buildShader.shade, m.shaded && shadingEnabled);
+                graphics->setUniformFloat(buildShader.shadeStrength, m.shadeStrength);
                 graphics->setUniformFloat(buildShader.buildRatio, m.buildRatio);
                 graphics->setUniformInt(buildShader.aboveMode, static_cast<int>(m.aboveMode));
                 graphics->setUniformInt(buildShader.bandMode, static_cast<int>(m.bandMode));
@@ -223,6 +246,9 @@ namespace rwe
                 graphics->setUniformVec3(buildShader.buildColorA, m.buildColorA.x, m.buildColorA.y, m.buildColorA.z);
                 graphics->setUniformVec3(buildShader.buildColorB, m.buildColorB.x, m.buildColorB.y, m.buildColorB.z);
 
+                graphics->setActiveTextureSlot1();
+                graphics->bindTexture(m.paletteIndexTexture);
+                graphics->setActiveTextureSlot0();
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -242,13 +268,21 @@ namespace rwe
             const auto& textureShader = shaders->unitTexture;
             graphics->bindShader(textureShader.handle.get());
             graphics->setUniformFloat(textureShader.seaLevel, seaLevel);
+            graphics->setUniformInt(textureShader.paletteIndexSampler, 1);
+            graphics->setUniformInt(textureShader.shadeTableSampler, 2);
+            graphics->setActiveTextureSlot2();
+            graphics->bindTexture(shadeTableTexture);
 
             graphics->disableColorBuffer();
             for (const auto& m : batch.cloakedMeshes)
             {
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
-                graphics->setUniformBool(textureShader.shade, m.shaded && shadingEnabled);
+                graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
+                graphics->setUniformFloat(textureShader.maskValue, m.maskValue);
+                graphics->setActiveTextureSlot1();
+                graphics->bindTexture(m.paletteIndexTexture);
+                graphics->setActiveTextureSlot0();
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -261,7 +295,11 @@ namespace rwe
             {
                 graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
-                graphics->setUniformBool(textureShader.shade, m.shaded && shadingEnabled);
+                graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
+                graphics->setUniformFloat(textureShader.maskValue, m.maskValue);
+                graphics->setActiveTextureSlot1();
+                graphics->bindTexture(m.paletteIndexTexture);
+                graphics->setActiveTextureSlot0();
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
@@ -271,9 +309,10 @@ namespace rwe
         }
     }
 
+
     void RenderService::drawUnitShadowMeshBatch(const UnitShadowMeshBatch& batch)
     {
-        if (batch.meshes.empty())
+        if (batch.meshes.empty() && batch.cutShadows.empty())
         {
             return;
         }
@@ -284,35 +323,60 @@ namespace rwe
         graphics->disableColorBuffer();
 
         const auto& shader = shaders->unitShadow;
-        graphics->bindShader(shader.handle.get());
-
-        for (const auto& m : batch.meshes)
-        {
-            graphics->setUniformFloat(shader.groundHeight, m.groundHeight);
-            graphics->setUniformMatrix(shader.vpMatrix, m.vpMatrix);
-            graphics->setUniformMatrix(shader.modelMatrix, m.modelMatrix);
-
-            graphics->bindTexture(m.texture);
-            graphics->drawTriangles(*m.mesh);
-        }
-
-        if (!batch.cutouts.empty())
-        {
-            // Erase the shadow wherever these models sit on screen, so it
-            // only shows where it falls outside them.
-            graphics->useStencilBufferForClears();
-            const auto& textureShader = shaders->unitTexture;
-            graphics->bindShader(textureShader.handle.get());
-            graphics->setUniformFloat(textureShader.seaLevel, 0.0f);
-            graphics->setUniformFloat(textureShader.alpha, 1.0f);
-            graphics->setUniformBool(textureShader.shade, false);
-            for (const auto& m : batch.cutouts)
+        auto drawShadows = [&](const std::vector<UnitTextureShadowMeshRenderInfo>& meshes) {
+            graphics->bindShader(shader.handle.get());
+            for (const auto& m : meshes)
             {
-                graphics->setUniformMatrix(textureShader.mvpMatrix, m.mvpMatrix);
-                graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
+                graphics->setUniformFloat(shader.groundHeight, m.groundHeight);
+                graphics->setUniformBool(shader.projected, m.projected);
+                graphics->setUniformFloat(shader.shadowOriginY, m.shadowOriginY);
+                graphics->setUniformMatrix(shader.vpMatrix, m.vpMatrix);
+                graphics->setUniformMatrix(shader.modelMatrix, m.modelMatrix);
+
                 graphics->bindTexture(m.texture);
                 graphics->drawTriangles(*m.mesh);
             }
+        };
+
+        drawShadows(batch.meshes);
+
+        // A nanoframe's own shadow is there from its first frame but never
+        // shows inside its own outline, as if the frame were solid, while
+        // everyone else's shadow shows through it: the original, watched in
+        // play on 2026-09-11 (TOTALA-EXE.md S:3). So each is drawn last, one
+        // at a time, into the stencil outside its own outline only. The
+        // outline is the whole model, drawn as the camera sees it and cut
+        // on the texture's alpha, and it is taken back out afterwards so
+        // the next frame's shadow is not kept out of it.
+        const auto& outlineShader = shaders->unitTexture;
+        auto drawOutline = [&](const std::vector<UnitTextureMeshRenderInfo>& meshes) {
+            graphics->bindShader(outlineShader.handle.get());
+            graphics->setUniformFloat(outlineShader.seaLevel, 0.0f);
+            graphics->setUniformFloat(outlineShader.alpha, 1.0f);
+            // With no shading the shader never reaches the table, so neither
+            // of the other two textures is bound; the samplers still name
+            // their own units, so none of them sits on the colour atlas.
+            graphics->setUniformFloat(outlineShader.shadeStrength, 0.0f);
+            graphics->setUniformFloat(outlineShader.maskValue, 0.0f);
+            graphics->setUniformInt(outlineShader.paletteIndexSampler, 1);
+            graphics->setUniformInt(outlineShader.shadeTableSampler, 2);
+            for (const auto& m : meshes)
+            {
+                graphics->setUniformMatrix(outlineShader.mvpMatrix, m.mvpMatrix);
+                graphics->setUniformMatrix(outlineShader.modelMatrix, m.modelMatrix);
+                graphics->bindTexture(m.texture);
+                graphics->drawTriangles(*m.mesh);
+            }
+        };
+
+        for (const auto& cut : batch.cutShadows)
+        {
+            graphics->useStencilBufferToMarkCutout();
+            drawOutline(cut.outline);
+            graphics->useStencilBufferForWritesOutsideCutout();
+            drawShadows(cut.shadow);
+            graphics->useStencilBufferToClearCutout();
+            drawOutline(cut.outline);
         }
 
         graphics->useStencilBufferAsMask();
@@ -339,15 +403,21 @@ namespace rwe
             graphics->drawTriangles(*s.sprite->mesh);
         }
     }
-    void RenderService::drawLineLoopsBatch(const ColoredMeshesBatch& batch)
+
+    void RenderService::drawMaskedSpriteBatch(const SpriteBatch& batch, float maskValue)
     {
-        const auto& shader = shaders->basicColor;
+        const auto& shader = shaders->basicTextureMasked;
         graphics->bindShader(shader.handle.get());
-        for (const auto& m : batch.meshes)
+        graphics->setUniformFloat(shader.maskValue, maskValue);
+
+        for (const auto& s : batch.sprites)
         {
-            graphics->setUniformMatrix(shader.mvpMatrix, m.mvpMatrix);
-            graphics->setUniformFloat(shader.alpha, 1.0f);
-            graphics->drawLineLoop(*m.mesh);
+            float alpha = s.translucent ? 0.5f : 1.0f;
+            graphics->bindTexture(s.sprite->texture.get());
+            graphics->setUniformMatrix(shader.mvpMatrix, s.mvpMatrix);
+            graphics->setUniformVec4(shader.tint, 1.0f, 1.0f, 1.0f, alpha);
+            graphics->setUniformFloat(shader.desaturate, s.fogged ? 1.0f : 0.0f);
+            graphics->drawTriangles(*s.sprite->mesh);
         }
     }
 }

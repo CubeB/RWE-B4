@@ -19,6 +19,7 @@ namespace rwe
      * size (32 world units). Rebuilt from the blackboard's known enemies.
      *
      * - antiGround: enemy damage per second that can reach the cell.
+     * - antiAirCover: how many enemy units with an anti-air weapon reach the cell.
      * - economic:   metal value of enemy buildings in the cell.
      * - staleness:  ticks since the cell was last in our line of sight.
      */
@@ -35,6 +36,15 @@ namespace rwe
         bool isEmpty() const { return getWidth() == 0 || getHeight() == 0; }
 
         float antiGroundAt(const SimVector& position) const;
+
+        /**
+         * How many enemy units that can shoot at aircraft cover this spot.
+         * A count and not a damage figure on purpose: what decides whether a
+         * bombing run is worth making is how many things will be firing at
+         * the bomber, and a count is a thing the profile can name a limit for
+         * in the words a player would use.
+         */
+        float antiAirCoverAt(const SimVector& position) const;
         float economicAt(const SimVector& position) const;
         float antiGroundInRadius(const SimVector& position, float radiusWorldUnits) const;
 
@@ -95,17 +105,21 @@ namespace rwe
         Point cellAt(const SimVector& position) const;
 
         const Grid<float>& getAntiGround() const { return antiGround; }
+        const Grid<float>& getAntiAirCover() const { return antiAirCover; }
         const Grid<float>& getEconomic() const { return economic; }
         const Grid<float>& getStaleness() const { return staleness; }
 
     private:
         Grid<float> antiGround;
+        Grid<float> antiAirCover;
         Grid<float> economic;
         Grid<float> staleness;
         /** Cells the last rebuild put economic value in, in map scan order. */
         std::vector<std::size_t> economicCellIndices;
         /** Cells the last rebuild put threat in, so only those need clearing. May repeat. */
         std::vector<std::size_t> antiGroundCellIndices;
+        /** As above, for the anti-air layer. May repeat. */
+        std::vector<std::size_t> antiAirCoverCellIndices;
         SimVector origin{0_ss, 0_ss, 0_ss};
         float cellSize{32.0f};
     };

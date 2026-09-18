@@ -56,7 +56,7 @@ namespace rwe
         bool handleMoveOrder(UnitInfo unitInfo, const MoveOrder& moveOrder);
 
         /** Returns true if the order has been completed. */
-        bool handleAttackOrder(UnitInfo unitInfo, const AttackOrder& attackOrder);
+        bool handleAttackOrder(UnitInfo unitInfo, AttackOrder& attackOrder);
 
         /** Returns true if the order has been completed. */
         bool handleBuildOrder(UnitInfo unitInfo, const BuildOrder& buildOrder);
@@ -122,7 +122,7 @@ namespace rwe
 
         bool handleLoadOrder(UnitInfo unitInfo, const LoadOrder& loadOrder);
 
-        bool handleUnloadOrder(UnitInfo unitInfo, const UnloadOrder& unloadOrder);
+        bool handleUnloadOrder(UnitInfo unitInfo, UnloadOrder& unloadOrder);
 
         /** Steers an air unit to a point that may be below cruise height; true once it hovers there. */
         bool hoverTowards(UnitInfo unitInfo, const SimVector& point);
@@ -156,12 +156,21 @@ namespace rwe
          * while it is still getting into position for the first time, so the
          * caller waits.
          *
-         * Ground builders are always ready and it returns true for them.
+         * A builder on the ground points itself at the job instead, and is
+         * not ready until it has come round far enough -- the turn every one
+         * of the original's work missions makes. One with no turn rate at all
+         * is ready at once, since it has no way to comply.
          */
         bool prepareBuilderForWork(UnitInfo unitInfo, const SimVector& workPosition);
 
         /** Whether the builder's arm reaches the target's footprint from where it stands. */
         bool withinBuildReach(UnitInfo unitInfo, const UnitState& target) const;
+
+        /**
+         * The same reach against a footprint that need not belong to a unit,
+         * so that a feature -- a wreck, a tree -- is measured the same way.
+         */
+        bool withinBuildReachOfRect(UnitInfo unitInfo, const DiscreteRect& rect) const;
 
         /** Whether this weapon can hit the unit at all (water weapons only reach units in the water, ordinary ones only reach units out of it). */
         bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const;
@@ -258,22 +267,66 @@ namespace rwe
 
         bool navigateTo(UnitInfo unitInfo, const NavigationGoal& goal);
 
+        /** Stows the nanolathe arm once a job has been over for long enough; see UnitState::armStowDueTime. */
+        void updatePendingArmStow(UnitInfo unitInfo);
+
         void moveTo(UnitInfo unitInfo, const MovingStateGoal& goal);
 
-        bool attackTarget(UnitInfo unitInfo, const AttackTarget& target);
+        /**
+         * Where a ground attacker should walk while it is out of range of a
+         * unit target: not the target's centre, which is what sends a whole
+         * group to the same cell and jams the pathfinder's single request
+         * queue (issue #66), but a point on the line from the target's
+         * centre through the attacker's own position, clamped to just inside
+         * weapon range (or to the target's footprint plus a margin, for a
+         * short-ranged weapon against something large). Cached on the
+         * attacker's own navigation state and only recomputed once the
+         * target has actually moved, so the goal stays stable tick to tick
+         * while the attacker's exact position keeps moving underneath it --
+         * see the .cpp for why that stability matters.
+         *
+         * A function of the attacker's and target's current positions and
+         * the target's definition only, so every peer computes the same
+         * point.
+         */
+        NavigationGoal attackApproachGoal(UnitInfo unitInfo, UnitId targetId, const SimVector& targetPosition, const WeaponDefinition& weaponDefinition) const;
+
+        /**
+         * Where an ordered attacker should believe its target is, updating the
+         * remembered position as it goes.
+         *
+         * The original does not track a unit through the fog: an attack order
+         * on something that goes out of sight stays on the last position the
+         * attacker's owner actually saw it at, and picks the target up again
+         * -- moved, if it has moved -- when that ground is visible once more.
+         * Tested against the running game; the routine in the exe that does it
+         * has not been found, so this is behaviour rather than transcription.
+         *
+         * canSeeUnit is the question, deliberately, and not canDetectUnit: a
+         * radar contact is a blip and not a target, and the radar picture is
+         * recomputed for one player a tick, so it could not feed a
+         * deterministic decision even if the original wanted it to.
+         *
+         * Nothing here depends on who is at the keyboard -- it asks about the
+         * attacking unit's own owner -- so every peer resolves the same
+         * position.
+         */
+        std::optional<SimVector> resolveAttackTargetPosition(UnitInfo unitInfo, const AttackTarget& target, std::optional<SimVector>& lastSeenPosition);
+
+        bool attackTarget(UnitInfo unitInfo, const AttackTarget& target, std::optional<SimVector>& lastSeenPosition);
 
         /**
          * Aircraft-specific attack target handler. Drives the AirMovementStateAttackRun
          * state machine: Approaching -> Engaging -> Departing -> (loop back or terminate).
          * Returns true when the order is satisfied and the unit should drop the order.
          */
-        bool attackTargetAir(UnitInfo unitInfo, const AttackTarget& target);
+        bool attackTargetAir(UnitInfo unitInfo, const AttackTarget& target, const std::optional<SimVector>& targetPosition);
 
         /**
          * Walks a crawling bomb onto its target and detonates it. The original's
          * ATTACK_KAMIKAZE mission handler, 0x403336 / 0x4032B4.
          */
-        bool kamikazeRun(UnitInfo unitInfo, const AttackTarget& target);
+        bool kamikazeRun(UnitInfo unitInfo, const AttackTarget& target, const std::optional<SimVector>& targetPosition);
 
         /**
          * Works out which speed band the unit is now in and, if it has changed,
@@ -301,7 +354,7 @@ namespace rwe
 
         UnitCreationStatus createNewUnit(UnitInfo unitInfo, const std::string& unitType, const SimVector& position);
 
-        bool buildExistingUnit(UnitInfo unitInfo, UnitId targetUnitId);
+        bool buildExistingUnit(UnitInfo unitInfo, UnitId targetUnitId, std::optional<UnitId> standNextTo = std::nullopt);
 
         void changeState(UnitState& unit, const UnitBehaviorState& newState);
 
@@ -309,7 +362,7 @@ namespace rwe
          * Gets the arm out, and lathes once the builder is in a position to.
          *
          * frameJustCreated says this is the tick the builder's own build order
-         * laid the nanoframe down, which is the tick TOTALA-EXE.md 101's second
+         * laid the nanoframe down, which is the tick TOTALA-EXE.md 107's second
          * lathe lands on for a construction aircraft. Every other caller --
          * assisting, finishing somebody else's frame, coming back into range --
          * leaves it false.
@@ -322,7 +375,7 @@ namespace rwe
          *
          * Separate from deployBuildArm because a construction aircraft runs it
          * twice on one tick, exactly as the original's mission service loop
-         * does (TOTALA-EXE.md 101).
+         * does (TOTALA-EXE.md 107).
          */
         bool latheNanoframe(UnitInfo unitInfo, UnitId targetUnitId);
 
@@ -334,10 +387,31 @@ namespace rwe
 
         bool climbToCruiseAltitude(UnitInfo unitInfo);
 
+        /**
+         * Where a descending aircraft is trying to stop. The terrain, unless
+         * it is coming down on a repair pad it holds an order for -- then the
+         * pad's own `QueryLandingPad` piece, which is twenty world units up on
+         * an ARMASP. See TOTALA-EXE.md §94.
+         */
+        /**
+         * Whether this unit's script raises a nanolathe arm at all. None of
+         * the shipped air repair pads or carriers does, so nothing may wait on
+         * their build stance. See TOTALA-EXE.md §94.
+         */
+        bool unitHasBuildArm(const UnitState& unit) const;
+
+        /**
+         * The pad this aircraft is coming down on and the exact point on it,
+         * or nothing if it is landing on open ground. The point is the world
+         * position of the pad's own `QueryLandingPad` piece -- twenty world
+         * units above the base on an ARMASP. See TOTALA-EXE.md §94.
+         */
+        std::optional<std::pair<UnitId, SimVector>> airBaseLandingPoint(UnitInfo unitInfo);
+
         bool descendToGroundLevel(UnitInfo unitInfo);
 
         void transitionFromGroundToAir(UnitInfo unitInfo);
-        bool tryTransitionFromAirToGround(UnitInfo unitInfo);
+        bool tryTransitionFromAirToGround(UnitInfo unitInfo, std::optional<UnitId> pad = std::nullopt);
 
         bool flyTowardsGoal(UnitInfo unitInfo, const MovingStateGoal& goal);
     };

@@ -65,9 +65,9 @@ namespace rwe
         auto secondVertex = o.vertices.size() > 1 ? vertexToVector(o.vertices[1]) : Vector3f(1.0f, 0.0f, 0.0f);
         auto mesh = meshFrom3do(atlasMap, teamAtlasMap, atlasColorMap, o);
         auto shaderMesh = convertMesh(graphics, mesh);
-        auto edges = std::make_shared<std::vector<WireframeEdge>>(polygonEdgesFrom3do(o));
+        auto polygons = std::make_shared<std::vector<WireframePolygon>>(wireframePolygonsFrom3do(o));
 
-        v.push_back(std::make_pair(o.name, UnitPieceMeshInfo{std::make_shared<ShaderMesh>(std::move(shaderMesh)), firstVertex, secondVertex, std::move(edges)}));
+        v.push_back(std::make_pair(o.name, UnitPieceMeshInfo{std::make_shared<ShaderMesh>(std::move(shaderMesh)), firstVertex, secondVertex, std::move(polygons)}));
 
         for (const auto& c : o.children)
         {
@@ -75,18 +75,21 @@ namespace rwe
         }
     }
 
-    std::vector<WireframeEdge> polygonEdgesFrom3do(const _3do::Object& o)
+    std::vector<WireframePolygon> wireframePolygonsFrom3do(const _3do::Object& o)
     {
-        // Edges follow the polygons as authored, not the triangulation,
-        // so a quad outlines as four lines with no diagonal.
-        // Each edge remembers the outward normals of the polygons on either
-        // side so the renderer can keep only the edges the camera can see.
-        std::map<std::pair<unsigned int, unsigned int>, std::size_t> edgeIndices;
-        std::vector<WireframeEdge> edges;
-        for (const auto& p : o.primitives)
+        // The polygons as authored, corners in the file's order, which is
+        // what the wireframe's scan conversion needs to tell a polygon facing
+        // the camera from one facing away. The selection plate is left out,
+        // as meshFrom3do leaves it out of the model.
+        std::vector<WireframePolygon> polygons;
+        for (std::size_t pi = 0; pi < o.primitives.size(); ++pi)
         {
-            auto count = p.vertices.size();
-            if (count < 3)
+            if (o.selectionPrimitiveIndex && *o.selectionPrimitiveIndex == pi)
+            {
+                continue;
+            }
+            const auto& p = o.primitives[pi];
+            if (p.vertices.size() < 3)
             {
                 continue;
             }
@@ -100,43 +103,15 @@ namespace rwe
                 continue;
             }
 
-            // Newell's method over the vertices in reverse order, matching the
-            // winding meshFrom3do uses, so the normal points outward like the lit faces.
-            Vector3f normal(0.0f, 0.0f, 0.0f);
-            for (std::size_t i = 0; i < count; ++i)
+            WireframePolygon polygon;
+            polygon.vertices.reserve(p.vertices.size());
+            for (auto index : p.vertices)
             {
-                auto current = vertexToVector(o.vertices[p.vertices[(count - i) % count]]);
-                auto next = vertexToVector(o.vertices[p.vertices[(count - i - 1) % count]]);
-                normal.x += (current.y - next.y) * (current.z + next.z);
-                normal.y += (current.z - next.z) * (current.x + next.x);
-                normal.z += (current.x - next.x) * (current.y + next.y);
+                polygon.vertices.push_back(vertexToVector(o.vertices[index]));
             }
-            normal = normal.normalizedOr(Vector3f(0.0f, 1.0f, 0.0f));
-
-            for (std::size_t i = 0; i < count; ++i)
-            {
-                auto a = p.vertices[i];
-                auto b = p.vertices[(i + 1) % count];
-                if (a == b)
-                {
-                    continue;
-                }
-                auto key = std::minmax(a, b);
-                auto it = edgeIndices.find(key);
-                if (it != edgeIndices.end())
-                {
-                    auto& edge = edges[it->second];
-                    if (!edge.normalB)
-                    {
-                        edge.normalB = normal;
-                    }
-                    continue;
-                }
-                edgeIndices.emplace(key, edges.size());
-                edges.push_back(WireframeEdge{vertexToVector(o.vertices[a]), vertexToVector(o.vertices[b]), normal, std::nullopt});
-            }
+            polygons.push_back(std::move(polygon));
         }
-        return edges;
+        return polygons;
     }
 
     Mesh meshFrom3do(
@@ -326,7 +301,7 @@ namespace rwe
         return m;
     }
 
-    SelectionMesh selectionMeshFrom3do(GraphicsContext& graphics, const _3do::Object& o)
+    SelectionMesh selectionMeshFrom3do(const _3do::Object& o)
     {
         auto index = o.selectionPrimitiveIndex.value_or(0u);
         auto p = o.primitives.at(index);
@@ -339,23 +314,7 @@ namespace rwe
         auto c = offset + vertexToVector(o.vertices[p.vertices[2]]);
         auto d = offset + vertexToVector(o.vertices[p.vertices[3]]);
 
-        auto collisionMesh = CollisionMesh::fromQuad(a, b, c, d);
-        auto selectionMesh = createSelectionMesh(graphics, a, b, c, d);
-
-        return SelectionMesh{std::move(collisionMesh), std::move(selectionMesh)};
-    }
-
-    GlMesh createSelectionMesh(GraphicsContext& graphics, const Vector3f& a, const Vector3f& b, const Vector3f& c, const Vector3f& d)
-    {
-        const Vector3f color(0.325f, 0.875f, 0.310f);
-
-        std::vector<GlColoredVertex> buffer{
-            {a, color},
-            {b, color},
-            {c, color},
-            {d, color}};
-
-        return graphics.createColoredMesh(buffer, GL_STATIC_DRAW);
+        return SelectionMesh{CollisionMesh::fromQuad(a, b, c, d), {a, b, c, d}};
     }
 
     ShaderMesh convertMesh(GraphicsContext& graphics, const Mesh& mesh)

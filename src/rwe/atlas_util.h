@@ -20,6 +20,23 @@ namespace rwe
 
         std::vector<SharedTextureHandle> teamTextureAtlases;
         std::unordered_map<std::string, Rectangle2f> teamTextureAtlasMap;
+
+        /**
+         * The palette index of every texel of textureAtlas: same size, same
+         * layout, one byte a texel, so the same texture coordinate reaches
+         * the same texel in both. This is what the shade table is indexed by.
+         */
+        SharedTextureHandle paletteIndexAtlas;
+        /** The same again for each of the team colour atlases, in their order. */
+        std::vector<SharedTextureHandle> teamPaletteIndexAtlases;
+        /** palettes/PALETTE.SHD as a 256x32 image; see ShadeTable.h. */
+        SharedTextureHandle shadeTableTexture;
+        /**
+         * palettes/PALETTE.ALP as a 256x256 image, rgb the blended colour and
+         * alpha the blended index so lookups can be chained; see AlphaTable.h.
+         * The building halo in worldPost.frag is its only reader.
+         */
+        SharedTextureHandle alphaTableTexture;
     };
 
     TextureAtlasInfo createTextureAtlases(AbstractVirtualFileSystem* vfs, GraphicsContext* graphics, const ColorPalette* palette);

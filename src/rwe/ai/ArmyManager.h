@@ -31,6 +31,51 @@ namespace rwe
         int ticksSinceLastUpdate{0};
 
         void updateRallyPoint(const AiTuningProfile& profile, AiBlackboard& bb) const;
-        std::optional<UnitId> nearestKnownEnemy(const GameSimulation& sim, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance) const;
+        std::optional<UnitId> nearestKnownEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly = false) const;
+
+        /**
+         * As nearestKnownEnemy, but only an enemy MapIntel::sameWaterBody
+         * says is on the same body of water as `from` -- the coarse test
+         * the type's own comment says is right for "is this worth going
+         * to". ArmyManager::update is never handed a ReachabilityMap (S:13.2
+         * step 5, the naval layer wiring, is still someone else's work in
+         * progress), so this is what stands in for isNavalReachable until
+         * that lands; it degrades safely on its own terms, since
+         * bb.mapIntel.valid false or sameWaterBody's own "0 means dry or
+         * off the map" answer both just find nothing to shoot at.
+         */
+        std::optional<UnitId> nearestNavalEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance) const;
+
+        /**
+         * Ships hold the coast at the shipyard that built them and fight
+         * only what nearestNavalEnemy says is on the same water -- never
+         * the rally point or an attack target, both of which sit on land.
+         * Nothing here ever sees bb.combatUnits or is seen by anything that
+         * walks it: bb.navalCombatUnits is EconomyManager's own bucket for
+         * exactly this reason.
+         */
+        void updateNavy(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            const AiTuningProfile& profile,
+            AiBlackboard& bb,
+            std::vector<PlayerCommand>& outCommands) const;
+
+        /**
+         * Mobile anti-air covers the base instead of joining the attack.
+         * Shoots anything airborne in reach, and otherwise walks back to the
+         * base anchor -- cover that has wandered off is not cover.
+         */
+        void updateAntiAir(
+            const GameSimulation& sim,
+            const AiTuningProfile& profile,
+            AiBlackboard& bb,
+            std::vector<PlayerCommand>& outCommands) const;
+
+        /**
+         * The enemy's outlying economy: a building of theirs away from their
+         * base with nothing covering it. Nothing to raid returns nothing.
+         */
+        std::optional<UnitId> chooseRaidTarget(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const ThreatMap& threatMap) const;
     };
 }

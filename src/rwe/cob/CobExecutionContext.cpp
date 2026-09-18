@@ -295,11 +295,15 @@ namespace rwe
                     return CobEnvironment::PieceCommandStatus{object, CobEnvironment::PieceCommandStatus::DisableShading()};
                 }
                 case OpCode::CACHE:
-                    enableCaching();
-                    break;
+                {
+                    auto object = nextInstruction();
+                    return CobEnvironment::PieceCommandStatus{object, CobEnvironment::PieceCommandStatus::EnableCaching()};
+                }
                 case OpCode::DONT_CACHE:
-                    disableCaching();
-                    break;
+                {
+                    auto object = nextInstruction();
+                    return CobEnvironment::PieceCommandStatus{object, CobEnvironment::PieceCommandStatus::DisableCaching()};
+                }
                 case OpCode::ATTACH_UNIT:
                 {
                     // attach-unit unit, piece: compiled with a third, always-zero operand.
@@ -557,18 +561,6 @@ namespace rwe
     {
         auto v = pop();
         push(~v);
-    }
-
-    void CobExecutionContext::enableCaching()
-    {
-        nextInstruction(); // object
-        // do nothing, RWE does not have the concept of caching
-    }
-
-    void CobExecutionContext::disableCaching()
-    {
-        nextInstruction(); // object
-        // do nothing, RWE does not have the concept of caching
     }
 
     void CobExecutionContext::returnFromScript()

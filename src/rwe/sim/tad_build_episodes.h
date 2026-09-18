@@ -28,7 +28,7 @@
 // which has nothing to deploy either -- the original never makes a construction
 // aircraft wait for its stance -- and whose extra tick is no longer a mystery:
 // it lathes twice on the tick it creates the nanoframe (docs/TOTALA-EXE.md
-// section 101), which RWE now does too. A ground mobile builder pays its own COB
+// section 107), which RWE now does too. A ground mobile builder pays its own COB
 // deploy sequence before INBUILDSTANCE, which is the mod's data rather than the
 // engine's behaviour, and is never an episode. See docs/TA-DEMOS.md.
 //

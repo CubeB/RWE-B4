@@ -490,4 +490,85 @@ namespace rwe
             REQUIRE(computeSlopeSpeedFactor(sim.terrain, tank, 255u).value == Catch::Approx(1.0f));
         }
     }
+
+    TEST_CASE("a search cut into slices reaches the answer it would have reached in one go", "[pathing]")
+    {
+        // The whole point of slicing is that it is invisible in the result:
+        // the scheduler stops the search when the tick's budget runs out and
+        // carries it on next tick, and what comes out is the route an
+        // uninterrupted search would have found. One expansion per slice is
+        // the cruellest schedule there is, so it is the one to check.
+        auto script = makeEmptyCobScript();
+
+        GameSimulation sim(makeFlatTerrain(24, 18), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto wall = addWallDef(sim);
+        auto tankId = addTank(sim, player, 2, 9, script);
+
+        for (int y = 0; y <= 12; ++y)
+        {
+            placeWall(sim, wall, 11, y);
+        }
+
+        UnitPathFinder wholeFinder(&sim, &sim.movementClassCollisionService, tankId, std::nullopt, 1u, 1u, Point(20, 9));
+        auto whole = wholeFinder.findPath(Point(2, 9));
+
+        UnitPathFinder slicedFinder(&sim, &sim.movementClassCollisionService, tankId, std::nullopt, 1u, 1u, Point(20, 9));
+        slicedFinder.beginSearch(Point(2, 9));
+
+        unsigned int slices = 0;
+        unsigned int expansions = 0;
+        while (!slicedFinder.isSearchFinished())
+        {
+            expansions += slicedFinder.stepSearch(1);
+            ++slices;
+        }
+        auto sliced = slicedFinder.takeResult();
+
+        REQUIRE(sliced.type == whole.type);
+        REQUIRE(describePath(sliced.path) == describePath(whole.path));
+
+        // Every expansion is accounted for, which is what the scheduler
+        // deducts from its budget, and the search really was interrupted
+        // rather than quietly run to completion on the first call.
+        REQUIRE(expansions == whole.closedVertices.size());
+        REQUIRE(slices > 1);
+    }
+
+    TEST_CASE("a search is not cut off after a thousand expansions", "[pathing]")
+    {
+        // RWE used to stop a search dead at a thousand expansions and hand
+        // back whatever partial route it had, which the unit walked before
+        // asking again. The original has no such cap -- it slices its A* and
+        // resumes it, so a search ends only at the goal or at an empty open
+        // list (TOTALA-EXE.md S:87). A goal walled off on a large map is the
+        // case that tells the two apart: the old cap stopped at a thousand
+        // with the open list still full, where an uncapped search looks at
+        // every cell it can reach and comes back knowing the place cannot be
+        // reached at all.
+        auto script = makeEmptyCobScript();
+
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto wall = addWallDef(sim);
+        auto tankId = addTank(sim, player, 2, 2, script);
+
+        for (int y = 58; y <= 60; ++y)
+        {
+            for (int x = 58; x <= 60; ++x)
+            {
+                if (x != 59 || y != 59)
+                {
+                    placeWall(sim, wall, x, y);
+                }
+            }
+        }
+
+        UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, tankId, std::nullopt, 1u, 1u, Point(59, 59));
+        auto result = pathFinder.findPath(Point(2, 2));
+
+        REQUIRE(result.type == AStarPathType::Partial);
+        REQUIRE(result.exhausted);
+        REQUIRE(result.closedVertices.size() > 1000);
+    }
 }

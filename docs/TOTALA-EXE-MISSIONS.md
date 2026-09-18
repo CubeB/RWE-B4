@@ -83,8 +83,13 @@ byte back into a record pointer.
 
 ### The record
 
-The static tables are in `.rdata`. The **VTOL table begins at `0x4FCA7C`**, 18
-records of 25 bytes:
+The static tables are in `.rdata`. The **VTOL table begins at `0x4FCA18`**, 22
+records of 25 bytes.
+
+> **Corrected 2026-09-10** (`TOTALA-EXE.md` §103). This sentence used to say
+> `0x4FCA7C` and 18 records, disagreeing with the table below it, which has
+> always been right: `0x4FCA7C` is row 4, `VTOL_Unload`, and the array runs
+> from row 0 at `0x4FCA18` to row 21 at `0x4FCC25`.
 
 | Offset | Field |
 |---|---|
@@ -99,7 +104,7 @@ The handler is at `+0x04`, confirmed independently by the three dispatch sites
 `0x43A21A`, `0x43B87C`, `0x43BB21`, each of which does
 `call DWORD PTR [eax + edx*1 + 4]` with `edx = tableBase` and `eax = 25 × missionId`.
 
-The record boundary is settled by the display names: with this alignment all 18
+The record boundary is settled by the display names: with this alignment all 22
 rows read sensibly (`VTOL_LandIfCan`→"Seeking to land", `VTOL_GetRepaired`→"Under
 repair", `AirStrike`→"Airstrike", `VTOL_Patrol`→"Patrolling"); shifted by one
 record they are all nonsense.

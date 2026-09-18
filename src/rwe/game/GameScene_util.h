@@ -1,10 +1,18 @@
 #pragma once
 
+#include <rwe/AudioService.h>
+#include <rwe/GlobalConfig.h>
 #include <rwe/RenderService.h>
 #include <rwe/collections/VectorMap.h>
+#include <rwe/game/BuilderGuisDatabase.h>
+#include <rwe/game/GameCameraState.h>
 #include <rwe/game/GameMediaDatabase.h>
 #include <rwe/game/Particle.h>
 #include <rwe/game/PlayerColorIndex.h>
+#include <rwe/game/UnitSoundType.h>
+#include <rwe/geometry/Line3f.h>
+#include <rwe/geometry/Rectangle2f.h>
+#include <rwe/io/gui/gui.h>
 #include <rwe/math/Matrix4x.h>
 #include <rwe/pathfinding/AStarPathFinder.h>
 #include <rwe/pathfinding/PathCost.h>
@@ -168,6 +176,39 @@ namespace rwe
 
     void drawMovementClassCollisionGrid(const MapTerrain& terrain, const Grid<char>& movementClassGrid, const Vector3f& cameraPosition, float viewportWidth, float viewportHeight, ColoredMeshBatch& batch);
 
+    /**
+     * The textures a unit's skin is drawn from. Each atlas comes in two
+     * parallel copies, the same size and the same layout: the colour one the
+     * fragment lands on, and a single-channel one holding that texel's
+     * palette index. The index is what the original shades by -- it reads
+     * PALETTE.SHD[row * 256 + texel] with the raw index out of the texture --
+     * so a shaded draw needs both.
+     */
+    struct UnitTextureAtlases
+    {
+        TextureIdentifier atlas;
+        TextureIdentifier paletteIndexAtlas;
+        const std::vector<SharedTextureHandle>* teamAtlases;
+        const std::vector<SharedTextureHandle>* teamPaletteIndexAtlases;
+    };
+
+    /**
+     * How a model's shadow is cast. The original has two passes and sorts each
+     * model into one of them: a building's shadow is genuinely projected onto
+     * the ground, while a unit's is a byte-for-byte copy of the sprite it was
+     * already cached into, blitted at an offset -- so a unit's shadow is its
+     * own silhouette moved across the screen and does not stretch with the
+     * unit's height. See TOTALA-EXE.md S:100.
+     */
+    struct ShadowProjection
+    {
+        float groundHeight;
+        /** True for the projected kind. */
+        bool projected;
+        /** For the offset kind, the unit's base: its height above groundHeight is how far the shadow drops. */
+        float originY;
+    };
+
     void drawUnit(
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,
@@ -178,8 +219,8 @@ namespace rwe
         unsigned int unitIndex,
         unsigned int gameTime,
         float frac,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        float shadeStrength,
+        const UnitTextureAtlases& atlases,
         UnitMeshBatch& batch);
 
     void drawMeshFeature(
@@ -187,8 +228,8 @@ namespace rwe
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,
         const MapFeature& feature,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        float shadeStrength,
+        const UnitTextureAtlases& atlases,
         UnitMeshBatch& batch);
 
     /**
@@ -202,6 +243,35 @@ namespace rwe
      */
     bool unitCastsShadow(const UnitDefinition& unitDefinition);
 
+    /**
+     * Whether a map feature drawn as a model gets a shadow.
+     *
+     * The one water test in the original's shadow pass is on the Feature
+     * Unit, the unit of type index 0 that draws map features: at
+     * 0x4592D5-0x4592F1 a unit whose type index is zero and whose ground,
+     * 0x485070 at its position, lies below the sea level byte casts
+     * nothing. A real building skips that test, and a finished unit's copied
+     * shadow is not cut at the water line either -- the cut at 0x4BA1B0 needs
+     * the height plane a finished bitmap does not carry. So a wreck on the
+     * sea bed or a rock in the shallows has no shadow, and everything else is
+     * as it is on land. TOTALA-EXE.md §3 and §100.
+     */
+    bool featureCastsShadow(SimScalar groundHeight, SimScalar seaLevel);
+
+    /**
+     * The unit's whole model as the camera sees it, finished or not, for
+     * keeping a nanoframe's own shadow out of its outline.
+     */
+    void drawUnitOutline(
+        const GameMediaDatabase& gameMediaDatabase,
+        const Matrix4f& viewProjectionMatrix,
+        const UnitState& unit,
+        const UnitDefinition& unitDefinition,
+        const UnitModelDefinition& modelDefinition,
+        float frac,
+        const UnitTextureAtlases& atlases,
+        std::vector<UnitTextureMeshRenderInfo>& out);
+
     void drawUnitShadow(
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,
@@ -210,8 +280,7 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         float frac,
         float groundHeight,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         UnitShadowMeshBatch& batch);
 
     void drawFeatureMeshShadow(
@@ -220,8 +289,7 @@ namespace rwe
         const Matrix4f& viewProjectionMatrix,
         const MapFeature& feature,
         float groundHeight,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         UnitShadowMeshBatch& batch);
 
     /** fogged draws the sprite in fog-of-war grey; currentTime drives the burning animation. */
@@ -249,8 +317,8 @@ namespace rwe
         const std::string& pieceName,
         const Matrix4f& matrix,
         PlayerColorIndex playerColorIndex,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        float shadeStrength,
+        const UnitTextureAtlases& atlases,
         UnitMeshBatch& batch);
 
     /** A small dark square: a fragment of a shattered piece. */
@@ -282,6 +350,24 @@ namespace rwe
     Vector3f buildCycleColorB(unsigned int unitIndex, unsigned int gameTime);
 
     /**
+     * What a wireframe needs to know about the screen to give its lines a
+     * width there. The world is drawn at twice the output size, so a GL line
+     * is half an output pixel wide and a single sample of it can miss the
+     * pixel altogether; each edge is drawn as a strip one output pixel wide
+     * instead, the width of the original's lines.
+     */
+    struct WireframeScreen
+    {
+        Matrix4f viewProjection;
+        /** The world-space step that moves one output pixel right on screen, and one up. */
+        Vector3f pixelRight;
+        Vector3f pixelUp;
+        /** The viewport in output pixels, which turns a clip-space distance into pixels. */
+        float width;
+        float height;
+    };
+
+    /**
      * Outlines the polygons of a nanoframe that face the camera, in one colour.
      * Edges resting on the ground are left out, and the lines are nudged towards
      * the camera so the depth buffer hides those behind other parts of the model.
@@ -293,20 +379,9 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         float frac,
         const Vector3f& toCamera,
+        const WireframeScreen& screen,
         const Vector3f& color,
         ColoredMeshBatch& batch);
-
-    /** The unit's model as the camera sees it, for stencil cut-outs. */
-    void drawUnitSilhouette(
-        const GameMediaDatabase& gameMediaDatabase,
-        const Matrix4f& viewProjectionMatrix,
-        const UnitState& unit,
-        const UnitDefinition& unitDefinition,
-        const UnitModelDefinition& modelDefinition,
-        float frac,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
-        std::vector<UnitTextureMeshRenderInfo>& out);
 
     void drawSpriteParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, SpriteBatch& batch);
 
@@ -371,13 +446,13 @@ namespace rwe
         const VectorMap<Projectile, ProjectileIdTag>& projectiles,
         GameTime currentTime,
         float frac,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         ColoredMeshBatch& coloredMeshbatch,
         SpriteBatch& spriteBatch,
         UnitMeshBatch& unitMeshBatch);
 
-    void drawSelectionRect(const GameMediaDatabase& gameMediaDatabase, const Matrix4f& viewProjectionMatrix, const UnitState& unit, const UnitDefinition& unitDefinition, float frac, ColoredMeshesBatch& batch);
+    /** The selection plate of a selected unit, outlined one output pixel wide. */
+    void drawSelectionRect(const GameMediaDatabase& gameMediaDatabase, const WireframeScreen& screen, const Vector3f& toCamera, const UnitState& unit, const UnitDefinition& unitDefinition, float frac, ColoredMeshBatch& batch);
 
     /**
      * Where a wake dot starts, which way it drifts and how long it lasts.
@@ -500,4 +575,87 @@ namespace rwe
      * nanoframe exists, which is what buildOrderUnitId holds.
      */
     std::optional<UnitId> unitOrderTargetUnit(const UnitState& unit);
+
+    // Declared here rather than kept private to GameScene.cpp because the
+    // renderers moved to GameScene_render.cpp still call them; the
+    // definitions stay where they were. See the head of that file for why it
+    // exists at all.
+
+    bool isValidUnitType(const GameSimulation& simulation, const std::string& unitType);
+
+    std::optional<std::reference_wrapper<const std::vector<GuiEntry>>> getBuilderGui(const BuilderGuisDatabase& db, const std::string& unitType, unsigned int page);
+
+    unsigned int getBuildPageCount(const BuilderGuisDatabase& db, const std::string& unitType);
+
+    bool unitIsBuilder(const GameSimulation& sim, std::optional<UnitId> singleSelectedUnit);
+
+    /** True for particles drawn among the world's geometry rather than over the finished frame. */
+    bool particleDrawsInWorld(const Particle& particle);
+
+    /**
+     * Whether the situational music driver should put the next track on.
+     *
+     * leavingScene is the one that is not about music at all. A scene that
+     * has stopped its music and handed the scene manager its successor is
+     * still the current scene for the rest of the frame, so it still gets an
+     * update; without this it would see a silent audio service, conclude that
+     * a track had ended, and start another one over the top of whatever the
+     * incoming scene starts. See GameScene::leavingScene.
+     */
+    bool shouldStartNextMusicTrack(bool leavingScene, bool musicPlaying, GameTime gameTime, GameTime holdOffUntil);
+
+    /**
+     * The next track for MUSICRT's Play All, Random and Repeat modes
+     * (TOTALA-EXE.md S:68), as an index into tracks, the playlist in album
+     * order. last is the track that played last, empty if none; step is +1
+     * or -1 after CDNEXT or CDPREV and 0 otherwise; randomValue is a raw draw
+     * from the scene's effects generator. Play All moves one on, or the way
+     * step says, wrapping; Repeat stays put unless stepped; Random takes any
+     * track. A last track not in the list starts from the first. Custom does
+     * not come here: the situational music picks by mood. tracks must not be
+     * empty.
+     */
+    std::size_t nextMusicTrackIndex(MusicTrackMode mode, const std::vector<std::string>& tracks, const std::string& last, int step, unsigned int randomValue);
+
+    bool shouldShowAllBuildBoxes(const GameSimulation& sim, PlayerId localPlayerId, std::optional<UnitId> singleSelectedUnit, std::optional<UnitId> hoveredUnit);
+
+    /**
+     * What a locally predicted build ghost (GameScene::localBuildGhosts)
+     * stands in for: an order the click has not reached the simulation for
+     * yet, or a cancellation the simulation has not caught up to yet.
+     */
+    enum class LocalBuildGhostKind
+    {
+        Placement,
+        Cancellation,
+    };
+
+    /**
+     * Whether a locally predicted build ghost is still doing useful work,
+     * given whether a BuildOrder matching it currently sits for real in the
+     * unit's own order queue.
+     *
+     * A Placement ghost covers for an order that has not shown up yet, so it
+     * stops once one does -- drawing both together would double it, and from
+     * then on the real order draws it just as well. A Cancellation ghost
+     * covers for an order that has not gone away yet, so it stops once it
+     * has. Either kind gives up once it has lived past timeout of scene
+     * time, in case the command it stood in for was refused (the footprint
+     * was already taken) or simply lost: nothing here ever hears back that a
+     * command arrived, so a ghost that outlives its usefulness has to expire
+     * by the clock instead of by being told.
+     */
+    bool localBuildGhostIsActive(LocalBuildGhostKind kind, bool matchingOrderPresent, GameTime createdAt, GameTime now, GameTime timeout);
+
+    int computeSoundVolume(int soundCount);
+
+    std::optional<AudioService::SoundHandle> getSound(const GameSimulation& sim, const GameMediaDatabase& meshDb, const std::string& unitType, UnitSoundType soundType);
+
+    Rectangle2f computeCameraConstraint(const MapTerrain& terrain, float viewportWidth, float viewportHeight);
+
+    Line3x<SimScalar> floatToSimLine(const Line3f& line);
+
+    Matrix4f computeViewProjectionMatrix(const GameCameraState& cameraState, int screenWidth, int screenHeight);
+
+    Matrix4f computeInverseViewProjectionMatrix(const GameCameraState& cameraState, int screenWidth, int screenHeight);
 }

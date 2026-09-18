@@ -195,6 +195,54 @@ namespace rwe
         return handle;
     }
 
+    TextureHandle GraphicsContext::createSingleChannelMipMappedTexture(const std::vector<Grid<unsigned char>>& mipLevels)
+    {
+        GLuint texture;
+        glGenTextures(1, &texture);
+        TextureIdentifier id(texture);
+        TextureHandle handle(id);
+
+        glBindTexture(GL_TEXTURE_2D, texture);
+
+        // Rows are a single byte per texel, so they are not word aligned.
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+        for (std::size_t i = 0; i < mipLevels.size(); ++i)
+        {
+            const auto& level = mipLevels[i];
+            glTexImage2D(
+                GL_TEXTURE_2D,
+                static_cast<GLint>(i),
+                GL_R8,
+                level.getWidth(),
+                level.getHeight(),
+                0,
+                GL_RED,
+                GL_UNSIGNED_BYTE,
+                level.getData());
+        }
+
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(mipLevels.size()) - 1);
+
+        // These bytes are palette indices, and the average of two indices names
+        // a third colour that is nowhere between them, so nothing may blend
+        // them: nearest at both ends, and no interpolation between levels
+        // either. It is also why the chain is handed to us instead of asked
+        // for -- glGenerateMipmap's box filter would do exactly that averaging.
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        requireNoOpenGlError();
+
+        return handle;
+    }
+
     void GraphicsContext::updateTexture(TextureIdentifier texture, unsigned int width, unsigned int height, const Color* image)
     {
         glBindTexture(GL_TEXTURE_2D, texture.value);
@@ -290,6 +338,12 @@ namespace rwe
         }
 
         glBindFragDataLocation(program.get().value, 0, "outColor");
+        // The building halo's coverage mask, written as a second render target
+        // by the same passes that draw the world. GLSL 150 has no layout
+        // qualifier for fragment outputs, so the location has to be bound here
+        // or the linker assigns the two outputs in whatever order it likes.
+        // Naming an output a program does not declare is harmless.
+        glBindFragDataLocation(program.get().value, 1, "outMask");
         glLinkProgram(program.get().value);
 
         glDetachShader(program.get().value, vertexShader.value);
@@ -578,6 +632,19 @@ namespace rwe
 
     void GraphicsContext::unbindFrameBuffer()
     {
+        glBindFramebuffer(GL_FRAMEBUFFER, presentationFrameBuffer);
+    }
+
+    void GraphicsContext::setPresentationFrameBuffer(std::optional<FrameBufferIdentifier> frameBuffer)
+    {
+        presentationFrameBuffer = frameBuffer ? frameBuffer->value : 0;
+    }
+
+    void GraphicsContext::blitFrameBufferToWindow(FrameBufferIdentifier source, int sourceWidth, int sourceHeight, int windowWidth, int windowHeight)
+    {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, source.value);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBlitFramebuffer(0, 0, sourceWidth, sourceHeight, 0, 0, windowWidth, windowHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 
@@ -606,6 +673,11 @@ namespace rwe
     void GraphicsContext::setUniformFloat(UniformLocation location, float value)
     {
         glUniform1f(location.value, value);
+    }
+
+    void GraphicsContext::setUniformVec2(UniformLocation location, float a, float b)
+    {
+        glUniform2f(location.value, a, b);
     }
 
     void GraphicsContext::setUniformVec3(UniformLocation location, float a, float b, float c)
@@ -718,10 +790,36 @@ namespace rwe
     {
         glStencilFunc(GL_EQUAL, 1, 0xFF);
         glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+        glStencilMask(0xFF);
+    }
+
+    void GraphicsContext::useStencilBufferToMarkCutout()
+    {
+        glStencilFunc(GL_ALWAYS, 2, 0xFF);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        glStencilMask(0x02);
+    }
+
+    void GraphicsContext::useStencilBufferForWritesOutsideCutout()
+    {
+        // The test is (1 & 0x02) == (stencil & 0x02), so it passes where bit 1
+        // is clear; the write is 1 through a mask of bit 0 alone.
+        glStencilFunc(GL_EQUAL, 1, 0x02);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        glStencilMask(0x01);
+    }
+
+    void GraphicsContext::useStencilBufferToClearCutout()
+    {
+        glStencilFunc(GL_ALWAYS, 0, 0xFF);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        glStencilMask(0x02);
     }
 
     void GraphicsContext::clearStencilBuffer()
     {
+        // A clear goes through the write mask, so it has to be whole first.
+        glStencilMask(0xFF);
         glClear(GL_STENCIL_BUFFER_BIT);
     }
 
@@ -729,12 +827,14 @@ namespace rwe
     {
         glStencilFunc(GL_ALWAYS, 1, 0xFF);
         glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        glStencilMask(0xFF);
     }
 
     void GraphicsContext::useStencilBufferForClears()
     {
         glStencilFunc(GL_ALWAYS, 0, 0xFF);
         glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        glStencilMask(0xFF);
     }
 
     void GraphicsContext::setViewport(int x, int y, int width, int height)
@@ -796,6 +896,42 @@ namespace rwe
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture.value, 0);
     }
 
+    void GraphicsContext::attachFrameBufferMaskBuffer(FrameBufferIdentifier frameBuffer, TextureIdentifier texture)
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, frameBuffer.value);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, texture.value, 0);
+
+        GLenum status;
+        if ((status = glCheckFramebufferStatus(GL_FRAMEBUFFER)) != GL_FRAMEBUFFER_COMPLETE)
+        {
+            throw GraphicsException("glCheckFrameBufferStatus error attaching mask buffer:" + std::to_string(status));
+        }
+
+        // Blending is switched off for this attachment alone, once, and left
+        // that way. It carries palette indices and a coverage level, not
+        // colour, and compositing either of them is meaningless -- half of a
+        // palette index is a different colour rather than a darker one. Doing
+        // it per attachment rather than around each pass is what makes it
+        // impossible to get wrong later: GameLaunch enables blending globally
+        // and nothing in the render path turns it off, so a pass that forgot
+        // would silently write quarter-alpha samples that read as empty.
+        glDisablei(GL_BLEND, 1);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+
+    void GraphicsContext::useSingleDrawBuffer()
+    {
+        GLenum buffers[] = {GL_COLOR_ATTACHMENT0};
+        glDrawBuffers(1, buffers);
+    }
+
+    void GraphicsContext::useDualDrawBuffers()
+    {
+        GLenum buffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+        glDrawBuffers(2, buffers);
+    }
+
     void GraphicsContext::setActiveTextureSlot0()
     {
         glActiveTexture(GL_TEXTURE0);
@@ -804,5 +940,15 @@ namespace rwe
     void GraphicsContext::setActiveTextureSlot1()
     {
         glActiveTexture(GL_TEXTURE1);
+    }
+
+    void GraphicsContext::setActiveTextureSlot2()
+    {
+        glActiveTexture(GL_TEXTURE2);
+    }
+
+    void GraphicsContext::setActiveTextureSlot3()
+    {
+        glActiveTexture(GL_TEXTURE3);
     }
 }

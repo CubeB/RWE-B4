@@ -129,7 +129,7 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   dropped from it outright rather than merely warned about. Immobile and
   airborne builders become episodes, each scored against its own model — a
   construction aircraft's first tick pays two increments (`docs/TOTALA-EXE.md`
-  §101), which RWE reproduces, so its cells carry the ordinary
+  §107), which RWE reproduces, so its cells carry the ordinary
   `expectedDurationDelta` and nothing of their own. A ground mobile builder
   never becomes one. `--max-cells` caps how many, keeping every cell whose
   `BuildTime` divides exactly by the rate, because those are the ones that carry
@@ -179,7 +179,7 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   late by exactly `30 - start % 30` plus whole seconds -- line for line with
   `tools/tad-stalltime.py`, and `--emit-stall-cpp` writes the fourth fixture,
   `src/rwe/sim/tad_stall_episodes.h`, for `[economy][corpus]` cases that replay
-  each episode through `GameSimulation::tick`. `docs/TOTALA-EXE.md` §102 is the
+  each episode through `GameSimulation::tick`. `docs/TOTALA-EXE.md` §108 is the
   settle it rests on.
 
   `--unit-state` decodes every `0x2c` and holds the decode to the rest of the
@@ -200,7 +200,7 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   immobile pair and needs `--min-builds 3`. Builders split three ways and the split matters: **immobile** ones
   are scored cell by cell, **airborne** ones are scored pair by pair against
   two increments on the nanoframe's own tick, because a construction aircraft's
-  mission runs its build step twice on that tick (`docs/TOTALA-EXE.md` §101), and
+  mission runs its build step twice on that tick (`docs/TOTALA-EXE.md` §107), and
   **ground mobile** ones are never scored at all, because they pay their own COB
   deploy before `INBUILDSTANCE` and that belongs to the mod rather than the
   engine. `--overheads` lists those. `docs/TOTALA-EXE.md` §23 and
@@ -243,7 +243,9 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
 
 The simulation is lockstep: peers exchange commands, not state, and a `GameHash` mismatch is a desync. Two rules keep biting.
 
-**Never draw from `std::uniform_int_distribution` in the sim.** Its bias correction is implementation-defined, so two builds of the engine can draw different numbers from the same seeded generator and fall out of step. Take a modulo of the generator's raw output instead — `UnitBehaviorService.cpp` and `GameSimulation::dealStartPositions` do, and say why at the call site. Ten such draws still remain in `GameSimulation.cpp` and `cob.cpp`, and two more in `ai/BuildManager.cpp`; they are known and tracked in the roadmap, left alone only because changing a draw shifts every subsequent random sequence and they deserve their own pass with the tests watched.
+**Never draw from `std::uniform_int_distribution` in the sim.** Its bias correction is implementation-defined, so two builds of the engine can draw different numbers from the same seeded generator and fall out of step. Take a modulo of the generator's raw output instead — `UnitBehaviorService.cpp` and `GameSimulation::dealStartPositions` do, and say why at the call site; `SimRandom.h`'s `randomBelow` is the wrapper to reach for.
+
+**That cleanup is finished, as of 2026-09-08.** This paragraph used to say ten such draws remained in `GameSimulation.cpp` and `cob.cpp` and two more in `ai/BuildManager.cpp`; audited, there are none left anywhere in the simulation. Every surviving mention of `uniform_int_distribution` under `src/rwe/` is either a comment warning against it (`SimRandom.h`, `GameSimulation.h`, three sites in `UnitBehaviorService.cpp`) or code outside the sim: `GameNetworkService.h`, and four presentation draws in `GameScene.cpp` for particle lifetime, screen shake and jitter. Those four are safe for a second reason worth knowing — `GameScene` draws from its own `effectsRng`, not `simulation.rng`, so rendering cannot advance the simulation's sequence. **Keep it that way:** presentation code that reaches into `simulation.rng` is a desync even if the value is only ever drawn on screen.
 
 **Keep sim state in step across four places.** New state on `UnitState`, `MapFeature`, `GamePlayerInfo` or the simulation itself needs adding to `src/rwe/game/save_util.cpp` (serialization), `src/rwe/sim/GameHash_util.cpp` (the sync hash) and `src/rwe/game/dump_util.cpp` (desync diagnostics) as well as to the struct. The save round-trip test (`src/rwe/sim/saveload.test.cpp`) fails if hashed state is missed, but unhashed state needs the discipline: nothing will tell you.
 
@@ -255,9 +257,20 @@ is the failure mode this rule exists to catch.
 
 Derived state is the exception and should say so. `UnitSpatialIndex` is rebuilt from the unit list every tick, is never saved and never hashed, and returns a deliberate *superset* of each query so that the exact test still runs against live positions — which is what makes it incapable of changing an outcome.
 
+**Derived state that can change an outcome is not exempt, and there is one.** A path search is sliced across ticks now, so at the end of any tick the pathfinder may be holding a half-finished A\*. That is not hashed — every peer suspends at the same point, so there is nothing to disagree about — but it *is* serialized, because when the path lands changes where a unit is. It goes into the save as five integers rather than as a search: the footprint the search began from and how many vertices it had expanded, which is enough to rebuild it exactly (`PathFindingService::suspendedSearchStart`, and `TOTALA-EXE.md` §87 for why dropping it instead would pass the saved-game test and break replays). The rule to take from it: ask whether a piece of derived state can move the simulation's future, not whether it is derived.
+
 ## Other hazards
 
 **Destroying a `Subscription` handle does not unsubscribe.** A subscriber that dies before the `Subject` it listens to must hand its subscription back by hand — call `unsubscribe()` in the destructor — or the subject will deliver into freed memory. Getting this wrong crashed the second game of any session, which is a slow thing to find. `src/rwe/observable/Subject.test.cpp` pins both halves of the rule.
+
+**And handing it back too late is the same bug wearing the other face.** `UiComponent` keeps a store of subscriptions and empties it in `~UiComponent` — the *base* destructor, which runs after the derived class's own members are already gone. So a component that subscribes to a subject it owns itself, and puts the handle in that store, hands it back to a `Subject` that no longer exists: `Subject::unsubscribe` does a `find_if` and an `erase` on a destroyed vector. It corrupts the heap rather than trapping, which is why the crash handler wrote nothing and the log simply stopped. Any `UiComponent` subclass that declares a `Subject` therefore calls `releaseSubscriptions()` in its own destructor, while its subjects are still alive — `UiPanel`, `UiListBox`, `UiScrollBar` and `UiStagedButton` all do, and a new one owning a subject must. `src/rwe/ui/UiComponent.test.cpp` walks the path for a sanitizer to catch; it cannot assert the fault, undefined behaviour being free to do nothing. This one cost a crash on entering a skirmish, the main menu's panels being destroyed on the way in.
+
+
+**A translation unit can outgrow what a COFF object can describe.** An object file numbers its sections with a signed 16-bit index, so 32767 is the ceiling. At `-O0` nothing is inlined and every implicitly instantiated template — every `std::vector` member, every `std::variant` visit — is emitted into its own COMDAT carrying four sections: `.text$`, `.xdata$`, `.pdata$` and `.debug_frame$`. Four sections per function means the real budget is about 8000 instantiations, and `GameScene.cpp` had reached 11466 of them: 46124 sections in a 49 MB object. The assembler covers for this silently by switching the object to the `pe-bigobj` format, which is why nothing warned; recent binutils reads that format back, but the MinGW64 CI runner's did not, and dropped every COMDAT definition while keeping the references. The Debug job failed to link four executables with 1124 undefined symbols in one object while Release, where the optimiser folds those instantiations away into 1388 sections, passed — which is the signature to recognise: a link failure in Debug only, all of it from a single `.obj`, every missing symbol a template or a lambda.
+
+The fix was to split the file, and the rule it leaves behind is a size one: no translation unit should need bigobj. `objdump -f` names the format and `objdump -h <obj> | grep -cE '^ *[0-9]+ '` counts the sections, so a suspect object takes one command to check. `-g1` does not help — `.debug_frame$` is emitted at every debug level — and neither does splitting off code that is merely long: moving the renderers out, 21% of the lines, removed 4% of the sections, because roughly 9500 of them are the standard library's variant, string and vector machinery, re-instantiated in any translation unit that touches the game's types. Only splitting off code that is *dense* helps. `GameScene` is eight files now (`_audio`, `_commands`, `_debug`, `_input`, `_menu`, `_render`, `_replay` and what remains), beside the older `_util`. Measured 2026-09-09 after the last of those cuts: `_commands` 21981 sections, `_replay` 18805, `GameScene.cpp` 15644, `_menu` 13105, `_input` 10810, `_debug` 4839, `_render` 4818, `_util` 3655, `_audio` 3420 — the largest now 67% of the ceiling, where before these two cuts it was 82%.
+
+Two things that pass measurement teaches, both worth knowing before making any of these bigger. **The section count is a budget, not a free win**: the standard library's floor is paid once per translation unit, so a split adds to the total even as it takes the peak down. Taking the debug harness out of `GameScene.cpp` cost 2216 sections across the pair to take 2623 off the larger; taking the menu out of `_commands` cost 8365 to take 4740 off. And **that floor is not a constant** — `_debug` came out at 4839 against the 9500 quoted above, because its include list is what it uses rather than what it would inherit, while `_menu` at 13105 pays for `MainMenuScene.h`, `LoadingScene.h` and `SaveFile.h`, which it genuinely needs. Keeping a new file's includes tight is most of what decides where it lands.
 
 ## Code Conventions
 
@@ -281,9 +294,9 @@ serialization, hash-validated round trip — see `sim/saveload.test.cpp`) and
 `src/rwe/game/SaveFile.*` (the on-disk container with the map/players header
 and the skirmish options). Saves are `<name>.rwesave` under the local data
 path. See the determinism section above for what a new piece of sim state
-obliges you to touch. One known gap: the `SaveFile` header's `PlayerInfo` carries no `teamId` (the
-simulation's own player table does, and is what a load restores, so alliances
-do survive; the header is simply thinner than the sim).
+obliges you to touch. The `SaveFile` header's `PlayerInfo` now carries `teamId`
+alongside the simulation's own player table, which is what a load actually
+restores.
 
 ## Matching Total Annihilation
 
@@ -291,7 +304,8 @@ Much of the current work is matching the original's behaviour down to the
 arithmetic. Where a behaviour is meant to match TA, it has usually been read out
 of `TotalA.exe` instead of guessed at.
 
-- `docs/TOTALA-EXE.md` — the findings, now a hundred sections: the flight
+- `docs/TOTALA-EXE.md` — the findings, numbered up to §108 (§83 and §84 do not
+  exist, so the count is two short of the last number): the flight
   model, fog of war and line of sight, the damage pipeline, missile flight,
   target selection and eligibility, the economy, the nanolathe and construction
   display, effects and render order, the interface (the minimap detection
@@ -302,25 +316,51 @@ of `TotalA.exe` instead of guessed at.
   order (§85), what makes a patrolling unit leave its route (§86), the
   pathfinder and its scheduler (§87), what the D-gun's projectile does once it
   has left the barrel (§92), why an abandoned nanoframe rots away (§93), and
-  which missions send a damaged aircraft to a repair pad and what the pad does
-  when it gets there (§94), what a feature contributes to movement — the
+  which missions send a damaged aircraft to a repair pad, what the pad does
+  when it gets there, and the repair tick every repairer in the game shares --
+  one hit point and one energy per tick, clamped from *above*, so repair scales
+  with the number of builders and not with their worker time (§94), what a feature contributes to movement — the
   map square, the passability class, and why a hovercraft cannot cross a
   sunken wreck (§95) — where capture progress is kept and what sets its clock
   (§96), what `autoreclaimable` actually gates and which sound a reclaim
-  plays (§97), and the Resurrect mission nothing in the shipped data can use
-  (§98), and the `0x1a` unit-table packet builder together with the checksum
-  behind it that got away (§100 — included because it *failed*, and the shape
-  of the failure is what stops the next attempt repeating it), and why a
-  construction aircraft finishes a build a tick before a factory would (§101),
-  and what one resource settle does and where every player's falls (§102). §88 and §91 are
-  the ones to read first if
+  plays (§97), the Resurrect mission nothing in the shipped data can use
+  (§98), and the two shadow passes — a unit's shadow is a byte-for-byte copy
+  of its own cached sprite drawn at an offset, where a building's is a
+  projected rectangle filled flat (§100), and the purple halo on building
+  edges, which is a bug of the original's that RWE reproduces on purpose by
+  running its table rather than imitating its output — the buildings' palette
+  indices go into a mask and each 2x2 block is filtered down through the
+  shipped `PALETTE.ALP` with the original's three chained lookups, an
+  uncovered sample standing in as index 253, plain magenta (§101), and the
+  ground path follower — the aim point projected eighty units along the
+  segment the unit is walking, and the two brake tests that slow it into a
+  corner (§102, and issue #36), and what a click on a unit does: the two
+  default-action ladders, one per mouse scheme, the cursor table they choose
+  from, and the fact that the displayed cursor is what decides whether a left
+  click issues anything at all — which is also where loading turns out to be
+  a transport-side order with no passenger side to it (§103), and how a game
+  ends: the banner, the ten-step fade, and the chart over OUTCOME0.PCX whose
+  seven bars run up left to right with the score read out of the map's own
+  killmul and timemul (§104), and the `0x1a` unit-table packet builder
+  together with the checksum behind it that got away (§106 — included
+  because it *failed*, and the shape of the failure is what stops the next
+  attempt repeating it), and why a construction aircraft finishes a build a
+  tick before a factory would (§107), and what one resource settle does and
+  where every player's falls (§108). §88 and
+  §91 are the ones to read first if
   you are about to change something — where RWE **deliberately** differs, so
   those do not get "corrected" back, and what is decoded but not ported.
-- `docs/TOTALA-EXE-SHADING.md` — the shaded unit rasterizer in full: the
-  16-byte vertex record, the per-vertex shade level and its `& 0x1F`, the
-  averaged (and deliberately unnormalised) vertex normals, and the Gouraud
-  interpolation of the integer row. Read this before touching the unit
-  shaders. It overturns two earlier readings: the original *does* light its
+- `docs/TOTALA-EXE-SHADING.md` — the shaded unit rasterizer in full, in two
+  halves. Part one is the geometry: the 16-byte vertex record, the per-vertex
+  shade level and its `& 0x1F`, the averaged (and deliberately unnormalised)
+  vertex normals, and the Gouraud interpolation of the integer row. Part two
+  (sections 17-27) is the span filler: the row is truncated per pixel with
+  `sar 16` and indexes `PALETTE.SHD[row * 256 + texel]` with **no** second
+  mask, clamp, ambient, fog or blend anywhere in the loop, the height test
+  sorts by model-space Y as an unsigned byte, and a unit whose FBI says
+  `ZBuffer=0` is drawn through a path that does not shade at all (CORFAV and
+  CORTRUCK are the only two in the shipped set). Read this before touching the
+  unit shaders. It overturns two earlier readings: the original *does* light its
   models (the "no lighting" finding had read the `SHADING=off` path), and the
   sun vector is not normalised, which sets the ramp's width at thirteen rows
   rather than thirty-two. The `& 0x1F` wrap is not the original being crude;
@@ -330,7 +370,10 @@ of `TotalA.exe` instead of guessed at.
   water sinks: the corpse spawns at the dying unit's exact height and the
   water branch adds a fixed 0.175 units a tick of downward velocity, spent by
   a per-tick sweep. The exemption for `IsFeature=1` — the floating dragon's
-  teeth — is what shows the rule is deliberate.
+  teeth — is what shows the rule is deliberate. It also names all eleven
+  death causes, and the one that mattered is cause 7: `IsFeature=1` again,
+  read from the same bit, which is why such a unit always leaves the intact
+  wreck whatever its `Killed` ladder asked for.
 - `docs/TOTALA-EXE-MISSIONS.md` — how aircraft decide *where to go* when
   attacking: the mission name table and its handlers, the bomber attack run,
   the fighter strafing pass, the gunship standoff ring, and what `hoverattack`
@@ -358,8 +401,9 @@ of `TotalA.exe` instead of guessed at.
   silently swallows nine tenths of the alliance records.
 - `docs/REVERSE-ENGINEERING-PRIORITIES.md` — what is worth reading out of the
   binary next, ranked, with the evidence that each is a real gap and a string
-  or offset to pivot on. Most of it is now done; the head of the file says
-  what is left.
+  or offset to pivot on. **The ranked list is empty as of 2026-09-15** -- every
+  entry has been read or refuted, and the file is now a record of what each
+  turned into and what it got wrong. Append the next one there.
 - `tools/exe/` — the probe scripts that produced them, and the method.
   `tools/exe/shading/` holds the palette work, including `shdgen.py`, which
   regenerates the shipped `PALETTE.SHD` byte-for-byte and is what pins its

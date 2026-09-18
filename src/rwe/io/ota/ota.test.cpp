@@ -409,4 +409,83 @@ namespace rwe
             }
         }
     }
+
+    TEST_CASE("findStartPosition: a slot has a seat only where the map declares one")
+    {
+        // Three positions with a gap at 3, the way a hand-edited map or a
+        // campaign schema can come: slots 1, 2 and 4 seat, 3 and 5 do not.
+        std::string input = R"TDF(
+[GlobalHeader]
+    {
+    missionname=Gappy;
+    SCHEMACOUNT=1;
+    [Schema 0]
+        {
+        Type=Network 3;
+        [specials]
+            {
+            [special0]
+                {
+                specialwhat=StartPos1;
+                XPos=100;
+                ZPos=200;
+                }
+            [special1]
+                {
+                specialwhat=StartPos2;
+                XPos=300;
+                ZPos=400;
+                }
+            [special2]
+                {
+                specialwhat=StartPos4;
+                XPos=500;
+                ZPos=600;
+                }
+            [special3]
+                {
+                specialwhat=Lightning;
+                XPos=1;
+                ZPos=2;
+                }
+            }
+        }
+    }
+)TDF";
+        auto ota = parseOta(parseTdfFromString(input));
+        REQUIRE(ota.schemas.size() == 1);
+        const auto& schema = ota.schemas[0];
+
+        SECTION("declared positions come back with their coordinates")
+        {
+            auto first = findStartPosition(schema, 1);
+            REQUIRE(first);
+            REQUIRE(first->xPos == 100);
+            REQUIRE(first->zPos == 200);
+
+            auto fourth = findStartPosition(schema, 4);
+            REQUIRE(fourth);
+            REQUIRE(fourth->xPos == 500);
+            REQUIRE(fourth->zPos == 600);
+        }
+
+        SECTION("a gap and the far end come back empty rather than throwing")
+        {
+            REQUIRE(!findStartPosition(schema, 3));
+            REQUIRE(!findStartPosition(schema, 5));
+            REQUIRE(!findStartPosition(schema, 10));
+        }
+
+        SECTION("the count skips the gap and ignores other specials")
+        {
+            REQUIRE(countStartPositions(schema) == 3);
+        }
+
+        SECTION("a schema with no specials at all seats nobody")
+        {
+            OtaSchema empty;
+            REQUIRE(!findStartPosition(empty, 1));
+            REQUIRE(countStartPositions(empty) == 0);
+        }
+    }
 }

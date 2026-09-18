@@ -6,83 +6,107 @@ which, and several say what the entry originally got wrong. The ranking it opens
 with is the ranking as first written, deliberately left alone so that the
 corrections stay legible next to the guesses that prompted them.
 
-Last revised 2026-09-04. Three of the items this file listed as outstanding have
-since landed: **the strafing pass for fighters** (`AirToGround` at `0x412710`,
-`TOTALA-EXE-MISSIONS.md` §5 — ported and gated to ground targets, since a
-dogfight is a different mission), **what a repair pad does once an aircraft has
-landed on it** (entry 22 below), and **TA's Permanent and Circular sight modes**
-(entry 23, now selectable from the skirmish screen). Two more subjects grew
-their own documents in the meantime: the shaded unit rasterizer in
+Last revised 2026-09-15, the day the last three entries were read. What had been
+the top three before them -- the corpse level and its `featuredead` walk,
+aircraft leaving no wreck at all, and the exact `PALETTE.SHD` lookup -- had
+already landed, as had `AirToAir` and `maneuverleashlength`. Two subjects grew
+their own documents along the way: the shaded unit rasterizer in
 `TOTALA-EXE-SHADING.md` and wrecks in `TOTALA-EXE-WRECKS.md`.
+
+**The ranked list is now empty.** All three of the entries that were left on
+2026-09-15 -- the veterancy reload term (#50), the death causes (#51) and the
+`SELFREPAIR` mission (#52) -- were read and closed that day. What each turned
+into is below.
 
 ## What is left, ranked
 
-Almost nothing here is now "go and read the binary". The list has changed shape:
-what remains is mostly **decoded and unported**, where the reading is done and
-the cost is implementation and play-testing. Ranked by player-visible impact
-over effort, as before.
+Nothing. The file stays because the record of what was asked, what it turned
+out to be, and what it got wrong is the useful part; the next entry should be
+appended here when somebody finds one.
 
-1. **The corpse level, and `unit+0xF7` with it.** The largest visible gap of the
-   lot, and the only entry that still contains something genuinely *unknown*.
-   RWE runs `Killed` with a hard-coded severity of 50 and discards the
-   `corpsetype` the script writes back, so it always spawns the level-one wreck;
-   the original derives the severity from the overkill and then walks the
-   `featuredead` chain (`0x486379`–`0x4863AC`). Done properly, a ship or a
-   hovercraft blown apart hard leaves **nothing** and a land unit leaves its
-   `_heap` — a difference in every game, and a bigger one than the sink that
-   prompted the decode. The severity formula is `TOTALA-EXE-WRECKS.md` §22; its
-   second term, `unit+0xF7`, is still unidentified, and that is the piece to go
-   and find.
+## What was on that list, and where it went
 
-   **Update, 2026-09-08.** The severity and the corpse level are both carried in
-   the `0x0c` death record of a `.tad` demo, so 60,075 real deaths are now
-   available as evidence — see the new section in `TOTALA-EXE-WRECKS.md`. Three
-   things came out of it. §22's reading of the death causes is confirmed without
-   a single exception (causes 4, 5 and 9 always leave nothing; cause 7 always
-   forces the wreck). The stock scripts' thresholds are pinned at the boundary:
-   level 2 from severity 26 and level 3 from severity 51. And the severity
-   really is the overkill term — median 100 for a unit killed with no prior
-   damage, 15 for one that took ten hits or more. That is a **check on the
-   port**, not a substitute for it, and it does *not* identify `unit+0xF7`: the
-   term is additive inside the same clamp, so nothing outside the binary can
-   separate it from the overkill without `maxdamage`. Finding its writer is
-   still the piece to go and find.
-2. **Aircraft leave no wreck at all.** Every one of the thirty aircraft FBIs
-   omits `Corpse`, so in the original a shot-down aircraft leaves nothing over
-   land or water at any severity. RWE spawns one anyway. Decoded, trivial to
-   port, and it is only ranked below the severity because it falls out of the
-   same change.
-3. **The exact `PALETTE.SHD` lookup.** Decoded in full and specified in
-   `TOTALA-EXE-SHADING.md`, with `tools/exe/shading/shdgen.py` regenerating the
-   shipped table byte-for-byte from the palette, which is what pins its layout.
-   The table stores palette *indices* from a nearest-neighbour search, so
-   brightening saturates toward white at the top of each ramp rather than
-   scaling and output luminance is not even monotone in the row; RWE's fitted
-   two-segment curve follows the measured mean to about 0.03 but cannot
-   reproduce per-texel behaviour. Reproducing it means carrying each texel's
-   palette index in a second single-channel atlas and sampling a 32×256 lookup.
-   No further reading required — this is an implementation job.
-4. **`AirToAir`, `0x412D40`.** Decoded for completeness in
-   `TOTALA-EXE-MISSIONS.md` §7 and unported: a fighter chasing another aircraft
-   should hop around it in twenty-unit steps and push `VTOL_EVADE` to break off.
-   Air targets currently keep the generic pattern, which is closer than the
-   strafing overshoot would be, so this is a refinement rather than a fault.
-5. **`maneuverleashlength`.** Parsed but not enforced. `WORD def+0x214`, read at
-   `0x4393A9`, `0x43B311`, `0x43B60F`; 106 units set it, at 640 or 1280. It is
-   the distance from where the unit was *standing when ordered* at which any
-   mission aborts — not a radius, a plausible reading the decode disproves. See
-   §A.
-6. **The veterancy reload term** at `0x49E468`, which scales `reloadtime` by
-   both the firer's veterancy and its damage. Decoded, not ported; it belongs
-   with whatever picks up the rest of veterancy. (Entry 11.)
-7. **The `"SELFREPAIR"` mission** pushed at `0x411ECE`. RWE's repair pads mend a
-   landed damaged aircraft now, but by nanolathing it with the pad's own build
-   rate rather than by whatever that mission does. Worth reading before anyone
-   claims the pads match.
-8. **Death causes 4, 5, 7 and 9** are decoded as a set and not named
-   individually. Cause 7 both forces a wreck and suppresses the burning plume,
-   so naming it would settle what "a wreck that does not burn on land" actually
-   is. (`TOTALA-EXE-WRECKS.md` loose ends.)
+- **The `"SELFREPAIR"` mission.** Closed 2026-09-15, fork issue #52. It is
+  pushed by `VTOL_Landing` at `0x411ECE` onto the *aircraft's* order list once
+  it has landed, provided the pad is `isairbase`, `builder` and finished; it is
+  row 20 of the **ground** table (`0x4FC490`), handler `0x402430`, the two
+  tables being merged at startup. Its work state runs every tick off the pad's
+  WorkerTime and hands over to `0x41BD10` -- which is not the pad's routine at
+  all but *the* repair tick, with five callers. That is where the entry paid
+  off: the rate and the cost are both clamped from **above** at one
+  (`0x41BD87`, `0x41BD97`), so every repairer in the game mends exactly one hit
+  point a tick and pays one energy for it whatever it is mending, and repair
+  scales with the number of repairers rather than their worker time. RWE had a
+  lower clamp where the original has an upper one -- forty hit points a tick on
+  a dragon's tooth instead of one, 403 of 2080 repairer/target pairs in the
+  shipped data differing -- and believed repair was free, which it is not
+  (`0x401180`, energy, refused outright while the repairer owes energy). Both
+  ported; §94 and `sim/repair.test.cpp`.
+
+- **The death causes, named one at a time.** Closed 2026-09-15, fork issue #51.
+  The dispatch is `0x486E64`, reached from `0x48687C` on the cause nibble
+  `[victim+0xA] >> 4`, and the recorder is `0x489BB0(attacker, victim, damage,
+  cause, direction)` writing the cause to `unit+0xF5`. All eleven are named in
+  `TOTALA-EXE-WRECKS.md`, "What each death cause is". The one that mattered was
+  **cause 7**, which turns out not to be a situation at all but a unit type:
+  `0x41B9FE` and `0x486167` both test bit 24 of `def+0x241`, which is
+  `isfeature`. So "a wreck that does not burn on land" is the dragon's teeth and
+  the forts -- scenery that happens to be built -- and the wrecks document had
+  already found that same bit from the sinking side without noticing it was the
+  same bit. RWE forces the corpse at level 1 for those now, ahead of the
+  nanoframe rule as the original orders it (`sim/aircraftwreck.test.cpp`). The
+  burning half has nothing to attach to yet: RWE lights a wreck from a
+  `firestarter` weapon rather than lighting a plume as the corpse spawns.
+  **And the same read settled the end-game chart's numbers**, which #50 had
+  deliberately left alone. The player record is `[globals+0x1B63]` on a 331-byte
+  stride, which is what identifies the indexed increments: Losses
+  (`player+0xFE`) goes up on the victim's owner with no test in front of it,
+  Kills (`player+0xFC`, at `0x486906`) behind exactly the two that gate
+  veterancy, reclaim is the one handler that asks who did it, and cause 9 never
+  reaches the table. All ported; see §5. Left open: **cause 8** has three
+  packer call sites and no single meaning yet, and the neutral slot `0xA` has no
+  RWE equivalent.
+
+- **The veterancy reload term at `0x49E468`.** Closed 2026-09-15, fork issue
+  #50, and it turned out this file was a week stale about it: the formula had
+  been ported some time earlier as `computeReloadTicks` in
+  `UnitBehaviorService_util`, with the commander's disintegrator worked by hand
+  in `sim/dgun.test.cpp`. Re-reading the branch confirmed the arithmetic to the
+  instruction. What the entry was really pointing at — "it belongs with whatever
+  picks up the rest of veterancy" — was the *input* to that formula rather than
+  the formula, and that had two faults: RWE credited a kill for friendly fire on
+  a comment asserting the original does too, and credited one for flattening an
+  unfinished nanoframe. The binary does neither (§5). Both fixed, both pinned in
+  `sim/damage.test.cpp`. Still not implemented, and still only a note: target
+  leading past five kills, `0x48A324`.
+- **The corpse level, and `unit+0xF7` with it.** Ported 2026-09-05. The severity
+  is §22's formula with `unit+0xF7` taken as zero, since that term still has no
+  known writer anywhere in the binary, and the level the script writes back is
+  read out of the COB thread and walked along the `featuredead` chain.
+  `sim/aircraftwreck.test.cpp`. The `0x0c` death records of the demo corpus
+  are the check on it (2026-09-08, `TOTALA-EXE-WRECKS.md`, "What 60,075
+  recorded deaths say about the severity"): the stock scripts' rungs sit at
+  severity 26 and 51 exactly, and the severity really is the overkill term.
+  They cannot separate `unit+0xF7` from the overkill, so its writer is still
+  the piece to go and find.
+- **Aircraft leave no wreck at all.** It turned out RWE already did this: every
+  aircraft FBI omits `Corpse`, `readOrDefault` leaves the string empty and
+  `deleteDeadUnits` already skipped it. The entry was wrong about RWE rather
+  than about the exe; the same test file pins both halves so the claim cannot
+  drift back.
+- **The exact `PALETTE.SHD` lookup.** Implemented 2026-09-08. The texel's palette
+  index is carried through the texture atlas in a second single-channel copy and
+  the fragment reads `SHD[row * 256 + texel]` from a 256x32 image of the table.
+  The generator at `0x4BADF0` is transcribed into `src/rwe/ShadeTable.cpp` and
+  reproduces the shipped file byte for byte, so a data set without it gets a
+  real table rather than a curve.
+- **`AirToAir`, `0x412D40`.** Ported 2026-09-05; see `TOTALA-EXE.md` §90 and
+  `sim/dogfight.test.cpp`. The description in this file of hopping around the
+  target in twenty-unit steps was wrong -- that constant is the length of two
+  probe vectors in a facing test.
+- **`maneuverleashlength`.** Enforced from 2026-09-04, for a self-started attack
+  only, which is the original's own rule: `0x43ADC0` passes a leash of zero on
+  the player-order path.
 
 Not on the list, and deliberately: `digger`, `upright` and `norestrict` are
 decoded and left, because all three select between routines or screens RWE does

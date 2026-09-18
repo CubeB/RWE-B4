@@ -80,6 +80,14 @@ namespace rwe
             return sim.tryAddUnit(std::move(unit)).value();
         }
 
+        /** A unit type nothing can finish, so a spawned one is always a nanoframe. */
+        UnitDefinition makeUnfinishableDef(unsigned int hitPoints)
+        {
+            auto d = makeTargetDef(hitPoints);
+            d.buildTime = 100u;
+            return d;
+        }
+
         Projectile makeBlast(PlayerId owner, const SimVector& position, unsigned int damage, SimScalar radius, SimScalar edgeEffectiveness)
         {
             Projectile p{};
@@ -364,6 +372,89 @@ namespace rwe
             sim.getUnitState(id).kills = 25;
             sim.applyDamage(id, 1000, attackerId);
             REQUIRE(damageTaken(sim, id) == 520);
+        }
+    }
+
+    TEST_CASE("what actually earns a unit its veterancy", "[damage]")
+    {
+        // Two tests stand in front of the increment at 0x4869CA, and RWE used
+        // to fail both. A kill counts only if the victim was finished
+        // (0x4869A7 compares its build progress against zero) and only if the
+        // attacker's player differs from the victim's owner (0x4869BA against
+        // the owner byte at victim+0xFF) -- so friendly fire buys nothing, and
+        // neither does flattening a half-built nanoframe.
+        auto script = makeDamageScript();
+        GameSimulation sim(makeDamageTerrain(64, 64), 0u, 0, 0);
+        auto us = addDamagePlayer(sim, "us");
+        auto them = addDamagePlayer(sim, "them");
+        sim.unitDefinitions["target"] = makeTargetDef(100);
+        sim.unitDefinitions["frame"] = makeUnfinishableDef(100);
+        registerDamageModel(sim, "model");
+
+        auto attackerId = spawnDamageUnit(sim, "target", us, SimVector(32_ss, 0_ss, 32_ss), script);
+
+        SECTION("killing an enemy earns one")
+        {
+            auto id = spawnDamageUnit(sim, "target", them, SimVector(0_ss, 0_ss, 0_ss), script);
+            sim.killUnit(id, attackerId);
+            REQUIRE(sim.getUnitState(attackerId).kills == 1);
+        }
+
+        SECTION("killing one of your own earns nothing")
+        {
+            auto id = spawnDamageUnit(sim, "target", us, SimVector(0_ss, 0_ss, 0_ss), script);
+            sim.killUnit(id, attackerId);
+            REQUIRE(sim.getUnitState(attackerId).kills == 0);
+        }
+
+        SECTION("flattening an enemy nanoframe earns nothing")
+        {
+            auto id = spawnDamageUnit(sim, "frame", them, SimVector(0_ss, 0_ss, 0_ss), script);
+            REQUIRE(sim.getUnitState(id).isBeingBuilt(sim.unitDefinitions.at("frame")));
+            sim.killUnit(id, attackerId);
+            REQUIRE(sim.getUnitState(attackerId).kills == 0);
+        }
+
+        SECTION("a unit that dies with nobody to blame earns nobody anything")
+        {
+            auto id = spawnDamageUnit(sim, "target", them, SimVector(0_ss, 0_ss, 0_ss), script);
+            sim.killUnit(id, std::nullopt);
+            REQUIRE(sim.getUnitState(attackerId).kills == 0);
+        }
+
+        SECTION("the player's Kills column is gated by the same two tests")
+        {
+            // The death-cause table at 0x486E64 is decoded now (issue #51):
+            // the weapon entry raises the killer's `player+0xFC` at 0x486906
+            // behind exactly the pair above, so the end-of-game chart counts
+            // neither friendly fire nor flattened frames. This section used to
+            // pin the opposite, as a marker that the question was open.
+            auto friendly = spawnDamageUnit(sim, "target", us, SimVector(0_ss, 0_ss, 0_ss), script);
+            sim.killUnit(friendly, attackerId);
+            REQUIRE(sim.getPlayer(us).unitsKilled == 0);
+
+            auto frame = spawnDamageUnit(sim, "frame", them, SimVector(96_ss, 0_ss, 0_ss), script);
+            sim.killUnit(frame, attackerId);
+            REQUIRE(sim.getPlayer(us).unitsKilled == 0);
+
+            auto enemy = spawnDamageUnit(sim, "target", them, SimVector(192_ss, 0_ss, 0_ss), script);
+            sim.killUnit(enemy, attackerId);
+            REQUIRE(sim.getPlayer(us).unitsKilled == 1);
+        }
+
+        SECTION("but the Losses column counts every death, friendly fire and all")
+        {
+            // The other half of the same entry, and it is not symmetric:
+            // 0x4868C1 raises the victim owner's `player+0xFE` with no tests in
+            // front of it at all. Only reclaim (cause 5) asks who did it, and
+            // only causes 1 to 6 reach the table.
+            auto friendly = spawnDamageUnit(sim, "target", us, SimVector(0_ss, 0_ss, 0_ss), script);
+            sim.killUnit(friendly, attackerId);
+            REQUIRE(sim.getPlayer(us).unitsLost == 1);
+
+            auto frame = spawnDamageUnit(sim, "frame", us, SimVector(96_ss, 0_ss, 0_ss), script);
+            sim.killUnit(frame, attackerId);
+            REQUIRE(sim.getPlayer(us).unitsLost == 2);
         }
     }
 }

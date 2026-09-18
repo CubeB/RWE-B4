@@ -33,12 +33,20 @@ namespace rwe
         static constexpr uint8_t WaterValue = 1u << 5;
 
         /**
-         * Eight bytes, and every field the search wants about a cell is in
-         * them. Worth the narrow types: the open list of a thousand-vertex
-         * search spans a few thousand cells, and a sift step reaches into one
-         * of them at random, so whether the set fits in L1 decides what a sift
-         * costs. The indices are narrow safely -- see the static asserts in
-         * AStarPathFinder, which bound both against the search's own limits.
+         * Twelve bytes, and every field the search wants about a cell is in
+         * them. The narrow stamp and flags are worth keeping: a sift step
+         * reaches into one of these at random, so whether the working set
+         * fits in L1 decides what a sift costs.
+         *
+         * The two indices used to be int16, bounded by a static assert
+         * against a per-search cap of a thousand expansions. That cap is
+         * gone -- a search now runs to completion over as many ticks as it
+         * takes, as the original's does -- and with it the bound. A search
+         * that expands every cell of a 512x512 map closes 262144 vertices and
+         * can hold a frontier far past what an int16 addresses, so both
+         * indices are int32 and the asserts they justified have gone with
+         * them. Four bytes a cell, and the map's grid is the only thing that
+         * bounds a search now.
          */
         struct Cell
         {
@@ -48,9 +56,9 @@ namespace rwe
             uint8_t flags{0};
             uint8_t unused{0};
             /** Position in the open heap, or -1 when this cell is not open. */
-            int16_t openIndex{-1};
+            int32_t openIndex{-1};
             /** Position in the closed list, or -1 when this cell is not closed. */
-            int16_t closedIndex{-1};
+            int32_t closedIndex{-1};
         };
 
         std::vector<Cell> cells;

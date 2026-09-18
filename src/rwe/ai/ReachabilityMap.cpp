@@ -22,36 +22,65 @@ namespace rwe
 
     void ReachabilityMap::rebuild(const GameSimulation& sim, const UnitDefinition::MovementCollisionInfo& mover, const SimVector& from)
     {
-        auto mc = sim.getAdHocMovementClass(mover);
-        if (!labelledFor || !sameMovementClass(*labelledFor, mc))
-        {
-            labelComponents(sim, mc);
-            labelledFor = mc;
-        }
-        setAnchor(sim, from);
+        rebuildLayer(ground, sim, mover, from);
     }
 
-    void ReachabilityMap::labelComponents(const GameSimulation& sim, const MovementClassDefinition& mc)
+    void ReachabilityMap::rebuildNaval(const GameSimulation& sim, const UnitDefinition::MovementCollisionInfo& mover, const SimVector& from)
+    {
+        rebuildLayer(naval, sim, mover, from);
+    }
+
+    void ReachabilityMap::rebuildCommander(const GameSimulation& sim, const UnitDefinition::MovementCollisionInfo& mover, const SimVector& from)
+    {
+        rebuildLayer(commander, sim, mover, from);
+    }
+
+    void ReachabilityMap::rebuildLayer(Layer& layer, const GameSimulation& sim, const UnitDefinition::MovementCollisionInfo& mover, const SimVector& from) const
+    {
+        auto mc = sim.getAdHocMovementClass(mover);
+        if (!layer.labelledFor || !sameMovementClass(*layer.labelledFor, mc))
+        {
+            labelComponents(layer, sim, mc);
+            layer.labelledFor = mc;
+        }
+        setAnchor(layer, sim, from);
+    }
+
+    void ReachabilityMap::labelComponents(Layer& layer, const GameSimulation& sim, const MovementClassDefinition& mc) const
     {
         const auto& heights = sim.terrain.getHeightMap();
         // A footprint's top-left tile must leave room for the whole footprint.
+        //
+        // This looks like it is one short -- top-left positions run to
+        // getWidth() - footprintX inclusive, so a grid of that width drops
+        // the last one -- and it is not. isGridPointWalkable runs
+        // isMaxSlopeGreaterThan, which calls getSlope on every cell of the
+        // footprint, and getSlope reads past the cell it is handed. Asking
+        // about the very last footprint therefore walks off the heightmap and
+        // trips Grid's own bounds assertion. Tried, on 2026-09-17: widening
+        // these two by one aborted rwe_test outright.
+        //
+        // MapIntel's naval site scan does use an inclusive bound for the same
+        // "leave room for the footprint" problem, which is not a
+        // contradiction: it calls isWaterDepthWithinBounds alone, and that
+        // reads strictly inside the footprint.
         int width = heights.getWidth() - static_cast<int>(mc.footprintX);
         int height = heights.getHeight() - static_cast<int>(mc.footprintZ);
-        walkableTiles = 0;
-        reachableTiles = 0;
-        componentSizes.clear();
-        homeComponents.clear();
-        anchorTile.reset();
+        layer.walkableTiles = 0;
+        layer.reachableTiles = 0;
+        layer.componentSizes.clear();
+        layer.homeComponents.clear();
+        layer.anchorTile.reset();
         if (width <= 0 || height <= 0)
         {
-            components = Grid<int>();
+            layer.components = Grid<int>();
             return;
         }
 
-        components = Grid<int>(width, height, 0);
+        layer.components = Grid<int>(width, height, 0);
         // The grid is written cell by cell in scan order, so go through the
         // backing vector directly rather than paying for a bounds check per tile.
-        auto& cells = components.getVector();
+        auto& cells = layer.components.getVector();
         for (int y = 0; y < height; ++y)
         {
             for (int x = 0; x < width; ++x)
@@ -60,7 +89,7 @@ namespace rwe
                 {
                     // -1 marks "walkable but not yet assigned to a region".
                     cells[(y * width) + x] = -1;
-                    ++walkableTiles;
+                    ++layer.walkableTiles;
                 }
             }
         }
@@ -77,7 +106,7 @@ namespace rwe
                 {
                     continue;
                 }
-                auto id = static_cast<int>(componentSizes.size()) + 1;
+                auto id = static_cast<int>(layer.componentSizes.size()) + 1;
                 int size = 0;
                 open.clear();
                 open.push_back(index);
@@ -104,39 +133,55 @@ namespace rwe
                         open.push_back(n);
                     }
                 }
-                componentSizes.push_back(size);
+                layer.componentSizes.push_back(size);
             }
         }
     }
 
-    void ReachabilityMap::setAnchor(const GameSimulation& sim, const SimVector& from)
+    void ReachabilityMap::setAnchor(Layer& layer, const GameSimulation& sim, const SimVector& from) const
     {
-        homeComponents.clear();
-        anchorTile.reset();
-        reachableTiles = 0;
-        if (!isValid())
+        layer.homeComponents.clear();
+        layer.anchorTile.reset();
+        layer.reachableTiles = 0;
+        if (layer.components.getWidth() <= 0)
         {
             return;
         }
 
-        auto width = components.getWidth();
-        auto height = components.getHeight();
+        auto width = layer.components.getWidth();
+        auto height = layer.components.getHeight();
+        // Deliberately NOT footprintOriginTile, though every query below uses
+        // it. Anchors do not all arrive in the convention queries do: the
+        // ground layer is homed on baseAnchor, which is a unit's CENTRE, but
+        // the naval layer is homed on a shipyard site's TOP-LEFT CORNER --
+        // AiPlayerController builds it with heightmapIndexToWorldCorner for
+        // exactly the reason this whole file cares about, that components are
+        // labelled by footprint top-left.
+        //
+        // Subtracting half a footprint here would therefore shift that corner
+        // a SECOND time: three whole tiles for a 6x6 hull. Tried, 2026-09-17 --
+        // it walked the naval anchor off the channel onto dry land, setAnchor
+        // found nothing there and nothing in its four neighbours, homeComponents
+        // came back empty, and the entire map became unreachable to the navy.
+        // It failed "the whole channel becomes home water for a hull" and took
+        // both sea-ferry tests down with it, navalLandingNear refusing every
+        // crossing once the naval layer had no home to probe towards.
         auto start = sim.terrain.worldToHeightmapCoordinate(from);
         if (start.x < 0 || start.y < 0 || start.x >= width || start.y >= height)
         {
             return;
         }
-        anchorTile = start;
+        layer.anchorTile = start;
 
         auto claim = [&](int id) {
-            if (id != 0 && std::find(homeComponents.begin(), homeComponents.end(), id) == homeComponents.end())
+            if (id != 0 && std::find(layer.homeComponents.begin(), layer.homeComponents.end(), id) == layer.homeComponents.end())
             {
-                homeComponents.push_back(id);
-                reachableTiles += componentSizes[static_cast<std::size_t>(id) - 1];
+                layer.homeComponents.push_back(id);
+                layer.reachableTiles += layer.componentSizes[static_cast<std::size_t>(id) - 1];
             }
         };
 
-        auto startId = components.get(start.x, start.y);
+        auto startId = layer.components.get(start.x, start.y);
         if (startId != 0)
         {
             claim(startId);
@@ -146,7 +191,7 @@ namespace rwe
         // The base itself stands on the tile even if the exact tile is not
         // walkable (buildings sit on flat ground, but be lenient): count it,
         // and treat whatever it touches as home.
-        reachableTiles = 1;
+        layer.reachableTiles = 1;
         const Point neighbours[4] = {Point(start.x + 1, start.y), Point(start.x - 1, start.y), Point(start.x, start.y + 1), Point(start.x, start.y - 1)};
         for (const auto& n : neighbours)
         {
@@ -154,40 +199,84 @@ namespace rwe
             {
                 continue;
             }
-            claim(components.get(n.x, n.y));
+            claim(layer.components.get(n.x, n.y));
         }
     }
 
     bool ReachabilityMap::isReachable(const GameSimulation& sim, const SimVector& position) const
     {
-        if (!isValid())
-        {
-            return true;
-        }
-        auto p = sim.terrain.worldToHeightmapCoordinate(position);
-        if (p.x < 0 || p.y < 0 || p.x >= components.getWidth() || p.y >= components.getHeight())
-        {
-            return false;
-        }
-        if (anchorTile && p.x == anchorTile->x && p.y == anchorTile->y)
-        {
-            return true;
-        }
-        auto id = components.get(p.x, p.y);
-        return id != 0 && std::find(homeComponents.begin(), homeComponents.end(), id) != homeComponents.end();
+        return isReachable(ground, sim, position);
     }
 
     bool ReachabilityMap::isWalkable(const GameSimulation& sim, const SimVector& position) const
     {
-        if (!isValid())
+        return isWalkable(ground, sim, position);
+    }
+
+    bool ReachabilityMap::isNavalReachable(const GameSimulation& sim, const SimVector& position) const
+    {
+        return isReachable(naval, sim, position);
+    }
+
+    bool ReachabilityMap::isNavalWalkable(const GameSimulation& sim, const SimVector& position) const
+    {
+        return isWalkable(naval, sim, position);
+    }
+
+    bool ReachabilityMap::isCommanderReachable(const GameSimulation& sim, const SimVector& position) const
+    {
+        return isReachable(commander, sim, position);
+    }
+
+    bool ReachabilityMap::isCommanderWalkable(const GameSimulation& sim, const SimVector& position) const
+    {
+        return isWalkable(commander, sim, position);
+    }
+
+    Point ReachabilityMap::footprintOriginTile(const Layer& layer, const GameSimulation& sim, const SimVector& position) const
+    {
+        // Before the layer has been labelled there is no footprint to offset
+        // by, and the centre's own tile is the only answer available.
+        if (!layer.labelledFor)
+        {
+            return sim.terrain.worldToHeightmapCoordinate(position);
+        }
+        auto halfFootprintX = SimScalar(layer.labelledFor->footprintX * MapTerrain::HeightTileWidthInWorldUnits.value / 2);
+        auto halfFootprintZ = SimScalar(layer.labelledFor->footprintZ * MapTerrain::HeightTileHeightInWorldUnits.value / 2);
+        return sim.terrain.worldToHeightmapCoordinateNearest(
+            SimVector(position.x - halfFootprintX, position.y, position.z - halfFootprintZ));
+    }
+
+    bool ReachabilityMap::isReachable(const Layer& layer, const GameSimulation& sim, const SimVector& position) const
+    {
+        if (layer.components.getWidth() <= 0)
         {
             return true;
         }
-        auto p = sim.terrain.worldToHeightmapCoordinate(position);
-        if (p.x < 0 || p.y < 0 || p.x >= components.getWidth() || p.y >= components.getHeight())
+        auto p = footprintOriginTile(layer, sim, position);
+        if (p.x < 0 || p.y < 0 || p.x >= layer.components.getWidth() || p.y >= layer.components.getHeight())
         {
             return false;
         }
-        return components.get(p.x, p.y) != 0;
+        if (layer.anchorTile && p.x == layer.anchorTile->x && p.y == layer.anchorTile->y)
+        {
+            return true;
+        }
+        auto id = layer.components.get(p.x, p.y);
+        return id != 0 && std::find(layer.homeComponents.begin(), layer.homeComponents.end(), id) != layer.homeComponents.end();
+    }
+
+    bool ReachabilityMap::isWalkable(const Layer& layer, const GameSimulation& sim, const SimVector& position) const
+    {
+        if (layer.components.getWidth() <= 0)
+        {
+            return true;
+        }
+        auto p = footprintOriginTile(layer, sim, position);
+        if (p.x < 0 || p.y < 0 || p.x >= layer.components.getWidth() || p.y >= layer.components.getHeight())
+        {
+            return false;
+        }
+        return layer.components.get(p.x, p.y) != 0;
     }
 }

@@ -4,10 +4,35 @@ in vec2 fragTexCoord;
 in float height;
 in float shadeLevel;
 out vec4 outColor;
+// The building halo's coverage mask, filled as a second render target while
+// this pass draws. It used to be a separate pass over the whole world, which
+// was a second walk of every model's pieces and a second draw call each to
+// recover two things this shader already has in hand: the texel's palette
+// index, which it samples below for the shade lookup, and which surface is in
+// front, which the depth test has already settled. Measured on a 200 v 200
+// battle_test that cost about 740us a frame and 3300 draw calls. Here it is a
+// register write. See worldPost.frag and TOTALA-EXE.md S:101.
+//
+// Red is the palette index. Alpha says what kind of sample it is: 1 for a
+// cached piece of a finished building, the only thing anti-aliased or haloed,
+// 0.7 for a finished building's dont-cache piece, which is neither and is not
+// touched by the units switch, and 0.5 for anything else solid, which is
+// coverage without being a source. Cleared 0 means nothing is there.
+out vec4 outMask;
+// 1.0, 0.7 or 0.5 as above, set per mesh. See RenderService::drawUnitMeshBatch.
+uniform float maskValue;
 
 uniform sampler2D textureSampler;
+// The same atlas again at the same coordinates, one byte a texel: that texel's
+// raw palette index. Nearest-filtered, with a mip chain built by picking a
+// representative index rather than averaging, because the mean of two palette
+// indices names a third colour that is nowhere between them.
+uniform sampler2D paletteIndexSampler;
+// palettes/PALETTE.SHD as a 256x32 image: column t of row r is the colour of
+// SHD[r * 256 + t].
+uniform sampler2D shadeTableSampler;
 uniform float seaLevel;
-uniform bool shade;
+uniform float shadeStrength;
 // How much of its own colour the model keeps where it covers the screen. 1 for
 // everything except a cloaked unit, which the original averages with whatever
 // is behind it. See RenderService::drawUnitMeshBatch.
@@ -15,10 +40,14 @@ uniform float alpha;
 
 const vec3 waterTint = vec3(0.5, 0.5, 1.0);
 const vec3 normalTint = vec3(1.0, 1.0, 1.0);
-// TA lights its models after all. The renderer decoded earlier -- no normals,
-// no sun, texels copied unmodified -- is the one that runs with SHADING
-// switched OFF; the option defaults ON, and 0x458744 picks between two
-// complete rasterizer chains on that one bit. The shaded chain averages the
+
+// TA lights its models after all -- its buildings and features, that is. The
+// renderer decoded earlier -- no normals, no sun, texels copied unmodified --
+// is the one that runs with SHADING switched OFF, and the one every mobile
+// unit gets regardless: 0x4586A0 sends only a building (bmcode 0) to the
+// shaded chain, and only with SHADING on (TOTALA-EXE-SHADING.md S:11). RWE's
+// Shading switch defaults to that, Buildings, and can shade units as well.
+// The shaded chain averages the
 // unit normals of the polygons meeting at a vertex and takes
 //
 //     level = (int)(5.0 * dot(n, (-0.8, 1.0, 0.25))) & 0x1F
@@ -32,52 +61,53 @@ const vec3 normalTint = vec3(1.0, 1.0, 1.0);
 // here interpolated. And the sun vector is not normalised: its length of
 // 1.3048 sets the ramp's width at about thirteen rows rather than thirty-two.
 //
-// PALETTE.SHD's row k remaps each texel to the nearest palette entry to
-// `colour * 0.06875k`, and row 15 is the identity -- the constant the exe
-// hard-codes for a piece the COB has told not to shade. The exact table is a
-// nearest-neighbour remap in a 256-entry palette, which would need each
-// texel's palette index carried through the atlas to reproduce faithfully;
-// that is written up as still to do.
-// The row is the original's, exactly -- see the probe in section 13 of
-// TOTALA-EXE-SHADING.md, which this reproduces primitive for primitive. What
-// a row MEANS is where RWE departs, in three measured steps.
-//
-// First, the table is not the linear `0.06875 * row` its generator suggests.
-// PALETTE.SHD stores palette INDICES from a nearest-neighbour search, so the
-// bright half runs out of palette to move to and saturates: measured over the
-// real entries, row 16 lands at 1.07 and row 31 at only 1.55, not 2.13. The
-// two-segment fit below tracks those measurements to within about 0.03 --
-// linear below the identity row, and a much shallower slope above it, which
-// is what stops lit faces blowing out.
-//
-// Second, the original truncates the interpolated row to an integer at every
-// pixel, quantising each gradient into at most thirty-two bands. Leaving it
-// continuous keeps the transition into shadow smooth.
-//
-// Third, its row 0 is pure black, and with the wrap a good deal of a model
-// lands there -- measured against a screenshot of the original, RWE at row 0
-// put 40% of a solar collector's pixels below luminance 8 where the original
-// had 25%, with correspondingly fewer mid-tones. The floor keeps some light
-// in a shadowed face. It is the one number here chosen by eye rather than
-// measured, and it is the one to turn if the shadows want to be deeper.
-const float shadowFloor = 0.25;
-const float identityRow = 15.0;
-const float darkSlope = 0.06875;
-const float litSlope = 0.0325;
-
-float shadeIntensity()
+// What a row MEANS is now the table itself rather than a curve fitted to it.
+// This used to multiply the texel by a 32-entry array of measured brightness
+// ratios, each being the mean of what that row does to every palette entry
+// bright enough to carry one. The mean is the part that could not be right:
+// PALETTE.SHD stores palette INDICES from a nearest-neighbour search, so a row
+// does not scale a colour, it snaps the scaled colour back onto the 256 entries
+// that exist. Entry 250, a pure green, comes back unchanged at every row from
+// 14 to 31 while a mid grey brightens by 80%, and at row 31 fifty-eight of the
+// 256 entries have run out of palette to move into and land on white. No single
+// multiplier reproduces that, which is why the texel's own index is now carried
+// through the atlas and the colour is read straight out of the table.
+vec3 shadeTexel(vec3 unshaded)
 {
-    if (!shade)
+    if (shadeStrength <= 0.0)
     {
-        return 1.0;
+        return unshaded;
     }
 
-    float row = clamp(shadeLevel, 0.0, 31.0);
-    float tableValue = row <= identityRow
-        ? darkSlope * row
-        : (darkSlope * identityRow) + ((row - identityRow) * litSlope);
+    // The original's inner loop entire, 0x4C81A4-0x4C81BD:
+    //
+    //     texel = texture[(v >> 16) * width + (u >> 16)]   ; raw palette index
+    //     row   = shade >> 16                              ; truncated, not rounded
+    //     pixel = PALETTE.SHD[row * 256 + texel]
+    //
+    // One shift, one add, one byte load. Between the shift and the load there
+    // is no second mask, no clamp, no ambient term, no fog and no blend
+    // between neighbouring rows -- verified at the byte level, and the only
+    // mask in the flat-colour filler beside it lands on the colour index
+    // rather than on the row. So each gradient is quantised into whole rows
+    // and a face steps down the table a band at a time; the bands are the
+    // original's look. Both ends of the interpolation are masked rows in
+    // 0..31, so the value cannot leave the table and the clamp here is
+    // against the array bound alone.
+    int row = clamp(int(shadeLevel), 0, 31);
+    int texel = int((texture(paletteIndexSampler, fragTexCoord).r * 255.0) + 0.5);
+    vec3 tableColor = texelFetch(shadeTableSampler, ivec2(texel, row), 0).rgb;
 
-    return shadowFloor + ((1.0 - shadowFloor) * tableValue);
+    // Strength blends the table towards "not shaded at all". At 1.0 -- the
+    // default -- this is the table exactly, row 0 included, which is genuinely
+    // black; the original's is too. Below 1.0 it is the same lookup with its
+    // contrast pulled in around the unshaded colour, an rwe.cfg option for
+    // anyone who wants the model to read more softly than the original draws
+    // it. The unshaded colour is the texture as authored, which is what the
+    // exe hands a piece the COB has said DONT_SHADE on -- near enough the same
+    // thing as its row 15, which is the identity for 232 of the 256 entries
+    // and within 12/255 of it for the rest.
+    return mix(unshaded, tableColor, shadeStrength);
 }
 
 void main(void)
@@ -88,6 +118,7 @@ void main(void)
         discard;
     }
 
-    vec3 lit = vec3(baseColor) * shadeIntensity() * (height > seaLevel ? normalTint : waterTint);
+    vec3 lit = shadeTexel(vec3(baseColor)) * (height > seaLevel ? normalTint : waterTint);
     outColor = vec4(min(lit, vec3(1.0)), alpha);
+    outMask = vec4(texture(paletteIndexSampler, fragTexCoord).r, 0.0, 0.0, maskValue);
 }

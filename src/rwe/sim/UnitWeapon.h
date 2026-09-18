@@ -34,6 +34,21 @@ namespace rwe
             SimAngle lastPitch;
         };
 
+        /**
+         * The aim script has said yes and the weapon is waiting on its
+         * reload. The original keeps this as bit 0 of the slot's flag byte,
+         * with the script's answer beside it at +0x08, and starts no new aim
+         * while the bit is up (0x49E211). The angles the script was sent are
+         * kept so the shot can be checked against them when the reload runs
+         * out. The thread itself is not: a finished thread is deleted on the
+         * next COB pass, so only its answer can outlive the tick it gave it.
+         */
+        struct AimedInfo
+        {
+            SimAngle lastHeading;
+            SimAngle lastPitch;
+        };
+
         struct FireInfo
         {
             SimAngle heading;
@@ -53,7 +68,7 @@ namespace rwe
         /** The target the weapon is currently trying to shoot at. */
         UnitWeaponAttackTarget target;
 
-        using AttackInfo = std::variant<IdleInfo, AimInfo, FireInfo>;
+        using AttackInfo = std::variant<IdleInfo, AimInfo, AimedInfo, FireInfo>;
         AttackInfo attackInfo;
 
         explicit UnitWeaponStateAttacking(const UnitWeaponAttackTarget& target) : target(target)

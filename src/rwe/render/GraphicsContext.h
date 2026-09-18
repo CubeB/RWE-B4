@@ -6,7 +6,9 @@
 #include <rwe/ColorPalette.h>
 #include <rwe/Mesh.h>
 #include <rwe/geometry/CollisionMesh.h>
+#include <rwe/grid/Grid.h>
 #include <rwe/math/Vector3f.h>
+#include <optional>
 #include <rwe/render/FrameBufferHandle.h>
 #include <rwe/render/GlMesh.h>
 #include <rwe/render/RenderBufferHandle.h>
@@ -145,6 +147,12 @@ namespace rwe
         TextureHandle createSingleChannelTexture(unsigned int width, unsigned int height, const unsigned char* image);
 
         /**
+         * The same, with the mip chain supplied rather than generated. Level 0
+         * is first and each level is half the size of the one before it.
+         */
+        TextureHandle createSingleChannelMipMappedTexture(const std::vector<Grid<unsigned char>>& mipLevels);
+
+        /**
          * Replaces a rectangle of a single-channel texture. The image pointer
          * is the whole image, of which the rectangle at (x, y) is uploaded.
          */
@@ -191,6 +199,20 @@ namespace rwe
         /** Subsequent draws reset the stencil to 0 where they land. */
         void useStencilBufferForClears();
         void useStencilBufferAsMask();
+
+        /**
+         * The cut-out bit, for keeping one shadow out of one outline without
+         * touching any other shadow already marked. The stencil's bit 0 says
+         * "shadowed" and bit 1 "inside the outline being cut":
+         * useStencilBufferToMarkCutout sets bit 1 where draws land,
+         * useStencilBufferForWritesOutsideCutout sets bit 0 where they land
+         * and bit 1 is clear, and useStencilBufferToClearCutout clears bit 1
+         * again. Each touches only its own bit.
+         */
+        void useStencilBufferToMarkCutout();
+        void useStencilBufferForWritesOutsideCutout();
+        void useStencilBufferToClearCutout();
+
         void clearStencilBuffer();
         void disableStencilBuffer();
 
@@ -218,6 +240,23 @@ namespace rwe
 
         void bindFrameBuffer(FrameBufferIdentifier frameBuffer);
 
+        /**
+         * The framebuffer that unbindFrameBuffer returns to: the window's
+         * own by default, or a presentation buffer while the frame is being
+         * drawn at a scale (see SceneManager). Scenes never need to know
+         * which, which is the point.
+         */
+        void setPresentationFrameBuffer(std::optional<FrameBufferIdentifier> frameBuffer);
+
+        /**
+         * Copies the colour of `source`, `sourceWidth` by `sourceHeight`
+         * pixels, onto the window's own framebuffer stretched to
+         * `windowWidth` by `windowHeight`, sampling nearest so a whole-number
+         * scale keeps every pixel square. Leaves the window's framebuffer
+         * bound.
+         */
+        void blitFrameBufferToWindow(FrameBufferIdentifier source, int sourceWidth, int sourceHeight, int windowWidth, int windowHeight);
+
         void unbindFrameBuffer();
 
         void enableBlending();
@@ -228,6 +267,7 @@ namespace rwe
 
         void setUniformInt(UniformLocation location, int value);
         void setUniformFloat(UniformLocation location, float value);
+        void setUniformVec2(UniformLocation location, float a, float b);
         void setUniformVec3(UniformLocation location, float a, float b, float c);
         void setUniformVec4(UniformLocation location, float a, float b, float c, float d);
         void setUniformMatrix(UniformLocation location, const Matrix4f& matrix);
@@ -249,10 +289,29 @@ namespace rwe
 
         void bindFrameBufferColorBuffer(TextureIdentifier texture);
 
+        /**
+         * Attaches the building halo's coverage mask as a second render
+         * target, so the passes that draw the world fill it as they go rather
+         * than a second pass re-deriving it. Also disables blending for that
+         * attachment alone, permanently. See worldPost.frag.
+         */
+        void attachFrameBufferMaskBuffer(FrameBufferIdentifier frameBuffer, TextureIdentifier texture);
+
+        /**
+         * Which of those two targets subsequent draws write. Passes that draw
+         * solid world geometry use both; everything else uses one, so a
+         * particle or a flash cannot punch a hole in the coverage.
+         */
+        void useSingleDrawBuffer();
+        void useDualDrawBuffers();
+
         void setActiveTextureSlot0();
         void setActiveTextureSlot1();
+        void setActiveTextureSlot2();
+        void setActiveTextureSlot3();
 
     private:
+        unsigned int presentationFrameBuffer{0};
         ShaderHandle compileShader(GLenum shaderType, const std::string& source);
 
         VboHandle genBuffer();

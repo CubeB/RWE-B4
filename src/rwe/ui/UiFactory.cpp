@@ -1,5 +1,6 @@
 #include "UiFactory.h"
 #include <cctype>
+#include <cstdlib>
 #include <rwe/ui/UiSlider.h>
 #include <rwe/ui/UiTextBox.h>
 #include <algorithm>
@@ -236,6 +237,17 @@ namespace rwe
         if (!backgroundSprite)
         {
             panel->setDrawSolidPlate(true);
+
+            // Not a flat rectangle: the original fills a plate like this with
+            // a 64x64 tile out of commongui.gaf. Which tile depends on where
+            // the dialog is: `BackTile` is the front end's, `igpatch` the one
+            // the in-game interface is filled with, and the scene says which
+            // it wants. A data set without the tile still gets the flat plate
+            // rather than nothing.
+            if (auto tile = textureService->getGuiTexture(name, plateTileName))
+            {
+                panel->setPlateTile((*tile)->sprites.at(0));
+            }
         }
 
         return panel;
@@ -309,6 +321,79 @@ namespace rwe
         }
 
         return button;
+    }
+
+    void UiFactory::replaceStagedButton(UiPanel& panel, const std::string& guiName, const std::string& name, const std::string& artName, const std::vector<std::string>& labels, unsigned int stage)
+    {
+        auto existing = panel.find<UiStagedButton>(name);
+        if (!existing)
+        {
+            return;
+        }
+
+        auto& button = existing->get();
+        auto x = button.getX();
+        auto y = button.getY();
+        auto width = static_cast<int>(button.getWidth());
+        auto height = static_cast<int>(button.getHeight());
+
+        panel.removeChildrenNamed(name);
+
+        auto replacement = createStagedButton(x, y, width, height, guiName, artName, labels, static_cast<unsigned int>(labels.size()));
+        replacement->setName(name);
+        replacement->setStage(stage);
+        panel.appendChild(std::move(replacement));
+    }
+
+    void UiFactory::addStagedButtonBelow(UiPanel& panel, const std::string& guiName, const std::string& artName, const std::string& name, const std::string& anchorName, const std::string& aboveAnchorName, const std::vector<std::string>& labels, unsigned int stage)
+    {
+        // A gadget the GUI data does not have at all, added one row under an
+        // existing one.
+        //
+        // Two things here are deliberate. The position is DERIVED rather than
+        // written down: the row step comes from the gap between the two
+        // gadgets named, so the same call places the button correctly on the
+        // in-game VISUALRT page (rows 44 apart) and the front end's VISUALS
+        // page (rows 68 apart) without either number appearing in the code.
+        //
+        // And it does nothing unless both anchors are present, which is the
+        // guard that matters. The caller loops over every panel of the options
+        // screen, because replaceStagedButton is a no-op on a panel that has
+        // no such gadget -- so an unconditional add put a second copy of this
+        // button on the left-hand PREFS column, floating over the menu
+        // buttons. Requiring the anchors makes this behave the way every other
+        // panel edit here behaves: it applies to the page it belongs on and
+        // ignores the rest.
+        auto anchor = panel.find<UiStagedButton>(anchorName);
+        auto above = panel.find<UiStagedButton>(aboveAnchorName);
+        if (!anchor || !above)
+        {
+            return;
+        }
+
+        // Idempotent: the panels are rebuilt whenever the options screen is
+        // opened, but a second copy would sit invisibly on the first and eat
+        // every other click, so this is worth being certain about.
+        if (panel.find<UiStagedButton>(name))
+        {
+            return;
+        }
+
+        auto& anchorButton = anchor->get();
+        auto rowStep = anchorButton.getY() - above->get().getY();
+
+        auto button = createStagedButton(
+            anchorButton.getX(),
+            anchorButton.getY() + rowStep,
+            static_cast<int>(anchorButton.getWidth()),
+            static_cast<int>(anchorButton.getHeight()),
+            guiName,
+            artName,
+            labels,
+            static_cast<unsigned int>(labels.size()));
+        button->setName(name);
+        button->setStage(stage);
+        panel.appendChild(std::move(button));
     }
 
     std::unique_ptr<UiStagedButton>
@@ -448,6 +533,10 @@ namespace rwe
             button->setBehaviorMode(UiStagedButton::BehaviorMode::Cycle);
         }
 
+        // The original draws a caption's drop shadow only for a gadget whose
+        // attribs carry bit 3 (0x4A59A4, TOTALA-EXE.md S:99).
+        button->setCaptionShadow((entry.common.attribs & GuiButtonAttrib::CaptionShadow) != 0);
+
         if (entry.quickKey)
         {
             button->setQuickKey(convertQuickKeyToSdlk(*entry.quickKey));
@@ -462,6 +551,14 @@ namespace rwe
         }
 
         return button;
+    }
+
+    std::unique_ptr<UiLabel> UiFactory::createLabel(int x, int y, int width, int height, const std::string& text, UiLabel::Alignment alignment)
+    {
+        auto font = textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+        auto label = std::make_unique<UiLabel>(x, y, width, height, text, font);
+        label->setAlignment(alignment);
+        return label;
     }
 
     std::unique_ptr<UiLabel> UiFactory::labelFromGuiEntry(const std::string& /*guiName*/, const GuiEntry& entry)
@@ -493,6 +590,8 @@ namespace rwe
             entry.common.name,
             labels,
             entry.stages.value());
+
+        button->setCaptionShadow((entry.common.attribs & GuiButtonAttrib::CaptionShadow) != 0);
 
         if (entry.quickKey)
         {
@@ -624,6 +723,39 @@ namespace rwe
                 [width, height](const std::shared_ptr<Sprite>& s) {
                     return s->bounds.width() == width && s->bounds.height() == height;
                 });
+
+            // An exact match is the usual case and the one the gui files
+            // were authored for, but not always. BUTTONS0 ships faces at
+            // 16x16 and 80, 96, 112, 120 and 321 by 20, and YESORNO.GUI --
+            // the confirmation the original puts in front of leaving a
+            // battle -- asks for **95** by 20. One pixel narrower than a
+            // face that is right there, and the search walked past it and
+            // fell through to the blank default sprite, so the two buttons
+            // came out as bare text on the plate while EXITMENU next door,
+            // whose buttons are 120x20, wore its art perfectly. So: settle
+            // for the nearest face of the same height, within a few pixels.
+            // Drawn at its own size, which is what the art expects; a pixel
+            // of overhang on a 95-pixel gadget is not visible and a button
+            // with no face on it is.
+            if (it == (*sprites)->sprites.end())
+            {
+                const int tolerance = 8;
+                int bestDistance = tolerance + 1;
+                for (auto candidate = (*sprites)->sprites.begin(); candidate != (*sprites)->sprites.end(); ++candidate)
+                {
+                    if (static_cast<int>((*candidate)->bounds.height()) != height)
+                    {
+                        continue;
+                    }
+
+                    auto distance = std::abs(static_cast<int>((*candidate)->bounds.width()) - width);
+                    if (distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        it = candidate;
+                    }
+                }
+            }
 
             if (it != (*sprites)->sprites.end())
             {

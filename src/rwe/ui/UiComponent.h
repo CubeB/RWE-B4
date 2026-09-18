@@ -7,6 +7,7 @@
 #include <rwe/observable/Subject.h>
 #include <rwe/observable/Subscription.h>
 #include <rwe/ui/events.h>
+#include <string>
 #include <vector>
 
 namespace rwe
@@ -44,12 +45,38 @@ namespace rwe
 
         virtual ~UiComponent();
 
+        /**
+         * Hands every stored subscription back and forgets it. Idempotent, and
+         * ~UiComponent calls it, so a component with no subjects of its own
+         * need do nothing.
+         *
+         * A component that *owns* a Subject must call this in its own
+         * destructor. ~UiComponent is the base's, and a base destructor runs
+         * after the derived class's members are already gone -- so a
+         * subscription to one of those members would be handed back to a
+         * destroyed Subject, and Subject::unsubscribe walks and erases a
+         * vector that no longer exists. This is the mirror image of the rule
+         * in CLAUDE.md: that one is a subscriber outliving nothing and
+         * failing to hand its subscription back, this one is handing it back
+         * too late. Both crash, and both do it a scene later than the mistake.
+         */
+        void releaseSubscriptions();
+
         unsigned int getWidth() { return sizeX; }
 
         unsigned int getHeight() { return sizeY; }
 
         int getX() { return posX; }
         int getY() { return posY; }
+
+        /**
+         * Moves the component. Both rendering and hit testing are expressed
+         * relative to posX/posY -- UiPanel translates the render matrix by
+         * them and subtracts them from incoming mouse events -- so setting
+         * this moves a panel and everything inside it together, which is what
+         * the side panel's F4/Space slide rides on.
+         */
+        void setX(int x) { posX = x; }
 
         virtual void mouseDown(MouseButtonEvent /*event*/) {}
 
@@ -62,6 +89,28 @@ namespace rwe
         virtual void keyDown(KeyEvent /*event*/) {}
 
         virtual void keyUp(KeyEvent /*event*/) {}
+
+        /**
+         * Composed text from the keyboard, whatever layout produced it:
+         * SDL_EVENT_TEXT_INPUT, routed to the focused control the way a key
+         * is. A control that is not typed into ignores it.
+         */
+        virtual void textInput(const std::string& /*text*/) {}
+
+        /**
+         * True for a control that is typed into. While one has the focus it
+         * takes every key its panel is given, so a letter that is also some
+         * button's quick key goes into the text instead of pressing the
+         * button.
+         */
+        virtual bool wantsTextInput() const { return false; }
+
+        /**
+         * True if this control answers to that key wherever the focus is:
+         * the gui files' `quickkey` (TOTALA-EXE.md S:78), the one underlined
+         * in its caption.
+         */
+        virtual bool matchesQuickKey(int /*keyCode*/) const { return false; }
 
         virtual void focus() {}
 

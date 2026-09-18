@@ -2,6 +2,7 @@
 
 #include <rwe/grid/DiscreteRect.h>
 #include <rwe/sim/FeatureId.h>
+#include <rwe/sim/GameTime.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitId.h>
 #include <optional>
@@ -36,6 +37,25 @@ namespace rwe
     {
         AttackTarget target;
         std::optional<AttackLeash> leash;
+
+        /**
+         * Where this attacker's owner last actually saw a unit target.
+         *
+         * An attack order does not follow a unit through the fog: it holds the
+         * last seen position and picks the target up again, moved if it moved,
+         * once the ground is visible once more. See TOTALA-EXE.md S:9's
+         * correction, and resolveAttackTargetPosition for the rule.
+         *
+         * It rides on the order, beside the leash anchor, because that is
+         * where the original keeps a position captured at sight-time
+         * (0x43B330) -- and the order queue is hashed, so it is covered like
+         * any other piece of simulation state.
+         *
+         * Empty for a ground target, which is a place and does not hide, and
+         * for a unit target nobody has seen yet.
+         */
+        std::optional<SimVector> lastSeenPosition;
+
         explicit AttackOrder(UnitId target) : target(target) {}
         explicit AttackOrder(const SimVector& target) : target(target) {}
         AttackOrder(UnitId target, const AttackLeash& leash) : target(target), leash(leash) {}
@@ -194,6 +214,17 @@ namespace rwe
     struct UnloadOrder
     {
         SimVector destination;
+
+        /**
+         * Until when an air transport's unload is parked. When the drop is
+         * refused, VTOL_Unload says "Unable to unload unit" and returns 9,
+         * which parks the mission for rand(30)+30 ticks and then starts it
+         * again from the top (TOTALA-EXE.md S:36). The timer lives on the
+         * order because the original keeps it on the mission, as it does
+         * capture progress.
+         */
+        GameTime parkedUntil{0};
+
         explicit UnloadOrder(const SimVector& destination) : destination(destination) {}
     };
 

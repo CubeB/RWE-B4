@@ -3,6 +3,10 @@
 in vec3 fragTexCoord;
 in vec2 fragWorldPos;
 out vec4 outColor;
+// Coverage for the building halo: the ground is an occluder, never a source.
+// Without it a building standing behind a cliff would be fringed along the
+// cliff line. See unitTexture.frag and worldPost.frag.
+out vec4 outMask;
 
 uniform sampler2DArray textureArraySampler;
 
@@ -46,4 +50,13 @@ void main(void)
     }
 
     outColor = color;
+    // Green flags the ground, and keeps it out of the supersample's box
+    // filter for good. The filter is the original's building anti-aliasing
+    // and the ground was never in it; averaging four reads of a
+    // palette-indexed texture names colours PALETTE.SHD does not contain,
+    // which is a blurred map rather than a smoothed edge. This flag is also
+    // what keeps the map out when the anti-alias-units switch puts everything
+    // else solid back in. Alpha is the occluder level, which is what the halo
+    // reads, and is unchanged.
+    outMask = vec4(0.0, 1.0, 0.0, 0.5);
 }

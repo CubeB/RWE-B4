@@ -56,8 +56,21 @@ int main(int argc, char* argv[])
     }
     auto objects = parse3doObjects(file, 0);
 
+    // Every piece, children included: a unit's root is often a bare "base"
+    // with the whole model hanging off it.
+    std::vector<const _3do::Object*> pending;
     for (const auto& o : objects)
     {
+        pending.push_back(&o);
+    }
+    while (!pending.empty())
+    {
+        const auto& o = *pending.back();
+        pending.pop_back();
+        for (const auto& c : o.children)
+        {
+            pending.push_back(&c);
+        }
         std::cout << "== piece '" << o.name << "'  verts=" << o.vertices.size()
                   << " prims=" << o.primitives.size() << "\n";
 
@@ -96,7 +109,7 @@ int main(int argc, char* argv[])
             {
                 continue;
             }
-            const auto& tex = p.textureName ? *p.textureName : std::string("<none>");
+            const auto& tex = p.textureName ? *p.textureName : (p.colorIndex ? "colour" + std::to_string(*p.colorIndex) : std::string("<none>"));
 
             float meanX = 0.0f;
             std::string rows;

@@ -23,6 +23,21 @@ namespace rwe
             return PlayerUnitCommand(transport, PlayerUnitCommand::IssueOrder(UnloadOrder(at), kind));
         }
 
+        // One UnloadOrder sets down exactly one passenger -- the crane
+        // stows itself between each unit and VTOL_Unload does the same one
+        // hook at a time (UnitBehaviorService::handleUnloadOrder) -- so a
+        // group ferry needs one order per head, not one for the whole
+        // party. firstKind lets a caller reissuing from a clean order queue
+        // send the first Immediate and the rest Queued, exactly as the
+        // matching load commands do.
+        void queueUnloads(std::vector<PlayerCommand>& outCommands, UnitId transport, const SimVector& at, std::size_t count, IssueKind firstKind)
+        {
+            for (std::size_t i = 0; i < std::max<std::size_t>(count, 1); ++i)
+            {
+                outCommands.push_back(unloadCommand(transport, at, i == 0 ? firstKind : IssueKind::Queued));
+            }
+        }
+
         PlayerCommand stopCommand(UnitId unit)
         {
             return PlayerUnitCommand(unit, PlayerUnitCommand::Stop());
@@ -98,8 +113,9 @@ namespace rwe
             {
                 if (carryingAny)
                 {
-                    // Loaded but the unload order got lost: set them down where they were going.
-                    outCommands.push_back(unloadCommand(transportId, ferry.destination, IssueKind::Immediate));
+                    // Loaded but the unload order got lost: set them all down
+                    // where they were going, one order per head aboard.
+                    queueUnloads(outCommands, transportId, ferry.destination, transport.carriedUnits.size(), IssueKind::Immediate);
                 }
                 else if (ferry.loaded)
                 {
@@ -116,7 +132,7 @@ namespace rwe
                     {
                         outCommands.push_back(loadCommand(transportId, ferry.passengers[i], IssueKind::Queued));
                     }
-                    outCommands.push_back(unloadCommand(transportId, ferry.destination, IssueKind::Queued));
+                    queueUnloads(outCommands, transportId, ferry.destination, ferry.passengers.size(), IssueKind::Queued);
                 }
             }
 
@@ -167,18 +183,108 @@ namespace rwe
         for (int step = 4; step <= 12; ++step)
         {
             auto candidate = target + (direction * SimScalar(static_cast<float>(step) * 48.0f));
-            if (candidate.x < 0_ss || candidate.z < 0_ss || candidate.x >= sim.terrain.getWidthInWorldUnits() || candidate.z >= sim.terrain.getHeightInWorldUnits())
+            // tryGetHeightAt is the terrain's own answer to "is this point on
+            // the map", and it is asked here rather than compared against the
+            // width because world space is CENTRED: x runs from -width/2 to
+            // +width/2. Testing against 0..width, as this did, is a window
+            // shifted by half a map -- and since the walk-back is a ray
+            // leaving a rectangle, the break below meant a target anywhere in
+            // the negative half gave up at its very first step.
+            auto height = sim.terrain.tryGetHeightAt(candidate.x, candidate.z);
+            if (!height)
             {
                 break;
             }
-            candidate.y = sim.terrain.getHeightAt(candidate.x, candidate.z);
+            candidate.y = *height;
             if (candidate.y >= sim.terrain.getSeaLevel() && reachability.isWalkable(sim, candidate))
             {
                 return candidate;
             }
         }
-        SimVector fallback(target.x, sim.terrain.getHeightAt(target.x, target.z), target.z);
+        // getHeightAt would answer 0 for a point off the map, which on a map
+        // at sea level 0 passes the test below and lands the cargo nowhere.
+        auto fallbackHeight = sim.terrain.tryGetHeightAt(target.x, target.z);
+        if (!fallbackHeight)
+        {
+            return std::nullopt;
+        }
+        SimVector fallback(target.x, *fallbackHeight, target.z);
         if (fallback.y >= sim.terrain.getSeaLevel() && reachability.isWalkable(sim, fallback))
+        {
+            return fallback;
+        }
+        return std::nullopt;
+    }
+
+    std::optional<SimVector> TransportManager::navalLandingNear(const GameSimulation& sim, const ReachabilityMap& reachability, const SimVector& target, const SimVector& from) const
+    {
+        // A ship cannot cross the strip of dry land landingNear would happily
+        // land an Atlas on: the drop point still has to be dry ground the
+        // cargo can stand on, but there also has to be water right beside it
+        // that our own navy -- not just any navy -- can actually reach, or
+        // the hull will approach the shore and stick there, forever out of
+        // crane range. isNavalReachable is what tests "our own": the naval
+        // layer is homed on our base the same way the ground one is.
+        if (!reachability.isNavalValid())
+        {
+            return std::nullopt;
+        }
+
+        auto back = (from - target);
+        back.y = 0_ss;
+        auto direction = back.normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+
+        // Reachability's components are labelled by a footprint's top-left
+        // corner, not by whichever point of it a query happens to land on
+        // (ReachabilityMap::labelComponents), so a probe within one hull
+        // width of the shoreline can read as unreachable even though the
+        // hull could genuinely float there -- its own footprint just could
+        // not START at that exact tile without running onto the bank. A
+        // point safely inside the water, clear of that shoreline margin, is
+        // what actually answers "is there water here our navy can reach";
+        // eight steps covers hulls a good deal wider than anything the game
+        // ships without ever being asked to search past a channel a couple
+        // of hundred units wide.
+        auto hasReachableWaterNearby = [&](const SimVector& dry) {
+            for (float stepsTowardsHome : {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f})
+            {
+                auto probe = dry + (direction * SimScalar(stepsTowardsHome * 48.0f));
+                auto probeHeight = sim.terrain.tryGetHeightAt(probe.x, probe.z);
+                if (!probeHeight)
+                {
+                    continue;
+                }
+                probe.y = *probeHeight;
+                if (probe.y < sim.terrain.getSeaLevel() && reachability.isNavalReachable(sim, probe))
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        for (int step = 4; step <= 12; ++step)
+        {
+            auto candidate = target + (direction * SimScalar(static_cast<float>(step) * 48.0f));
+            // Same bounds reasoning as landingNear above.
+            auto height = sim.terrain.tryGetHeightAt(candidate.x, candidate.z);
+            if (!height)
+            {
+                break;
+            }
+            candidate.y = *height;
+            if (candidate.y >= sim.terrain.getSeaLevel() && reachability.isWalkable(sim, candidate) && hasReachableWaterNearby(candidate))
+            {
+                return candidate;
+            }
+        }
+        auto fallbackHeight = sim.terrain.tryGetHeightAt(target.x, target.z);
+        if (!fallbackHeight)
+        {
+            return std::nullopt;
+        }
+        SimVector fallback(target.x, *fallbackHeight, target.z);
+        if (fallback.y >= sim.terrain.getSeaLevel() && reachability.isWalkable(sim, fallback) && hasReachableWaterNearby(fallback))
         {
             return fallback;
         }
@@ -214,7 +320,14 @@ namespace rwe
 
         // Is there anywhere worth going that needs a lift?
         bool enemyAcrossWater = bb.groundReachabilityValid && bb.attackTarget && !reachability.isReachable(sim, *bb.attackTarget);
+        bb.hasExpansionSite = expansionSite.has_value();
+        bb.enemyAcrossWater = enemyAcrossWater;
         bb.wantsTransport = expansionSite.has_value() || enemyAcrossWater;
+
+        if (enemyAcrossWater && bb.phase == GamePhase::Attack && bb.transports.empty())
+        {
+            LOG_DEBUG << "AI transport: army ferry wanted, but nothing is classified as a transport";
+        }
 
         for (auto transportId : bb.transports)
         {
@@ -225,10 +338,24 @@ namespace rwe
             const auto& transport = sim.getUnitState(transportId);
             if (!transport.orders.empty() || !transport.carriedUnits.empty())
             {
+                if (enemyAcrossWater && bb.phase == GamePhase::Attack)
+                {
+                    LOG_DEBUG << "AI transport " << transportId.value << ": army ferry blocked, transport busy ("
+                              << transport.orders.size() << " orders, " << transport.carriedUnits.size() << " aboard)";
+                }
                 continue;
             }
             const auto& transportDef = sim.unitDefinitions.at(transport.unitType);
-            auto capacity = static_cast<std::size_t>(transportDef.effectiveTransportCapacity());
+            // Mirrors GameSimulation::canLoadUnitIntoTransport, which caps an
+            // air transport at exactly one passenger whatever its FBI says:
+            // the original's VTOL pickup aborts while anything is already
+            // attached, which is why the Atlas's transportcapacity=5 has
+            // never meant five. Booking a second passenger onto an aircraft
+            // got it refused by the simulation and left it marked as a ferry
+            // passenger regardless -- out of the army, and waiting for a lift
+            // that was never coming.
+            auto capacity = static_cast<std::size_t>(
+                transportDef.canFly ? 1u : transportDef.effectiveTransportCapacity());
 
             // Ferrying a builder to fresh metal comes first.
             if (expansionSite && !bb.idleBuilders.empty())
@@ -273,12 +400,41 @@ namespace rwe
             // Otherwise, carry the army over to an enemy it cannot walk to.
             if (enemyAcrossWater && bb.phase == GamePhase::Attack && bb.baseAnchor)
             {
-                auto landing = landingNear(sim, reachability, *bb.attackTarget, *bb.baseAnchor);
+                auto landing = transportDef.canFly
+                    ? landingNear(sim, reachability, *bb.attackTarget, *bb.baseAnchor)
+                    : navalLandingNear(sim, reachability, *bb.attackTarget, *bb.baseAnchor);
                 if (!landing)
                 {
+                    LOG_DEBUG << "AI transport " << transportId.value << ": army ferry blocked, no landing near "
+                              << static_cast<int>(bb.attackTarget->x.value) << "," << static_cast<int>(bb.attackTarget->z.value)
+                              << (transportDef.canFly ? " (air)" : " (sea)");
                     continue;
                 }
                 std::vector<UnitId> passengers;
+                // Why each candidate was turned away, counted so the blocked
+                // message below can name the gate rather than only the tally.
+                // Measured on Hundred Isles, sixteen combat units were refused
+                // against a capacity of twenty, 152 times in ten games, and
+                // which of these gates did it could not be told from the log
+                // at all -- the same silent gap every other blocked path in
+                // this file already avoids by saying what stopped it.
+                int refusedScout = 0;
+                int refusedCarried = 0;
+                int refusedUnreachable = 0;
+                int refusedBooked = 0;
+                int refusedCantBeTransported = 0;
+                int refusedFootprint = 0;
+                int refusedNeedsWater = 0;
+                // Where the first unreachable candidate was standing. The
+                // refusal counts said the gate; they cannot say WHY it fired,
+                // and the three candidate causes want three different fixes:
+                // the army standing off its own island (the rally point is
+                // 220 units seaward, and a ~360 tile island is only about 300
+                // world units across), the query disagreeing with the
+                // labelling for a position that is genuinely on it, or the
+                // unit sitting in the two-tile margin the components grid
+                // drops by being heightmap-minus-footprint in size.
+                std::optional<SimVector> firstUnreachable;
                 for (auto id : bb.combatUnits)
                 {
                     if (passengers.size() >= capacity)
@@ -287,12 +443,30 @@ namespace rwe
                     }
                     if (bb.scoutUnitId && *bb.scoutUnitId == id)
                     {
+                        ++refusedScout;
                         continue;
                     }
                     const auto& unit = sim.getUnitState(id);
                     const auto& def = sim.unitDefinitions.at(unit.unitType);
-                    if (unit.carriedBy || !reachability.isReachable(sim, unit.position) || bb.ferryPassengers.count(id.value) > 0)
+                    // Split out of one compound condition purely so each can be
+                    // counted; the behaviour is unchanged.
+                    if (unit.carriedBy)
                     {
+                        ++refusedCarried;
+                        continue;
+                    }
+                    if (!reachability.isReachable(sim, unit.position))
+                    {
+                        ++refusedUnreachable;
+                        if (!firstUnreachable)
+                        {
+                            firstUnreachable = unit.position;
+                        }
+                        continue;
+                    }
+                    if (bb.ferryPassengers.count(id.value) > 0)
+                    {
+                        ++refusedBooked;
                         continue;
                     }
                     // A unit the simulation will refuse to load must not be
@@ -302,14 +476,107 @@ namespace rwe
                     {
                         continue;
                     }
-                    if (transportDef.transportSize > 0 && def.transportSize > transportDef.transportSize)
+                    // The size gate is the passenger's FOOTPRINT X against
+                    // transportsize -- that is what
+                    // GameSimulation::canLoadUnitIntoTransport tests, and it
+                    // is how an air transport refuses ships, every one of
+                    // which is wider than transportsize 3. This used to
+                    // compare the passenger's own transportSize field, which
+                    // is 0 for anything that is not itself a transport, so
+                    // the gate passed everything and the simulation did the
+                    // refusing a tick later -- the same shape of bug as the
+                    // water-depth one below.
+                    if (transportDef.transportSize > 0
+                        && sim.getFootprintXZ(def.movementCollisionInfo).first > transportDef.transportSize)
                     {
                         continue;
+                    }
+                    // Mirrors GameSimulation::canLoadUnitIntoTransport: a sea
+                    // or hover transport refuses anything that needs water
+                    // under it. Without this a ship gets a load order the
+                    // simulation declines outright, and the ferry sits
+                    // there -- loaded with nothing -- until it times out.
+                    if (!transportDef.canFly)
+                    {
+                        auto passengerMovement = sim.getAdHocMovementClass(def.movementCollisionInfo);
+                        if (passengerMovement.minWaterDepth > 0)
+                        {
+                            continue;
+                        }
                     }
                     passengers.push_back(id);
                 }
                 if (passengers.empty())
                 {
+                    int factoriesReachable = 0;
+                    for (auto factoryId : bb.factories)
+                    {
+                        if (reachability.isReachable(sim, sim.getUnitState(factoryId).position))
+                        {
+                            ++factoriesReachable;
+                        }
+                    }
+                    LOG_DEBUG << "AI transport " << transportId.value << ": army ferry blocked, no eligible passenger out of "
+                              << bb.combatUnits.size() << " combat units (capacity " << capacity << ")"
+                              << " refused: scout=" << refusedScout
+                              << " carried=" << refusedCarried
+                              << " unreachable=" << refusedUnreachable
+                              << " booked=" << refusedBooked
+                              << " cantBeTransported=" << refusedCantBeTransported
+                              << " footprint=" << refusedFootprint
+                              << " needsWater=" << refusedNeedsWater
+                              << " anchorReachable=" << (bb.baseAnchor ? (reachability.isReachable(sim, *bb.baseAnchor) ? 1 : 0) : -1)
+                              << " anchorAt=" << (bb.baseAnchor ? static_cast<int>(bb.baseAnchor->x.value) : 0)
+                              << "," << (bb.baseAnchor ? static_cast<int>(bb.baseAnchor->z.value) : 0)
+                              << " firstRefusedAt=" << (firstUnreachable ? static_cast<int>(firstUnreachable->x.value) : 0)
+                              << "," << (firstUnreachable ? static_cast<int>(firstUnreachable->z.value) : 0)
+                              // Walkable-but-not-home means the labelling split a
+                              // region the unit demonstrably walked across, which
+                              // points at connectivity (the flood fills 4-way while
+                              // the pathfinder moves octile). Not walkable at all
+                              // means the footprint-origin margin instead. The two
+                              // want different fixes, and the refusal counts cannot
+                              // tell them apart.
+                              << " firstRefusedWalkable=" << (firstUnreachable ? (reachability.isWalkable(sim, *firstUnreachable) ? 1 : 0) : -1)
+                              // How much of our own BASE is on home ground.
+                              //
+                              // Counted across every factory rather than read
+                              // off the first one, because bb.factories is
+                              // "builder, not mobile, not commander" and that
+                              // includes the SHIPYARD -- which floats at
+                              // MinWaterDepth=30 where a land constructor can
+                              // never stand, so a single unreachable factory
+                              // proves nothing at all. The type of the first is
+                              // logged for the same reason.
+                              //
+                              // anchorWalkable is the other half: setAnchor has
+                              // a lenient branch for an anchor tile carrying no
+                              // component, which claims whatever its four
+                              // orthogonal neighbours belong to, and isReachable
+                              // returns true for the anchor tile itself
+                              // regardless. So anchorReachable=1 can be that
+                              // special case firing rather than a healthy home,
+                              // and the claimed component can be a neighbouring
+                              // piece that is not where the base actually is.
+                              << " factories=" << factoriesReachable << "/" << bb.factories.size()
+                              << " firstFactory=" << (bb.factories.empty() ? std::string("-") : sim.getUnitState(bb.factories.front()).unitType)
+                              << " anchorWalkable=" << (bb.baseAnchor ? (reachability.isWalkable(sim, *bb.baseAnchor) ? 1 : 0) : -1)
+                              // The commander wades to depth 100 where the
+                              // constructor the ground layer is labelled for
+                              // stops at 12. If the COMMANDER layer reaches our
+                              // own lab while the ground layer does not, the base
+                              // was built on an island the army can never leave,
+                              // and baseAnchor -- set from homePosition the first
+                              // tick the commander is seen, and never revised --
+                              // is still pointing at the spawn tile.
+                              << " cmdrValid=" << (reachability.isCommanderValid() ? 1 : 0)
+                              << " factoryCmdrReachable=" << (bb.factories.empty() ? -1 : (reachability.isCommanderReachable(sim, sim.getUnitState(bb.factories.front()).position) ? 1 : 0))
+                              // Plain coordinates rather than a distance: anchorAt
+                              // is right there on the same line, and a subtraction
+                              // the reader can do needs no <cmath> here and no
+                              // arithmetic of mine to get wrong.
+                              << " factoryAt=" << (bb.factories.empty() ? 0 : static_cast<int>(sim.getUnitState(bb.factories.front()).position.x.value))
+                              << "," << (bb.factories.empty() ? 0 : static_cast<int>(sim.getUnitState(bb.factories.front()).position.z.value));
                     continue;
                 }
                 Ferry ferry{passengers, *landing, sim.gameTime, false};

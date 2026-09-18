@@ -62,6 +62,10 @@ namespace rwe
             p.energyStalled,
             p.unitsKilled,
             p.unitsLost,
+            p.metalProduced,
+            p.energyProduced,
+            p.metalExcess,
+            p.energyExcess,
             p.desiredMetalConsumptionBuffer,
             p.desiredEnergyConsumptionBuffer,
             p.previousDesiredMetalConsumptionBuffer,
@@ -89,6 +93,9 @@ namespace rwe
             u.navigationState,
             u.behaviourState,
             u.inBuildStance,
+            u.armStowDueTime,
+            u.nanoPointQueriedAt,
+            u.nanoPoint,
             u.yardOpen,
             u.inCollision,
             u.orders,
@@ -139,7 +146,7 @@ namespace rwe
     }
 
     GameHash computeHashOf(const MoveOrder& o) { return computeHashOf(o.destination); }
-    GameHash computeHashOf(const AttackOrder& o) { return combineHashes(o.target, o.leash); }
+    GameHash computeHashOf(const AttackOrder& o) { return combineHashes(o.target, o.leash, o.lastSeenPosition); }
     GameHash computeHashOf(const BuildOrder& o) { return combineHashes(o.unitType, o.position); }
     GameHash computeHashOf(const BuggerOffOrder& o) { return computeHashOf(o.rect); }
     GameHash computeHashOf(const CompleteBuildOrder& o) { return computeHashOf(o.target); }
@@ -156,7 +163,7 @@ namespace rwe
     }
 
     GameHash computeHashOf(const LoadOrder& o) { return computeHashOf(o.target); }
-    GameHash computeHashOf(const UnloadOrder& o) { return computeHashOf(o.destination); }
+    GameHash computeHashOf(const UnloadOrder& o) { return combineHashes(o.destination, o.parkedUntil); }
     GameHash computeHashOf(const DgunOrder& o) { return computeHashOf(o.target); }
     GameHash computeHashOf(const LandOnAirBaseOrder& o) { return computeHashOf(o.target); }
     GameHash computeHashOf(const ResurrectOrder& o) { return computeHashOf(o.target); }
@@ -292,9 +299,9 @@ namespace rwe
             s.status);
     }
 
-    GameHash computeHashOf(const UnitCreationStatusPending&)
+    GameHash computeHashOf(const UnitCreationStatusPending& s)
     {
-        return GameHash(0);
+        return combineHashes(s.attempts, s.nextAttempt);
     }
     GameHash computeHashOf(const UnitCreationStatusDone& s)
     {
@@ -385,6 +392,7 @@ namespace rwe
             simulation.units,
             simulation.projectiles,
             simulation.features,
+            simulation.currentWindVector,
             simulation.featureRegrowthCursor);
     }
 }

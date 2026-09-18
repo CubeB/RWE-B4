@@ -78,6 +78,17 @@ namespace rwe
 
     OtaSchema parseOtaSchema(const TdfBlock& tdf);
 
+    /**
+     * The StartPos<n> special the schema declares for player slot n
+     * (1-based), if it declares one. Maps may leave gaps in the numbering
+     * and campaign schemas usually stop at StartPos1, so a caller must be
+     * ready for nothing to come back.
+     */
+    std::optional<OtaSpecial> findStartPosition(const OtaSchema& schema, int n);
+
+    /** How many of StartPos1 to StartPos10 the schema declares, gaps not counted. */
+    int countStartPositions(const OtaSchema& schema);
+
     OtaRecord parseOta(const TdfBlock& tdf);
 
     OtaRecord parseOtaGlobalHeader(const TdfBlock& tdf);

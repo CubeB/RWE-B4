@@ -156,6 +156,21 @@ namespace rwe
         /** Units this player has lost, by any cause. */
         unsigned int unitsLost{0};
 
+        /**
+         * Everything the player has ever earned, and everything it earned with
+         * nowhere to put it. The end-of-game chart's four middle columns --
+         * Energy Produced, Metal Produced, Excess Energy, Excess Metal -- are
+         * these four, read out of the player record at `player+0xAC`, `+0xB4`,
+         * `+0xCC` and `+0xD4` in the original (0x41DD86-0x41DDBB). Excess is
+         * measured where the original measures it: what the storage cap threw
+         * away at the end of a second, not what a full bar refused to take
+         * during one.
+         */
+        Metal metalProduced{0};
+        Energy energyProduced{0};
+        Metal metalExcess{0};
+        Energy energyExcess{0};
+
         Metal desiredMetalConsumptionBuffer{0};
         Energy desiredEnergyConsumptionBuffer{0};
 
@@ -203,6 +218,17 @@ namespace rwe
      */
     SimVector toMissileDirection(SimAngle heading, SimAngle pitch);
 
+    /**
+     * The map's wind, as a per-tick displacement in world units.
+     *
+     * Ballistic and dropped projectiles have this added to their position
+     * every tick, on top of gravity (TotalA.exe 0x49BD10). `speed` is the raw
+     * OTA figure -- minwindspeed/maxwindspeed, which run into the thousands --
+     * and not a world-unit speed, so the conversion lives in here. Strictly
+     * horizontal: the original never writes the vector's Y word.
+     */
+    SimVector computeWindVector(SimAngle direction, int speed);
+
     struct PathRequest
     {
         UnitId unitId;
@@ -210,6 +236,13 @@ namespace rwe
         bool operator==(const PathRequest& rhs) const;
 
         bool operator!=(const PathRequest& rhs) const;
+    };
+
+    /** Where a carried unit would be set down: the cells it takes, and the point at their centre. */
+    struct UnloadSpot
+    {
+        DiscreteRect footprint;
+        SimVector position;
     };
 
     struct WinStatusWon
@@ -289,9 +322,64 @@ namespace rwe
         UnitId unitId;
         PlayerId victimOwner;
         std::optional<PlayerId> attackerOwner;
+
+        /**
+         * The original's damage cause byte (unit+0xF5): 1 is a weapon hit
+         * and 2 a paralyser. The under-attack voice, sound slot 2, plays
+         * for damage from another player whatever its cause, and for damage
+         * from the unit's own side only when it is a weapon hit
+         * (0x4071BA-0x4071D1). See TOTALA-EXE.md §97.
+         */
+        bool paralyzer{false};
+    };
+
+    /**
+     * A repair job has finished and its unit says "Unit repaired": sound
+     * slot 10, `repair`. The original plays it from both ends of the job --
+     * the repairer when RepairUnit or VTOL_RepairUnit completes, and the
+     * aircraft itself when SELFREPAIR (0x402491) or VTOL_GetRepaired
+     * (0x415298) sees its hit points reach the maximum on a pad. See
+     * TOTALA-EXE.md §97.
+     *
+     * Emitted for the scene, and never hashed.
+     */
+    struct UnitRepairedEvent
+    {
+        UnitId unitId;
+    };
+
+    /**
+     * An order the unit cannot carry out, with the caption the original
+     * prints for it: sound slot 7, `cant`, whose table caption is "Cannot
+     * Comply" but which every one of its forty-five call sites overrides
+     * with a message of its own ("That unit is a cloud of vapor and cannot
+     * be captured", "Landing aborted: no pads available", ...). See
+     * TOTALA-EXE.md §97 for the full list.
+     *
+     * Emitted for the scene, and never hashed.
+     */
+    struct UnitCannotComplyEvent
+    {
+        UnitId unitId;
+        std::string message;
     };
 
     struct UnitStartedBuildingEvent
+    {
+        UnitId unitId;
+    };
+
+    /**
+     * A builder's nanolathe has just begun a reclaim or a capture job: the
+     * unit is in reach, the arm is out, and this is the first tick on which
+     * work is actually done. Sound slot 11, `working` -- `reclaim1` for every
+     * construction category in the shipped data -- is played once here, by
+     * all three of the original's Reclaim (0x404C69), ReclaimUnit (0x4048B5)
+     * and Capture (0x404568) handlers alike. See TOTALA-EXE.md §97.
+     *
+     * Emitted for the scene, and never hashed.
+     */
+    struct UnitStartedReclaimingEvent
     {
         UnitId unitId;
     };
@@ -359,6 +447,15 @@ namespace rwe
         UnitId unitId;
         PlayerId previousOwner;
         PlayerId newOwner;
+
+        /**
+         * The unit that took it, where a unit did. Sound slot 16, `capture`,
+         * is played by the captor when the job lands (0x4046cc, the Capture
+         * mission's state 5) -- no shipped category sets the slot, so on the
+         * shipped data it is silent. See TOTALA-EXE.md §97. Empty when the
+         * change of hands came from somewhere other than a capture mission.
+         */
+        std::optional<UnitId> captorUnitId;
     };
 
     /** A feature has just been fully reclaimed and removed. */
@@ -395,9 +492,12 @@ namespace rwe
         UnitDiedEvent,
         UnitDamagedEvent,
         UnitStartedBuildingEvent,
+        UnitStartedReclaimingEvent,
         ProjectileDiedEvent,
         ProjectileDetonatedEvent,
-        UnitCapturedEvent>;
+        UnitCapturedEvent,
+        UnitRepairedEvent,
+        UnitCannotComplyEvent>;
 
 
     struct UnitInfo
@@ -539,6 +639,19 @@ namespace rwe
 
         SimScalar currentWindGenerationFactor{0_ss};
 
+        /**
+         * The wind as a per-tick displacement for ballistic and dropped
+         * projectiles. Rebuilt only when the wind changes; the speed and
+         * direction it came from are not retained anywhere, so this is the
+         * only form of the wind the simulation keeps -- which is why it is
+         * saved and hashed rather than treated as derived state.
+         *
+         * Explicitly zeroed: Vector3x default-constructs its components, so
+         * leaving this bare would put three uninitialised floats into the
+         * simulation and desync the first shot of the game.
+         */
+        SimVector currentWindVector{0_ss, 0_ss, 0_ss};
+
         const int minWindSpeed;
 
         const int maxWindSpeed;
@@ -549,6 +662,17 @@ namespace rwe
          * loaded; unlike the wind it never changes during a game.
          */
         int tidalStrength{0};
+
+        /**
+         * The map's `killmul` and `timemul`, the two numbers the end-of-game
+         * chart's Score column is made of: `score = kills * killmul +
+         * seconds * timemul`, truncated one term at a time and floored at zero
+         * (0x41DDBE-0x41DE11). Map constants like the tide, read out of the OTA
+         * at load. The original defaults killmul to 50 and timemul to nothing,
+         * so by default a game is scored on kills alone.
+         */
+        int killMul{50};
+        int timeMul{0};
 
         GameTime nextWindSpeedChange;
 
@@ -598,6 +722,15 @@ namespace rwe
 
         std::optional<FeatureId> addFeature(FeatureDefinitionId featureType, int heightmapX, int heightmapZ);
 
+        /**
+         * Puts a saved feature back into the slot it was saved from, after
+         * `features.restoreLayout`. Only a load has any business calling
+         * this: it skips the occupancy check and keeps the hit points the
+         * feature arrives with. See VectorMap::Layout for why a load wants
+         * the slot back rather than just the feature.
+         */
+        FeatureId addFeatureInSlot(unsigned int slot, MapFeature&& newFeature);
+
         /** Removes a feature and frees the grid cells it occupied. No-op if the id is stale. */
         void deleteFeature(FeatureId id);
 
@@ -607,7 +740,8 @@ namespace rwe
          * feature turns into a lesser one: burning out into its featureBurnt form.
          * No-op if the id is stale; the replacement is dropped if it does not fit.
          */
-        void replaceFeature(FeatureId id, const std::optional<FeatureDefinitionId>& replacement);
+        /** Removes the feature and stands its replacement, if any, in its place; returns the replacement's id. */
+        std::optional<FeatureId> replaceFeature(FeatureId id, const std::optional<FeatureDefinitionId>& replacement);
 
         /**
          * Applies workAmount of reclaim work to a feature on behalf of a player,
@@ -651,8 +785,12 @@ namespace rwe
          *
          * The work of getting here is counted on the capture order, not here
          * and not on the target -- see CaptureOrder.
+         *
+         * `captorUnitId` names the unit that did it, where a unit did; it
+         * rides along on the event so the scene can play the captor's slot 16
+         * `capture` sound (TOTALA-EXE.md §97) and is otherwise unused.
          */
-        bool captureUnit(UnitId targetId, PlayerId captor);
+        bool captureUnit(UnitId targetId, PlayerId captor, std::optional<UnitId> captorUnitId = std::nullopt);
 
         /** Length of the self-destruct countdown, as in TA. */
         static constexpr unsigned int SelfDestructCountdownTicks = 5 * SimTicksPerSecond;
@@ -865,17 +1003,46 @@ namespace rwe
          */
         bool canBeBuiltAt(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y) const;
 
+        /**
+         * As canBeBuiltAt, but blind to occupants the given player has not
+         * discovered, so that refusing a placement cannot tell them something
+         * is there. The original allows the placement in that case and reports
+         * the failure when the builder arrives -- see TOTALA-EXE.md §27's
+         * correction.
+         *
+         * For the interface only. Nothing in the tick may call this: what it
+         * answers depends on one player's fog, where canBeBuiltAt answers the
+         * same for every peer, and only the latter may decide anything the
+         * simulation does.
+         */
+        bool canBeBuiltAtAsSeenBy(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y, PlayerId player) const;
+
         DiscreteRect computeFootprintRegion(const SimVector& position, unsigned int footprintX, unsigned int footprintZ) const;
 
         DiscreteRect computeFootprintRegion(const SimVector& position, const UnitDefinition::MovementCollisionInfo& collisionInfo) const;
 
         bool anyFeatureOccupies(const DiscreteRect& rect) const;
 
+        /** The grid side of placing a feature, shared by addFeature and addFeatureInSlot. */
+        void writeFeatureToGrids(FeatureId featureId, const FeatureDefinition& featureDefinition, const DiscreteRect& footprintRegion);
+
         bool containsAnyGeoMatch(const Grid<YardMapCell>& yardMap, unsigned int x, unsigned int y) const;
 
         bool isCollisionAt(const DiscreteRect& rect) const;
 
         bool isCollisionAt(const GridRegion& region) const;
+
+        /**
+         * The collision test, but with one building's own cells treated as
+         * clear. An aircraft coming down on a repair pad is not blocked by the
+         * pad: ARMASP's yardmap is sixteen `o` cells and `o` is
+         * `YardMapCell::Ground`, which is impassable, so the ordinary test
+         * refused every touchdown on a pad in the game. The original never
+         * asks, because a landed aircraft is *attached* to the pad (0x48AAC0
+         * links it, 0x47E570 walks the links) rather than standing on cells.
+         * See TOTALA-EXE.md §94.
+         */
+        bool isCollisionAtIgnoringBuilding(const GridRegion& region, UnitId building) const;
 
         bool isCollisionAt(const DiscreteRect& rect, UnitId self) const;
 
@@ -890,6 +1057,11 @@ namespace rwe
         void enableShading(UnitId unitId, const std::string& name);
 
         void disableShading(UnitId unitId, const std::string& name);
+
+        /** The COB cache / dont-cache state of a piece; see UnitMesh::cached. */
+        void enableCaching(UnitId unitId, const std::string& name);
+
+        void disableCaching(UnitId unitId, const std::string& name);
 
         UnitState& getUnitState(UnitId id);
 
@@ -930,6 +1102,16 @@ namespace rwe
          * either unit is missing, dead, or the unit is already carried.
          */
         bool loadUnitIntoTransport(UnitId transportId, UnitId unitId, const std::string& piece);
+
+        /**
+         * Where a carried unit would be set down if let go at position: the
+         * nearest footprint its movement class may stand on, searching
+         * outwards ring by ring up to twelve cells, with the point on the
+         * ground at its centre (on the surface, for a floater or a
+         * hovercraft). Empty if there is nowhere. An air transport asks
+         * this before it descends; unloadUnitFromTransport lets go there.
+         */
+        std::optional<UnloadSpot> findUnloadSpot(UnitId unitId, const SimVector& position) const;
 
         /**
          * Sets a carried unit down on the nearest clear ground to position.
@@ -1002,6 +1184,16 @@ namespace rwe
         bool addResourceDelta(const UnitId& unitId, const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal);
         bool addResourceDelta(const UnitId& unitId, const Energy& energy, const Metal& metal);
 
+        /**
+         * The single-resource request, `0x401180`. A repair asks through this
+         * rather than through `0x4011C0`, the two-resource one the build path
+         * uses, and the difference is which debt is consulted: this one looks
+         * at the unit's **energy** debt alone, so a builder whose owner owes
+         * metal can still mend something. The demand is booked for the display
+         * either way, as it is there. See TOTALA-EXE.md §94.
+         */
+        bool addEnergyRequest(const UnitId& unitId, const Energy& amount);
+
         bool trySetYardOpen(const UnitId& unitId, bool open);
 
         void emitBuggerOff(const UnitId& unitId);
@@ -1057,7 +1249,27 @@ namespace rwe
          */
         void detonateProjectilesInBlast(std::optional<ProjectileId> source, const SimVector& position, SimScalar radius);
 
+        /**
+         * Take a unit off the board with no wreck, no explosion and no
+         * `Killed` script, counting it as a loss for its owner. This is a
+         * nanoframe shot to pieces, which the original records as an ordinary
+         * weapon death (cause 1) -- the owner's Losses go up, but the
+         * attacker's Kills do not, the build-progress test at 0x4869A7
+         * standing in front of that one.
+         */
         void quietlyKillUnit(UnitId unitId);
+
+        /**
+         * The same, for death cause 9: a nanoframe the build tick gave up on
+         * (0x41BC49) or one its builder took back (0x402701). Nobody's
+         * counters move at all -- the dispatch at 0x48688C accepts only causes
+         * 1 to 6 and rejects this one before reaching the table -- because a
+         * frame that was never finished was never a unit.
+         */
+        void removeUnfinishedUnit(UnitId unitId);
+
+        /** What the two above share; the flag is the only thing between them. */
+        void quietlyKillUnit(UnitId unitId, bool countAsLoss);
 
         Matrix4x<SimScalar> getUnitPieceLocalTransform(UnitId unitId, const std::string& pieceName) const;
 
@@ -1169,6 +1381,13 @@ namespace rwe
         void deleteDeadProjectiles();
 
         void spawnNewUnits();
+
+        /**
+         * What to do with a creation request whose site was occupied: count
+         * the attempt, tell the player the first time and again when it gives
+         * up, and say whether to keep waiting or abandon it.
+         */
+        UnitCreationStatus retryBlockedSite(UnitId unitId, const UnitCreationStatusPending& pending);
 
         /**
          * The unit a corpse raises into, if any.

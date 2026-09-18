@@ -34,6 +34,12 @@ namespace rwe
         s.basicTexture.tint = graphics.getUniformLocation(s.basicTexture.handle.get(), "tint");
         s.basicTexture.desaturate = graphics.getUniformLocation(s.basicTexture.handle.get(), "desaturate");
 
+        s.basicTextureMasked.handle = loadShader(graphics, "shaders/basicTexture.vert", "shaders/basicTextureMasked.frag", texturedVertexAttribs);
+        s.basicTextureMasked.mvpMatrix = graphics.getUniformLocation(s.basicTextureMasked.handle.get(), "mvpMatrix");
+        s.basicTextureMasked.tint = graphics.getUniformLocation(s.basicTextureMasked.handle.get(), "tint");
+        s.basicTextureMasked.desaturate = graphics.getUniformLocation(s.basicTextureMasked.handle.get(), "desaturate");
+        s.basicTextureMasked.maskValue = graphics.getUniformLocation(s.basicTextureMasked.handle.get(), "maskValue");
+
         s.mapTerrain.handle = loadShader(graphics, "shaders/mapTerrain.vert", "shaders/mapTerrain.frag", texturedVertexAttribs);
         s.mapTerrain.mvpMatrix = graphics.getUniformLocation(s.mapTerrain.handle.get(), "mvpMatrix");
         s.mapTerrain.fogSampler = graphics.getUniformLocation(s.mapTerrain.handle.get(), "fogSampler");
@@ -44,20 +50,25 @@ namespace rwe
         s.unitTexture.mvpMatrix = graphics.getUniformLocation(s.unitTexture.handle.get(), "mvpMatrix");
         s.unitTexture.modelMatrix = graphics.getUniformLocation(s.unitTexture.handle.get(), "modelMatrix");
         s.unitTexture.seaLevel = graphics.getUniformLocation(s.unitTexture.handle.get(), "seaLevel");
-        s.unitTexture.shade = graphics.getUniformLocation(s.unitTexture.handle.get(), "shade");
+        s.unitTexture.shadeStrength = graphics.getUniformLocation(s.unitTexture.handle.get(), "shadeStrength");
         s.unitTexture.alpha = graphics.getUniformLocation(s.unitTexture.handle.get(), "alpha");
+        s.unitTexture.paletteIndexSampler = graphics.getUniformLocation(s.unitTexture.handle.get(), "paletteIndexSampler");
+        s.unitTexture.shadeTableSampler = graphics.getUniformLocation(s.unitTexture.handle.get(), "shadeTableSampler");
+        s.unitTexture.maskValue = graphics.getUniformLocation(s.unitTexture.handle.get(), "maskValue");
 
         s.unitShadow.handle = loadShader(graphics, "shaders/unitShadow.vert", "shaders/unitShadow.frag", texturedVertexAttribs);
         s.unitShadow.vpMatrix = graphics.getUniformLocation(s.unitShadow.handle.get(), "vpMatrix");
         s.unitShadow.modelMatrix = graphics.getUniformLocation(s.unitShadow.handle.get(), "modelMatrix");
         s.unitShadow.groundHeight = graphics.getUniformLocation(s.unitShadow.handle.get(), "groundHeight");
+        s.unitShadow.projected = graphics.getUniformLocation(s.unitShadow.handle.get(), "projected");
+        s.unitShadow.shadowOriginY = graphics.getUniformLocation(s.unitShadow.handle.get(), "shadowOriginY");
 
         s.unitBuild.handle = loadShader(graphics, "shaders/unitBuild.vert", "shaders/unitBuild.frag", texturedNormalVertexAttribs);
         s.unitBuild.mvpMatrix = graphics.getUniformLocation(s.unitBuild.handle.get(), "mvpMatrix");
         s.unitBuild.unitY = graphics.getUniformLocation(s.unitBuild.handle.get(), "unitY");
         s.unitBuild.modelMatrix = graphics.getUniformLocation(s.unitBuild.handle.get(), "modelMatrix");
         s.unitBuild.seaLevel = graphics.getUniformLocation(s.unitBuild.handle.get(), "seaLevel");
-        s.unitBuild.shade = graphics.getUniformLocation(s.unitBuild.handle.get(), "shade");
+        s.unitBuild.shadeStrength = graphics.getUniformLocation(s.unitBuild.handle.get(), "shadeStrength");
         s.unitBuild.unitHeight = graphics.getUniformLocation(s.unitBuild.handle.get(), "unitHeight");
         s.unitBuild.buildRatio = graphics.getUniformLocation(s.unitBuild.handle.get(), "buildRatio");
         s.unitBuild.aboveMode = graphics.getUniformLocation(s.unitBuild.handle.get(), "aboveMode");
@@ -65,6 +76,8 @@ namespace rwe
         s.unitBuild.belowMode = graphics.getUniformLocation(s.unitBuild.handle.get(), "belowMode");
         s.unitBuild.buildColorA = graphics.getUniformLocation(s.unitBuild.handle.get(), "buildColorA");
         s.unitBuild.buildColorB = graphics.getUniformLocation(s.unitBuild.handle.get(), "buildColorB");
+        s.unitBuild.paletteIndexSampler = graphics.getUniformLocation(s.unitBuild.handle.get(), "paletteIndexSampler");
+        s.unitBuild.shadeTableSampler = graphics.getUniformLocation(s.unitBuild.handle.get(), "shadeTableSampler");
 
         s.flashEffect.handle = loadShader(graphics, "shaders/flashEffect.vert", "shaders/flashEffect.frag", texturedVertexAttribs);
         s.flashEffect.mvpMatrix = graphics.getUniformLocation(s.flashEffect.handle.get(), "mvpMatrix");
@@ -74,6 +87,14 @@ namespace rwe
         s.worldPost.handle = loadShader(graphics, "shaders/worldPost.vert", "shaders/worldPost.frag", texturedVertexAttribs);
         s.worldPost.dodgeMask = graphics.getUniformLocation(s.worldPost.handle.get(), "dodgeMask");
         s.worldPost.gamma = graphics.getUniformLocation(s.worldPost.handle.get(), "gamma");
+        s.worldPost.buildingMask = graphics.getUniformLocation(s.worldPost.handle.get(), "buildingMask");
+        s.worldPost.alphaTable = graphics.getUniformLocation(s.worldPost.handle.get(), "alphaTable");
+        s.worldPost.haloStrength = graphics.getUniformLocation(s.worldPost.handle.get(), "haloStrength");
+        s.worldPost.haloSaturation = graphics.getUniformLocation(s.worldPost.handle.get(), "haloSaturation");
+        s.worldPost.haloRedShift = graphics.getUniformLocation(s.worldPost.handle.get(), "haloRedShift");
+        s.worldPost.selectiveAntiAlias = graphics.getUniformLocation(s.worldPost.handle.get(), "selectiveAntiAlias");
+        s.worldPost.antiAliasUnits = graphics.getUniformLocation(s.worldPost.handle.get(), "antiAliasUnits");
+
 
         return s;
     }

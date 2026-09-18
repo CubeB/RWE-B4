@@ -327,7 +327,7 @@ and a high group the same way. A random permutation produces the two-player case
 with probability about 4e-13.
 
 It is the index TA's FBI loader assigns each unit type and stores at
-`record+0x21e` (`TOTALA-EXE.md` §100). The order is:
+`record+0x21e` (`TOTALA-EXE.md` §106). The order is:
 
 > Take every `units\*.FBI` name the VFS presents once the archives are merged
 > into one directory, sort it, and number from **one**.
@@ -509,7 +509,7 @@ have meant something quite different:
   the endpoint, so both spellings predict the same number for all of them.
 
 What was left was that an airborne builder credits its job once more over its
-life than a ground one does, and [TOTALA-EXE.md](TOTALA-EXE.md) §101 has now
+life than a ground one does, and [TOTALA-EXE.md](TOTALA-EXE.md) §107 has now
 read out where: **the extra increment lands on the creation tick, which gets
 two.**
 `VTOL_MobileBuild` calls the `INBUILDSTANCE` wait and discards its answer, and
@@ -576,7 +576,7 @@ RWE gates build progress on `inBuildStance` (`UnitBehaviorService.cpp`) for a
 factory and a ground builder, so it reproduces this as long as it runs the same
 script. There is no engine gap here. A construction aircraft is exempt, because
 the original exempts it: neither VTOL build mission waits for the stance
-(`TOTALA-EXE.md` §101), which is why an aircraft's overhead is not its script's
+(`TOTALA-EXE.md` §107), which is why an aircraft's overhead is not its script's
 either.
 
 **A lead, not a finding.** Those two rows also pin TA's COB clock, if the
@@ -971,7 +971,7 @@ stamps its events.
 
 **The engine's order.** One tick of `TotalA.exe` is `0x4954BD`: increment the
 game tick, the unit pass `0x48AD30`, the projectile pass `0x49B720`
-(`0x495513`), the feature pass, then the per-player settle (§102 of
+(`0x495513`), the feature pass, then the per-player settle (§108 of
 [TOTALA-EXE.md](TOTALA-EXE.md)). A firing weapon is reached from the per-tick
 weapon update `0x49E1A0` inside the unit pass, and at `0x49D77E` it calls
 `0x49C9C0`, which appends the round to the flat projectile array
@@ -1037,7 +1037,7 @@ residual is expected rather than awkward: `0x489BB0` has callers inside the
 unit pass too (the lathe at `0x41BC49`/`0x41BDC7` among them), so a minority of
 `0x0b`s really are queued before the `0x2c`.
 
-**This also closes §102's either/or.** That section could not tell whether the
+**This also closes §108's either/or.** That section could not tell whether the
 settle runs at internal ticks one short of a multiple of 30 or the demo clock
 is a tick behind the internal one. It is the second, for everything queued
 before the `0x2c`: a settle at the end of internal tick T pays a stalled
@@ -1262,7 +1262,7 @@ naming the last six.
 #### What a stalled settle costs a factory, and where the settles fall
 
 The stall half of the economy oracle. `docs/TOTALA-EXE.md` §23 has the settle
-and §102 the re-reading this rests on. The rule that matters: between settles a
+and §108 the re-reading this rests on. The rule that matters: between settles a
 consumer's only gate is its own debt, only a settle writes debt, and a settle
 that can pay a debt leaves it at exactly zero. So a builder granted anything in
 a second whose settle falls short is refused every tick until a settle pays,
@@ -1297,7 +1297,7 @@ line for line. It measures three things:
    tick marks a settle. 60,588 of the 60,760 samples, from all 86 senders, sit
    within 6 ticks of a multiple of 30 of the demo clock, and the least aligned
    sender still has 208 of 211 there. The few ticks are how far a sender's clock
-   runs behind. Settles are not staggered per player, and §102 found why: every
+   runs behind. Settles are not staggered per player, and §108 found why: every
    player's counter starts on the same tick. Scored per sender at 95%.
 2. **The quantum.** Over factory builds on the 45 cells the build model
    explains, 3,546 land on the model and 2,653 are late. **2,011 of the late ones
@@ -1924,7 +1924,7 @@ Settled by the economy oracle, and inherited by everything after it.
   aim-point model it was 33, and the four it did not predict were skipped with
   a printed reason rather than checked in with their offset written into
   `expectedFlightDelta` -- the same rule that kept airborne builders out of the
-  build fixture until §101 explained their extra tick and RWE reproduced it.
+  build fixture until §107 explained their extra tick and RWE reproduced it.
   That field is for a divergence somebody decided on, never for an
   observation nobody has explained, and the rule still stands for the next
   cell that disagrees.
@@ -2120,7 +2120,7 @@ They catch different things and should not share machinery.
       ~~**The stall half.**~~ Done, through build lateness rather than the
       stockpile path, and "What a stalled settle costs a factory" above says why.
       A stall costs a factory whole seconds on a settle every player shares
-      (`TOTALA-EXE.md` §102, which also struck the staggered-settle entry from
+      (`TOTALA-EXE.md` §108, which also struck the staggered-settle entry from
       §88). `tools/tad-stalltime.py` is the reference: 73 of 77 scored builds
       land on their residue, the four short ones are named exceptions, and the
       same pattern over settles that did not stall predicts 0 of 449.
@@ -2128,7 +2128,7 @@ They catch different things and should not share machinery.
       replayed through `GameSimulation::tick` by three `[economy][corpus]` cases,
       and four mutations each moved exactly the subset their mechanism predicts.
       What stays unassertable is the fractions inside one settle, because the
-      corpus samples one settle in four. §102 also lists ten places RWE's settle
+      corpus samples one settle in four. §108 also lists ten places RWE's settle
       differs from TA's, none changed yet.
    4. ~~**The build-timing oracle.**~~ Done.
       `tad_episodes --emit-build-cpp` writes `src/rwe/sim/tad_build_episodes.h`
@@ -2172,7 +2172,7 @@ They catch different things and should not share machinery.
 
       Airborne builders are still not episodes. Why a construction aircraft
       finishes a tick early is now explained -- its mission runs the build step
-      twice on the nanoframe's tick (`TOTALA-EXE.md` §101) -- and the decision
+      twice on the nanoframe's tick (`TOTALA-EXE.md` §107) -- and the decision
       is to match that in RWE rather than license a `+1`, so they become
       episodes together with that change and not before it.
    5. **The weapon-event oracle.** `0x0d` shot to `0x0b` damage or `0x0c` death

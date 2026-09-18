@@ -67,12 +67,6 @@ namespace rwe
 
         void bitwiseNot();
 
-        // control object pieces
-
-        void enableCaching();
-
-        void disableCaching();
-
 
 
         // script dispatch and return

@@ -54,17 +54,35 @@ three separate ways and each turned out to have a different cause.
 
 ### The per-tick air movement, `0x43D290`
 
-Six steps, in this order. The order matters: bank is fed the *total* change in
+Seven steps, in this order. The order matters: bank is fed the *total* change in
 velocity for the tick, after everything else has had its say.
 
 | Step | Address range | What it does |
 |---|---|---|
 | Drag | `0x43D2FB`–`0x43D38B` | `vel *= 1 − Acceleration/MaxVelocity` |
 | Brake | `0x43D38E`–`0x43D47D` | if horizontal speed > `BrakeRate`, scale it back to `BrakeRate` and re-inject the excess along the nose |
+| Height | `0x43D4D0`–`0x43D502` | `vel.y = clamp(goalY − y, −r, r)`, set outright, where `r` is a quarter of the speed stored at the end of the last tick, or 1 below a speed of 4 |
 | Turn | `0x43D520`–`0x43D585` | heading steps toward the desired heading, limited by `TurnRate` |
-| Profile | `0x43D58B`–`0x43D5EA` | `desiredVel = toTarget × sqrt(2 × Acceleration / max(distance, 8))` |
-| Clamp | `0x43D60A` | the change in velocity is limited to one `Acceleration` |
+| Profile | `0x43D58B`–`0x43D5EA` | `desiredVel = toTarget × sqrt(2 × Acceleration / max(distance, 8))`, in x and z only |
+| Clamp | `0x43D60A` | the horizontal change in velocity is limited to one `Acceleration` |
 | Bank | `0x43D68B`–`0x43D6B3` | roll from the tick's total velocity change |
+
+**Height is not steered.** Found 2026-09-11, and missed by the six-step
+reading above until then. The profile and the clamp are flat: the distance
+is the hypot of x and z (`0x43D51B`), the clamp tests the hypot of the two
+horizontal deltas (`0x43D605`), and the result is added to `vel.x` and
+`vel.z` alone (`0x43D653`, `0x43D65A`). Height has its own step, which
+does not accelerate at all. It takes the goal altitude less the unit's
+height and writes it straight into `vel.y`, clamped to ±`r`. Here `r` is
+`[mover+0x20] >> 2`, a quarter of the `|vel|` that `0x43D688` stores at
+the end of each tick, and a flat 1.0 when that speed is under 4
+(`0x43D4D8`). The step is skipped only for a unit in the off-map bucket
+(`unit+0x82 == [gs+0x142B7]`, `0x43D4C8`). An aircraft therefore closes
+on its altitude as fast as that limit allows and stops on it, and it
+cannot overshoot. RWE had height inside the profile, sharing the one
+`Acceleration` with the turn. An Atlas (0.04) that took its cargo while
+still coming down at a unit a tick, then turned for home, sank fifty
+units under the ground and the sea before it climbed back.
 
 **There is no throttle/brake mode switch.** This is the single most important
 finding in this section. RWE had a two-branch law — full acceleration toward
@@ -131,13 +149,20 @@ the job rather than on the flight path.
 
 ### Deliberately not ported
 
-- **The `BrakeRate` nose re-aim** (`0x43D38E`–`0x43D47D`) is real behaviour and is
-  why the original's aircraft barely crab — speed above `BrakeRate` is stripped
-  and re-injected along the nose, so they fly roughly where they point. It moved
-  the construction-aircraft bank peak by 0.00° in testing, because a
-  construction aircraft never reaches its `BrakeRate` of 1.5, so it was left out
-  rather than risk changing fast aircraft. `brakeRate` is still unused for air
-  units in RWE.
+- ~~**The `BrakeRate` nose re-aim** (`0x43D38E`–`0x43D47D`)~~: ported 2026-09-11
+  (`applyBrakeRateNoseReaim`, in the flying state's velocity update, after drag
+  and before the profile as in the original). It is why the original's aircraft
+  barely crab: speed above `BrakeRate` is stripped and re-injected along the
+  nose, so they fly roughly where they point. It had been left out because it
+  moved the construction-aircraft bank peak by 0.00° (a construction aircraft
+  never reaches its `BrakeRate` of 1.5) and nothing faster had been measured.
+  Measured now with the shipped fighters' numbers: the worst crab angle through
+  a ninety-degree turn drops to a few degrees (`brakerate.test.cpp`). Applied
+  in every air state since B4 #41: `Mover::Update` (`0x43DD20`, §87) hands any
+  `canfly` unit to `0x43D290` whatever its mission, so the gunship ring and the
+  dogfight, which already flew through the flying state's function, had it
+  from the first port, and the attack run, which steers its own heading, now
+  runs the brake step before that swing.
 - **Pitch.** The original also pitches aircraft from the longitudinal component
   of the same accumulator, via `PitchScale` (`def+0x1A6`) into `unit+0x68`. RWE
   has no pitch for units at all and the renderer applies only yaw and roll.
@@ -279,6 +304,171 @@ per unit so two frames side by side are not in step.
 
 **The wireframe is colour B**, per unit. RWE had invented a green → white →
 black cycle for it.
+
+### How the wireframe is drawn
+
+**It is not drawn with lines.** Decoded 2026-09-11. `0x458DD0`, the
+construction display, runs on the unit's cached bitmap whenever that bitmap
+has a height plane and `[unit+0x104]` is non-zero. It computes the two
+colours (`xor 5` at 33 steps a second for A, `xor 9` at 57 for B, both folded
+over palette 160-175), picks the phase from the fraction still to build, runs
+the per-pixel remap `0x458D30`, and then, in **every** phase, calls
+`0x458FA0` with colour B:
+
+```
+458fe1  test byte [piece+0x28],1     ; SHOW, else skip the piece
+459032  sar  16 on x, y, -z          ; each corner, integer
+45904b  sy = -z - (y >> 1)           ; the cabinet projection
+45904f  h  = y + 0x32 (or 0x7d)      ; the height-plane value
+45908a  cmp [piece+0xc],-1           ; a selection plate: start at primitive 1
+459128  call 0x4C0820                ; each primitive, loop closed, colour B
+```
+
+`0x4C0820` is a polygon scan converter. It finds the first corner with the
+least y and the first with the greatest, walks the chain of corners
+**backwards** from the top one to the bottom one to get each row's left end
+and **forwards** to get its right end, both in 16.16 with `+0xFFFF` added to
+the starting x so each row's end is rounded up, over rows from the top corner
+down to and not including the bottom one. It does not fill the row. It calls
+`0x4C0A90` for each row where the right end lies strictly to the right of the
+left, and that routine writes **two pixels**, the left end and the right end,
+each only if the height plane there is not higher than the edge
+(`cmp [plane],h / ja skip`), updating the plane where it writes. With no
+height plane it writes both unconditionally.
+
+So the look follows from the scan conversion rather than from any line
+drawing:
+
+- **A steep edge is a solid line one pixel wide**, one pixel a row.
+- **A shallow edge is a dotted line**: still one pixel a row, so the dots
+  are as far apart as the edge runs across in a row.
+- **A horizontal edge is not drawn at all.** The top and bottom of a wall
+  standing on the ground, which is why the footprint never shows.
+- **A polygon facing away draws nothing.** Its winding on screen is the other
+  way round, so its "right" chain lies to the left of its "left" one and
+  every row fails the test. There is no normal and no culling step; the
+  winding does it.
+- **A row with no pixel between its ends draws nothing either**, so a sliver
+  narrower than a pixel vanishes.
+- **The edge between two polygons is drawn by both**, the first polygon's
+  right end landing in the same column as the second's left end. That
+  includes two polygons lying in one plane, if the edge between them is
+  steep. (RWE outlined a flat face only once for a few hours on 2026-09-11,
+  going by how the original looked in play; the dotted and missing shallow
+  edges were the difference being seen.)
+- **Only the model's own surfaces hide it.** The height test is against the
+  unit's own bitmap, and keeps a pixel only where no higher surface of the
+  model covers it.
+
+RWE runs the same scan conversion (`scanWireframePolygon`,
+`src/rwe/render/WireframeScan.cpp`) on each polygon's corners projected to
+output pixels, with pixel centres standing in for the original's integer
+corners, and draws each pixel it keeps as a one-pixel quad at the depth of
+the edge it came from. The depth buffer, with the quad lifted slightly
+towards the camera, stands in for the height test. The selection plate is
+left out rather than primitive 0, as it is from the model (§58, the 3DO
+selection-plate row).
+
+### The nanoframe's shadow
+
+**What the original decides, decoded 2026-09-11.** The shadow is drawn by the
+unit draw routine `0x459200`, every frame, before the unit's own image, and
+the construction display is applied afterwards to a scratch copy of the
+unit's cached bitmap (`0x4589C0` → `0x458DD0`), never to the bitmap the
+shadow is taken from. The shadow pass tests, in order:
+
+- the master shadow option, bit 2 of the options word `[globals+0x37F06]`;
+- `noshadow`, bit 25 of `def+0x241`;
+- `digger`, bit 30: a copied shadow cut at height 125 (`0x4BA1B0`), for
+  ARMAMB and CORTOAST only;
+- **`unit+0x110` bit 29, which is `bmcode == 0`** — set at unit creation,
+  `0x485A8B`-`0x485A9E`, from `def+0x22F`, and on the "Feature Unit" that
+  draws map features (`0x421FD3`) — so it is "is a building or a feature".
+  That takes the **projected** shadow: built once by `0x45A790` from the
+  pieces that are both shown and cached, each corner at `x + y/4`,
+  `-z - y/4`, and cached on the unit until its bitmap is re-rendered. The
+  water test here (`0x4592D5`-`0x4592F1`) is skipped when `[unit+0xA6]`, the
+  unit's type index (§18), is non-zero -- so it is a test on the **Feature
+  Unit** only: a map feature whose ground (`0x485070`) lies below the sea
+  level byte casts none, and a real building is never tested;
+- anything else — every mobile unit — takes the **copied** shadow if the
+  second option bit (bit 3) is set and it neither hovers nor floats
+  (`def+0x241 & 0x81000`, canhover and floater: so hovercraft and ships have
+  no shadow). The cached bitmap is copied (`0x45A470`), every opaque pixel
+  becomes index 0 (`0x4B96A0`), and it goes down five pixels right at ground
+  level (§100). The cut below the water line (`0x4BA1B0`, at
+  `sea - unitY + 0x32` against the height plane) is in the `0x45949D` block
+  only, the one taken when the bitmap carries a height plane; a finished
+  unit's bitmap has none (`0x437B50`, B4 #40), so a finished unit driving
+  through the shallows keeps its whole silhouette.
+
+**There is no build-progress test anywhere in it.** A nanoframe's cached
+bitmap is the whole model — the display's erasing happens on the copy — and
+a building's projected shadow is built from every shown, cached piece, which
+is all of them from the first frame. So by the code a frame's own shadow is
+there from the start, and the erased parts of the frame, which are written
+transparent (`0x458DA8`), would let it show through.
+
+**In play the shadow is there, but not inside the frame.** Watched on
+2026-09-11 and corrected the same day: a nanoframe casts its whole shadow
+from its first frame, as the code says, but none of it shows inside the
+frame's own outline. The frame is treated as solid for its own shadow the
+whole time, while other units' shadows do show through it. RWE matches that
+(`RenderService::drawUnitShadowMeshBatch`): each nanoframe's shadow is drawn
+after every other shadow, and only outside the whole model's outline. An
+earlier version cut every nanoframe's outline out of the whole stencil,
+which hid other units' shadows behind it too. The version after it held
+the frame's shadow back until the green layer had finished, on a first
+reading of the same observation.
+
+**The three leads, followed (B4 #40, 2026-09-11).** None of them is it.
+
+1. *Is the shadow built from a drawable that is mostly transparent key?*
+   No. The projected shadow `0x45A790` never reads the bitmap. Its extent
+   `0x45A510` walks the 54-byte piece records from `[obj+0x22]`, keeps a
+   piece on `[piece+0x28]` bit 0 (SHOW) and a positive vertex count at
+   `[[piece]+0x4]`, and takes the cached transformed corners from
+   `[piece+0x22]`. It tests no CACHE bit and nothing about construction.
+2. *Is the cache at `[obj+0x14]` left empty during construction?* No. It is
+   filled on demand at `0x4592FE` and `0x45955B` whenever it is null, and
+   cleared only when the bitmap is rebuilt (`0x458905`).
+3. *Does anything clear a nanoframe piece's SHOW bit?* No. The only writers
+   of the piece flag byte are `0x45AF21` (SHOW on, when the piece has three
+   or more vertices) and `0x45AF27`/`0x45AF31`, in the piece set-up.
+
+**What the cached bitmap does carry is a height plane.** The cache renderer
+`0x4586A0` renders a clean, finished unit (`[unit+0x114]` bit 0 clear and
+`float unit+0x104 == 0`) through `0x437B50`, which allocates `w*h + 0x18`
+bytes, and everything else through `0x437BE0`, which allocates `2*w*h +
+0x18`: pixels and a height plane. The construction display needs that plane
+(`0x458DDA` returns at once without one). And the draw routine tests it
+first: at `0x459271`-`0x459282`, a bitmap with a plane goes to the shadow
+block at `0x45949D`, one without to the block at `0x459288`. **Both blocks
+draw the shadow.** They are the same sequence of gates -- option bit 2,
+`noshadow`, the building bit with its water test, the projected shadow, else
+the copied shadow under option bit 3 and the hover/floater exclusion -- and
+differ only in `digger`: with a plane a digger's copy is cut at height
+`0x32 + 0x4B` (`0x4594D8`-`0x459503`), without one it takes the plain copy.
+So the plane is not a gate either; it only changes how a digger is cut.
+
+**So the code and the look agree that the shadow is drawn. What is still
+open is what keeps it out of the frame's outline**, and the listing has
+not settled it. The likeliest place is the blit. Both shadows go through
+`0x4B8500` at `x + 0x85`, before the unit image, and the image is the
+display's scratch copy with its erased pixels written as the transparent
+key (`0x458DA8`). If the frame's own shadow is masked by the whole cached
+bitmap, which is the finished model, or the blitter treats the shadow's
+single index against the frame's key, the shadow would be hidden exactly
+within the model's outline and nowhere else. Other units' shadows would be
+untouched, which is what play shows.
+
+RWE does not wait on that: it cuts the frame's own shadow by the model's
+outline, which is the look. The mobile case the issue asked about goes the
+same way. A unit under construction on a factory pad has a bitmap with a
+plane, takes the `0x45949D` block, and gets the copied shadow like any
+other mobile unit. The copy is of the cached bitmap, not of the display's
+scratch copy, so its shadow is the whole silhouette from the first frame,
+and RWE cuts it by the outline in the same way.
 
 ---
 
@@ -557,9 +747,84 @@ one is not. The `0x7530` cut-out is why the D-gun ignores it.
 
 `unit+0xB8` really is a kill count: it is zeroed at unit creation (`0x485C76`)
 and incremented on the killer at `0x4869CA`, reached through the victim's
-last-damager pointer at `unit+0xF0` which `0x489DBA` records. Note the original
-**declines to credit a kill when the killer and the victim share a player**
-(`0x4869BA`–`0x4869C8`); RWE currently credits friendly fire.
+last-damager pointer at `unit+0xF0` which `0x489DBA` records.
+
+**Two tests stand in front of that increment, and RWE used to fail both.**
+Read out on 2026-09-15 and now ported:
+
+```
+4869a3  test ecx,ecx ; je                ; no known last damager -> nothing
+4869a7  fld [esi+0x104] ; fcomp 0.0      ; the victim must be FINISHED
+4869ba  dl = [esi+0xff]                  ; the victim's own owner
+4869c0  al = [esi+0xf4]                  ; the player recorded with the damager
+4869c6  cmp dl,al ; je                   ; the same player -> nothing
+4869ca  inc WORD [ecx+0xb8]              ; otherwise, one kill
+```
+
+So **friendly fire earns no veterancy at all** -- shooting your own units is not
+a way to farm the damage bonus above or the reload bonus of §21 -- and neither
+does flattening a half-built nanoframe, whose build progress is not yet zero.
+`unit+0xFF` is the owner byte, the same one §8 checks a projectile's owner
+against. Tests in `sim/damage.test.cpp`.
+
+### The player-level counters, and the death-cause dispatch that gates them
+
+Read out on 2026-09-15 (issue #51), and the answer changes what the end-of-game
+chart shows. `0x4647FB` zeroes four words together at `player+0xFC`, `+0xFE`,
+`+0x104` and `+0x106`; `0x466215` reloads the first two from the lobby under the
+literal names `"Kills"` and `"Losses"` (`0x502BB8`, `0x502BB0`), which is what
+fixes their meaning, and §104's chart reads those two. The other two go with the
+"Commanders Killed" / "Commanders Lost" strings, and nothing in the shipped
+interface displays them.
+
+Their increments hang off a jump table. `0x48687C` takes the cause nibble as
+`[pkt+0xA] >> 4`, **rejects anything outside 1 to 6 outright**, and dispatches
+through `0x486E64`:
+
+| Cause | Target | What it does |
+|---|---|---|
+| 1 weapon | `0x4868B3` | the counters, with no question about who fired |
+| 2 paralyser | `0x486A98` | nothing at all |
+| 3 self-destruct | `0x4869F5` | its own copy, behind an ally-matrix test |
+| 4 owner change | `0x486A98` | nothing at all |
+| 5 reclaim | `0x486899` | the same as 1, but only from another player |
+| 6 carrier died | `0x4868B3` | the same as 1 |
+
+The player record is `[globals+0x1B63]` with a stride of **331 bytes**, which is
+what lets the indexed increments and the pointer ones be read as the same
+fields: `0x486906` writes `globals + 331·killer + 0x1C5F`, and `0x1C5F − 0x1B63`
+is `0xFC`, Kills.
+
+So, in order:
+
+```
+4868c1  inc WORD [player+0xfe]          ; the VICTIM's owner: Losses, always
+4868ce  cmp cl,0xa                      ; the recorded killer, vs the neutral slot
+4868d3  fld [esi+0x104] ; fcomp 0.0     ; the victim must be FINISHED
+4868e6  cmp [esi+0xff],cl               ; and must not be the killer's own player
+486906  inc WORD [globals+331*cl+0x1c5f]; the KILLER's Kills
+```
+
+**Losses counts every death, friendly fire and self-inflicted alike** -- the
+increment has nothing standing in front of it -- while **Kills is gated by
+exactly the two tests that gate veterancy above**. The only handler that asks
+who did it is reclaim's: `0x486899` runs the killer-vs-owner test *before*
+falling into the Losses increment, so recycling your own base costs you nothing
+on the chart while having it eaten by an enemy builder does. And because the
+dispatch takes only 1 to 6, a nanoframe that rotted away or was taken back by
+its builder (cause 9) moves no counter at all, though one *shot* to pieces is
+cause 1 and does cost its owner a loss.
+
+The two commander columns come off a string compare at `0x48694B`: the dying
+unit's name (`def+0x20`) against the entry for its owner in a table of 562-byte
+records at `globals+0x37F5F`. On a match, the killer's `+0x104` and the victim's
+`+0x106` both go up.
+
+All of this is ported. `GameSimulation::killUnit` gates `unitsKilled` with the
+veterancy pair, `reclaimUnit` charges a loss only to a victim of somebody else,
+and `removeUnfinishedUnit` is the cause-9 removal that charges nobody anything.
+`sim/damage.test.cpp` and `sim/reclaim.test.cpp`. The neutral slot `0xA` has no
+RWE equivalent and is the one test not reproduced.
 
 Besides damage, more than five kills also earns a unit target leading
 (`0x48A324`), which RWE does not implement.
@@ -666,7 +931,7 @@ against a victim with the episode's own footprint.
 
 ### Which tick a new round first moves on
 
-**The tick it is fired.** The order in one sim step (§102, `0x4954BD`) is: game
+**The tick it is fired.** The order in one sim step (§108, `0x4954BD`) is: game
 tick incremented, unit pass `0x48AD30`, projectile pass `0x49B720`
 (`0x495513`), feature pass, per-player settle. The fire routine runs inside the
 unit pass, reached from the per-tick weapon update `0x49E1A0`, and at
@@ -773,22 +1038,50 @@ have to dive to reach its cruise height.
 
 Ballistic and dropped projectiles have the map's wind vector added to their
 position every tick (`0x49BD10`, the three words at `globals+0x37ECC`), on top
-of gravity. Not ported; recorded because it is easy to miss.
+of gravity. **Ported** — `computeWindVector`, and the `currentWindVector` the
+simulation now retains.
 
 The vector is built once at `0x490CA4`–`0x490D35`: the speed is
 `minwindspeed + rand(maxwindspeed − minwindspeed)` straight out of the OTA, the
 direction is `rand(0x10000)`, and the two components stored are
-`−2·cos(dir)·speed` and `−2·sin(dir)·speed` in the same 16.16 units as a
-position. Smoke uses the same two words, scaled by 8 per tick (§4), which is the
-one place the missing wind is actually conspicuous — every puff in the original
-leans downwind together. Porting it needs a map-wide wind vector RWE does not
-have yet, so the smoke rises straight up for now.
+`−2·sin(dir)·speed` in X and `−2·cos(dir)·speed` in Z, in the same 16.16 units
+as a position.
+
+That is the opposite way round from what this section said until 2026-09-17,
+and the table settles it. X comes from the routine at `0x4b70ef` and Z from
+`0x4b7123`; the two are identical but for the index, which the second advances
+by `0x4000` — a quarter turn. Both read the table at `0x509f00`, whose first
+entry is `0` and which climbs to a peak of `0x2000`, so it is a **sine** table
+of amplitude 8192. The first routine is therefore sin and the second cos, not
+the reverse. (Each multiplies by the speed and then does `shrd …, 0xd`, a `>>13`
+that exactly cancels the 8192, so a routine returns `trig(dir)·speed`.) The
+error was invisible in play — against a uniformly random direction the two
+conventions produce the same distribution — which is why it survived the first
+reading, and why the test that pins it asserts fixed cardinal directions rather
+than sampling.
+
+There is no Y term: the word at `globals+0x37ED0` is never written anywhere in
+the binary, so the wind is strictly horizontal.
+
+At Brain Coral's `maxwindspeed` of 3000 this is 0.092 world units a tick, which
+carries a Crusader shell about six units over its flight against a damage radius
+of 24 — a real nudge rather than a dominant force. Note that nothing compensates
+for it: the original's bombsight does not model the wind either, so a bomber's
+aim drifts very slightly downwind, and `predictBombImpactPoint` matches it by
+also ignoring it.
+
+Smoke uses the same two words, scaled by 8 per tick (§4), and that is still not
+ported — every puff in the original leans downwind together. Nothing about it is
+undecoded now; it wants only the particle code wired to the vector the
+simulation already keeps.
 
 ---
 
 ### Decoded but not ported
 
-- **Wind on ballistic projectiles** (`0x49BD10`) is decoded but not ported.
+- **Smoke drifting with the wind** (§4 — the same two words the projectiles
+  use, scaled by 8 a tick) is decoded but not ported. The wind on the
+  projectiles themselves, which used to head this list, is ported now.
 - **Escalation changes what an expired ballistic round does.** The GOG binary
   tests `burnblow` (bit 23) at `0x49BC67` -- `shr eax,0x17` then `je` past the
   detonation -- and Escalation patches the two bytes to `shr eax,0x1b` and
@@ -1131,6 +1424,38 @@ Deliberately not ported:
 - **`unitsOnly`, `turret`, `lineOfSight`, `minbarrelangle`.** Decoded far enough
   to say they are no part of this decision: `0x49ABB0` never looks at them.
 
+### Correction: an attack order does not follow a target through the fog
+
+Sections 9 and 10 are about *choosing* a target, and that half is fog-correct:
+the acquisition scan asks `0x465AC0` -- RWE's `canSeeUnit` -- so a unit will not
+pick something it cannot see. What neither section says, because it was never
+asked, is what becomes of a target **already** being attacked when it goes out
+of sight.
+
+Tested against the running game: the order **stays on the last position the
+attacker's owner actually saw**. The attacker walks to that spot rather than to
+wherever the target has gone, and when the ground is visible again the order
+picks the target up where it now is -- moved, if it moved while it was dark.
+
+RWE followed the live position the whole time, which is omniscient: an ordered
+attacker walked to where its quarry really was rather than to where it was last
+seen. The last seen position now rides on the order itself, beside the leash
+anchor the original already keeps there (`0x43B330`), and is refreshed only
+while `canSeeUnit` is true.
+
+Deliberately `canSeeUnit` and not `canDetectUnit`: a radar contact is a blip and
+not a target, and the radar picture is recomputed for one player a tick
+(section 18), so it could not feed a deterministic decision even if the original
+wanted it to.
+
+The routine in the exe that does this has not been found, so this is behaviour
+rather than transcription -- the same standing as the placement gate corrected
+in section 27, and the second time a static reading here said "no fog
+involvement" where the running game disagrees. A target that was never seen at
+all keeps the live position rather than being lost, which is the conservative
+half: in play an attack order is issued by clicking something visible, so the
+remembered position is set on the first tick.
+
 ## 10. Weapon target eligibility, `0x49ABB0` in full
 
 §9 gave this routine a sentence. It is the whole of "may this weapon shoot at
@@ -1427,7 +1752,51 @@ resolves the script through `0x4B07C0`, checks the global bit
 `0x10`, the unit id from `unit+0xA8`, the script and its two arguments — and
 hands it to `0x451DF0`, the same emitter `0x49DB4D` uses for a projectile spawn.
 It is the network and replay echo of the call, not a second execution, and it
-does nothing at all in a local game. **Issue #42 is not explained by this.**
+does nothing at all in a local game. **Issue #42 is not explained by this** —
+what does explain it is the next subsection.
+
+### One aim per shot
+
+Issue #42 was real, and it was RWE's. A commander attacking the ground ran
+`AimPrimary` 151 times for 12 shots; the original runs it once a shot. What
+holds it to that is the slot's flag byte at `slot+0x1B` and the script's answer
+beside it at `slot+0x08`:
+
+- **Bit 0 up means aimed, or aiming.** A turret whose bit is up goes straight
+  past the aim call to the fire check (`0x49E211`–`0x49E215`). Otherwise the
+  update works out a heading and pitch, stores them at `slot+0x16` and
+  `slot+0x18`, zeroes the answer (`0x49E2FF`), starts the script with
+  `slot+0x04` as the place to put its answer (`0x49E31C`), and raises the bit
+  (`0x49E3AB`).
+- **Nothing is looked at while the reload runs.** The fire check opens by
+  testing the reload counter at `slot+0x14` and leaves if it is not zero
+  (`0x49E3AE`), so an aimed gun is not rechecked or re-aimed until the reload is
+  done.
+- **The turret handler waits on the answer.** With the bit down or the answer
+  still zero, `0x49D580` returns 0 at `0x49D86D` and changes nothing: the script
+  is still turning, or it said no.
+- **Three things in the handler lower the bit.** The eligibility test failing
+  (`0x49D65B`, which also raises bit 12 of the unit's event word); the fresh
+  angles missing the stored ones by more than tolerance (`0x49D68A` — the drift
+  check, which is what stops a ballistic shot going off on a stale aim); and the
+  round being spawned (`0x49D78B`, which zeroes the answer as well). Losing the
+  target lowers it too (`0x49E1EA`).
+
+So a gun aims, fires, aims once more on the next tick at wherever the target
+stands then, and sits on that aim for the rest of the reload. If the target has
+moved past tolerance by the time the reload runs out, the drift check sends it
+round for a second aim, and that is the only way a shot gets two.
+
+RWE went back to idle whenever a successful aim found the reload unfinished, and
+idle starts a new aim: with a script that answers straight away, one every other
+tick of every reload. It holds the aim now, as `AimedInfo`, which keeps the
+angles and not the thread, because a finished thread is deleted on the next COB
+pass. The drift check is unchanged and runs when the reload does.
+`sim/aimpershot.test.cpp` counts aims and shots with a tally-keeping script on
+ARMCOM and the shipped J7 laser: one aim a shot at the ground, one a shot at a
+unit that stands still, and two for the shot after it moves a hundred units.
+
+An answer of no is where RWE still differs: see §91.
 
 ### The hull is what has to come round
 
@@ -2787,9 +3156,12 @@ too.
 
 ### Not ported
 
-- **`digger`.** RWE has one shadow path and no projection constant to swap, so
-  there is nothing for the flag to select. It has no global shadows option
-  either, which is why `unitCastsShadow` is only ever asked about the unit.
+- **`digger`.** RWE has both shadow passes now (§100), but the constant the
+  flag swaps is not a projection constant at all: 50 and 125 are the height
+  buffer's bias, `height = modelY + (digger ? 125 : 50)`, which
+  `TOTALA-EXE-SHADING.md` §22 reads out of the span filler. RWE has no
+  per-drawable height buffer — it has a real depth buffer — so there is still
+  nothing for the flag to select.
 - **`upright`.** RWE does not conform anything to the ground: `UnitState`
   carries a `roll` for the aircraft bank and no pitch at all. The flag chooses
   between two ground-placement routines neither of which RWE has, so honouring
@@ -3593,12 +3965,29 @@ units in the shipped data, but not the same rule), and gated nothing at all on
 It now builds the list of selected definitions and applies
 `selectionOffersOrderButton`, which is the OR above.
 
+> **Ported, 2026-09-02** ("Buttons can be greyed out, and the order panel
+> greys instead of hiding", `3f1a6c12`). This list used to open with a bullet
+> saying RWE had no disabled state for a `UiStagedButton` and removed a button
+> the selection could not use instead of drawing it dim. It has one now:
+> `UiStagedButton::setEnabled(false)` draws the button's greyed face and makes
+> it ignore every event, `UiFactory` honours a gui file's `grayedout=1`, and
+> `GameScene::applyOrderButtonGating` greys everything and hides only LOAD and
+> BLAST, which is exactly the split above (`0x41A412`, `0x41A471`).
+>
+> **The greyed face is not the original's arithmetic, and does not need to
+> be.** The original darkens the gadget's whole rectangle in place, running it
+> through SHADE row 12 at level -20 — a measured 0.82x on luminance (§99).
+> RWE draws the frame the artists put in the button's own GAF one past the
+> pressed frame; every shipped button carries one, and the factory had been
+> extracting it and throwing it away all along. So the two agree because the
+> artwork was drawn to agree, not because the code does the same sum: what
+> the original computes at run time, the artists had already painted. A mod
+> whose GAF has no such frame gets no dimming at all here, where the original
+> would still have darkened it — the one case where the two can be told
+> apart.
+
 ### Deliberately not ported
 
-- **Greying.** RWE has no disabled state for a `UiStagedButton`, so a button
-  the selection cannot use is removed rather than drawn dim. Recorded here so
-  it is not mistaken for the original's behaviour: the original greys
-  everything except LOAD and BLAST, which it hides because they overlap.
 - **The cloak accumulator's disagreement bug** at `0x41B485`.
 - **`canresurrect`, `wacky` and `selfdestructcountdown`.** No shipped unit
   names any of them and RWE has no resurrect order.
@@ -4078,7 +4467,7 @@ reaches `0x465077`:
 `global+0x38A47` is the game tick counter. `player+0xF0` is pushed thirty ticks
 ahead every time it fires, so the settle at `0x46555A -> 0x401360` runs **once a
 second per player**, on whatever tick each player's counter started at -- which
-§102 finds is the same tick for every player of a game, so in practice they all
+§108 finds is the same tick for every player of a game, so in practice they all
 settle together. The
 gate the call itself sits behind (`0x46554F`, a word at `global+0x39239` that
 must be negative) is initialised to `0xFFFF` at `0x498199` and only ever moved by
@@ -4165,7 +4554,7 @@ reduced rate.
 
 Called as `(builder, target, amount)`. Every mission that lathes passes the same
 amount (`0x402A09`, `0x403E43`, `0x404139`, `0x414235`, `0x414656`); the sixth
-caller, `0x41BCFB`, passes a negative one for nanoframe decay (§101 attributes
+caller, `0x41BCFB`, passes a negative one for nanoframe decay (§107 attributes
 all six):
 
 ```
@@ -4256,13 +4645,13 @@ Two things fall out of that for anyone reading this section:
   `float` in the simulation to close that is very likely a bad trade; see the
   determinism rules in `CLAUDE.md`.
 
-One thing did not fall out, and is now explained in §101: **a construction
+One thing did not fall out, and is now explained in §107: **a construction
 aircraft finishes one tick sooner than the replay allows**, 60 of its 68 builds
 in the Escalation corpus with none faster. It gets two increments on the
 creation tick where a factory gets one: `VTOL_MobileBuild` discards the answer
 of its stance wait, and the wait's wake mask lets a COB event left pending since
 the last `set` run the lathe a second time before the tick ends. The call-site
-list above is also short by one; §101 has all six, attributed to their missions.
+list above is also short by one; §107 has all six, attributed to their missions.
 
 ### What counts as production
 
@@ -4648,6 +5037,66 @@ its movement object's speed word, and treats a unit that is turning on the spot
 with no linear speed as moving (`0x43DA8E` also tests `WORD [mov+0x24]`); RWE
 measures the distance the unit actually covered this tick and calls anything
 under a tenth of a unit stopped.
+
+### What a blast does to a feature, `0x4244B0`
+
+> **Ported, 2026-09-11** (B4 #45). The blast gate in `doProjectileImpact` is
+> `!indestructible` and nothing else; the damage added is the weapon's default
+> damage, unscaled; the feature breaks to its `featuredead` the moment what it
+> has taken reaches its `damage`; the feature reader defaults a missing
+> `damage` to zero; and a feature stood up by the blast in progress is not met
+> again by it. `wreckage.test.cpp` pins each. Not ported: the fire branch
+> below, which RWE still handles with its own chance roll in
+> `tryIgniteFeaturesInRadius`.
+
+The area walkers (`0x455496` from the blast at `0x4554xx`, and `0x49A626`)
+call `0x4244B0(cellRecord, x, z, wdef)` for each map square in the blast. The
+routine loads the globals pointer and falls into `0x4244B6`, which is why no
+call to the latter address exists. In order:
+
+1. `[globals+0x37F2F] & 8` must be set. That word is the console-toggle word
+   (`NoShake` is its bit 4, §"Screen shake"); bit 3 is **`TreeDeath`**
+   (handler `0x416E30`, record at `0x502118`), and the session set-up at
+   `0x430E90` turns it on. `TreeDeath 0` makes every feature immune.
+2. The square must hold a feature: `[cell+0x8]` below `0xFFFB`.
+3. Its definition (`[globals+0x1426F] + index * 0x100`) must not be
+   `indestructible` (`[featdef+0xFE]` bit 9). **That is the whole of the
+   gate.** `blocking`, `reclaimable` and the rest are never read here, so a
+   rock, a bush, a wreck and a scar decal are all fair game.
+4. In a multiplayer session (`0x435100` = 3) a peer that is not the local
+   authority (`[player+0x97]` bit 0 clear) does not apply the damage; it packs
+   `(x, z, wdef+0x10A)` into a type `0xF`/`0x6` message and sends it
+   (`0x450030`, `0x44FDB0`, `0x451BC0`). The rest is the local path.
+5. **Fire first.** If the definition is `flamable` (bit 4), the weapon's
+   `firestarter` byte (`wdef+0x10B`) is non-zero, and the feature is not
+   already burning (`[cell+0xC]` bit 0), the feature is set alight
+   (`0x4233A0`, §"Burning") and takes **no damage**. No chance roll happens
+   here; whatever `firestarter`'s percentage means, it is not tested on the
+   way in.
+6. Otherwise the weapon's default damage, the word at `wdef+0xD4` (the
+   `default` key, parsed at `0x42EF9A`-`0x42EFA9`), is added to what the
+   feature has taken: `[cell+0xA]` for a feature that is not burning, or the
+   burn record's `[+0x26]` (the 48-byte table at `globals+0x1420B`, found by
+   the index in `[cell+0xA]` and checked against `[+0x28]`/`[+0x2A]`) for one
+   that is. There is no distance falloff and no `edgeeffectiveness`; those are
+   for units.
+7. If the total reaches `[featdef+0xEA]`, the definition's `damage`, the
+   feature is removed and its `featuredead` stood up (`0x423550(x, z, 0)`).
+
+**The default `damage` is zero.** The feature parser (`0x422A20`) reads every
+integer key through the integer-with-default helper `0x4C46C0`, passing the
+same register as the default for the whole block, and that register is zeroed
+once at `0x4226F4`. `damage` comes off the stack at `0x422A87` straight into
+`featdef+0xEA`. So the 145 shipped features that omit the key (the `LightScar`
+and `CarScar` decals among them) go on the first hit, and the 378 that say
+`damage=20000` (the `Sl-RockScar` family) take the hit like anything else and
+in practice never fall. RWE's reader used to default the key to 1, which for
+the blast was the same thing and for reclaim work was a floor it did not need.
+
+**On the flag word's other bits**, since they had to be read to find bit 3:
+`Drop` is bit 0, `ShareMetal` bit 1, `0x416E00`'s command bit 2, `TreeDeath`
+bit 3, `NoShake` bit 4, `Clock` bit 6, `0x417030`'s bit 7, `0x417060`'s bit 8,
+`0x417090`'s bit 9, `ShootAll` bit 10.
 
 ## 25. The detection rings on the minimap
 
@@ -5388,6 +5837,27 @@ click handler at `0x498F86` confirms independently:
 498f9f  push 0x509660            ; "oktobuild"
 ```
 
+### Correction: the gate is fog-aware, and this reading was wrong
+
+The passage above says bit 6 decides, and that `0x47D2E0` settles it from the
+map's own occupancy. Tested against the running game, that is **not** the whole
+gate: the original **does** let a building be placed on top of an enemy
+structure that is not in view, and refuses once the structure has been seen.
+
+About two thirds of `0x47D2E0` was traced when the paragraphs above were
+written, and no reference to the explored array of section 2 was found in it,
+which is why the reading came out as "just as fog-blind as RWE". Either the
+untraced span (`0x47D479`-`0x47D800`) consults it, or something upstream of the
+call filters the occupancy the check sees. Whichever it is, the behaviour is
+settled by observation and the mechanism is not.
+
+RWE follows the observed behaviour: the box and the click gate ignore an
+occupant the local player has not discovered, and the build then fails at the
+site with the constructor message, which is the sequence the original shows.
+That test lives on the presentation side -- `canBeBuiltAtAsSeenBy` -- because
+the simulation's own occupancy test has to stay identical on every peer, and
+one player's fog is not.
+
 ### Drawing it, inside the world render at `0x469E0B`
 
 The box is drawn by the world render `0x468CF0` itself, sharing its code with the
@@ -5970,9 +6440,14 @@ In words, a transport may load a unit iff:
 
 The existing partial decode stops at (7); (8) and (9) are new.
 
-Note what is *not* here: no ownership or alliance test (the UI only offers the
-cursor on the player's own units), no `floater`, no `canhover`, no mass, no
-check that the candidate is an aircraft or not.
+Note what is *not* here: no ownership or alliance test, no `floater`, no
+`canhover`, no mass, no check that the candidate is an aircraft or not.
+
+> **Corrected 2026-09-10** (§103). This used to add "(the UI only offers the
+> cursor on the player's own units)", which is not true of the original: none
+> of the five `CanLoadUnit` call sites applies an ownership test either, and
+> the LOAD cursor arm at `0x43E7D3` will hand back `cursorpickup` over an
+> enemy. The own-units rule is RWE's, and is recorded in §88 as such.
 
 ### Why the folklore comes out the way it does
 
@@ -7704,6 +8179,14 @@ flag.
 
 ## 68. MUSICRT -- the CD music panel
 
+> **Ported in part, 2026-09-11** (`3da7c98a`). TRACKMODE works: Play All
+> walks the album in order and wraps, Random takes any track, Repeat plays
+> the current track again, and Custom, the default, is the situational music;
+> the evaluator keeps counting in every mode but only Custom acts on it.
+> CDNEXT and CDPREV step Play All and Repeat through the album. The mode is
+> saved to `rwe.cfg` as `music-mode`. TRACKTYPE and TRACKNUM are not ported
+> (fork issue #20).
+
 Layout (panel 150x352 at (128,128), background GAF entry `MUSICRT`):
 `NOTRAK` "Off|On" (CD music on/off), `MUSICVOL` slider, `TRACKMODE`
 "Play All|Random|Repeat|Custom", CD transport `CDPREV CDSTOP CDPLAY
@@ -8115,6 +8598,13 @@ the menu-pause bit:
 next `%s%s%s%04i.pcx` -- so **Ctrl+F9 = screenshot to
 `screenshots\SHOTnnnn.pcx`** (HELP.TDF line 38), no gating.
 
+> **Ported, 2026-09-11** (`1b16930e`). `SceneManager` catches Ctrl+F9 above
+> every scene, consumes it, and writes `screenshots/SHOTnnnn.pcx` under the
+> local data directory, one past the highest number already there. Two
+> departures, both in §88: the file is 24-bit where the original's was 8-bit,
+> and the picture is taken before the cursor is drawn. Where the original's
+> numbering starts is not decoded; RWE's first is `SHOT0000`.
+
 The registry value `Games` under `Total Annihilation` (read at `0x430e43`;
 `== 1` sets bit 1 of `[game+0x37f2f]`) gates the developer keys:
 
@@ -8433,6 +8923,19 @@ Palette ranges that turned up:
 
 ## 85. The D-gun: `ATTACKSPECIAL`, and what `commandfire` really costs you
 
+> **A computer player's commander fires it by itself.** `commandfire` keeps a
+> weapon out of the auto-acquire scan, which is what makes the D-gun a decision
+> rather than a gun — but the scan at `0x4089A0` exempts the computer from that
+> rule: "`commandfire` weapons do not either, **unless the player is of type
+> 2**". Type 2 is the same `player+0x73` byte that exempts an AI from the
+> `ShootMe` rule a few tests further down the same scan. So an AI commander
+> engages with its D-gun on its own and a human's does not. RWE implemented the
+> `ShootMe` half of that scan and not this one, until a play-test reported a
+> commander standing and dying under fire with the weapon unused; it now does
+> both (`UnitBehaviorService`, and the `[dgun]` cases). The return-fire path
+> `0x408A90` skips `commandfire` too and **no exemption has been read there** —
+> that is a different routine, and it has not been checked.
+
 `candgun` is capability bit 14, and `0x43F7E8` turns a click in D-gun mode into
 the `ATTACKSPECIAL` mission. That test is the whole eligibility rule: it does
 not look at the target or the position, so a D-gun order is produced for an
@@ -8691,14 +9194,79 @@ consequences follow, and only the first is a real cost:
   - The walk takes a **step limit** where the original has none. Running out
     of it costs a less relaxed goal and nothing else.
 
+**The slicing is ported too, as of 2026-09-09.** RWE used to stop a search
+dead at a thousand expansions and hand back whatever partial route it had,
+which the unit walked before asking again; the original has no per-search cap
+at all and slices its A\* instead, carrying the same search on next tick
+(`0x40EEAF`). RWE now does the same. `AStarPathFinder` is a state machine --
+`beginSearch`, `stepSearch(n)`, `takeResult` -- and `PathFindingService` gives
+the search whatever is left of the tick's expansion budget and keeps it
+exactly where it stopped if that runs out. A search therefore ends at the
+goal or at an empty open list and nowhere else, so a partial result now means
+one thing only: the place genuinely cannot be reached. The remaining bound is
+the map, which is the same bound the original has.
+
+Three things follow, and they are the shape of the original's scheduler
+rather than a coincidence:
+
+  - **One search at a time**, because the scratch grid stamps its cells with
+    the search they belong to and starting a second search would stamp the
+    first one's cells stale. The original is under the same constraint from
+    the other end: its pathfinder is a singleton at `gm+0x14207` holding one
+    set of map entries, which is why it can slice at all.
+  - **A suspended search is checked before it is resumed.** A unit that has
+    died, or been given a different order while its search was part way
+    through, has no use for the answer, so the search is thrown away and the
+    request started again against what the unit wants now.
+  - **A save carries it, in five integers.** A half-finished A\* cannot be
+    serialised and does not have to be: a search is a pure function of the
+    world, the goal, and the cell it started from. The first two are in the
+    save already -- the world because it *is* the save, the goal because it
+    hangs off the unit's navigation state -- and only the third is lost,
+    because a unit whose search is suspended keeps walking its straight-line
+    stand-in and is no longer standing where the search began. So the save
+    writes down that footprint and how many expansions had been done, and the
+    load rebuilds the search from the footprint and runs it forward that far.
+    A\* is deterministic, so what comes out is the state that was suspended
+    and not an approximation of it. The request needs no name: the search
+    always belongs to the one at the head of the queue.
+
+    The obvious alternative -- drop the search on both sides of a save, so
+    both timelines start it again from nothing -- is wrong, and it is worth
+    saying why, because it looks right. It works for a saved game, where
+    nobody can watch both timelines. It breaks a **replay**: keyframes go
+    through the same `saveSimulationToJson` during playback, and the
+    recording they are being compared against dropped nothing, so every
+    keyframe taken while a search happened to be in flight would put the
+    playback a few ticks out from the game it is replaying. Measured on
+    `path_bench` at 400 units, a search is in flight on about a third of all
+    ticks, so that is not a rare case.
+
+The scratch grid's two per-cell indices went from int16 to int32 to pay for
+this -- a cell is twelve bytes now rather than eight -- because the static
+asserts that made int16 safe were bounded by the thousand-expansion cap, and
+a search that can close every cell of a 512x512 map needs more than an int16
+addresses.
+
+One number is deliberately not changed with it: the budget stays at 4000
+expansions a tick, forty times the original's hundred. Raising or lowering it
+is its own question with its own roadmap entry, and doing both at once would
+make neither measurable.
+
 Still not ported: the adaptive heuristic weight (it would have to be hashed
 simulation state, since RWE is lockstep and the original is not), the
 restricted successor fan, the turn and straight-run costs, unexplored ground
 reading as free, the 60-tick per-unit cooldown, and the 20-waypoint clamp. RWE
-keeps an admissible octile heuristic, an eight-way fan, and a 1000-expansion
-cap that truncates a search rather than suspending and resuming it -- which is
-the one structural piece of the original's scheduler that RWE still has no
-equivalent for.
+keeps an admissible octile heuristic and an eight-way fan.
+
+**And a warning about the benchmark, found while measuring this.**
+`path_bench`'s obstacles were an immobile unit definition with no yard map,
+which is an assert in a Debug build and an empty-optional dereference in a
+Release one. Every `path_bench` figure recorded before 2026-09-09 was
+therefore measured with obstacles that did not reliably obstruct, and none of
+them is a valid baseline -- including the "116 units arrive where 96 did"
+line the bug-walk entry in the roadmap carries. The definition has a yard map
+now.
 
 ## 88. Where RWE deliberately differs
 
@@ -8725,6 +9293,46 @@ original:
   RWE's radar and sonar contacts therefore reach the minimap (`canDetectUnit`)
   and nothing else; every simulation decision goes through `canSeeUnit`.
 
+- **Mobile units can be shaded, and shading can be switched off by category.**
+  The original shades buildings and features and never a mobile unit. The
+  shaded rasterizer `0x459C70` itself branches on nothing but the piece's COB
+  `SHADE` bit, which is why this entry used to say the original shades
+  everything; but it has one caller, the cache renderer `0x4586A0`, and that
+  sends only an object with `unit+0x110` bit 29 set -- `bmcode == 0`, a
+  building, or the Feature Unit -- to it, and only with SHADING on
+  (`0x45873C`, `0x45874A`). Everything else, every tank, aircraft, ship and
+  commander, is cached by the unshaded twin `0x459830` (`0x45878B`), whatever
+  the option says. Found 2026-09-11. RWE shaded units by default until the
+  same day; the default is now Buildings, which is the original's On, and
+  the Units and Both stages that shade units are the divergence. RWE's
+  VISUALS page carries a four-state Shading switch -- Off, Units,
+  Buildings, Both -- and two rwe.cfg keys, `shading-strength-units` and
+  `shading-strength-buildings`, blend the measured `PALETTE.SHD` ramp towards
+  the unshaded colour. Both default to 40. The shape of the ramp is the
+  original's in full -- the per-vertex level, the wrap, the unnormalised
+  normals and sun, the row truncated per pixel -- and only its depth is pulled
+  in: at 100 the table's snap to the nearest palette entry reads as banding on
+  a modern screen and row 0 is a true black, which was tried on 2026-09-08 and
+  rejected on sight. Units sat at 25 until 2026-09-11, when a play-test found
+  it too faint to see on a commander at all; they went to 40 with the
+  buildings. (An earlier version of this entry said both defaulted to 100.
+  They never shipped that way; see the comment on `shadingStrengthUnits` in
+  `GlobalConfig.h`.)
+- **Units can be anti-aliased, on a switch that is off by default.** The
+  original box-filters a building's cached bitmap and nothing else (§101),
+  and by default so does RWE. A finished building's dont-cache pieces, such
+  as a metal extractor's top, are drawn sharp as the original drew them, and
+  the switch does not reach them. `anti-alias-units` (Units Smooth on the
+  VISUALS page) also filters everything solid that is not the ground. It
+  was on by default, and the extractor's top smoothed, for part of
+  2026-09-11; both went back to the original the same day, when the player
+  asked for it exactly.
+- **A finished `ZBuffer=0` unit's flat-coloured faces are unshaded.** The
+  original leaves such a unit's textured quads raw but still shades its
+  flat-colour n-gons (TOTALA-EXE-SHADING.md S:23). RWE draws the whole model
+  raw: its mesh does not keep the two kinds of face apart, and the difference
+  is nine faces of CORFAV and one of CORTRUCK, the only two units that say
+  `ZBuffer=0`.
 - **Nanolathe spray lands on the roof**, not inside the model. The original
   samples the landing height inside the model too, which it can afford because
   its spray is composited in a late layer. RWE's is depth-tested so a
@@ -8741,7 +9349,7 @@ original:
 - **Off-map fog cells read as the nearest on-map cell.** Reading them as "clear"
   leaves the frame's ragged edge with no neighbouring tile to cover it, and a
   strip of map shows through at the border.
-- **No `BrakeRate` nose re-aim and no pitch** — see §1.
+- **No pitch**, see §1 (the `BrakeRate` nose re-aim is ported now).
 - **A mobile unit's `buildangle` is ignored.** The original overwrites a mobile
   unit's spawn heading with the raw value (§8), which for everything but the ten
   capital ships is zero and so agrees with RWE's half-turn default anyway. RWE
@@ -8760,7 +9368,7 @@ original:
   behaviour pass (it is walking the unit map), so every builder defers to
   `spawnNewUnits` at the end of the tick and meets its own frame on the next
   one. That is where the first lathe lands — for a mobile builder and, since
-  §101 was ported, for the two that a construction aircraft pays there. A
+  §107 was ported, for the two that a construction aircraft pays there. A
   factory takes one tick more: its state machine spends the tick it picks the
   creation up starting `StartBuilding` and lathes from the tick after. None of
   this changes a job's *length*, which is what the corpus measures and what the
@@ -8848,7 +9456,7 @@ original:
   `BuildOrder` covers the walk and the work, so the mission line changes one
   order earlier (S:99).
 - ~~**Every player's economy settles on the same tick.**~~ **Not a divergence
-  after all** (§102). This entry said the original staggers the settle per
+  after all** (§108). This entry said the original staggers the settle per
   player because `player+0xF0` starts at whatever each player's counter started
   at. It starts at the current game tick, written for all ten player slots in
   one loop (`0x464990` -> `0x464700`), so every player of a game settles on the
@@ -8860,6 +9468,38 @@ original:
   players' `0x28` samples on nearby ticks can therefore be compared, within the
   few ticks each sender's clock lags. The storage episodes stay per player
   because a sample is its sender's own state, not because of the phase.
+- **A transport only picks up your own units.** The original applies no
+  ownership or alliance test anywhere on the load path: not in `CanLoadUnit`
+  (§31), not at any of its five call sites, and not in the LOAD button's
+  cursor arm, which will show `cursorpickup` over an enemy (§103). Whether the
+  pickup then completes was never traced and never play-tested, so this is a
+  house rule kept for want of evidence rather than in defiance of it: the test
+  lives once, in `canLoad` in `src/rwe/game/DefaultAction.cpp`, so that
+  removing it later is one edit rather than a hunt.
+- **A resurrect shows the reclaim cursor.** The original has `cursorrevive`,
+  id 10, for it (§103). The base game's `CURSORS.GAF` does not contain that
+  sequence — only `rev31.gp3`'s does — and RWE has never loaded it, so the
+  reclaim cursor stands in, as it already did for a resurrect order in flight.
+- **Right-clicking an enemy still attacks it when nothing better applies.**
+  The decode of the right-click chain (`0x43FA00`, §103) lists capture and
+  reclaim on an enemy and no attack arm at all, which cannot be the whole
+  story and is recorded there as unsettled. RWE keeps an attack arm below the
+  two, so a tank right-clicking an enemy shoots at it.
+- **A waypoint retires at sixteen world units, not the original's five.**
+  `Navigator::Update` compares the squared distance against 25 (`0x44F205`);
+  RWE keeps sixteen for an intermediate waypoint and eight for the last, which
+  is also `hasReachedGoal`'s own tolerance. Five is fine for a unit on its own
+  and costs about a third of the arrivals in a crowd, because a waypoint is a
+  cell centre and a unit two cells across cannot always reach within five of
+  one another unit is standing on. Measured, at a hundred units in
+  `path_bench`: 27 arrivals and 884 searches at five, against 49 and 509 at
+  sixteen. §102 has the rest of it.
+- **Screenshots are 24-bit, and leave the cursor out.** The original writes
+  8-bit PCX from its 8-bit screen; RWE draws in true colour, so it keeps the
+  name, the folder, the numbering and the format family and widens the
+  pixels. The picture is read back after the scene draws and before the
+  cursor and the debug windows go on top; whether the original's included
+  its cursor is not decoded (§77).
 
 ---
 
@@ -8990,8 +9630,21 @@ there is a regression test for it now.
 - RWE's explored grid is **per-player** rather than the original's one shared
   bitmask with a bit per LOS group. Equivalent until allied vision groups exist.
 - `hitDensity` is parsed (100 for solid things, 5–10 for foliage, 0 for smudges)
-  and is very likely the pass-through chance for projectiles hitting features,
-  but this has not been confirmed in the binary.
+  and does nothing. It was once guessed to be the pass-through chance for
+  projectiles hitting features; that guess is **refuted** — the string does not
+  occur in `TotalA.exe` at all, and the collision test at `0x49B2B3` is purely
+  geometric. This entry survived here after the refutation was written up and
+  is corrected rather than deleted, since the guess is an inviting one to make
+  twice.
+- **Weapons damage features regardless of their kind.** RWE once switched
+  feature damage off for render types 0, 5 and 7 — the laser and lightning
+  draws — on the community belief that beams cannot hurt wreckage. Nothing in
+  the binary gates damage on `rendertype` (a drawing attribute at `wdef+0x10C`)
+  or on `beamweapon` (bit 3 of `wdef+0x111`, one reader, which maintains the
+  draw's tail point), and the shipped naval corpses' `damage=24000` only makes
+  sense as bought immunity from gunfire that would otherwise clear them. The
+  exemption is gone. Collision was always geometric and is unchanged, so a beam
+  still stops on a feature — it can now also break it.
 - The **strafing pass** (`AirToGround`, `0x412710`) is decoded but not ported:
   RWE's fighters still fly the generic attack run. See the missions document §5.
 - **`maneuverleashlength`** is now parsed but not enforced. In the original it
@@ -9011,7 +9664,7 @@ there is a regression test for it now.
 - ~~Why a construction aircraft finishes a build one tick early~~ Resolved: two
   increments on the creation tick, because `VTOL_MobileBuild` discards its stance
   wait's answer and a pending COB event re-runs the lathe in the same tick; see
-  §101, which also accounts for the 8 builds off the model (late by whole
+  §107, which also accounts for the 8 builds off the model (late by whole
   seconds). **Ported**: RWE credits a construction aircraft twice on the tick it
   first has a frame to lathe and never makes one wait for its stance, and the
   airborne cells are in the build fixture on the ordinary §88 delta.
@@ -9056,11 +9709,15 @@ there is a regression test for it now.
   neither changes what is passable. Left alone because a change to path cost
   moves every route, and that deserves its own pass with `path_bench` and the
   pathing tests watched.
-- **The work sounds are decoded but not played.** Sound slot 11, `working`
-  (`reclaim1` in every construction unit's category), is played once when
-  reclaim or capture work starts, and slot 16 `capture` when a capture
-  finishes -- S:97. RWE parses both and raises no simulation event either could
-  hang off; the scene already knows how to play them.
+- **The work sounds are played. Ported, 2026-09-10.** Sound slot 11,
+  `working` (`reclaim1` in every construction unit's category), is played once
+  when reclaim or capture work starts, and slot 16 `capture` when a capture
+  finishes -- S:97. Both now have a simulation event to hang off: a new
+  `UnitStartedReclaimingEvent` raised on the first tick of actual work by
+  feature reclaim, unit reclaim and capture alike, and the `UnitCapturedEvent`
+  that already existed, which now carries the captor so slot 16 is the
+  captor's sound. Slot 16 stays silent on the shipped data, no category
+  setting it.
 - **`Resurrect` is decoded and not implemented** -- S:98. No shipped FBI sets
   `canresurrect`, so it would be a mod-only capability, and a new `UnitOrder`
   alternative cannot be added from inside `src/rwe/sim` alone.
@@ -9071,6 +9728,13 @@ there is a regression test for it now.
   disintegrators are `rendertype=3` and declare no `duration`, so for them the
   original computes the tail and throws it away. Anything that wanted it would
   have to be a mod.
+- **An aim script that answers no is asked again on the next tick.** The
+  original leaves bit 0 up with the answer still zero (`0x49D580` returns at
+  `0x49D86D`), so it starts no other aim until something lowers the bit — §11,
+  *One aim per shot*. It matters in the shipped data: ARMCOM's `AimPrimary`
+  returns 0 while its static 3 is set. What lowers the bit when a unit changes
+  target has not been read, and asking again cannot strand a gun the original
+  would have freed, so the wait is not ported.
 
 ## 92. The D-gun's projectile: `noexplode`, the full-range flight, and who gets hurt
 
@@ -9484,67 +10148,230 @@ this:
 which works because patrol is one of the missions that carries the test, and
 standing still is not.
 
-### A pad is taken from the moment someone sets out for it
+### `SELFREPAIR`, and the repair tick every repairer in the game shares
 
-VTOL_Landing re-tests its pad before it commits, and what it tests is
-availability rather than existence:
+Read out 2026-09-15 for issue #52, which asked whether RWE's pads may be said
+to *match*. They may now, and the read turned up two divergences, one of them
+worth a fifth of all repairer/target pairs in the shipped data.
 
+**Where the mission comes from.** `VTOL_Landing` (`0x4118E0`) runs a seven-state
+machine, and in the state that finishes a landing it checks the pad it landed
+on — `mission+0x16` — against three things before doing anything else:
 
+```
+411e7c  ecx = [mission+0x16]         ; the pad
+411e7f  eax = [ecx+0x92]             ; its definition
+411e85  eax = [eax+0x241]
+411e8b  test ah,0x2                  ; bit 9, isairbase
+411e90  test al,0x40                 ; bit 6, builder
+411e94  fld [ecx+0x104] ; fcomp 0.0  ; and finished, not a nanoframe
+411eb1  call 0x4b4f10                ; new Mission(0x56 bytes)
+411ece  push 0x501c24                ; "SELFREPAIR"
+411ee1  call 0x43acb0                ; appended to the AIRCRAFT's order list
+```
 
- returns 0 -- taken -- when  is set, or when a walk of the
-pad list at  (following , comparing ) finds
-a match. It never looks at the on/off bit.
+Bit 6 is `builder`, parsed at `0x42C4CB` from the key at `0x503C44` — the same
+run of boolean keys §34's table comes from. So a pad that is not a builder, or
+that is still a frame, parks the aircraft and mends nothing.
 
-That split is exactly what the strategy guide reports, and the two confirm each
-other:
+`SELFREPAIR` is not a VTOL mission at all: it is row 20 of the **ground** table
+at `0x4FC490`, handler `0x402430`, and the two tables are merged into one sorted
+vector at startup, so either side can name either. Its state machine has three
+states: 0 re-tests the pad's `builder` bit and build progress and starts the
+mission, 1 does the work, 2 prints "Unit repaired" (`0x5012CC`). State 1, per
+tick:
 
-> When a plane is making its way back to the repair pad, that pad is considered
-> to be occupied (even if the unit isn't there yet), so other damaged aircraft
-> will not use that pad until the occupying aircraft has been repaired and has
-> left.
+```
+4024af  if (unit.hitPoints >= def.maxdamage) return done
+4024e1  unit+0xB0 = clock + 150           ; the nanolathe stance deadline
+4024f0  cx = [padDef+0x1FE]               ; the PAD's WorkerTime
+4024f7  work = WorkerTime / 30            ; integer
+402518  call 0x41BD10(pad, aircraft, (float)work)
+40252e  0x43E400 / 0x4720D0 type 6        ; the nanolathe spray, pad to aircraft
+4025bb  sleep 1 tick
+```
 
-> After I tested it out, I found that turning an aircraft repair pad 'Off'
-> would stop aircraft from returning to it. However, those that were already
-> making their way towards it will continue towards it.
+Two things to notice before the arithmetic. The mission belongs to the
+**aircraft** and the rate comes from the **pad**, and the sleep is one tick, so
+this runs every tick like any other builder's work. RWE arrives at the same
+pair of facts from the other side — its pads run the repair from the ordinary
+builder path, with the pad as the repairer — and that is not a divergence, only
+a different place to put the loop.
 
-**Switching a pad off turns away new arrivals but does not recall the aircraft
-already coming.** New arrivals stop because the query walks the owner's air
-base list, which holds only switched-on pads (); a trip under way
-carries on because the re-test above never asks about the switch. An earlier
-reading here had the re-test as an on/off test and turned those aircraft back,
-which is wrong on both the binary and the guide.
+**The repair tick, `0x41BD10`.** This is not the pad's own routine. It has five
+callers — the two ground `Repair` missions, `VTOL_RepairUnit`, `SELFREPAIR`, and
+`0x48AF92` — so it is *the* repair tick, and what it says about pads it says
+about every builder in the game:
 
-RWE needs no new state for the claim. The claim *is* the ,
-which is already serialized, and an aircraft parked on a pad is already in the
-unit list. Physical occupancy is unconditional -- an aircraft standing on the
-pad holds it however healthy it is and whoever else wants it, which is the
-"and has left" half. Two aircraft merely *en route* to the same pad can happen,
-since the choice is a random draw, and there the lower  keeps it: a
-deterministic reading of "no pads available" that needs no tie-break state.
+```
+41bd33  if (hitPoints >= maxdamage) return 0
+41bd48  hp     = ftol((maxdamage       * work - 1.0) / buildtime + 1.0)
+41bd68  energy = ftol((buildcostenergy * work - 1.0) / buildtime + 1.0)
+41bd87  if (hp     >= 1) hp     = 1
+41bd97  if (energy >= 1) energy = 1
+41bdb7  if (!0x401180(&pad->economy, (float)energy)) return 0
+41bdc7  0x489BB0(pad, aircraft, hp, cause 10, 0)
+```
 
-### The practical consequence
+Both clamps are **upper** bounds, and that is the whole of the behaviour. The
+expression reaches 1 whenever the product does — `maxdamage` and `work` are both
+integers, so `(n-1)/bt + 1 >= 1` exactly when `n >= 1` — so the elaborate
+formula collapses to:
 
-The guide is worth quoting on what this feels like to play against, because it
-is the reason the behaviour is worth having exactly rather than approximately:
+> **A repairer with any worker time at all mends exactly one hit point a tick
+> and pays exactly one energy for it, whatever it is mending and however fast a
+> worker it is. One with none mends nothing.**
 
-> This is both a blessing and a curse when you are making an assault using
-> aircraft [...] If you have to kill that buildings *NOW* [...] it can be
-> incredibly annoying having your planes continually break off. Even
-> retargetting them only causes the planes to fly back, attack for a very short
-> time and then go and get repaired.
+Repair scales with the *number* of repairers, not with their WorkerTime. Thirty
+hit points a second each, thirty energy a second each. Nothing in the shipped
+data has a WorkerTime between 1 and 29 — the values present are 0, 30, 50, 80,
+100, 125, 160, 200, 225 and 300 over 258 units — so the "mends nothing" case is
+unreachable there and is recorded rather than relied on.
 
-That loop falls out of the health test running inside each mission handler
-rather than once at the point the order is given: retargeting starts a fresh
-attack mission, which tests the health again on its next tick.
+The energy request is `0x401180`, the **single-resource** one, not the
+two-resource `0x4011C0` the build path uses. It books the demand on the
+repairer's own block either way and answers no only when that block is still
+paying off an *energy* shortfall, so a player who owes metal can still repair.
+And `0x41BDBC` tests the answer: refused means no hit points at all, not fewer.
+The heal itself goes through the damage choke point with **cause 10**, which
+`0x489BB0` short-circuits at `0x489BC1` — no armour, no veterancy, no
+direction — straight into adding hit points.
 
-And the trick it ends on is the practical way a player drives all of this:
+**What RWE had wrong.** Two things, both now fixed and both pinned in
+`sim/repair.test.cpp`:
 
-> If you have some damaged aircraft [...] sitting on the ground and you want
-> them to repair themselves, set up a 1 point Patrol route (where they are),
-> and those planes that are heavily damaged will go off and get repaired.
+- `deployRepairArm` computed `max(1, maxHitPoints * work / buildTime)` — a
+  *lower* clamp where the original has an upper one. For most aircraft the two
+  agree at 1, which is why the pads looked right; they diverge wherever a unit
+  is cheap in build time and rich in hit points. A construction vehicle mending
+  a dragon's tooth — 3500 points on a buildtime of 520 — ran it up forty points
+  a tick instead of one. Counted over the shipped data, 403 of 2080
+  repairer/target pairs differed.
+- The comment beside it said "Repairing costs nothing, as in TA". It does cost:
+  one energy a tick, and a builder whose owner is in energy debt repairs
+  nothing. `GameSimulation::addEnergyRequest` is `0x401180`, added for this.
 
-which works because patrol is one of the missions that carries the test, and
-standing still is not.
+**And writing an end-to-end test for the pads found that they had never mended
+anything at all.** Two faults, both in RWE alone and neither visible from the
+findings, because every test on this until now called the patient search
+directly rather than ticking the simulation:
+
+- the search uses `airBaseRepairReach` — the larger of `BuildDistance` and half
+  the pad's own footprint, which is the whole reason that helper exists — and
+  then handed the patient to `repairExistingUnit`, which re-tested the distance
+  with `BuildDistance` **alone**. ARMASP's `BuildDistance` is 6 against a
+  four-by-four footprint 64 world units across, so the re-test refused every
+  patient the search had just found, and sent an immobile pad off to "navigate"
+  towards an aircraft parked in its own middle. The pad path goes straight to
+  `deployRepairArm` now.
+- and the builder update ends with `else { changeState(Idle) }` for anything
+  with no orders, which runs *after* the repair block — so it wiped the building
+  state the pad had entered a few lines earlier and told the script to stow the
+  arm, every tick. The reset skips a pad that is mending.
+
+`sim/airbase.test.cpp` ticks the simulation and watches the hit points now, so
+neither can come back quietly.
+
+### Where an aircraft actually comes to rest, and the third pad fault
+
+A play-test the same day: "airplanes sink through the pads when trying to land
+on them and never regain health". Both halves were real, and the second had a
+cause neither of the two above accounts for.
+
+**The deck is a piece of the pad's model.** `VTOL_Landing` asks the pad's own
+script where to put the aircraft. It calls `QueryLandingPad` — the string at
+`0x501C14` — at `0x411A35` and again at `0x411CEC`, gets back up to four piece
+ids in the query's locals, tests each with `0x47E570` until it finds one that is
+free, keeps it on the mission at `mission+0x36`, and hands it to the navigator
+as a **piece** goal rather than a point (`0x44E250` at `0x411D60`). The circling
+approach before that is a point on a ring about the pad at the pad's own `y`,
+stepped a quarter turn each time round (`0x411AF1`–`0x411B3F`).
+
+ARMASP's `QueryLandingPad` answers with piece 1, `landpad`, and in `ARMASP.3DO`
+that piece sits at **(0, 20, 0)** — twenty world units above the pad's base.
+CORASP, ARMCARRY and CORCARRY all carry the same function. The one other thing
+the landing goal is given is a height offset, and it is not the pad's:
+`0x411D6F`–`0x411D8D` reads `def+0x170`, the model height, of whatever the
+aircraft is **carrying**, so a transport sets down high enough not to bury its
+cargo, and passes zero when it is empty.
+
+RWE's `descendToGroundLevel` used the terrain height and nothing else, so an
+aircraft landing on a pad sank twenty units through the platform and came to
+rest inside the ground. It runs the pad's `QueryLandingPad` and stops at that
+piece's world height now — only the height, since the piece's x and z are the
+pad's own on every shipped pad and the navigation has already brought the
+aircraft over it, and only while the aircraft holds a `LandOnAirBaseOrder` for a
+pad it is actually above.
+
+**And the third reason nothing was ever mended: none of the four `isairbase`
+units has a `StartBuilding` thread.** ARMASP and CORASP carry SmokeUnit, Create,
+SweetSpot, QueryLandingPad, QueryNanoPiece and Killed; the two carriers not even
+QueryNanoPiece. Their `Create` does not touch `INBUILDSTANCE` either — ARMASP's
+zeroes a static and starts SmokeUnit, and that is all of it. RWE's builder path
+waits for the build stance before it works, so it created a `StartBuilding`
+thread that found no such function and then waited for a flag nothing would ever
+set. The original has no stance test anywhere in its repair tick; RWE's is a
+sequencing device for the nanolathe animation, and now applies only to a unit
+whose script actually raises an arm.
+
+`sim/airbase.test.cpp` flies a damaged fighter to a pad, lands it, and checks
+both the deck height and that the hit points climb — the whole journey in one
+test, because each piece of it was already covered in isolation and every fault
+was in a join.
+
+### The pad's own footprint, and why none of the above was enough
+
+The play-test after that one: "they land on the pads but do not repair, and
+while a few brawlers were sat on the pads I set some other random planes to
+patrol and it kicked the first lot off with the message 'none available'". One
+cause underneath both halves, and it is a piece of RWE's own data handling
+rather than anything in the binary.
+
+**ARMASP's yardmap is `oooo oooo oooo oooo`, and `o` is not an open cell.**
+`parseYardMapCell` maps it to `YardMapCell::Ground`, and `isPassable` says
+Ground is impassable — correctly, because that is what stops a tank walking
+through a building. So the pad's whole four-by-four footprint blocks movement,
+and `tryTransitionFromAirToGround` tested the aircraft's footprint against it
+like any other touchdown and refused. The aircraft set `landingFailed`, climbed
+away, came back round, and did it again for ever.
+
+Everything else follows from that. It never became a ground unit, so
+`findAircraftToRepairOnPad` — which skips anything still flying — never saw it,
+and nothing mended it. And `airBaseIsClaimedByAnother`'s physical-occupancy
+branch also asks for a ground unit, so an aircraft cycling over a pad never
+held it: a later arrival was offered the same pad, and then turned the first
+one away with "Landing aborted: no pads available". The whole report is that one
+fault seen from three sides, and it was invisible to every test here because the
+fixture had written `GroundPassable` into the pad's yardmap and called it
+"sixteen open cells".
+
+**The original never asks the question.** A landed aircraft is *attached* to the
+pad: `0x48AAC0` links it into the pad's list and `0x47E570` walks the links to
+see which landing slots are free. It is carried, not standing on cells, which is
+why `QueryLandingPad` returns *pieces* and why a pad's yardmap has nothing to do
+with it. RWE has no attachment, so the equivalent is to let the aircraft through
+the footprint of the one pad it is landing on:
+`GameSimulation::isCollisionAtIgnoringBuilding`.
+
+Two smaller things went with it, both consequences of the aircraft now sitting
+twenty units up rather than on the ground:
+
+- **Every "is it standing on that pad?" test measures flat now**
+  (`distanceSquaredXZ`). Against a reach sized from the pad's footprint — 32
+  world units for a four-by-four — a deck height of 20 ate two fifths of the
+  radius, and the thing it stands in for, the original's attachment, has no
+  notion of height at all.
+- **Standing on a pad beats every claim on it.** The claim test in
+  `handleLandOnAirBaseOrder` ran *before* the standing-on-it test, so a later
+  arrival with a lower unit id could turn a parked aircraft off its own pad.
+  The guide's rule is "until the occupying aircraft has been repaired *and has
+  left*", and the lower-id tie-break is only for two aircraft both still in the
+  air.
+
+Not ported, and neither has anywhere to attach: `unit+0xB0`, the
+clock-plus-150 stance deadline, which RWE keeps as build-stance state instead;
+and the spray's own particle type, RWE running the nanolathe effect it already
+has.
 
 ### What RWE does not do
 
@@ -10001,16 +10828,122 @@ the player's units every second and so is not a fixture's to invent.
 The feature's `seqnamereclamate` swirl was already implemented (it plays on
 `FeatureReclaimedEvent`); the roadmap entry asking for it was stale.
 
-**The reclaim sound is not implemented.** It needs a scene-side change:
-`GameScene` already knows how to play `UnitSoundType::Working`, and already
-plays `UnitSoundType::Build` off `UnitStartedBuildingEvent`, but nothing in the
-simulation raises an event when reclaim or capture work begins. The shape of
-the fix is a `UnitStartedReclaimingEvent` beside `UnitStartedBuildingEvent`,
-emitted where `UnitBehaviorStateReclaiming` is first entered and where a
-capture first reaches its target, with a scene handler that calls
-`playUnitNotificationSound(..., UnitSoundType::Working)`. Adding an alternative
-to the `GameEvent` variant obliges every `match` over it to grow an arm, which
-is why it was left for whoever owns the scene.
+> **Ported, 2026-09-10.** Both work sounds now play.
+> `UnitStartedReclaimingEvent` sits beside `UnitStartedBuildingEvent` in the
+> `GameEvent` variant and is raised on the first tick of actual work by all
+> three jobs the original plays slot 11 from: feature reclaim and unit
+> reclaim, in `deployReclaimArm`, and capture, in `deployCaptureArm`.
+> `GameScene::processSimEvents` plays `UnitSoundType::Working` off it. Slot 16
+> hangs off the `UnitCapturedEvent` that already marked the end of a capture,
+> which now carries the captor as well as the two owners, so the sound is the
+> captor's and not the taken unit's; no shipped category sets the slot, so it
+> is silent until a mod sets it. Neither needed a new piece of simulation
+> state: "work has started on this job" is the reclaiming state's empty
+> `nanoParticleOrigin` on one side and a `CaptureOrder::progress` of zero on
+> the other, both of which already exist, are already hashed, and are already
+> reset when a job ends. `src/rwe/sim/worksounds.test.cpp` pins the *once* and
+> the *when* -- in particular that a builder sent to a wreck it must walk to
+> announces nothing until it arrives.
+
+### `underattack`, `repair` and `cant`: the three voices that were never played
+
+> **Ported, 2026-09-11.** `UnitDamagedEvent` carries the cause (its
+> `paralyzer` flag) and the scene plays slot 2 off it under the gates below;
+> `UnitRepairedEvent` is raised where a repair job lands, on both sides of
+> it, and plays slot 10; `UnitCannotComplyEvent` carries the caption a
+> refusing site passes and plays slot 7. Four of the forty-five `cant`
+> sites are wired, the ones whose refusals RWE already makes: the nanoframe
+> capture, the Commander reclaim, the pad that is taken, and the corpse that
+> has gone. The rest are in the table for when their refusals exist.
+> `src/rwe/sim/unitnotifications.test.cpp`.
+
+The rest of the slot table at `0x5086F0`, read out in full this time:
+
+| Id | Key | Caption | | Id | Key | Caption |
+|---|---|---|---|---|---|---|
+| 1 | `select` | | | 12 | `load` | |
+| 2 | `underattack` | Under Attack | | 13 | `unload` | |
+| 3 | `activate` | | | 14 | `cloak` | Cloaked |
+| 4 | `deactivate` | | | 15 | `uncloak` | Visible |
+| 5 | `ok` | | | 16 | `capture` | |
+| 6 | `arrived` | Arrived | | 17-22 | `count5`..`count0` | five..zero |
+| 7 | `cant` | Cannot Comply | | 23 | `canceldestruct` | Self destruct terminated |
+| 8 | `unitcomplete` | Nanolathe Complete | | | | |
+| 9 | `build` | | | | | |
+| 10 | `repair` | | | | | |
+| 11 | `working` | | | | | |
+
+**Three entry points, one player.** `0x47F780(unit, id, caption)` is the one
+the eighty-two direct call sites use. It refuses a unit that is not the local
+player's, or not alive (`unit+0x110` bit 28 clear or bit 14 set); takes the
+caption passed in, or the table's if none; prints it (`0x4C5740`) and hands
+`(unit, id, text)` to the player `0x47FAD0`. Two siblings differ only in one
+extra gate, `0x48BCB0(unit)`, which walks the frame's draw list (the "HOT
+UNITS" list at `world+0x1435F`, §18): `0x47F7E0` plays only for a unit *in*
+the list and is never called; `0x47F850` plays only for a unit *not* in it,
+and has one caller.
+
+**The player keeps a queue.** `0x47FAD0` holds up to eight pending voices of
+17 bytes each. A slot id already waiting is not queued again (`0x47FB0A`), a
+full queue drops its head, and the entries are kept in priority order from
+the table's third dword (`underattack` 0x14, `cant` 1, `select` 0). So a unit
+under sustained fire says "Under Attack" once per playback, not once per hit.
+RWE has one reserved voice channel and drops a voice while it is busy, which
+comes to nearly the same thing.
+
+**`underattack`, slot 2, one site.** `0x4071D8`, the tail of the return-fire
+routine `0x406F80(attacker, victim, damage)` (§"Firing modes"). Every early
+exit in that routine jumps to the tail rather than returning, so the voice is
+independent of the fire mode and of whether the unit shot back. Its own gates:
+
+- `0x438BE0(victim)` returns the victim's current mission flags word
+  (`mission+0x42`); bit 7 set skips the voice. No mission handler sets that
+  bit directly in this binary; it is treated as never set.
+- `[victim+0xF4]` (the owner of the last unit to damage it) differs from the
+  victim's owner: play. Otherwise play only if `[victim+0xF5]`, the cause
+  byte, is 1, a weapon hit -- so a paralyser from your own side is silent.
+- Through `0x47F850`: only for a unit that is not being drawn this frame. It
+  is the warning for what you cannot see.
+
+**`repair`, slot 10, five sites, all with `0x5012CC` "Unit repaired".**
+`0x402491` in `SELFREPAIR` (`0x402430`, the aircraft on a pad, once its hit
+points meet the maximum), `0x415298` in `VTOL_GetRepaired` (`0x415250`, the
+same from the air side), `0x415219` in `VTOL_RepairUnit` (`0x414E70`, the
+repairer), and `0x4056FE`/`0x4057A1` in the ground repair body shared below
+`0x4056A5` (the repairer again). Both ends of a repair say it.
+
+**`cant`, slot 7, 45 sites.** Not one passes a null caption; every site
+overrides "Cannot Comply" with a message of its own, which is why the table's
+caption is never seen. The sites, by caption:
+
+| Sites | Caption |
+|---|---|
+| `4046fe` | Capture failed |
+| `402736` | Construction stopped |
+| `403a3c, 403fb0, 413dba` | Construction terminated |
+| `41473c` | Construction terminated by hostile action |
+| `40407a` | I can't get there |
+| `403c45` | I can't reach the construction site |
+| `41190b` | Landing aborted |
+| `411d36` | Landing aborted: all pads are occupied |
+| `411e01` | Landing aborted: no pads available |
+| `411c3a` | Landing failed |
+| `4047a6, 4047e6, 404b00, 41479f, 414d69` | Reclamation failed |
+| `40244e, 415268` | Repair aborted. |
+| `414f8e` | Repair mission failed |
+| `40531e, 4053aa, 40575e, 414e8e, 414f18` | Repairs unsuccessful. |
+| `404f7e` | Ressurection failed |
+| `403d10, 414055` | Target area was blocked |
+| `4042ff` | That unit cannot be captured |
+| `404799, 414d91` | That unit cannot be reclaimed |
+| `40432e` | That unit is a cloud of vapor and cannot be captured |
+| `4068d7, 411207, 411526` | Transport mission failed |
+| `402907, 403d78, 405121, 4140b8` | Unable to create any more units |
+| `411771` | Unable to unload unit |
+| `411275` | Unit is too heavy to transport |
+| `4067ea` | Unit is too large to transport |
+| `406916` | Unloading process is proceeding non-optimally |
+| `403cdf, 414020` | Waiting for target area to clear |
 
 ---
 
@@ -10335,10 +11268,17 @@ and `"LIGHT TABLE"`, and they are the shipped `palettes/PALETTE.SHD` and
    `(84, 84, 252)`. Buttons and list boxes draw no focus indicator at all.
 
 Two smaller findings from the same pass, recorded because they are cheap to
-port: a button's caption is drawn twice, once at (x+1, y+3) in interface
-colour 0 as a drop shadow and then in the gadget's own `colorf`
-(`0x4A59A4`-`0x4A59E3`); and if the gadget's `quickkey` character appears in
-its caption, that character is underlined (`0x4A5B2C` onward).
+port. A button's caption can carry a drop shadow: `0x4A59A4` tests bit 3 of
+the gadget's attribs (`gadget+0x1B`, the dword before `colorf` at `+0x1F`)
+and only when it is set draws the caption once at (x+1, y+3) in interface
+colour 0 before drawing it in the gadget's own `colorf`
+(`0x4A59A9`-`0x4A59E3`). The shipped menu buttons do not set it. And if the
+gadget's `quickkey` character appears in its caption, `0x4A5B2C`-`0x4A5CFC`
+find it with `strstr`, measure the caption up to it and the character itself
+in the font's per-glyph widths, measure the font's `I` (`0x4A5CB7`, its
+height plus two), and draw a line under the character with the line routine
+`0x4BE950` in interface colour 2 (`[cfg+0x8B4]`), GUIPAL green: from the
+character's left edge to its right edge less one, at y + height(`I`) + 1.
 
 ### What RWE does with all this
 
@@ -10351,7 +11291,18 @@ for a launcher, which is now a restoration rather than an addition. The
 minimap coverage ring is drawn, dashed while the launcher has a round, and
 both it and the four detection rings are clipped to the minimap. The text box
 draws the blue caret only when it has the focus, and a list box's selected row
-is brightened rather than washed with 12% white.
+is brightened rather than washed with 12% white. The focus now decides more
+than the caret: a key goes to the focused control and to nothing else, the way
+one focused-gadget index a panel implies, where RWE used to hand every key to
+every child of the panel -- which is what made Space press every button on a
+panel at once. A `quickkey` still answers from anywhere on the panel (S:78),
+except while a text box holds the focus, since a letter that is also a
+button's quick key belongs in the name being typed. The characters themselves
+come from SDL's composed text rather than from a table of keycodes, so a save
+name typed on a layout other than US comes out as typed. A button's caption carries
+the drop shadow only where its attribs ask for it and its quick key is
+underlined in interface green, and a greyed control is drawn
+greyed rather than removed — see the note below the list.
 
 Deliberately different, and recorded in §88 rather than left to be found:
 
@@ -10368,11 +11319,1952 @@ Deliberately different, and recorded in §88 rather than left to be found:
 - **A builder walking to its site already says `Nanolathing`.** The original
   would be running a move mission and saying `Moving`; RWE has one
   `BuildOrder` covering the walk and the work.
-- **Greying, the caption shadow and the quick-key underline are still not
-  ported.** The first is §19's existing note, now with the arithmetic behind
-  it; the other two are new and small.
+> **Ported, 2026-09-10.** This list used to end with a bullet saying greying,
+> the caption shadow and the quick-key underline were all still unported. All
+> three are in.
+>
+> Greying went in on 2026-09-02 and the bullet was stale when it was written;
+> §19 now carries the note, including why RWE's greyed face is the artwork's
+> own frame rather than SHADE row 12.
+>
+> The other two are `UiStagedButton::render`. The shadow is drawn at (+1, +3)
+> in black — interface colour 0, as a literal with the slot named, RWE having
+> no runtime interface-colour table — for a button whose gadget sets attribs
+> bit 3 (`GuiButtonAttrib::CaptionShadow`, passed on by both of `UiFactory`'s
+> button builders). The quick-key underline is a one-pixel `fillColor` in
+> (0, 128, 0), interface colour 2 on screen, under the first occurrence of the
+> gadget's `quickkey` character in the caption, measured with
+> `findCharacterInText` in the font's own per-glyph advances so that it lands
+> under the character `drawText` actually drew, at textY + bottom(`I`) + 1.
+>
+> Two things had to be settled that the finding does not record. **The
+> alignment**: RWE's button draws its caption through three paths (left,
+> centred, bottom-centred), and the shadow and the underline have to follow
+> whichever one the gadget uses, so `render` now works out the caption's
+> origin once — reproducing what `drawTextCentered` and `drawTextCenteredX`
+> compute internally, rounding included — and all three draws go from that.
+> The pressed shift survives the move, `round(a + 1)` being `round(a) + 1`.
+> **The case**: the original compares the `quickkey` byte against the caption
+> as it stands, and the shipped gui files are authored to suit — SKIRMISH.GUI's
+> `SelectMap` carries a lowercase `e` for `Select Map`. RWE has folded the
+> quickkey to an SDL keycode by the time a button holds it, so the original's
+> case is gone and the match is case-insensitive. That is not only the
+> available reading but the better one: four shipped gadgets are authored in
+> the *other* case and would lose their underline to an exact test —
+> MISSION.GUI's `SELECT`, whose key is `L` against `Select Mission`, and the
+> `UNDO` buttons on MUSICRT, SOUNDSRT and VISUALRT, whose key is `c` against
+> `Undo Changes`.
+>
+> **Corrected, 2026-09-11** (`2fc621c0`). A play-test against the original
+> showed both of these wrong as first ported: no shadow under the menu
+> captions, and a green underline. The listing agrees on both. The first
+> reading of `0x4A59A4` missed the attribs test in front of the shadow, and
+> took the underline for the caption's colour where `0x4A5CD7` loads
+> interface colour 2. Measured from the font's `I`, the line also sits one
+> row lower than first ported for hattfont12.
 
-## 100. `0x46d630`, the unit-table packet builder, and the checksum behind it that got away
+---
+
+## 100. Two shadow passes: a unit's shadow is a copy of its own sprite, a building's is a projection
+
+Prompted by Jon Mavor's 2012 account of the engine he wrote
+(`mavorsrants.blogspot.com`, "Total Annihilation graphics engine"), which says
+unit shadows "simply took the cached texture and rendered it offset from the
+unit ... that used a darkening palette lookup", while for buildings, "due to
+their tall spires and general complexity I decided to go ahead and properly
+project the shadows". Recollection fifteen years after the fact is not evidence,
+so this section is what the binary says. **It says he remembered it right.**
+
+### The two passes and how a unit is sorted into one
+
+`0x459288` opens the pass on the global options word, `WORD [0x511DE8]+0x37F06`:
+
+```
+459288  mov  ecx,[0x511de8]
+45928e  mov  ax,WORD PTR [ecx+0x37f06]
+459295  test al,0x4                     ; bit 2, Shadows
+459297  je   0x45935c                   ; ... off: nothing at all
+4592a0  mov  ecx,[ecx+0x92]             ; the unit definition
+4592a6  mov  ecx,[ecx+0x241]            ; flags word A
+4592ac  test ecx,0x2000000              ; bit 25, noshadow
+4592b6  jne  0x45935c
+4592bc  test BYTE PTR [ebp-...+0x113],0x20   ; unit+0x113 bit 5 picks the path
+4592c6  je   0x459324                        ; ... clear: the vehicle path
+```
+
+The clear branch gates again, on a **second** option bit:
+
+```
+459324  shr  al,0x3 / test al,0x1       ; bit 3, VehicleShadows
+459329  je   0x45935c
+45932b  test DWORD PTR [esp+0x10],0x81000    ; flags A bits 12 and 19
+459333  jne  0x45935c
+459338  call 0x45a470
+```
+
+So the original has **two** shadow switches where RWE has one, and §78's
+registry table already listed them: bit 2 `Shadows`, bit 3 `VehicleShadows`,
+bit 4 `FeatureShadows`. Turning vehicle shadows off leaves the buildings
+casting. All VERIFIED.
+
+### `0x45A470`, the vehicle path: it copies the unit's own bitmap
+
+The routine copies the source drawable's header — width at `+0`, height at
+`+2`, then `+4`, `+6` and the byte at `+8` — and then moves the pixel plane
+across wholesale:
+
+```
+45a4ae  mov  cx,WORD PTR [eax]          ; width
+45a4b3  mov  dx,WORD PTR [eax+0x2]      ; height
+45a4b7  mov  esi,[eax+0x10]             ; source pixels
+45a4ba  imul ecx,edx
+45a4c0  mov  edi,[edx+0x10]             ; destination pixels
+45a4c8  rep movsd                       ; width*height bytes, verbatim
+45a4cf  rep movsb
+```
+
+There is no transform anywhere in it. **A unit's shadow is a byte-for-byte copy
+of the bitmap the unit was already cached into**, drawn at an offset — which is
+exactly the "offset the cached texture" account, and it means a vehicle's shadow
+is its own silhouette, undistorted, whatever the unit's height. VERIFIED.
+
+### `0x45A790`, the building path: an extent, filled flat
+
+The other branch computes a size through `0x45A510` — four pointer arguments,
+whose results are written straight into the new drawable's width, height, x and
+y words — and then fills it:
+
+```
+45a7f2  imul ecx,[esp+0x14]             ; width * height
+45a7f7  mov  al,[edx+0x8]               ; the drawable's own byte
+45a7fd  mov  bl,al / mov bh,bl          ; replicated into all four bytes
+45a805  shl  eax,0x10
+45a80d  rep stos DWORD                  ; fill the pixel plane
+45a815  rep stos BYTE
+45a82d  rep stos DWORD (eax = 0)        ; and clear the height plane at +0x14
+45a834  rep stos BYTE
+```
+
+**A building's shadow is a projected rectangle filled with a single palette
+index** — one value, which is why Mavor could RLE it "since it's all the same
+intensity", and why cutting the building's own shape out of it was worth doing
+separately. Both paths then composite through `0x4B8500`, the recursive drawable
+blitter, at a screen x biased by `+0x85`. That is an x and not a y: the unit
+itself is drawn by the same blitter at `+0x80` (`0x4597BA`), which is the
+128-pixel side panel, and its y carries the `+32` of the top bar. VERIFIED.
+
+### What RWE does instead
+
+`shaders/unitShadow.vert` used to have **one** path for both: every vertex
+flattened onto the ground plane at `groundHeight` and sheared by
+`(y - groundHeight) * 0.25` in +x and -z. That is the building treatment applied
+to everything — RWE gave a tank the shadow the original reserves for a factory,
+and a tall unit's shadow stretched where the original's would not.
+
+**It has both passes now.** A model that is not mobile keeps that projection;
+a mobile one is displaced by a single vector instead, which carries its
+silhouette across unchanged because the world projection is orthographic, so a
+constant translation in world space is a constant translation on screen — which
+is what blitting the cached bitmap amounts to. The pass already ran with the
+depth buffer off and wrote only the stencil, so nothing else had to agree about
+where the geometry sits. The gate is the unit's mobility, which is exactly
+`unit+0x113` bit 5: that bit is `bmcode == 0`, set at unit creation from
+`def+0x22F` (`0x485A8B`), and on the Feature Unit that draws map features
+(§3, "The nanoframe's shadow", has the whole pass). A mobile unit that hovers
+or floats casts no shadow at all. The second option bit is in too,
+as the `vehicle-shadows` key in `rwe.cfg` — not as a button, because VISUALRT
+has exactly one shadow gadget and RWE already wires it to the master.
+
+**The offset is decoded, as of 2026-09-11.** The unit's own bitmap goes to
+`0x4B8500` at `(sx + 0x80, syUnit)` from `0x4597BA`, and the vehicle shadow's
+copy at `(sx + 0x85, syGround)` from `0x45933D`, where
+
+```
+sx       = int(unit.x - camX)
+syUnit   = int(dz) - int(unit.y) / 2 + 32
+syGround = int(dz) - h / 2 + 32          ; h = 0x485070(&unit.pos), the ground
+```
+
+So a unit's shadow is its silhouette **five pixels to the right**, at the
+height of the ground under it: nothing more for anything that drives, and for
+an aircraft the silhouette lands on the ground below it and walks away as it
+climbs, which is the behaviour everyone remembers. RWE lowers every vertex by
+the unit's height above the ground (the camera's own `y / 2` does the halving)
+and adds 5 to x. It used to take the displacement from the top of the model
+instead, down-right by a quarter of the model's height, which looked plausible
+on paper and in play made a commander look as if it were floating. That
+reading had been chosen before this decode, to keep a visible crescent past
+the unit; the original shows much less of its unit shadows than that.
+
+One thing is still RWE's own: the **darkening**, a screen fill of black at 70%
+alpha through the stencil, where the original's is a palette lookup on a single
+fill index.
+
+One thing this does **not** settle, and it is not guessed at here: which table
+the darkening lookup uses (`0x4B8500` is a tree walk, and the blit it reaches
+was not followed). What `unit+0x113` bit 5 means, left open here until
+2026-09-11, is settled: it is "is a building or a feature".
+
+### And a measurement of the third palette table
+
+`PALETTE.LHT`, `[display+0xC8]`, the `LIGHT TABLE` that §09 of
+`TOTALA-EXE-SHADING.md` records as not used by the shading path: measured
+against `PALETTE.PAL` the same way `PALETTE.SHD` was, it is **identity at row 0
+and brightens monotonically to 1.77x at row 31**, and it never darkens at any
+row. It is a lighten-only ramp, complementary to SHD's 0 to 1.807, and §99's
+interface brightening already uses it. So it is not a candidate for the shadow
+darkening.
+
+### Shadows on water: considered, and declined
+
+Upstream #25 asked for shadows to be cast on the water surface rather than the
+sea floor. That is not what the original does: a building's projection is
+drawn flat at the ground under it wherever that ground is, a finished unit's
+copy is not cut at the water line (above), and the only water test in either
+pass is the one on map features in §3, which casts nothing for a feature whose
+ground is below the sea level. RWE follows all three, as of B4 #9, and the
+request is declined rather than recorded in §88 or `compatibility.md`, since
+nothing here departs from the original.
+
+One thing did depart, in RWE's code rather than in this reading: a **floating
+building's** shadow was lifted to the water surface with
+`rweMax(groundHeight, seaLevel)`. The projected pass has no water test in it,
+so the shadow belongs on the sea bed under the building, and that is where RWE
+draws it now. A floating *unit* is a separate matter and unchanged: it casts no
+shadow at all, the copied pass skipping `canhover` and `floater` alike
+(`0x45957F`).
+
+---
+
+## 101. The purple halo on buildings, and what stood for transparent
+
+A bug of the original's, reproduced on purpose. Jon Mavor names it as his own in
+the 2012 post that prompted §100: "Ever notice that a lot of the buildings have
+a weird purple halo? Basically the table broke when dealing with the edge and
+transparency because I didn't have a correct way to represent that."
+
+The mechanism he describes is the building anti-aliasing: "for the non-animating
+part of the building I would allocate a buffer that was double the size in each
+dimension. I rendered the building at this larger size and then anti-aliased
+that into the final cache", and the filter is a table, applied twice — "a lookup
+on the top two pixel and the bottom two pixels. The results from those two ops
+were then looked up to give me the final color, so 3 lookups." At the silhouette
+the pairs being averaged are a real colour and whatever stood for transparent,
+and what came back was wrong.
+
+**And note what it is applied to: a building's cached bitmap, and nothing
+else.** Not the map. The original has no supersampled world buffer at all --
+the double-size buffer is allocated per building, filtered once, and cached,
+which is the whole reason a DONT_CACHE piece never gets a halo (§12a of
+`TOTALA-EXE-SHADING.md`, and the arms of a metal extractor in practice). RWE
+reaches the same arithmetic from the other end: it renders the *whole world*
+at twice the size and filters the lot down, which gives buildings the
+original's filter for free and gives the ground a filter the original never
+applied to it. That was reported from play as "the terrain just looks blurry",
+and it is a fair description of what averaging four samples of a
+palette-indexed map does -- the mean of four `PALETTE.SHD` reads names a
+colour the palette does not contain, so the crispness the ground is drawn
+with goes.
+
+As of 2026-09-09 the filter is **selective, and selects what the original
+selected**. A 2x2 block is averaged if a cached building piece covers any of
+it -- its silhouette included, which is where the halo comes from, so the two
+features necessarily agree about which blocks those are -- and otherwise the
+block takes a single sample, which is the pixel a render at native size would
+have produced. The ground and the units are therefore left alone, as they
+were in 1997. The mask the halo already reads carries the flags: alpha is the
+occluder level it always was, and green is the ground.
+
+One switch sits on top of it, `anti-alias-units` (VISUALS page), which puts
+units, nanoframes and features back into the filter for anyone who wants
+smooth edges on them more than they want the original. It is off by default,
+the faithful setting. It was turned on by default for part of 2026-09-11,
+after a play-test found sharp units beside smoothed buildings looked like a
+fault, and went back off the same day, when the player asked for the original
+exactly. The ground stays out either way: the blur there was never
+anti-aliasing, it was a box filter over a texture that cannot survive one.
+
+**A finished building's dont-cache piece is drawn sharp, and the switch
+does not reach it** (2026-09-11). It used to go into the mask as an ordinary
+occluder, at 0.5, so a metal extractor's spinning top went sharp or smooth
+with the units, which a play-test rightly found wrong. It has a level of its
+own, 0.7, and `dontCache()` in `worldPost.frag` keeps a block whose native
+sample is such a piece out of every filter, the units switch included. The
+original left that piece out of the cached bitmap and drew it straight to
+the screen afterwards, unfiltered and unfringed, and that is what this
+reproduces. For a few hours the same day it was smoothed with its building
+instead; that went back when the player asked for the original exactly.
+`cached()` (above 0.85) alone now decides both the filter and the halo.
+
+So the direction of travel is worth stating plainly, because it is the
+opposite of what it looks like: **this removed a divergence rather than
+adding one.** RWE was anti-aliasing three things the original anti-aliased
+none of, and it now anti-aliases the one thing it did.
+
+**Which table is INFERRED.** `PALETTE.ALP` is the only 256x256 source-by-
+destination blend table in the shipped data, it is installed at `[display+0xC0]`
+as the anti-alias blend table (`TOTALA-EXE-SHADING.md` §09), and the cloak
+composite already goes through it (`0x4B8500` → `0x4CBF2C`). The anti-aliasing
+code path itself was **not** followed in the binary, so the identification rests
+on there being nothing else it could be.
+
+**Which index stood for transparent is measured.** Blending every palette entry
+against each of the 256 possible partners through the shipped `PALETTE.ALP`, and
+scoring each partner by how purple it makes ordinary building colours — the mean
+of `(R + B) / 2 − G` over every entry of luminance 40 or more — ranks them:
+
+| partner | the index itself | mean result | purpleness |
+|---|---|---|---|
+| **253** | **(255, 0, 255)** | (158, 108, 169) | **+55.2** |
+| 252 | (0, 0, 255) | (55, 70, 186) | +50.7 |
+| 5 | (128, 0, 128) | (117, 76, 119) | +41.6 |
+| 249 | (255, 0, 0) | (172, 76, 58) | +39.2 |
+| 1 | (128, 0, 0) | (123, 65, 58) | +24.9 |
+| 0 | (0, 0, 0) | (61, 64, 56) | −5.9 |
+
+**253 wins, but be honest about the margin: pure blue is close behind it.** The
+score alone would not settle this. What settles it is that 253 is (255, 0, 255),
+plain magenta, which is the conventional colour key and is not a colour any of
+the artwork uses, while 252 is pure blue and appears in the artwork all over the
+place. A transparency sentinel has to be a colour nothing legitimately is.
+Index 0 is black and averages to grey, which is what a sentinel of 0 would have
+produced and is not what anybody saw.
+
+An earlier version of this section put 253 at +40.2 against a runner-up of
++25.8, and put index 1 at −8.0 — "comes back reddish rather than purple". Those
+figures came from a reconstruction of the table rather than from the shipped
+file and are withdrawn; index 1 is quite purple, at +24.9. The identification of
+253 survives, on the argument above rather than on the gap.
+
+Worked values, read straight out of `palettes/PALETTE.ALP`:
+
+```
+grey  (128,128,128) idx   7 + 253 -> index 148 = (167,123,179)   light purple
+white (251,251,251) idx  80 + 253 -> index 146 = (211,171,215)   pale lilac
+blue  ( 39, 63, 87) idx 120 + 253 -> index 150 = (119, 75,143)   violet
+green (  0,255,  0) idx 250 + 253 -> index 248 = (128,128,128)   grey, not purple
+```
+
+That is the whole of the bug, and it is subtler than "the snap has nowhere to
+go". The table's answers are perfectly reasonable *blends* — a grey averaged
+with magenta really is about (167,123,179). They are simply the wrong thing to
+put there, because nothing at that edge was magenta; magenta was the absence of
+the building. So the building acquires a rim of plausible-looking purples it has
+no business having, and because most buildings are painted in greys and metals,
+most of those rims land in the same part of the palette. That is why it reads as
+one effect — "a weird purple halo" — rather than as random noise. The green row
+is the tell: a green edge comes back plain grey, so this is not a purple filter,
+it is an average with a colour that should never have been in the average.
+
+### What RWE does with it
+
+Runs the same arithmetic, rather than painting on an impression of the result.
+
+RWE already renders the world into a buffer of exactly twice the size in each
+dimension when anti-aliasing is on (`worldRenderTextureScale`), which is the
+same shape as the original's "buffer that was double the size in each
+dimension". So every output pixel is one 2x2 block of a supersampled buffer,
+and the original's filter applies to it directly.
+
+What was missing was the palette. A second pass draws the finished buildings
+into a mask at the supersampled size — but writing each fragment's **palette
+index**, not coverage (`unitMask.frag`; the index atlas it reads already exists
+for the `PALETTE.SHD` shade lookup, so this costs nothing new). `worldPost.frag`
+then filters that 2x2 block down with three chained lookups through
+`PALETTE.ALP`, in the original's order: the top pair, the bottom pair, and then
+those two results. Any sample the mask says was uncovered stands in as index
+253. At the silhouette the pairs being averaged really are a real colour and
+whatever stood for transparent, so the wrong colour falls out of the shipped
+table instead of being chosen — the same wrong colour, from the same table, by
+the same three operations.
+
+Two consequences, and both are how you tell this apart from an approximation:
+
+- **The colour is per pixel.** A dark panel edge comes back near-black purple,
+  a lit edge comes back magenta, a pale edge comes back lilac, and a green edge
+  comes back grey. A single averaged constant — which is what RWE painted on
+  before, (158,109,171), the mean of the row — is right only for the greys.
+- **It is a rim, not a glow.** Only a *mixed* block gets it: 1, 2 or 3 of the
+  four samples covered. An all-covered block is ordinary anti-aliasing, which
+  RWE's supersample already does, and an all-uncovered block is terrain. So the
+  artefact sits on the building's outermost pixels the way the original's sat
+### Which pieces get it: "the non-animating part of the building"
+
+Mavor's sentence is precise and it names a mechanism RWE had already decoded
+under another heading. He anti-aliased **"the non-animating part of the
+building"** — and the thing that decides which part that is, is the COB
+`CACHE` / `DONT_CACHE` state (`TOTALA-EXE-SHADING.md` §12a, §15 item 8). The
+original keeps a finished unit in a cached bitmap rendered by the shaded
+rasterizer; a piece the script has marked `DONT_CACHE` is left out of that
+bitmap and drawn straight to the screen each frame by the unshaded twin. 137 of
+the shipped scripts use it, mostly on the pieces that move — turrets, lab arms,
+radar dishes.
+
+So the anti-aliasing and the halo it produces are properties **of the cache**,
+not of the building. A piece that is not in the cache never passes through the
+table and therefore never acquires a halo, no matter how hard its edge contrasts
+with what is behind it.
+
+That is directly observable, and it is what caught the divergence: a metal
+extractor in the original has the fringe along its base and pad and **not** on
+the arm and counterweights on top, which are exactly the pieces its script keeps
+out of the cache. RWE haloed the whole model until 2026-09-09 and now passes
+`cachedPiecesOnly` when it builds the halo mask, skipping any piece whose
+`UnitMesh::cached` is false. `tools/visual-test.ps1 -phase mex` is the
+regression test: base fringed, top clean.
+
+The pleasing part is that no new decoding was needed. `DONT_CACHE` was read out
+of the binary for the *shading* — a dont-cache piece is not shaded, because the
+unshaded rasterizer draws it — and the same flag turns out to answer "which part
+is the non-animating part" exactly. Two of Mavor's sentences, three years of
+his engine apart, describing one list of pieces.
+
+### What is RWE's own
+
+Three things, recorded rather than hidden.
+
+The first is a strength setting, `building-halo-strength`. 100 is the original,
+where the filtered pixel simply is the pixel; lower values blend back towards
+RWE's own rendering. There is deliberately **no width setting**: the artefact is
+one output pixel wide because it is a 2x2 downsample, and widening it would mean
+inventing pixels the original never drew. What that costs is honest to state —
+TA drew its buildings smaller in pixels than RWE does, so one pixel was a larger
+share of a building then than it is now, and the effect is correspondingly
+subtler here than it was on a 640x480 screen. Matching the *proportion* instead
+would mean a wider rim and a less faithful mechanism; the mechanism was chosen.
+
+The second is a colour correction, `building-halo-saturation` (65) and
+`building-halo-red-shift` (50), applied to what the table returns. A play-test
+of the exact colours asked for something less saturated and redder, and that is
+a fair thing to want rather than a fudge: a palette index is not a colour until
+something displays it, and TA's were displayed on a 1997 CRT through a hardware
+LUT, where phosphor, a warmer white point and the gamma of that path all pull a
+saturated blue-purple towards a duller red-magenta. None of that is in the data.
+So the arithmetic above stays exact and the correction sits in one place, off at
+100 and 0. The red shift pulls blue down towards green rather than reordering
+the channels, and that detail matters: the two harshest colours the table
+returns are black-with-magenta (128,0,128) and magenta-with-itself (255,0,255),
+and both have red and blue *exactly equal*, so any correction phrased as "send
+the larger of red and blue into red" leaves precisely the pixels that most need
+it untouched.
+
+The third is inherent to reproducing this from a screen-space mask, and is the
+one that took a second pass to get right.
+
+The original anti-aliases each building's bitmap **in isolation** — nothing else
+is in the buffer when the filter runs — and then paints whatever stands in front
+over the top. RWE's mask is drawn depth-tested against the finished world, so
+anything in front of a building *removes* the building's samples where it
+covers it. The rim of that gap is a boundary, and a boundary is all the post
+pass can see, so it drew a fringe there: a line **inside** the model, along the
+outline of whatever was in front.
+
+That is not a corner case. A unit's own dont-cache pieces are in front of its
+own cached ones, so a metal extractor drew a purple line where its rotating arm
+crossed its base, and the line crawled as the arm turned. It was reported from a
+play-test within a day of the halo first working.
+
+The fix is to give the mask a third state. Every sample is now one of: nothing
+(cleared, alpha 0), an **occluder** (alpha 0.5), or a cached building piece
+(alpha 1). A block gets a halo only when it straddles the outer edge of
+everything solid — 1, 2 or 3 of its four samples solid — **and** every solid
+sample in it is a cached piece. So:
+
+- an arm crossing its own base is four solid samples, no boundary, no halo;
+- the arm's own outer edge against the ground is a real boundary, but its
+  samples are not cached, so it gets nothing, which is also what the original
+  does;
+- the building's own outer edge is unchanged.
+
+What goes in as an occluder: every dont-cache piece of a haloed building, every
+mobile unit and nanoframe entire, and every modelled map feature. **Two things
+still do not**, and they are the remaining way to see a fringe inside a model:
+a *billboard* feature is a sprite with no mesh to walk, and the terrain is not
+drawn into the mask at all, so a building partly hidden by a cliff would be
+fringed along the cliff line. Neither has been seen in play; both are fixable
+the same way, by drawing them in at 0.5.
+
+**And the occluders have to actually land, which took a second attempt.** They
+were written correctly and then thrown away, because `GameLaunch` enables
+blending once for the whole program with
+`GL_SRC_ALPHA`/`GL_ONE_MINUS_SRC_ALPHA` and nothing in the render path ever
+turns it off. The mask is data, not a picture, and compositing it is nonsense —
+but the failure is quiet and, worse, *selective*: a cached piece asks for alpha
+1 and blends to 1, so it comes through perfectly, while an occluder asks for 0.5
+and lands as `0.5*0.5 + 0.5*0 = 0.25`, which fails the "is this sample solid"
+threshold. Every occluder was discarded, every hole stayed open, and the fringe
+went on crawling inside the model exactly as before — with the fix apparently
+in. The red channel was being halved too, and half of a palette index is a
+different colour rather than a darker one. `disableBlending` around the pass is
+the whole of it. The general lesson is the one about `GL_LESS` again in a
+different suit: this pass writes *values*, not pixels, and every piece of
+pipeline state that quietly interpolates or combines them has to be turned off
+deliberately rather than left as whatever the last draw wanted.
+
+**How to test it, since no single frame can.** A still cannot show a crawling
+line. `tools/visual-test.ps1 -phase mex` takes two frames three seconds apart of
+a metal extractor that does not move but whose arm does, and the test is the
+diff: a halo pixel present in one frame and absent in the other, inside the
+model, is the bug. Beware two false positives that will otherwise convince you
+it is still broken. The map's own sand carries pink speckle whose colour is
+genuinely indistinguishable from the halo, and the counterweights throw a shadow
+that sweeps as the arm turns; both move or match on colour and neither is the
+halo. Marking the differing pixels onto a magnified frame and looking at where
+they fall separates them in one glance, where counting them does not.
+
+### How the mask is filled, and what it costs
+
+The mask is a **second render target of the passes that already draw the
+world**, not a pass of its own. `unitTexture.frag` writes it alongside the
+colour it was writing anyway; `mapTerrain.frag` and `unitBuild.frag` write an
+occluder value the same way. `glDrawBuffers` turns the second target on for
+exactly those passes and off for everything else, because a particle or a flash
+must not touch coverage and its shader does not declare that output at all.
+
+That arrangement fell out of noticing that a separate pass was re-deriving two
+things the first pass already had in hand: the texel's palette index, which
+`unitTexture.frag` samples anyway for the shade lookup, and which surface is in
+front, which the depth test had already settled. It also disposes of two whole
+classes of bug at once -- there is no second set of matrices to disagree with
+the first, so `GL_EQUAL` is not needed and cannot be forgotten, and blending is
+disabled once for that attachment with `glDisablei(GL_BLEND, 1)` rather than
+around each pass, so a pass that forgets cannot write quarter-alpha samples that
+read as empty. Both of those had already cost a day each.
+
+Measured on `battle_test --map "Coast To Coast" --units 200 --unit-type CORAK`,
+per unit mesh, because a run drifts and the runs saw 3299, 3625 and 3000 meshes:
+
+| per unit mesh | separate pass | halo off | second render target |
+|---|---|---|---|
+| draw calls | 3.19 | 2.18 | **2.21** |
+| `w.unit.build` | 0.443 us | 0.245 us | **0.232 us** |
+
+The separate pass cost about 740 us a frame and 3300 extra draw calls -- an 81%
+rise in the unit build phase and 46% more draws. As a render target it costs no
+CPU work and no draw calls at all: both figures are the halo-off baseline.
+
+**What the remaining cost is, and why it is not quoted.** Writing a second
+target is real GPU bandwidth, and it is below what this harness can resolve. A
+battle_test run drifts by a third in how much is on screen, and two runs
+measured `world` per mesh *lower* with the effect on than with it off, which is
+impossible and says plainly that the timing noise exceeds the difference. The
+draw counts are trustworthy where the microseconds are not: a count does not
+drift with load, and 2.21 against 2.18 is the whole story. Anyone wanting the
+GPU figure needs a fixed camera on a fixed scene, not battle_test.
+
+It is still gated on a visible finished building -- a scan of positions and
+bounding boxes, no mesh work -- so a field battle away from a base pays nothing
+at all rather than paying a little.
+
+Dropping the depth test instead would trade all of this for something worse — a
+building hidden behind a hill drawing its outline across the hill — so the
+depth-tested mask with occluders is the version that keeps.
+
+**One trap, recorded because it cost two days, and now designed out.** When the mask was a separate pass it redrew geometry the world pass had already drawn, so it had to run under `GL_EQUAL` and not `GL_LESS`: the two shaders transformed with the same expression and the same matrix, so every fragment landed at exactly the depth already stored and `GL_LESS` rejected all of them. It did, and the halo was invisible at every setting because it was never drawn at all -- while "the original's is one pixel of a 640x480 screen, so of course it is too small to see" sat there as a ready and completely wrong explanation. An invisible effect is a broken effect until proven otherwise. Filling the mask from the world passes themselves removes the hazard rather than documenting it: there is no second set of matrices to agree with the first.
+
+---
+
+## 102. The ground path follower: an aim point on the segment, and two brakes into the corner
+
+> **Ported, 2026-09-10.** Upstream issue #36, "a unit that overshoots a
+> waypoint turns round and goes back for it". Three of the four things below
+> are in. The corner the unit has left is kept in the waypoint list, so there
+> is a segment to steer along at all — `PathFindingService::pathToWaypoints`
+> no longer drops the start cell and `PathFollowingInfo` starts its iterator
+> at `begin() + 1`. The aim point is projected onto that segment with the
+> original's eighty-unit look-ahead. And the cosine speed factor is gone,
+> replaced by the original's two brake tests, written in the original's
+> operation order. The straight-line stand-in of §87 is two points now — the
+> unit's own position, then the goal, which is what `0x44F3F2` writes — and it
+> is walked on the tick the order arrives rather than the one after, because
+> `Mover::Update` calls the navigator and then the follower in the same frame
+> (`0x43DD28`).
+>
+> **One departure, and it is measured.** The waypoint advance radius stays at
+> RWE's sixteen world units, and eight for the last one, rather than the
+> original's five. Five is fine for a unit on its own and costs about a third
+> of the arrivals in a crowd: at a hundred units in `path_bench`, five arrived
+> 27 against sixteen's 49 and asked for 884 searches against 509, because a
+> waypoint is a cell centre and a unit two cells across cannot always reach
+> within five of one another unit is standing on — it circles until the
+> collision repath rescues it. The original's answer to that is its blocked
+> bit, which RWE has; RWE's units get in each other's way differently. With
+> the other three in and sixteen kept, the same benchmark arrives 49 where the
+> old follower arrived 45, and asks for 509 searches where it asked for 613.
+>
+> `followPath` in `src/rwe/sim/UnitBehaviorService.cpp` and `followSegment` in
+> `src/rwe/sim/UnitBehaviorService_util.cpp`; the old `seek` and `arrive` are
+> gone. `src/rwe/sim/pathfollowing.test.cpp` pins it.
+
+§87 decodes the pathfinder and its scheduler and stops at the point where a
+route has been handed to a unit; this is the other half, the per-tick step that
+walks it.
+
+The short answer is that the original **does** have a look-ahead — a pure
+pursuit aim point projected onto the segment the unit is walking, with a
+look-ahead of exactly 80 world units — and that it has two braking tests whose
+whole job is to stop a unit arriving at a corner too fast to take it. What it
+does not have is any test for *having passed* a waypoint. So the original can
+turn round for one; it is arranged so that it rarely has to.
+
+### Where it lives
+
+The call graph from the mission to the arithmetic, all of it confirmed by
+reading the calls rather than by inference:
+
+| Address | Role |
+|---|---|
+| `0x4031D0` | ground mission **`Move`** — row 26 of the ground mission table at `0x4FC71A` (base `0x4FC490`, 25-byte records), display string `"Moving"` |
+| `0x438930` | `Mission::SetPointGoal(&pos, radius)` — allocates a `PointGoal` and installs it on the navigator. `0x438943` is §87's `canfly` test: an aircraft gets no goal and no path |
+| `0x44CF60` | `PointGoal::PointGoal(mission, x, z, radius)` |
+| `0x43DD20` | `Mover::Update(unit)` — the per-tick entry. Calls `Navigator::Update` **first**, then the follower, then the collision/integration step |
+| `0x44F1A0` | `Navigator::Update()` — the goal test and **the waypoint advance** |
+| `0x43CD20` | **the ground path follower**, the subject of this section |
+| `0x43D290` | the air follower (§1), chosen instead when `def+0x241` bit 11 (`canfly`) is set |
+| `0x43CC20` | `Mover::Move(unit, accel)` — applies the acceleration, caps the speed, writes the velocity vector |
+| `0x43D6D0` | integrate: add velocity to position, test the new map square, set the **blocked** bit |
+| `0x43DA70` | pick the COB animation band and call `StartMoving`/`StopMoving`/`MoveRate1`..`3` |
+
+`0x43DD20` in full, which is where the ordering comes from:
+
+```
+43dd24  ecx = [this]                      ; this+0x00 is the navigator
+43dd28  call [[ecx]+0x08]                 ; Navigator::Update  (0x44F1A0)
+43dd30  ecx = unit->def (unit+0x92)
+43dd36  edx = def->[0x241] >> 11
+43dd44  if (edx & 1) call 0x43D290        ; air
+43dd4d  else         call 0x43CD20        ; ground
+43dd55  call 0x43D6D0 (unit)              ; integrate + collide
+43dd5d  call 0x43DA70 (unit)              ; animation band
+43dd65  call 0x43DB50 (unit)              ; waterline / height
+```
+
+There is exactly **one** ground follower. Ships, hovercraft, tanks and kbots
+all reach `0x43CD20`; the only branch anywhere in the movement dispatch is
+`canfly`. `0x43CD20` has a single caller, `0x43DD4D`.
+
+Three objects are involved and they point at each other in a cycle worth
+writing down, because every offset below depends on it: `unit+0x00` is the
+**mover**, `mover+0x00` is the **navigator**, and `navigator+0x08` is the unit.
+
+### Where the path is kept
+
+`Navigator`, vtable `0x4FD458` (the base-class table at `0x4FD428` sits
+immediately before it in `.rdata`):
+
+| Offset | Field |
+|---|---|
+| `+0x00` | vtable |
+| `+0x04` | the goal object, or null |
+| `+0x08` | the unit |
+| `+0x0C` | **the waypoint array**: 20 entries of 4 bytes, `int16 x` then `int16 z` |
+| `+0x5C` | waypoint count |
+| `+0x60` | tick of the last path request (the 60-tick rate limit of §87) |
+| `+0x64` | flags: bit 0 "I have a path", bit 1 "I want a path", bit 3 "dirty, send me" |
+
+Vtable slots used below: `+0x04` `SetGoal` (`0x44F2A0`), `+0x08` `Update`
+(`0x44F1A0`), `+0x0C` `GetWaypoints` (`0x44F150`), `+0x14` `HasPath`
+(`0x44F290`), `+0x18` `WantsPath` (`0x44F260`), `+0x20` the three-waypoint
+bit-serialiser (`0x44F4A0`).
+
+**Waypoints are whole world units in an `int16`, not map squares and not
+fixed point.** Two independent confirmations. `Navigator::SetGoal` writes the
+*high word* of the unit's 16.16 position straight into a slot
+(`0x44F3F9`: `mov dx, WORD PTR [ecx+0x6c]`, and `unit+0x6C` is the high half of
+the 16.16 `x` at `unit+0x6A`), and `GetWaypoints` shifts a slot left by 16 to
+hand it back (`0x44F178`: `shl ebp,0x10`). And the pathfinder's emitter builds
+each corner the same way at `0x40E11F`–`0x40E13A`:
+
+```
+world = (2 * cell + footprint) * 8     ; i.e. cell*16 + footprint*8
+```
+
+which is `PointGoal::GetPosition`'s formula (`0x44D2E1`: `(footprint + 2*g) << 19`,
+`<<19` being ×8 in 16.16) written for integers. A waypoint is therefore the
+world position of the **centre of the unit's own footprint** placed on that map
+square, and `>>4` on it gives the square index — which is what `SetGoal`'s
+ladder does at `0x44F301` before asking the goal whether the path's tail is
+already good enough.
+
+The array is walked as `wp[j]` at `nav + 0x0C + 4j`, `j = 0 … count-1`. **`wp[0]`
+is the corner the unit has left and `wp[1]` is the corner it is heading for.**
+`SetGoal` makes that explicit for the straight-line stand-in of §87: at
+`0x44F3F2` it sets `count = 2`, `wp[0] =` the unit's own position, `wp[1] =`
+the goal.
+
+The mover, for the fields the follower touches:
+
+| Offset | Field |
+|---|---|
+| `+0x00` | the navigator |
+| `+0x08`…`+0x13` | velocity, three 16.16 world units per tick |
+| `+0x20` | **speed**, 16.16 world units per tick |
+| `+0x24` | the turn applied this tick, a signed 16-bit angle |
+| `+0x2A` | tick the unit last changed square or mode (`0x43D865`) |
+| `+0x2E` | flags; **bit 2 is "blocked"**, set at `0x43D92C` from the footprint test `0x47DB70` (§95's third reader) |
+
+And the unit, adding to §82's table: position `unit+0x6A` / `+0x6E` / `+0x72`
+(16.16 x, y, z; the high words at `+0x6C`, `+0x70`, `+0x74` are read directly as
+`int16` world units in several places), occupied map square `unit+0x76` / `+0x78`
+(`int16`), footprint in squares `unit+0x7E` / `+0x80` (`int16`), the unit
+definition at `unit+0x92`.
+
+### The waypoint advance — `0x44F1A0`
+
+`Navigator::Update` runs before the follower every tick and does two things.
+The second is the advance:
+
+```
+44f1d7  edi = this->count
+44f1da  if (count < 2) goto repath_check
+44f1df  edx = this->unit
+44f1e2  eax = (int16) this->wp[1].z          ; nav+0x12
+44f1e6  ecx = (int16) unit->z                ; unit+0x74, the high word
+44f1ea  edx = (int16) unit->x                ; unit+0x6C
+44f1ee  ebp = (int16) this->wp[1].x          ; nav+0x10
+44f1f2  ecx -= eax                           ; dz
+44f1f7  edx -= ebp                           ; dx
+44f1fb  ebp = dx*dx
+44f200  edx = dz*dz
+44f203  ebp += edx
+44f205  cmp ebp, 0x19                        ; 25
+44f208  jg repath_check                      ; not there yet
+        ; pop wp[0]: memmove wp[1..count-1] down to wp[0..count-2]
+44f223  count--
+44f22c  if (count < 2) clear bit 0           ; "I have a path" goes away
+44f235  set bit 3
+```
+
+**The rule.** When the unit is within **5 world units** of the corner it is
+heading for — `dx² + dz² ≤ 25`, computed on the truncated integer positions —
+the corner behind it is dropped and the list shifts down by one. Exactly one
+waypoint is dropped per tick; there is no loop, so a unit cannot skip two
+corners in a tick however fast it is going.
+
+Five world units is under a third of a map square. It is a small number and it
+is meant to be: nothing else in the original ever advances the list.
+
+There is a `Navigator::PopN(n)` at `0x44F100` that would drop several at once.
+Nothing calls it — it is in no vtable, `xref.py` finds no data reference, and
+the listing contains no `call 0x44f100`. It is dead code.
+
+**There is no "have I passed it" test anywhere.** No dot product against the
+segment, no plane through the waypoint, no skip-ahead. The advance is a radius
+and nothing else.
+
+The first thing `Update` does, before the advance, is the goal test:
+
+```
+44f1a5  ecx = this->goal
+44f1aa  if (goal == 0) skip
+44f1b2  if (goal->IsSatisfiedBy(unit))       ; vtable +0x10
+        {
+44f1bc      Notify(goal, 0x20)               ; mission+0x4E |= 0x20, "arrived"
+44f1c8      if (!goal->vf2C())                ; 0x44CEF0, returns 0 for a PointGoal
+44f1d4          this->SetGoal(NULL)
+        }
+```
+
+and the last thing is the repath decision (`0x44F239`), which confirms §87's
+three triggers and adds nothing: a goal exists **and** (the mover's blocked bit
+is set **or** the waypoint count has fallen below two). Grepping every
+instruction in `.text` that ors or ands `[reg+0x64]`, and every `mov` into it,
+finds writers at `0x44F0AE`, `0x44F0B1`, `0x44F0E9`, `0x44F0EF`, `0x44F13A`,
+`0x44F231`, `0x44F251`, `0x44F2DA`, `0x44F2E1`, `0x44F2E8`, `0x44F313`,
+`0x44F3D4`, `0x44F41B`, `0x44F441` and `0x44F55C` — every one of them inside
+the navigator's own four methods. **Nothing outside the navigator can ask for a
+path**, so there is no "too far from the route" re-request and no stuck timer
+feeding one. `mover+0x2A` is stamped with the tick the unit last changed square
+but no reader of it turns up in the mover, the navigator or the follower.
+
+### The aim point — `0x43CD20`, first half
+
+The follower opens by asking whether there is a path at all:
+
+```
+43cd2d  ecx = this->navigator
+43cd31  call HasPath()                        ; vtable +0x14
+43cd36  if (!HasPath) {
+43cd3c      this->turnDelta = 0
+43cd46      eax = -def->brakerate              ; def+0x19A
+43cd52      Move(this, unit, eax)              ; 0x43CC20
+            return
+        }
+```
+
+**A unit with no path brakes at `brakerate` and does not turn.** That is the
+whole of the stopping behaviour; see "Arrival at the goal" below.
+
+With a path, it asks for three waypoints:
+
+```
+43cd61  ecx = this->navigator
+43cd63  push 3 ; push 0 ; push &buf
+43cd6e  call GetWaypoints(&buf, 0, 3)          ; vtable +0x0C = 0x44F150
+```
+
+`GetWaypoints` writes three 12-byte vectors — `(x<<16, 0, z<<16)` — and clamps
+the index it reads with `index = min(i, count-1)` (`0x44F16A`–`0x44F172`). So
+with a two-point path, `buf[2]` repeats the goal; with a longer one, `buf[2]` is
+the corner after next. Name them `prev = buf[0]`, `next = buf[1]`,
+`after = buf[2]`.
+
+Then the aim point:
+
+```
+43cd75  dx = next.x - unit.x
+43cd8c  dz = next.z - unit.z
+43cda7  dist = hypot(dx, dz)                   ; 0x4FB440 then ftol at 0x4E43A0
+43cdb4  if (dist <= 0x500000) goto aim_at_next  ; 80.0 in 16.16
+
+43cdc3  sx = next.x - prev.x
+43cdd5  sz = next.z - prev.z
+43cdf4  seglen = hypot(sx, sz)
+43ce01  if (seglen < 0x10000) goto aim_at_next  ; 1.0 world unit
+
+43ce1f  ux = (sx << 16) / seglen               ; unit vector along the segment
+43ce3b  uz = (sz << 16) / seglen
+43ce55  back = min(dist - 0x500000, seglen)
+43ce73  aim.x = next.x - ((ux * back) >> 16)
+43ce99  aim.z = next.z - ((uz * back) >> 16)
+
+aim_at_next:
+43cebc  aim = next
+```
+
+**The rule.** The unit does not steer at the corner. It steers at a point on the
+segment it is walking, placed so that the aim point is always **80 world units
+closer to `next` than the unit itself is**, and never further back than `prev`.
+
+Put on the line, that is plain pure pursuit with a look-ahead of 80 units: a
+unit sitting on the segment 300 units short of the corner aims at a point 80
+units in front of it. Put off the line, it is a corridor: the aim point is the
+point on the segment at distance `dist − 80` from the corner, so a unit that has
+drifted sideways is steered back onto the line rather than at the corner, and
+the further off it is the further back along the line it aims. Inside 80 units
+of the corner the projection stops and the unit homes on the corner itself.
+
+Eighty world units is five map squares. `0x500000 / 65536 = 80`, and
+`0x10000 = 1.0`; both are immediates in the instruction stream, not table
+lookups.
+
+The `min(…, seglen)` cap means the aim point lies on the closed segment
+`prev … next` and never behind `prev`, and the `seglen < 1.0` bail-out is what
+stops a degenerate segment dividing by zero. On the tick a unit is given an
+order, `prev` is its own position and `seglen` is the whole distance to the
+goal, so the stand-in path steers 80 units straight ahead — which is correct
+and needs no special case.
+
+### The turn — `0x43CD20`, second half
+
+```
+43cf0b  ax = HeadingTo(&unit.pos, &aim)        ; 0x48A980 -> atan2 at 0x4B715A
+43cf12  ax -= unit->heading                    ; unit+0x66, 16-bit wrap
+43cf1e  err = (int16) ax
+43cf8a  if (err == 0) { this->turnDelta = 0; goto speed }
+
+43cf96  rate = def->turnrate                   ; def+0x1BA, a WORD
+43cfa5  if (err >=  rate)  this->turnDelta = +rate
+43cfb5  else if (err <= -rate) this->turnDelta = -rate
+43cfc9  else                   this->turnDelta = err
+43cfdb  unit->heading += this->turnDelta
+43cfdf  unit->flags(+0x110) |= 0x10000
+```
+
+**The rule.** The heading error is clamped to ±`turnrate` and applied. That is
+all: no damping, no proportional term, no separate rate for large errors. The
+same three lines appear standalone at `0x43CBB0`, which is the helper the rest
+of the engine uses to point a unit at something.
+
+`turnrate` is parsed as a plain **integer** (`0x4C46C0`, `atoi`) and stored as a
+`WORD` at `def+0x1BA` (`0x42C243`), so it is a raw 16-bit-angle step per tick:
+65536 units to the circle, and an FBI `TurnRate=550` is 3.02° a tick, about 90°
+a second. `maxvelocity`, `acceleration` and `brakerate` go through `0x4C4800`
+instead, which is `atof(value) * 65536.0` truncated (the multiplier is the
+double at `0x4FDC20`, and it is exactly 65536.0) — so all three are 16.16 and
+**per tick**, with no further division by the frame rate.
+
+### Accelerate or brake — the two tests
+
+This is the part that matters most for #36, and it is the part RWE did not
+have.
+
+```
+43d000  speed = this->speed
+43d00e  edx:eax = |err| * speed
+43d022  A = (|err| * speed) / def->turnrate               ; 16.16
+
+43d03e  edx:eax = speed * speed
+43d048  t = (speed*speed) >> 16                            ; speed² in 16.16
+43d06c  B0 = (t << 16) / (2 * def->brakerate)              ; 16.16
+43d080  B  = (B0 * B0) >> 32                               ; squared, integer units²
+
+43d090  C  = 4 * ((A * A) >> 32)                           ; (2A)², integer units²
+
+43d0a2  if (distToAim² > C && distToAfter² > B)
+43d0ac      accel = +def->acceleration                     ; def+0x19E
+        else
+43d0b8      accel = -def->brakerate                        ; def+0x19A
+43d0c0  Move(this, unit, accel)
+```
+
+`distToAim²` is `ebp`, the squared distance to the aim point above, computed at
+`0x43CECC`–`0x43CF09`. `distToAfter²` is `[esp+0x1C]`, the squared distance to
+`buf[2]`, computed at `0x43CF37`–`0x43CF7D`. Both are 32.32 products shifted
+right 32, so both are in whole world units squared, as are `B` and `C`.
+
+Written out, with the squares removed:
+
+- **The corner test.** Accelerate only while `distance to the aim point > 2 × speed × |heading error| / turnrate`. The right-hand side is twice the distance the unit would cover in the number of ticks it needs to finish turning. It is a turn-radius test in disguise, and it is what makes a unit slow down for a corner in proportion to how sharp the corner is. A unit pointing straight at its aim point (`err = 0`) always passes it.
+- **The arrival test.** Accelerate only while `distance to buf[2] > speed² / (2 × brakerate)`, the textbook stopping distance. Because `GetWaypoints` clamps its index, `buf[2]` is the **final** waypoint whenever the path has three points or fewer, so this is the brake into the destination; on a longer path it is a brake into the corner after next, which is a mild look-ahead of its own.
+
+Failing either test brakes at `brakerate`. There is no partial throttle: every
+tick the unit either adds `acceleration` or subtracts `brakerate`, and the
+speed cap does the rest.
+
+### The speed cap — `0x43CC20`
+
+```
+43cc2d  this->speed += accel
+43cc37  if (this->speed < 0) this->speed = 0
+
+43cc46  i = unit->pitch >> 11                  ; unit+0x68, 16-bit angle
+43cc4d  i = clamp(i, -5, +5)
+43cc61  pct = (int8) byte at 0x505205 + i
+43cc76  cap = (pct << 16) * def->maxvelocity   ; def+0x192
+43cc7c  cap >>= 16
+43cc95  cap /= 100.0                           ; 0x640000
+
+43cca8  if (unit->y_high < seaLevel && !(def->[0x241] & 0x81000))
+43ccc4      cap = (cap * 0x8000) >> 16          ; halved
+
+43ccd3  if (this->speed > cap) this->speed = cap
+43ccde  velocity = (-sin(heading)*speed, 0, -cos(heading)*speed)
+```
+
+The slope table at `0x505200`, eleven signed bytes indexed `-5 … +5` from
+`0x505205`, is:
+
+| index | −5 | −4 | −3 | −2 | −1 | 0 | +1 | +2 | +3 | +4 | +5 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| percent | 25 | 55 | 70 | 85 | 100 | 100 | 75 | 50 | 25 | 20 | 15 |
+
+Each index step is `1 << 11` of a 16-bit angle, 11.25°, so the table covers
+±56.25° of pitch and clamps beyond that. It is asymmetric on purpose: one
+direction reaches 25% at the third step and the other only at the second-to-last.
+
+`seaLevel` is the byte at `globals+0x1427F` in whole world units, compared
+against the high word of the unit's `y`. The exemption is `def+0x241` bits 12
+and 19 — `canhover` and `floater` — so a hovercraft or a ship keeps full speed
+in the water and a submerged land unit is halved.
+
+`0x4B70EF` and `0x4B7123` are sine and cosine of a 16-bit angle out of the
+512-entry table at `0x509F00` (`(table[a] * r + 0x1000) >> 13`), and both
+results are negated on the way into the velocity, which is why
+`HeadingTo(&unit.pos, &aim)` at `0x48A980` computes `atan2(unit − aim)` rather
+than `atan2(aim − unit)`: the two negations cancel.
+
+`0x43DA70` then bands the speed for the animation — 0, or 1/2/3 by comparison
+against `def->moverate1` (`+0x1AE`) and `def->moverate2` (`+0x1B2`) — and calls
+the COB functions `StopMoving`, `StartMoving`, `MoveRate1`, `MoveRate2`,
+`MoveRate3` (strings at `0x50523C`, `0x505230`, `0x50520C`, `0x505218`,
+`0x505224`). A blocked unit reports band 0 whatever its speed.
+
+### Arrival at the goal
+
+`PointGoal`, built at `0x44CF60`, vtable `0x4FD328`:
+
+| Offset | Field |
+|---|---|
+| `+0x04` | the mission |
+| `+0x08` / `+0x0A` | the goal **map square**, `int16` |
+| `+0x0C` | the radius in world units |
+| `+0x10` | `(radius / 16)²`, in map squares squared |
+
+The constructor converts the requested world position to a square with the same
+footprint correction the collision code uses,
+`(x - (footprint << 19) + 0x80000) >> 0x14`, and divides the radius by 16
+rounding toward zero.
+
+`IsSatisfiedBy(unit)` (`0x44D310`, vtable `+0x10`) is
+
+```
+(unit->squareX - gx)² + (unit->squareZ - gz)² <= radiusSq
+```
+
+on `unit+0x76` / `unit+0x78`, and `IsSatisfiedAt(x, z)` (`0x44D290`, vtable
+`+0x14`) is the same test on supplied square coordinates — that is the one
+`SetGoal` uses at `0x44F309` when it decides whether an existing path's tail
+already satisfies a new goal.
+
+The `Move` mission passes `mission+0x36 + 4` as the radius (`0x403232`), where
+`mission+0x36` is the order's own tolerance. For a plain move order that is a
+radius of 4 world units, which divides down to **0 map squares**: the unit must
+end up standing on the goal square itself.
+
+So arrival is a three-step sequence rather than one test:
+
+1. `Navigator::Update` finds `IsSatisfiedBy` true, sets `mission+0x4E |= 0x20`, and calls `SetGoal(NULL)`.
+2. `SetGoal(NULL)` clears both "I have a path" and "I want a path" (`0x44F2E1`).
+3. The follower sees `HasPath` false and brakes at `brakerate` with no turn until the speed reaches zero.
+
+The braking is not abrupt, because the arrival test has already been pulling
+the speed down over the last `speed²/(2·brakerate)` world units. The two halves
+are designed together: the follower gets the unit to the goal square slowly, and
+the goal test then takes the path away.
+
+### So what happens when a unit misses a waypoint?
+
+Putting the advance, the aim point and the two brakes together, and this is the
+answer #36 needs.
+
+The original has **no** skip-ahead and **no** passed-the-plane test. If a unit
+gets past the corner it was heading for without having come within 5 world
+units of it, the corner is still `wp[1]`, and:
+
+- while the unit is within 80 units of it — which it is immediately after passing — the aim point *is* that corner, so the unit turns back toward it;
+- once it is more than 80 units past, the aim point becomes a point on the segment `prev → next` pulled back by `dist − 80`, which is behind the corner from the unit's point of view, so it turns back harder.
+
+**So yes, the original will turn round and go back for a waypoint.** #36
+describes real TA behaviour, not a divergence.
+
+What the original has that keeps it rare is the corner brake. As a unit
+approaches a corner the heading error to the aim point grows, and the corner
+test `distToAim > 2·speed·|err|/turnrate` fails: the unit brakes at `brakerate`
+every tick until it is going slowly enough that it can turn inside the distance
+remaining. A unit therefore normally arrives at a corner at a speed its
+`turnrate` can cope with, passes within 5 units, and advances. The
+overshoot-and-return is the failure mode of the corner brake, not the normal
+path of the code.
+
+Two secondary effects make it rarer still. Sliding sideways off the line is
+corrected before the corner arrives, because the aim point is on the segment
+rather than at its end. And a unit that ends up genuinely lost will hit one of
+the three repath triggers above — most often the blocked bit, since a unit
+circling a corner in a crowd collides — and get a fresh route from where it
+actually is.
+
+### The FBI fields the follower reads
+
+Confirmed by the string comparisons at `0x42C129`–`0x42C25F`, keeping §82's
+warning in mind that the parser stores a key's value one push late.
+
+| FBI key | Offset | Parsed by | Units | Read at |
+|---|---|---|---|---|
+| `maxvelocity` | `def+0x192` | `0x4C4800`, ×65536 | 16.16 world units per tick | `0x43CC76` (the cap), `0x43D9A2` (halved when blocked) |
+| `brakerate` | `def+0x19A` | `0x4C4800`, ×65536 | 16.16 per tick² | `0x43CD46`, `0x43D02F`, `0x43D0B4` |
+| `acceleration` | `def+0x19E` | `0x4C4800`, ×65536 | 16.16 per tick² | `0x43D0AC` |
+| `moverate1` / `moverate2` | `def+0x1AE` / `+0x1B2` | `0x4C4800`, ×65536, default `maxvelocity × 2` | 16.16 | `0x43DA9A`, `0x43DAA9` — animation bands only |
+| `turnrate` | `def+0x1BA` | `0x4C46C0`, `atoi`, `WORD` | 16-bit angle per tick | `0x43CBCA`, `0x43CF96`, `0x43D014` |
+| `waterline` | `def+0x22C` | `0x4C46C0`, `BYTE` | world units | `0x43D72E` (§12) |
+| `canfly` | `def+0x241` bit 11 | | | `0x43DD3E` — picks air over ground |
+| `canhover` / `floater` | `def+0x241` bits 12 / 19 | | | `0x43CCAE` — exempt from the underwater halving |
+
+Notably **not** read by the follower: `footprintx`/`footprintz` (they are baked
+into the waypoints by the emitter and into the goal square by the constructor,
+so the follower never sees them), and `movementclass`, which belongs to the
+search and to the footprint test, not to the walking.
+
+`brakerate` is read three times and the three uses are different: as the
+deceleration when there is no path, as the deceleration when either test
+fails, and inside the stopping-distance formula. It is *not* the "nose
+re-aim only" field §82 describes — that note is about the air path at
+`0x43D3BC`.
+
+### What RWE does with this
+
+RWE's follower is `followPath` in `src/rwe/sim/UnitBehaviorService.cpp`, with
+the steering in `followSegment` (`UnitBehaviorService_util.cpp`), the turn in
+`UnitBehaviorService::updateUnitRotation` and the speed in
+`computeNewGroundUnitSpeed`. The path itself is `PathFollowingInfo` in
+`src/rwe/sim/UnitState.h` — a `UnitPath` plus an iterator into its waypoints.
+As with the original, only ground units come here: `moveTo` branches on
+`canFly` and nothing else, exactly as `0x43DD3E` does.
+
+| The original | RWE before this port | RWE now |
+|---|---|---|
+| Keeps the corner behind (`wp[0]`) as well as the one ahead | Kept only an iterator to the one ahead; `pathToWaypoints` started its loop at `++simplifiedPath.cbegin()`, so the cell the unit started in was dropped | Keeps it. `waypoints[0]` is the corner behind, the iterator starts at `begin() + 1`, and a path is never shorter than two points |
+| Aim point projected onto the segment, look-ahead 80 world units | `seek` aimed straight at the current waypoint, always | The projection, the 80-unit look-ahead, the `min(dist − 80, seglen)` cap and the degenerate-segment bail-out |
+| Advance when within **5** world units of the waypoint ahead | Advance when within **16**; **8** for the last one | Unchanged, and deliberately — see the note at the head of this section |
+| Turn: clamp the heading error to ±`turnrate` | `turnTowards(rotation, targetAngle, turnRate)` — the same rule | Unchanged |
+| Accelerate iff `distToAim > 2·speed·abs(err)/turnrate` **and** `distToAfterNext > speed²/(2·brakerate)`; otherwise brake at `brakerate` | Target speed was `maxVelocity × max(0, cos θ)`, squared again inside one turn radius of the goal | Both tests, in the original's operation order. Target speed is `maxVelocity` when both pass and zero when either fails, and `computeNewGroundUnitSpeed`'s accelerate/brake step — which already matched `0x43CC20` — does the rest |
+| Arrival brake keyed to `buf[2]`, the final waypoint on a short path | `arrive` did the same `speed²/(2·brakeRate)` test, but only on the last waypoint; intermediate corners got no arrival brake at all | Keyed to the waypoint after next, clamped to the last the way `GetWaypoints` clamps its index, so every corner gets it |
+| Speed cap: `maxvelocity × slope%[pitch]`, halved underwater unless `canhover`/`floater` | `computeNewGroundUnitSpeed` caps at `maxVelocity`, halves it below sea level, and scales by `computeSlopeSpeedFactor` — a rise-over-one-tile ratio with a floor of ¼, not the original's eleven-entry pitch table | Unchanged; the pitch table is still not ported |
+| No path → brake at `brakerate`, no turn | Reaching the end of the path returned `true` and asked for another; the steering info was left as it was | The end of the path sets the steering to "hold this heading, stop", which is `0x43CD36` |
+| Straight-line stand-in is two points: unit position, then goal (`0x44F3F2`) | `groundUnitMoveTo` pushed **one** waypoint, the destination | Two points, and the unit walks it on the tick the order arrives rather than the one after |
+| Repath triggers: goal changed, count < 2, blocked | Goal moved, `inCollision` (with a 30-tick cooldown), path finished | Unchanged — the same three in substance |
+
+**The two tests are written the original's way round.** `A = |err| × speed /
+turnrate` first and `distToAim² > (2A)²` after, not cross-multiplied into a
+division-free form; and `B0 = speed²/(2 × brakerate)` first and
+`distToAfterNext² > B0²` after. The original divides first with 64-bit
+intermediates, and where that division truncates is part of the arithmetic:
+rearranging it moves the tick a unit starts braking on. The determinism worry
+about a division is a real one in general and does not bite here — a
+`SimScalar` divide is a single IEEE operation with one correctly rounded
+result, so every peer gets the same number out of it. Both divisions are
+guarded against a zero `turnrate` or `brakerate`, which the shipped data never
+has and a test fixture can.
+
+**No new state.** The only thing the follower needed that it did not have is
+`prev`, and putting it in `path.waypoints` rather than beside them is what
+keeps the bookkeeping free: `save_util.cpp` already serialises the vector and
+the iterator's index, and `dump_util.cpp` already dumps the moving state.
+`computeHashOf(NavigationStateMoving)` hashes `pathDestination`,
+`pathRequested` and `reachableDestination` but not the path — the path is saved
+and not hashed, which is defensible under CLAUDE.md's rule only because every
+peer computes the same path from the same search, and a follower carrying extra
+state must keep it inside `UnitPath` for the same reason rather than inventing a
+second unhashed field beside it.
+
+**And one thing found on the way.** A unit picked up by a transport kept the
+speed it was walking at, and nothing runs a carried unit's physics, so the
+number was still sitting there when it was set down again and the unit coasted
+a world unit or two out of the spot the transport had chosen for it, in
+whatever direction the transport happened to be facing. `loadUnitIntoTransport`
+stops it now.
+
+### What is not settled
+
+- **`mover+0x2A`.** Stamped at `0x43D865` with the tick the unit last changed map square or movement mode. No reader turned up in the mover, the navigator or the follower. It may be a stuck timer read from somewhere further away, or dead. Stated as found.
+- **`mover+0x04`.** The scheduler checks it non-null before touching the navigator (`0x40ED4A`) and nothing else read here uses it.
+- **The `min(i, count-1)` clamp's intent.** It makes `buf[2]` the last waypoint on a short path, which is what turns the second test into an arrival brake. Whether that was the intent or a convenience that happens to work is not decidable from the code.
+- **Bit 2 of `mover+0x2E`.** Read as "blocked" here and in §87, and the only writer found is `0x43D92C`, which sets it when `0x47DB70` — §95's footprint test for a unit definition — refuses the square. But that writer sits inside a branch gated on `unit+0x96` (`0x43D8E3`), so there may be a second writer on a path not walked here.
+- **The exact sign convention of the pitch index** into the slope table. The table is asymmetric, so which end is uphill matters; the code is `clamp(pitch >> 11, -5, +5)` with no negation, and the table's shape (100% at −1 and 0, falling faster on the positive side) reads as positive = uphill, but that is inference from the numbers rather than a decode.
+- **Whether ships differ.** They do not take a different follower — `0x43DD3E` branches on `canfly` alone — but `0x43DB50`, the waterline step, was not read past its first few instructions and may adjust the speed for a floater in a way the follower does not see.
+
+---
+
+## 103. Loading is issued to the transport, and what a click on a unit does
+
+> **Ported, 2026-09-10.** The roadmap's "units ordering themselves aboard
+> (select units, click transport)" is closed as **not-TA**: there is no
+> passenger-side boarding order in the v3.1 binary, and the count below is
+> exhaustive rather than a search that came up empty. What is ported instead
+> is the thing next door that *is* the original — the default-action ladder,
+> which RWE had written out twice, in the cursor chooser and in the click
+> handler, already disagreeing. It is one free function now,
+> `computeDefaultAction` in `src/rwe/game/DefaultAction.{h,cpp}`, taking the
+> simulation, one selected unit, what is under the cursor and which scheme is
+> in force, and returning the order *and* the cursor together, so the two
+> cannot come apart. `GameScene.cpp`'s cursor arms and `GameScene_input.cpp`'s
+> left, right, minimap and MOVE-armed click handlers all call it.
+> `CursorType::Pickup` is new and loads `cursorpickup`, which RWE had never
+> used, so the air/crane split can be drawn. The visible change is that a
+> click on a friendly unit now does something: in "Right Click" mode it
+> guards, repairs, completes, lands on a pad, picks up or moves, where before
+> it silently dropped every click that was not an enemy or a nanoframe.
+>
+> **Three things are deliberately not ported.** A passenger-side board order,
+> because there is none — implementing one would be a §88 divergence and
+> belongs under features rather than fidelity. Picking up an enemy unit:
+> §5 below shows the original has no ownership test at any of the five
+> decision points, and RWE keeps its own-units rule, now stated once in
+> `DefaultAction.cpp` instead of scattered (§88). And `cursorrevive`, which
+> the base game's `CURSORS.GAF` does not ship; a resurrect keeps the reclaim
+> cursor, as it already did for an order in flight. The air pickup's order of
+> operations — `QueryTransport` and `BeginTransport` before the descent rather
+> than after the attach — is the other thing this section turned up, and it
+> was fixed in its own commit the same day rather than here. What is left
+> unported and recorded is the crane path's ten-second self-attach fallback
+> and its `CraneReach` gate, neither of which the original has an equivalent
+> of.
+>
+> `src/rwe/game/DefaultAction.test.cpp` pins the arms, including the pair the
+> roadmap item was about: a Peewee over a friendly Hulk guards it, and an
+> Atlas over a friendly Peewee loads it.
+
+§31–§41 decode the transport *missions*: what `CanLoadUnit` allows, what the
+crane and the Atlas do once a pickup mission is running, and what the carried
+state is. This is the layer above them — the click, the command and the
+cursor.
+
+**The headline answer is no.** Loading is a *transport-side* order in every
+path: the transport is always the unit being commanded and the cargo is always
+the click target, never the other way about. What a selection of ordinary
+mobile units gets for clicking a friendly transport is, depending on the mouse
+scheme, either nothing but a change of selection or a **Guard** order:
+
+| `Interface Type` | Button | Cursor shown | What the click does |
+|---|---|---|---|
+| **0 — "Left Click"** (the shipped default) | left | 15 `cursorselect` | **selects the transport**, replacing the selection. No order at all |
+| 0 | right | (unchanged) | cancels an armed command; otherwise starts the screen drag-scroll |
+| **1 — "Right Click"** | left | 15 `cursorselect` | selects the transport |
+| 1 | right | 15 `cursorselect` (feedback only) | **`FOLLOW_GROUND` / `VTOL_FOLLOW`** — a Guard order on the transport |
+| either, with the MOVE button armed (command 2) | left | 5 `cursordefend` | **`FOLLOW_GROUND` / `VTOL_FOLLOW`** — Guard |
+
+The confidence is **high**, and it rests on a count rather than on a failed
+search. There are exactly five calls to `CanLoadUnit` (`0x489A90`) in the whole
+image, all five pass the *ordering* unit as the transport, and the ground
+mission table has 46 rows of which exactly three touch transports at all
+(`BeCarried`, `Ground_Pickup`, `Ground_Unload`) — and `BeCarried` is entered
+only from the attach routine, never from an order.
+
+### The command table: fourteen commands, and where they come from
+
+A click becomes an order in two steps. The order panel arms a **command id**
+in `BYTE [game+0x2CC3]` (`game` = `ds:0x511DE8`); a click in the world then
+runs that id, the clicked unit and the clicked point through a builder that
+produces a **mission name** per selected unit. The ids are not the mission rows
+and not the cursor ids — three separate numberings, which is the trap in
+reading any of this.
+
+The arming sites are one per button, all in `0x419BA0`–`0x41A0E0`, each
+`strstr`-matched by gadget name (§19's `0x49FE60` caveat applies) and each
+toggling back to 1 when pressed a second time:
+
+| Button | Arms `[game+0x2CC3]` | Order-builder arm | Cursor-chooser arm |
+|---|---|---|---|
+| — (nothing armed) | **1** | `0x43F9E9` | `0x43E505` |
+| `MOVE` | **2** | `0x43F845` | `0x43E8BB` |
+| `ATTACK` | 3 | `0x43F154` | `0x43E545` |
+| `BLAST` | 4 | `0x43F7E8` | `0x43E850` |
+| `UNLOAD` | **5** | `0x43F735` | `0x43E80C` |
+| `LOAD` | **6** | `0x43F701` | `0x43E7D3` |
+| `DEFEND` | 7 | `0x43F4C7` | `0x43E615` |
+| `REPAIR` | 8 | `0x43F46C` | `0x43E5FA` |
+| `PATROL` | 9 | `0x43F3B9` | `0x43E5DE` |
+| `STOP` | 10 (issued at once, then back to 1) | `0x43F82C` | — (`0x43F098`) |
+| (no button) | 11 — `TELEPORT` | `0x43F813` | `0x43E8AE` |
+| `RECLAIM` | 12 | `0x43F4F7` | `0x43E65C` |
+| `CAPTURE` | 13 | `0x43F6D1` | `0x43E797` |
+| building placement | 14 | `0x43F7A0` | `0x43E828` |
+
+Both dispatchers are the same shape — `eax = cmd & 0xFF; dec; cmp 0xD; ja
+default; jmp [table + eax*4]` — with tables at `0x4401EC` (order builder, entry
+`0x43F0E0`) and `0x43F0A8` (cursor chooser, entry `0x43E490`).
+
+`0x43E470` is the small predicate that says whether a command consults the unit
+under the cursor at all: commands **5 (UNLOAD), 10 (STOP) and 14 (placement)**
+return 0 and are point-or-nothing orders; everything else returns 1 and takes
+the hovered unit as its target. That is why an unload is aimed at a spot and a
+load is aimed at a unit.
+
+**`LOAD` is command 6 and only the LOAD button arms it**, which §19 has already
+shown is offered only when some selected unit has `canload` — the four base-game
+transports (`armatlas`, `armtship`, `cortship`, `corvalk`) plus the two Core
+Contingency hover transports. A Peewee can never have the LOAD button, so a
+passenger can never arm command 6.
+
+### The order builder, `0x43F0E0`, called once per selected unit
+
+```
+0x43F0E0(char* outMissionName, BYTE cmd, Unit* orderer, Unit* target, Point* clickXZ)
+```
+
+The issue routine `0x48CF30` walks the local player's unit array (stride
+`0x118`), keeps those with `unit+0x110` bit 4 (selected), **skips the click
+target itself** (`0x48D07B` — a selected unit that is also the thing clicked
+does not order itself), and calls the builder once per survivor at `0x48D0A0`.
+So a mixed selection produces a different mission per unit from the same click,
+and `orderer` is always the *selected* unit.
+
+Its preamble sets the two relationship flags the rest reads
+(`0x43F0EC`–`0x43F12D`):
+
+```
+if (target) {
+    require target+0x110 & 0x10000000            ; else no order at all
+    ebx = 1 if ordererPlayer->allyTable[targetPlayerIndex] != 0   ; ALLIED
+    eax = 1 if that byte == 0                                     ; ENEMY
+}
+```
+
+The polarity is pinned twice over: the guard arm is friendly-only and requires
+the `!= 0` flag, and the cursor chooser's red/green pair puts `cursorred` under
+the `== 0` flag and `cursorgrn` under the other.
+
+**Command 6, LOAD** (`0x43F701`) refuses without a target, calls
+`CanLoadUnit(transport = orderer, candidate = target)` with `ecx = ebp =
+orderer` — the transport is the unit being commanded — and produces
+`VTOL_PICKUP` or `GROUND_PICKUP` on `canfly`. There is no call with the
+operands the other way round anywhere in the image.
+
+**Command 5, UNLOAD** (`0x43F735`) produces `VTOL_LANDING` when a `canload`
+aircraft is aimed at an `isairbase` target, and otherwise requires `canload`
+and gives `VTOL_UNLOAD` or `GROUND_UNLOAD`.
+
+**Command 2, MOVE** (`0x43F845`) is not a plain move: it is the full context
+ladder, and the only armed command that can produce a pickup without the LOAD
+button. Read top to bottom; the first arm that fires wins:
+
+```
+43f845  require ordererDef+0x245 bit 7 (canmove)          ; else no order
+43f854  if (orderer has no mover)          -> "QMOVE"     ; a factory: rally point
+43f873  if (no target unit)                -> canfly ? "VTOL_MOVE" : "MOVE_GROUND"
+43f893  if (cancapture && ENEMY)            -> "CAPTURE"
+43f8b5  if (canreclamate && ENEMY)          -> canfly ? "VTOL_RECLAIMUNIT" : "RECLAIMUNIT"
+43f8d9  if (ALLIED && CanRepair && target buildFraction != 1.0)
+                                            -> canfly ? "VTOL_HELPBUILD" : "HELPBUILD"
+43f918  if (ALLIED && CanRepair && target hp < maxhp)
+                                            -> canfly ? "VTOL_REPAIRUNIT" : "REPAIRUNIT"
+43f959  if (canfly && ALLIED && targetDef isairbase)
+                                            -> "VTOL_LANDING"
+43f97d  if (CanLoadUnit(orderer, target))   -> canfly ? "VTOL_PICKUP" : "GROUND_PICKUP"
+43f9a4  if (canguard && ALLIED)             -> canfly ? "VTOL_FOLLOW" : "FOLLOW_GROUND"
+43f9cd  otherwise                           -> canfly ? "VTOL_MOVE" : "MOVE_GROUND"
+```
+
+`CanRepair` is `0x4899B0`; `CanLoadUnit` is `0x489A90` and is again called with
+`ecx = orderer` (`0x43F97E`: `mov ecx,ebp`).
+
+**Trace a Peewee down that list against a friendly Hulk.** Not an enemy, so the
+capture and reclaim arms are skipped. `CanRepair` fails — a Peewee is not a
+builder. Not `canfly`. `CanLoadUnit(peewee, hulk)` fails at its second test,
+`0x489AB8`, because the *transport* argument is the Peewee and a Peewee has
+`canload = 0`. `canguard` is set on essentially every mobile unit and the Hulk
+is allied, so the Peewee gets **`FOLLOW_GROUND`** — ground mission row 27,
+handler `0x406300`, display "Guarding". It walks over and escorts the
+transport. It does not board it.
+
+**Command 1, the default action**, reads `DWORD [game+0x37EFA]` at `0x43F9E9`
+and forks on it. **Interface Type 1's right-click chain** (`0x43FA00`) is
+command 2's ladder with `CAPTURE` at the front, and it keeps the transport
+arms: capture (enemy) → `RECLAIMUNIT` (enemy) → `HELPBUILD` → `REPAIRUNIT` →
+`VTOL_LANDING` (`0x43FB04`) → **`CanLoadUnit` at `0x43FB3D`** → `FOLLOW_GROUND`
+at `0x43FB7B` → feature reclaim → `MOVE_GROUND` at `0x4401C2`.
+
+**Interface Type 0's left-click chain** (`0x43FE35`) is shorter, and the
+difference is the interesting part:
+
+```
+43fe35  if (canattack && ENEMY)     -> recurse into 0x43F0E0 with cmd 3   ; ATTACK
+43fe68  if (canreclamate && ENEMY)  -> recurse into 0x43F0E0 with cmd 12  ; RECLAIMUNIT
+43fe91  if (CanRepair && under construction / damaged) -> HELPBUILD / REPAIRUNIT
+43ff38  if (canresurrect && the feature under the cursor is resurrectable) -> RESURRECT
+440065  if (canreclamate && the feature under the cursor is reclaimable)   -> RECLAIM
+44019d  if (canmove && has a mover) -> canfly ? "VTOL_MOVE" : "MOVE_GROUND"
+        else no order
+```
+
+**There is no guard arm and no load arm in the left-click chain.** In the
+shipped default scheme, clicking a friendly unit can never produce a Guard
+order and can never produce a pickup; the DEFEND and LOAD buttons are the only
+routes to either.
+
+### The mission tables
+
+Ground table: base `0x4FC490`, **25-byte records**, 46 live rows, laid out as
+`TOTALA-EXE-MISSIONS.md` S:1 describes. The rows this section needs are **14
+`BeCarried`** (`0x4FC5EE`, `0x402FC0`, "Being transported"), **27
+`Follow_Ground`** (`0x4FC733`, `0x406300`, "Guarding"), **34 `Ground_Pickup`**
+(`0x4FC7E2`, `0x406780`, "Loading") and **35 `Ground_Unload`** (`0x4FC7FB`,
+`0x406900`, "Unloading"). Row 23 is not a mission at all: the twenty-five bytes
+there are float constants that happen to sit inside the array's stride.
+
+**The air table's prose in `TOTALA-EXE-MISSIONS.md` was wrong and is corrected
+by this pass.** It said the VTOL table "begins at `0x4FCA7C`, 18 records" where
+its own table (correctly) starts at `0x4FCA18` and runs 22 rows; `0x4FCA7C` is
+row 4, `VTOL_Unload`. The rows wanted here are **3 `VTOL_Pickup`**
+(`0x4FCA63`, `0x4111B0`, "Loading"), **4 `VTOL_Unload`** (`0x4FCA7C`,
+`0x411560`, "Unloading"), 2 `VTOL_Landing` (`0x4118E0`) and 5 `VTOL_Follow`
+(`0x40FBE0`).
+
+**Every transport-related row is transport-side except `BeCarried`, and
+`BeCarried` is not orderable.** It is installed only by `0x4384A0`, called from
+the attach routine `0x48AAC0` at `0x48ACF3` when a unit is put aboard something
+that is not a repair pad (§37). Nothing names it in the order builder, no
+button arms it, and it carries no target of its own.
+
+There is no `Load`, `LoadUnits`, `Board`, `BoardTransport`, `GetLoaded`,
+`EnterTransport` or `GotoTransport` string anywhere in the binary. The only
+`Transport` literals are `TransportPickup` (`0x5016F4`), `TransportDrop`
+(`0x501734`), `EndTransport` (`0x501B0C`), `BeginTransport` (`0x501BA4`),
+`QueryTransport` (`0x501BB4`), the three announcements ("Transport mission
+failed", "Unit is too large to transport", "Unit is too heavy to transport"),
+"Being transported" (`0x501160`), and the FBI key names.
+
+> A lead, recorded but not decoded: the **low byte of the word at `+0x10`**
+> agrees with the cursor id the next part derives for the same action in most
+> rows — `Ground_Pickup` 12, `VTOL_Pickup` 8, `Ground_Unload` 13,
+> `Follow_Ground` 5, `Move_Ground` 14, `Capture` 4, the reclaim rows 11, the
+> attack rows 1. It is **not** a reliable source for the cursor:
+> `VTOL_Unload` carries 9 where the chooser returns 13, `MobileBuild` carries
+> 0, and `Standby` carries 15. Treat the chooser as the authority and this as
+> a coincidence worth someone's afternoon.
+
+### The cursor chooser, `0x43E490`, and the cursor table
+
+```
+0x43E490(BYTE cmd, Unit* orderer, Unit* target, Point* clickXZ) -> cursor id
+```
+
+It is called from exactly one place, `0x48D3E4`, in a loop over the selection
+that starts at `0x13` (`cursornormal`) and keeps the **minimum**
+(`48d3e9  if (eax < edi) edi = eax`). So a mixed selection shows the cursor of
+whichever selected unit has the lowest-numbered applicable action — the
+cursor's counterpart to §19's "any, not all" button rule. `0x43F098`, the
+switch default, returns 19, which is the sentinel a unit contributes when it
+cannot do the armed command at all.
+
+The cursor ids are **1-based indices into an array of GAF handles at
+`game+0x14883`**, loaded in one straight-line run at `0x429C9A`–`0x429E94` from
+`CURSORS.GAF`. The consumer at `0x4992B9` reads `[game + id*4 + 0x1487F]`,
+which is the same array biased by one; `BYTE [game+0x2CBE]` caches the id
+currently displayed.
+
+| id | Field | Sequence | Frames |
+|---:|---|---|---:|
+| 1 | `+0x14883` | `cursorattack` | 10 |
+| 2 | `+0x14887` | `cursorairstrike` | 16 |
+| 3 | `+0x1488B` | `cursortoofar` | 2 |
+| 4 | `+0x1488F` | `cursorcapture` | 13 |
+| 5 | `+0x14893` | `cursordefend` | 16 |
+| 6 | `+0x14897` | `cursorrepair` | 12 |
+| 7 | `+0x1489B` | `cursorpatrol` | 14 |
+| **8** | `+0x1489F` | **`cursorpickup`** | 24 |
+| 9 | `+0x148A3` | `cursorteleport` | 46 |
+| 10 | `+0x148A7` | `cursorrevive` | 18 |
+| 11 | `+0x148AB` | `cursorreclamate` | 11 |
+| **12** | `+0x148AF` | **`cursorload`** | 16 |
+| **13** | `+0x148B3` | **`cursorunload`** | 16 |
+| 14 | `+0x148B7` | `cursormove` | 8 |
+| 15 | `+0x148BB` | `cursorselect` | 2 |
+| 16 | `+0x148BF` | `cursorfindsite` | 2 |
+| 17 | `+0x148C3` | `cursorred` | 1 |
+| 18 | `+0x148C7` | `cursorgrn` | 1 |
+| 19 | `+0x148CB` | `cursornormal` | 1 |
+| 20 | `+0x148CF` | `cursorhourglass` | 8 |
+| 21 | `+0x148D3` | `pathicon` | 1 |
+
+`cursorrevive` is out of order in the array because the load run assigns it
+last (`0x429E94`) into the slot skipped at `0x429D9D`; it is also the only one
+of these absent from the base game's `CURSORS.GAF` and present in `rev31.gp3`'s.
+`pathicon` is the marching-waypoint sprite of §26, riding in the same array.
+`CURSORS.GAF` also ships `cursorprotect` and `MISCART.GAF` a whole parallel set
+(`cursor load`, `cursor moveto`, …) — **the exe loads none of them**; no such
+strings exist in the binary.
+
+**Command 6, LOAD** (`0x43E7D3`) returns 19 without a target or when
+`CanLoadUnit(orderer, target)` fails, and otherwise computes
+`((~(def+0x241 >> 11) & 1) | 2) << 2` — that is, **8 (`cursorpickup`) when the
+transport is `canfly` and 12 (`cursorload`) when it is not**. That split is the
+only air-versus-crane difference anywhere in the cursor path. **Command 5,
+UNLOAD** (`0x43E80C`) is `canload ? 13 : 19` and does *not* branch on `canfly`
+— the Atlas and the Hulk both show `cursorunload`.
+
+**Command 2, MOVE** (`0x43E8BB`) mirrors its ladder arm for arm: 14 with no
+target or no mover, 4 for capture, 11 for reclaim, 6 for both repair arms, 13
+when a flyer is over an air base, `canfly ? 8 : 12` for a pickup, 5 for a guard,
+14 otherwise.
+
+**Command 1** forks on `Interface Type` at `0x43E505` exactly as the order
+builder does:
+
+```
+43e505  if (Interface Type == 1) goto 0x43eb02        ; the RIGHT-click scheme
+        ; Interface Type 0 -- the LEFT-click scheme:
+43e512  if (canattack && ENEMY)     { cmd := 3;  re-enter the switch }
+43e52a  if (canreclamate && ENEMY)  { cmd := 12; re-enter the switch }
+43edb6  if (CanRepair && under construction) -> 6  (cursorrepair)
+43edec  if (target is the LOCAL player's own, selectable, fully built,
+            [target+0xFB]==0, and either unattached or on a repair pad)
+                                             -> 15 (cursorselect)
+43ee4f  if (canresurrect && resurrectable feature) -> 10 (cursorrevive)
+43ef6c  if (canreclamate && reclaimable feature)   -> 11 (cursorreclamate)
+43f07c  canmove ? 14 (cursormove) : 19
+
+43eb02  ; Interface Type 1 -- selection feedback only:
+        if (target is the local player's own and selectable, as above) -> 15
+43eb63  if (ENEMY)  -> 17 (cursorred)
+43eb74  if (ALLIED) -> 18 (cursorgrn)
+43eb85  ... otherwise probe the terrain and features, ending at 14/19
+```
+
+Note the fourth arm of the left-click chain: **your own units answer with
+`cursorselect` before anything else can fire.** That is why, in the shipped
+default scheme, no amount of hovering your own transport produces a load
+cursor — and why the LOAD button exists.
+
+### The cursor is the decision
+
+**Left button** (`0x4993B6` for the down-event with a command armed;
+`0x4995AE` for a click that ended a drag of under 32 pixels in under 0x19
+ticks) → **`0x498F70`**, which dispatches on the **currently displayed cursor
+id**, not on the command:
+
+```
+498f77  cl = [game+0x2CC3]                     ; armed command
+498f7d  if (cl == 14) { building placement, separate path }
+499027  dl = [game+0x2CBE]                     ; the cursor on screen right now
+49902d  if (dl == 15 /*cursorselect*/) { 0x48C7F0(click); return }   ; select that unit
+499041  if (dl >= 17) {                        ; red, green, normal, hourglass, pathicon
+            if (Interface Type == 1 && cl == 1) { clear the selection }
+            return                             ; otherwise the click does nothing
+        }
+49906d  0x48CF30(click, cl, 0, &game+0x2CAA, 0, 0)     ; issue the order
+49908c  if (!shift) unarm the command and un-press its button
+```
+
+That is the tidiest thing in this whole path: **the cursor is the decision.** A
+left click issues an order exactly when the chooser returned an id below 17,
+selects when it returned 15, and does nothing otherwise. A real drag goes to
+`0x48C390` instead, which is the rubber-band box selection and issues nothing.
+
+**Right button down** → `0x499100`: an armed command is cancelled first
+(`0x499107`), Interface Type 0 then starts the screen drag-scroll
+(`0x499162`), and Interface Type 1 calls `0x48CF30` with command 1 directly
+(`0x4991D5`). So cancelling with the right button works in **both** schemes,
+only "Right Click" mode issues on it, and — because that path does *not*
+consult the cursor — in "Right Click" mode the cursor reads `cursorselect` over
+your own transport while the right button still issues a Guard order on it.
+
+`DWORD [game+0x37EFA]` is the registry value **`Interface Type`** under
+`HKCU\Software\Cavedog Entertainment\Total Annihilation` (read at `0x42F9A0`,
+written back at `0x430F1C`), clamped to 0..1 at `0x42F9CF` and defaulting to
+**0** when absent. Its UI is the `LEFTCLICK` gadget on `SPEEDSRT.GUI` /
+`SPEEDS.GUI`, labelled `"Left Click|Right Click"` (§65).
+
+The unit under the cursor is resolved once per frame by `0x48CD80` into
+`WORD [game+0x2CBA]`, from the drawn-unit list by a ray test with **no owner
+filter**; `0x48CF30` converts it to a pointer only when `0x43E470` says the
+command in hand takes a unit target.
+
+### An aside the code is unambiguous about: enemies are loadable
+
+Neither `CanLoadUnit` (§31 already noted this), nor the LOAD cursor arm
+(`0x43E7D3`), nor any of the three order-builder call sites applies an
+ownership or alliance test. In the command-2 ladder the `CanLoadUnit` arm at
+`0x43F97D` sits *after* capture and reclaim but is itself unguarded, and a
+transport has neither `cancapture` nor `canreclamate`, so it is reached with an
+enemy target; and with the LOAD button armed, `0x43E7D3` will happily hand back
+cursor 8 or 12 over an enemy. §31's parenthetical "the UI only offers the
+cursor on the player's own units" and §39's "RWE should keep its UI-level
+own-units-only rule" both read as though the UI supplies the missing test —
+**it does not**. That rule is a deliberate RWE house rule, recorded in §88, not
+a description of the original. Whether the resulting pickup then completes was
+not traced and was not play-tested.
+
+### What the transport's script sees, and when
+
+The roadmap's second item asks whether the `TransportPickup` boom animation is
+timed to the actual attach. **On the crane path it is the other way round: the
+attach is timed to the animation, and the engine never attaches at all.** It
+starts the script and polls a field.
+
+`Ground_Pickup` (`0x406780`) state 2 is the whole of the engine's involvement:
+it starts `TransportPickup(cargoId)` through `0x4B0A70`, plays announcement
+slot 0xC, bumps an attempt counter and sets a 15-tick timer. State 3 sleeps
+while the COB `BUSY` value at `unit+0x10F` bit 1 is set, and state 4 tests
+`target+0x86 != 0` — *is the cargo attached to anything at all*. The attach
+itself happens inside the script when it executes `ATTACH_UNIT`. Three
+consequences worth naming:
+
+- **There is no engine-side range gate for the crane.** The script's own
+  `BoomCalc` reach test is the only one. The engine's check in state 0
+  (`0x4067B1`) is a *footprint* test, not a distance test, and its failure
+  message is "Unit is too large to transport".
+- **The announcement is not timed to the attach on the ground path** — slot 0xC
+  plays when the *script starts*, before any hook has touched anything. On the
+  air path (`VTOL_Pickup` state 4, `0x411479`) the same slot plays *at* the
+  attach. The two genuinely differ.
+- **A script that never sets `BUSY` costs 15 ticks, not a failure.** State 4
+  finds nothing attached and, while the attempt counter is under 3, installs a
+  ground move goal at the cargo's position. Three attempts exhausted, it returns
+  9 and parks for `rand(30)+30` ticks before restarting from state 0. There is
+  no timeout after which the engine takes the unit aboard itself.
+
+`VTOL_Pickup` (`0x4111B0`) is the reverse. State 2 calls `QueryTransport` after
+arriving within 48 wu of the cargo at cruise altitude and **before** any
+descent, and the script returns the piece to hang the cargo from. State 3 calls
+`BeginTransport(targetDef+0x16E)` — the cargo's model height — still before the
+descent, and the Atlas's `BeginTransport` is a single `MOVE_NOW link y -> -h`;
+the engine then resolves that piece's offset and descends until the hook sits
+on the cargo's roof. State 4 does the attach itself, `0x48AAC0`, with no script
+call at all. So on the air path **the animation is timed to the engine's
+attach**, where on the crane path the attach is timed to the animation.
+
+`EndTransport` has five call sites and two are not where you would look:
+`0x411E27` runs it inside `VTOL_Landing` whenever `transport+0x8A` is
+non-empty — the Atlas folds its arms whenever it *lands* loaded, not only when
+it lets go — and `0x411D9C` on that mission's abort path. The others are
+`VTOL_Pickup`'s abort (`0x411489`), `VTOL_Unload` state 2 (`0x411790`), and
+`VTOL_LandIfCan` (`0x40F42E`).
+
+`Ground_Unload` state 0 starts `TransportDrop(passengerId, (intX<<16)|intZ)`
+and the same `BUSY` protocol runs. The release is the script's `DROP_UNIT`, and
+the engine's contribution is the legality veto inside that opcode's handler
+(`0x4813B0`, §37): a `DROP_UNIT` onto an illegal cell does nothing at all and
+the unit stays hooked, which is what makes the mission retry.
+
+### Sea transports and the AI
+
+§39 answers "how do the crane transports load" completely. What it does not
+carry, and what an AI would need, is the surrounding geography. Recorded as
+gaps rather than findings, because none of it was decoded in this pass:
+
+- **Whether the original's computer player uses transports at all** was not
+  traced. Nothing transport-shaped turned up in the AI while walking these
+  tables, but that is an absence of evidence.
+- **Nothing in the original ever moves the passenger.** `Ground_Pickup` state 4
+  installs the move goal on the *transport* with tolerance 0. The cargo is
+  never ordered anywhere. Whatever RWE does about meeting points is RWE's own
+  invention with no original behind it.
+- **`Ground_Unload`'s arrival tolerance** is the one hover-specific number:
+  `int(footprintZ * 16 * 1.5)` world units when `canhover` is set, 0 otherwise
+  — 96 wu for the 4-footprint Bear and Turtle (§35). That is the beach-reach
+  allowance, and the closest thing the original has to a "dock here" rule.
+- **The load predicate already forbids the interesting case**: a sea or hover
+  transport refuses any candidate whose `minwaterdepth >= 0` (`0x489B44`), so a
+  Hulk can never carry a ship, and every surface ship's footprint exceeds
+  `transportsize = 3` anyway. An AI planning sea transport is only ever
+  planning to move *land* units *across* water.
+- **One unload order sets down one unit** (§35); a full Hulk needs the order
+  re-issued twenty times, which the `Standby` re-execution loop does for the
+  human player. An AI queueing unloads must queue one per passenger.
+
+### What RWE does with this
+
+The ladder is `computeDefaultAction` in `src/rwe/game/DefaultAction.{h,cpp}`,
+over `(simulation, scheme, orderer, hovered unit, hovered feature)`, returning
+the order to issue — or "select it", or "move to the point under the cursor",
+or nothing — together with the cursor. Three schemes, named after the arms they
+run: `LeftClickDefault`, `RightClickDefault` and `MoveButton`.
+`GameScene::selectionDefaultCursor` folds it over the selection with
+`preferredCursor`, which is the original's minimum-id rule; `GameScene::
+issueDefaultAction` runs it for one unit and issues or queues on the shift key.
+The old arrangement — an `any_of` ladder in `GameScene.cpp` and an if-chain in
+`GameScene_input.cpp` — is gone.
+
+| Question | Original | RWE before | RWE now |
+|---|---|---|---|
+| Passenger-side board order | none | none | none — and now known to match rather than merely to coincide |
+| Selected transport, click cargo with LOAD armed | `GROUND_PICKUP` / `VTOL_PICKUP` | `LoadOrder` per selected unit | unchanged |
+| Cursor with LOAD armed | 8 `cursorpickup` if `canfly`, else 12 `cursorload`; 19 over anything unliftable | always `CursorType::Load` | the split, and the plain arrow when the hover cannot be lifted |
+| Ownership test at order time | **none**, anywhere | `isFriendly` in two places | one place, `canLoad` in `DefaultAction.cpp`, still own-units-only (§88) |
+| Default action on a friendly unit, "Left Click" | selects it | selected it | unchanged |
+| Default action on a friendly unit, "Right Click" | guard, repair, complete, land, pick up, or move | **nothing at all** unless it was a nanoframe | the ladder |
+| Default action on an enemy, "Right Click" | capture if `cancapture`, else reclaim if `canreclamate` | always attack | capture, then reclaim, then attack |
+| MOVE button armed | the whole ladder, with its own cursors | land on a pad, else move | the whole ladder |
+| Whether the cursor gates the click | yes below 17, selects at 15 | two independent ladders that disagreed | one ladder; in "Left Click" the cursor is the decision, in "Right Click" it is feedback, as in the original |
+| `Interface Type` | registry DWORD 0/1, `LEFTCLICK` gadget, default 0 | `globalConfig->leftClickInterfaceMode`, same polarity | unchanged |
+| Crane pickup | script does everything; engine polls `target+0x86`; no range gate; three attempts then park | `TransportPickup` then a 10-second self-attach fallback, and a `CraneReach` gate | unchanged, and both differences recorded here |
+| Air pickup | `QueryTransport` and `BeginTransport` before the descent | both after `loadUnitIntoTransport` had already succeeded | the two calls sit either side of the descent, fixed in its own commit rather than this one |
+| Pickup announcement | ground at script start, air at the attach | neither played | unchanged |
+
+Two arms are RWE's own and are marked as such in the source. The **attack arm
+in the right-click ladder** is kept although the decode of `0x43FA00` lists
+none: right-clicking an enemy has always attacked it here, and removing it on
+the strength of an elided list would be the worse mistake. And the **resurrect
+arm shows the reclaim cursor**, because `cursorrevive` is not in the base
+game's `CURSORS.GAF`.
+
+### What is unsettled
+
+- **Whether an enemy unit can actually be picked up.** The order layer permits
+  it at all five decision points and `CanLoadUnit` has no team test, so the
+  order will be issued and the mission will start. Whether `ATTACH_UNIT` or
+  `0x48AAC0` refuses later was not traced, and this was not play-tested. Do not
+  port "transports can steal enemy units" on the strength of this section.
+- **Whether `0x43FA00` really has no attack arm.** The chain was read from its
+  capture arm onward; an attack arm ahead of it, or a recursion into command 3
+  like the left chain's, would not have shown up in that reading. RWE keeps its
+  own attack arm until this is settled.
+- **`BYTE [game+0x2CC6]`**, the mouse state byte, is used as opaque bits above.
+  Only bit 3's role (a selection box is being dragged) is firmly established;
+  bit 2's is guessed from context.
+- **Command 10's issue path.** The STOP button writes 1 to `[game+0x2CC3]` and
+  acts immediately rather than arming 10, yet command 10 has a live builder arm
+  (`0x43F82C` → `"STOP"`) and appears in `0x43E470`'s no-target list. Something
+  issues it; that something was not found.
+- **`0x489960` and `0x4899B0`**, the reclaim and repair predicates, are used as
+  named black boxes here; only their positions in the ladders were established.
+- **`0x43E828`** (command 14, the placement cursor) and the feature probes in
+  the command-1 and command-2 arms were read only far enough to identify their
+  return values. RWE's own feature arms therefore fire only when nothing is
+  under the cursor but the feature, where the original probes the map cell
+  after its unit arms have failed.
+- The **frame counts** in the cursor table come from a prior `gaf.py` sweep of
+  every shipped GAF, not from a fresh read of `CURSORS.GAF`. The sequence
+  *names* are from the binary and are certain.
+- The mission tables' **`+0x10` word** is tabulated above only as a lead; its
+  meaning is not decoded, and its correlation with the cursor id has three
+  counter-examples.
+
+---
+
+## 104. The end of a game: a banner, a fade, and a chart that runs its bars up
+
+The module is `endgame.cpp` -- the original leaves its own source path in the
+binary at `0x502A97`, `c:\cavedog\wargame\endgame.cpp` -- and it occupies
+`0x41D700`-`0x420600`. Its whole shape is one function, `0x41F7F0`, driven by a
+nine-way state in `DWORD [game+0x39057]` through the jump table at `0x4205AC`:
+
+| State | Handler | What it does |
+|---|---|---|
+| 0 | `0x41F830` | Takes a copy of the last game frame (the surface is created by name, `"Copy of last game frame"` at `0x502BE0`) and blits the screen into it |
+| 1 | `0x41F976` | Waits on the message box, if one was raised |
+| 2 | `0x41FA3D` | Arms the fade: counter `[game+0x39067] = 10`, next step at `now + 1` |
+| 3 | `0x41FA8F` | One fade step a tick, ten of them, then sets the done flag |
+| 4 | `0x41FB6C` | The campaign's CD check |
+| 5 | `0x41FC12` | Campaign mission messages; otherwise builds the chart and goes to 7 |
+| 6 | `0x41FDF8` | The campaign's full-screen outcome picture, with `"Click to continue."` |
+| 7 | `0x41FF42` | The chart, running its bars up |
+| 8 | `0x42055B` | The chart standing still, waiting for a button |
+
+Only 0, 2, 3, 5, 7 and 8 are on a skirmish's path.
+
+**The fade is ten steps.** `0x41FA3D` sets the counter to ten and `0x41FA8F`
+spends one a tick -- `[game+0x3905F] = now + 1` each time -- calling
+`0x4BF4D0(0, &rect, counter - 0x1D)` over the whole screen. The level therefore
+runs -19, -20 ... -28: darker each step, and black at the end. A third of a
+second at the original's thirty ticks a second.
+
+**The clock.** `0x4B6340` is `GetTickCount() * ticksPerSecond / 1000` and
+`0x4B6330` returns that `ticksPerSecond` on its own, so every interval below is
+in ticks of that rate.
+
+### The chart
+
+The background is `bitmaps/OUTCOME0.PCX`, shown by `0x4288D0("outcome0")` at
+`0x41F1C8`; a campaign win gets `outcome1` instead. It is a 640x480 bitmap that
+paints the frame, the button surround, and all eight column headings -- **Name,
+Kills, Losses, Energy Produced, Metal Produced, Excess Energy, Excess Metal,
+Score**. Over it the original builds `guis/ENDMSN.GUI` (`0x4AA8F0` at
+`0x41F0D3`) and enables exactly one of its buttons, `MainMenu` (`0x4A76B0` at
+`0x41F1E4`); the rest of that gui -- the mission list, Start, Save, Load, the
+difficulty dial -- belongs to the campaign's end-of-mission screen, which is
+the same gui worn differently.
+
+**The score table** is ten records of 58 bytes at `game+0x38DD9`, filled by
+`0x41DC20` and zeroed first with a `rep stos` of 145 dwords. Per record:
+
+| Offset | Field | Source |
+|---|---|---|
+| +0x00 | name, 30 bytes | `player+0x2B` |
+| +0x1E | Kills | `(int16)player+0xFC` |
+| +0x22 | Losses | `(int16)player+0xFE` |
+| +0x26 | Energy Produced | `(int)(double)player+0xAC` |
+| +0x2A | Metal Produced | `(int)(double)player+0xB4` |
+| +0x2E | Excess Energy | `(int)(double)player+0xCC` |
+| +0x32 | Excess Metal | `(int)(double)player+0xD4` |
+| +0x36 | Score | computed, below |
+
+**The score** (`0x41DDBE`-`0x41DE11`) is
+
+```
+score = (int)(kills * killmul) + (int)((gameTicks / 30) * timemul)
+if (score < 0) score = 0
+```
+
+`killmul` and `timemul` are floats read out of the **map's OTA** at `0x4365EB`
+and `0x436603` into `[gametype+0xD54]` and `[gametype+0xD58]`. Each term is
+truncated to an integer on its own -- the original converts twice, once per
+multiply -- so the two truncations do not combine. The shipped default is
+`killmul=50` and `timemul=0`, which scores a game on kills alone.
+
+**What a full bar means.** Seven dwords at `game+0x3918F` hold the maximum for
+each column, seeded at `0x41DCA4` with **10, 10, 100, 100, 100, 100, 100** and
+then raised to the largest value any player reached (`0x41DE12` onwards). The
+floor is what stops one kill in a quiet game drawing as a full bar.
+
+**Geometry**, from `0x41E420`, and confirmed against the artwork itself -- the
+cell runs measured out of `OUTCOME0.PCX` agree with the gadget rects to the
+pixel:
+
+- name cell x 16, width 90 (`0x41E556` builds the `PlayerColor%d` gadget there);
+- bars at x 112, 186, 260, 334, 408, 482, 556 -- 112 and a stride of 74 -- each
+  67 wide and 18 high, in cells the artwork draws 68 wide;
+- rows start at y 93 and step 20, ten of them.
+
+**The run-up.** `[game+0x3906B]` is the column, 0 to 6, and the jump table at
+`0x4205D0` has one arm each: **Kills, Losses, EProduced, MProduced, EWasted,
+MWasted, Score** -- left to right. Each arm walks the ten records, builds the
+gadget name with `sprintf("%s%d", label, index)` (the `"%s%d"` at `0x502B30`)
+and enables that player's bar; then `0x47F1A0` starts the group, the next
+column is scheduled at `now + 10` (`0x42053A`) and the column index is bumped.
+A bar advances by `max(target / 15, 1)` per gadget update -- the `1/15` at
+`0x4FD008` and the `1.0f` floor at `0x4FD00C` -- so every bar is full after
+fifteen frames whatever it is counting.
+
+A **click during the run-up** (`0x4C1AB0` tested at `0x41FFD9`) jumps to
+`0x420028`, which enables all seven groups at once and then
+`ActivateAllStatBars`. When every bar has reached its target the state goes to
+8 and the screen simply sits there.
+
+**The title.** `anims/ENDMSN.GAF` carries `victory` (129x29) and `defeat`
+(101x29) beside an `outcdivider`; `OUTCOME0.PCX` leaves an empty band above its
+column headings for them. These are not the `igvictory`/`igdefeat` banners the
+world renderer flashes over the battlefield (§70) -- those are 117x29 and live
+in `IGTITLES.GAF`.
+
+**What sets the banner in the first place** is `0x4169D0` (victory) and
+`0x416A30` (defeat), which each call `0x486F10` -- the routine that destroys a
+player's units -- and then set bits in `game+0x3923B`: bit 4 mission complete,
+bit 5 `igvictory`, bit 6 `igdefeat`, bit 2 game over.
+
+### Not decoded
+
+**Which sound the two beeps are.** `sounds/BEEP1..6.WAV` and
+`VICTORY2/VICTORY4.WAV` all ship, but no string in the executable names any of
+them, `gamedata/SOUND.TDF` has no entry for them, and no gui file carries a
+sound field that reaches them. `0x46C620`, which the endgame calls with 7 at
+`0x41F897`, turns out to be the statistics recorder rather than a sound call.
+RWE plays `BEEP6` twice and says so at the call site.
+
+---
+
+## 105. The campaign: campaign files, mission files, and a unit's first orders
+
+Decoded 2026-09-15 for B4 #55, the first piece of #38. Everything here is
+read out of the same binary as the rest of this file; where a reading is
+inferred rather than followed to its consumer it says so.
+
+### The campaign file
+
+`0x476AE0` loads a campaign by name: `camps\<name>.tdf` (`0x476B07`,
+`0x476B11`), then `[HEADER]` (`0x476B32`) and its one key, `campaignside`
+(`0x476B57`), a string defaulting to `ALL` (`0x476BB1`). The two names the
+front end passes are `"Arm Campaign"` and `"Core Campaign"` (`0x477C0A`,
+`0x477C17`, under the `Campaign` and `Missions` menu strings); the shipped
+files are `ccdata.ccx/CAMPS/Arm Campaign.tdf` and `Core Campaign.tdf`, 25
+missions each. They are the original game's campaigns: the `.ccx` archives
+carry the campaign disc, and the mission maps are in `ccmiss.ccx/Maps/`.
+
+The mission list is read by `0x4356C0`-`0x4359C0`: blocks named by the format
+`MISSION%d` (`0x504A78`) from 0 up until one is missing, each giving
+`missionname` and `missionfile`. `missionname` goes through `0x4C58A0`, the
+localised-key reader: it copies the language string at `0x51FDC0` in front of
+the key (so `Germanmissionname`, `Frenchmissionname`, ...) and reads that;
+a mission with no name shows `"Error -- Unnamed Mission"` (`0x504A84`).
+`missionfile` names the map: `0x435F5E` reads it and `0x4290F0` resolves it
+to `Maps\<missionfile>` with the `OTA` extension; a missing one is
+`"The requested mission file, %s, does not exist."` (`0x504DE8`), and a
+mission entry with no `missionfile` at all is the affectionate
+`"Hey, joker!  There is no mission defintion for this mission: %s"`
+(`0x504D9C`).
+
+### The mission file
+
+A mission is an ordinary OTA read by `0x435F00`-`0x437300`, the same reader
+skirmish maps go through, with the campaign-only keys below on top of the
+ones RWE's `parseOta` already knows. The `.tnt` beside it is
+`Maps\<name>.TNT` (`0x43604E`). No `[GlobalHeader]` is fatal
+(`"No GlobalHeader block in mission file!"`, `0x4361B5`), and a header that
+parses but has no usable schema is `"No suitable schema type in mission
+file!"` (`0x43662C`).
+
+**`[GlobalHeader]` keys and defaults**, in the order they are read. Integer
+keys come through `0x4C46C0` with the default shown, strings through
+`0x4C48C0` into a buffer of the size shown, floats through `0x4C4760`.
+
+| Key | Type | Default | What the reader does with it |
+|---|---|---|---|
+| `maxunits` | int | 200 (`0xC8`) | the unit cap for the mission |
+| `brief` | string, 256 | | `camps\briefs\<brief>.TXT` (`0x436204`), read into a `"Briefing"`-tagged buffer (`0x436258`): the briefing text |
+| `narration` | string, 256 | | `camps\briefs\<narration>.WAV` (`0x4362A6`): the briefing voice-over |
+| `missionhint` | string, 256 | | `camps\hints\<hint>.TXT` (`0x4362DC`) |
+| `glamour` | string, 256 | | `<glamour>.PCX` (`0x43630B`): the briefing picture |
+| `glamoursound` | string, 256 | | `camps\briefs\<glamoursound>.WAV` (`0x436346`) |
+| `UseOnlyUnits` | string, 256 | | `camps\useonly\<name>.TDF` (`0x43637B`): the unit list the mission restricts building to |
+| `mapping` / `lineofsight` | int | 0 | as skirmish |
+| `memory` / `numplayers` / `Planet` | string, 128 | | display only |
+| `nomovie` | int | 0 | skips the mission's movie |
+| `missiondescription` | string | `"No description available"` (`0x504C58`) | |
+| `minwindspeed` / `maxwindspeed` / `gravity` | int | 0 | as skirmish |
+| `tidalstrength` / `killmul` / `timemul` | float | 0.0 | as skirmish |
+| `lavaworld` / `nosealeveltrigger` / `waterdoesdamage` / `waterdamage` | int | 0 | `waterdamage` is the per-tick damage when `waterdoesdamage` is set; the shipped missions all say `waterdoesdamage=0`, `waterdamage=100` |
+
+**Win and lose conditions** are not read by the mission reader at all. The
+rule evaluator at `0x48E040`-`0x48E720` reads them straight off the header
+block when the mission starts, each as an integer with default 0, and for
+each that is set allocates a rule object (`0x4B4F10`): `DestroyAllUnits`
+(`0x48E06B`), `KillAllMobileUnits` (`0x48E0A9`, which no shipped mission
+sets), `CommanderKilled` (`0x48E67C`) and `AllUnitsKilled` (`0x48E6C3`).
+The shipped missions set `CommanderKilled=1` and `AllUnitsKilled=1` in all
+26 and `DestroyAllUnits=1` in 22. What each rule tests, tick by tick, is not
+followed here; it is the next piece.
+
+**Which schema is played.** A skirmish map's schemas are `Network n`; a
+mission's are `Easy`, `Medium` and `Hard` (25, 25 and 26 of the shipped 26).
+`0x43689A`-`0x4368CA` lays the seven type names out in a table, and the
+switch at `0x4368DC` picks an order of preference from the difficulty
+setting at `[globals+0x37EEE]` (§24): difficulty 0 tries `Easy` then `Medium`
+then `Hard`, 1 tries `Medium` first, 2 tries `Hard` first, each falling back
+through the others (`0x4368F9`-`0x43693C`). The first schema whose `type`
+matches is the one played; none matching is the "No suitable schema type"
+error above. Inside the schema, `HumanMetal`, `HumanEnergy`,
+`ComputerMetal`, `ComputerEnergy`, `SurfaceMetal` (int, default 0),
+`aiprofile` (string; `ai\<profile>.txt`, or `ai\default.txt` when absent,
+`0x4366EA`-`0x43672D`), and the five `Meteor*` keys are read as for
+skirmish.
+
+### `[units]` — the mission's starting units
+
+Each schema's `[units]` block (`0x436C7E`) holds `[unit0]`, `[unit1]`, ...
+(9,576 of them across the shipped 26). Each is read at `0x436DFE`-`0x437002`
+into a record tagged `"MISSIONUNIT DATA"` (`0x436DA4`):
+
+| Key | Read as | Default | Stored at | Meaning |
+|---|---|---|---|---|
+| `Unitname` | string, 1024 | | the record's name | the FBI name |
+| `Ident` | string, 1024 | | | a label other orders can name (see `g` and `i` below) |
+| `InitialMission` | string, 1024 | | | the unit's first orders, the mini-language below |
+| `XPos` / `YPos` / `ZPos` | int | 0 | `+0x0C` / `+0x10` / `+0x14` | position |
+| `Angle` | int, degrees | 0 | `+0x18` | heading; `0x436EF9`-`0x436F0A` converts degrees to the 16-bit angle |
+| `Player` | int | 0 | byte `+0x22` | owning player index |
+| `HealthPercentage` | int | 100 (`0x64`) | word `+0x1A` | starting health |
+| `BuildPriority` | int | 0 | word `+0x20` | |
+| `CreationCountdown` | int | 0 | `+0x1C` | ticks before the unit appears; the shipped data only ever says 0 |
+| `MissionCriticalUnit` | int | 0 | `+0x23` bit 4 | |
+| `AiIgnore` | int | 0 | `+0x23` bit 5 | |
+| `AiPriorityTarget` | int | 0 | `+0x23` bit 6 | |
+| `InitialGroup` | int | 0 | `+0x23` bits 0-3 | a squad number |
+| `Immunity` | int | 0 | `+0x23` bit 7 | |
+
+`Kills`, which every shipped `[unit]` block carries, is not read by the
+executable at all.
+
+### `InitialMission`, the order mini-language
+
+The string is a comma-separated list of orders, each a letter and its
+arguments, interpreted by `0x487BF0`. The scanner stops at each `,`
+(`0x487C3D`); the letter, upper or lower case, indexes the byte table at
+`0x4882CC` and that the jump table at `0x488270` (`0x487C7D`-`0x487C96`).
+Arguments are scanned with the `sscanf` formats shown. Point missions go
+through `0x43F0E0(id, x, z, ...)`; named ones through `0x438760(name)`.
+
+| Letter | Scans | Issues | Read as |
+|---|---|---|---|
+| `m` | ` %f %f` | mission 2 at the point | move to (x, z) |
+| `p` | ` %f %f %f` | mission 9 at the point | patrol to (x, z) |
+| `a` | ` %f %f`, else ` %[a-zA-Z0-9_.]` | mission 3 at the point, else `ATTACKUTYPE` with the name (`0x487FEC`) | attack the point, or attack every unit of that type: `a CORCOM,` |
+| `g` | ` %[a-zA-Z0-9_.]` | `0x487AF0` looks the name up, then mission 7 | guard the unit whose `Ident` this is (inferred from mission 7's use) |
+| `i` | ` %[a-zA-Z0-9_.]` | `0x487AF0` on the name (`0x48822C`) | a link to the unit whose `Ident` this is: `i CHRIS,` in the shipped data; what the link does is not followed |
+| `o` | ` %d %d` | (`0x487C9D`) | the standing orders, read as (fire, move) from the shipped `o 0 1,` (inferred; the consumer is not followed) |
+| `w` | ` %f %d`, else `a` | `WAIT` with the number (`0x48816B`); `wa` is `WAITFORATTACK` (`0x4881C7`) | wait that long, or wait to be attacked |
+| `u` | ` %f %f` | mission 5 at the point | no shipped mission uses it; by its shape, unload at the point |
+| `b` | ` %[a-zA-Z0-9_.] %d %f %f` | `MOBILEBUILD` / `BUILDINGBUILD` / `BUILDWEAPON` (`0x4880A1`, `0x4880C8`, `0x488106`) | build the named unit at the point |
+| `d` | | `SELFDESTRUCTFG` (`0x4881E0`) | self-destruct |
+| `s` | | `MAKESELECTABLE` (`0x488206`) | make the unit selectable |
+| any other letter, and the end of the string | | `MAKESELECTABLE` (`0x487E50`) | the unit is handed to the player once its orders are done |
+
+The shipped missions use twelve shapes, the commonest being `w N,p X Z,`
+(958 units), `p X Z,` (206), `o N N,w N,` (175) and `w N,a CORCOM,` /
+`w N,a ARMCOM,` (142): wait, then patrol; or wait, then hunt the enemy
+commander.
+
+### `[specials]` and `[features]`
+
+The schema's `[specials]` (`0x437010`, tagged `"MISSIONRULE DATA"`) are the
+`StartPos` entries RWE already reads, and nothing else in the shipped
+missions. `[features]` (`0x437183`, `"MISSIONFEATURE DATA"`) are
+`Featurename` / `XPos` / `ZPos` with `-1` as the coordinate default, as RWE
+reads them for skirmish; the shipped missions place 91.
+
+### What RWE has, and what the port is
+
+`parseOta` reads the header keys shared with skirmish, the schemas' specials
+and features, and nothing above the line: none of the campaign header keys,
+no `[units]`, no rule keys. Nothing reads a campaign file. The port, per #55,
+is a campaign TDF reader with the `MISSION%d` enumeration and the localised
+name, the header keys above added to `OtaRecord`, a `[units]` reader with the
+record's fields, and the `InitialMission` grammar as data; the interpreter's
+missions, the rules and the schema choice are the pieces after it.
+
+---
+
+## 106. `0x46d630`, the unit-table packet builder, and the checksum behind it that got away
 
 This one is included because it **failed**, and the shape of the failure is
 worth having written down before someone spends the same two days on it again.
@@ -10478,7 +13370,7 @@ thing the work was blocked on was not the thing it was chasing, and an hour
 spent testing whether the blocker was real would have been worth more than the
 day spent on the checksum.
 
-## 101. Why a construction aircraft finishes a build one tick early: a second lathe on the creation tick
+## 107. Why a construction aircraft finishes a build one tick early: a second lathe on the creation tick
 
 Over the demo corpus a construction aircraft finishes one tick sooner than §23's
 float32 replay allows, where a factory lands on it exactly. The cause is not a
@@ -10696,7 +13588,7 @@ soon as the two mobile build handlers were read side by side; what took the time
 was finding what could make the service loop run a waiting mission again in the
 same tick, and that was the sticky event bit.
 
-## 102. The settle, re-read: one phase for every player, and what a refusal costs
+## 108. The settle, re-read: one phase for every player, and what a refusal costs
 
 §23 decoded the once-a-second settle and RWE ported it. This section is the
 second reading, done to check §23 against the demo corpus's stall evidence

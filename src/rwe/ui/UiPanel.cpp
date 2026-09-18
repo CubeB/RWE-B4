@@ -1,5 +1,6 @@
 #include "UiPanel.h"
 #include <algorithm>
+#include <cmath>
 #include <rwe/util/rwe_string.h>
 
 namespace rwe
@@ -25,7 +26,9 @@ namespace rwe
         : UiComponent(panel.posX, panel.posY, panel.sizeX, panel.sizeY),
           background(std::move(panel.background)),
           children(std::move(panel.children)),
-          focusedChild(std::move(panel.focusedChild))
+          focusedChild(std::move(panel.focusedChild)),
+          drawSolidPlate(panel.drawSolidPlate),
+          plateTile(std::move(panel.plateTile))
     {
     }
 
@@ -38,6 +41,8 @@ namespace rwe
         background = panel.background;
         children = std::move(panel.children);
         focusedChild = std::move(panel.focusedChild);
+        drawSolidPlate = panel.drawSolidPlate;
+        plateTile = panel.plateTile;
 
         return *this;
     }
@@ -50,11 +55,52 @@ namespace rwe
         }
         else if (drawSolidPlate)
         {
-            // A dialog whose gui declares no art of its own (SAVEGAME and
-            // friends say panel=NULL, and carry no picture box either) still
-            // has to be seen: a solid plate with a border rather than an
-            // invisible rectangle of floating buttons.
+            // A dialog whose gui declares no art of its own (YESORNO and
+            // EXITMENU say panel=NULL, and carry no picture box or bitmap
+            // either) still has to be seen. The original fills it with
+            // BackTile, so tile that where it is to be had and keep the flat
+            // fill underneath for the part of the last row and column that
+            // the tile overhangs, and for a data set that has no tile.
             graphics.fillColor(posX, posY, sizeX, sizeY, Color(28, 34, 30));
+
+            if (plateTile)
+            {
+                const auto& tile = **plateTile;
+                auto naturalWidth = tile.bounds.width();
+                auto naturalHeight = tile.bounds.height();
+                if (naturalWidth >= 1.0f && naturalHeight >= 1.0f)
+                {
+                    // The tile is stretched a little so that a whole number
+                    // of them covers the panel exactly. Drawing them at their
+                    // own size instead would leave a part-tile at the right
+                    // and bottom, and drawSpriteAbs scales rather than clips,
+                    // so that part-tile would be the same texture squashed
+                    // into a quarter of its width -- a smeared strip down the
+                    // edge of every dialog. Spread over every tile the same
+                    // squash is a few percent and invisible on a texture that
+                    // is mostly noise. A 400x100 dialog takes 7 across and 2
+                    // down.
+                    auto columns = std::max(1.0f, std::ceil(static_cast<float>(sizeX) / naturalWidth));
+                    auto rows = std::max(1.0f, std::ceil(static_cast<float>(sizeY) / naturalHeight));
+                    auto tileWidth = static_cast<float>(sizeX) / columns;
+                    auto tileHeight = static_cast<float>(sizeY) / rows;
+
+                    for (int row = 0; row < static_cast<int>(rows); ++row)
+                    {
+                        for (int column = 0; column < static_cast<int>(columns); ++column)
+                        {
+                            graphics.drawSpriteAbs(
+                                Rectangle2f::fromTopLeft(
+                                    static_cast<float>(posX) + (static_cast<float>(column) * tileWidth),
+                                    static_cast<float>(posY) + (static_cast<float>(row) * tileHeight),
+                                    tileWidth,
+                                    tileHeight),
+                                tile);
+                        }
+                    }
+                }
+            }
+
             graphics.drawBoxOutline(posX, posY, sizeX, sizeY, Color(110, 124, 110), 2.0f);
         }
 
@@ -102,18 +148,55 @@ namespace rwe
 
     void UiPanel::keyDown(KeyEvent event)
     {
+        // A key goes to the control that has the focus, not to every child.
+        // The original keeps a focused-gadget index at `panel+0x64`, and it
+        // is what the caret is drawn from (S:99). RWE used to hand each key
+        // to every child, which meant Space pressed every button on the panel
+        // at once and two text boxes would have taken the same typing.
+        //
+        // A quick key is the exception: it is defined to work wherever the
+        // focus is (S:78). Unless what has the focus is typed into, in which
+        // case the letter belongs in the text.
+        if (focusedChild && (*focusedChild)->wantsTextInput())
+        {
+            (*focusedChild)->keyDown(event);
+            return;
+        }
+
         for (auto& e : children)
         {
-            e->keyDown(event);
+            if (e->matchesQuickKey(event.keyCode))
+            {
+                e->keyDown(event);
+                return;
+            }
+        }
+
+        if (focusedChild)
+        {
+            (*focusedChild)->keyDown(event);
         }
     }
 
     void UiPanel::keyUp(KeyEvent event)
     {
-        for (auto& e : children)
+        if (focusedChild)
         {
-            e->keyUp(event);
+            (*focusedChild)->keyUp(event);
         }
+    }
+
+    void UiPanel::textInput(const std::string& text)
+    {
+        if (focusedChild)
+        {
+            (*focusedChild)->textInput(text);
+        }
+    }
+
+    bool UiPanel::wantsTextInput() const
+    {
+        return focusedChild && (*focusedChild)->wantsTextInput();
     }
 
     void UiPanel::mouseMove(MouseMoveEvent event)

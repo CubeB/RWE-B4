@@ -126,7 +126,17 @@ namespace rwe
 
         void putInTheAir(GameSimulation& sim, UnitId id)
         {
-            sim.getUnitState(id).physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            auto& unit = sim.getUnitState(id);
+
+            // Whatever this is, it is an aircraft now. Handing a unit air
+            // physics while its definition still says canfly=0 is a state the
+            // game cannot produce, and moveTo sends such a unit down the
+            // ground path, where the follower asserts on the physics it finds
+            // -- which is exactly the invariant the assertion is there to
+            // protect.
+            sim.unitDefinitions.at(unit.unitType).canFly = true;
+
+            unit.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
             sim.flyingUnitsSet.insert(id);
         }
 
@@ -830,6 +840,82 @@ namespace rwe
             const auto& orders = sim.getUnitState(tankId).orders;
             REQUIRE(std::holds_alternative<AttackOrder>(orders.front()));
             REQUIRE((std::get<PatrolOrder>(orders.at(1)).destination == here));
+        }
+    }
+
+    TEST_CASE("an anti-air unit comes off a ground target when an aircraft arrives", "[targeting]")
+    {
+        // The preference at 0x40BA4D only decides what a free weapon picks.
+        // What decides what it keeps is the scan at 0x4089A0, which throws
+        // away an existing target that is in the slot's bad-target set and
+        // picks again. A Jethro names wpri_badTargetCategory=NOTAIR and its
+        // missile is not a toairweapon, so with nothing in the air it shoots
+        // at tanks -- and has to stop the moment something flies over.
+        auto script = makeTargetingScript();
+        GameSimulation sim(makeTargetingTerrain(), 0u, 0, 0);
+        auto us = addTargetingPlayer(sim, "us", GamePlayerType::Human);
+        auto them = addTargetingPlayer(sim, "them", GamePlayerType::Human);
+        registerTargetingModel(sim);
+        defineShooter(sim, "jethro", "NOTAIR");
+        defineTarget(sim, "enemyTank", "CORE TANK LEVEL1 NOTAIR NOTSUB", true);
+        defineTarget(sim, "enemyPlane", "CORE VTOL LEVEL1 NOTSUB", true);
+        defineWeapon(sim, "missile", false);
+
+        auto shooterId = spawnTargetingUnit(sim, "jethro", us, SimVector(0_ss, 0_ss, 0_ss), script);
+        armWith(sim, shooterId, "missile");
+        auto tankId = spawnTargetingUnit(sim, "enemyTank", them, SimVector(32_ss, 0_ss, 0_ss), script);
+
+        tickTwice(sim);
+        REQUIRE(weaponTarget(sim, shooterId).has_value());
+        REQUIRE(weaponTarget(sim, shooterId)->value == tankId.value);
+
+        SECTION("it swaps to the aircraft within a second of it showing up")
+        {
+            auto planeId = spawnTargetingUnit(sim, "enemyPlane", them, SimVector(-256_ss, 60_ss, 0_ss), script);
+            putInTheAir(sim, planeId);
+
+            // The scan reaches any one unit about once a second, so the swap
+            // is not immediate; a second and a half is generous enough not to
+            // depend on which tick the shooter's phase lands on.
+            for (int i = 0; i < 45; ++i)
+            {
+                sim.tick();
+            }
+
+            auto target = weaponTarget(sim, shooterId);
+            REQUIRE(target.has_value());
+            REQUIRE(target->value == planeId.value);
+        }
+
+        SECTION("with nothing in the air it keeps shooting at the tank")
+        {
+            // Dropping the target is not the same as giving up: 0x40B7B0 runs
+            // again straight afterwards and hands back the same tank, so the
+            // gun must not end up idle.
+            for (int i = 0; i < 45; ++i)
+            {
+                sim.tick();
+            }
+
+            auto target = weaponTarget(sim, shooterId);
+            REQUIRE(target.has_value());
+            REQUIRE(target->value == tankId.value);
+        }
+
+        SECTION("an ordered attack on the tank is left alone")
+        {
+            auto planeId = spawnTargetingUnit(sim, "enemyPlane", them, SimVector(-256_ss, 60_ss, 0_ss), script);
+            putInTheAir(sim, planeId);
+            sim.getUnitState(shooterId).orders.push_back(AttackOrder(tankId));
+
+            for (int i = 0; i < 45; ++i)
+            {
+                sim.tick();
+            }
+
+            auto target = weaponTarget(sim, shooterId);
+            REQUIRE(target.has_value());
+            REQUIRE(target->value == tankId.value);
         }
     }
 }

@@ -117,10 +117,26 @@ int main(int argc, char* argv[])
         glewExperimental = GL_TRUE;
         glewInit();
 
+        // Everything that is not `--panel NAME` is a path to add to the VFS,
+        // which is what this took before the option existed.
         CompositeVirtualFileSystem vfs;
+        std::vector<std::string> requestedPanels;
         for (int i = 1; i < argc; ++i)
         {
-            addToVfs(vfs, argv[i]);
+            std::string arg(argv[i]);
+            if (arg == "--panel" && i + 1 < argc)
+            {
+                requestedPanels.emplace_back(argv[++i]);
+                continue;
+            }
+            if (arg == "--help" || arg == "-h")
+            {
+                std::cout << "usage: ui_probe [--panel NAME]... <data path>...\n"
+                          << "  With no --panel, walks the options screens the probe was written for.\n"
+                          << "  With one or more, dumps and clicks just those guis and stops.\n";
+                return 0;
+            }
+            addToVfs(vfs, arg);
         }
 
         auto paletteBytes = vfs.readFile("palettes/PALETTE.PAL");
@@ -135,6 +151,25 @@ int main(int argc, char* argv[])
         TdfBlock emptySoundLookup;
 
         UiFactory factory(&textureService, &audioService, &emptySoundLookup, &vfs, pathMapping.get(), 640, 480);
+
+        // ---- any gui the caller named, and nothing else ----
+        if (!requestedPanels.empty())
+        {
+            for (const auto& panelName : requestedPanels)
+            {
+                auto p = factory.panelFromGuiFile(panelName);
+                p->groupMessages().subscribe([](const auto& msg) {
+                    if (std::get_if<ActivateMessage>(&msg.message) != nullptr)
+                    {
+                        std::cout << "[MSG topic=" << msg.topic << " control=" << msg.controlName << "]";
+                    }
+                });
+                dumpPanel(*p, panelName);
+                clickAll(*p, panelName);
+            }
+            std::cout << "probe done\n";
+            return 0;
+        }
 
         // ---- front end composite, exactly as MainMenuScene builds it ----
         auto startOptRaw = vfs.readFile("guis/STARTOPT.GUI");

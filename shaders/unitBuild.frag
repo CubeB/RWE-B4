@@ -4,11 +4,17 @@ in vec2 fragTexCoord;
 in float height;
 in float shadeLevel;
 out vec4 outColor;
+// Coverage for the building halo; see unitTexture.frag and worldPost.frag.
+out vec4 outMask;
 
 uniform sampler2D textureSampler;
+// The same atlas again, one byte a texel: that texel's raw palette index.
+uniform sampler2D paletteIndexSampler;
+// palettes/PALETTE.SHD as a 256x32 image; see unitTexture.frag.
+uniform sampler2D shadeTableSampler;
 uniform float unitY;
 uniform float seaLevel;
-uniform bool shade;
+uniform float shadeStrength;
 // Height of the whole model above unitY.
 uniform float unitHeight;
 
@@ -33,59 +39,35 @@ const float heightBias = 50.0;
 
 const vec3 waterTint = vec3(0.5, 0.5, 1.0);
 const vec3 normalTint = vec3(1.0, 1.0, 1.0);
-// The shaded chain's lighting; see unitTexture.frag, which this must match.
-// PALETTE.SHD's row k remaps each texel to the nearest palette entry to
-// `colour * 0.06875k`, and row 15 is the identity -- the constant the exe
-// hard-codes for a piece the COB has told not to shade. The exact table is a
-// nearest-neighbour remap in a 256-entry palette, which would need each
-// texel's palette index carried through the atlas to reproduce faithfully;
-// that is written up as still to do.
-// The row is the original's, exactly -- see the probe in section 13 of
-// TOTALA-EXE-SHADING.md, which this reproduces primitive for primitive. What
-// a row MEANS is where RWE departs, in three measured steps.
-//
-// First, the table is not the linear `0.06875 * row` its generator suggests.
-// PALETTE.SHD stores palette INDICES from a nearest-neighbour search, so the
-// bright half runs out of palette to move to and saturates: measured over the
-// real entries, row 16 lands at 1.07 and row 31 at only 1.55, not 2.13. The
-// two-segment fit below tracks those measurements to within about 0.03 --
-// linear below the identity row, and a much shallower slope above it, which
-// is what stops lit faces blowing out.
-//
-// Second, the original truncates the interpolated row to an integer at every
-// pixel, quantising each gradient into at most thirty-two bands. Leaving it
-// continuous keeps the transition into shadow smooth.
-//
-// Third, its row 0 is pure black, and with the wrap a good deal of a model
-// lands there -- measured against a screenshot of the original, RWE at row 0
-// put 40% of a solar collector's pixels below luminance 8 where the original
-// had 25%, with correspondingly fewer mid-tones. The floor keeps some light
-// in a shadowed face. It is the one number here chosen by eye rather than
-// measured, and it is the one to turn if the shadows want to be deeper.
-const float shadowFloor = 0.25;
-const float identityRow = 15.0;
-const float darkSlope = 0.06875;
-const float litSlope = 0.0325;
 
-float shadeIntensity()
+// The shaded chain's lighting; see unitTexture.frag, which this must match.
+// The level is computed once per vertex and interpolated, and the row it
+// yields indexes PALETTE.SHD -- which stores palette INDICES from a
+// nearest-neighbour search, not a scale, so it has to be read as a table and
+// not approximated by a brightness curve. The texel's own palette index rides
+// through the atlas in a second single-channel copy to make that possible.
+vec3 shadeTexel(vec3 unshaded)
 {
-    if (!shade)
+    if (shadeStrength <= 0.0)
     {
-        return 1.0;
+        return unshaded;
     }
 
-    float row = clamp(shadeLevel, 0.0, 31.0);
-    float tableValue = row <= identityRow
-        ? darkSlope * row
-        : (darkSlope * identityRow) + ((row - identityRow) * litSlope);
+    // texel = the raw palette index; row = shade >> 16, truncated; the pixel
+    // is SHD[row * 256 + texel] and nothing else (0x4C81A4-0x4C81BD). The
+    // clamp is against the array bound alone -- both ends of the
+    // interpolation are already masked rows in 0..31.
+    int row = clamp(int(shadeLevel), 0, 31);
+    int texel = int((texture(paletteIndexSampler, fragTexCoord).r * 255.0) + 0.5);
+    vec3 tableColor = texelFetch(shadeTableSampler, ivec2(texel, row), 0).rgb;
 
-    return shadowFloor + ((1.0 - shadowFloor) * tableValue);
+    return mix(unshaded, tableColor, shadeStrength);
 }
 
 vec3 shadeNormal()
 {
     vec3 baseColor = vec3(texture(textureSampler, fragTexCoord));
-    return min(baseColor * shadeIntensity() * (height > seaLevel ? normalTint : waterTint), vec3(1.0));
+    return min(shadeTexel(baseColor) * (height > seaLevel ? normalTint : waterTint), vec3(1.0));
 }
 
 void main(void)
@@ -114,17 +96,29 @@ void main(void)
     {
         // Erased: this part of the model has not been laid down yet.
         outColor = vec4(0.0, 0.0, 0.0, 0.0);
-    }
-    else if (mode == 1)
-    {
-        outColor = vec4(buildColorA, 1.0);
-    }
-    else if (mode == 2)
-    {
-        outColor = vec4(buildColorB, 1.0);
+        // ...so it is not coverage either. Writing an occluder here would let
+        // a nanoframe's unbuilt half block the halo of a finished building
+        // standing behind it.
+        outMask = vec4(0.0, 0.0, 0.0, 0.0);
     }
     else
     {
-        outColor = vec4(shadeNormal(), 1.0);
+        if (mode == 1)
+        {
+            outColor = vec4(buildColorA, 1.0);
+        }
+        else if (mode == 2)
+        {
+            outColor = vec4(buildColorB, 1.0);
+        }
+        else
+        {
+            outColor = vec4(shadeNormal(), 1.0);
+        }
+
+        // An occluder, never a halo source: the original's halo comes out of a
+        // FINISHED building's cached bitmap, and a thing under construction
+        // has no cached bitmap yet.
+        outMask = vec4(0.0, 0.0, 0.0, 0.5);
     }
 }

@@ -1,5 +1,6 @@
 #include "ota.h"
 
+#include <algorithm>
 #include <rwe/io/tdf/tdf.h>
 
 namespace rwe
@@ -133,5 +134,29 @@ namespace rwe
         tdf.read("XPos", s.xPos);
         tdf.read("ZPos", s.zPos);
         return s;
+    }
+
+    std::optional<OtaSpecial> findStartPosition(const OtaSchema& schema, int n)
+    {
+        auto key = "StartPos" + std::to_string(n);
+        auto it = std::find_if(schema.specials.begin(), schema.specials.end(), [&key](const OtaSpecial& s) { return s.specialWhat == key; });
+        if (it == schema.specials.end())
+        {
+            return std::nullopt;
+        }
+        return *it;
+    }
+
+    int countStartPositions(const OtaSchema& schema)
+    {
+        int count = 0;
+        for (int n = 1; n <= 10; ++n)
+        {
+            if (findStartPosition(schema, n))
+            {
+                ++count;
+            }
+        }
+        return count;
     }
 }

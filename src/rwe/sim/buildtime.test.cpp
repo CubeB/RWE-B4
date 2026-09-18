@@ -82,7 +82,7 @@ namespace rwe
          * creates the nanoframe, calls the INBUILDSTANCE wait and discards the
          * answer, and the wait leaves the event bit a pending COB `set` matches,
          * so the service loop runs the lathe state a second time before the tick
-         * ends -- docs/TOTALA-EXE.md section 101, which UnitBehaviorService
+         * ends -- docs/TOTALA-EXE.md section 107, which UnitBehaviorService
          * reproduces. It is the whole of why a construction aircraft finishes a
          * job a tick before a factory at the same rate would.
          */
@@ -159,7 +159,7 @@ namespace rwe
         // duration is one less than the number of increments -- which is what
         // makes this comparable with a demo's finishTick - startTick at all.
         // A construction aircraft pays two increments on that tick rather than
-        // one (section 101), so its duration is two less; that is the only
+        // one (section 107), so its duration is two less; that is the only
         // difference between the two classes here, and both are held against
         // the same corpus numbers with the same delta convention.
         //
@@ -258,7 +258,7 @@ namespace rwe
     {
         // What the airborne cells are evidence for. Credited once on the
         // creation tick like a factory, every one of them comes out a tick LATE
-        // against the game it was measured in -- which is the shape section 101
+        // against the game it was measured in -- which is the shape section 107
         // explains and UnitBehaviorService now reproduces. This is the
         // assertion that would fail if the second lathe were taken back out,
         // and it is why an airborne cell may carry the ordinary section 88

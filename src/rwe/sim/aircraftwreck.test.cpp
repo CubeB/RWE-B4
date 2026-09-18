@@ -176,6 +176,33 @@ namespace rwe
             return sim.tryAddUnit(std::move(unit)).value();
         }
 
+        /**
+         * A script whose Killed ladder asks for a particular corpse level:
+         * `Killed(severity, corpsetype) { corpsetype = level; return 0; }`.
+         * The shipped ones are three-band ladders off the severity; what they
+         * write into the second parameter is all the spawner reads.
+         */
+        std::shared_ptr<CobScript> makeKilledLevelScript(const std::vector<std::string>& pieces, int level)
+        {
+            auto script = std::make_shared<CobScript>();
+            script->staticVariableCount = 0;
+            for (const auto& piece : pieces)
+            {
+                script->pieces.push_back(piece);
+            }
+
+            script->instructions = {
+                static_cast<uint32_t>(OpCode::PUSH_CONSTANT),
+                static_cast<uint32_t>(level),
+                static_cast<uint32_t>(OpCode::POP_LOCAL_VAR),
+                1u,
+                static_cast<uint32_t>(OpCode::PUSH_CONSTANT),
+                0u,
+                static_cast<uint32_t>(OpCode::RETURN)};
+            script->functions.push_back(CobFunctionInfo{"Killed", 0u});
+            return script;
+        }
+
         int countFeatures(const GameSimulation& sim)
         {
             int n = 0;
@@ -444,6 +471,75 @@ namespace rwe
 
             REQUIRE(killWith(script, 200) == 1);
             REQUIRE(wreckOnTheMap() == "HULK");
+        }
+    }
+
+    TEST_CASE("an isfeature unit always leaves its wreck", "[wreckage]")
+    {
+        // Death cause 7, and the answer to this document's long-standing
+        // question -- what is "a wreck that does not burn on land"? It is a
+        // type, not a situation. 0x41B9FE and 0x486167 both test bit 24 of
+        // `def+0x241`, which is `isfeature`, and force the cause to 7; the
+        // packer then pins the corpse level at 1 (0x486525) whatever the
+        // Killed ladder asked for. In the shipped data that is the dragon's
+        // teeth and the forts: scenery that happens to be built.
+        auto script = makeKilledLevelScript({"base"}, 2);
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        std::vector<UnitPieceDefinition> modelPieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+        sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(modelPieces));
+
+        // HULK breaks down to RUBBLE, as in the chain test above.
+        auto hulk = sim.featureDefinitions.insert(makeWreckDef("HULK"));
+        auto rubble = sim.featureDefinitions.insert(makeWreckDef("RUBBLE"));
+        sim.featureNameIndex.insert_or_assign("HULK", hulk);
+        sim.featureNameIndex.insert_or_assign("RUBBLE", rubble);
+        sim.featureDefinitions.get(hulk).featureDead = rubble;
+
+        sim.unitDefinitions["fort"] = makeUnitDef("HULK");
+
+        SECTION("an ordinary unit is given the level its ladder asked for")
+        {
+            auto id = spawn(sim, "fort", player, SimVector(100_ss, 0_ss, 100_ss), script);
+            sim.killUnit(id, std::nullopt, 100000u);
+
+            REQUIRE(std::get<UnitState::LifeStateDead>(sim.getUnitState(id).lifeState).corpseLevel == 2);
+
+            sim.tick();
+            REQUIRE(countFeatures(sim) == 1);
+            REQUIRE(sim.getFeatureDefinition(sim.features.begin()->second.featureName).name == "RUBBLE");
+        }
+
+        SECTION("scenery gets the intact wreck instead, ladder or no ladder")
+        {
+            sim.unitDefinitions["fort"].isFeature = true;
+            auto id = spawn(sim, "fort", player, SimVector(100_ss, 0_ss, 100_ss), script);
+            sim.killUnit(id, std::nullopt, 100000u);
+
+            const auto& dead = std::get<UnitState::LifeStateDead>(sim.getUnitState(id).lifeState);
+            REQUIRE(dead.leaveCorpse);
+            REQUIRE(dead.corpseLevel == 1);
+
+            sim.tick();
+            REQUIRE(countFeatures(sim) == 1);
+            REQUIRE(sim.getFeatureDefinition(sim.features.begin()->second.featureName).name == "HULK");
+        }
+
+        SECTION("but a half-built one still leaves nothing")
+        {
+            // The forcing sits ahead of the nanoframe rule in the original --
+            // 0x486525 runs before 0x4865D2 -- so being scenery does not save
+            // a fort that was never finished.
+            sim.unitDefinitions["fort"].isFeature = true;
+            sim.unitDefinitions["fort"].buildTime = 100u;
+            auto id = spawn(sim, "fort", player, SimVector(100_ss, 0_ss, 100_ss), script);
+            REQUIRE(sim.getUnitState(id).isBeingBuilt(sim.unitDefinitions.at("fort")));
+
+            sim.killUnit(id, std::nullopt, 100000u);
+            REQUIRE_FALSE(std::get<UnitState::LifeStateDead>(sim.getUnitState(id).lifeState).leaveCorpse);
+
+            sim.tick();
+            REQUIRE(countFeatures(sim) == 0);
         }
     }
 }

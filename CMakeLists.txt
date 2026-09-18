@@ -179,11 +179,18 @@ set(SOURCE_FILES
     src/rwe/ai/AiTuningProfile.cpp
     src/rwe/ai/AiTuningProfile.h
     src/rwe/ai/ArmyManager.cpp
+    src/rwe/ai/AirManager.cpp
     src/rwe/ai/ArmyManager.h
     src/rwe/ai/BuildManager.cpp
     src/rwe/ai/BuildManager.h
+    src/rwe/ai/AiBuildTree.cpp
+    src/rwe/ai/AiBuildTree.h
     src/rwe/ai/EconomyManager.cpp
     src/rwe/ai/EconomyManager.h
+    src/rwe/ai/MapIntel.cpp
+    src/rwe/ai/MapIntel.h
+    src/rwe/ai/MetalMakerManager.cpp
+    src/rwe/ai/MetalMakerManager.h
     src/rwe/ai/PerceptionManager.cpp
     src/rwe/ai/PerceptionManager.h
     src/rwe/ai/ScoutManager.cpp
@@ -236,6 +243,10 @@ set(SOURCE_FILES
     src/rwe/RenderService.h
     src/rwe/SceneContext.h
     src/rwe/SelectionMesh.h
+    src/rwe/AlphaTable.cpp
+    src/rwe/AlphaTable.h
+    src/rwe/ShadeTable.cpp
+    src/rwe/ShadeTable.h
     src/rwe/ShaderService.cpp
     src/rwe/ShaderService.h
     src/rwe/TextureService.cpp
@@ -282,8 +293,12 @@ set(SOURCE_FILES
     src/rwe/float_math.h
     src/rwe/game/BuilderGuisDatabase.cpp
     src/rwe/game/BuilderGuisDatabase.h
+    src/rwe/game/DefaultAction.cpp
+    src/rwe/game/DefaultAction.h
     src/rwe/game/FeatureMediaInfo.cpp
     src/rwe/game/FeatureMediaInfo.h
+    src/rwe/game/EndGameStats.cpp
+    src/rwe/game/EndGameStats.h
     src/rwe/game/FlashEffect.cpp
     src/rwe/game/FlashEffect.h
     src/rwe/game/GameCameraState.cpp
@@ -294,7 +309,17 @@ set(SOURCE_FILES
     src/rwe/game/GameNetworkService.h
     src/rwe/game/GameScene.cpp
     src/rwe/game/GameScene.h
+    src/rwe/game/GameScene_audio.cpp
+    src/rwe/game/GameScene_commands.cpp
+    src/rwe/game/GameScene_debug.cpp
+    src/rwe/game/GameScene_endgame.cpp
+    src/rwe/game/GameScene_input.cpp
+    src/rwe/game/GameScene_menu.cpp
+    src/rwe/game/GameScene_render.cpp
+    src/rwe/game/panel_slide.cpp
+    src/rwe/game/GameScene_replay.cpp
     src/rwe/game/GameScene_util.cpp
+    src/rwe/game/featureplacement.cpp
     src/rwe/game/GameScene_util.h
     src/rwe/game/InGameSoundsInfo.cpp
     src/rwe/game/InGameSoundsInfo.h
@@ -310,6 +335,8 @@ set(SOURCE_FILES
     src/rwe/game/PlayerCommandService.cpp
     src/rwe/game/PlayerCommandService.h
     src/rwe/game/ProjectileRenderType.h
+    src/rwe/game/ReplayFile.cpp
+    src/rwe/game/ReplayFile.h
     src/rwe/game/SceneTime.cpp
     src/rwe/game/SceneTime.h
     src/rwe/game/UnitPieceMeshInfo.cpp
@@ -390,6 +417,8 @@ set(SOURCE_FILES
     src/rwe/ui/UiTextBox.h
     src/rwe/game/SaveFile.cpp
     src/rwe/game/SaveFile.h
+    src/rwe/game/AiArenaReport.cpp
+    src/rwe/game/AiArenaReport.h
     src/rwe/game/GameParameters.h
     src/rwe/io/lostdf/io.cpp
     src/rwe/io/lostdf/io.h
@@ -490,6 +519,8 @@ set(SOURCE_FILES
     src/rwe/render/UniformLocation.h
     src/rwe/render/VaoHandle.h
     src/rwe/render/VboHandle.h
+    src/rwe/render/WireframeScan.cpp
+    src/rwe/render/WireframeScan.h
     src/rwe/resource_io.cpp
     src/rwe/resource_io.h
     src/rwe/rwe_time.cpp
@@ -499,6 +530,8 @@ set(SOURCE_FILES
     src/rwe/setup/TaInstall.cpp
     src/rwe/setup/TaInstall.h
     src/rwe/scene/SceneManager.h
+    src/rwe/scene/Screenshot.cpp
+    src/rwe/scene/Screenshot.h
     src/rwe/scene/util.h
     src/rwe/sdl/SdlContext.h
     src/rwe/sdl/SdlContextManager.cpp
@@ -819,24 +852,43 @@ endif()
 set(TEST_FILES
     src/rwe/ai/AiPlayerController.test.cpp
     src/rwe/ai/AiBehaviour.test.cpp
+    src/rwe/ai/MapIntel.test.cpp
+    src/rwe/ai/ReachabilityMap.test.cpp
+    src/rwe/ai/TransportManager.test.cpp
+    src/rwe/ai/AiBuildTree.test.cpp
+    src/rwe/ai/ArmyTactics.test.cpp
+    src/rwe/ai/AirTactics.test.cpp
+    src/rwe/AudioService.test.cpp
     src/rwe/BoxTreeSplit.test.cpp
+    src/rwe/AlphaTable.test.cpp
+    src/rwe/ShadeTable.test.cpp
+    src/rwe/GlobalConfig.test.cpp
     src/rwe/Viewport.test.cpp
     src/rwe/cob/cob_util.test.cpp
     src/rwe/collections/MinHeap.test.cpp
     src/rwe/observable/Subject.test.cpp
     src/rwe/collections/VectorMap.test.cpp
+    src/rwe/game/DefaultAction.test.cpp
+    src/rwe/game/GameScene_audio.test.cpp
+    src/rwe/game/panel_slide.test.cpp
     src/rwe/game/GameSpeed.test.cpp
+    src/rwe/game/buildghost.test.cpp
     src/rwe/game/cloakdisplay.test.cpp
     src/rwe/game/damagesmoke.test.cpp
+    src/rwe/game/featureplacement.test.cpp
     src/rwe/game/fogeffects.test.cpp
     src/rwe/test_announce.cpp
     src/rwe/test_crt_silence.cpp
     src/rwe/game/exploredgrid.test.cpp
+    src/rwe/game/ReplayFile.test.cpp
+    src/rwe/game/replaykeyframe.test.cpp
+    src/rwe/game/savefileheader.test.cpp
     src/rwe/game/hoveredfeature.test.cpp
     src/rwe/game/infopanel.test.cpp
     src/rwe/game/orderbuttons.test.cpp
     src/rwe/game/PlayerCommand_hotkey.test.cpp
     src/rwe/game/PlayerCommand_speed.test.cpp
+    src/rwe/game/EndGameStats.test.cpp
     src/rwe/game/dump_util.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp
     src/rwe/geometry/Circle2f.test.cpp
@@ -851,9 +903,12 @@ set(TEST_FILES
     src/rwe/grid/Point.test.cpp
     src/rwe/io/featuretdf/io.test.cpp
     src/rwe/io/gui/gui.test.cpp
+    src/rwe/io/hpi/hpi_util.test.cpp
     src/rwe/io/ota/ota.test.cpp
     src/rwe/io/tad/tad.test.cpp
     src/rwe/io/tad/tad_events.test.cpp
+    src/rwe/io/pcx/pcx.test.cpp
+    src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
     src/rwe/io/tdf/ListTdfAdapter.test.cpp
     src/rwe/io/tdf/NetSchemaTdfAdapter.test.cpp
@@ -864,9 +919,11 @@ set(TEST_FILES
     src/rwe/math/Vector2f.test.cpp
     src/rwe/math/Vector3f.test.cpp
     src/rwe/math/rwe_math.test.cpp
+    src/rwe/mesh_util.test.cpp
     src/rwe/network_util.test.cpp
     src/rwe/pathfinding/pathfinding_utils.test.cpp
     src/rwe/render/FogTiles.test.cpp
+    src/rwe/render/WireframeScan.test.cpp
     src/rwe/rc_gen_optional.h
     src/rwe/sim/GameHash_util.test.cpp
     src/rwe/sim/accuracy.test.cpp
@@ -878,6 +935,7 @@ set(TEST_FILES
     src/rwe/sim/buildtime.test.cpp
     src/rwe/sim/aircraftbuild.test.cpp
     src/rwe/sim/bombsight.test.cpp
+    src/rwe/sim/brakerate.test.cpp
     src/rwe/sim/cob.test.cpp
     src/rwe/sim/SimAngle.test.cpp
     src/rwe/sim/SimVector.test.cpp
@@ -888,6 +946,8 @@ set(TEST_FILES
     src/rwe/sim/nanoframedecay.test.cpp
     src/rwe/sim/patrol.test.cpp
     src/rwe/sim/capture.test.cpp
+    src/rwe/sim/worksounds.test.cpp
+    src/rwe/sim/unitnotifications.test.cpp
     src/rwe/sim/burning.test.cpp
     src/rwe/sim/waterbuilding.test.cpp
     src/rwe/sim/weaponflight.test.cpp
@@ -901,9 +961,16 @@ set(TEST_FILES
     src/rwe/sim/kamikaze.test.cpp
     src/rwe/sim/paralyzer.test.cpp
     src/rwe/sim/moverate.test.cpp
+    src/rwe/sim/pathfollowing.test.cpp
     src/rwe/sim/transport.test.cpp
     src/rwe/sim/bomber.test.cpp
     src/rwe/sim/bomberpatrol.test.cpp
+    src/rwe/sim/guardassist.test.cpp
+    src/rwe/sim/armstow.test.cpp
+    src/rwe/sim/nanonozzle.test.cpp
+    src/rwe/sim/builderfacing.test.cpp
+    src/rwe/sim/reclaimreach.test.cpp
+    src/rwe/sim/fogplacement.test.cpp
     src/rwe/sim/gunship.test.cpp
     src/rwe/sim/aircraftidle.test.cpp
     src/rwe/sim/airbase.test.cpp
@@ -917,7 +984,10 @@ set(TEST_FILES
     src/rwe/sim/dgun.test.cpp
     src/rwe/sim/dgunorder.test.cpp
     src/rwe/sim/dogfight.test.cpp
+    src/rwe/sim/groupattack.test.cpp
+    src/rwe/sim/fogattack.test.cpp
     src/rwe/sim/ballisticair.test.cpp
+    src/rwe/sim/wind.test.cpp
     src/rwe/pathfinding/pathing.test.cpp
     src/rwe/pathfinding/BugWalk.test.cpp
     src/rwe/pathfinding/walkwhilewaiting.test.cpp
@@ -935,6 +1005,7 @@ set(TEST_FILES
     src/rwe/sim/targetsearch.test.cpp
     src/rwe/sim/turret.test.cpp
     src/rwe/sim/maxreloadtime.test.cpp
+    src/rwe/sim/aimpershot.test.cpp
     src/rwe/sim/SimRandom.test.cpp
     src/rwe/sim/resurrect.test.cpp
     src/rwe/sim/saveload.test.cpp
@@ -943,7 +1014,12 @@ set(TEST_FILES
     src/rwe/util/Result.test.cpp
     src/rwe/util/SimpleLogger.test.cpp
     src/rwe/util/SpanStream.test.cpp
+    src/rwe/util/range_util.test.cpp
     src/rwe/util/rwe_string.test.cpp
+    src/rwe/ui/UiComponent.test.cpp
+    src/rwe/ui/UiTextBox.test.cpp
+    src/rwe/ui/UiPanelFocus.test.cpp
+    src/rwe/UiRenderService.test.cpp
     )
 
 add_executable(rwe_test ${TEST_FILES})
@@ -1008,6 +1084,12 @@ target_link_libraries(battle_test librwe)
 add_executable(path_bench src/path_bench.cpp)
 target_link_libraries(path_bench librwe)
 
+# Watches a recorded game. Its own executable rather than a switch on rwe.exe
+# because watching one is a separate thing to do, with its own list of what
+# there is to watch.
+add_executable(replay_viewer src/replay_viewer.cpp)
+target_link_libraries(replay_viewer librwe)
+
 # Crashes on purpose, so the crash handler has something to be tested against.
 # rwe_test runs it as a subprocess: nothing else exercises a real fault.
 add_executable(crash_probe src/crash_probe.cpp)
@@ -1017,5 +1099,5 @@ target_link_libraries(crash_probe librwe)
 # symbol table, which for an executable means linking with -rdynamic. Without
 # this the crash reports on Linux are addresses and nothing else.
 if(NOT WIN32)
-    set_target_properties(rwe battle_test crash_probe PROPERTIES ENABLE_EXPORTS ON)
+    set_target_properties(rwe battle_test replay_viewer crash_probe PROPERTIES ENABLE_EXPORTS ON)
 endif()

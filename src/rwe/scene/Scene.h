@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 #include <rwe/events.h>
+#include <string>
 
 namespace rwe
 {
@@ -17,6 +18,9 @@ namespace rwe
         virtual void onKeyDown(const SDL_KeyboardEvent& /*key*/) {}
 
         virtual void onKeyUp(const SDL_KeyboardEvent& /*key*/) {}
+
+        /** Composed text from the keyboard, for whatever the scene has focused. */
+        virtual void onTextInput(const std::string& /*text*/) {}
 
         virtual void onMouseDown(MouseButtonEvent /*event*/) {}
 

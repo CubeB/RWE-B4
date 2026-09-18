@@ -3,6 +3,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <rwe/render/WireframeScan.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/match.h>
 
@@ -114,12 +115,12 @@ namespace rwe
     {
         for (const auto& item : pathInfo.closedVertices)
         {
-            if (!item.second.predecessor)
+            if (item.second.predecessor < 0)
             {
                 continue;
             }
 
-            auto start = (*item.second.predecessor)->vertex;
+            auto start = pathInfo.closedVertices[item.second.predecessor].second.vertex;
             auto end = item.second.vertex;
             drawTerrainArrow(terrain, start, end, Color(255, 0, 0), batch);
         }
@@ -404,21 +405,21 @@ namespace rwe
         const Matrix4f& viewProjectionMatrix,
         const ShaderMesh& mesh,
         const Matrix4f& matrix,
-        bool shaded,
+        float shadeStrength,
         PlayerColorIndex playerColorIndex,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
+        float maskValue,
         std::vector<UnitTextureMeshRenderInfo>& batch)
     {
         auto mvpMatrix = viewProjectionMatrix * matrix;
 
         if (mesh.vertices)
         {
-            batch.push_back(UnitTextureMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shaded, unitTextureAtlas});
+            batch.push_back(UnitTextureMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shadeStrength, atlases.atlas, atlases.paletteIndexAtlas, maskValue});
         }
         if (mesh.teamVertices)
         {
-            batch.push_back(UnitTextureMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shaded, unitTeamTextureAtlases.at(playerColorIndex.value).get()});
+            batch.push_back(UnitTextureMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shadeStrength, atlases.teamAtlases->at(playerColorIndex.value).get(), atlases.teamPaletteIndexAtlases->at(playerColorIndex.value).get(), maskValue});
         }
     }
 
@@ -426,18 +427,17 @@ namespace rwe
         const Matrix4f& viewProjectionMatrix,
         const ShaderMesh& mesh,
         const Matrix4f& matrix,
-        float groundHeight,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const ShadowProjection& shadow,
+        const UnitTextureAtlases& atlases,
         std::vector<UnitTextureShadowMeshRenderInfo>& batch)
     {
         if (mesh.vertices)
         {
-            batch.push_back(UnitTextureShadowMeshRenderInfo{&*mesh.vertices, matrix, viewProjectionMatrix, unitTextureAtlas, groundHeight});
+            batch.push_back(UnitTextureShadowMeshRenderInfo{&*mesh.vertices, matrix, viewProjectionMatrix, atlases.atlas, shadow.groundHeight, shadow.projected, shadow.originY});
         }
         if (mesh.teamVertices)
         {
-            batch.push_back(UnitTextureShadowMeshRenderInfo{&*mesh.teamVertices, matrix, viewProjectionMatrix, unitTeamTextureAtlases.at(0).get(), groundHeight});
+            batch.push_back(UnitTextureShadowMeshRenderInfo{&*mesh.teamVertices, matrix, viewProjectionMatrix, atlases.teamAtlases->at(0).get(), shadow.groundHeight, shadow.projected, shadow.originY});
         }
     }
 
@@ -450,8 +450,9 @@ namespace rwe
         const Matrix4f& modelMatrix,
         PlayerColorIndex playerColorIndex,
         float frac,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        float shadeStrength,
+        const UnitTextureAtlases& atlases,
+        bool isFinishedBuilding,
         std::vector<UnitTextureMeshRenderInfo>& out)
     {
         const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
@@ -465,13 +466,44 @@ namespace rwe
                 continue;
             }
 
-            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], mesh.shaded, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, out);
+            // A dont-cache piece is left out of the original's cached bitmap
+            // and drawn to the screen by the unshaded rasterizer instead
+            // (TOTALA-EXE-SHADING.md S:12a) -- but only once the unit is
+            // finished, which is the only time this function draws it; the
+            // nanoframe path shades every piece the script has not said
+            // DONT_SHADE on, as the construction pass does.
+            auto pieceShadeStrength = mesh.shaded && mesh.cached ? shadeStrength : 0.0f;
+
+            // The same flag decides the building halo, for the same reason.
+            // The halo is an artefact of the cached bitmap's anti-aliasing, so
+            // a piece that is not in that bitmap never met the table that
+            // produces it: a metal extractor's spinning top has no fringe in
+            // the original while its base does. Everything else solid still
+            // goes in at 0.5 as an OCCLUDER -- coverage without being a source
+            // -- because a gap in the coverage is a boundary, and the post
+            // pass cannot tell a gap from an outline. See unitTexture.frag.
+            //
+            // A finished building's dont-cache piece has a level of its own,
+            // 0.7: no halo, for the reason above, and no anti-aliasing either,
+            // because the original drew it straight to the screen after the
+            // cached bitmap. Left at 0.5 it went sharp or smooth with the
+            // units switch, and an extractor's top is part of a building, not
+            // a unit.
+            auto maskValue = isFinishedBuilding ? (mesh.cached ? 1.0f : 0.7f) : 0.5f;
+
+            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], pieceShadeStrength, playerColorIndex, atlases, maskValue, out);
         }
     }
 
     bool unitCastsShadow(const UnitDefinition& unitDefinition)
     {
         return !unitDefinition.noShadow;
+    }
+
+    bool featureCastsShadow(SimScalar groundHeight, SimScalar seaLevel)
+    {
+        // `jl 0x45935C`: strictly below the sea level casts none; at it, it does.
+        return groundHeight >= seaLevel;
     }
 
     void drawUnitShadowMesh(
@@ -482,9 +514,8 @@ namespace rwe
         const std::vector<UnitMesh>& meshes,
         const Matrix4f& modelMatrix,
         float frac,
-        float groundHeight,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const ShadowProjection& shadow,
+        const UnitTextureAtlases& atlases,
         UnitShadowMeshBatch& batch)
     {
         const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
@@ -498,7 +529,7 @@ namespace rwe
                 continue;
             }
 
-            drawShaderMeshShadow(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], groundHeight, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
+            drawShaderMeshShadow(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], shadow, atlases, batch.meshes);
         }
     }
 
@@ -508,16 +539,15 @@ namespace rwe
         const std::string& objectName,
         const UnitModelDefinition& modelDefinition,
         const Matrix4f& modelMatrix,
-        float groundHeight,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const ShadowProjection& shadow,
+        const UnitTextureAtlases& atlases,
         UnitShadowMeshBatch& batch)
     {
         const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
 
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
-            drawShaderMeshShadow(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * renderInfo.restTransforms[i], groundHeight, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
+            drawShaderMeshShadow(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * renderInfo.restTransforms[i], shadow, atlases, batch.meshes);
         }
     }
 
@@ -525,23 +555,22 @@ namespace rwe
         const Matrix4f& viewProjectionMatrix,
         const ShaderMesh& mesh,
         const Matrix4f& matrix,
-        bool shaded,
+        float shadeStrength,
         const BuildPhase& buildPhase,
         float unitY,
         float unitHeight,
         PlayerColorIndex playerColorIndex,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         std::vector<UnitBuildingMeshRenderInfo>& batch)
     {
         auto mvpMatrix = viewProjectionMatrix * matrix;
         if (mesh.vertices)
         {
-            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shaded, unitTextureAtlas, unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB});
+            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shadeStrength, atlases.atlas, atlases.paletteIndexAtlas, unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB});
         }
         if (mesh.teamVertices)
         {
-            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shaded, unitTeamTextureAtlases.at(playerColorIndex.value).get(), unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB});
+            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shadeStrength, atlases.teamAtlases->at(playerColorIndex.value).get(), atlases.teamPaletteIndexAtlases->at(playerColorIndex.value).get(), unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB});
         }
     }
 
@@ -556,8 +585,8 @@ namespace rwe
         float unitY,
         PlayerColorIndex playerColorIndex,
         float frac,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        float shadeStrength,
+        const UnitTextureAtlases& atlases,
         UnitMeshBatch& batch)
     {
         const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
@@ -571,7 +600,7 @@ namespace rwe
                 continue;
             }
 
-            drawBuildingShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], mesh.shaded, buildPhase, unitY, simScalarToFloat(modelDefinition.height), playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.buildingMeshes);
+            drawBuildingShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], mesh.shaded ? shadeStrength : 0.0f, buildPhase, unitY, simScalarToFloat(modelDefinition.height), playerColorIndex, atlases, batch.buildingMeshes);
         }
     }
 
@@ -582,16 +611,15 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         const Matrix4f& modelMatrix,
         PlayerColorIndex playerColorIndex,
-        bool shaded,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        float shadeStrength,
+        const UnitTextureAtlases& atlases,
         UnitMeshBatch& batch)
     {
         const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
 
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
-            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * renderInfo.restTransforms[i], shaded, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
+            drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * renderInfo.restTransforms[i], shadeStrength, playerColorIndex, atlases, 0.5f, batch.meshes);
         }
     }
 
@@ -605,8 +633,8 @@ namespace rwe
         unsigned int unitIndex,
         unsigned int gameTime,
         float frac,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        float shadeStrength,
+        const UnitTextureAtlases& atlases,
         UnitMeshBatch& batch)
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
@@ -615,7 +643,7 @@ namespace rwe
         if (unit.isBeingBuilt(unitDefinition))
         {
             auto buildPhase = computeBuildPhase(unit.getPreciseCompletePercent(unitDefinition), unitIndex, gameTime);
-            drawBuildingUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, buildPhase, position.y, playerColorIndex, frac, unitTextureAtlas, unitTeamTextureAtlases, batch);
+            drawBuildingUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, buildPhase, position.y, playerColorIndex, frac, shadeStrength, atlases, batch);
         }
         else
         {
@@ -624,7 +652,26 @@ namespace rwe
             // reached the batch. A nanoframe never gets here cloaked either --
             // the drain skips a unit that is still being built.
             auto& out = unit.cloaked ? batch.cloakedMeshes : batch.meshes;
-            drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, playerColorIndex, frac, unitTextureAtlas, unitTeamTextureAtlases, out);
+
+            // A finished unit whose FBI says ZBuffer=0 gets a cached bitmap
+            // with no height plane, and the original's textured span filler
+            // only looks the shade table up when there is one: its texels go
+            // to the screen untouched (TOTALA-EXE-SHADING.md S:23). Only
+            // while it is being built does it get the plane, for the
+            // construction wipe, and shade like everything else -- which is
+            // why this sits on the finished branch alone. CORFAV and
+            // CORTRUCK are the two shipped units it reaches. (The flat-colour
+            // n-gons of such a unit are still shaded by the original; RWE's
+            // mesh does not keep them apart from the textured quads, so they
+            // go unshaded with the rest, a difference on nine faces of the
+            // Weasel and one of the truck.)
+            auto finishedShadeStrength = unitDefinition.zBuffer ? shadeStrength : 0.0f;
+            // Only an immobile unit can carry the building halo. This branch
+            // is already the finished one -- a nanoframe went the other way
+            // above -- so immobility is the whole of the test, and getting it
+            // wrong here puts a purple fringe round every tank and aircraft
+            // on the map.
+            drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, playerColorIndex, frac, finishedShadeStrength, atlases, !unitDefinition.isMobile, out);
         }
     }
 
@@ -633,8 +680,8 @@ namespace rwe
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,
         const MapFeature& feature,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        float shadeStrength,
+        const UnitTextureAtlases& atlases,
         UnitMeshBatch& batch)
     {
         const auto& featureMediaInfo = gameMediaDatabase.getFeature(feature.featureName);
@@ -643,8 +690,25 @@ namespace rwe
         {
             const auto& modelDefinition = modelDefinitions.at(objectInfo->objectName);
             auto matrix = Matrix4f::translation(simVectorToFloat(feature.position)) * Matrix4f::rotationY(toRadians(feature.rotation).value);
-            drawProjectileUnitMesh(gameMediaDatabase, viewProjectionMatrix, objectInfo->objectName, modelDefinition, matrix, PlayerColorIndex(0), true, unitTextureAtlas, unitTeamTextureAtlases, batch);
+            drawProjectileUnitMesh(gameMediaDatabase, viewProjectionMatrix, objectInfo->objectName, modelDefinition, matrix, PlayerColorIndex(0), shadeStrength, atlases, batch);
         }
+    }
+
+    void drawUnitOutline(
+        const GameMediaDatabase& gameMediaDatabase,
+        const Matrix4f& viewProjectionMatrix,
+        const UnitState& unit,
+        const UnitDefinition& unitDefinition,
+        const UnitModelDefinition& modelDefinition,
+        float frac,
+        const UnitTextureAtlases& atlases,
+        std::vector<UnitTextureMeshRenderInfo>& out)
+    {
+        auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
+        auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
+        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
+
+        drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, 0.0f, atlases, false, out);
     }
 
     void drawUnitShadow(
@@ -655,15 +719,32 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         float frac,
         float groundHeight,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         UnitShadowMeshBatch& batch)
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
         auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
 
-        drawUnitShadowMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, frac, groundHeight, unitTextureAtlas, unitTeamTextureAtlases, batch);
+        // Which of the original's two shadow passes this unit belongs to. It
+        // sorts on unit+0x113 bit 5, whose meaning is not established -- "is a
+        // building" is the obvious reading, and is what mobility stands in for
+        // here (TOTALA-EXE.md S:100).
+        //
+        // A mobile unit's shadow is a copy of its own silhouette under one
+        // displacement, and the displacement is decoded (TOTALA-EXE.md S:100):
+        // 0x45933D blits the copy at the unit's screen x plus 0x85 where
+        // 0x4597BA draws the unit itself at plus 0x80, and at the screen y of
+        // the ground under it rather than of the unit. So five pixels right,
+        // and down by however far the unit is above the ground -- nothing, for
+        // anything that drives. The height it is taken from is the unit's
+        // base. RWE used to take it from the top of the model, which is what
+        // made a commander look as if it were floating over its own shadow.
+        auto shadow = unitDefinition.isMobile
+            ? ShadowProjection{groundHeight, false, position.y}
+            : ShadowProjection{groundHeight, true, 0.0f};
+
+        drawUnitShadowMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, frac, shadow, atlases, batch);
     }
 
     void drawFeatureMeshShadow(
@@ -672,8 +753,7 @@ namespace rwe
         const Matrix4f& viewProjectionMatrix,
         const MapFeature& feature,
         float groundHeight,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         UnitShadowMeshBatch& batch)
     {
         const auto& featureMediaInfo = gameMediaDatabase.getFeature(feature.featureName);
@@ -689,7 +769,8 @@ namespace rwe
         const auto& position = feature.position;
         auto matrix = Matrix4f::translation(simVectorToFloat(position)) * Matrix4f::rotationY(toRadians(feature.rotation).value);
 
-        drawUnitShadowMeshNoPieces(gameMediaDatabase, viewProjectionMatrix, objectInfo->objectName, modelDefinition, matrix, groundHeight, unitTextureAtlas, unitTeamTextureAtlases, batch);
+        // Scenery never moves, so it takes the projected pass with the buildings.
+        drawUnitShadowMeshNoPieces(gameMediaDatabase, viewProjectionMatrix, objectInfo->objectName, modelDefinition, matrix, ShadowProjection{groundHeight, true, 0.0f}, atlases, batch);
     }
 
     void drawFeature(
@@ -815,8 +896,8 @@ namespace rwe
         const std::string& pieceName,
         const Matrix4f& matrix,
         PlayerColorIndex playerColorIndex,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        float shadeStrength,
+        const UnitTextureAtlases& atlases,
         UnitMeshBatch& batch)
     {
         auto pieceMesh = gameMediaDatabase.getUnitPieceMesh(objectName, pieceName);
@@ -824,7 +905,7 @@ namespace rwe
         {
             return;
         }
-        drawShaderMesh(viewProjectionMatrix, *pieceMesh->get().mesh, matrix, true, playerColorIndex, unitTextureAtlas, unitTeamTextureAtlases, batch.meshes);
+        drawShaderMesh(viewProjectionMatrix, *pieceMesh->get().mesh, matrix, shadeStrength, playerColorIndex, atlases, 0.5f, batch.meshes);
     }
 
     void drawDebrisShard(const Vector3f& position, ColoredMeshBatch& batch)
@@ -838,6 +919,38 @@ namespace rwe
         pushTriangle(batch.triangles, topLeft, bottomRight, topRight, color);
     }
 
+    namespace
+    {
+        /** How far, in world units, a wireframe or selection pixel is lifted towards the camera. */
+        constexpr float WireframeDepthLift = 2.0f;
+
+        /** Where a world-space point lands on screen, in output pixels, y down. */
+        Vector2f toScreenPixels(const WireframeScreen& screen, const Vector3f& world)
+        {
+            auto clip = screen.viewProjection * world;
+            return Vector2f((clip.x + 1.0f) * 0.5f * screen.width, (1.0f - clip.y) * 0.5f * screen.height);
+        }
+
+        /**
+         * One output pixel of wireframe, centred on centre. The camera is
+         * orthographic, so a pixel's width and height are the same two
+         * world-space steps everywhere on screen.
+         */
+        void pushWireframePixel(const WireframeScreen& screen, const Vector3f& centre, const Vector3f& color, std::vector<GlColoredVertex>& out)
+        {
+            auto right = screen.pixelRight * 0.5f;
+            auto up = screen.pixelUp * 0.5f;
+            auto bottomLeft = centre - right - up;
+            auto bottomRight = centre + right - up;
+            auto topRight = centre + right + up;
+            auto topLeft = centre - right + up;
+
+            // Anticlockwise on screen, which is the way culling keeps.
+            pushTriangle(out, bottomLeft, bottomRight, topRight, color);
+            pushTriangle(out, bottomLeft, topRight, topLeft, color);
+        }
+    }
+
     void drawUnitWireframe(
         const GameMediaDatabase& gameMediaDatabase,
         const UnitState& unit,
@@ -845,6 +958,7 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         float frac,
         const Vector3f& toCamera,
+        const WireframeScreen& screen,
         const Vector3f& color,
         ColoredMeshBatch& batch)
     {
@@ -854,17 +968,23 @@ namespace rwe
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
         auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
 
-        // Edges resting on the ground trace the footprint; TA leaves those out.
-        auto groundLevel = position.y + 1.0f;
-
-        // Lift the lines slightly towards the camera so they pass the depth
-        // test against the surface they outline, while anything the model
-        // itself hides stays hidden.
-        auto bias = toCamera * 0.75f;
+        // Lift each pixel towards the camera so it passes the depth test
+        // against the surface it lies on, while anything the model itself
+        // hides stays hidden. That stands in for the original's height test,
+        // which keeps a wireframe pixel only where no higher surface of the
+        // model covers it (0x4C0A90). The pixel is a flat square facing the
+        // camera, and a surface seen at a slant falls away across it, so the
+        // lift has to clear that slope as well as the surface: at 0.75 part
+        // of a pixel could sink behind the face it outlines, which reads as a
+        // thinner, broken line.
+        auto bias = toCamera * WireframeDepthLift;
 
         const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(unitDefinition.objectName, modelDefinition);
         const auto& transforms = computePieceTransformsForRender(modelDefinition, renderInfo, unit.pieces, frac);
 
+        std::vector<Vector3f> world;
+        std::vector<Vector2f> onScreen;
+        std::vector<WireframePixel> pixels;
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
             if (!unit.pieces[i].visible)
@@ -874,60 +994,37 @@ namespace rwe
 
             auto matrix = transform * transforms[i];
             const auto& pieceInfo = *renderInfo.pieces[i];
-            if (!pieceInfo.edges)
+            if (!pieceInfo.polygons)
             {
                 continue;
             }
 
-            auto origin = matrix * Vector3f(0.0f, 0.0f, 0.0f);
-            auto facesCamera = [&](const Vector3f& normal) {
-                return ((matrix * normal) - origin).dot(toCamera) > 0.0f;
-            };
-
-            auto facesUp = [&](const Vector3f& normal) {
-                return ((matrix * normal) - origin).y > 0.5f;
-            };
-
-            for (const auto& edge : *pieceInfo.edges)
+            // Every polygon goes through the scan conversion, and it is the
+            // conversion that drops the ones facing away (TOTALA-EXE.md S:3).
+            for (const auto& polygon : *pieceInfo.polygons)
             {
-                if (!facesCamera(edge.normalA) && !(edge.normalB && facesCamera(*edge.normalB)))
+                world.clear();
+                onScreen.clear();
+                for (const auto& corner : polygon.vertices)
                 {
-                    continue;
+                    auto w = matrix * corner;
+                    world.push_back(w);
+                    onScreen.push_back(toScreenPixels(screen, w));
                 }
-                auto a = matrix * edge.start;
-                auto b = matrix * edge.end;
-                if (a.y <= groundLevel && b.y <= groundLevel)
+
+                pixels.clear();
+                scanWireframePolygon(onScreen, pixels);
+                for (const auto& p : pixels)
                 {
-                    // A ground-level edge is skipped when it is just where a
-                    // wall meets the ground, but kept when it outlines a
-                    // floor polygon such as an aircraft plant's landing pad.
-                    bool outlinesFloor = facesUp(edge.normalA) || (edge.normalB && facesUp(*edge.normalB));
-                    if (!outlinesFloor)
-                    {
-                        continue;
-                    }
+                    // The point on the edge this pixel came from, moved across
+                    // the screen to the pixel's centre. The move is in the
+                    // image plane, so the depth stays the polygon's.
+                    auto onEdge = lerp(world[p.from], world[p.to], p.t);
+                    auto centre = onEdge + (screen.pixelRight * ((static_cast<float>(p.x) + 0.5f) - p.edgeX)) + bias;
+                    pushWireframePixel(screen, centre, color, batch.triangles);
                 }
-                pushLine(batch.lines, a + bias, b + bias, color);
             }
         }
-    }
-
-    void drawUnitSilhouette(
-        const GameMediaDatabase& gameMediaDatabase,
-        const Matrix4f& viewProjectionMatrix,
-        const UnitState& unit,
-        const UnitDefinition& unitDefinition,
-        const UnitModelDefinition& modelDefinition,
-        float frac,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
-        std::vector<UnitTextureMeshRenderInfo>& out)
-    {
-        auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
-        auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
-
-        drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, unitTextureAtlas, unitTeamTextureAtlases, out);
     }
 
     /**
@@ -1337,8 +1434,7 @@ namespace rwe
         const VectorMap<Projectile, ProjectileIdTag>& projectiles,
         GameTime currentTime,
         float frac,
-        TextureIdentifier unitTextureAtlas,
-        std::vector<SharedTextureHandle>& unitTeamTextureAtlases,
+        const UnitTextureAtlases& atlases,
         ColoredMeshBatch& coloredMeshbatch,
         SpriteBatch& spriteBatch,
         UnitMeshBatch& unitMeshBatch)
@@ -1394,7 +1490,7 @@ namespace rwe
                         * pointDirection(direction)
                         * rotationModeToMatrix(m.rotationMode);
                     const auto& modelDefinition = sim.unitModelDefinitions.at(m.objectName);
-                    drawProjectileUnitMesh(gameMediaDatabase, viewProjectionMatrix, m.objectName, modelDefinition, transform, PlayerColorIndex(0), false, unitTextureAtlas, unitTeamTextureAtlases, unitMeshBatch);
+                    drawProjectileUnitMesh(gameMediaDatabase, viewProjectionMatrix, m.objectName, modelDefinition, transform, PlayerColorIndex(0), 0.0f, atlases, unitMeshBatch);
                 },
                 [&](const ProjectileRenderTypeSprite& s) {
                     Vector3f snappedPosition(
@@ -1443,25 +1539,53 @@ namespace rwe
         }
     }
 
-    void drawSelectionRect(const GameMediaDatabase& gameMediaDatabase, const Matrix4f& viewProjectionMatrix, const UnitState& unit, const UnitDefinition& unitDefinition, float frac, ColoredMeshesBatch& batch)
+    void drawSelectionRect(const GameMediaDatabase& gameMediaDatabase, const WireframeScreen& screen, const Vector3f& toCamera, const UnitState& unit, const UnitDefinition& unitDefinition, float frac, ColoredMeshBatch& batch)
     {
-        auto selectionMesh = gameMediaDatabase.getSelectionMesh(unitDefinition.objectName);
+        auto quad = gameMediaDatabase.getSelectionQuad(unitDefinition.objectName);
+        if (!quad)
+        {
+            return;
+        }
 
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
-
-        // try to ensure that the selection rectangle vertices
-        // are aligned with the middle of pixels,
-        // to prevent discontinuities in the drawn lines.
-        Vector3f snappedPosition(
-            snapToInterval(position.x, 1.0f) + 0.5f,
-            snapToInterval(position.y, 2.0f),
-            snapToInterval(position.z, 1.0f) + 0.5f);
-
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto matrix = Matrix4f::translation(snappedPosition) * Matrix4f::rotationY(rotation);
-        auto mvpMatrix = viewProjectionMatrix * matrix;
+        auto matrix = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
 
-        batch.meshes.push_back(ColoredMeshRenderInfo{selectionMesh.value().get(), mvpMatrix});
+        // The selection plate's outline in green, one output pixel wide and
+        // solid. It was a GL line loop, which the double-size world buffer
+        // made half a pixel wide, and where the ground sat under a line the
+        // resolve's one sample of each block could miss it altogether.
+        const Vector3f color(0.325f, 0.875f, 0.310f);
+        auto bias = toCamera * WireframeDepthLift;
+
+        std::array<Vector3f, 4> world;
+        std::array<Vector2f, 4> onScreen;
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            world[i] = matrix * (*quad)[i];
+            onScreen[i] = toScreenPixels(screen, world[i]);
+        }
+
+        std::vector<LinePixel> pixels;
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            auto j = (i + 1) % 4;
+            pixels.clear();
+            scanLine(onScreen[i], onScreen[j], pixels);
+            for (const auto& p : pixels)
+            {
+                // The point on the line this pixel came from, moved in the
+                // image plane to the pixel's centre so its depth is kept.
+                auto onLine = lerp(world[i], world[j], p.t);
+                auto exactX = onScreen[i].x + (p.t * (onScreen[j].x - onScreen[i].x));
+                auto exactY = onScreen[i].y + (p.t * (onScreen[j].y - onScreen[i].y));
+                auto centre = onLine
+                    + (screen.pixelRight * ((static_cast<float>(p.x) + 0.5f) - exactX))
+                    - (screen.pixelUp * ((static_cast<float>(p.y) + 0.5f) - exactY))
+                    + bias;
+                pushWireframePixel(screen, centre, color, batch.triangles);
+            }
+        }
     }
 
     WakeEmission computeWakeEmission(const Vector3f& firstVertex, const Vector3f& secondVertex, bool reverse, unsigned int rampPeriod)
@@ -1732,6 +1856,42 @@ namespace rwe
         return simulation.tryGetFeature(*hoveredFeature);
     }
 
+    bool shouldStartNextMusicTrack(bool leavingScene, bool musicPlaying, GameTime gameTime, GameTime holdOffUntil)
+    {
+        return !leavingScene && !musicPlaying && gameTime >= holdOffUntil;
+    }
+
+    std::size_t nextMusicTrackIndex(MusicTrackMode mode, const std::vector<std::string>& tracks, const std::string& last, int step, unsigned int randomValue)
+    {
+        const auto count = tracks.size();
+        if (mode == MusicTrackMode::Random)
+        {
+            return randomValue % count;
+        }
+
+        auto it = std::find(tracks.begin(), tracks.end(), last);
+        if (it == tracks.end())
+        {
+            return 0;
+        }
+        auto index = static_cast<std::size_t>(it - tracks.begin());
+
+        auto move = step;
+        if (mode == MusicTrackMode::PlayAll && move == 0)
+        {
+            move = 1;
+        }
+        if (move > 0)
+        {
+            return (index + 1) % count;
+        }
+        if (move < 0)
+        {
+            return (index + count - 1) % count;
+        }
+        return index;
+    }
+
     bool featureCanBeReclaimed(const GameSimulation& sim, FeatureId featureId)
     {
         auto feature = sim.tryGetFeature(featureId);
@@ -1741,5 +1901,23 @@ namespace rwe
         }
 
         return sim.getFeatureDefinition(feature->get().featureName).reclaimable;
+    }
+
+    bool localBuildGhostIsActive(LocalBuildGhostKind kind, bool matchingOrderPresent, GameTime createdAt, GameTime now, GameTime timeout)
+    {
+        if (now - createdAt >= timeout)
+        {
+            return false;
+        }
+
+        switch (kind)
+        {
+            case LocalBuildGhostKind::Placement:
+                return !matchingOrderPresent;
+            case LocalBuildGhostKind::Cancellation:
+                return matchingOrderPresent;
+        }
+
+        return false;
     }
 }

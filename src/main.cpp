@@ -3,6 +3,7 @@
 #include <memory>
 #include <SDL3/SDL.h>
 #include <rwe/GameLaunch.h>
+#include <rwe/game/ReplayFile.h>
 #include <rwe/GlobalConfig.h>
 #include <rwe/PathMapping.h>
 #include <rwe/setup/TaInstall.h>
@@ -109,7 +110,13 @@ int main(int argc, char* argv[])
                       << "  --help                Show this message\n"
                       << "  --log <path>          Log output file path\n"
                       << "  --state-log <path>    Sim-state log file (desync debugging)\n"
-                      << "  --ai-difficulty <d>   easy | standard | hard | brutal (default: standard)\n"
+                      << "  --ai-difficulty <d>   idle | easy | standard | hard | brutal (default: standard)\n"
+                      << "  --ai-arena <seconds>  computer-vs-computer measurement run: draws nothing,\n"
+                      << "                        runs flat out, writes ai-arena.csv and quits\n"
+                      << "  --seed <n>            vary the simulation seed, for averaging arena runs\n"
+                      << "  --ai-tune <p>:<k>=<v> override one AI knob for player p (see applyAiTuning)\n"
+                      << "  --record-replay <f>   write every command to a replay file as you play\n"
+                      << "  --replay <file>       watch a replay instead of playing\n"
                       << "  --width <pixels>      Window width (default: 800)\n"
                       << "  --height <pixels>     Window height (default: 600)\n"
                       << "  --fullscreen          Start in fullscreen mode (same as --window-mode fullscreen)\n"
@@ -140,14 +147,54 @@ int main(int argc, char* argv[])
             config.musicVolume = std::min(100u, args.getUint("music-volume", 100));
             config.musicEnabled = args.getString("music", "true") != "false";
             config.shadows = args.getString("shadows", "true") != "false";
+            config.vehicleShadows = args.getString("vehicle-shadows", "true") != "false";
+            config.screenScale = std::clamp(args.getUint("screen-scale", 1), 1u, 4u);
             config.scrollSpeed = std::clamp(args.getUint("scroll-speed", 100), 25u, 200u);
             config.soundMode = std::min(2u, args.getUint("sound-mode", 2));
             config.unitSpeech = std::min(2u, args.getUint("unit-speech", 2));
+            config.musicTrackMode = std::min(3u, args.getUint("music-mode", 3));
             config.gamma = std::clamp(args.getUint("gamma", 100), 50u, 133u);
-            config.shading = args.getString("shading", "true") != "false";
+            // "shading" was a plain bool before the switch grew four states. An
+            // existing rwe.cfg still carries it, so it decides the default that
+            // "shading-mode" then overrides -- otherwise upgrading would silently
+            // turn shading back on for someone who had switched it off.
+            auto shadingWasOn = args.getString("shading", "true") != "false";
+            config.shadingMode = std::min(3u, args.getUint("shading-mode", shadingWasOn ? 2u : 0u));
+            config.shadingStrengthUnits = std::min(100u, args.getUint("shading-strength-units", 40));
+            config.shadingStrengthBuildings = std::min(100u, args.getUint("shading-strength-buildings", 40));
             config.antiAlias = args.getString("anti-alias", "true") != "false";
+            config.buildingHalo = args.getString("building-halo", "true") != "false";
+            config.antiAliasUnits = args.getString("anti-alias-units", "false") != "false";
+            config.buildingHaloStrength = std::min(100u, args.getUint("building-halo-strength", 100));
+            config.buildingHaloSaturation = std::min(100u, args.getUint("building-halo-saturation", 65));
+            config.buildingHaloRedShift = std::min(100u, args.getUint("building-halo-red-shift", 50));
             std::optional<rwe::GameParameters> gameParameters;
-            if (args.contains("load"))
+            if (args.contains("replay"))
+            {
+                // A replay carries the conditions the game started under, so
+                // the parameters come out of the file rather than off the
+                // command line. Anything else given alongside it would be a
+                // different game, and would diverge on the first tick.
+                auto replayPath = std::filesystem::path(args.getString("replay"));
+                auto replay = rwe::readReplayFile(replayPath);
+                if (!replay)
+                {
+                    throw std::runtime_error("Could not read replay file: " + replayPath.string());
+                }
+                gameParameters = rwe::gameParametersFromReplayHeader(replay->header);
+                gameParameters->replayFile = replayPath.string();
+
+                // A replay can be run through the arena as well, which is how
+                // you check that it reproduces the game it recorded: the
+                // report out of the replay should match the report out of the
+                // original, figure for figure.
+                auto replayArenaSeconds = args.getUint("ai-arena", 0);
+                if (replayArenaSeconds > 0)
+                {
+                    gameParameters->aiArenaSeconds = replayArenaSeconds;
+                }
+            }
+            else if (args.contains("load"))
             {
                 // Resume a saved game straight from the command line, the same
                 // way the front end does it: the save header carries the map
@@ -172,12 +219,34 @@ int main(int argc, char* argv[])
                     gameParameters->stateLogFile = args.getString("state-log");
                 }
                 gameParameters->localNetworkPort = args.getString("port", "1337");
+                auto arenaSeconds = args.getUint("ai-arena", 0);
+                if (arenaSeconds > 0)
+                {
+                    gameParameters->aiArenaSeconds = arenaSeconds;
+                }
+                if (args.getUint("seed", 0) > 0)
+                {
+                    gameParameters->randomSeed = args.getUint("seed", 0);
+                }
+                if (!args.getString("record-replay", "").empty())
+                {
+                    // A bare name lands in the Replays folder, which is
+                    // where the viewer looks; a path is left alone.
+                    gameParameters->recordReplayFile =
+                        rwe::replayPathForName(args.getString("record-replay", "")).string();
+                }
                 auto difficulty = args.getString("ai-difficulty", "standard");
                 for (auto& c : difficulty)
                 {
                     c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 }
-                if (difficulty == "easy")
+                if (difficulty == "idle" || difficulty == "none" || difficulty == "off")
+                {
+                    // A computer player that does nothing at all. Useful when
+                    // the thing being tested is anything other than the AI.
+                    gameParameters->aiDifficulty = rwe::AiDifficulty::Idle;
+                }
+                else if (difficulty == "easy")
                 {
                     gameParameters->aiDifficulty = rwe::AiDifficulty::Easy;
                 }
@@ -192,6 +261,31 @@ int main(int argc, char* argv[])
                 else
                 {
                     gameParameters->aiDifficulty = rwe::AiDifficulty::Standard;
+                }
+                // Fixed -- player n takes the map's StartPos n -- is the
+                // right default for a lobby, where people pick their seat,
+                // and the wrong one for a batch of computer-versus-computer
+                // games: it hands both sides the same two positions on every
+                // seed, so a change given to one side is measured on top of
+                // the gap between those seats rather than on its own. On
+                // Hundred Isles that gap is larger than any AI knob measured
+                // so far, and it manufactured a false positive before anyone
+                // noticed -- see docs/ROADMAP.md. "random" deals them
+                // instead, through the same StartLocationMode::Random the
+                // skirmish menu uses. The default stays "fixed", so every
+                // existing invocation behaves exactly as it did.
+                auto startLocation = args.getString("start-location", "fixed");
+                for (auto& c : startLocation)
+                {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                if (startLocation == "random")
+                {
+                    gameParameters->startLocation = rwe::StartLocationMode::Random;
+                }
+                for (const auto& tuning : args.getMulti("ai-tune"))
+                {
+                    gameParameters->aiTuning.push_back(tuning);
                 }
                 unsigned int playerIndex = 0;
                 if (players.size() > 10)

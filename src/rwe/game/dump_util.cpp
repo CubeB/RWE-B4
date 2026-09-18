@@ -41,6 +41,10 @@ namespace rwe
             {"energyStalled", dumpJson(p.energyStalled)},
             {"unitsKilled", dumpJson(p.unitsKilled)},
             {"unitsLost", dumpJson(p.unitsLost)},
+            {"metalProduced", dumpJson(p.metalProduced)},
+            {"energyProduced", dumpJson(p.energyProduced)},
+            {"metalExcess", dumpJson(p.metalExcess)},
+            {"energyExcess", dumpJson(p.energyExcess)},
             {"desiredMetalConsumptionBuffer", dumpJson(p.desiredMetalConsumptionBuffer)},
             {"desiredEnergyConsumptionBuffer", dumpJson(p.desiredEnergyConsumptionBuffer)},
             {"previousDesiredMetalConsumptionBuffer", dumpJson(p.previousDesiredMetalConsumptionBuffer)},
@@ -67,6 +71,8 @@ namespace rwe
             {"navigationState", dumpJson(u.navigationState)},
             {"behaviourState", dumpJson(u.behaviourState)},
             {"inBuildStance", dumpJson(u.inBuildStance)},
+            {"armStowDueTime", dumpJson(u.armStowDueTime)},
+            {"nanoPoint", dumpJson(u.nanoPoint)},
             {"yardOpen", dumpJson(u.yardOpen)},
             {"inCollision", dumpJson(u.inCollision)},
             {"fireOrders", dumpJson(u.fireOrders)},
@@ -283,9 +289,9 @@ namespace rwe
             {"position", dumpJson(s.position)},
         };
     }
-    nlohmann::json dumpJson(const UnitCreationStatusPending&)
+    nlohmann::json dumpJson(const UnitCreationStatusPending& s)
     {
-        return nlohmann::json();
+        return nlohmann::json{{"attempts", s.attempts}, {"nextAttempt", dumpJson(s.nextAttempt)}};
     }
     nlohmann::json dumpJson(const UnitCreationStatusDone& s)
     {
@@ -352,6 +358,7 @@ namespace rwe
             {"players", dumpJson(simulation.players)},
             {"units", dumpJson(simulation.units)},
             {"projectiles", dumpJson(simulation.projectiles)},
+            {"currentWindVector", dumpJson(simulation.currentWindVector)},
             {"featureRegrowthCursor", simulation.featureRegrowthCursor},
         };
     }

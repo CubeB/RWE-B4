@@ -213,12 +213,26 @@ int main(int argc, char* argv[])
         config.musicVolume = args.getUint("music-volume", 100);
         config.musicEnabled = args.getString("music", "true") != "false";
         config.shadows = args.getString("shadows", "true") != "false";
+        config.vehicleShadows = args.getString("vehicle-shadows", "true") != "false";
         config.scrollSpeed = std::clamp(args.getUint("scroll-speed", 100), 25u, 200u);
         config.soundMode = std::min(2u, args.getUint("sound-mode", 2));
         config.unitSpeech = std::min(2u, args.getUint("unit-speech", 2));
+        config.musicTrackMode = std::min(3u, args.getUint("music-mode", 3));
         config.gamma = std::clamp(args.getUint("gamma", 100), 50u, 133u);
-        config.shading = args.getString("shading", "true") != "false";
+        // "shading" was a plain bool before the switch grew four states. An
+        // existing rwe.cfg still carries it, so it decides the default that
+        // "shading-mode" then overrides -- otherwise upgrading would silently
+        // turn shading back on for someone who had switched it off.
+        auto shadingWasOn = args.getString("shading", "true") != "false";
+        config.shadingMode = std::min(3u, args.getUint("shading-mode", shadingWasOn ? 2u : 0u));
+        config.shadingStrengthUnits = std::min(100u, args.getUint("shading-strength-units", 40));
+        config.shadingStrengthBuildings = std::min(100u, args.getUint("shading-strength-buildings", 40));
         config.antiAlias = args.getString("anti-alias", "true") != "false";
+        config.buildingHalo = args.getString("building-halo", "true") != "false";
+        config.antiAliasUnits = args.getString("anti-alias-units", "false") != "false";
+        config.buildingHaloStrength = std::min(100u, args.getUint("building-halo-strength", 100));
+        config.buildingHaloSaturation = std::min(100u, args.getUint("building-halo-saturation", 65));
+        config.buildingHaloRedShift = std::min(100u, args.getUint("building-halo-red-shift", 50));
 
         auto mapName = args.getString("map", "Coast To Coast");
 

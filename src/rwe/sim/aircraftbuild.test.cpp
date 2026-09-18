@@ -18,7 +18,7 @@
 
 /**
  * A construction aircraft does not wait for its build stance, and it lathes
- * twice on the tick it lays its nanoframe down. See docs/TOTALA-EXE.md 101:
+ * twice on the tick it lays its nanoframe down. See docs/TOTALA-EXE.md 107:
  * VTOL_MobileBuild (0x413D80) calls the INBUILDSTANCE wait and discards the
  * answer, and the wait's side effect -- putting event bit 4 in the mission's
  * wake mask -- matches the bit every COB `set` leaves pending on the unit, so
@@ -119,7 +119,7 @@ namespace rwe
             "YardMap=oooooooooooooooooooooooooooooooooooo;\n";
 
         // x-esc unitsE/CORDRAG.fbi -- dragon's teeth. BuildTime 1130 divides
-        // exactly by CORCA's rate, which is what makes it the pair section 101
+        // exactly by CORCA's rate, which is what makes it the pair section 107
         // works through.
         const char* CorDragKeys =
             "FootprintX=2;\n"
@@ -294,7 +294,7 @@ namespace rwe
         // 569 increments finish it. The first tick pays two of them, which
         // leaves 567 ticks after it -- one fewer than the 568 the same 569
         // increments would take one at a time. That one tick is the whole of
-        // what section 101 explains, and 567 is what the demo corpus shows for
+        // what section 107 explains, and 567 is what the demo corpus shows for
         // this exact pair over 19 builds.
         auto script = makeEmptyCobScript({"base"});
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);

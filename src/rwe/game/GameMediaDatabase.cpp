@@ -5,15 +5,15 @@
 
 namespace rwe
 {
-    void GameMediaDatabase::addSelectionMesh(const std::string& objectName, std::shared_ptr<GlMesh> mesh)
+    void GameMediaDatabase::addSelectionQuad(const std::string& objectName, const std::array<Vector3f, 4>& corners)
     {
-        selectionMeshesMap.insert({objectName, mesh});
+        selectionQuadsMap.insert({objectName, corners});
     }
 
-    std::optional<std::shared_ptr<GlMesh>> GameMediaDatabase::getSelectionMesh(const std::string& objectName) const
+    std::optional<std::array<Vector3f, 4>> GameMediaDatabase::getSelectionQuad(const std::string& objectName) const
     {
-        auto it = selectionMeshesMap.find(objectName);
-        if (it == selectionMeshesMap.end())
+        auto it = selectionQuadsMap.find(objectName);
+        if (it == selectionQuadsMap.end())
         {
             return std::nullopt;
         }

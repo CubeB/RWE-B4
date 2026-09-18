@@ -35,6 +35,17 @@ namespace rwe
         int screenWidth;
         int screenHeight;
 
+        /**
+         * The 64x64 tile a dialog with no art of its own is filled with.
+         *
+         * commongui.gaf carries two, and which is right depends on where the
+         * dialog is: `BackTile` is the front end's, and `igpatch` -- the name
+         * says it -- is the patch the in-game interface is made of. A
+         * confirmation raised over the battlefield wearing the front end's
+         * tile was reported from play as the wrong texture, and it was.
+         */
+        std::string plateTileName{"BackTile"};
+
     public:
         UiFactory(TextureService* textureService, AudioService* audioService, TdfBlock* soundLookup, AbstractVirtualFileSystem* vfs, const PathMapping* const pathMapping, int screenWidth, int screenHeight);
 
@@ -44,6 +55,9 @@ namespace rwe
 
         std::unique_ptr<UiPanel> panelFromGuiFile(const std::string& name, const std::vector<GuiEntry>& entries);
 
+        /** See plateTileName. GameScene asks for the in-game one. */
+        void setPlateTileName(std::string name) { plateTileName = std::move(name); }
+
         std::unique_ptr<UiPanel> createPanel(int x, int y, int width, int height, const std::string& name);
         std::unique_ptr<UiPanel> createPanel(int x, int y, int width, int height, const std::string& name, const std::optional<std::string>& background);
 
@@ -52,6 +66,46 @@ namespace rwe
         std::unique_ptr<UiStagedButton> createBasicButton(int x, int y, int width, int height, const std::string& guiName, const std::string& name, const std::string& label);
 
         std::unique_ptr<UiStagedButton> createStagedButton(int x, int y, int width, int height, const std::string& guiName, const std::string& name, const std::vector<std::string>& labels, unsigned int stages);
+
+        /**
+         * Swaps a button declared in a GUI file for one with a different
+         * number of stages, at exactly the geometry the data gave it.
+         *
+         * The GUI files are read-only game data and there is no override
+         * directory, so a control RWE has and the original does not cannot be
+         * declared in data. `artName` is the name the button art is looked up
+         * under and is deliberately separate from `name`: a gadget's own
+         * entry carries only as many faces as the original needed, so asking
+         * under a name the data does not carry falls through to the generic
+         * stagebuttnN face for the count actually wanted. The replacement is
+         * named `name` regardless, because that is what click dispatch
+         * matches on.
+         *
+         * Does nothing if the panel has no such button.
+         */
+        void replaceStagedButton(UiPanel& panel, const std::string& guiName, const std::string& name, const std::string& artName, const std::vector<std::string>& labels, unsigned int stage);
+
+        /**
+         * Adds a staged button the GUI data does not contain, one row below
+         * anchorName, taking the row step from the gap between anchorName and
+         * aboveAnchorName so no coordinate has to be written down. Does
+         * nothing unless the panel has both, which is what keeps it off the
+         * pages it does not belong on. For settings TA never had a gadget
+         * for; see GameScene::addBuildingHaloButton.
+         */
+        void addStagedButtonBelow(UiPanel& panel, const std::string& guiName, const std::string& artName, const std::string& name, const std::string& anchorName, const std::string& aboveAnchorName, const std::vector<std::string>& labels, unsigned int stage);
+
+        /**
+         * A label the gui data does not declare, in the same font every label
+         * read out of a gui file gets.
+         *
+         * YESORNO.GUI is the reason it exists. The dialog is three gadgets --
+         * the panel and the two buttons -- and carries no gadget for the
+         * question it is asking, because the original writes that text into
+         * the panel itself at runtime (0x4605c0). RWE's panels have no text,
+         * so the question needs somewhere to live.
+         */
+        std::unique_ptr<UiLabel> createLabel(int x, int y, int width, int height, const std::string& text, UiLabel::Alignment alignment);
 
     private:
         std::unique_ptr<UiComponent> componentFromGuiEntry(const std::string& guiName, const GuiEntry& entry);

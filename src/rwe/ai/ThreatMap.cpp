@@ -5,6 +5,7 @@
 #include <rwe/sim/PlayerVisibility.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/WeaponDefinition.h>
+#include <rwe/util/rwe_string.h>
 
 namespace rwe
 {
@@ -20,13 +21,22 @@ namespace rwe
                 {
                     continue;
                 }
-                auto it = sim.weaponDefinitions.find(weaponName);
+                // Both keyed upper case by the loader, whatever the FBI and
+                // the weapon TDF happen to spell them. This looked up
+                // "default" in lower case and so found nothing in a real
+                // game: every weapon scored zero damage, the whole
+                // anti-ground layer of the influence map was flat, and
+                // bestAttackTarget was choosing on economic value with the
+                // threat term it is weighted against permanently absent.
+                // The unit test that covers it passed because the fixture
+                // spelled the key the same wrong way.
+                auto it = sim.weaponDefinitions.find(toUpper(weaponName));
                 if (it == sim.weaponDefinitions.end())
                 {
                     continue;
                 }
                 const auto& w = it->second;
-                auto defaultDamage = w.damage.find("default");
+                auto defaultDamage = w.damage.find("DEFAULT");
                 float damage = defaultDamage == w.damage.end() ? 0.0f : static_cast<float>(defaultDamage->second);
                 float reload = std::max(0.1f, w.reloadTime.value);
                 total += damage * static_cast<float>(std::max(1, w.burst)) / reload;
@@ -34,12 +44,32 @@ namespace rwe
             return total;
         }
 
+        /**
+         * How far the unit's guns reach.
+         *
+         * Keyed upper case because the loader upper-cases every weapon name
+         * while a unit's FBI is spelled however its author typed it. This is
+         * hardening for mod data and not a repair: every one of the 29 weapon
+         * references in the 64 shipped FBIs is already upper case, so the
+         * lookup matched before it was added.
+         *
+         * It was first committed as a fix, on the grounds that the damage
+         * lookup above had exactly this defect and this one had the same
+         * shape. That was assumed rather than checked and it was wrong. The
+         * damage bug was real -- the map is keyed "DEFAULT" and the code
+         * asked for "default" -- but a matching shape is not evidence of a
+         * matching fault.
+         */
         float weaponRange(const GameSimulation& sim, const UnitDefinition& def)
         {
             float best = 0.0f;
             for (const auto& weaponName : {def.weapon1, def.weapon2, def.weapon3})
             {
-                auto it = weaponName.empty() ? sim.weaponDefinitions.end() : sim.weaponDefinitions.find(weaponName);
+                if (weaponName.empty())
+                {
+                    continue;
+                }
+                auto it = sim.weaponDefinitions.find(toUpper(weaponName));
                 if (it != sim.weaponDefinitions.end())
                 {
                     best = std::max(best, it->second.maxRange.value);
@@ -47,10 +77,31 @@ namespace rwe
             }
             return best;
         }
+
+        /** How far the unit reaches at an aircraft, or zero if it cannot touch one. */
+        float antiAirRange(const GameSimulation& sim, const UnitDefinition& def)
+        {
+            float best = 0.0f;
+            for (const auto& weaponName : {def.weapon1, def.weapon2, def.weapon3})
+            {
+                if (weaponName.empty())
+                {
+                    continue;
+                }
+                auto it = sim.weaponDefinitions.find(toUpper(weaponName));
+                if (it == sim.weaponDefinitions.end() || !it->second.toAirWeapon)
+                {
+                    continue;
+                }
+                best = std::max(best, it->second.maxRange.value);
+            }
+            return best;
+        }
     }
 
     ThreatMap::ThreatMap(int width, int height)
         : antiGround(width, height, 0.0f),
+          antiAirCover(width, height, 0.0f),
           economic(width, height, 0.0f),
           staleness(width, height, 100000.0f)
     {
@@ -79,10 +130,12 @@ namespace rwe
         if (width != antiGround.getWidth() || height != antiGround.getHeight())
         {
             antiGround = Grid<float>(width, height, 0.0f);
+            antiAirCover = Grid<float>(width, height, 0.0f);
             economic = Grid<float>(width, height, 0.0f);
             staleness = Grid<float>(width, height, 100000.0f);
             economicCellIndices.clear();
             antiGroundCellIndices.clear();
+            antiAirCoverCellIndices.clear();
         }
         origin = sim.terrain.heightmapIndexToWorldCorner(0, 0);
         cellSize = MapTerrain::HeightTileWidthInWorldUnits.value * static_cast<float>(PlayerVisibility::VisionCellSizeInTiles);
@@ -92,6 +145,7 @@ namespace rwe
         // and Grid::get/set pays for an index calculation and a bounds check
         // each time.
         auto& antiGroundCells = antiGround.getVector();
+        auto& antiAirCoverCells = antiAirCover.getVector();
         auto& economicCells = economic.getVector();
         auto& stalenessCells = staleness.getVector();
         const auto& visibleCells = vis.visible.getVector();
@@ -102,11 +156,16 @@ namespace rwe
         {
             antiGroundCells[index] = 0.0f;
         }
+        for (auto index : antiAirCoverCellIndices)
+        {
+            antiAirCoverCells[index] = 0.0f;
+        }
         for (auto index : economicCellIndices)
         {
             economicCells[index] = 0.0f;
         }
         antiGroundCellIndices.clear();
+        antiAirCoverCellIndices.clear();
         economicCellIndices.clear();
         if (omniscient)
         {
@@ -138,6 +197,38 @@ namespace rwe
                     economicCellIndices.push_back(index);
                 }
                 economicCells[index] += def.buildCostMetal.value;
+            }
+
+            // Each unit that can reach an aircraft puts a 1 on every cell it
+            // covers, so the layer reads as "how many things will shoot at a
+            // bomber over here".
+            auto aaRange = antiAirRange(sim, def);
+            if (aaRange > 0.0f)
+            {
+                auto aaRadiusCells = static_cast<int>(std::ceil(aaRange / cellSize));
+                auto aaRadiusSquared = static_cast<float>(aaRadiusCells * aaRadiusCells);
+                for (int dy = -aaRadiusCells; dy <= aaRadiusCells; ++dy)
+                {
+                    for (int dx = -aaRadiusCells; dx <= aaRadiusCells; ++dx)
+                    {
+                        auto x = cell.x + dx;
+                        auto y = cell.y + dy;
+                        if (x < 0 || y < 0 || x >= width || y >= height)
+                        {
+                            continue;
+                        }
+                        if (static_cast<float>((dx * dx) + (dy * dy)) > aaRadiusSquared)
+                        {
+                            continue;
+                        }
+                        auto index = static_cast<std::size_t>((y * width) + x);
+                        if (antiAirCoverCells[index] == 0.0f)
+                        {
+                            antiAirCoverCellIndices.push_back(index);
+                        }
+                        antiAirCoverCells[index] += 1.0f;
+                    }
+                }
             }
 
             auto dps = estimateDps(sim, def);
@@ -186,6 +277,16 @@ namespace rwe
             return 0.0f;
         }
         return antiGround.get(c.x, c.y);
+    }
+
+    float ThreatMap::antiAirCoverAt(const SimVector& position) const
+    {
+        auto c = cellAt(position);
+        if (c.x < 0 || c.y < 0 || c.x >= getWidth() || c.y >= getHeight())
+        {
+            return 0.0f;
+        }
+        return antiAirCover.get(c.x, c.y);
     }
 
     float ThreatMap::economicAt(const SimVector& position) const

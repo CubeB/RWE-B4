@@ -4,7 +4,11 @@
 #include <rwe/util/CrashHandler.h>
 #include <rwe/util/SpanStream.h>
 #include <rwe/LoadingScene_util.h>
+#include <rwe/ai/AiBuildTree.h>
 #include <rwe/ai/AiPlayerController.h>
+#include <rwe/game/ReplayFile.h>
+#include <rwe/game/featureplacement.h>
+#include <set>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/atlas_util.h>
 #include <rwe/collections/SimpleVectorMap.h>
@@ -33,6 +37,10 @@ namespace rwe
     std::seed_seq seedFromGameParameters(const GameParameters& params)
     {
         std::vector<unsigned int> initialVec;
+        if (params.randomSeed)
+        {
+            initialVec.push_back(*params.randomSeed);
+        }
         std::copy(params.mapName.begin(), params.mapName.end(), std::back_inserter(initialVec));
 
         for (const auto& e : params.players)
@@ -71,7 +79,7 @@ namespace rwe
         AudioService::LoopToken&& bgm,
         GameParameters gameParameters)
         : sceneContext(sceneContext),
-          scaledUiRenderService(sceneContext.graphics, sceneContext.shaders, &MenuUiViewport),
+          scaledUiRenderService(sceneContext.graphics, sceneContext.shaders, &MenuUiViewport, sceneContext.viewport),
           nativeUiRenderService(sceneContext.graphics, sceneContext.shaders, sceneContext.viewport),
           audioLookup(audioLookup),
           bgm(std::move(bgm)),
@@ -181,6 +189,8 @@ namespace rwe
         // whose minimum is above the cap with an empty range to draw from.
         GameSimulation simulation(std::move(mapInfo.terrain), mapInfo.surfaceMetal, std::max(0, mapInfo.minWindSpeed), std::max(0, mapInfo.maxWindSpeed));
         simulation.tidalStrength = std::max(0, mapInfo.tidalStrength);
+        simulation.killMul = mapInfo.killMul;
+        simulation.timeMul = mapInfo.timeMul;
 
         // The skirmish options the simulation itself has to know about. They
         // go in before any player is added: Mapped hands a player its explored
@@ -201,10 +211,32 @@ namespace rwe
         simulation.featureNameIndex = std::move(dataMaps.featureNameIndex);
         simulation.losTables = std::move(dataMaps.losTables);
 
-        for (const auto& [pos, featureName] : mapInfo.features)
+        // Two features drawn on one cell: the original keeps the later one
+        // unless the earlier is indestructible, and never places anything
+        // on the attribute grid's last row or column. Settled here, in the
+        // order the map lists them, so addFeature below never has to refuse
+        // one -- when it refused, it kept the earlier feature, which on
+        // twenty-seven of the official maps is the wrong one.
+        const auto& heightmap = simulation.terrain.getHeightMap();
+        auto placement = resolveFeatureOverlaps(
+            mapInfo.features,
+            heightmap.getWidth() - 1,
+            heightmap.getHeight() - 1,
+            [&](const std::string& name) {
+                const auto& d = simulation.getFeatureDefinition(simulation.tryGetFeatureDefinitionId(name).value());
+                return FeaturePlacementInfo{d.footprintX, d.footprintZ, d.indestructible};
+            });
+        LOG_INFO << "Map features: " << placement.placed.size() << " placed, "
+                 << placement.replaced << " replaced by a later feature, "
+                 << placement.dropped << " dropped";
+
+        for (const auto& [pos, featureName] : placement.placed)
         {
             auto featureId = simulation.tryGetFeatureDefinitionId(featureName).value();
-            simulation.addFeature(featureId, pos.x, pos.y);
+            if (!simulation.addFeature(featureId, pos.x, pos.y))
+            {
+                LOG_WARN << "Map feature " << featureName << " at " << pos.x << "," << pos.y << " could not be placed";
+            }
         }
 
         auto seedSeq = seedFromGameParameters(gameParameters);
@@ -248,10 +280,75 @@ namespace rwe
                 }
             }
         }
+        if (!localPlayerId && (gameParameters.aiArenaSeconds || gameParameters.replayFile))
+        {
+            // Nobody is playing: this is a measurement run, or a recording of
+            // a game between computer players being watched back. The scene
+            // still needs a point of view, because the camera, the fog it
+            // draws and the interface all hang off a local player, so the
+            // first slot stands in. It keeps its AI controller -- GameScene
+            // knows not to push an empty command buffer on top of the AI's
+            // for a local player that is a computer -- so this really is
+            // every player being played by the AI.
+            for (Index i = 0; i < getSize(gamePlayers); ++i)
+            {
+                if (gamePlayers[i])
+                {
+                    localPlayerId = gamePlayers[i];
+                    LOG_INFO << "AI arena: no human player, watching from slot " << i;
+                    break;
+                }
+            }
+        }
         if (!localPlayerId)
         {
             throw std::runtime_error("No local player!");
         }
+
+        // What the map looks like, read once before anyone moves. Every AI
+        // gets the same copy: it describes ground, not a player's situation.
+        //
+        // The start positions are in here because a human has them too -- the
+        // lobby draws them on the map preview. Which one the enemy actually
+        // took is not, and cannot be, since the AI is handed the list and not
+        // the deal; it has to scout for that like anybody else.
+        std::vector<SimVector> declaredStartPositions;
+        {
+            const auto& startSchema = ota.schemas.at(schemaIndex);
+            // StartPos keys are 1-based and a map may leave gaps in them, so
+            // scan the whole range the slot table can hold rather than
+            // stopping at the first one missing.
+            for (int n = 1; n <= 10; ++n)
+            {
+                auto it = findStartPosition(startSchema, n);
+                if (!it)
+                {
+                    continue;
+                }
+                auto world = simulation.terrain.topLeftCoordinateToWorld(SimVector(SimScalar(it->xPos), 0_ss, SimScalar(it->zPos)));
+                world.y = simulation.terrain.getHeightAt(world.x, world.z);
+                declaredStartPositions.push_back(world);
+            }
+        }
+        auto mapIntel = analyseMap(simulation.terrain, std::move(declaredStartPositions));
+        LOG_INFO << "Map " << mapName << " reads as " << mapCharacterName(mapIntel.character)
+                 << " (" << static_cast<int>(mapIntel.waterFraction * 100.0f) << "% water, "
+                 << mapIntel.startPositions.size() << " start positions)";
+
+        // What each builder is allowed to build, read out of the same build
+        // menus the human's panels are drawn from. The engine enforces no
+        // tech tree of its own -- a BuildOrder naming any type at all becomes
+        // a nanoframe -- so without this the AI quietly builds things no
+        // player could order from that unit, and cannot know that the
+        // advanced constructor is the only way to a fusion plant. See
+        // docs/ai-architecture-proposal.md §15.2.
+        std::set<std::string> knownUnitTypes;
+        for (const auto& [unitType, unitDefinition] : simulation.unitDefinitions)
+        {
+            knownUnitTypes.insert(unitType);
+        }
+        auto buildTree = buildTreeFromBuilderGuis(dataMaps.builderGuisDatabase, knownUnitTypes);
+        LOG_INFO << "AI build tree: " << buildTree.buildableBy.size() << " builders with a build menu";
 
         // Instantiate one AiPlayerController per Computer player.
         // The controller's RNG is sub-seeded from simulation.rng so its
@@ -278,6 +375,44 @@ namespace rwe
             // the game (--ai-difficulty, or rwe.cfg). Per-slot difficulty can
             // follow once the lobby exposes it.
             auto profile = makeProfileForDifficulty(gameParameters.aiDifficulty);
+            for (const auto& entry : gameParameters.aiTuning)
+            {
+                auto colon = entry.find(':');
+                auto equals = entry.find('=');
+                if (colon == std::string::npos || equals == std::string::npos || equals < colon)
+                {
+                    throw std::runtime_error("--ai-tune wants <player>:<knob>=<value>, got " + entry);
+                }
+                if (std::stoul(entry.substr(0, colon)) != static_cast<unsigned long>(i))
+                {
+                    continue;
+                }
+                auto knob = entry.substr(colon + 1, equals - colon - 1);
+                auto value = entry.substr(equals + 1);
+                // A misspelt knob that silently did nothing would make an
+                // arena comparison between two identical AIs look like a
+                // result, so it is fatal.
+                if (!applyAiTuning(profile, knob, value))
+                {
+                    throw std::runtime_error("--ai-tune: no such AI knob: " + knob);
+                }
+                LOG_INFO << "Player " << i << " AI knob " << knob << " = " << value;
+            }
+            if (gameParameters.replayFile)
+            {
+                // Watching rather than playing: the commands come out of the
+                // file, so a thinking AI would only add its own on top.
+                //
+                // The controller is still CONSTRUCTED, and that is the whole
+                // point of idling it here rather than skipping it. Building
+                // one draws a value from simulation.rng, and the start
+                // positions are dealt from that same stream a few lines
+                // further down -- skip the draw and every commander spawns
+                // somewhere else, which is a divergence on the very first
+                // tick and looks like anything except an off-by-one in the
+                // random number generator.
+                profile.idle = true;
+            }
             LOG_INFO << "Player " << i << " is a computer player at " << aiDifficultyName(profile.difficulty) << " difficulty";
 
             // Pull a single value from the sim RNG to seed the AI's
@@ -287,7 +422,7 @@ namespace rwe
 
             simulation.addAiController(
                 aiPlayerId,
-                std::make_unique<AiPlayerController>(aiPlayerId, std::move(profile), aiSeed));
+                std::make_unique<AiPlayerController>(aiPlayerId, std::move(profile), aiSeed, mapIntel, buildTree));
         }
 
         // Which of the map's start positions each filled slot takes. Fixed
@@ -337,6 +472,8 @@ namespace rwe
         sounds.okToBuild = lookUpSound("OKTOBUILD");
         sounds.notOkToBuild = lookUpSound("NOTOKTOBUILD");
         sounds.selectMultipleUnits = lookUpSound("SelectMultipleUnits");
+        sounds.panel = lookUpSound("PANEL");
+        sounds.options = lookUpSound("OPTIONS");
 
         auto consoleFont = sceneContext.textureService->getFont("fonts/CONSOLE.FNT");
         // The original loads exactly two in-game fonts (0x42A320): COMIX for
@@ -358,6 +495,10 @@ namespace rwe
             worldCameraState,
             atlasInfo.textureAtlas,
             std::move(atlasInfo.teamTextureAtlases),
+            atlasInfo.paletteIndexAtlas,
+            std::move(atlasInfo.teamPaletteIndexAtlases),
+            atlasInfo.shadeTableTexture,
+            atlasInfo.alphaTableTexture,
             std::move(simulation),
             std::move(mapInfo.terrainGraphics),
             std::move(dataMaps.builderGuisDatabase),
@@ -403,17 +544,19 @@ namespace rwe
                 continue;
             }
 
-            std::string startPosKey("StartPos");
-            startPosKey.append(std::to_string(*startPositionForSlot[i]));
-
-            auto startPosIt = std::find_if(schema.specials.begin(), schema.specials.end(), [&startPosKey](const OtaSpecial& s) { return s.specialWhat == startPosKey; });
-            if (startPosIt == schema.specials.end())
+            // The lobby refuses to start a game whose slots the map cannot
+            // seat, so this is the backstop for the command line and the
+            // harnesses. It still ends the game, but it says which map and
+            // which slot rather than naming a key.
+            auto startPos = findStartPosition(schema, *startPositionForSlot[i]);
+            if (!startPos)
             {
-                throw std::runtime_error("Missing key from schema: " + startPosKey);
+                throw std::runtime_error(
+                    "Map \"" + mapName + "\" has no start position for player slot " + std::to_string(*startPositionForSlot[i])
+                    + " (schema " + std::to_string(schemaIndex) + " declares " + std::to_string(countStartPositions(schema)) + ")");
             }
-            const auto& startPos = *startPosIt;
 
-            auto worldStartPos = gameScene->getTerrain().topLeftCoordinateToWorld(SimVector(SimScalar(startPos.xPos), 0_ss, SimScalar(startPos.zPos)));
+            auto worldStartPos = gameScene->getTerrain().topLeftCoordinateToWorld(SimVector(SimScalar(startPos->xPos), 0_ss, SimScalar(startPos->zPos)));
             worldStartPos.y = gameScene->getTerrain().getHeightAt(worldStartPos.x, worldStartPos.z);
 
             if (*gamePlayers[i] == *localPlayerId)
@@ -452,6 +595,20 @@ namespace rwe
         }
 
         gameScene->setCameraPosition(Vector3f(simScalarToFloat(humanStartPos->x), 0.0f, simScalarToFloat(humanStartPos->z)));
+
+        if (gameParameters.replayFile)
+        {
+            auto replay = readReplayFile(*gameParameters.replayFile);
+            if (!replay)
+            {
+                throw std::runtime_error("Could not read replay file: " + *gameParameters.replayFile);
+            }
+            gameScene->enableReplayPlayback(std::move(*replay));
+        }
+        else if (gameParameters.recordReplayFile)
+        {
+            gameScene->enableReplayRecording(*gameParameters.recordReplayFile, replayHeaderFromParameters(gameParameters));
+        }
 
         return gameScene;
     }
@@ -508,7 +665,7 @@ namespace rwe
             features.emplace_back(Point(f.xPos, f.zPos), f.featureName);
         }
 
-        return LoadMapResult{std::move(terrain), static_cast<unsigned char>(schema.surfaceMetal), ota.minWindSpeed, ota.maxWindSpeed, ota.tidalStrength, std::move(features), std::move(terrainGraphics)};
+        return LoadMapResult{std::move(terrain), static_cast<unsigned char>(schema.surfaceMetal), ota.minWindSpeed, ota.maxWindSpeed, ota.tidalStrength, ota.killMul, ota.timeMul, std::move(features), std::move(terrainGraphics)};
     }
 
     std::vector<TextureArrayRegion> LoadingScene::getTileTextures(TntArchive& tnt)
@@ -899,7 +1056,7 @@ namespace rwe
                 }
 
                 dataMaps.gameMediaDatabase.addSelectionCollisionMesh(fbi.objectName, std::make_shared<CollisionMesh>(std::move(meshInfo.selectionMesh.collisionMesh)));
-                dataMaps.gameMediaDatabase.addSelectionMesh(fbi.objectName, std::make_shared<GlMesh>(std::move(meshInfo.selectionMesh.visualMesh)));
+                dataMaps.gameMediaDatabase.addSelectionQuad(fbi.objectName, meshInfo.selectionMesh.corners);
 
                 if (!fbi.corpse.empty())
                 {

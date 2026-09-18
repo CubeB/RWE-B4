@@ -341,7 +341,17 @@ namespace rwe
             auto wreckId = sim.addFeature(wreckDef, 20, 20).value();
             auto plantId = sim.addFeature(plantDef, 20, 25).value();
             auto wreckPosition = sim.getFeature(wreckId).position;
-            addPatrollingKbot(sim, player, wreckPosition + SimVector(30_ss, 0_ss, 0_ss), script);
+            // Clear of the wreck itself. armsolar_dead is five cells across,
+            // forty world units either side of its centre, so the thirty the
+            // cases above use stands the builder inside its blocking
+            // footprint -- ground it cannot path out of. That never showed
+            // while a builder reclaimed from three hundred units away without
+            // moving, and the cases above still never move, because what they
+            // reclaim is the wreck they are standing in. This one walks to a
+            // different feature, so it has to start somewhere it can walk
+            // from. That a unit inside a blocking footprint cannot leave it
+            // is its own problem, filed separately.
+            addPatrollingKbot(sim, player, wreckPosition + SimVector(60_ss, 0_ss, 0_ss), script);
 
             for (int i = 0; i < 800 && sim.tryGetFeature(plantId); ++i)
             {

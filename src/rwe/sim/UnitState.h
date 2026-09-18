@@ -30,9 +30,30 @@ namespace rwe
     {
         UnitPath path;
         GameTime pathCreationTime;
+
+        /**
+         * The corner the unit is heading for. The one behind it is
+         * `*(currentWaypoint - 1)`, and the segment between the two is what
+         * the follower steers along -- so this never points at the first
+         * entry. That layout is the original's waypoint array exactly: wp[0]
+         * is where the unit came from and wp[1] where it is going
+         * (TOTALA-EXE.md section 102).
+         */
         std::vector<SimVector>::const_iterator currentWaypoint;
+
         explicit PathFollowingInfo(UnitPath&& path, GameTime creationTime)
-            : path(std::move(path)), pathCreationTime(creationTime), currentWaypoint(this->path.waypoints.begin()) {}
+            : path(std::move(path)), pathCreationTime(creationTime), currentWaypoint(this->path.waypoints.begin())
+        {
+            // Every path is built with the corner behind the unit at the
+            // front, including the two-point straight-line stand-in. A
+            // one-point path would have no segment at all; there is no such
+            // path, and if one ever appeared this leaves the iterator
+            // somewhere valid rather than at the end.
+            if (this->path.waypoints.size() > 1)
+            {
+                ++currentWaypoint;
+            }
+        }
     };
 
     struct NavigationGoalLandingLocation
@@ -51,6 +72,17 @@ namespace rwe
 
     struct UnitCreationStatusPending
     {
+        /**
+         * How many times the site has been found blocked. The original tries
+         * again every 30 ticks and gives up after ten goes -- 300 ticks --
+         * announcing "Waiting for target area to clear" on the way and
+         * "Target area was blocked" at the end of it. See TOTALA-EXE.md's
+         * table of the `cant` captions, at 403cdf/414020 and 403d10/414055.
+         */
+        unsigned int attempts{0};
+
+        /** Not tried again before this. */
+        GameTime nextAttempt{0};
     };
 
     struct UnitCreationStatusDone
@@ -140,6 +172,27 @@ namespace rwe
     {
         std::optional<NavigationGoal> desiredDestination;
         std::optional<UnitPositionCache> unitPositionCache;
+
+        /**
+         * Where an attacker has decided to stand while it walks in at a unit
+         * target -- see UnitBehaviorService::attackApproachGoal.
+         *
+         * A slot of its own rather than sharing unitPositionCache, which
+         * holds the target's *own* position. Both are keyed by the target's
+         * id, so one slot for the two meanings let an approach point be read
+         * back as the target's position by anything navigating to that same
+         * unit inside the cache's second -- a capture order on a unit just
+         * attacked, for one, which would then have walked to a point a whole
+         * stand-off distance wide of it.
+         *
+         * Cached rather than hashed, for the same reason as its neighbour:
+         * it is derived from positions that are hashed, so peers cannot
+         * disagree about it without already disagreeing about those. It is
+         * saved, because when a path is requested changes where a unit ends
+         * up.
+         */
+        std::optional<UnitPositionCache> attackApproachCache;
+
         NavigationState state;
     };
 
@@ -484,6 +537,34 @@ namespace rwe
          */
         std::optional<UnitId> buildOrderUnitId;
 
+        /**
+         * The nozzle this unit's nanolathe is spraying from, and the tick it
+         * was asked for.
+         *
+         * `QueryNanoPiece` is a question with a side effect: a unit with two
+         * nozzles answers with a different one each time, which is how the
+         * original makes both of them spray -- ARMACK alternates `rnanospray`
+         * and `lnanospray`, ARMASP `beam1` and `beam2`. RWE asked twice every
+         * tick, once where the work is done and once where a running spray
+         * follows its nozzle, so the answer advanced twice and every tick
+         * landed on the same side. One question a tick, remembered here, and
+         * the two nozzles take their turn as they should.
+         */
+        std::optional<GameTime> nanoPointQueriedAt;
+        SimVector nanoPoint;
+
+        /**
+         * When the nanolathe arm is due to be put away, if it is.
+         *
+         * A job ending used to stow the arm on the spot, so a builder handed
+         * another job a tick later put the arm away, turned round and took it
+         * straight back out -- and one reclaiming its way along a patrol did
+         * that between every wreck. The stow waits a moment now: work started
+         * again before this time cancels it, so back-to-back jobs keep the arm
+         * out and the builder simply turns to the new one.
+         */
+        std::optional<GameTime> armStowDueTime;
+
         bool inBuildStance{false};
         bool yardOpen{false};
 
@@ -645,9 +726,17 @@ namespace rwe
         std::optional<AirLoiterState> airLoiter;
 
         /**
-         * Set each tick while a construction aircraft holds station: it turns
-         * towards this point at a slow fixed rate instead of chasing its
-         * flight path. Cleared at the start of every behaviour update.
+         * Where a working builder points itself, asserted afresh on every
+         * tick it works and cleared at the start of every behaviour update.
+         *
+         * A construction aircraft holding station turns towards this instead
+         * of chasing its flight path. A builder on the ground turns towards
+         * it instead of holding the heading it happened to stop on, which is
+         * what the original does in every one of its work missions: the
+         * bearing to the job (0x48A980, an atan2 over the two positions),
+         * less the unit's own heading (unit+0x66), handed to the turn at
+         * 0x438590 -- whose nine callers are the build, repair, capture,
+         * reclaim and resurrect handlers and the two aircraft ones.
          */
         std::optional<SimVector> slowFacePoint;
 

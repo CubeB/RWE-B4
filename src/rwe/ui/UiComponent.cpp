@@ -23,12 +23,22 @@ namespace rwe
         subscriptions.push_back(std::move(s));
     }
 
-    UiComponent::~UiComponent()
+    void UiComponent::releaseSubscriptions()
     {
         for (auto& s : subscriptions)
         {
             s->unsubscribe();
         }
+
+        // Cleared, so that a derived destructor calling this first leaves
+        // ~UiComponent nothing to do rather than a second pass over handles
+        // whose subjects are now gone.
+        subscriptions.clear();
+    }
+
+    UiComponent::~UiComponent()
+    {
+        releaseSubscriptions();
     }
 
     const std::string& UiComponent::getName() const

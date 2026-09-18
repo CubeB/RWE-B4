@@ -15,24 +15,28 @@ namespace rwe
         std::vector<GlColoredVertex> triangles;
     };
 
-    struct ColoredMeshRenderInfo
-    {
-        const GlMesh* mesh;
-        Matrix4f mvpMatrix;
-    };
-
-    struct ColoredMeshesBatch
-    {
-        std::vector<ColoredMeshRenderInfo> meshes;
-    };
-
     struct UnitTextureMeshRenderInfo
     {
         const GlMesh* mesh;
         Matrix4f modelMatrix;
         Matrix4f mvpMatrix;
-        bool shaded;
+        /**
+         * How much of the shade table to apply: 0 leaves the texture as
+         * authored, 1 is the measured PALETTE.SHD ramp. It already has the
+         * piece's own COB shade flag and the VISUALS switch folded in, so the
+         * renderer only has to hand it to the shader.
+         */
+        float shadeStrength;
         TextureIdentifier texture;
+        /** The same atlas again, one byte a texel: that texel's palette index. */
+        TextureIdentifier paletteIndexTexture;
+        /**
+         * What this mesh writes into the building halo's coverage mask: 1 for
+         * a cached piece of a finished building, which is the only thing that
+         * can carry a halo, and 0.5 for anything else solid. See
+         * unitTexture.frag and TOTALA-EXE.md S:101.
+         */
+        float maskValue;
     };
 
     /**
@@ -57,8 +61,16 @@ namespace rwe
         const GlMesh* mesh;
         Matrix4f modelMatrix;
         Matrix4f mvpMatrix;
-        bool shaded;
+        /**
+         * How much of the shade table to apply: 0 leaves the texture as
+         * authored, 1 is the measured PALETTE.SHD ramp. It already has the
+         * piece's own COB shade flag and the VISUALS switch folded in, so the
+         * renderer only has to hand it to the shader.
+         */
+        float shadeStrength;
         TextureIdentifier texture;
+        /** The same atlas again, one byte a texel: that texel's palette index. */
+        TextureIdentifier paletteIndexTexture;
         float unitY;
         /** Height of the whole model, so the build fill can sweep bottom to top. */
         float unitHeight;
@@ -89,6 +101,13 @@ namespace rwe
         Matrix4f vpMatrix;
         TextureIdentifier texture;
         float groundHeight;
+        /**
+         * True for the projected shadow a building casts, false for the offset
+         * copy of its own silhouette a unit casts. See TOTALA-EXE.md S:100.
+         */
+        bool projected;
+        /** The one height an offset shadow takes its displacement from; unused when projected. */
+        float shadowOriginY;
     };
 
     struct UnitMeshBatch
@@ -103,12 +122,21 @@ namespace rwe
         std::vector<UnitTextureMeshRenderInfo> cloakedMeshes;
     };
 
+    /**
+     * A unit under construction: its own shadow, and the model's whole
+     * outline as the camera sees it, which that shadow and no other is kept
+     * out of. See RenderService::drawUnitShadowMeshBatch.
+     */
+    struct UnitCutShadow
+    {
+        std::vector<UnitTextureShadowMeshRenderInfo> shadow;
+        std::vector<UnitTextureMeshRenderInfo> outline;
+    };
+
     struct UnitShadowMeshBatch
     {
         std::vector<UnitTextureShadowMeshRenderInfo> meshes;
-
-        /** Models drawn as the camera sees them, whose silhouettes are cut out of the shadow. */
-        std::vector<UnitTextureMeshRenderInfo> cutouts;
+        std::vector<UnitCutShadow> cutShadows;
     };
 
     struct SpriteRenderInfo
@@ -142,18 +170,6 @@ namespace rwe
 
     class RenderService
     {
-    public:
-        /**
-         * The VISUALS page's Shading switch. The original picks between two
-         * whole rasterizer chains on it; here it gates the lighting term,
-         * and it ANDs with each piece's own COB shade flag.
-         */
-        void setShadingEnabled(bool enabled) { shadingEnabled = enabled; }
-
-    private:
-        bool shadingEnabled{true};
-
-    public:
     private:
         GraphicsContext* graphics;
         ShaderService* shaders;
@@ -176,12 +192,21 @@ namespace rwe
 
         void drawBatch(const ColoredMeshBatch& batch, const Matrix4f& vpMatrix, float alpha = 1.0f);
 
-        void drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel);
+        void drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel, TextureIdentifier shadeTableTexture);
 
         void drawUnitShadowMeshBatch(const UnitShadowMeshBatch& batch);
 
         void drawSpriteBatch(const SpriteBatch& batch);
 
-        void drawLineLoopsBatch(const ColoredMeshesBatch& batch);
+        /**
+         * As drawSpriteBatch, but also fills the building halo's coverage
+         * mask with maskValue -- 0.5, "anything else solid", for a standing
+         * feature -- so the halo pass sees the sprite as an occluder instead
+         * of drawing through it onto whatever mask sample is still
+         * underneath. Callers wrap this in useDualDrawBuffers() /
+         * useSingleDrawBuffer() themselves, as the terrain and unit mesh
+         * passes do; whether the mask is wanted at all is their call to make.
+         */
+        void drawMaskedSpriteBatch(const SpriteBatch& batch, float maskValue);
     };
 }

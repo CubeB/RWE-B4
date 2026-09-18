@@ -188,6 +188,12 @@ namespace rwe
             [&](const CobEnvironment::PieceCommandStatus::DisableShading&) {
                 simulation.disableShading(unitId, objectName);
             },
+            [&](const CobEnvironment::PieceCommandStatus::EnableCaching&) {
+                simulation.enableCaching(unitId, objectName);
+            },
+            [&](const CobEnvironment::PieceCommandStatus::DisableCaching&) {
+                simulation.disableCaching(unitId, objectName);
+            },
             [&](const CobEnvironment::PieceCommandStatus::Explode& e) {
                 const auto& unit = simulation.getUnitState(unitId);
 

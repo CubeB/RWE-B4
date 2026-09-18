@@ -15,13 +15,13 @@ and pinning them to what the original executable actually does. That is a long
 tail of small fidelity work, and it is the easy end of the problem — the
 foundation was already there.
 
-233 commits ahead of upstream `master`, and the suite stands at **416 cases /
-58,723 assertions**, green on Debug and Release.
+448 commits ahead of upstream `master`, and the suite stands at **654 cases /
+72,613 assertions**, green on Debug and Release.
 
 ## What is different here
 
 Most of the work is behavioural, and most of it was **read out of `TotalA.exe`
-rather than guessed at**. `docs/TOTALA-EXE.md` is ninety-five sections of
+rather than guessed at**. `docs/TOTALA-EXE.md` is a hundred and three sections of
 findings — the flight model, fog of war and line of sight, the damage pipeline,
 target selection, the economy, the nanolathe, the interface, transports, the
 music system, the renderer's own rasteriser — with the probe scripts that
@@ -69,10 +69,19 @@ Total Annihilation is Cavedog Entertainment's. This fork ships no game data
 
 ## Download
 
-There is no binary release. Build from source with the instructions below; the
-MSYS2/MinGW64 route is the one this fork is developed and tested against daily,
-and CI covers Linux (gcc/clang) and Windows (MSVC and MinGW64) in both Debug
-and Release.
+Pre-release builds live on the releases page:
+
+https://github.com/CubeB/RWE-B4/releases
+
+Every tag there carries three things: a Windows installer, a Windows zip and a
+Linux AppImage. They are pre-releases in the plain sense of the word — cut from
+`revival` when a tag goes up rather than off a stable line — so take them as
+somewhere between the roadmap and a finished game. Either way you supply your
+own copy of Total Annihilation; see below.
+
+Building from source is the other route, and the MSYS2/MinGW64 one is what this
+fork is developed and tested against daily; CI covers Linux (gcc/clang) and
+Windows (MSVC and MinGW64) in both Debug and Release.
 
 Source code:
 

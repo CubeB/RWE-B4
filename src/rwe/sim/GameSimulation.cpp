@@ -36,6 +36,18 @@ namespace rwe
         constexpr unsigned int CloakSuppressionTicks = 90;
 
         /**
+         * What a builder does about a build site that is occupied when it
+         * comes to put the unit down. The original tries again every thirty
+         * ticks and gives up after ten goes, announcing "Waiting for target
+         * area to clear" as it starts and "Target area was blocked" when it
+         * runs out -- the two captions in the `cant` table at 403cdf/414020
+         * and 403d10/414055, from the site check 0x47D2E0 called through
+         * 0x47DB70 at unit-creation time.
+         */
+        constexpr unsigned int BlockedSiteRetryTicks = 30;
+        constexpr unsigned int BlockedSiteAttempts = 10;
+
+        /**
          * Whether any of the dishes or jammers of the given kind reaches the
          * point, measured in the map plane. Both lists carry their radius
          * already squared.
@@ -268,13 +280,31 @@ namespace rwe
         }
 
         // TA keeps a feature's hit points in its `damage` key; features that omit
-        // it (most vegetation) come out of the TDF reader with 1. Nothing spends
-        // these points -- weapons do not damage features -- they only tell
-        // computeFeatureReclaimWork how much bulk there is to haul away.
+        // it (most vegetation) come out of the TDF reader with 1. A blast spends
+        // them (doProjectileImpact, unless the feature is indestructible) and
+        // computeFeatureReclaimWork reads them for how much bulk is left to haul.
         newFeature.hitPoints = featureDefinition.damage;
 
         auto featureId = FeatureId(features.emplace(std::move(newFeature)));
+        writeFeatureToGrids(featureId, featureDefinition, footprintRegion);
+        return featureId;
+    }
 
+    FeatureId GameSimulation::addFeatureInSlot(unsigned int slot, MapFeature&& newFeature)
+    {
+        // No occupancy check: the saved set was consistent when it was
+        // written, and the check would only be asking whether a feature is
+        // standing where it stood. The hit points come from the save too, so
+        // they are not reset from the definition here.
+        const auto& featureDefinition = getFeatureDefinition(newFeature.featureName);
+        auto footprintRegion = computeFootprintRegion(newFeature.position, featureDefinition.footprintX, featureDefinition.footprintZ);
+        auto featureId = FeatureId(features.emplaceInSlot(slot, std::move(newFeature)));
+        writeFeatureToGrids(featureId, featureDefinition, footprintRegion);
+        return featureId;
+    }
+
+    void GameSimulation::writeFeatureToGrids(FeatureId featureId, const FeatureDefinition& featureDefinition, const DiscreteRect& footprintRegion)
+    {
         occupiedGrid.forEach(occupiedGrid.clipRegion(footprintRegion), [&](auto& cell) {
             cell.featureId = featureId;
         });
@@ -288,8 +318,6 @@ namespace rwe
         {
             geoGrid.set(geoGrid.clipRegion(footprintRegion), true);
         }
-
-        return featureId;
     }
 
     int computeMidpointHeight(const Grid<unsigned char>& heightmap, int x, int y)
@@ -354,11 +382,10 @@ namespace rwe
         // for wreckage -- a fusion plant's corpse is mostly a hauling job, 4104 +
         // 620 = 4724 -- while bulk alone still costs real time on scenery.
         //
-        // The hit points read here are the feature's current ones, but nothing
-        // damages a feature: weapons leave wreckage and scenery alone, so in
-        // practice this is always the full `damage` value the definition declared.
-        // The payout does not depend on it either way: reclaimFeature always hands
-        // over the full metal/energy, spread across whatever work total applies.
+        // The hit points read here are the feature's current ones, so a wreck
+        // that has been shelled clears quicker than one that has not. The payout
+        // does not depend on it either way: reclaimFeature always hands over the
+        // full metal/energy, spread across whatever work total applies.
         return std::max(1u, definition.metal + definition.energy + (currentHitPoints / 4u));
     }
 
@@ -445,12 +472,12 @@ namespace rwe
         return true;
     }
 
-    void GameSimulation::replaceFeature(FeatureId id, const std::optional<FeatureDefinitionId>& replacement)
+    std::optional<FeatureId> GameSimulation::replaceFeature(FeatureId id, const std::optional<FeatureDefinitionId>& replacement)
     {
         auto featureRef = tryGetFeature(id);
         if (!featureRef)
         {
-            return;
+            return std::nullopt;
         }
 
         auto position = featureRef->get().position;
@@ -458,10 +485,11 @@ namespace rwe
 
         deleteFeature(id);
 
-        if (replacement)
+        if (!replacement)
         {
-            addFeature(MapFeature{*replacement, position, rotation});
+            return std::nullopt;
         }
+        return addFeature(MapFeature{*replacement, position, rotation});
     }
 
     void GameSimulation::igniteFeature(FeatureId id)
@@ -789,21 +817,30 @@ namespace rwe
         unit.clearWeaponTargets();
         unit.behaviourState = UnitBehaviorStateIdle();
         unit.navigationState = NavigationStateInfo{};
+
+        // And it stops. A unit picked up mid-stride kept the speed it was
+        // walking at, and since nothing on board runs its physics the number
+        // was still sitting there when it was set down again -- so it coasted
+        // a world unit or two away from where the transport put it, in
+        // whatever direction the transport happened to be facing.
+        if (auto* ground = std::get_if<UnitPhysicsInfoGround>(&unit.physics); ground != nullptr)
+        {
+            ground->currentSpeed = 0_ss;
+            ground->steeringInfo = SteeringInfo{unit.rotation, 0_ss};
+        }
+
         transport.carriedUnits.push_back(unitId);
         return true;
     }
 
-    bool GameSimulation::unloadUnitFromTransport(UnitId transportId, UnitId unitId, const SimVector& position)
+    std::optional<UnloadSpot> GameSimulation::findUnloadSpot(UnitId unitId, const SimVector& position) const
     {
-        auto transportRef = tryGetUnitState(transportId);
         auto unitRef = tryGetUnitState(unitId);
-        if (!transportRef || !unitRef || unitRef->get().carriedBy != transportId)
+        if (!unitRef)
         {
-            return false;
+            return std::nullopt;
         }
-        auto& transport = transportRef->get();
-        auto& unit = unitRef->get();
-        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        const auto& unitDefinition = unitDefinitions.at(unitRef->get().unitType);
         auto mc = getAdHocMovementClass(unitDefinition.movementCollisionInfo);
 
         // Nearest clear footprint to the drop point, searching outwards ring by ring.
@@ -836,7 +873,7 @@ namespace rwe
         }
         if (!spot)
         {
-            return false;
+            return std::nullopt;
         }
 
         auto corner = terrain.heightmapIndexToWorldCorner(spot->x, spot->y);
@@ -849,14 +886,33 @@ namespace rwe
         {
             newPosition.y = rweMax(newPosition.y, terrain.getSeaLevel());
         }
+        return UnloadSpot{*spot, newPosition};
+    }
 
-        if (auto region = occupiedGrid.tryToRegion(*spot))
+    bool GameSimulation::unloadUnitFromTransport(UnitId transportId, UnitId unitId, const SimVector& position)
+    {
+        auto transportRef = tryGetUnitState(transportId);
+        auto unitRef = tryGetUnitState(unitId);
+        if (!transportRef || !unitRef || unitRef->get().carriedBy != transportId)
+        {
+            return false;
+        }
+        auto& transport = transportRef->get();
+        auto& unit = unitRef->get();
+
+        auto spot = findUnloadSpot(unitId, position);
+        if (!spot)
+        {
+            return false;
+        }
+
+        if (auto region = occupiedGrid.tryToRegion(spot->footprint))
         {
             occupiedGrid.forEach(*region, [unitId](auto& cell) { cell.mobileUnitId = unitId; });
         }
 
-        unit.position = newPosition;
-        unit.previousPosition = newPosition;
+        unit.position = spot->position;
+        unit.previousPosition = spot->position;
         unit.rotation = transport.rotation;
         unit.previousRotation = transport.rotation;
         unit.carriedBy = std::nullopt;
@@ -1016,6 +1072,18 @@ namespace rwe
 
         // Reclaimed units vanish quietly: no wreck, no explosion.
         unit.markAsDeadNoCorpse();
+
+        // Death cause 5, and the one place the original checks who is doing it
+        // before moving a counter: 0x486899 tests the recorded killer against
+        // the victim's own owner and only then falls into the Losses increment.
+        // Recycling your own base is not a loss; having it eaten by an enemy
+        // builder is. (The original also rejects player 0xA, its neutral slot,
+        // which RWE has no equivalent of.)
+        if (reclaimer != unit.owner)
+        {
+            getPlayer(unit.owner).unitsLost += 1;
+        }
+
         events.push_back(UnitDiedEvent{targetId, unit.unitType, unit.position, UnitDiedEvent::DeathType::Deleted});
         return true;
     }
@@ -1054,7 +1122,7 @@ namespace rwe
         return static_cast<unsigned int>(std::max<std::uint64_t>(1, ticks));
     }
 
-    bool GameSimulation::captureUnit(UnitId targetId, PlayerId captor)
+    bool GameSimulation::captureUnit(UnitId targetId, PlayerId captor, std::optional<UnitId> captorUnitId)
     {
         auto unitRef = tryGetUnitState(targetId);
         if (!unitRef || unitRef->get().isDead())
@@ -1083,7 +1151,7 @@ namespace rwe
         unit.behaviourState = UnitBehaviorStateIdle();
         unit.clearWeaponTargets();
 
-        events.push_back(UnitCapturedEvent{targetId, previousOwner, captor});
+        events.push_back(UnitCapturedEvent{targetId, previousOwner, captor, captorUnitId});
         return true;
     }
 
@@ -1235,8 +1303,10 @@ namespace rwe
             // TA kills the frame with `DamageUnit(self, self, 30000, cause 9)`,
             // and cause 9 is one of the three the death routine short-circuits:
             // no wreck, no `Killed` script, no explosion. The unit is simply
-            // taken off the board.
-            quietlyKillUnit(unitId);
+            // taken off the board -- and not counted, either: the dispatch at
+            // 0x48688C takes only causes 1 to 6, so nobody's Losses move for a
+            // frame that rotted away.
+            removeUnfinishedUnit(unitId);
         }
     }
 
@@ -2180,6 +2250,55 @@ namespace rwe
         return true;
     }
 
+    bool GameSimulation::canBeBuiltAtAsSeenBy(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y, PlayerId player) const
+    {
+        auto region = occupiedGrid.tryToRegion(DiscreteRect(x, y, mc.footprintX, mc.footprintZ));
+        if (!region)
+        {
+            return false;
+        }
+
+        // A unit the player has not seen does not stand in the way of the
+        // placement box, because letting it would say that it is there. A
+        // feature does: a wreck or a tree is part of the ground rather than
+        // somebody's secret, and the report this answers was about buildings.
+        auto blocked = occupiedGrid.any(*region, [&](const auto& cell) {
+            if (cell.mobileUnitId && canSeeUnit(player, *cell.mobileUnitId))
+            {
+                return true;
+            }
+            if (cell.buildingInfo && !cell.buildingInfo->passable && canSeeUnit(player, cell.buildingInfo->unit))
+            {
+                return true;
+            }
+            if (cell.featureId)
+            {
+                const auto& f = getFeature(*cell.featureId);
+                if (getFeatureDefinition(f.featureName).blocking)
+                {
+                    return true;
+                }
+            }
+            return false;
+        });
+        if (blocked)
+        {
+            return false;
+        }
+
+        if (!isGridPointWalkable(terrain, mc, x, y))
+        {
+            return false;
+        }
+
+        if (yardMapContainsGeo && yardMap && !containsAnyGeoMatch(*yardMap, x, y))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     DiscreteRect GameSimulation::computeFootprintRegion(const SimVector& position, unsigned int footprintX, unsigned int footprintZ) const
     {
         auto halfFootprintX = SimScalar(footprintX * MapTerrain::HeightTileWidthInWorldUnits.value / 2);
@@ -2275,6 +2394,31 @@ namespace rwe
                 return true;
             }
             if (cell.buildingInfo && !cell.buildingInfo->passable)
+            {
+                return true;
+            }
+            if (cell.featureId)
+            {
+                const auto& f = getFeature(*cell.featureId);
+                const auto& def = getFeatureDefinition(f.featureName);
+                if (def.blocking)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        });
+    }
+
+    bool GameSimulation::isCollisionAtIgnoringBuilding(const GridRegion& region, UnitId building) const
+    {
+        return occupiedGrid.any(region, [&](const auto& cell) {
+            if (cell.mobileUnitId)
+            {
+                return true;
+            }
+            if (cell.buildingInfo && !cell.buildingInfo->passable && cell.buildingInfo->unit != building)
             {
                 return true;
             }
@@ -2398,6 +2542,24 @@ namespace rwe
         if (mesh)
         {
             mesh->get().shaded = false;
+        }
+    }
+
+    void GameSimulation::enableCaching(UnitId unitId, const std::string& name)
+    {
+        auto mesh = getUnitState(unitId).findPiece(name);
+        if (mesh)
+        {
+            mesh->get().cached = true;
+        }
+    }
+
+    void GameSimulation::disableCaching(UnitId unitId, const std::string& name)
+    {
+        auto mesh = getUnitState(unitId).findPiece(name);
+        if (mesh)
+        {
+            mesh->get().cached = false;
         }
     }
 
@@ -2561,6 +2723,37 @@ namespace rwe
     {
         auto horizontal = cos(pitch);
         return SimVector(sin(heading) * horizontal, sin(pitch), cos(heading) * horizontal);
+    }
+
+    SimVector computeWindVector(SimAngle direction, int speed)
+    {
+        // The original builds the map's wind vector once, each time the wind
+        // changes (0x490CA4-0x490D35): X from the routine at 0x4b70ef, Z from
+        // the one at 0x4b7123, each negated and then doubled.
+        //
+        // Which of those is sin and which is cos is worth spelling out,
+        // because docs/TOTALA-EXE.md had it backwards until this was ported.
+        // The two routines are identical but for the table index, which the
+        // second advances by 0x4000 -- a quarter turn. Both read 0x509f00,
+        // whose first entry is 0 and which peaks at 0x2000, so that table is a
+        // SINE table of amplitude 8192: the first routine is sin and the
+        // second cos, not the reverse. Each multiplies by the speed and then
+        // does shrd ..., 0xd -- a >>13 that exactly cancels the 8192 -- so a
+        // routine returns trig(direction) * speed.
+        //
+        // That happens to be RWE's own convention too; see toMissileDirection
+        // directly above, which puts sin in X and cos in Z for the same reason.
+        //
+        // The components the original stores are 16.16 fixed point, like a
+        // position, which is what the 65536 converts out of. At Brain Coral's
+        // maxwindspeed of 3000 the wind carries a shell 0.092 world units a
+        // tick -- around six units over a Crusader shell's flight, against a
+        // damage radius of 24. Enough to matter, not enough to dominate.
+        //
+        // There is no Y term. The word at globals+0x37ED0 is never written
+        // anywhere in the binary, so the wind is strictly horizontal.
+        auto magnitude = SimScalar(-2 * speed) / 65536_ss;
+        return SimVector(sin(direction) * magnitude, 0_ss, cos(direction) * magnitude);
     }
 
     /**
@@ -2797,6 +2990,26 @@ namespace rwe
         return unit.addResourceDelta(apparentEnergy, apparentMetal, actualEnergy, actualMetal);
     }
 
+    bool GameSimulation::addEnergyRequest(const UnitId& unitId, const Energy& amount)
+    {
+        auto& unit = getUnitState(unitId);
+        auto& player = getPlayer(unit.owner);
+
+        // 0x401180, in its own order: the demand goes onto the block before
+        // the answer is worked out, so a refused request still shows up in the
+        // resource bars as something the player wanted and did not get.
+        player.recordDesire(-amount);
+        unit.addEnergyDelta(-amount);
+
+        if (unit.energyDebt > Energy(0))
+        {
+            return false;
+        }
+
+        unit.energyRequestBuffer += amount;
+        return true;
+    }
+
     bool GameSimulation::trySetYardOpen(const UnitId& unitId, bool open)
     {
         auto& unit = getUnitState(unitId);
@@ -3008,9 +3221,22 @@ namespace rwe
 
     void GameSimulation::quietlyKillUnit(UnitId unitId)
     {
+        quietlyKillUnit(unitId, true);
+    }
+
+    void GameSimulation::removeUnfinishedUnit(UnitId unitId)
+    {
+        quietlyKillUnit(unitId, false);
+    }
+
+    void GameSimulation::quietlyKillUnit(UnitId unitId, bool countAsLoss)
+    {
         auto& unit = getUnitState(unitId);
         unit.markAsDeadNoCorpse();
-        getPlayer(unit.owner).unitsLost += 1;
+        if (countAsLoss)
+        {
+            getPlayer(unit.owner).unitsLost += 1;
+        }
         releaseTransportLinks(unitId);
         // No explosion or wreck, but the scene still has to hear about it so
         // it drops the unit from the selection, hover state and GUI caches.
@@ -3335,18 +3561,45 @@ namespace rwe
         getPlayer(unit.owner).unitsLost += 1;
         releaseTransportLinks(unitId, attacker);
 
-        // Credit the kill to the attacker, if any.
-        // Match TA behavior: friendly-fire kills count.
-        // Skip if the attacker is dead or no longer exists, and never
-        // credit a unit for killing itself (suicide / explodeAs).
+        // Credit the kill to the attacker, if any. Skip if the attacker is
+        // dead or no longer exists, and never credit a unit for killing itself
+        // (suicide / explodeAs).
+        //
+        // The veterancy count is the original's `unit+0xB8`, incremented at
+        // 0x4869CA, and it is fussier than RWE used to be about what earns it.
+        // Two tests stand in front of that increment and this used to fail
+        // both, on a comment that claimed the opposite of what the binary does:
+        //
+        //   0x4869A7  the victim's build progress must be zero -- an
+        //             unfinished nanoframe is worth nothing to whoever
+        //             flattens it;
+        //   0x4869BA  the attacker's recorded player (`victim+0xF4`) must
+        //             differ from the victim's own owner (`victim+0xFF`), so
+        //             **friendly fire earns no veterancy at all**. Shooting
+        //             your own units was a way to farm the damage bonus of S:5
+        //             and the reload bonus of S:3965; it is not.
+        //
+        // The player-level tallies are gated the same way, and by the same two
+        // tests. The death-cause jump table at 0x486E64 is decoded now (issue
+        // #51): its weapon-kill entry raises the victim owner's Losses
+        // (`player+0xFE`) unconditionally, then raises the killer's Kills
+        // (`player+0xFC`) at 0x486906 behind exactly the pair above -- the
+        // victim must be finished and the killer must not be the victim's own
+        // owner. So a player's Kills column on the end-of-game chart counts
+        // neither friendly fire nor flattened nanoframes, and RWE's counted
+        // both.
         std::optional<PlayerId> killerOwner;
         if (attacker && *attacker != unitId)
         {
             auto attackerUnit = tryGetUnitState(*attacker);
             if (attackerUnit && attackerUnit->get().isAlive())
             {
-                attackerUnit->get().kills += 1;
-                getPlayer(attackerUnit->get().owner).unitsKilled += 1;
+                auto sameSide = attackerUnit->get().owner == unit.owner;
+                if (!sameSide && !unit.isBeingBuilt(unitDefinition))
+                {
+                    attackerUnit->get().kills += 1;
+                    getPlayer(attackerUnit->get().owner).unitsKilled += 1;
+                }
                 killerOwner = attackerUnit->get().owner;
             }
         }
@@ -3384,6 +3637,27 @@ namespace rwe
                         deadState->corpseLevel = *level;
                     }
                 }
+            }
+        }
+
+        // An `isfeature` unit always leaves its wreck, at level 1, whatever its
+        // `Killed` ladder asked for. The original reaches this by forcing the
+        // death cause to 7 -- 0x41B9FE and 0x486167 both test bit 24 of
+        // `def+0x241`, which is `isfeature`, and write the cause onto the unit
+        // -- and the packer then short-circuits the level at 0x486525. Cause 7
+        // also clears `mayBurn` at 0x486D66, which has nothing to attach to
+        // here yet: RWE lights a wreck from a `firestarter` weapon rather than
+        // lighting a plume as the wreck spawns, so nothing would have burnt
+        // anyway. See TOTALA-EXE-WRECKS.md, "What each death cause is".
+        //
+        // Before the nanoframe rule below, deliberately: 0x486525 runs ahead of
+        // 0x4865D2, so a half-built fort still leaves nothing.
+        if (unitDefinition.isFeature)
+        {
+            if (auto deadState = std::get_if<UnitState::LifeStateDead>(&unit.lifeState); deadState != nullptr)
+            {
+                deadState->leaveCorpse = true;
+                deadState->corpseLevel = 1;
             }
         }
 
@@ -3448,7 +3722,7 @@ namespace rwe
                     attackerOwner = attackerUnit->get().owner;
                 }
             }
-            events.push_back(UnitDamagedEvent{unitId, getUnitState(unitId).owner, attackerOwner});
+            events.push_back(UnitDamagedEvent{unitId, getUnitState(unitId).owner, attackerOwner, paralyzer});
         }
 
         if (attacker)
@@ -3525,8 +3799,12 @@ namespace rwe
                 // die quietly without a corpse.
                 // FIXME: units in TA that are not actively receiving build input
                 // die with an explosion, even though they leave no corpse.
-                // Note: under-construction kills are not credited to the attacker
-                // because the unit dies via quietlyKillUnit which has no firing path.
+                //
+                // This is still death cause 1, an ordinary weapon kill, so the
+                // owner takes the loss -- and the attacker is credited nothing,
+                // which used to be an accident of the code path and is now the
+                // rule: both the veterancy counter and the player's Kills sit
+                // behind the build-progress test at 0x4869A7. See §5.
                 quietlyKillUnit(unitId);
             }
             else
@@ -3624,11 +3902,12 @@ namespace rwe
         std::unordered_set<UnitId> seenUnits;
         std::unordered_set<FeatureId> seenFeatures;
 
-        // Blasts hurt wreckage too: force-attacking a wreck field to clear a
+        // Blasts hurt features too: force-attacking a wreck field to clear a
         // lane is a standing part of play, and controlling one is an economy
-        // in itself. A feature's own `damage` key is its hit points; a wreck
+        // in itself. A feature's own `damage` key is its hit points; a feature
         // blown to nothing breaks down to its featureDead form the way a
-        // burnt one does, and a beam weapon never touches them at all.
+        // burnt one does. `damagesFeatures` is a mod's switch to exempt a
+        // weapon; the shipped data sets it on nothing.
         auto damagesFeatures = weaponIt == weaponDefinitions.end() || weaponIt->second.damagesFeatures;
 
         auto region = GridRegion::fromCoordinates(minCell, maxCell);
@@ -3657,18 +3936,34 @@ namespace rwe
                   {
                       auto& feature = featureRef->get();
                       const auto& featureDefinition = getFeatureDefinition(feature.featureName);
-                      if (featureDefinition.reclaimable || featureDefinition.blocking)
+                      // The original's blast-on-feature routine (0x4244B0,
+                      // TOTALA-EXE.md §24) asks one thing of the feature:
+                      // that it is not `indestructible`. Blocking, reclaimable
+                      // and the rest never enter into it, so a scar decal or
+                      // a bush takes the hit like a wreck does. It adds the
+                      // weapon's default damage, unscaled by distance, to what
+                      // the feature has already taken, and breaks the feature
+                      // to its featuredead form the moment that reaches the
+                      // definition's `damage` -- which for a feature that
+                      // omits the key is zero, so the first hit takes it.
+                      if (!featureDefinition.indestructible)
                       {
-                          auto distance = (feature.position - position).length();
-                          auto scale = blastDamageScale(distance, radius, projectile.edgeEffectiveness);
-                          auto scaled = static_cast<int>(simScalarToUInt(SimScalar(static_cast<float>(projectile.getDamage(std::string()))) * scale));
-                          if (scaled > 0 && feature.hitPoints > 0)
+                          auto damage = projectile.getDamage(std::string());
+                          if (damage >= feature.hitPoints)
                           {
-                              feature.hitPoints = feature.hitPoints > static_cast<unsigned int>(scaled) ? feature.hitPoints - static_cast<unsigned int>(scaled) : 0;
-                              if (feature.hitPoints == 0)
+                              // What stands in its place lands on the cell
+                              // just walked and is not met again by this
+                              // blast, as in the original's per-cell walk;
+                              // without that a heap that names no damage
+                              // would go in the same shell that made it.
+                              if (auto replacement = replaceFeature(*cell.featureId, featureDefinition.featureDead))
                               {
-                                  replaceFeature(*cell.featureId, featureDefinition.featureDead);
+                                  seenFeatures.insert(*replacement);
                               }
+                          }
+                          else
+                          {
+                              feature.hitPoints -= damage;
                           }
                       }
                   }
@@ -3900,12 +4195,22 @@ namespace rwe
             match(
                 weaponDefinition.physicsType,
                 [&](const ProjectilePhysicsTypeBallistic&) {
+                    // Wind goes onto the position and gravity onto the
+                    // velocity, which is the shape of 0x49BD10: the wind is a
+                    // displacement the shell never accumulates, so a long
+                    // flight drifts linearly rather than curving away.
+                    projectile.position += currentWindVector;
                     projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
                 },
                 [&](const ProjectilePhysicsTypeBomb&) {
                     // Bombs follow the same gravity model as ballistic
                     // projectiles. Their initial velocity is inherited from
                     // the aircraft at release time; gravity does the rest.
+                    // They take the wind from that same branch of 0x49BD10,
+                    // which is why a bomber's aim is now slightly off downwind
+                    // -- predictBombImpactPoint does not model the wind, and
+                    // neither does the original's own bombsight.
+                    projectile.position += currentWindVector;
                     projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
                 },
                 [&](const ProjectilePhysicsTypeLineOfSight&) {
@@ -4124,6 +4429,11 @@ namespace rwe
             // the map says the wind blows (TotalA.exe 0x490D5E).
             currentWindGenerationFactor = rweMin(1_ss, SimScalar(currentWindSpeed) / SimScalar(MaxUtilizableWindSpeed));
 
+            // The same draw also aims the wind that pushes shells about. The
+            // speed and direction above are locals, so this vector is the only
+            // thing that outlives the change.
+            currentWindVector = computeWindVector(currentWindDirection, currentWindSpeed);
+
             UnitBehaviorService(this).updateWind(currentWindGenerationFactor, currentWindDirection);
         }
     }
@@ -4279,6 +4589,12 @@ namespace rwe
                 player.metalProductionBuffer = Metal(player.metalProductionBuffer.value * bonus);
                 player.energyProductionBuffer = Energy(player.energyProductionBuffer.value * bonus);
 
+                // The chart's "produced" columns are the income itself, counted
+                // once a second as it arrives and after the difficulty bonus,
+                // which is the figure the player has actually had to spend.
+                player.metalProduced += player.metalProductionBuffer;
+                player.energyProduced += player.energyProductionBuffer;
+
                 auto metalSupply = player.metal + player.metalProductionBuffer;
                 auto energySupply = player.energy + player.energyProductionBuffer;
 
@@ -4290,13 +4606,18 @@ namespace rwe
                 player.metalStalled = metalSettlement.stalled;
                 player.energyStalled = energySettlement.stalled;
 
+                // And "excess" is what the cap takes off the top here. A player
+                // whose storage is full is throwing its whole income away, and
+                // the chart is where that shows.
                 if (player.metal > player.maxMetal)
                 {
+                    player.metalExcess += player.metal - player.maxMetal;
                     player.metal = player.maxMetal;
                 }
 
                 if (player.energy > player.maxEnergy)
                 {
+                    player.energyExcess += player.energy - player.maxEnergy;
                     player.energy = player.maxEnergy;
                 }
 
@@ -4544,6 +4865,26 @@ namespace rwe
         return candidate;
     }
 
+    UnitCreationStatus GameSimulation::retryBlockedSite(UnitId unitId, const UnitCreationStatusPending& pending)
+    {
+        // Said once, at the front of the run of tries, and once more when the
+        // tries run out. Between the two the builder simply waits: the
+        // original's site check refuses quietly on the intervening attempts.
+        if (pending.attempts == 0)
+        {
+            events.push_back(UnitCannotComplyEvent{unitId, "Waiting for target area to clear"});
+        }
+
+        auto attempts = pending.attempts + 1;
+        if (attempts >= BlockedSiteAttempts)
+        {
+            events.push_back(UnitCannotComplyEvent{unitId, "Target area was blocked"});
+            return UnitCreationStatusFailed();
+        }
+
+        return UnitCreationStatusPending{attempts, gameTime + GameTime(BlockedSiteRetryTicks)};
+    }
+
     void GameSimulation::spawnNewUnits()
     {
         for (const auto& unitId : unitCreationRequests)
@@ -4558,6 +4899,12 @@ namespace rwe
             {
 
                 if (!std::holds_alternative<UnitCreationStatusPending>(s->status))
+                {
+                    continue;
+                }
+
+                // Waiting out the gap between two tries at a blocked site.
+                if (gameTime < std::get<UnitCreationStatusPending>(s->status).nextAttempt)
                 {
                     continue;
                 }
@@ -4584,8 +4931,11 @@ namespace rwe
                 auto newUnitId = trySpawnUnit(s->unitType, s->owner, s->position, spawnRotation);
                 if (!newUnitId)
                 {
-                    LOG_INFO << "Could not place " << s->unitType << " at " << s->position.x.value << "," << s->position.z.value << " for player " << s->owner.value << "; the build order is dropped";
-                    s->status = UnitCreationStatusFailed();
+                    // Occupied. Wait for it to clear and say so, rather than
+                    // dropping the order on the spot with only a log line --
+                    // which is what this did, and why a builder whose site was
+                    // briefly straddled by a passing unit silently gave up.
+                    s->status = retryBlockedSite(unitId, std::get<UnitCreationStatusPending>(s->status));
                     continue;
                 }
 
@@ -4601,10 +4951,20 @@ namespace rwe
                     continue;
                 }
 
+                // As above: the yard waits out the gap between tries.
+                if (gameTime < std::get<UnitCreationStatusPending>(s->status).nextAttempt)
+                {
+                    continue;
+                }
+
                 auto newUnitId = trySpawnUnit(s->unitType, s->owner, s->position, s->rotation);
                 if (!newUnitId)
                 {
-                    s->status = UnitCreationStatusFailed();
+                    // A factory had it worst of all: this set Failed without
+                    // even a log line, and handleBuild dropped straight back
+                    // into Building, which re-requested the same blocked spot
+                    // on the next tick and every tick after it.
+                    s->status = retryBlockedSite(unitId, std::get<UnitCreationStatusPending>(s->status));
                     continue;
                 }
 

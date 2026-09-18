@@ -47,35 +47,33 @@ namespace rwe
 
     void UiTextBox::keyDown(KeyEvent event)
     {
-        auto key = event.keyCode;
-        if (key == SDLK_BACKSPACE)
+        // Editing keys only. The characters themselves arrive as text input,
+        // which is what makes a box on a French or German layout type what
+        // its keys say: this used to be a hand-written US table, and on any
+        // other layout it wrote the wrong letters.
+        if (event.keyCode == SDLK_BACKSPACE && !text.empty())
         {
-            if (!text.empty())
+            text.pop_back();
+        }
+    }
+
+    void UiTextBox::textInput(const std::string& newText)
+    {
+        // SDL hands this over as UTF-8. A save name is a filename, and the
+        // font has one glyph to a byte, so anything outside printable ASCII
+        // is dropped rather than stored as bytes nothing can draw.
+        for (char c : newText)
+        {
+            if (text.size() >= maxLength)
             {
-                text.pop_back();
+                return;
             }
-            return;
-        }
 
-        if (text.size() >= maxLength)
-        {
-            return;
-        }
-
-        // Letters, digits and a few separators, which is everything a save
-        // name needs. There is no text-input event plumbing to draw on, so
-        // shifted characters are out; names come out lowercase.
-        if (key >= SDLK_A && key <= SDLK_Z)
-        {
-            text.push_back(static_cast<char>('a' + (key - SDLK_A)));
-        }
-        else if (key >= SDLK_0 && key <= SDLK_9)
-        {
-            text.push_back(static_cast<char>('0' + (key - SDLK_0)));
-        }
-        else if (key == SDLK_SPACE || key == SDLK_MINUS || key == SDLK_PERIOD)
-        {
-            text.push_back(key == SDLK_SPACE ? ' ' : static_cast<char>(key));
+            auto byte = static_cast<unsigned char>(c);
+            if (byte >= 0x20 && byte < 0x7F)
+            {
+                text.push_back(c);
+            }
         }
     }
 

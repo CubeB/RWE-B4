@@ -5,9 +5,11 @@
 #include <random>
 #include <rwe/ai/AiBlackboard.h>
 #include <rwe/ai/AiTuningProfile.h>
+#include <rwe/ai/AirManager.h>
 #include <rwe/ai/ArmyManager.h>
 #include <rwe/ai/BuildManager.h>
 #include <rwe/ai/EconomyManager.h>
+#include <rwe/ai/MetalMakerManager.h>
 #include <rwe/ai/PerceptionManager.h>
 #include <rwe/ai/ReachabilityMap.h>
 #include <rwe/ai/ScoutManager.h>
@@ -67,7 +69,9 @@ namespace rwe
         AiPlayerController(
             PlayerId playerId,
             AiTuningProfile profile,
-            std::uint64_t rngSeed);
+            std::uint64_t rngSeed,
+            MapIntel mapIntel,
+            AiBuildTree buildTree = AiBuildTree{});
 
         void tick(const GameSimulation& sim, std::vector<PlayerCommand>& outCommands);
 
@@ -88,14 +92,18 @@ namespace rwe
         int ticksSinceThreatRebuild{0};
         ReachabilityMap reachability;
         int ticksSinceReachabilityRebuild{0};
+        /** So the air-threat line is logged when it changes rather than every tick. */
+        bool loggedAirThreat{false};
 
         PerceptionManager perception;
         EconomyManager economy;
+        MetalMakerManager metalMakers;
         StrategicManager strategic;
         BuildManager build;
         ScoutManager scout;
         TransportManager transport;
         ArmyManager army;
+        AirManager air;
 
         AiProfiler profiler;
     };

@@ -4,6 +4,38 @@
 
 namespace rwe
 {
+    std::optional<unsigned int> selectTrackForSound(
+        const std::vector<TrackSlot>& tracks,
+        unsigned int reservedCount,
+        const void* soundKey,
+        unsigned int maxConcurrentCopies)
+    {
+        unsigned int copiesPlaying = 0;
+        std::optional<unsigned int> freeTrack;
+        for (unsigned int i = reservedCount; i < tracks.size(); ++i)
+        {
+            const auto& slot = tracks[i];
+            if (slot.playing)
+            {
+                if (slot.soundKey == soundKey)
+                {
+                    ++copiesPlaying;
+                }
+            }
+            else if (!freeTrack)
+            {
+                freeTrack = i;
+            }
+        }
+
+        if (copiesPlaying >= maxConcurrentCopies)
+        {
+            return std::nullopt;
+        }
+
+        return freeTrack;
+    }
+
     AudioService::AudioService(
         SdlContext* sdlContext,
         SdlMixerContext* sdlMixerContext,
@@ -14,9 +46,22 @@ namespace rwe
     {
     }
 
+    float computeEffectGain(int volume, float baseGain, float volumeScale, bool enabled)
+    {
+        if (!enabled)
+        {
+            return 0.0f;
+        }
+
+        // 128 is MIX_MAX_VOLUME, the scale computeSoundVolume still works in.
+        auto channelScale = std::clamp(static_cast<float>(volume), 0.0f, 128.0f) / 128.0f;
+        return channelScale * baseGain * volumeScale;
+    }
+
     void AudioService::allocateTracks(unsigned int count)
     {
         tracks.reserve(count);
+        trackSoundKey.reserve(count);
         for (unsigned int i = tracks.size(); i < count; ++i)
         {
             auto track = sdlMixerContext->createTrack();
@@ -25,6 +70,7 @@ namespace rwe
                 throw std::runtime_error("Failed to create mixer track");
             }
             tracks.push_back(std::move(track));
+            trackSoundKey.push_back(nullptr);
             setupTrackCallback(i);
         }
     }
@@ -63,6 +109,17 @@ namespace rwe
         return -1;
     }
 
+    std::optional<unsigned int> AudioService::findTrackForSound(const Sound* soundKey, unsigned int maxConcurrentCopies)
+    {
+        std::vector<TrackSlot> slots;
+        slots.reserve(tracks.size());
+        for (unsigned int i = 0; i < tracks.size(); ++i)
+        {
+            slots.push_back(TrackSlot{sdlMixerContext->trackPlaying(tracks[i].get()), trackSoundKey[i]});
+        }
+        return selectTrackForSound(slots, reservedCount, soundKey, maxConcurrentCopies);
+    }
+
     AudioService::LoopToken AudioService::loopSound(const SoundHandle& sound)
     {
         int channel = findFreeTrack();
@@ -74,6 +131,7 @@ namespace rwe
         auto* track = tracks[channel].get();
         sdlMixerContext->setTrackAudio(track, sound.get());
         sdlMixerContext->setTrackGain(track, soundEnabled ? defaultGain * soundVolumeScale : 0.0f);
+        trackSoundKey[channel] = sound.get();
 
         auto props = SDL_CreateProperties();
         SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, -1);
@@ -218,18 +276,19 @@ namespace rwe
 
     int AudioService::playSound(const SoundHandle& sound)
     {
-        int channel = findFreeTrack();
-        if (channel == -1)
+        auto channel = findTrackForSound(sound.get(), maxConcurrentCopiesOfOneSound);
+        if (!channel)
         {
             return -1;
         }
 
-        auto* track = tracks[channel].get();
+        auto* track = tracks[*channel].get();
         sdlMixerContext->setTrackAudio(track, sound.get());
         sdlMixerContext->setTrackGain(track, soundEnabled ? defaultGain * soundVolumeScale : 0.0f);
         sdlMixerContext->playTrack(track);
+        trackSoundKey[*channel] = sound.get();
 
-        return channel;
+        return static_cast<int>(*channel);
     }
 
     std::optional<AudioService::SoundHandle> AudioService::loadSound(const std::string& soundName)
@@ -292,6 +351,16 @@ namespace rwe
         sdlMixerContext->setTrackAudio(track, sound.get());
         sdlMixerContext->setTrackGain(track, soundEnabled ? defaultGain * soundVolumeScale : 0.0f);
         sdlMixerContext->playTrack(track);
+        trackSoundKey[channel] = sound.get();
+    }
+
+    bool AudioService::isChannelPlaying(unsigned int channel)
+    {
+        if (channel >= tracks.size())
+        {
+            return false;
+        }
+        return sdlMixerContext->trackPlaying(tracks[channel].get());
     }
 
     Observable<int>& AudioService::getChannelFinished()
@@ -316,8 +385,7 @@ namespace rwe
     {
         if (channel >= 0 && static_cast<unsigned int>(channel) < tracks.size())
         {
-            // Old scale: 0-128 (MIX_MAX_VOLUME). New scale: 0.0-1.0
-            float gain = static_cast<float>(volume) / 128.0f;
+            auto gain = computeEffectGain(volume, defaultGain, soundVolumeScale, soundEnabled);
             sdlMixerContext->setTrackGain(tracks[channel].get(), gain);
         }
     }

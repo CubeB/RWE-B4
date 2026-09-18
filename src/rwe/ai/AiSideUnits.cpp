@@ -20,16 +20,95 @@ namespace rwe
             upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
         }
 
+        // Written out field by field rather than as a positional aggregate.
+        // The list had grown to seventeen strings of the same type in a row,
+        // where transposing two is silent and would only show up as an AI
+        // building the wrong thing, and the level-two block below makes it
+        // twenty-five.
         AiSideUnits units;
         if (upper == "CORE")
         {
-            units = AiSideUnits{"CORMEX", "CORSOLAR", "CORLAB", "CORCK", "CORAK", "CORSTORM", "CORLLT", "CORRAD", "CORMAKR",
-                "CORAP", "CORFINK", "CORVALK", "CORVP", "CORFAV", "CORGATOR"};
+            units.metalExtractor = "CORMEX";
+            units.solar = "CORSOLAR";
+            units.lab = "CORLAB";
+            units.constructor = "CORCK";
+            units.raider = "CORAK";
+            units.rocketKbot = "CORSTORM";
+            units.lightLaserTower = "CORLLT";
+            units.radar = "CORRAD";
+            units.metalMaker = "CORMAKR";
+            units.airPlant = "CORAP";
+            units.scoutPlane = "CORFINK";
+            units.airTransport = "CORVALK";
+            units.fighter = "CORVENG";
+            units.bomber = "CORSHAD";
+            units.airConstructor = "CORCA";
+            units.vehiclePlant = "CORVP";
+            units.scoutVehicle = "CORFAV";
+            units.tank = "CORGATOR";
+            units.antiAirTower = "CORRL";
+            units.antiAirKbot = "CORCRASH";
+            units.advancedLab = "CORALAB";
+            units.advancedConstructor = "CORACK";
+            units.advancedAssault = "CORCAN";
+            units.heavyLaserTower = "CORHLT";
+            units.heavyPlasmaTower = "CORPUN";
+            units.advancedRadar = "CORARAD";
+            units.mohoExtractor = "CORMOHO";
+            units.fusion = "CORFUS";
+            units.shipyard = "CORSY";
+            units.constructionShip = "CORCS";
+            units.scoutShip = "CORPT";
+            units.destroyer = "CORROY";
+            units.seaTransport = "CORTSHIP";
+            units.submarine = "CORSUB";
+            units.tidalGenerator = "CORTIDE";
+            units.sonar = "CORSONAR";
+            units.torpedoLauncher = "CORTL";
+            units.underwaterMetalExtractor = "CORUWMEX";
+            units.floatingMetalMaker = "CORFMKR";
         }
         else
         {
-            units = AiSideUnits{"ARMMEX", "ARMSOLAR", "ARMLAB", "ARMCK", "ARMPW", "ARMROCK", "ARMLLT", "ARMRAD", "ARMMAKR",
-                "ARMAP", "ARMPEEP", "ARMATLAS", "ARMVP", "ARMFAV", "ARMFLASH"};
+            units.metalExtractor = "ARMMEX";
+            units.solar = "ARMSOLAR";
+            units.lab = "ARMLAB";
+            units.constructor = "ARMCK";
+            units.raider = "ARMPW";
+            units.rocketKbot = "ARMROCK";
+            units.lightLaserTower = "ARMLLT";
+            units.radar = "ARMRAD";
+            units.metalMaker = "ARMMAKR";
+            units.airPlant = "ARMAP";
+            units.scoutPlane = "ARMPEEP";
+            units.airTransport = "ARMATLAS";
+            units.fighter = "ARMFIG";
+            units.bomber = "ARMTHUND";
+            units.airConstructor = "ARMCA";
+            units.vehiclePlant = "ARMVP";
+            units.scoutVehicle = "ARMFAV";
+            units.tank = "ARMFLASH";
+            units.antiAirTower = "ARMRL";
+            units.antiAirKbot = "ARMJETH";
+            units.advancedLab = "ARMALAB";
+            units.advancedConstructor = "ARMACK";
+            units.advancedAssault = "ARMZEUS";
+            units.heavyLaserTower = "ARMHLT";
+            units.heavyPlasmaTower = "ARMGUARD";
+            units.advancedRadar = "ARMARAD";
+            units.mohoExtractor = "ARMMOHO";
+            units.fusion = "ARMFUS";
+            units.shipyard = "ARMSY";
+            units.constructionShip = "ARMCS";
+            units.scoutShip = "ARMPT";
+            units.destroyer = "ARMROY";
+            units.seaTransport = "ARMTSHIP";
+            units.submarine = "ARMSUB";
+            units.tidalGenerator = "ARMTIDE";
+            units.sonar = "ARMSONAR";
+            units.torpedoLauncher = "ARMTL";
+            units.underwaterMetalExtractor = "ARMUWMEX";
+            units.floatingMetalMaker = "ARMFMKR";
         }
 
         auto check = [&](std::string& name) {
@@ -50,14 +129,43 @@ namespace rwe
         check(units.airPlant);
         check(units.scoutPlane);
         check(units.airTransport);
+        check(units.fighter);
+        check(units.bomber);
+        check(units.airConstructor);
         check(units.vehiclePlant);
         check(units.scoutVehicle);
         check(units.tank);
+        check(units.antiAirTower);
+        check(units.antiAirKbot);
+        check(units.advancedLab);
+        check(units.advancedConstructor);
+        check(units.advancedAssault);
+        check(units.heavyLaserTower);
+        check(units.heavyPlasmaTower);
+        check(units.advancedRadar);
+        check(units.mohoExtractor);
+        check(units.fusion);
+        check(units.shipyard);
+        check(units.constructionShip);
+        check(units.scoutShip);
+        check(units.destroyer);
+        check(units.seaTransport);
+        check(units.submarine);
+        check(units.tidalGenerator);
+        check(units.sonar);
+        check(units.torpedoLauncher);
+        check(units.underwaterMetalExtractor);
+        check(units.floatingMetalMaker);
         return units;
     }
 
     bool isAiScoutType(const AiSideUnits& units, const std::string& unitType)
     {
         return !unitType.empty() && (unitType == units.scoutPlane || unitType == units.scoutVehicle);
+    }
+
+    bool isAiAntiAirType(const AiSideUnits& units, const std::string& unitType)
+    {
+        return !unitType.empty() && unitType == units.antiAirKbot;
     }
 }

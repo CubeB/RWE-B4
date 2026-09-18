@@ -139,6 +139,55 @@ namespace rwe
         constexpr const char* StaleRef = "stale";
         constexpr unsigned int StaleIdValue = 0xFFu;
 
+        // ---- id table layout --------------------------------------------
+        //
+        // See VectorMap::Layout. Written as one flat array per table,
+        // [id, occupied, nextFree] a slot, because a map has thousands of
+        // features and the keyframes hold dozens of these in memory.
+
+        template <typename Layout>
+        json saveLayout(const Layout& layout)
+        {
+            json slots = json::array();
+            for (const auto& s : layout.slots)
+            {
+                slots.push_back(json::array({s.id, s.occupied, s.nextFreeIndex ? json(*s.nextFreeIndex) : json()}));
+            }
+            return json{
+                {"firstFree", layout.firstFreeIndex ? json(*layout.firstFreeIndex) : json()},
+                {"slots", slots},
+            };
+        }
+
+        template <typename T, typename Tag>
+        typename VectorMap<T, Tag>::Layout loadLayout(const json& j)
+        {
+            typename VectorMap<T, Tag>::Layout layout;
+            const auto& firstFree = j.at("firstFree");
+            layout.firstFreeIndex = firstFree.is_null() ? std::nullopt : std::make_optional(firstFree.get<unsigned int>());
+            for (const auto& s : j.at("slots"))
+            {
+                const auto& next = s.at(2);
+                layout.slots.push_back({s.at(0).get<unsigned int>(), s.at(1).get<bool>(), next.is_null() ? std::nullopt : std::make_optional(next.get<unsigned int>())});
+            }
+            return layout;
+        }
+
+        /** The slot numbers a layout's members occupy, in iteration order -- which is saved order. */
+        template <typename Layout>
+        std::vector<unsigned int> occupiedSlots(const Layout& layout)
+        {
+            std::vector<unsigned int> slots;
+            for (unsigned int i = 0; i < layout.slots.size(); ++i)
+            {
+                if (layout.slots[i].occupied)
+                {
+                    slots.push_back(i);
+                }
+            }
+            return slots;
+        }
+
         struct SaveContext
         {
             std::unordered_map<UnitId, uint32_t> units;
@@ -268,6 +317,10 @@ namespace rwe
                 {"energyStalled", p.energyStalled},
                 {"unitsKilled", p.unitsKilled},
                 {"unitsLost", p.unitsLost},
+                {"metalProduced", saveMetal(p.metalProduced)},
+                {"energyProduced", saveEnergy(p.energyProduced)},
+                {"metalExcess", saveMetal(p.metalExcess)},
+                {"energyExcess", saveEnergy(p.energyExcess)},
                 {"desiredMetalConsumptionBuffer", saveMetal(p.desiredMetalConsumptionBuffer)},
                 {"desiredEnergyConsumptionBuffer", saveEnergy(p.desiredEnergyConsumptionBuffer)},
                 {"previousDesiredMetalConsumptionBuffer", saveMetal(p.previousDesiredMetalConsumptionBuffer)},
@@ -301,6 +354,15 @@ namespace rwe
             p.energyStalled = j.at("energyStalled").get<bool>();
             p.unitsKilled = j.at("unitsKilled").get<unsigned int>();
             p.unitsLost = j.at("unitsLost").get<unsigned int>();
+            // Added after the first saves were written; an older file simply
+            // has an empty chart.
+            if (j.contains("metalProduced"))
+            {
+                p.metalProduced = loadMetal(j.at("metalProduced"));
+                p.energyProduced = loadEnergy(j.at("energyProduced"));
+                p.metalExcess = loadMetal(j.at("metalExcess"));
+                p.energyExcess = loadEnergy(j.at("energyExcess"));
+            }
             p.desiredMetalConsumptionBuffer = loadMetal(j.at("desiredMetalConsumptionBuffer"));
             p.desiredEnergyConsumptionBuffer = loadEnergy(j.at("desiredEnergyConsumptionBuffer"));
             p.previousDesiredMetalConsumptionBuffer = loadMetal(j.at("previousDesiredMetalConsumptionBuffer"));
@@ -394,6 +456,7 @@ namespace rwe
                 {"name", m.name},
                 {"visible", m.visible},
                 {"shaded", m.shaded},
+                {"cached", m.cached},
                 {"offset", saveSimVector(m.offset)},
                 {"previousOffset", saveSimVector(m.previousOffset)},
                 {"previousRotationX", saveSimAngle(m.previousRotationX)},
@@ -416,6 +479,9 @@ namespace rwe
             m.name = j.at("name").get<std::string>();
             m.visible = j.at("visible").get<bool>();
             m.shaded = j.at("shaded").get<bool>();
+            // Saves written before the flag existed carry no key; every piece
+            // starts cached, which is the original's default too.
+            m.cached = j.value("cached", true);
             m.offset = loadSimVector(j.at("offset"));
             m.previousOffset = loadSimVector(j.at("previousOffset"));
             m.previousRotationX = loadSimAngle(j.at("previousRotationX"));
@@ -681,6 +747,12 @@ namespace rwe
                                 {"lastHeading", saveSimAngle(i.lastHeading)},
                                 {"lastPitch", saveSimAngle(i.lastPitch)}};
                         },
+                        [](const UnitWeaponStateAttacking::AimedInfo& i) {
+                            return json{
+                                {"kind", "aimed"},
+                                {"lastHeading", saveSimAngle(i.lastHeading)},
+                                {"lastPitch", saveSimAngle(i.lastPitch)}};
+                        },
                         [](const UnitWeaponStateAttacking::FireInfo& i) {
                             return json{
                                 {"kind", "fire"},
@@ -718,6 +790,12 @@ namespace rwe
                 {
                     a.attackInfo = UnitWeaponStateAttacking::AimInfo{
                         loadCobThreadRef(ij.at("thread"), env),
+                        loadSimAngle(ij.at("lastHeading")),
+                        loadSimAngle(ij.at("lastPitch"))};
+                }
+                else if (infoKind == "aimed")
+                {
+                    a.attackInfo = UnitWeaponStateAttacking::AimedInfo{
                         loadSimAngle(ij.at("lastHeading")),
                         loadSimAngle(ij.at("lastPitch"))};
                 }
@@ -825,6 +903,10 @@ namespace rwe
                         j["leashAnchor"] = saveSimVector(a.leash->anchor);
                         j["leashDistance"] = saveSimScalar(a.leash->distance);
                     }
+                    if (a.lastSeenPosition)
+                    {
+                        j["lastSeenPosition"] = saveSimVector(*a.lastSeenPosition);
+                    }
                     return j;
                 },
                 [](const BuildOrder& b) { return json{{"kind", "build"}, {"unitType", b.unitType}, {"position", saveSimVector(b.position)}}; },
@@ -855,7 +937,7 @@ namespace rwe
                     return j;
                 },
                 [&](const LoadOrder& l) { return json{{"kind", "load"}, {"target", saveUnitIdRef(l.target, ctx)}}; },
-                [](const UnloadOrder& u) { return json{{"kind", "unload"}, {"destination", saveSimVector(u.destination)}}; },
+                [](const UnloadOrder& u) { return json{{"kind", "unload"}, {"destination", saveSimVector(u.destination)}, {"parkedUntil", saveGameTime(u.parkedUntil)}}; },
                 [&](const DgunOrder& d) { return json{{"kind", "dgun"}, {"target", saveAttackTarget(d.target, ctx)}}; },
                 [&](const LandOnAirBaseOrder& l) { return json{{"kind", "landOnAirBase"}, {"target", saveUnitIdRef(l.target, ctx)}}; });
         }
@@ -876,6 +958,10 @@ namespace rwe
                 if (j.contains("leashAnchor"))
                 {
                     order.leash = AttackLeash(loadSimVector(j.at("leashAnchor")), loadSimScalar(j.at("leashDistance")));
+                }
+                if (j.contains("lastSeenPosition"))
+                {
+                    order.lastSeenPosition = loadSimVector(j.at("lastSeenPosition"));
                 }
                 return order;
             }
@@ -942,7 +1028,12 @@ namespace rwe
             }
             if (kind == "unload")
             {
-                return UnloadOrder(loadSimVector(j.at("destination")));
+                auto order = UnloadOrder(loadSimVector(j.at("destination")));
+                if (j.contains("parkedUntil"))
+                {
+                    order.parkedUntil = loadGameTime(j.at("parkedUntil"));
+                }
+                return order;
             }
             if (kind == "landOnAirBase")
             {
@@ -957,7 +1048,7 @@ namespace rwe
         {
             return match(
                 s,
-                [](const UnitCreationStatusPending&) { return json{{"kind", "pending"}}; },
+                [](const UnitCreationStatusPending& p) { return json{{"kind", "pending"}, {"attempts", p.attempts}, {"nextAttempt", saveGameTime(p.nextAttempt)}}; },
                 [](const UnitCreationStatusFailed&) { return json{{"kind", "failed"}}; },
                 [&](const UnitCreationStatusDone& d) { return json{{"kind", "done"}, {"unitId", saveUnitIdRef(d.unitId, ctx)}}; });
         }
@@ -967,7 +1058,7 @@ namespace rwe
             const auto& kind = j.at("kind").get_ref<const std::string&>();
             if (kind == "pending")
             {
-                return UnitCreationStatusPending();
+                return UnitCreationStatusPending{j.at("attempts").get<unsigned int>(), loadGameTime(j.at("nextAttempt"))};
             }
             if (kind == "failed")
             {
@@ -1273,6 +1364,12 @@ namespace rwe
                          {"position", saveSimVector(c.position)},
                          {"cachedAtTime", saveGameTime(c.cachedAtTime)}};
                  })},
+                {"attackApproachCache", saveOptional(i.attackApproachCache, [&](const UnitPositionCache& c) {
+                     return json{
+                         {"unitId", saveUnitIdRef(c.unitId, ctx)},
+                         {"position", saveSimVector(c.position)},
+                         {"cachedAtTime", saveGameTime(c.cachedAtTime)}};
+                 })},
                 {"state", saveNavigationState(i.state, ctx)}};
         }
 
@@ -1281,6 +1378,12 @@ namespace rwe
             return NavigationStateInfo{
                 loadOptional(j.at("desiredDestination"), [&](const json& g) { return loadNavigationGoal(g, ctx); }),
                 loadOptional(j.at("unitPositionCache"), [&](const json& c) {
+                    return UnitPositionCache{
+                        loadUnitIdRef(c.at("unitId"), ctx),
+                        loadSimVector(c.at("position")),
+                        loadGameTime(c.at("cachedAtTime"))};
+                }),
+                loadOptional(j.at("attackApproachCache"), [&](const json& c) {
                     return UnitPositionCache{
                         loadUnitIdRef(c.at("unitId"), ctx),
                         loadSimVector(c.at("position")),
@@ -1581,6 +1684,9 @@ namespace rwe
                 {"navigationState", saveNavigationStateInfo(u.navigationState, ctx)},
                 {"buildOrderUnitId", saveOptional(u.buildOrderUnitId, [&](UnitId id) { return saveUnitIdRef(id, ctx); })},
                 {"inBuildStance", u.inBuildStance},
+                {"armStowDueTime", saveOptional(u.armStowDueTime, [](GameTime t) { return saveGameTime(t); })},
+                {"nanoPointQueriedAt", saveOptional(u.nanoPointQueriedAt, [](GameTime t) { return saveGameTime(t); })},
+                {"nanoPoint", saveSimVector(u.nanoPoint)},
                 {"commandFireShotFired", u.commandFireShotFired},
                 {"yardOpen", u.yardOpen},
                 {"inCollision", u.inCollision},
@@ -1657,6 +1763,9 @@ namespace rwe
             u.navigationState = loadNavigationStateInfo(j.at("navigationState"), ctx);
             u.buildOrderUnitId = loadOptional(j.at("buildOrderUnitId"), [&](const json& v) { return loadUnitIdRef(v, ctx); });
             u.inBuildStance = j.at("inBuildStance").get<bool>();
+            u.armStowDueTime = loadOptional(j.at("armStowDueTime"), [](const json& v) { return loadGameTime(v); });
+            u.nanoPointQueriedAt = loadOptional(j.at("nanoPointQueriedAt"), [](const json& v) { return loadGameTime(v); });
+            u.nanoPoint = loadSimVector(j.at("nanoPoint"));
             u.commandFireShotFired = j.value("commandFireShotFired", false);
             u.yardOpen = j.at("yardOpen").get<bool>();
             u.inCollision = j.at("inCollision").get<bool>();
@@ -1925,7 +2034,10 @@ namespace rwe
         }
 
         json j;
-        j["version"] = 1;
+        // 2 since 2026-09-11. The layout did not change; what changed is
+        // that a version 1 save may hold units made before mobile units were
+        // shaded, which loadSimulationFromJson has to put right.
+        j["version"] = 2;
 
         // The wind range is a construction-time constant; it travels with the
         // save only so the load can check it was given the right map.
@@ -1942,7 +2054,10 @@ namespace rwe
 
         j["gameStatus"] = saveWinStatus(sim.gameStatus);
         j["currentWindGenerationFactor"] = saveSimScalar(sim.currentWindGenerationFactor);
+        j["currentWindVector"] = saveSimVector(sim.currentWindVector);
         j["tidalStrength"] = sim.tidalStrength;
+        j["killMul"] = sim.killMul;
+        j["timeMul"] = sim.timeMul;
         j["nextWindSpeedChange"] = saveGameTime(sim.nextWindSpeedChange);
         j["featureRegrowthCursor"] = sim.featureRegrowthCursor;
 
@@ -1986,12 +2101,40 @@ namespace rwe
         }
         j["projectiles"] = projectiles;
 
+        // The shape of the three id tables, so the load can put everything
+        // back in the slot it came from. Without this the load hands out
+        // dense ids, and the game is the same game only until the next unit
+        // is born: VectorMap refills freed slots, so a fresh table puts the
+        // newcomer at the end where the original put it in a hole, and from
+        // there on the two iterate in different orders and hash differently.
+        // A keyframe the replay viewer winds forward from cannot afford
+        // that; a saved game merely deserved better.
+        j["layout"] = json{
+            {"features", saveLayout(sim.features.layout())},
+            {"units", saveLayout(sim.units.layout())},
+            {"projectiles", saveLayout(sim.projectiles.layout())},
+        };
+
         json pathRequests = json::array();
         for (const auto& r : sim.pathRequests)
         {
             pathRequests.push_back(saveUnitIdRef(r.unitId, ctx));
         }
         j["pathRequests"] = pathRequests;
+
+        // A path search part way through, if there is one. It belongs to the
+        // request at the head of the queue above, so it needs no name of its
+        // own -- only the footprint it started from, because the unit has
+        // been walking its straight-line stand-in since and is no longer
+        // standing there, and how far it had got. See
+        // PathFindingService::suspendedSearchStart for why that is enough and
+        // why dropping the search instead would break a replay.
+        if (auto searchStart = sim.pathFindingService.suspendedSearchStart())
+        {
+            j["pathSearch"] = json{
+                {"start", saveDiscreteRect(*searchStart)},
+                {"expansions", sim.pathFindingService.suspendedSearchExpansions()}};
+        }
 
         // Empty between ticks (spawnNewUnits drains it), but carried along so
         // a mid-tick snapshot would not lose anything.
@@ -2007,7 +2150,8 @@ namespace rwe
 
     void loadSimulationFromJson(const nlohmann::json& j, GameSimulation& sim)
     {
-        if (j.at("version").get<int>() != 1)
+        auto version = j.at("version").get<int>();
+        if (version != 1 && version != 2)
         {
             throw std::runtime_error("unsupported save version");
         }
@@ -2039,7 +2183,19 @@ namespace rwe
         }
         sim.gameStatus = loadWinStatus(j.at("gameStatus"));
         sim.currentWindGenerationFactor = loadSimScalar(j.at("currentWindGenerationFactor"));
+        if (j.contains("currentWindVector"))
+        {
+            // Absent from saves written before the wind was ported. Leaving
+            // those at zero is harmless -- the next wind change rebuilds it
+            // within fourteen seconds.
+            sim.currentWindVector = loadSimVector(j.at("currentWindVector"));
+        }
         sim.tidalStrength = j.at("tidalStrength").get<int>();
+        if (j.contains("killMul"))
+        {
+            sim.killMul = j.at("killMul").get<int>();
+            sim.timeMul = j.at("timeMul").get<int>();
+        }
         sim.nextWindSpeedChange = loadGameTime(j.at("nextWindSpeedChange"));
         sim.featureRegrowthCursor = j.at("featureRegrowthCursor").get<int>();
 
@@ -2054,6 +2210,33 @@ namespace rwe
         sim.occupiedGrid.forEachIndexed([](const auto&, OccupiedCell& cell) { cell.featureId = std::nullopt; });
         sim.features = VectorMap<MapFeature, FeatureIdTag>();
 
+        // A save that recorded the shape of its id tables is put back into
+        // that shape, member by member into the slot each came from. One
+        // without (any save older than the layout) is laid out densely, as
+        // it always was, and the ids it hands out are the load's own.
+        std::optional<std::vector<unsigned int>> featureSlots;
+        std::optional<std::vector<unsigned int>> unitSlots;
+        std::optional<std::vector<unsigned int>> projectileSlots;
+        if (j.contains("layout"))
+        {
+            const auto& lj = j.at("layout");
+            auto featureLayout = loadLayout<MapFeature, FeatureIdTag>(lj.at("features"));
+            auto unitLayout = loadLayout<UnitState, UnitIdTag>(lj.at("units"));
+            auto projectileLayout = loadLayout<Projectile, ProjectileIdTag>(lj.at("projectiles"));
+            featureSlots = occupiedSlots(featureLayout);
+            unitSlots = occupiedSlots(unitLayout);
+            projectileSlots = occupiedSlots(projectileLayout);
+            if (featureSlots->size() != j.at("features").size()
+                || unitSlots->size() != j.at("units").size()
+                || projectileSlots->size() != j.at("projectiles").size())
+            {
+                throw std::runtime_error("save layout does not match its contents");
+            }
+            sim.features.restoreLayout(featureLayout);
+            sim.units.restoreLayout(unitLayout);
+            sim.projectiles.restoreLayout(projectileLayout);
+        }
+
         LoadContext ctx;
 
         for (const auto& fj : j.at("features"))
@@ -2062,7 +2245,15 @@ namespace rwe
             f.featureName = FeatureDefinitionId(fj.at("featureName").get<unsigned int>());
             f.position = loadSimVector(fj.at("position"));
             f.rotation = loadSimAngle(fj.at("rotation"));
-            auto id = sim.addFeature(std::move(f));
+            std::optional<FeatureId> id;
+            if (featureSlots)
+            {
+                id = sim.addFeatureInSlot((*featureSlots)[ctx.features.size()], std::move(f));
+            }
+            else
+            {
+                id = sim.addFeature(std::move(f));
+            }
             if (!id)
             {
                 throw std::runtime_error("could not place a loaded feature");
@@ -2096,14 +2287,50 @@ namespace rwe
                 pieces.push_back(loadUnitMesh(pj));
             }
 
+            // Until 2026-09-06 createUnit cleared the shade flag on every
+            // piece of anything mobile, and a save keeps the flag, so a unit
+            // made back then has come through every save and load since with
+            // no piece shaded -- a commander from the first minute of a long
+            // game, for one. In a version 1 save a mobile unit with no piece
+            // shaded is taken to be one of those and shaded again. A script
+            // can ask for that too, by saying DONT_SHADE on every piece, and
+            // an old save gets that one case wrong; nothing written since
+            // version 2 is touched.
+            if (version == 1)
+            {
+                auto definitionIt = sim.unitDefinitions.find(unitType);
+                auto noneShaded = std::none_of(pieces.begin(), pieces.end(), [](const UnitMesh& m) { return m.shaded; });
+                if (definitionIt != sim.unitDefinitions.end() && definitionIt->second.isMobile && !pieces.empty() && noneShaded)
+                {
+                    for (auto& m : pieces)
+                    {
+                        m.shaded = true;
+                    }
+                }
+            }
+
             auto env = std::make_unique<CobEnvironment>(&scriptIt->second);
-            ctx.units.push_back(UnitId(sim.units.emplace(pieces, std::move(env))));
+            if (unitSlots)
+            {
+                ctx.units.push_back(UnitId(sim.units.emplaceInSlot((*unitSlots)[ctx.units.size()], pieces, std::move(env))));
+            }
+            else
+            {
+                ctx.units.push_back(UnitId(sim.units.emplace(pieces, std::move(env))));
+            }
         }
 
         const auto& projectilesJson = j.at("projectiles");
         for (std::size_t i = 0; i < projectilesJson.size(); ++i)
         {
-            ctx.projectiles.push_back(ProjectileId(sim.projectiles.emplace()));
+            if (projectileSlots)
+            {
+                ctx.projectiles.push_back(ProjectileId(sim.projectiles.emplaceInSlot((*projectileSlots)[i])));
+            }
+            else
+            {
+                ctx.projectiles.push_back(ProjectileId(sim.projectiles.emplace()));
+            }
         }
 
         {
@@ -2129,6 +2356,7 @@ namespace rwe
             restoreUnitOccupancy(sim, id, unit);
         }
 
+        sim.pathFindingService.abandonSearch();
         sim.pathRequests.clear();
         for (const auto& rj : j.at("pathRequests"))
         {
@@ -2164,5 +2392,46 @@ namespace rwe
                 loadExploredGrid(exploredJson[i], sim.playerVisibility[i].explored);
             }
         }
+
+        // Last of all, because rebuilding a suspended path search runs the
+        // search, and the search reads the terrain, the occupancy grid and
+        // the unit it belongs to -- all of which are only now in place.
+        // Older saves carry no such key and simply start the search again,
+        // as they did before any of this was written.
+        if (j.contains("pathSearch"))
+        {
+            const auto& searchJson = j.at("pathSearch");
+            sim.pathFindingService.restoreSuspendedSearch(
+                sim,
+                loadDiscreteRect(searchJson.at("start")),
+                searchJson.at("expansions").get<std::size_t>());
+        }
+    }
+
+    void clearSimulationForLoad(GameSimulation& sim)
+    {
+        sim.clearPlayers();
+
+        // Whole tables replaced rather than emptied one member at a time:
+        // the load puts its own layout in, so there is nothing to keep, and
+        // going through the death paths would fire events and write wrecks.
+        sim.units = VectorMap<UnitState, UnitIdTag>();
+        sim.projectiles = VectorMap<Projectile, ProjectileIdTag>();
+        sim.flyingUnitsSet.clear();
+        sim.occupiedGrid.forEachIndexed([](const auto&, OccupiedCell& cell) {
+            cell.mobileUnitId = std::nullopt;
+            cell.buildingInfo = std::nullopt;
+        });
+        // The features are the load's to sweep, as they are for a fresh sim.
+
+        // Derived caches that would otherwise answer for units that are no
+        // longer there. The spatial index is stamped with the game time it
+        // was built at and a restore can land on that very tick.
+        sim.invalidateUnitSpatialIndex();
+        sim.pathFindingService.abandonSearch();
+        sim.pathRequests.clear();
+        sim.unitCreationRequests.clear();
+        sim.events.clear();
+        sim.aiPendingCommands.clear();
     }
 }

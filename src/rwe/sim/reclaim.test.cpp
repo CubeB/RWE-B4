@@ -137,6 +137,47 @@ namespace rwe
             REQUIRE(sim.reclaimUnit(solarId, player, 30u));
             REQUIRE(info.metalProductionBuffer.value == Catch::Approx(0.0f));
         }
+
+        SECTION("recycling your own base is not a loss, but being eaten is")
+        {
+            // Death cause 5 is the only one whose handler asks who did it:
+            // 0x486899 tests the recorded killer against the victim's owner
+            // and falls through to the Losses increment only when they differ.
+            // Without that, a builder clearing its own obsolete metal
+            // extractors would run the end-of-game Losses column up.
+            // `info` is deliberately not used here: adding a player can
+            // reallocate the player vector out from under a held reference.
+            auto enemy = addPlayerWithNothing(sim);
+
+            REQUIRE(sim.reclaimUnit(solarId, player, 150u));
+            REQUIRE(sim.getPlayer(player).unitsLost == 0u);
+
+            auto otherId = addUnitOfType(sim, "solar", player, SimVector(200_ss, 0_ss, 200_ss), script);
+            REQUIRE(sim.reclaimUnit(otherId, enemy, 150u));
+            REQUIRE(sim.getPlayer(player).unitsLost == 1u);
+        }
+    }
+
+    TEST_CASE("a nanoframe that never finished is nobody's loss", "[reclaim]")
+    {
+        // Death cause 9 -- the build tick giving up on a frame (0x41BC49), or
+        // its builder taking it back (0x402701). The dispatch at 0x48688C
+        // accepts only causes 1 to 6, so this one never reaches the counter
+        // table at all. A unit shot to pieces while it was still a frame is a
+        // different cause -- 1, an ordinary weapon death -- and does count.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto player = addPlayerWithNothing(sim);
+        sim.unitDefinitions["solar"] = makeSolarDef();
+        const auto& info = sim.getPlayer(player);
+
+        auto abandoned = addUnitOfType(sim, "solar", player, SimVector(100_ss, 0_ss, 100_ss), script);
+        sim.removeUnfinishedUnit(abandoned);
+        REQUIRE(info.unitsLost == 0u);
+
+        auto shot = addUnitOfType(sim, "solar", player, SimVector(200_ss, 0_ss, 200_ss), script);
+        sim.quietlyKillUnit(shot);
+        REQUIRE(info.unitsLost == 1u);
     }
 
     TEST_CASE("a builder with a reclaim order reclaims an enemy unit over successive ticks", "[reclaim]")

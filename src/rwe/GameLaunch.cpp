@@ -7,6 +7,7 @@
 #include <rwe/GlobalConfig.h>
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuScene.h>
+#include <rwe/MovieScene.h>
 #include <rwe/PathMapping.h>
 #include <rwe/game/SaveFile.h>
 #include <rwe/SceneContext.h>
@@ -167,6 +168,13 @@ namespace rwe
             throw std::runtime_error(SDL_GetError());
         }
 
+        // SDL3 sends no SDL_EVENT_TEXT_INPUT until it is asked to, and
+        // nothing else asks: without this every text box stays empty however
+        // much is typed at it. It stays on for the life of the window, since
+        // it is the panels that decide who receives what is typed and a scene
+        // with nothing focused simply drops it.
+        sdlContext->startTextInput(window.get());
+
         if (windowMode == WindowMode::Fullscreen)
         {
             SDL_DisplayMode targetMode;
@@ -314,6 +322,7 @@ namespace rwe
         cursors[*CursorType::Patrol] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorpatrol");
         cursors[*CursorType::Capture] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorcapture");
         cursors[*CursorType::Load] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorload");
+        cursors[*CursorType::Pickup] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorpickup");
         cursors[*CursorType::Unload] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorunload");
         cursors[*CursorType::Red] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorred");
         cursors[*CursorType::Green] = textureService.getGafEntry("anims/CURSORS.GAF", "cursorgrn");
@@ -371,15 +380,56 @@ namespace rwe
         else
         {
             LOG_INFO << "Launching into the main menu";
-            auto scene = std::make_unique<MainMenuScene>(
-                sceneContext,
-                &allSoundTdf,
-                viewport.width(),
-                viewport.height());
-            sceneManager.setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+
+            // The startup logo. 0x4271FE is what separates the films: 1.zrb
+            // is the one the original plays on the way to the menu, before
+            // anything else is on screen, where 2.zrb -- the intro -- is what
+            // the menu's own button plays. Any key or click skips it, which
+            // MovieScene already does for every film.
+            //
+            // Only on the way to the menu. Launching straight into a game
+            // (the --map path every harness takes) never reaches this branch,
+            // and neither does quitting a game back to the menu, which builds
+            // its MainMenuScene itself.
+            auto logoBytes = vfs.readFile("movies/1.zrb");
+            if (logoBytes)
+            {
+                auto context = sceneContext;
+                auto* soundTdf = &allSoundTdf;
+                auto* viewportPtr = &viewport;
+                auto logo = std::make_shared<MovieScene>(
+                    sceneContext,
+                    std::move(*logoBytes),
+                    [context, soundTdf, viewportPtr]() {
+                        auto menu = std::make_shared<MainMenuScene>(
+                            context,
+                            soundTdf,
+                            viewportPtr->width(),
+                            viewportPtr->height());
+                        context.sceneManager->setNextScene(menu);
+                    });
+                sceneManager.setNextScene(logo);
+            }
+            else
+            {
+                auto scene = std::make_unique<MainMenuScene>(
+                    sceneContext,
+                    &allSoundTdf,
+                    viewport.width(),
+                    viewport.height());
+                sceneManager.setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+            }
         }
 
         LOG_INFO << "Entering main loop";
+        // An arena run is headless by definition: nobody is watching, and
+        // waiting for a display to refresh would make a batch of twenty games
+        // take all afternoon.
+        if (gameParameters && gameParameters->aiArenaSeconds)
+        {
+            sceneManager.setHeadless(true);
+        }
+
         sceneManager.execute();
 
         LOG_INFO << "Finished main loop, exiting";

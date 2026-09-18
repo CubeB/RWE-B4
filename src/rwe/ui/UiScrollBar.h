@@ -66,6 +66,9 @@ namespace rwe
             unsigned int sizeY,
             std::shared_ptr<SpriteSeries> sprites);
 
+        /** Hands back this component's subscriptions while its own subjects are still alive; see UiComponent::releaseSubscriptions. */
+        ~UiScrollBar() override { releaseSubscriptions(); }
+
         void render(UiRenderService& context) const override;
 
         void mouseDown(MouseButtonEvent event) override;

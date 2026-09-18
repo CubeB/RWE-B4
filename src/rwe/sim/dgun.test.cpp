@@ -313,12 +313,19 @@ namespace rwe
         }
     }
 
-    TEST_CASE("a command-fire weapon never picks its own target", "[dgun]")
+    TEST_CASE("a command-fire weapon picks its own target only for the computer", "[dgun]")
     {
         // The auto-target scan skips any weapon carrying `commandfire`
         // (0x40643F, 0x407131, 0x40FDE5), and so does the return-fire path
-        // (0x408A90). It is what keeps a commander from disintegrating the
-        // first thing that wanders past.
+        // (0x408A90). It is what keeps a human's commander from
+        // disintegrating the first thing that wanders past.
+        //
+        // With one exception, from the scan at 0x4089A0: "commandfire weapons
+        // do not either, unless the player is of type 2". Type 2 is the
+        // computer player -- the same player+0x73 byte that exempts an AI from
+        // the ShootMe rule -- so an AI's commander does D-gun what comes at
+        // it. Reported from a play-test, where one stood and died under fire
+        // from several units with that weapon unused.
         auto script = makeDgunScript();
 
         SECTION("with commandfire it sits there at fire-at-will")
@@ -336,6 +343,17 @@ namespace rwe
             GameSimulation sim(makeDgunTerrain(), 0u, 0, 0);
             auto duel = setUpDuel(sim, script, 10000.0f, 10000.0f, 1000000u, 0x10000);
             defineDgunWeapon(sim, "disintegrator", false, 400.0f, 0.0f, 1.2f, 30000u);
+            armWithDgun(sim, duel.shooter, "disintegrator");
+
+            REQUIRE(everFires(sim, 60));
+        }
+
+        SECTION("a computer player's commander fires it unbidden")
+        {
+            GameSimulation sim(makeDgunTerrain(), 0u, 0, 0);
+            auto duel = setUpDuel(sim, script, 10000.0f, 10000.0f, 1000000u, 0x10000);
+            sim.players[duel.us.value].type = GamePlayerType::Computer;
+            defineDgunWeapon(sim, "disintegrator", true, 400.0f, 0.0f, 1.2f, 30000u);
             armWithDgun(sim, duel.shooter, "disintegrator");
 
             REQUIRE(everFires(sim, 60));

@@ -3,7 +3,7 @@
 
     tools/exe/coblist.py ~/ta-mods/x-esc/TAESC.gp3/scripts/CORCA.cob StartBuilding StopBuilding
 
-Written for docs/TOTALA-EXE.md section 101, where whether a construction
+Written for docs/TOTALA-EXE.md section 107, where whether a construction
 aircraft gets its second increment on the creation tick comes down to what its
 script `set`s and when -- every SET_VALUE raises bit 0x4 of the unit's event
 word, whatever the port -- and a mod ships the .cob, not the .bos. Port numbers

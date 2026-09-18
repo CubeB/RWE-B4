@@ -62,4 +62,17 @@ namespace rwe
      * fit the simulation it is being loaded into.
      */
     void loadSimulationFromJson(const nlohmann::json& j, GameSimulation& sim);
+
+    /**
+     * Sweeps a played simulation back to what loadSimulationFromJson wants:
+     * no players, no units, no projectiles, nothing of theirs left on the
+     * grids or in the derived caches. The definitions, terrain and the
+     * map's permanent grids stay, because the load does not rebuild them.
+     *
+     * This is what lets a save be restored into the simulation that made it
+     * instead of into a freshly built one -- the replay viewer's keyframes
+     * do exactly that, and rebuilding the scene from disk for each of them
+     * is the slow path they exist to avoid.
+     */
+    void clearSimulationForLoad(GameSimulation& sim);
 }

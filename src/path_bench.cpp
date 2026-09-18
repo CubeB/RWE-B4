@@ -100,6 +100,10 @@ namespace rwe
             d.maxHitPoints = 10000;
             d.buildTime = 0u;
             d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{4u, 4u, 255u, 255u, 0u, 0u};
+            // An immobile unit stamps itself into the occupancy grid through
+            // its yard map, and GameSimulation asserts on having one. Four by
+            // four of solid, matching the footprint above.
+            d.yardMap = Grid<YardMapCell>(4, 4, YardMapCell::Ground);
             return d;
         }
 
@@ -231,7 +235,7 @@ int main(int argc, char** argv)
 
     std::cout << "map " << mapCells << " cells, " << placed << " units, " << wallsPlaced << " obstacles\n";
     std::cout << "budget " << sim.pathFindingService.expansionBudgetPerTick
-              << ", per-search cap " << MaxOpenListQueries << "\n";
+              << " expansions a tick, no per-search cap\n";
 
     // Spread the destinations down the east edge. Sending every unit at one
     // point means the first arrivals block the goal and everyone behind them
@@ -305,8 +309,9 @@ int main(int argc, char** argv)
 
     const auto& c = sim.pathFindingService.counters;
     std::cout << "searches " << c.searches
-              << "  cut off by the cap " << c.searchesTruncated
               << "  exhausted " << c.searchesExhausted
+              << "  suspended " << c.searchesSuspended
+              << "  abandoned " << c.searchesAbandoned
               << "  expansions " << c.expansions
               << "  relaxed " << c.searchesRelaxed
               << "  walk steps " << c.bugWalkSteps;

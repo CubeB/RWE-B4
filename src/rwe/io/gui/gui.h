@@ -30,6 +30,9 @@ namespace rwe
         static constexpr unsigned int LabelDisplayLeft = 1;
         static constexpr unsigned int LabelDisplayCenter = 2;
 
+        /** Tested by the original before it draws a caption's drop shadow (0x4A59A4, TOTALA-EXE.md S:99). */
+        static constexpr unsigned int CaptionShadow = 8;
+
         static constexpr unsigned int BehaviorRadio = 16;
         static constexpr unsigned int BehaviorBuildButton = 32;
         static constexpr unsigned int BehaviorToggle = 64;

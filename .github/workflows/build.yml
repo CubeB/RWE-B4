@@ -92,10 +92,20 @@ jobs:
           fetch-depth: 0
       - name: init submodules (shallow)
         run: git submodule update --init --recursive --depth 1
+      # The runner image ships apt sources for Google Chrome and Microsoft
+      # that nothing here installs from -- everything in the next step comes
+      # out of Ubuntu's own archive. On 2026-09-09 Google published a
+      # Packages.gz whose hash did not match the one in its own Release file,
+      # `apt-get update` exited 100, and all four Linux jobs went down with it
+      # while nothing in the repository had changed. They are removed rather
+      # than left able to fail the build, and the update retries transient
+      # fetch errors on the sources that are left.
       - name: update apt package list
-        run: sudo apt-get update -y
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.* /etc/apt/sources.list.d/microsoft-prod.*
+          sudo apt-get update -y -o Acquire::Retries=3
       - name: install apt packages
-        run: sudo apt-get install -y
+        run: sudo apt-get install -y -o Acquire::Retries=3
           gcc-14
           g++-14
           clang-18
@@ -417,24 +427,31 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    # These two actions sit on their Node 24 majors because GitHub takes Node 20
+    # off the runners on 2026-09-23; for what we ask of them, nothing else moved.
     steps:
       - name: download MSVC Release zip
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: RWE Zip Windows MSVC Release
           path: dist
       - name: download MSVC Release installer
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: RWE Installer Windows MSVC Release
           path: dist
       - name: download AppImage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: RWE AppImage
           path: dist
       - name: create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true
+          # A -preN tag is a pre-release, so GitHub should say so and should
+          # not move the "Latest" badge onto it. The tag name is the caller's:
+          # a called workflow's github context is the caller's throughout, so
+          # github.ref_name here is the tag release.yml was pushed for.
+          prerelease: ${{ contains(github.ref_name, '-pre') }}

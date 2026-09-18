@@ -34,8 +34,8 @@ namespace rwe
         const _3do::Object& o,
         std::vector<std::pair<std::string, UnitPieceMeshInfo>>& v);
 
-    /** Every polygon outline edge of the object (model space), each edge listed once with the normals of the polygons it borders. */
-    std::vector<WireframeEdge> polygonEdgesFrom3do(const _3do::Object& o);
+    /** Every polygon of the object but its selection plate, model space, corners in the file's order: what the construction wireframe draws. */
+    std::vector<WireframePolygon> wireframePolygonsFrom3do(const _3do::Object& o);
 
     Mesh meshFrom3do(
         const std::unordered_map<std::string, Rectangle2f>& atlasMap,
@@ -43,9 +43,7 @@ namespace rwe
         const std::vector<Vector2f>& atlasColorMap,
         const _3do::Object& o);
 
-    SelectionMesh selectionMeshFrom3do(GraphicsContext& graphics, const _3do::Object& o);
-
-    GlMesh createSelectionMesh(GraphicsContext& graphics, const Vector3f& a, const Vector3f& b, const Vector3f& c, const Vector3f& d);
+    SelectionMesh selectionMeshFrom3do(const _3do::Object& o);
 
     ShaderMesh convertMesh(GraphicsContext& graphics, const Mesh& mesh);
 

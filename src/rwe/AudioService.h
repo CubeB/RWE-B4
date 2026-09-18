@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <rwe/observable/Subject.h>
 #include <rwe/sdl/SdlContext.h>
 #include <rwe/sdl/SdlMixerContext.h>
@@ -12,6 +13,63 @@
 
 namespace rwe
 {
+    /**
+     * One unreserved track's state, as seen by selectTrackForSound: whether
+     * it is currently playing, and -- if it is -- the identity of the sound
+     * on it. Kept free of MIX_Track/MIX_Audio so the picking logic below can
+     * run under a test with no mixer device behind it.
+     */
+    struct TrackSlot
+    {
+        bool playing;
+        const void* soundKey;
+    };
+
+    /**
+     * Chooses the unreserved track a new copy of `soundKey` should play on.
+     * TA's own per-effect voice limit has not been read out of the exe --
+     * only the eight-slot unit-notification queue at `0x47FAD0` is decoded
+     * (docs/TOTALA-EXE.md S:"underattack, repair and cant"), and that is a
+     * different mechanism for a different class of sound. Absent the
+     * original's rule for weapon fire and impacts, this caps concurrent
+     * copies of one sample conservatively instead of guessing at a limiter:
+     * a handful of overlapping copies of the same wav reads as one loud
+     * effect, forty of them reads as clipping (issue #58). A track is never
+     * taken from a sound still playing on it -- the search only ever returns
+     * a track that is already free -- so nothing already sounding is cut
+     * short by this.
+     */
+    std::optional<unsigned int> selectTrackForSound(
+        const std::vector<TrackSlot>& tracks,
+        unsigned int reservedCount,
+        const void* soundKey,
+        unsigned int maxConcurrentCopies);
+
+    /**
+     * The gain an effect track should be given, from the 0-128 channel
+     * volume the game's automatic gain control still speaks in.
+     *
+     * SDL2_mixer had two gains in series: Mix_VolumeChunk set the sample's
+     * own level -- MIX_MAX_VOLUME/4 here, which is defaultGain -- and
+     * Mix_Volume scaled the channel on top of it, so the two multiplied.
+     * SDL3_mixer has one gain per track and MIX_SetTrackGain replaces it,
+     * so the migration (45eb5f03) left `volume / 128` as the whole of the
+     * level and the quarter was lost.
+     *
+     * That made every effect four times louder than intended, and it turned
+     * computeSoundCeiling's budget into something it was never written to
+     * be: the ceiling counts in units of one sound at the base gain and
+     * allows at most eight of them, which is a peak of 2.0 when the base
+     * gain is a quarter and 8.0 without it. The mixer can only clamp what
+     * will not fit, and that is what a loud battle sounded like (issue #58).
+     *
+     * The volume setting and Sound Mode Off belong here too. Every other
+     * play path applies them, and this one is reapplied to every unit sound
+     * channel each frame, so leaving them out let weapon fire and impacts
+     * ignore the slider and the mute outright.
+     */
+    float computeEffectGain(int volume, float baseGain, float volumeScale, bool enabled);
+
     class AudioService
     {
     public:
@@ -52,8 +110,28 @@ namespace rwe
         std::vector<SdlMixerContext::TrackPtr> tracks;
         unsigned int reservedCount{0};
 
-        // Default gain applied to sounds on load (equivalent to old MIX_MAX_VOLUME/4)
-        static constexpr float defaultGain = 0.25f;
+        // Parallel to tracks: the sound each one was last given, so
+        // selectTrackForSound can count how many copies of a sample are
+        // already sounding. Stale once a track finishes, but findTrackForSound
+        // only ever reads an entry alongside that track's own trackPlaying(),
+        // so a stale key on a silent track is never mistaken for a live copy.
+        std::vector<const Sound*> trackSoundKey;
+
+        // Never let more than this many copies of one sample sound at once.
+        // See selectTrackForSound's comment for why this is RWE's own number
+        // and not a ported one.
+        static constexpr unsigned int maxConcurrentCopiesOfOneSound = 4;
+
+        // Base gain for an effect, multiplied by the channel volume the
+        // automatic gain control hands out -- see computeEffectGain.
+        //
+        // Upstream used MIX_MAX_VOLUME/4. A half is RWE's own, tuned by ear
+        // against a play-test: a quarter is what the old two-gain
+        // arrangement came to, and it left a lone explosion 12 dB down with
+        // the whole battle playing under the music. computeSoundCeiling's
+        // cap came down from eight to four to pay for it, so the worst-case
+        // summed peak is exactly where it was.
+        static constexpr float defaultGain = 0.5f;
 
         // Music sits under the effects rather than over them.
         static constexpr float musicGain = 0.3f;
@@ -140,6 +218,16 @@ namespace rwe
 
         void setVolume(int channel, int volume);
 
+        /**
+         * True while the mixer is still sounding this channel. A caller
+         * holding on to a channel index from an earlier play (GameScene's
+         * playingUnitChannels does, for the AGC in computeSoundVolume) needs
+         * this to tell "still my sound" from "reused for someone else's"
+         * before believing a finished notification for it -- see the note at
+         * GameScene::onChannelFinished.
+         */
+        bool isChannelPlaying(unsigned int channel);
+
         Observable<int>& getChannelFinished();
 
         /**
@@ -153,6 +241,7 @@ namespace rwe
     private:
         void haltChannel(int channel);
         int findFreeTrack();
+        std::optional<unsigned int> findTrackForSound(const Sound* soundKey, unsigned int maxConcurrentCopies);
         void setupTrackCallback(int trackIndex);
     };
 }

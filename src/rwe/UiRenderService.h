@@ -2,12 +2,62 @@
 
 #include <rwe/ShaderService.h>
 #include <algorithm>
+#include <optional>
 #include <rwe/Viewport.h>
 #include <rwe/render/GraphicsContext.h>
 #include <stack>
+#include <string>
 
 namespace rwe
 {
+    struct UiOrthoBounds
+    {
+        float left;
+        float right;
+        float bottom;
+        float top;
+    };
+
+    /**
+     * The orthographic box a fixed-size UI is drawn through, widened on
+     * whichever axis has room to spare so that the UI keeps its proportions
+     * in a window that is not its shape.
+     *
+     * A window at the content's own aspect gets the content's own box back,
+     * so this is identity for everything that was already the right shape.
+     * A window of zero height (minimised, on Windows) gets the same, rather
+     * than a division by zero.
+     */
+    UiOrthoBounds computeUiOrthoBounds(float contentWidth, float contentHeight, float windowWidth, float windowHeight);
+
+    /** Where one character sits inside a run of text, measured in the font's own advances. */
+    struct TextCharacterSpan
+    {
+        /** The offset of the character from the start of the run. */
+        float x;
+
+        /** The advance the run gains from that character, which is the width to underline. */
+        float width;
+    };
+
+    /**
+     * Where the first occurrence of `character` falls in `text`, stepping by
+     * the same per-glyph advances drawText steps by, so the answer lines up
+     * with what is on screen. Nothing if the character does not occur.
+     *
+     * Matched without regard to case. The original compares the gadget's
+     * `quickkey` byte against the caption as it stands, and the shipped gui
+     * files are authored to suit -- SKIRMISH.GUI's `SelectMap` carries a
+     * lowercase `e` for `Select Map` -- but RWE has already folded the
+     * quickkey to its SDL keycode by the time a button holds it, so the
+     * original's case is gone. Four shipped gadgets would lose their
+     * underline to a case-sensitive test anyway (MISSION.GUI's `SELECT`,
+     * whose key is `L` against `Select Mission`, and the three `UNDO`
+     * buttons, whose key is `c` against `Undo Changes`), so this is also the
+     * reading that underlines what the authors plainly meant.
+     */
+    std::optional<TextCharacterSpan> findCharacterInText(const std::string& text, int character, const SpriteSeries& font);
+
     class UiRenderService
     {
     private:
@@ -15,10 +65,35 @@ namespace rwe
         ShaderService* shaders;
         const AbstractViewport* viewport;
 
+        /**
+         * The window the fixed-size UI above lands in, when it is not the
+         * same shape as that UI.
+         *
+         * The menus are laid out at 640x480 because that is what the original
+         * laid them out at and what its GUI files carry, and the projection
+         * used to map that box onto the whole window whatever shape the
+         * window was -- so a 16:9 display stretched every button, dial and
+         * piece of art by a third. With this set, the projection is widened
+         * on whichever axis has room to spare instead, so the 640x480 keeps
+         * its proportions and sits in the middle with the slack showing as
+         * bars. MovieScene has done the same for its films since they landed;
+         * this is that, for the menus.
+         *
+         * Null for a UI already drawn at the window's own size, where there
+         * is nothing to reconcile -- the in-game HUD, which is native by
+         * design so that a bigger window means more world and not a bigger
+         * interface.
+         */
+        const AbstractViewport* aspectViewport{nullptr};
+
         std::stack<Matrix4f> matrixStack{{Matrix4f::identity()}};
 
     public:
+        UiOrthoBounds getOrthoBounds() const;
+
+    public:
         UiRenderService(GraphicsContext* graphics, ShaderService* shaders, const AbstractViewport* viewport);
+        UiRenderService(GraphicsContext* graphics, ShaderService* shaders, const AbstractViewport* viewport, const AbstractViewport* aspectViewport);
 
         void fillScreen(const Color& color);
 

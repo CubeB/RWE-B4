@@ -327,6 +327,59 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a path search suspended when the game is saved is restored exactly", "[saveload][pathing]")
+    {
+        // A search no longer has to finish inside the tick that started it,
+        // so a save can land in the middle of one. That half-finished A* is
+        // not in the document and cannot be, but it does not have to be: the
+        // search is a pure function of the world, the goal and the cell it
+        // started from, and only the last of those is lost, because the unit
+        // keeps walking its straight-line stand-in while it waits. The save
+        // writes that footprint and the number of expansions already done,
+        // and the load runs the search forward that far.
+        //
+        // Dropping the search on both sides instead would pass this test and
+        // break replays, where keyframes go through the same path during
+        // playback and the recording they are compared against dropped
+        // nothing.
+        const int tinyBudget = 20;
+
+        auto simA = makeBaseSim();
+        simA.pathFindingService.expansionBudgetPerTick = tinyBudget;
+        buildScenario(simA);
+
+        int ticks = 0;
+        while (!simA.pathFindingService.suspendedSearchStart() && ticks < 200)
+        {
+            simA.tick();
+            ++ticks;
+        }
+        REQUIRE(simA.pathFindingService.suspendedSearchStart().has_value());
+        REQUIRE(simA.pathFindingService.suspendedSearchExpansions() > 0);
+
+        auto saved = saveSimulationToJson(simA);
+
+        auto simB = makeBaseSim();
+        simB.pathFindingService.expansionBudgetPerTick = tinyBudget;
+        loadSimulationFromJson(saved, simB);
+
+        REQUIRE(simB.pathFindingService.suspendedSearchStart() == simA.pathFindingService.suspendedSearchStart());
+        REQUIRE(simB.pathFindingService.suspendedSearchExpansions() == simA.pathFindingService.suspendedSearchExpansions());
+        REQUIRE(computeHashOf(simA) == computeHashOf(simB));
+        REQUIRE(saveSimulationToJson(simB) == saved);
+
+        // Where a dropped search would show: the two would path the same
+        // route but land it on different ticks, and the units would be
+        // somewhere different by the time it arrived.
+        for (int i = 0; i < 200; ++i)
+        {
+            simA.tick();
+            simB.tick();
+            INFO("tick " << i << " after the save");
+            REQUIRE(computeHashOf(simA) == computeHashOf(simB));
+        }
+    }
+
     TEST_CASE("the save carries state nothing hashes", "[saveload]")
     {
         // The round trip above compares the whole save byte for byte, which
@@ -354,6 +407,21 @@ namespace rwe
 
             // A chase the unit started for itself, which gives up at the leash.
             marked.orders.push_back(AttackOrder(markedId, AttackLeash(SimVector(11_ss, 0_ss, 22_ss), 640_ss)));
+
+            // A piece the script has said dont-cache on, which the renderer
+            // then draws unshaded. Render-facing, like `shaded`, and hashed
+            // by nothing.
+            marked.pieces.front().cached = false;
+
+            // A gun whose aim script has said yes and which is waiting on its
+            // reload. The thread that answered is deleted on the next COB
+            // pass, so the angles it was sent are all that is left to keep.
+            UnitWeapon gun;
+            gun.weaponType = "MISSILE";
+            UnitWeaponStateAttacking aimed(SimVector(40_ss, 0_ss, 50_ss));
+            aimed.attackInfo = UnitWeaponStateAttacking::AimedInfo{SimAngle(1234), SimAngle(567)};
+            gun.state = aimed;
+            marked.weapons[1] = gun;
         }
 
         auto deadId = spawnUnit(simA, "KBOT", us, SimVector(360_ss, 0_ss, 300_ss));
@@ -371,6 +439,15 @@ namespace rwe
         // rather than pointing at a diff of the whole save.
         const auto& markedB = simB.getUnitState(markedId);
         REQUIRE(markedB.commandFireShotFired);
+        REQUIRE(!markedB.pieces.front().cached);
+
+        REQUIRE(markedB.weapons[1].has_value());
+        const auto* attackingB = std::get_if<UnitWeaponStateAttacking>(&markedB.weapons[1]->state);
+        REQUIRE(attackingB != nullptr);
+        const auto* aimedB = std::get_if<UnitWeaponStateAttacking::AimedInfo>(&attackingB->attackInfo);
+        REQUIRE(aimedB != nullptr);
+        REQUIRE(aimedB->lastHeading == SimAngle(1234));
+        REQUIRE(aimedB->lastPitch == SimAngle(567));
 
         REQUIRE(!markedB.orders.empty());
         const auto* attack = std::get_if<AttackOrder>(&markedB.orders.front());
@@ -382,5 +459,61 @@ namespace rwe
         const auto* deadB = std::get_if<UnitState::LifeStateDead>(&simB.getUnitState(deadId).lifeState);
         REQUIRE(deadB != nullptr);
         REQUIRE(deadB->corpseLevel == 3);
+    }
+
+    TEST_CASE("an old save's units from before mobile units were shaded come back shaded", "[saveload]")
+    {
+        // Until 2026-09-06 every piece of a mobile unit was made unshaded, and
+        // a save keeps the flag, so a version 1 save can still hold a
+        // commander from then with no piece shaded.
+        auto addPad = [](GameSimulation& sim) {
+            auto pad = makeMobileDef(2u);
+            pad.isMobile = false;
+            pad.canMove = false;
+            pad.yardMap = Grid<YardMapCell>(2, 2, YardMapCell::Ground);
+            sim.unitDefinitions["PAD"] = pad;
+            sim.unitScriptDefinitions["PAD"] = makeLoopScript();
+        };
+
+        auto simA = makeBaseSim();
+        addPad(simA);
+        buildScenario(simA);
+
+        auto us = PlayerId(0);
+        auto tankId = spawnUnit(simA, "TANK", us, SimVector(300_ss, 0_ss, 300_ss));
+        auto padId = spawnUnit(simA, "PAD", us, SimVector(420_ss, 0_ss, 300_ss));
+        for (auto id : {tankId, padId})
+        {
+            for (auto& piece : simA.getUnitState(id).pieces)
+            {
+                piece.shaded = false;
+            }
+        }
+
+        auto saved = saveSimulationToJson(simA);
+        REQUIRE(saved.at("version").get<int>() == 2);
+
+        auto simB = makeBaseSim();
+        addPad(simB);
+
+        SECTION("a version 1 save has its unshaded mobile units shaded again")
+        {
+            saved["version"] = 1;
+            loadSimulationFromJson(saved, simB);
+            REQUIRE(simB.getUnitState(tankId).pieces.front().shaded);
+        }
+
+        SECTION("but not its buildings, which were always made shaded")
+        {
+            saved["version"] = 1;
+            loadSimulationFromJson(saved, simB);
+            REQUIRE(!simB.getUnitState(padId).pieces.front().shaded);
+        }
+
+        SECTION("and a version 2 save is loaded as written")
+        {
+            loadSimulationFromJson(saved, simB);
+            REQUIRE(!simB.getUnitState(tankId).pieces.front().shaded);
+        }
     }
 }

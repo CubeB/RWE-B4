@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <rwe/ui/UiComponent.h>
 
 namespace rwe
@@ -24,6 +25,11 @@ namespace rwe
         void render(UiRenderService& context) const override;
 
         void keyDown(KeyEvent event) override;
+
+        void textInput(const std::string& newText) override;
+
+        /** The box is typed into, so a focused one takes every key its panel gets. */
+        bool wantsTextInput() const override { return true; }
 
         void focus() override;
 

@@ -1,12 +1,16 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <deque>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <optional>
 #include <queue>
 #include <rwe/AudioService.h>
+#include <rwe/game/AiArenaReport.h>
+#include <rwe/game/ReplayFile.h>
 #include <rwe/CroppedViewport.h>
 #include <rwe/CursorService.h>
 #include <rwe/RenderService.h>
@@ -15,6 +19,8 @@
 #include <rwe/UiRenderService.h>
 #include <rwe/Viewport.h>
 #include <rwe/game/BuilderGuisDatabase.h>
+#include <rwe/game/DefaultAction.h>
+#include <rwe/game/EndGameStats.h>
 #include <rwe/game/GameCameraState.h>
 #include <rwe/game/GameMediaDatabase.h>
 #include <rwe/game/GameNetworkService.h>
@@ -45,6 +51,7 @@
 #include <rwe/sim/UnitState.h>
 #include <rwe/ui/UiFactory.h>
 #include <rwe/ui/UiPanel.h>
+#include <rwe/ui/UiStagedButton.h>
 #include <unordered_set>
 #include <variant>
 
@@ -215,6 +222,16 @@ namespace rwe
         static constexpr int GuiSizeTop = 32;
         static constexpr int GuiSizeBottom = 32;
 
+        /**
+         * How far the left column travels when F4 or Space puts it away.
+         *
+         * TOTALA-EXE.md 76 gives the original's figure as 0x7d, 125 pixels,
+         * which is its own side panel's width. RWE's column is 128 wide, so
+         * the faithful analogue is this engine's width rather than the
+         * original's number -- 125 here would leave a three pixel sliver.
+         */
+        static constexpr int PanelSlideTravel = GuiSizeLeft;
+
     private:
         static const unsigned int UnitSelectChannel = 0;
 
@@ -225,6 +242,13 @@ namespace rwe
          * in world units/second.
          */
         static constexpr float CameraPanSpeed = 1000.0f;
+
+        /**
+         * How fast the side panel slides, in pixels per second. RWE's own
+         * number: 76 pins the endpoints and the sounds but says nothing
+         * about the rate. 850 crosses the 128 pixels in about 150ms.
+         */
+        static constexpr float PanelSlidePixelsPerSecond = 850.0f;
 
         static const Rectangle2f minimapViewport;
 
@@ -245,6 +269,11 @@ namespace rwe
         GameMediaDatabase gameMediaDatabase;
         SharedTextureHandle unitTextureAtlas;
         std::vector<SharedTextureHandle> unitTeamTextureAtlases;
+        SharedTextureHandle unitPaletteIndexAtlas;
+        std::vector<SharedTextureHandle> unitTeamPaletteIndexAtlases;
+        SharedTextureHandle shadeTableTexture;
+        /** palettes/PALETTE.ALP; the building halo in worldPost.frag reads it. */
+        SharedTextureHandle alphaTableTexture;
 
         UiRenderService worldUiRenderService;
         UiRenderService chromeUiRenderService;
@@ -261,6 +290,14 @@ namespace rwe
         std::shared_ptr<SpriteSeries> minimapDots;
         std::shared_ptr<Sprite> minimapDotHighlight;
         Rectangle2f minimapRect;
+
+        /**
+         * Where the minimap sits with the panel out. minimapRect itself is
+         * driven from this every frame, so the six places that read it --
+         * the draw, the drag, the dot hover, isCursorOverMinimap -- follow
+         * the slide without each needing to know about it.
+         */
+        Rectangle2f minimapRectBase;
 
         std::unique_ptr<UiPanel> currentPanel;
         std::optional<std::unique_ptr<UiPanel>> nextPanel;
@@ -333,6 +370,100 @@ namespace rwe
         /** Set when the game has been decided; the result is shown until the player leaves. */
         std::optional<WinStatus> gameOver;
         GameTime gameOverTime{0};
+
+        /**
+         * What the original's `endgame.cpp` does once a game is decided, cut
+         * down to the three steps a skirmish actually runs. Its own state
+         * machine is nine states wide (the jump table at 0x4205AC) and most of
+         * that is the campaign: the CD check, the mission list, the briefing
+         * for the next mission. What is left is the banner over the frozen
+         * world, the fade, and the chart.
+         */
+        enum class EndGamePhase
+        {
+            /**
+             * `igvictory` or `igdefeat` over the last frame of the game, which
+             * the original leaves up because the banner is a flag on the world
+             * renderer rather than a screen of its own: bits 5 and 6 of
+             * `game+0x3923B`, drawn by 0x46A107 beside `igpaused`.
+             */
+            Banner,
+
+            /** Ten steps of the fade table, one a tick (0x41FA8F). */
+            Fade,
+
+            /** The chart, over `bitmaps/OUTCOME0.PCX` (0x41FF42). */
+            Chart
+        };
+
+        EndGamePhase endGamePhase{EndGamePhase::Banner};
+
+        /** When the current phase started, on the scene clock. */
+        SceneTime endGamePhaseStart{0};
+
+        /** Filled once, when the chart is built. */
+        std::optional<EndGameStats> endGameStats;
+
+        /**
+         * How far each bar has run up, in its column's own units. The original
+         * keeps this on the gadget and advances it by `max(target/15, 1)` on
+         * every update, so a bar is full after fifteen of them whatever it is
+         * counting (0x41E697, the constants at 0x4FD008 and 0x4FD00C).
+         */
+        std::vector<std::array<float, EndGameStatCount>> endGameBarFill;
+
+        /** How many columns have been started. They go left to right. */
+        int endGameColumnsStarted{0};
+
+        /** When the next column starts: ten ticks after the last (0x42053A). */
+        SceneTime endGameNextColumn{0};
+
+        std::shared_ptr<Sprite> endGameBackground;
+
+        /**
+         * The chart's text, in the face every gui label in the game is set in
+         * and the one the column headings painted into OUTCOME0.PCX were drawn
+         * with: Haettenschweiler, out of `anims/hattfont12.gaf`.
+         */
+        std::shared_ptr<SpriteSeries> endGameChartFont;
+
+        /** ENDMSN.GUI's MainMenu button, wearing the BUTTONS0 face. */
+        std::unique_ptr<UiStagedButton> endGameMainMenuButton;
+
+        /** Whether the press that armed the button started on it. */
+        bool endGameChartButtonArmed{false};
+
+        void beginEndGameSequence();
+        void updateEndGameSequence();
+        void buildEndGameChart();
+        void renderEndGameSequence();
+        void renderEndGameChart();
+
+        bool localPlayerWon() const;
+
+        /** Window coordinates back into the chart's own 640x480 space. */
+        Point endGameScreenPoint(int windowX, int windowY) const;
+
+        /** Fills every bar at once, which is what a click during the run-up does (0x420028). */
+        void finishEndGameBars();
+
+        /** True once the chart has taken the screen; the world is not drawn behind it. */
+        bool endGameChartVisible() const;
+
+        /**
+         * Maps the original's 640x480 layout onto the window, keeping its
+         * proportions and centring what is left over -- the same bargain
+         * MovieScene and the menus strike.
+         */
+        struct EndGameLayout
+        {
+            float scale;
+            float offsetX;
+            float offsetY;
+
+            Rectangle2f rect(float x, float y, float w, float h) const;
+        };
+        EndGameLayout endGameLayout() const;
 
         /** Fog of war: hide what the local player cannot see. Off reveals the whole map. */
         bool fogOfWarEnabled{true};
@@ -410,9 +541,15 @@ namespace rwe
 
         SoundMode soundModeSetting{SoundMode::Stereo};
         UnitSpeechLevel unitSpeechSetting{UnitSpeechLevel::Full};
+        /** MUSICRT's TRACKMODE, TOTALA-EXE.md S:68. Only Custom lets the situational music choose. */
+        MusicTrackMode musicTrackModeSetting{MusicTrackMode::Custom};
         unsigned int gammaSetting{100};
-        bool shadingEnabled{true};
+        ShadingMode shadingMode{ShadingMode::BuildingsOnly};
         bool antiAliasEnabled{true};
+        /** The purple building fringe; see GlobalConfig and TOTALA-EXE.md S:101. */
+        bool buildingHaloEnabled{true};
+        /** Whether the 2x2 filter reaches past the buildings; see GlobalConfig. */
+        bool antiAliasUnitsEnabled{false};
 
         void applyGamma();
 
@@ -422,6 +559,23 @@ namespace rwe
 
         /** Pushes the current settings back into the menu widgets: a staged button does not advance its own display. */
         void refreshInGameOptionControls();
+
+        /**
+         * How much of the measured PALETTE.SHD ramp a model of each kind
+         * gets: 0 for one the switch excludes, otherwise the category's own
+         * strength. See the constants in GameScene.cpp for why the two
+         * differ.
+         */
+        float shadeStrengthFor(bool isBuilding) const;
+
+        /**
+         * Rebuilds VISUALRT's two-stage SHADING gadget as a four-stage one.
+         * The GUI files are read-only game data, so a control the original
+         * does not have has to be made in code.
+         */
+        void widenShadingButton();
+        void addBuildingHaloButton(UiPanel& panel);
+        void addAntiAliasUnitsButton(UiPanel& panel);
 
         /** Finds a control by name across every open menu panel. */
         template <typename T>
@@ -440,10 +594,131 @@ namespace rwe
 
         /** Live copies of the display settings the options pages edit. */
         bool shadowsEnabled{true};
+        /**
+         * The original's second shadow bit, under the master above: with it
+         * clear, buildings and scenery go on casting and mobile units do not.
+         * rwe.cfg only -- see GlobalConfig for why it is not a button.
+         */
+        bool vehicleShadowsEnabled{true};
+        /** The purple building halo: strength as a percentage, width in output pixels. */
+        unsigned int buildingHaloStrength{100};
+        unsigned int buildingHaloSaturation{65};
+        unsigned int buildingHaloRedShift{50};
         unsigned int scrollSpeedSetting{100};
 
         /** What this game was started with, kept for the save-game header. */
         GameParameters gameParameters;
+
+        /**
+         * Set only for a computer-versus-computer measurement run. Samples
+         * the simulation as it goes and, at the time limit, writes a CSV and
+         * quits. See AiArenaReport for why this exists.
+         */
+        std::optional<AiArenaReport> arenaReport;
+        std::optional<unsigned int> arenaEndTick;
+
+        // --- Replays ---
+        /** Set while recording: every command popped for a tick is written here. */
+        std::optional<ReplayWriter> replayWriter;
+        /**
+         * Set while watching one. The commands are pushed into the command
+         * service a tick at a time instead of coming from a player or an AI,
+         * and the computer players are idled so they add nothing of their own.
+         */
+        std::optional<Replay> replayPlayback;
+        /** Playing or paused; separate from the game's own pause. */
+        bool replayPlaying{true};
+        /**
+         * Simulation ticks to run per frame while watching. One is real time.
+         * This is raised rather than the game speed because the speed control
+         * scales an accumulator that the per-frame tick cap then truncates,
+         * which silently drops ticks and ends the replay early.
+         */
+        int replaySpeed{1};
+        /** While seeking, run flat out until this tick is reached. */
+        std::optional<unsigned int> replaySeekTarget;
+
+        /**
+         * Where the scrub handle is, in seconds. Held here rather than made
+         * fresh from the playback position each frame: rebuilding it every
+         * frame means the game drags the handle out from under the mouse,
+         * which is what made scrubbing unusable.
+         */
+        int replayScrubSeconds{0};
+        /** True while the handle is being dragged, so the position stops following the game. */
+        bool replayScrubbing{false};
+        /** Set once the end has been reached, so it is only paused there once. */
+        bool replayReachedEnd{false};
+
+        /**
+         * Which player's resources and panel art the interface shows. A
+         * recording has no local player in the sense the interface means, and
+         * whichever slot stood in for one is not necessarily the side worth
+         * watching.
+         */
+        std::optional<PlayerId> hudPlayerOverride;
+
+        /**
+         * Both sides' fog at once, rebuilt when the tick moves on. A spectator
+         * with the fog on wants to see what each side could see, which is
+         * neither player's own grid nor a fully lit map.
+         */
+        mutable std::optional<PlayerVisibility> combinedVisibility;
+        mutable unsigned int combinedVisibilityTick{0};
+
+        /**
+         * The other recordings on disk, so one can be picked without going
+         * back to a command line. Read when playback starts and when the
+         * refresh button is pressed, rather than every frame: it is a
+         * directory scan and a header parse per file.
+         */
+        std::vector<ReplaySummary> availableReplays;
+
+        /**
+         * Snapshots of the simulation taken as a recording plays, keyed by
+         * the scene time each was taken at, so that a scrub backwards can
+         * start from the nearest one instead of from the beginning. Each is
+         * the save-game document in CBOR, which is a fraction of the json
+         * object's size in memory; a thirty-minute game holds sixty of them.
+         *
+         * A keyframe at scene time S is the state before tick S's commands
+         * are pushed, which is the state after tick S-1 has run in full.
+         * Restoring it sets sceneTime to S, and the next tryTickGame feeds
+         * tick S exactly as the first pass did.
+         */
+        std::map<unsigned int, std::vector<std::uint8_t>> replayKeyframes;
+        std::size_t replayKeyframeBytes{0};
+        /** Thirty seconds of game time between keyframes. */
+        static constexpr unsigned int ReplayKeyframeInterval = 900;
+        /**
+         * RWE_REPLAY_NO_KEYFRAMES=1 in the environment: take none, so every
+         * scrub backwards rebuilds the scene from the start as it did before
+         * there were any. For timing one path against the other, and for
+         * telling a keyframe bug from a playback one.
+         */
+        bool replayKeyframesDisabled{false};
+
+        void pushReplayCommandsForTick(unsigned int tick);
+        void renderReplayWindow();
+        void restartReplayAt(unsigned int tick);
+        void openReplay(const std::filesystem::path& path);
+        void takeReplayKeyframe();
+        /** Puts the simulation and the scene back to the keyframe at the given scene time. */
+        void restoreReplayKeyframe(unsigned int tick, const std::vector<std::uint8_t>& keyframe);
+        /**
+         * Moves the playback to the given tick: winds forward from where it
+         * is, or from the latest keyframe at or before the target, or if
+         * there is none rebuilds the scene from the start.
+         */
+        void seekReplayTo(unsigned int tick);
+
+        /**
+         * Shows what no player can see: cloaked enemies, and every unit
+         * whoever owns it. Distinct from fogOfWarEnabled, which only decides
+         * whether the map is lit -- a cloaked unit stays hidden with the fog
+         * off, because hiding it is not a fog rule.
+         */
+        bool spectatorMode{false};
 
         /** Sound lookup table, kept so a main menu scene can be built on the way out. */
         TdfBlock* audioLookup;
@@ -574,6 +849,10 @@ namespace rwe
         std::vector<std::string> battleTracks;
         std::vector<std::string> musicBag;
         std::string lastMusicTrack;
+        /** Every track but the title theme, in album order, for Play All, Random and Repeat. */
+        std::vector<std::string> allMusicTracks;
+        /** +1 or -1 after CDNEXT or CDPREV, used up by the next pick in Play All and Repeat. */
+        int pendingMusicStep{0};
         bool musicPlaylistBuilt{false};
 
         MusicSituation musicSituation{MusicSituation::Building};
@@ -617,9 +896,41 @@ namespace rwe
         std::vector<FlashEffect> flashes;
         bool guiVisible{true};
 
+        /**
+         * How far the left column is currently slid, in pixels: 0 with it in
+         * place, PanelSlideTravel with it clear of the screen.
+         *
+         * Presentation only. Nothing under sim/ reads it, so it is neither
+         * saved nor hashed -- see the determinism section of CLAUDE.md.
+         */
+        float panelSlide{0.0f};
+
+        /**
+         * F4's latch -- the original's display word bit 7 at game+0x37f06
+         * (76). That bit has no registry name and only F4 touches it, so it
+         * lasts the session and no longer, and this bool does the same.
+         */
+        bool panelHiddenLatch{false};
+
+        /** Space held, which peeks past the panel while it is down. */
+        bool spaceDown{false};
+
+        /** currentPanel's own x, before the slide is taken off it. */
+        int panelBaseX{0};
+
+        /**
+         * The left inset the world viewport was last given. The slide only
+         * moves this between its two endpoints, never through them: changing
+         * it remakes the world framebuffer and two full size textures, which
+         * is not a thing to do sixty times a second.
+         */
+        int appliedLeftInset{GuiSizeLeft};
+
         FrameBufferInfo worldFrameBuffer;
 
         TextureHandle dodgeMask;
+        /** Coverage of the finished buildings, for the purple halo the post pass draws. */
+        TextureHandle buildingMask;
 
 
     public:
@@ -630,6 +941,10 @@ namespace rwe
             const GameCameraState& cameraState,
             SharedTextureHandle unitTextureAtlas,
             std::vector<SharedTextureHandle>&& unitTeamTextureAtlases,
+            SharedTextureHandle unitPaletteIndexAtlas,
+            std::vector<SharedTextureHandle>&& unitTeamPaletteIndexAtlases,
+            SharedTextureHandle shadeTableTexture,
+            SharedTextureHandle alphaTableTexture,
             GameSimulation&& simulation,
             MapTerrainGraphics&& terrainGraphics,
             BuilderGuisDatabase&& builderGuisDatabase,
@@ -662,6 +977,8 @@ namespace rwe
 
         void onKeyUp(const SDL_KeyboardEvent& keysym) override;
 
+        void onTextInput(const std::string& text) override;
+
         void onMouseDown(MouseButtonEvent event) override;
 
         void onMouseUp(MouseButtonEvent event) override;
@@ -678,6 +995,17 @@ namespace rwe
 
         /** Applies a saved game's state onto the freshly built simulation. */
         void applyLoadedGame(const SaveFile& save);
+
+        /** Watch a recorded game instead of playing one. */
+        void enableReplayPlayback(Replay&& replay);
+
+        /** Write every command issued in this game to a replay file. */
+        void enableReplayRecording(const std::filesystem::path& path, const ReplayHeader& header);
+
+        bool isReplayPlayback() const { return replayPlayback.has_value(); }
+
+        /** Whose resources the top bar reads out; the local player unless a replay says otherwise. */
+        PlayerId hudPlayerId() const { return hudPlayerOverride.value_or(localPlayerId); }
 
         void setCameraPosition(const Vector3f& newPosition);
 
@@ -752,6 +1080,11 @@ namespace rwe
 
         bool isCursorOverWorld() const;
 
+        /** Whether the cursor is on the side panel, which is Space's exception (76). */
+        bool isCursorOverPanel();
+
+        void updatePanelSlide(int millisecondsElapsed);
+
         Point getMousePosition() const;
 
         std::optional<UnitId> getFirstCollidingUnit(const Ray3f& ray) const;
@@ -771,6 +1104,23 @@ namespace rwe
 
         void localPlayerEnqueueUnitOrder(UnitId unitId, const UnitOrder& order);
 
+        /**
+         * What one selected unit does about a click on the world, run through
+         * the ladder in DefaultAction.h and issued or queued according to the
+         * shift key. Returns whether anything was ordered.
+         *
+         * A select is not handled here: the selection is not per unit, and
+         * the caller has already dealt with it.
+         */
+        bool issueDefaultAction(UnitId selectedUnit, DefaultActionScheme scheme);
+
+        /**
+         * The cursor the whole selection shows for the current hover under
+         * one scheme -- the lowest-numbered cursor any selected unit asks
+         * for, which is what the original's chooser loop keeps (0x48D3E9).
+         */
+        CursorType selectionDefaultCursor(DefaultActionScheme scheme) const;
+
         void localPlayerStopUnit(UnitId unitId);
 
         void localPlayerSelfDestructUnit(UnitId unitId);
@@ -782,6 +1132,35 @@ namespace rwe
 
         /** The position of the unit's queued build order whose footprint covers position, if any. */
         std::optional<SimVector> plannedBuildOrderAt(UnitId unitId, const SimVector& position) const;
+
+        /**
+         * A planned building or a cancellation the local player just clicked,
+         * drawn (or hidden) a frame ahead of the order actually reaching the
+         * unit's queue -- see issue #61. Presentation only: this list is
+         * never read by anything under src/rwe/sim/, never serialized and
+         * never hashed. What it stands in for is always the same click that
+         * also went into localPlayerCommandBuffer as a real command; this is
+         * just what the screen shows while that command is still in transit.
+         */
+        struct LocalBuildGhost
+        {
+            UnitId builderId;
+            /** Empty for a Cancellation ghost, which only needs to match a position. */
+            std::string unitType;
+            SimVector position;
+            LocalBuildGhostKind kind;
+            /** Scene time the ghost was added, for the timeout in reconcileLocalBuildGhosts. */
+            GameTime createdAt;
+        };
+        std::vector<LocalBuildGhost> localBuildGhosts;
+
+        void addLocalBuildGhost(UnitId unitId, const std::string& unitType, const SimVector& position, LocalBuildGhostKind kind);
+
+        /** Drops each local ghost once the real order it stood in for has caught up, or once it has waited too long. */
+        void reconcileLocalBuildGhosts();
+
+        /** Whether a Cancellation ghost is currently hiding the build order at position for unitId. */
+        bool buildOrderIsLocallyCancelled(UnitId unitId, const SimVector& position) const;
 
         /** The ORDERS panel with the buttons a unit cannot use taken out. */
         std::unique_ptr<UiPanel> createOrdersPanel();
@@ -872,7 +1251,6 @@ namespace rwe
 
         void returnToMainMenu();
 
-        void renderGameOverOverlay();
 
         void renderHelpOverlay();
 
@@ -954,6 +1332,16 @@ namespace rwe
         void toggleGameMenu();
         void openGameMenuRoot();
         void openGameExitMenu();
+
+        /**
+         * TotalA's YESORNO.GUI, built fresh for whichever question is being
+         * asked and dropped in as the whole menu stack so CHOICE2/Cancel has
+         * a clean panel to land back on. onYes and onNo are copy-then-cleared
+         * before being called, because either one is free to replace the
+         * whole scene (exiting to Windows, tearing down to the main menu) and
+         * a member read after that point would be reading freed state.
+         */
+        void openConfirmDialog(const std::string& title, std::function<void()> onYes, std::function<void()> onNo);
         void openInGameOptions(const std::string& page);
         void closeGameMenu();
         void setGameMenuPanel(std::unique_ptr<UiPanel>&& panel);
@@ -968,7 +1356,34 @@ namespace rwe
          * lands here and runs at the top of the next update.
          */
         std::vector<std::function<void()>> pendingMenuActions;
+
+        /** What CHOICE1/CHOICE2 on the open YESORNO panel run; see openConfirmDialog. */
+        std::function<void()> pendingConfirmAction;
+        /** What CHOICE2 runs instead, or nothing to fall back to openGameMenuRoot(). */
+        std::function<void()> pendingConfirmCancel;
+
+        /**
+         * Set the moment this scene has handed the scene manager its
+         * successor, and never cleared: the scene is on its way out.
+         *
+         * The swap is not immediate. SceneManager::execute takes the next
+         * scene at the top of the loop, so a scene that calls setNextScene
+         * from inside its own update -- which every exit here does, by way of
+         * pendingMenuActions -- still owns the audio service for the rest of
+         * that update and for the render that follows it. Anything that would
+         * start a sound the incoming scene has to live with has to know not
+         * to; the situational music driver is the one that did.
+         */
+        bool leavingScene{false};
+
         void exitToMainMenu();
+        /**
+         * Hands the game to another scene. Every exit from GameScene goes
+         * through here: it stops the music this scene was playing and marks
+         * the scene as leaving, so the frame's remaining update does not
+         * start another track for the next scene to inherit.
+         */
+        void leaveFor(std::shared_ptr<Scene> scene);
         GameOptions currentInGameOptions() const;
         void applyInGameOptions(const GameOptions& state);
         void saveInGameOptions();
@@ -977,6 +1392,10 @@ namespace rwe
         void openLoadDialog();
         void saveCurrentGame(const std::string& name);
         void loadSavedGame(const std::string& name);
+        /** RESTART.GUI, opened from the exit menu in skirmish; see TOTALA-EXE.md S:63. */
+        void openRestartMenu();
+        /** Reloads the current map and players from scratch, the way a fresh game starts. */
+        void restartGame();
         /** Pause the sim for the menu, through the same command path the Pause key uses. */
         void setMenuPause(bool wantPaused);
 
@@ -1002,7 +1421,7 @@ namespace rwe
         /** The marching string of stars the original draws between queued waypoints. */
         void drawWaypointTrail(const Matrix4f& worldToUi, const SimVector& from, const SimVector& to);
 
-        void renderBuildBoxes(const UnitState& unit, const Color& outerColor, const Color& innerColor);
+        void renderBuildBoxes(UnitId unitId, const UnitState& unit, const Color& outerColor, const Color& innerColor);
 
         /**
          * The white ring the v3.1 patch draws around a cloaked unit while

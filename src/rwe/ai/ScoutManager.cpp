@@ -5,6 +5,7 @@
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/util/SimpleLogger.h>
+#include <rwe/util/Index.h>
 
 namespace rwe
 {
@@ -12,6 +13,21 @@ namespace rwe
     {
         // Two scouts do not chase the same ground.
         const SimScalar ScoutTargetSeparation = 320_ss;
+
+        /**
+         * How long a declared start position has to have gone unwatched before
+         * a scout is sent to look at it, in threat-map rebuilds -- which is
+         * about a second apiece at Standard. Low enough that the opening
+         * sweep starts at once, high enough that a scout which has just been
+         * there does not turn straight round.
+         */
+        const float StartPositionStaleThreshold = 20.0f;
+
+        /**
+         * A start position this close to our base anchor is our own, and
+         * there is nothing to learn by scouting it.
+         */
+        const SimScalar OwnStartPositionRadius = 512_ss;
 
         // Retreat once this badly hurt; the scout is more use alive.
         bool isBadlyHurt(const UnitState& unit, const UnitDefinition& def)
@@ -96,6 +112,52 @@ namespace rwe
             bb.scoutUnitId.reset();
         }
 
+        // Nothing that walks can find an enemy across water. While no
+        // enemy is known and we own a hull, one goes and looks -- the scout
+        // ship for preference, since that is what the yard builds first and
+        // what it is for, but any warship rather than none, because eyes
+        // matter more than one destroyer's patrol while the map is blank.
+        if (profile.navalScouting && !bb.enemyBasePosition && bb.knownEnemies.empty() && !bb.navalCombatUnits.empty())
+        {
+            if (bb.navalScoutUnitId)
+            {
+                auto existing = sim.tryGetUnitState(*bb.navalScoutUnitId);
+                if (!existing || existing->get().isDead())
+                {
+                    bb.navalScoutUnitId.reset();
+                }
+            }
+            if (!bb.navalScoutUnitId)
+            {
+                for (auto shipId : bb.navalCombatUnits)
+                {
+                    auto shipRef = sim.tryGetUnitState(shipId);
+                    if (!shipRef || shipRef->get().isDead())
+                    {
+                        continue;
+                    }
+                    if (!bb.navalScoutUnitId)
+                    {
+                        bb.navalScoutUnitId = shipId;
+                    }
+                    if (!bb.sideUnits.scoutShip.empty() && shipRef->get().unitType == bb.sideUnits.scoutShip)
+                    {
+                        bb.navalScoutUnitId = shipId;
+                        break;
+                    }
+                }
+            }
+            if (bb.navalScoutUnitId)
+            {
+                scouts.push_back(*bb.navalScoutUnitId);
+            }
+        }
+        else
+        {
+            // Enemy found, or the knob is off: the hull goes back to the fleet.
+            bb.navalScoutUnitId.reset();
+        }
+
         for (auto scoutId : scouts)
         {
             sendScout(sim, threatMap, reachability, bb, scoutId, outCommands);
@@ -113,6 +175,12 @@ namespace rwe
         const auto& scout = sim.getUnitState(scoutId);
         const auto& def = sim.unitDefinitions.at(scout.unitType);
         bool flies = def.canFly;
+        // Needs water under it. Taken from the movement class rather than the
+        // FBI's Floater flag because the naval reachability layer is labelled
+        // by this same field, so the test and the map that answers it cannot
+        // drift apart -- which is exactly how the ground layer came to be
+        // answering questions about an amphibious commander.
+        bool floats = !flies && sim.getAdHocMovementClass(def.movementCollisionInfo).minWaterDepth > 0;
 
         // Hurt: head home, where the base can look after it.
         if (isBadlyHurt(scout, def) && bb.baseAnchor)
@@ -152,7 +220,23 @@ namespace rwe
             {
                 return false;
             }
-            if (!flies)
+            if (floats)
+            {
+                // A hull is the mirror image of a ground scout: it wants the
+                // water and cannot leave it. Judged by the naval labelling,
+                // never the ground one -- asking a land mover's map about a
+                // ship is the same mistake that had the ground layer telling
+                // an amphibious commander every island was out of reach.
+                if (reachability.isNavalValid() && !reachability.isNavalReachable(sim, center))
+                {
+                    return false;
+                }
+                if (sim.terrain.getHeightAt(center.x, center.z) >= sim.terrain.getSeaLevel())
+                {
+                    return false;
+                }
+            }
+            else if (!flies)
             {
                 // Ground scouts keep to land they can reach.
                 if (bb.groundReachabilityValid && !reachability.isReachable(sim, center))
@@ -167,11 +251,55 @@ namespace rwe
             return true;
         };
 
+        // Opening priority: the map's own start positions.
+        //
+        // A player opens by looking at the other corners, because that is
+        // where an enemy has to be. The AI is handed the same list a player
+        // reads off the lobby preview (MapIntel.h) and does the same thing
+        // with it -- and only until it has actually found the enemy base,
+        // after which the staleness search below is the better guide.
+        //
+        // Nothing here tells the AI which position the enemy took. It is
+        // still a search: the scout has to go and look.
+        if (!bb.enemyBasePosition && bb.mapIntel.valid && !threatMap.isEmpty())
+        {
+            const auto& staleness = threatMap.getStaleness();
+            std::optional<SimVector> bestStart;
+            float bestStale = StartPositionStaleThreshold;
+            for (const auto& start : bb.mapIntel.startPositions)
+            {
+                if (bb.baseAnchor && start.distanceSquared(*bb.baseAnchor) < OwnStartPositionRadius * OwnStartPositionRadius)
+                {
+                    continue;
+                }
+                auto cell = threatMap.cellAt(start);
+                if (cell.x < 0 || cell.y < 0 || static_cast<std::size_t>(cell.x) >= staleness.getWidth() || static_cast<std::size_t>(cell.y) >= staleness.getHeight())
+                {
+                    continue;
+                }
+                auto stale = staleness.get(static_cast<std::size_t>(cell.x), static_cast<std::size_t>(cell.y));
+                if (stale <= bestStale)
+                {
+                    continue;
+                }
+                if (!accept(cell.x, cell.y, start))
+                {
+                    continue;
+                }
+                bestStale = stale;
+                bestStart = start;
+            }
+            if (bestStart)
+            {
+                chosen.push_back(*bestStart);
+            }
+        }
+
         // A plane strings several legs together so it keeps flying rather
         // than hovering at the first spot; a ground scout takes one at a time.
         int legs = flies ? 3 : 1;
-        auto from = scout.position;
-        for (int i = 0; i < legs; ++i)
+        auto from = chosen.empty() ? scout.position : chosen.back();
+        for (Index i = getSize(chosen); i < static_cast<Index>(legs); ++i)
         {
             auto target = threatMap.bestScoutTarget(from, accept);
             if (!target)

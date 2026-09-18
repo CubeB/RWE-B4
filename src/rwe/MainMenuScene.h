@@ -6,6 +6,7 @@
 #include <rwe/RenderService.h>
 #include <rwe/SceneContext.h>
 #include <rwe/TextureService.h>
+#include <rwe/game/GameParameters.h>
 #include <rwe/io/sidedatatdf/SideData.h>
 #include <rwe/io/tdf/TdfBlock.h>
 #include <rwe/scene/Scene.h>
@@ -25,9 +26,12 @@ namespace rwe
         unsigned int pendingScrollSpeed{100};
         SoundMode pendingSoundMode{SoundMode::Stereo};
         UnitSpeechLevel pendingUnitSpeech{UnitSpeechLevel::Full};
+        MusicTrackMode pendingMusicTrackMode{MusicTrackMode::Custom};
         unsigned int pendingGamma{100};
-        bool pendingShading{true};
+        ShadingMode pendingShading{ShadingMode::BuildingsOnly};
         bool pendingAntiAlias{true};
+        bool pendingBuildingHalo{true};
+        bool pendingAntiAliasUnits{false};
 
         /** Pushes the current settings back into the menu widgets: a staged button does not advance its own display. */
         void refreshOptionControls();
@@ -76,6 +80,8 @@ namespace rwe
         void onMouseWheel(MouseWheelEvent event) override;
 
         void onKeyDown(const SDL_KeyboardEvent& keysym) override;
+
+        void onTextInput(const std::string& text) override;
 
         void update(int millisecondsElapsed) override;
 
@@ -160,6 +166,12 @@ namespace rwe
     private:
         AudioService::LoopToken startBgm();
 
+        /**
+         * Why the selected map cannot seat the filled slots, or nothing if
+         * it can. Slot n needs the map's StartPos n; see startGame.
+         */
+        std::optional<std::string> startPositionProblem(const GameParameters& params);
+
         UiPanel& topPanel();
 
         Point toScaledCoordinates(int x, int y) const;
@@ -173,8 +185,16 @@ namespace rwe
         void selectDefaultMap();
 
         /**
+         * Which skirmish option the pointer is over, and so whose description
+         * the help line under the setup box is currently showing. Empty when
+         * it is over none of them, which is when the line is blank.
+         */
+        std::string hoveredSkirmishOption;
+
+        /**
          * Hooks the staged option buttons on the right of the skirmish
-         * screen up to the model so that clicking them cycles the stage.
+         * screen up to the model so that clicking them cycles the stage,
+         * and to the help line so that hovering one describes it.
          */
         void attachSkirmishOptionComponents(UiPanel& panel);
 
