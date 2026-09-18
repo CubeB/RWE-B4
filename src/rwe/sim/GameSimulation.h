@@ -1046,6 +1046,21 @@ namespace rwe
 
         bool isCollisionAt(const DiscreteRect& rect, UnitId self) const;
 
+        /**
+         * As isCollisionAt(rect, self), but blocking cells that lie inside
+         * `passableRegion` do not count.
+         *
+         * A unit can end up standing inside a blocking feature: a corpse
+         * dropped onto the ground it occupies, or a reclaim order for
+         * something it is already inside. The pathfinder has to be able to
+         * move such a unit, and the only blocking cells it can step across are
+         * the ones its own footprint already covers -- so those are handed in
+         * here and treated as passable for the duration of one search. Every
+         * other cell blocks exactly as it always did, so a unit can walk out
+         * of a wall it is half inside but not through one.
+         */
+        bool isCollisionAt(const DiscreteRect& rect, UnitId self, const DiscreteRect& passableRegion) const;
+
         bool isYardmapBlocked(unsigned int x, unsigned int y, const Grid<YardMapCell>& yardMap, bool open, UnitId self) const;
 
         bool isAdjacentToObstacle(const DiscreteRect& rect) const;
@@ -1286,6 +1301,9 @@ namespace rwe
         MovementClassDefinition getAdHocMovementClass(const UnitDefinition::MovementCollisionInfo& info) const;
 
         std::pair<unsigned int, unsigned int> getFootprintXZ(const UnitDefinition::MovementCollisionInfo& info) const;
+
+        /** Whether a cell blocks a unit other than `self`. */
+        bool cellBlocksUnit(const OccupiedCell& cell, UnitId self) const;
 
         BoundingBox3x<SimScalar> createBoundingBox(const UnitState& unit) const;
 

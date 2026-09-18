@@ -1782,10 +1782,20 @@ namespace rwe
             return true;
         }
 
-        // check for collision at the new position
+        // check for collision at the new position.
+        //
+        // The cells the unit already stands on do not count against it: a unit
+        // dropped inside a blocking feature -- a corpse over the ground it
+        // occupies, say -- has no move that is collision-free until it has
+        // stepped clear, and would otherwise be pinned where it is. This only
+        // lets it walk over its own body and off the obstacle; entering a
+        // blocking cell it is not already on is still refused. It is not the
+        // original's wall-push (which is not decoded -- see TOTALA-EXE.md
+        // §87), just a unit being allowed to leave the ground it is on.
         auto newFootprintRegion = sim->computeFootprintRegion(newPosition, unitInfo.definition->movementCollisionInfo);
+        auto currentFootprintRegion = sim->computeFootprintRegion(unitInfo.state->position, unitInfo.definition->movementCollisionInfo);
 
-        if (sim->isCollisionAt(newFootprintRegion, unitInfo.id))
+        if (sim->isCollisionAt(newFootprintRegion, unitInfo.id, currentFootprintRegion))
         {
             return false;
         }
