@@ -238,6 +238,17 @@ namespace rwe
             return MapTerrain(std::move(heights), 60_ss);
         }
 
+        /**
+         * A blank blackboard for the site-search cases below, which call
+         * chooseBuildSite directly rather than through a controller. It
+         * only has to know of no enemies: the search asks it nothing else.
+         */
+        const AiBlackboard& siteTestBlackboard()
+        {
+            static const AiBlackboard bb{};
+            return bb;
+        }
+
         template <typename Order>
         std::vector<Order> ordersFor(const std::vector<PlayerCommand>& commands, UnitId unit)
         {
@@ -1645,7 +1656,17 @@ namespace rwe
 
             SECTION("with the rule off it walks into them")
             {
+                // Both rules, because there are two now and they ask the
+                // same question of different things.
+                // mexAvoidsEnemyGunsRadius steers the extractor SEARCH to
+                // another patch; noticeProductionHarassment declines any
+                // site at all that has a gun on it, at the point the order
+                // would be issued, which is the backstop for everything
+                // that is not an extractor. Switching off only the first no
+                // longer walks into the guns, because the second still
+                // refuses the order.
                 profile.mexAvoidsEnemyGunsRadius = 0_ss;
+                profile.noticeProductionHarassment = false;
                 AiPlayerController controller(ai, profile, 42u, MapIntel{});
                 std::vector<PlayerCommand> commands;
                 runTicks(sim, controller, 31, commands);
@@ -2222,7 +2243,7 @@ namespace rwe
 
         BuildManager buildManager;
         std::minstd_rand rng(1u);
-        auto site = buildManager.chooseBuildSite(sim, profile, "SOLAR", anchor, rng, farSideOnly);
+        auto site = buildManager.chooseBuildSite(sim, profile, siteTestBlackboard(), "SOLAR", anchor, rng, farSideOnly);
 
         REQUIRE(site.has_value());
         REQUIRE(site->x < -300_ss);
@@ -2253,7 +2274,7 @@ namespace rwe
         // Where it goes with nothing in the way.
         BuildManager clean;
         std::minstd_rand rngA(1u);
-        auto firstSite = clean.chooseBuildSite(sim, profile, "SOLAR", anchor, rngA);
+        auto firstSite = clean.chooseBuildSite(sim, profile, siteTestBlackboard(), "SOLAR", anchor, rngA);
         REQUIRE(firstSite.has_value());
         auto firstRect = sim.computeFootprintRegion(*firstSite, solarDef.movementCollisionInfo);
 
@@ -2265,7 +2286,7 @@ namespace rwe
 
         BuildManager retry;
         std::minstd_rand rngB(1u);
-        auto secondSite = retry.chooseBuildSite(sim, profile, "SOLAR", anchor, rngB);
+        auto secondSite = retry.chooseBuildSite(sim, profile, siteTestBlackboard(), "SOLAR", anchor, rngB);
         REQUIRE(secondSite.has_value());
         auto secondRect = sim.computeFootprintRegion(*secondSite, solarDef.movementCollisionInfo);
 
@@ -2309,7 +2330,7 @@ namespace rwe
         std::minstd_rand rng(1u);
         BuildManager buildManager;
 
-        auto site = buildManager.chooseBuildSite(sim, profile, "SOLAR", anchor, rng);
+        auto site = buildManager.chooseBuildSite(sim, profile, siteTestBlackboard(), "SOLAR", anchor, rng);
         REQUIRE(site.has_value());
 
         auto rect = sim.computeFootprintRegion(*site, solarDef.movementCollisionInfo);
@@ -2401,7 +2422,7 @@ namespace rwe
             // documented way to switch the behaviour off.
             profile.buildSiteFallbackRadius = profile.maxMexSearchRadius;
 
-            REQUIRE_FALSE(buildManager.chooseBuildSite(sim, profile, "LAB", anchor, rng).has_value());
+            REQUIRE_FALSE(buildManager.chooseBuildSite(sim, profile, siteTestBlackboard(), "LAB", anchor, rng).has_value());
         }
 
         SECTION("with it on, the far patch is found")
@@ -2409,7 +2430,7 @@ namespace rwe
             auto profile = makeDefaultStandardProfile();
             REQUIRE(profile.buildSiteFallbackRadius > profile.maxMexSearchRadius);
 
-            auto site = buildManager.chooseBuildSite(sim, profile, "LAB", anchor, rng);
+            auto site = buildManager.chooseBuildSite(sim, profile, siteTestBlackboard(), "LAB", anchor, rng);
             REQUIRE(site.has_value());
 
             // It really is the far patch, not somewhere the near rings could
@@ -3102,6 +3123,65 @@ namespace rwe
             sim.getUnitState(frameId).markAsDead();
             runTicks(sim, controller, 60, commands);
             REQUIRE(ordersFor<AttackOrder>(commands, commanderId).empty());
+        }
+    }
+
+    TEST_CASE("nothing at all is built under an enemy gun, not just an extractor", "[ai]")
+    {
+        // What the all-water games actually lost, which is not what the
+        // shipyard loses: two commanders replacing tidal generators under
+        // an enemy scout ship, 286 and 232 units in one game. The extractor
+        // search has refused a patch under guns since the Crystal Maze
+        // measurement, but a frame has no hit points whatever it is going
+        // to become, so the rule was never really about extractors.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        auto gunId = addUnit(sim, "ARMPT", human, SimVector(-330_ss, 60_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+        // Off, so that only the general rule can rule a site out: an
+        // extractor refused by the extractor search would prove nothing
+        // about anything else.
+        profile.mexAvoidsEnemyGunsRadius = 0_ss;
+
+        const auto& gunPosition = sim.getUnitState(gunId).position;
+        auto radiusSquared = profile.productionHarassRadius * profile.productionHarassRadius;
+
+        SECTION("every site the planner issues is out of its reach")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 200, commands);
+            auto orders = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!orders.empty());
+            for (const auto& order : orders)
+            {
+                REQUIRE(gunPosition.distanceSquared(order.position) > radiusSquared);
+            }
+        }
+
+        SECTION("and with the knob off, at least one is not")
+        {
+            profile.noticeProductionHarassment = false;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 200, commands);
+            auto orders = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!orders.empty());
+            auto underGuns = std::count_if(orders.begin(), orders.end(), [&](const BuildOrder& o) {
+                return gunPosition.distanceSquared(o.position) <= radiusSquared;
+            });
+            REQUIRE(underGuns > 0);
         }
     }
 
