@@ -531,6 +531,9 @@ namespace rwe
 
         assert(env.isNotCorrupt());
 
+        // and free, at last, the ones deleted a whole pass ago
+        env.sweepDeadThreads();
+
         // clean up any finished threads that were not reaped last frame
         for (const auto& thread : env.finishedQueue)
         {

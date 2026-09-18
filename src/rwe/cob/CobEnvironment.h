@@ -294,6 +294,29 @@ namespace rwe
         std::deque<std::pair<CobTime, CobThread*>> sleepingQueue;
         std::deque<CobThread*> finishedQueue;
 
+        /**
+         * Threads that have been deleted and not yet freed.
+         *
+         * A weapon holds the address of its aim thread from one tick to the
+         * next, and a thread can die under it -- an aim script's first act
+         * is a signal that kills the aim before it. Freed at once, that
+         * address goes back to the allocator, and the next thread created
+         * may or may not be handed the same one. When it was, the weapon's
+         * stale pointer matched a thread that was not its own, reaped
+         * another weapon's answer and fired on it; when it was not, it did
+         * nothing. Which of those happened was the heap's decision, so the
+         * same replay played two ways -- about one run in four, from the
+         * fourteenth minute of a game -- and peers would have desynced.
+         *
+         * So a dead thread is kept until two sweeps have passed, which is
+         * long enough for every holder to have looked and found it gone
+         * (ownsThread), and only then freed. Never saved and never hashed:
+         * nothing may look inside one, and a stale handle saves as null and
+         * loads as a thread nobody owns, which is the same answer.
+         */
+        std::vector<std::unique_ptr<CobThread>> deadThreads;
+        std::vector<std::unique_ptr<CobThread>> deadThreadsFromLastSweep;
+
     public:
         explicit CobEnvironment(const CobScript* _script);
 
@@ -322,6 +345,12 @@ namespace rwe
         std::optional<const CobThread*> createThread(const std::string& functionName);
 
         void deleteThread(const CobThread* thread);
+
+        /** Whether this is one of our live threads. False for one that has been killed or swept, however recently. */
+        bool ownsThread(const CobThread* thread) const;
+
+        /** Frees the threads deleted before the previous call. Once per COB pass. */
+        void sweepDeadThreads();
 
         /**
          * True while a thread running the named function still exists, whether

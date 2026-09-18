@@ -2762,6 +2762,20 @@ namespace rwe
 
     void GameScene::processUnitCommand(const PlayerUnitCommand& unitCommand)
     {
+        // A command is about half a second old by the time it lands -- it
+        // waits out the command buffer like everybody else's -- and the unit
+        // it names can have died in the meantime. Most of the handlers below
+        // looked it up with care; SetOnOff, SelfDestruct and the stockpile
+        // did not, and a lookup of a freed slot in the unit table throws
+        // "std::get: wrong index for variant", which ended the game. Found
+        // when the computer player switched off a metal maker that had just
+        // been shot. Asked once here, of the simulation's own state, so every
+        // peer drops the same command on the same tick.
+        if (!simulation.unitExists(unitCommand.unit))
+        {
+            return;
+        }
+
         match(
             unitCommand.command,
             [&](const PlayerUnitCommand::IssueOrder& c) {

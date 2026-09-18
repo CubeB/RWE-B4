@@ -1,6 +1,7 @@
 #include "GameScene.h"
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
@@ -523,15 +524,49 @@ namespace rwe
         // speed up winding the scrub bar forward. That still runs at about
         // ten times real time, and the cost is the simulation itself rather
         // than anything around it. Periodic keyframes are the fix for that.
-        if (!replayPlayback)
+        // RWE_HASH_LOG=<file>: one line a tick, the tick and the hash. A
+        // game and the replay of it should write the same file -- it is on
+        // in playback too, which is what it is for -- and the first line that
+        // differs is the tick a determinism fault showed itself on.
+        // RWE_STATE_DUMP=<first tick>:<last tick>:<file prefix> is the second
+        // step: the full saved state for each tick in the range, to
+        // <prefix><tick>.json. Both are pure observers.
+        static std::optional<std::ofstream> hashLog = [] {
+            std::optional<std::ofstream> out;
+            if (const char* path = std::getenv("RWE_HASH_LOG"))
+            {
+                out.emplace(path, std::ios::binary);
+            }
+            return out;
+        }();
+        if (!replayPlayback || hashLog)
         {
             GameHash gameHash{0};
             {
                 RWE_RENDERPROF("u.hash");
                 gameHash = simulation.computeHash();
             }
-            playerCommandService->pushHash(localPlayerId, gameHash);
-            gameNetworkService->submitGameHash(gameHash);
+            if (hashLog)
+            {
+                *hashLog << sceneTime.value << ' ' << gameHash.value << std::endl;
+            }
+            if (const char* spec = std::getenv("RWE_STATE_DUMP"))
+            {
+                unsigned int first = 0;
+                unsigned int last = 0;
+                char prefix[512] = {0};
+                if (std::sscanf(spec, "%u:%u:%511s", &first, &last, prefix) == 3 && sceneTime.value >= first && sceneTime.value <= last
+                    && (sceneTime.value - first) % static_cast<unsigned int>(std::max(1, std::atoi(std::getenv("RWE_STATE_DUMP_STEP") ? std::getenv("RWE_STATE_DUMP_STEP") : "1"))) == 0)
+                {
+                    std::ofstream out(std::string(prefix) + std::to_string(sceneTime.value) + ".json", std::ios::binary);
+                    out << saveSimulationToJson(simulation).dump(1);
+                }
+            }
+            if (!replayPlayback)
+            {
+                playerCommandService->pushHash(localPlayerId, gameHash);
+                gameNetworkService->submitGameHash(gameHash);
+            }
         }
 
         if (stateLogStream)
