@@ -849,9 +849,10 @@ tools/tad-weapontime.py --shots /tmp/shots.jsonl --units ~/ta-mods/x-esc --class
 **All three classes stop the same way: on the victim's footprint, not at the aim
 point.** The models below differ only in how far each step goes. Where the
 round stops is the section after them, "Where a round stops", and it is what
-makes all 39 scored cells land -- 24 constant-speed, 13 with a motor and 2 that
-lob a shell, the last class added later and written up under "A shell: the flat
-root, and the cosine that falls out of it". Before the footprint stop
+makes all 40 scored cells land -- 24 constant-speed, 13 with a motor, 2 that
+lob a shell and 1 whose `cruise` flag turns out to be inert, the last two
+classes added later and written up under "A shell: the flat root, and the cosine
+that falls out of it" and "And `cruise` has left the table altogether". Before the footprint stop
 the constant-speed model was `flight = ceil(d / v) - 1`, landing on 22 of 24
 cells, and its `-1` was read as a projectile taking its first step on the tick
 it is fired. That reading of the `-1` is retired -- the `-1` was the footprint.
@@ -892,10 +893,14 @@ Three things that reading settled, none of them guessable from the field names:
 * **`cruise` and `twophase` are not the accelerating class**, and reading the
   velocities alone hides that. `ROCKET_HRK` is `selfprop` with `cruise` and a
   start speed equal to its cap, so the velocity test put it in the constant-speed
-  table -- where it sat at the worst share in it, 40%, because a cruise missile
-  climbs to a fixed altitude and flies over the aim point before coming down
-  (`0x49B455`) and that is not the straight line being measured. It is now its
-  own class and is not scored. `GAUSS_SNIPE` is the other `selfprop` round whose
+  table -- where it sat at the worst share in it, 40%. It is its own class now,
+  and it *is* scored: the reason first given here for splitting it out ("a cruise
+  missile climbs to a fixed altitude and flies over the aim point before coming
+  down, `0x49B455`") was the wrong reason, because this weapon cannot steer and
+  so never reaches that clause. The right reason was that a `selfprop` cell wants
+  the motor class's drift bound, which the constant-speed table does not apply.
+  See "And `cruise` has left the table altogether" below. `GAUSS_SNIPE` is the
+  other `selfprop` round whose
   start speed equals its cap; that one is genuinely a constant speed, and the
   fixture flies it on the motor path anyway because that is the path the engine
   puts it on.
@@ -1074,7 +1079,7 @@ the two fall on one tick. RWE already matched -- `spawnProjectile` emplaces
 during the behaviour pass and `updateProjectiles` walks the new round in the
 same tick -- so nothing was changed to make it pass; the test exists so that a
 rearrangement of `tick()` cannot quietly put every weapon in the game a tick
-behind the original without the 37 corpus episodes noticing, which they would
+behind the original without the corpus episodes noticing, which they would
 not.
 
 **Every routine above is unpatched in Escalation's `TotalA.exe`.**
@@ -1146,41 +1151,186 @@ victim it can name for the mirror-image reason: it does not need the bound.
 Both choices are visible in the script, and `--drift` prints the measurement
 either could be argued from.
 
-**And 39 of the 39 scored cells carry their firing weapon's own `[DAMAGE]
-default` as their modal damage,** across all three classes. Nothing in the
+**And 40 of the 40 scored cells carry their firing weapon's own `[DAMAGE]
+default` as their modal damage,** across every scored class. Nothing in the
 filters looks at the damage field, so that is the pairing checking itself against
 evidence it was not built from.
 
-**The four classes no model describes** are listed by `--classes` and never
-scored. Each is explicable and each wants a model of its own:
+**The three classes no model describes** are listed by `--classes` and never
+scored. Each is explicable, and only one of the three still wants a model:
 
 | class | cells | pairings | why no model fits |
 |---|---|---|---|
-| `vlaunch` | 3 | 780 | goes up before it goes anywhere; `ARMMERL` reads +136 |
-| `cruise` | 1 | 709 | climbs to a fixed altitude and crosses the aim point before descending |
-| `burst` | 7 | 630 | see below |
-| `waterweapon` | 4 | 297 | a torpedo's path from a surface launcher to a submerged target is not that line either |
+| `vlaunch` | 3 | 780 | goes up before it goes anywhere, and about 190 ticks later arrives with no mode -- see "A vertical launch" below |
+| `burst` | 7 | 630 | the quantity the filters isolate is not a flight time; see below |
+| `waterweapon` | 4 | 297 | a torpedo's model is probably right and the corpus cannot hold it; see below |
 
-(A fifth name appears there, "ballistic selfprop", for a weapon carrying both
+(Two more names appear there. "ballistic selfprop" is for a weapon carrying both
 flags: TA dispatches on `selfprop` first at `0x49B9C2`, so such a round is flown
 by the motor off a ballistic launch angle. `ROCKET_HEAVY` is the only one in this
-data set and nothing in the corpus fires it.) **Ballistic used to head this
-table** at 18 cells and 4,946 pairings, "travels an arc, which is longer than the
-straight line measured". It has a model now -- the arc is longer by exactly the
-cosine of the launch angle -- and seventeen cells, `CANNON_FIDO` having moved to
-`burst` where it belonged. Two of those seventeen are scoreable.
+data set and nothing in the corpus fires it. "cruise steering" is the guard
+described below, and nothing in this data set is one either.) **Ballistic used
+to head this table** at 18 cells and 4,946 pairings, "travels an arc, which is
+longer than the straight line measured". It has a model now -- the arc is longer
+by exactly the cosine of the launch angle -- and seventeen cells, `CANNON_FIDO`
+having moved to `burst` where it belonged. Two of those seventeen are scoreable.
+
+**And `cruise` has left the table altogether, because its entry was wrong.**
+That row read "climbs to a fixed altitude and crosses the aim point before
+descending", which is a true statement about a cruise missile and a false one
+about the only cell it was ever applied to. The cruise clause lives in the
+**aim point** (`0x49B3E0`), and `updateSelfPropelledProjectile` asks for an aim
+point from exactly one place: its guidance step. `ROCKET_HRK` declares no
+`guidance`, no `twophase` and no `turnrate`, so it never steers, so it never
+reaches the clause, and it flies the same straight line every other motor round
+flies. What its exclusion was really costing it was the **drift bound** --
+`scoreable` handed an unbounded pass to every class that was not `accelerating`
+or `ballistic`, and this is a `selfprop` cell that wanted the motor class's
+victim bound like any other. With it, `CORHRK` reads **+0 at 65% over 291
+pairings** against +0 at 41% over 709 unbounded, which is squarely inside the
+motor class's own 41-76% range, and its modal damage is `ROCKET_HRK`'s own 160.
+**Not one pairing's answer changed; only which ones were scored.** It is the
+fortieth checked-in episode.
+
+A cruise weapon that *can* steer is still unscored, under the name "cruise
+steering", on the precedent that names "ballistic selfprop". Nothing in this
+data set is one, and that is exactly why the guard exists: the model above is
+only known to be right about a cruise weapon that cannot turn.
+
+#### The replay, and why it scores nothing
+
+That correction was measured rather than argued, and the instrument is worth
+keeping. `selfprop_replay` in `tools/tad-weapontime.py` is the whole of
+`updateSelfPropelledProjectile` written out a tick at a time -- the launch of
+`0x49C980` and the vertical-launch spawn of `0x49CC20`, the motor of
+`0x49BA16`, the two-phase turnover of `0x49BAE1`, the aim point of `0x49B3E0`,
+the `burnblow` abort, and the SimAngle quantisation RWE's heading and pitch
+carry -- ported from RWE's own code, the same provenance the step-length model
+has. `--replay` prints what it establishes, and both halves are negative
+results:
+
+* over `ROCKET_HRK` it gives the step-length model's answer on **all 709** of
+  its pairings, which is what says the cruise clause does nothing here;
+* over the accelerating class it gives the stepper's answer on **all 3,537**
+  pairings of all thirteen cells -- not merely the same modes, the same
+  pairings, which a different model that happened to agree would not manage.
+
+So the replay is not a second model. Nothing is scored by it: `steps()` still
+scores everything, with `cruise` added to its motor branch. What the replay
+bought is that the two remaining selfprop exclusions below are measurements
+instead of sentences, and it is the reason each of them can now say what it
+does.
+
+#### A vertical launch: the model is not the problem
+
+The replay flies a `vlaunch` round without difficulty -- a vertical launch is
+one more branch of the same routine, heading zero and pitch straight up out of
+`0x49CC20`, with the whole climb coming from the motor -- and the class still
+does not land. `--unmodelled` prints it:
+
+| cell | weapon | median flight | inside the bound | mode | share | victims that cannot move | IQR |
+|---|---|---|---|---|---|---|---|
+| `ARMMERL` | `VLAUNCH_TRUCK_ARM` | 188 | 189 | -23 | 6% | 189 | -19..-1 |
+| `CORVROC` | `VLAUNCH_TRUCK_CORE` | 195 | 64 | +0 | 8% | 64 | -16..+9 |
+| `CORSPID` | `RADIATION_CLOUD` | 10 | 41 | +1 | 15% | 7 | -2..+2 |
+
+The shape is what matters. These flights are **about 190 ticks**, thirty times
+a laser's, and over that the drift bound admits only victims whose
+`maxvelocity` is under about 0.12 -- which is why its column and the
+cannot-move-at-all column are the same number. **So the spread is not drift**,
+and it is still twenty ticks wide with no mode. `RADIATION_CLOUD` is the
+opposite case and no better: its climb is zero ticks and its turn rate is
+effectively instant, so it barely exercises the profile at all, and it sits on
+the replay at the median at every distance while still having no mode (15% over
+41). Scoring the class would check in a disagreement, which is what the rule
+against that exists to prevent. A flight that long is not a flight time an
+engine can be held to.
+
+#### A torpedo: the model is probably right and the corpus cannot hold it
+
+`waterweapon` is **not a flight kind**. The dispatch at `0x49B9AE` names five --
+`selfprop`, `lineofsight`, `ballistic`, `dropped`, `meteor` -- and this is not
+one of them. It enters a flight from inside the selfprop branch only, at
+`0x49B9EB`, where a waterweapon **above sea level** takes gravity and has its
+pitch forced to zero; otherwise it is a target-eligibility rule (`0x49ABE3`, the
+submarine rule above). So the old entry, "a torpedo's path from a surface
+launcher to a submerged target is not that line either", names a real clause,
+and the replay does not model it.
+
+The replay still settles the class, from the other end:
+
+| cell | weapon | named | inside the bound | mode | share |
+|---|---|---|---|---|---|
+| `ARMSUBK` | `TORPEDO_SNIPE` | 106 | 47 | +0 | 13% |
+| `CORAMPH` | `TORPEDO_LIGHT` | 66 | **19** | **+0** | **95%** |
+| `ARMLANCE` | `TORPEDO_SEAP` | 63 | **0** | - | - |
+| `ARMLANCE` | `TORPEDO_SEAP` | 62 | **0** | - | - |
+
+`CORAMPH` fires from *below* the surface -- its shots leave at y≈22-33 at
+victims at y≈74-87 -- so its torpedo never has an above-water segment, the
+unmodelled clause never fires, and it reads **the best share anywhere in this
+corpus**. `ARMLANCE`'s are dropped from an aircraft 185 units up, the clause
+runs for most of the flight, and they are the worst. That is the clause
+confirming itself without being modelled.
+
+**And it would not help to model it.** Sea level is a per-map byte at
+`world+0x1427f` that a demo does not carry, and getting it from the map files
+would change nothing: after the drift bound the two `ARMLANCE` cells keep
+**zero** pairings and `CORAMPH` keeps **19** against a `--min-n` of 30. There is
+no value of sea level, and no model of the above-water segment, that adds a
+scoreable cell. The class is lost to arithmetic, not to a gap. Dropping
+`--min-n` to twenty would admit `CORAMPH` at 95%, and that is precisely the move
+this document refuses: a threshold chosen after seeing which cell it admits is
+not evidence.
 
 The `burst` exclusion is the one worth spelling out, because it is what turned
 eight failures into two. A burst weapon fires `burst` rounds `burstrate` seconds
-apart from one trigger, each its own `0x0d` and each thrown off the aim line by
-`sprayangle`, so the isolation filter cannot mean there what it means everywhere
-else: the shot that survives it is one round of several and the damage that
-arrives need not be its own. Six of the eight cells that failed the model before
-the class existed are burst weapons -- both flamethrowers, both `EMG`s,
-`EMG_VTOL`, `GAUSS_SPRAY` -- excluded on a criterion that has nothing to do with
-flight time. The seventh is `CANNON_FIDO`, which is `ballistic` as well and had
-been classed by that; `burst` is asked first now, because a burst weapon's
-isolation filter fails whatever shape its rounds fly.
+apart from one trigger, each thrown off the aim line by `sprayangle`, so the
+isolation filter cannot mean there what it means everywhere else: the shot that
+survives it is one round of several and the damage that arrives need not be its
+own. Six of the eight cells that failed the model before the class existed are
+burst weapons -- both flamethrowers, both `EMG`s, `EMG_VTOL`, `GAUSS_SPRAY` --
+excluded on a criterion that has nothing to do with flight time. The seventh is
+`CANNON_FIDO`, which is `ballistic` as well and had been classed by that;
+`burst` is asked first now, because a burst weapon's isolation filter fails
+whatever shape its rounds fly.
+
+#### What a burst cell's spread actually is: a comb
+
+One correction to the sentence above, and then the measurement. The rounds of a
+burst are **not** each their own `0x0d`. `0x49CB79` makes the record a
+*template* that never flies, the projectile pass spawns one copy per `burstrate`
+and appends it past the trip count it had already latched (`0x49B810`), and only
+the trigger emits a `0x0d`. So one shot record stands for `burst` rounds, which
+is also why such a shot passes the isolation filter at all -- there is only one
+of it -- and why "several damage events in the window" throws so many away.
+
+A copy therefore first moves on `1 + j*burstrate` ticks after the trigger, and a
+cell's delta is drawn from a **comb** of `burst` teeth rather than from a single
+value. `--unmodelled` prints it:
+
+| cell | weapon | burst | teeth | sprayangle | deltas on a tooth |
+|---|---|---|---|---|---|
+| `ARMFIDO` | `CANNON_FIDO` | 6 | +1..+6 | 1536 | 180/323 (56%) |
+| `CORPYRO` | `FLAMETHROWER` | 10 | +1..+10 | 1024 | 91/112 (**81%**) |
+| `CORAFAV` | `FLAMETHROWER_HVY` | 5 | +1..+5 | 1536 | 12/60 (20%) |
+| `ARMBRAWL` | `EMG_VTOL` | 3 | +1..+7 | 1024 | 6/38 (16%) |
+| `ARMWAR` | `GAUSS_SPRAY` | 3 | +1..+3 | 3072 | 30/35 (**86%**) |
+| `ARMFLASH` | `EMG` | 3 | +1..+7 | 1024 | 11/32 (34%) |
+| `ARMPW` | `EMG` | 3 | +1..+7 | 1024 | 9/30 (30%) |
+
+Where the comb is short and the spray is not the dominant term it is plainly
+visible: `GAUSS_SPRAY` puts 86% of its deltas on its three teeth and does it in
+the decaying order later rounds predict (+1:15, +2:10, +3:5), which is what a
+single surviving hit out of three should look like. Where the comb is long it is
+not, `CANNON_FIDO` spreading over twenty values against six teeth -- because
+`sprayangle` throws each copy off the aim line the model measures, and for a
+shell that becomes a range error by the same cotangent the aim cone does.
+
+So this is not a flight-time model with a residual to chase. **The quantity the
+filters isolate here is not a flight time**, and no amount of modelling the
+round's flight will make it one; what would be needed is a way to say which
+round of a burst drew the damage, and nothing in the stream carries it.
 
 **The four exceptions the aim-point model carried all land on the footprint
 model**, and `KNOWN_EXCEPTIONS` is empty. Each read one tick low, and how firmly
@@ -1207,10 +1357,11 @@ replaying the checked-in episodes under the model with the one change, and each
 moved exactly the predicted episodes and no others:
 
 * stamping a unit's footprint with its edge **truncated** rather than rounded to
-  the nearest square (`computeFootprintRegion`) fails **15 of 39**, the fifteen
+  the nearest square (`computeFootprintRegion`) fails **15 of 40**, the fifteen
   whose aim point sits where the two rules pick different squares -- ten
   constant-speed, four with a motor and `CORMORT` alone of the two shells,
-  `ARMBULL`'s aim point falling in the same square under either rule;
+  `ARMBULL`'s aim point falling in the same square under either rule, and
+  `CORHRK`'s too;
 * testing the occupied grid at the round's position **before** its move rather
   than after fails **all 37** (measured before the shell class existed);
 * a motor that **never accelerates** fails **10 of the 13** motor episodes and
@@ -1224,6 +1375,28 @@ moved exactly the predicted episodes and no others:
   of what the shell model claims: the launch angle decides the flight time and
   the fall does not touch it. It does fail `wind.test.cpp`'s ballistic case,
   which is watching the height it changes.
+
+Three more came with the `cruise` episode, and the first two are the ones that
+say what it does *not* pin:
+
+* turning **`p.cruise` on** for every episode in `weaponflight.test.cpp` fails
+  **none of the 40**, because the clause is read only from the guidance step and
+  no episode's weapon has `guidance`;
+* turning **`p.cruise`, `p.guidance` and a wide `p.turnRate` on** together fails
+  **none of the 40** either -- every episode in the fixture is closer to its aim
+  point than the 1024-unit handover, so the cruise aim point is never the one
+  returned, and steering at a point already dead ahead is an identity. **The
+  corpus cannot tell a cruise round from a straight one**, which is the honest
+  limit of the fortieth episode and the reason the class carries the "cruise
+  steering" guard instead of relying on this fixture to catch a steering one;
+* making every **self-propelled round one world unit a tick slower** fails
+  **10 of 40** -- `ARMAABOT`, `ARMFIG`, `ARMROCK`, `ARMSAM`, `ARMSNIPE`,
+  `CORCRASH`, **`CORHRK`**, `CORMANT`, `CORSTORM`, `CORVAMP` -- and nothing
+  without a motor. That is the one that says the new episode is live rather
+  than inert, which the two above could not, and it is why it had to be run:
+  `CORHRK` has no acceleration and an aim point that lands in the same square
+  under either stamping rule, so neither of the older motor mutations touches
+  it.
 
 ### A shell: the flat root, and the cosine that falls out of it
 
@@ -1509,6 +1682,36 @@ never score, so nothing checked in moves -- but it was worth 311 shots in this
 pass before the guard, and it is the whole of what the port and the reference
 script disagreed about. It was found by diffing the two per shot rather than by
 argument, which is the method this document keeps recommending.
+
+**And it is not a speed.** That guard treats the value as unusable, which is
+right, but what the original does with it is worth knowing before anything ever
+tries to fly one. The motor's two comparisons are at `0x49BA1E` and `0x49BA2D`:
+
+```
+49ba1e  cmp eax,ecx ; jae ...   ; already at the cap, leave it
+49ba2d  cmp eax,ecx ; jbe ...   ; still under it, skip the clamp
+```
+
+`jae` and `jbe` are **unsigned**. So a negative cap is compared as a number near
+2^32, the speed is never at or above it, and the clamp can never fire. Its whole
+effect is to **disable the ceiling** -- which is exactly what these blocks want,
+because every one of them also carries a *negative* `weaponacceleration`
+alongside a large positive `startvelocity`. `VSPAM_ALL` is the pattern:
+`startvelocity=480`, `weaponacceleration=-75`, `weaponvelocity=-10`. It is a
+**decelerating missile**, 16 world units a tick off the rail and losing 0.083 a
+tick for the sixteen ticks its motor burns, and disabling the ceiling is the
+only way TA lets a mod write one down.
+
+`BOMB_MS` and `BOMB_SHOCK` are the other shape: `startvelocity` is negative too
+and *equal* to the cap, so the first comparison takes its `jae` and the speed
+never moves at all. The round flies **backward** along its nose at 13.3 units a
+tick -- and since `0x49CC20` points a vertical launch's nose straight up, that
+is straight down. A bomb, written as a negative-velocity vertical launch.
+
+Neither shape is scored here and neither is ported. What this settles is that
+the guard is dropping a *meaningful* value rather than a corrupt one, so a
+future pass that wants these fourteen weapons has something to implement and not
+merely a sign to fix.
 
 **So: is the hit/miss oracle feasible?** Yes, and not as the statistic it was
 first imagined to be. Three things constrain it.
@@ -2572,14 +2775,14 @@ They catch different things and should not share machinery.
       firing-tick off-by-one as the build accumulator. The pairing is confirmed
       by a number the filters never look at: each cell's modal `damage` is that
       weapon's own `[DAMAGE] default`. The whole argument, the rejection counts
-      and the four classes that need their own models are in "Pairing a
+      and the three classes that need their own models are in "Pairing a
       `0x0d` to the `0x0b` it caused" above.
 
-      **The fixture and the test exist, over three classes.** `--emit-weapon-cpp`
-      writes `src/rwe/sim/tad_weapon_episodes.h`, now 39 episodes over the cells
-      a model predicts -- 24 constant-speed, 13 with a motor and 2 that lob a
-      shell (it was 33 over two classes when this paragraph was written, 22 and
-      11) -- with `UnitFacts`
+      **The fixture and the test exist, over four classes.** `--emit-weapon-cpp`
+      writes `src/rwe/sim/tad_weapon_episodes.h`, now 40 episodes over the cells
+      a model predicts -- 24 constant-speed, 13 with a motor, 2 that lob a shell
+      and 1 carrying an inert `cruise` (it was 33 over two classes when this
+      paragraph was written, 22 and 11) -- with `UnitFacts`
       widened to carry each FBI's `WeaponN` names and a second reader over the
       data set's weapon TDFs going through the engine's own `parseWeaponTdf`, so
       a fixture cannot disagree with the loader about what a field means.
@@ -2616,12 +2819,24 @@ They catch different things and should not share machinery.
       what remains is the use rather than the decode: it is the only way to test
       the solver's *output* rather than its inputs.
 
-      What is left is `vlaunch` (3 cells), torpedoes (4) and `cruise` (1, split
-      out of the constant-speed table as a class of one).
+      ~~What is left is `vlaunch` (3 cells), torpedoes (4) and `cruise` (1)~~ --
+      **`cruise` is done and the other two are answered in the negative.**
+      `cruise` needed no model at all: its clause is read only through an aim
+      point a round that cannot steer never asks for, and what its exclusion was
+      really costing it was the motor class's drift bound. `vlaunch` and the
+      torpedoes were both put through a full replay of
+      `updateSelfPropelledProjectile` and neither can be scored -- a vertical
+      launch spends about 190 ticks in the air and arrives with a twenty-tick
+      spread and no mode even over victims that cannot move, and no torpedo cell
+      keeps `--min-n` pairings after the drift bound whatever sea level was.
+      `burst` is not a flight-time class at all: one `0x0d` stands for several
+      rounds, so its deltas come off a comb. All three are written up under
+      "The three classes no model describes", with the measurement behind each
+      reprintable through `--unmodelled`.
       ~~The sub-tick residual~~ is closed: a round stops on the
       first step that puts it in one of the victim's footprint squares ("Where a
       round stops"), every scored cell now lands on +0, the four named
-      exceptions are gone, and the fixture is 39 episodes fired at a real victim.
+      exceptions are gone, and the fixture is 40 episodes fired at a real victim.
       What that reopened is **which tick a new round first steps on**: the old
       `-1` was the only evidence, and a first read of the binary disagrees with
       the corpus. It has to be settled before any of the classes above, and is
