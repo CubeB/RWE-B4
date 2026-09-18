@@ -196,6 +196,7 @@ namespace rwe
                  << " under water, deepest " << deepest;
     }
 
+
     namespace
     {
         /**
@@ -888,9 +889,33 @@ namespace rwe
             return std::tie(a.ring, a.dz, a.dx) < std::tie(b.ring, b.dz, b.dx);
         });
 
-        // Take the richest buildable patch on the nearest ring that has one.
+        // Take the richest buildable footprint on the nearest ring that has
+        // one -- and then keep walking inward for as long as each further ring
+        // does strictly better.
+        //
+        // The first half alone was the rule, and it put extractors on the
+        // edge of every deposit larger than about two cells square. A patch
+        // here is one metal CELL, not one deposit, so the nearest ring to
+        // turn anything up is the deposit's near edge, and a 3x3 footprint
+        // centred there hangs half off it. Extraction is the sum of the metal
+        // grid under the footprint (GameSimulation's resource tick), so that
+        // is real income lost, not a cosmetic offset: a 4x4 deposit taken
+        // from the side gives 800 at its edge against 1800 at its heart.
+        // Reported from a replay on Brain Coral as extractors "not central to
+        // the metal spot".
+        //
+        // Stopping at the first ring that does not improve keeps the old
+        // behaviour for small and isolated spots, where the next ring holds
+        // no metal. A GAP in the ring numbers stops it too: only rings that
+        // hold metal are in this list at all, so a gap means the deposit has
+        // ended, and without that test a builder standing at a small spot
+        // would be sent past it to a large deposit ten rings further out.
+        // Ties are kept to the ring that set the best, so equal cells further
+        // in do not drag the choice outward, and the single draw at the end
+        // is unchanged.
         std::vector<SimVector> tiedCandidates;
         unsigned int bestMetal = 0;
+        int bestRing = -1;
         for (std::size_t i = 0; i < ringCells.size(); ++i)
         {
             const int gx = anchorHm.x + ringCells[i].dx;
@@ -911,21 +936,33 @@ namespace rwe
                     if (metal > bestMetal)
                     {
                         bestMetal = metal;
+                        bestRing = ringCells[i].ring;
                         tiedCandidates.clear();
                         tiedCandidates.push_back(candidate);
                     }
-                    else if (metal == bestMetal && metal > 0)
+                    else if (metal == bestMetal && metal > 0 && ringCells[i].ring == bestRing)
                     {
                         tiedCandidates.push_back(candidate);
                     }
                 }
             }
 
-            // Stop at the end of the first ring that turned something up.
-            bool ringEnds = (i + 1 == ringCells.size()) || ringCells[i + 1].ring != ringCells[i].ring;
+            bool lastCell = i + 1 == ringCells.size();
+            bool ringEnds = lastCell || ringCells[i + 1].ring != ringCells[i].ring;
             if (ringEnds && !tiedCandidates.empty())
             {
-                break;
+                // This ring did not beat what an earlier one found: the
+                // deposit's heart has been passed.
+                if (bestRing != ringCells[i].ring)
+                {
+                    break;
+                }
+                // The next ring holding any metal is not the adjacent one, so
+                // the rings between are bare and the deposit has ended.
+                if (lastCell || ringCells[i + 1].ring != ringCells[i].ring + 1)
+                {
+                    break;
+                }
             }
         }
 
@@ -1720,6 +1757,15 @@ namespace rwe
                 // submarine's only weapon is a waterweapon (S:13.2), so it
                 // cannot answer anything that is not afloat.
                 auto fleetTarget = navalFleetTarget(profile, bb);
+                // Builders for the metal under the sea; see
+                // targetConstructionShipCount. Second only to the scout, the
+                // way the lab makes its constructor before any army: each one
+                // is income, and the fleet is paid for out of income. Asked
+                // whether or not the map wants a fleet, because a yard that
+                // stands on a map with submerged metal is worth a builder
+                // even where it is worth no warships.
+                auto wantConstructionShip = !s.constructionShip.empty() && submergedMetalPatches > 0
+                    && total(s.constructionShip) < profile.targetConstructionShipCount;
                 if (fleetTarget > 0)
                 {
                     auto submarineTarget = std::min(profile.targetSubmarineCount, fleetTarget);
@@ -1727,6 +1773,10 @@ namespace rwe
                     if (!s.scoutShip.empty() && total(s.scoutShip) < profile.targetScoutShipCount)
                     {
                         next = s.scoutShip;
+                    }
+                    else if (wantConstructionShip)
+                    {
+                        next = s.constructionShip;
                     }
                     else if (!s.seaTransport.empty() && bb.wantsTransport && total(s.seaTransport) < profile.targetSeaTransportCount)
                     {
@@ -1741,6 +1791,10 @@ namespace rwe
                     {
                         next = s.submarine;
                     }
+                }
+                else if (wantConstructionShip)
+                {
+                    next = s.constructionShip;
                 }
             }
             else if (!s.advancedLab.empty() && factory.unitType == s.advancedLab)
@@ -2345,9 +2399,34 @@ namespace rwe
                     || (!sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor)
                     || (!sideUnits.heavyPlasmaTower.empty() && next == sideUnits.heavyPlasmaTower)
                     || (!sideUnits.heavyLaserTower.empty() && next == sideUnits.heavyLaserTower);
-                auto window = isLevelTwo ? profile.techSaveUpSeconds : profile.saveUpSeconds;
+                // So is the one answer the AI has to a hull at its shipyard.
+                // The torpedo launcher is only wanted once an enemy ship has
+                // actually been seen, so by the time it is on this list it is
+                // a response rather than a luxury -- and at 804 metal it is as
+                // far out of the ordinary minute's reach as an advanced lab.
+                // Judged against that minute on Brain Coral it was skipped
+                // 2140 times in ten games and never built once, while a single
+                // scout ship shot every hull the yard started. The commander
+                // cannot answer that ship itself: it walks the seabed there,
+                // and nothing but a waterweapon fires from under the sea.
+                auto isThreatAnswer = !sideUnits.torpedoLauncher.empty() && next == sideUnits.torpedoLauncher;
+                auto window = (isLevelTwo || isThreatAnswer) ? profile.techSaveUpSeconds : profile.saveUpSeconds;
                 if (!canAfford(bb, estimate))
                 {
+                    // Deliberately NOT gated on whether the map has room for
+                    // the thing anywhere. On Brain Coral, with no dry ground,
+                    // the commander saves all game for a lab and a solar
+                    // collector it can never place, and that looks like a bug.
+                    // It was tried as a fix and measured over the same ten
+                    // seeds, and it was ruinous: 18.9 units, 14.3 buildings and
+                    // 10 metal a second without the gate, against 13, 8.7 and
+                    // 7.8 with it, and the torpedo launcher went from built in
+                    // four games in ten to none. Saving only ever holds back
+                    // what is NOT economy -- extractors and collectors are
+                    // exempt, below -- so saving for the impossible makes the
+                    // commander a pure economy builder, which on a map like
+                    // that is exactly right. Without it the metal went on
+                    // sonar and a second shipyard.
                     if (canAfford(bb, estimate, window))
                     {
                         // Within reach: wait for it rather than spend the

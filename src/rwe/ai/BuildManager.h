@@ -272,7 +272,9 @@ namespace rwe
 
         /**
          * The richest buildable metal patch on the nearest ring around the
-         * anchor, within the radius. The optional predicate can rule sites
+         * anchor that has one, walking on inward while each further ring does
+         * strictly better, so a deposit is taken at its heart rather than its
+         * near edge. Within the radius. The optional predicate can rule sites
          * out (for example, only ground the base cannot walk to).
          */
         std::optional<SimVector> chooseMexSite(
@@ -282,7 +284,6 @@ namespace rwe
             SimScalar radius,
             std::minstd_rand& rng,
             const std::function<bool(const SimVector&)>& accept = nullptr) const;
-
     private:
         int ticksSinceLastPlanning{0};
 

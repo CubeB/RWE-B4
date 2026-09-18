@@ -922,6 +922,75 @@ namespace rwe
         }
     }
 
+    TEST_CASE("an attack is ordered at the factory, not at the frame on its pad", "[ai]")
+    {
+        // A frame on a factory's pad stands where the factory stands, so a
+        // nearest-enemy search picked it ahead of the factory: a raid killed
+        // the same cheap frame over and over while the factory that kept
+        // making it stood untouched. Reported from play.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        // Home well away, so this is a raid and not a defence.
+        addUnit(sim, "ARMCOM", ai, SimVector(-900_ss, 0_ss, -900_ss), script);
+
+        auto labId = addUnit(sim, "ARMLAB", human, SimVector(500_ss, 0_ss, 0_ss), script);
+        // Nearer the raider than the lab is, so a search that took frames
+        // would take this one.
+        auto frameId = addUnit(sim, "ARMPW", human, SimVector(490_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(frameId).buildTimeCompleted = 0;
+        auto raiderId = addUnit(sim, "ARMPW", ai, SimVector(420_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        AiPlayerController controller(ai, profile, 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 20, commands);
+
+        auto attacks = ordersFor<AttackOrder>(commands, raiderId);
+        REQUIRE(!attacks.empty());
+        for (const auto& attack : attacks)
+        {
+            auto target = std::get_if<UnitId>(&attack.target);
+            REQUIRE(target != nullptr);
+            REQUIRE(*target != frameId);
+        }
+        REQUIRE(*std::get_if<UnitId>(&attacks.front().target) == labId);
+    }
+
+    TEST_CASE("a commander under the sea is not sent after what it cannot shoot", "[ai]")
+    {
+        // Nothing but a waterweapon fires from under the surface, so where the
+        // commander walks the seabed an attack order sends it chasing
+        // something it can never hurt -- and takes the only builder off the
+        // base to do it. This is the flat-ground scene from the test above
+        // that answers with the commander; only the sea level differs.
+        auto script = makeEmptyCobScript();
+        Grid<unsigned char> seabed(64, 64, static_cast<unsigned char>(0));
+        GameSimulation sim(MapTerrain(std::move(seabed), 60_ss), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+        // A skeeter on the surface, as on Brain Coral. Not a kbot on the
+        // seabed: that is submerged, so nobody without sonar sees it, and the
+        // AI would never have gone into Defend to be tested at all.
+        addUnit(sim, "ARMPT", human, SimVector(250_ss, 60_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        AiPlayerController controller(ai, profile, 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 20, commands);
+
+        REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
+        REQUIRE(controller.getBlackboard().combatUnits.empty());
+        REQUIRE(ordersFor<AttackOrder>(commands, commanderId).empty());
+    }
+
     TEST_CASE("the army attacks in waves and holds when outnumbered", "[ai]")
     {
         auto script = makeEmptyCobScript();
@@ -2263,6 +2332,79 @@ namespace rwe
         REQUIRE((builds.front().unitType == "ARMMOHO" || builds.front().unitType == "ARMARAD"));
     }
 
+    TEST_CASE("an extractor goes to the heart of a deposit, not its near edge", "[ai]")
+    {
+        // A metal patch is one CELL, not one deposit, so the nearest ring of
+        // the site search to find anything is a deposit's near edge -- and the
+        // search used to stop there, putting a 3x3 extractor half off every
+        // deposit bigger than about two cells square. Extraction is the metal
+        // under the footprint, so that was income lost, not a cosmetic
+        // offset. Reported from a replay on Brain Coral.
+        GameSimulation sim(makeFlatTerrain(128, 128), /*surfaceMetal*/ 0u, 0, 0);
+        addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+
+        UnitDefinition mexDef;
+        mexDef.isMobile = false;
+        mexDef.builder = false;
+        // ARMMEX and ARMUWMEX are both 3x3.
+        mexDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 3u, 255u, 255u, 0u, 255u};
+        sim.unitDefinitions["MEX"] = mexDef;
+
+        auto anchor = SimVector(0_ss, 0_ss, 0_ss);
+        auto anchorHm = sim.terrain.worldToHeightmapCoordinate(anchor);
+
+        auto paint = [&](int x0, int z0, int width, int height) {
+            for (int z = z0; z < z0 + height; ++z)
+            {
+                for (int x = x0; x < x0 + width; ++x)
+                {
+                    sim.metalGrid.set(x, z, static_cast<unsigned char>(200));
+                }
+            }
+        };
+        auto metalUnder = [&](const SimVector& site) {
+            auto rect = sim.computeFootprintRegion(site, mexDef.movementCollisionInfo);
+            unsigned int total = 0;
+            for (int z = rect.y; z < rect.y + static_cast<int>(rect.height); ++z)
+            {
+                for (int x = rect.x; x < rect.x + static_cast<int>(rect.width); ++x)
+                {
+                    total += sim.metalGrid.get(x, z);
+                }
+            }
+            return total;
+        };
+
+        SECTION("a deposit found from the side is taken at its heart")
+        {
+            // 5x5, its near edge six cells east of the anchor. On that edge a
+            // 3x3 covers six of the deposit's cells; one ring further in it
+            // covers nine.
+            paint(anchorHm.x + 6, anchorHm.y - 2, 5, 5);
+            BuildManager buildManager;
+            std::minstd_rand rng(1u);
+            auto site = buildManager.chooseMexSite(sim, "MEX", anchor, 1600_ss, rng, {});
+            REQUIRE(site.has_value());
+            REQUIRE(metalUnder(*site) == 9u * 200u);
+        }
+
+        SECTION("but it does not walk past a spot to reach a richer deposit further off")
+        {
+            // A single cell three out, bare ground, then a 5x5 twelve out. The
+            // walk goes INTO the deposit it has found; it is not a hunt for a
+            // better one elsewhere, and bare ground is where it stops. Without
+            // the gap test the lone cell's ring counts as improving and the
+            // walk carries on out to the big deposit.
+            paint(anchorHm.x + 3, anchorHm.y, 1, 1);
+            paint(anchorHm.x + 12, anchorHm.y - 2, 5, 5);
+            BuildManager buildManager;
+            std::minstd_rand rng(1u);
+            auto site = buildManager.chooseMexSite(sim, "MEX", anchor, 1600_ss, rng, {});
+            REQUIRE(site.has_value());
+            REQUIRE(metalUnder(*site) == 200u);
+        }
+    }
+
     TEST_CASE("the site search walks outward past a ring the builder cannot reach", "[ai]")
     {
         // The ring walk stops at the NEAREST ring with room on it, which is
@@ -2968,6 +3110,66 @@ namespace rwe
             AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMROY") == 1);
+        }
+    }
+
+    TEST_CASE("naval: a yard on a map with metal under the sea makes construction ships", "[ai]")
+    {
+        // Nothing ever queued one: the slot resolved, and its only reader was
+        // a movement-class lookup. On a map with no dry ground there is no lab
+        // either, so the commander was the only builder the AI would ever own.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto armcs = makeDef(false, true, true, "", 200u);
+        armcs.movementCollisionInfo = UnitDefinition::AdHocMovementClass{4u, 4u, 255u, 255u, 6u, 255u};
+        sim.unitDefinitions["ARMCS"] = armcs;
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMSY", ai, SimVector(0_ss, 60_ss, 0_ss), script);
+        // Eyes already covered, so the yard's next job is what comes after them.
+        addUnit(sim, "ARMPT", ai, SimVector(50_ss, 60_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+
+        SECTION("asked for, with metal under the water, a builder comes before the warships")
+        {
+            // Open water east of the shelf, sixty deep.
+            sim.metalGrid.set(40, 32, static_cast<unsigned char>(200));
+            profile.targetConstructionShipCount = 2;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMCS") == 1);
+            REQUIRE(countQueueCommands(commands, "ARMROY") == 0);
+        }
+
+        SECTION("asked for, with no metal under the water, the yard goes to warships")
+        {
+            profile.targetConstructionShipCount = 2;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMCS") == 0);
+            REQUIRE(countQueueCommands(commands, "ARMROY") == 1);
+        }
+
+        SECTION("by default it does not, even with metal to take")
+        {
+            // Off by default: the shipped construction ship has no underwater
+            // extractor on its menu, and measured, building them cost the
+            // commander planning passes. See targetConstructionShipCount.
+            sim.metalGrid.set(40, 32, static_cast<unsigned char>(200));
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMCS") == 0);
             REQUIRE(countQueueCommands(commands, "ARMROY") == 1);
         }
     }

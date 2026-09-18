@@ -50,6 +50,61 @@ namespace rwe
             return attacked != nullptr && *attacked == target;
         }
 
+        /**
+         * Whether a unit, standing where it is, could hurt anything with its
+         * own guns. Below the waterline it cannot unless it carries a
+         * waterweapon: the projectile collision test in GameSimulation stops
+         * every other round the moment it is at or under sea level over water,
+         * which is the original's rule too. A commander walking the seabed is
+         * unarmed for as long as it is down there -- on Brain Coral, that is
+         * the whole game.
+         *
+         * Judged from the unit's origin rather than its firing piece, which is
+         * good enough for the case this exists for: a commander at a depth of
+         * 47 to 75 is under the surface from head to foot.
+         */
+        bool canFireFrom(const GameSimulation& sim, const UnitState& unit)
+        {
+            if (unit.position.y >= sim.terrain.getSeaLevel())
+            {
+                return true;
+            }
+            auto defIt = sim.unitDefinitions.find(unit.unitType);
+            if (defIt == sim.unitDefinitions.end())
+            {
+                return false;
+            }
+            for (const auto* name : {&defIt->second.weapon1, &defIt->second.weapon2, &defIt->second.weapon3})
+            {
+                if (name->empty())
+                {
+                    continue;
+                }
+                auto weaponIt = sim.weaponDefinitions.find(*name);
+                if (weaponIt != sim.weaponDefinitions.end() && weaponIt->second.waterWeapon)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * A unit still under construction, which is not a target worth an
+         * order. A frame spawns with nought hit points and dies quietly to any
+         * hit, so the units' own fire-at-will finishes it without being asked.
+         * And one on a factory's pad stands exactly where the factory does, so
+         * a nearest-enemy search picks it ahead of the factory every time:
+         * ordering the attack at the frame is how a raid kills the same cheap
+         * frame over and over while the factory that keeps making it stands
+         * untouched. Skipping it hands the order to the factory instead.
+         */
+        bool isNanoframe(const GameSimulation& sim, const UnitState& unit)
+        {
+            auto defIt = sim.unitDefinitions.find(unit.unitType);
+            return defIt != sim.unitDefinitions.end() && unit.isBeingBuilt(defIt->second);
+        }
+
         bool isMovingTo(const UnitState& unit, const SimVector& destination)
         {
             if (unit.orders.empty())
@@ -144,6 +199,10 @@ namespace rwe
             {
                 continue;
             }
+            if (isNanoframe(sim, unitRef->get()))
+            {
+                continue;
+            }
             auto d = from.distanceSquared(enemy.lastKnownPosition);
             if (d <= bestDistanceSquared)
             {
@@ -230,6 +289,10 @@ namespace rwe
             }
             auto unitRef = sim.tryGetUnitState(enemy.unitId);
             if (!unitRef || unitRef->get().isDead())
+            {
+                continue;
+            }
+            if (isNanoframe(sim, unitRef->get()))
             {
                 continue;
             }
@@ -699,6 +762,14 @@ namespace rwe
                 {
                     continue;
                 }
+                // A frame is no intruder: it cannot fire until it is
+                // finished, and isNanoframe says why it is no target either.
+                // The builder putting it up is armed or it is not, and is
+                // judged on its own entry in this list.
+                if (auto enemyRef = sim.tryGetUnitState(enemyId); enemyRef && isNanoframe(sim, enemyRef->get()))
+                {
+                    continue;
+                }
                 auto distance = bb.baseAnchor->distanceSquared(known->second.lastKnownPosition);
                 if (!intruder || distance < nearest)
                 {
@@ -785,7 +856,14 @@ namespace rwe
             && bb.commanderUnitId
             && static_cast<int>(bb.enemiesNearBase.size()) <= profile.commanderDefendsAloneMaxIntruders)
         {
-            if (auto commanderRef = sim.tryGetUnitState(*bb.commanderUnitId))
+            // Only if it could actually hurt the intruder from where it
+            // stands. The first version of this did not ask, and on an
+            // all-water map it was worse than useless: an attack order at a
+            // ship the commander cannot hit walks it along the seabed after
+            // the ship, taking the only builder off the base to chase
+            // something it will never damage.
+            auto commanderRef = sim.tryGetUnitState(*bb.commanderUnitId);
+            if (commanderRef && canFireFrom(sim, commanderRef->get()))
             {
                 if (!isAttackingUnit(commanderRef->get(), *intruder))
                 {

@@ -483,6 +483,43 @@ namespace rwe
          */
         int targetSeaTransportCount{1};
         /**
+         * Construction ships the shipyard makes once the map has metal under
+         * its water. 0 leaves the commander to mine the sea by itself.
+         *
+         * Nothing queued one before this. sideUnits.constructionShip resolved
+         * on both sides, and its only reader picked a movement class for the
+         * naval reachability layer. On a map with no dry ground there is no
+         * lab and so no constructor either, which left the commander as the
+         * only builder the AI would ever own: one unit walking the seabed,
+         * against Brain Coral's 1170 submerged patches, reaching three to
+         * seven extractors in fifteen minutes.
+         *
+         * Gated on submerged metal rather than on how wet the map is, for the
+         * reason the underwater extractor is: the census of all 52 shipped
+         * maps showed that the water fraction says little about what lies
+         * under it.
+         *
+         * OFF BY DEFAULT, because the arena said so and the data says why.
+         * At 2, over ten games on Brain Coral with seats alternating, the side
+         * building them finished with 3.5 extractors and 7.7 metal a second
+         * against 5.9 and 10.9 for the side that did not -- more builders,
+         * fewer extractors, in game after game. The construction ship cannot
+         * build an underwater extractor at all: ARMCS1.GUI and CORCS1.GUI
+         * offer the advanced shipyard, shipyard, tidal generator, sonar,
+         * torpedo launcher and light laser, and in the shipped menus only the
+         * commander (ARMCOM3/CORCOM3) and Core Contingency's construction
+         * seaplane (ARMCSA4/CORCSA4) carry one. So the ships found nothing on
+         * the plan they could build, and the planner serves one builder per
+         * pass: every pass spent on an idle ship was a pass the commander --
+         * the one unit that could build the extractors -- did not get.
+         *
+         * Worth revisiting once the planner stops spending passes on builders
+         * with nothing to do. Then ships taking the tidals and the launcher
+         * would leave the commander free for the metal, which is the division
+         * of labour this was meant to be.
+         */
+        int targetConstructionShipCount{0};
+        /**
          * Submarines wanted, out of navalFleetSize, once the destroyer core
          * below is standing. A submarine's only weapon is a waterweapon
          * (TOTALA-EXE.md and S:13.2), so it cannot answer anything on land
