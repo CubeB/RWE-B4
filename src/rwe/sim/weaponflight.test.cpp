@@ -4,9 +4,9 @@
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
+#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitModelDefinition.h>
-#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/UnitWeapon.h>
 #include <rwe/sim/WeaponDefinition.h>
