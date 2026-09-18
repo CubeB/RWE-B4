@@ -182,6 +182,17 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
   each episode through `GameSimulation::tick`. `docs/TOTALA-EXE.md` §108 is the
   settle it rests on.
 
+  `--miss-buckets` answers why 53,706 of the paired shots drew **no** damage in
+  the window, which was what blocked the hit/miss half of the weapon oracle. It
+  sorts them into ten named buckets in a priority order -- a quarter are rounds
+  whose victim died before they arrived, which is `0x49B090` finding the
+  square's unit slot empty -- prints the no-damage rate down the same drift axis
+  the flight-time work uses, and then holds what is left to the `0x2c` health
+  stream, with the same bracket over shots *known* to have drawn damage as the
+  control that says how often the instrument misses one. Absence in `0x0b` is
+  still unknown rather than zero; the point of the pass is that it no longer has
+  to be. `docs/TA-DEMOS.md`, "Why 53,706 shots drew no damage".
+
   `--unit-state` decodes every `0x2c` and holds the decode to the rest of the
   stream -- a `0x09`'s type and position, `MaxVelocity`, a building staying put,
   where a `0x0d` aims -- and exits non-zero if one fails to decode;

@@ -352,10 +352,29 @@ Everything tagged `[tad]` alone is still a decoder test.
       covers the behaviour in the real simulation.
 - [ ] The weapon classes with no model yet: ballistic (18 cells), `vlaunch` (3),
       torpedoes (4) and `cruise` (1). They should reuse the footprint stop.
-- [ ] The hit/miss half of the weapon oracle. 53,706 shots drew no damage in the
-      window, and `0x0b` is not a complete ledger. `0x2c`'s per-cycle health is
-      a way to test that; so is the pass-through the footprint model already
-      detects.
+- [x] Why 53,706 shots drew no damage, which was blocking the hit/miss half
+      (2026-09-18). `tad_episodes --miss-buckets` sorts them: **36% structural**,
+      the largest single bucket being 13,991 rounds whose victim died before
+      they arrived -- `0x49B090` finds the square's unit slot empty and there is
+      nothing to damage; **56%** misses the drift bound explains; **8%** misses
+      it does not. The no-damage rate runs 14% to 77% down the drift axis, which
+      the ledger cannot see, and the `0x2c` health bracket says about nine in
+      ten of both open buckets took no damage at all -- reported against its own
+      control, which puts the instrument's sensitivity at 82%. What stays
+      unexplained is the mechanism behind the 8%, not their disposition. 119
+      shots are ledger gaps demonstrated on units that *lived*, which is the
+      first such measurement. `docs/TA-DEMOS.md`, "Why 53,706 shots drew no
+      damage".
+- [ ] The hit/miss half of the weapon oracle itself. Unblocked, and its shape is
+      now settled rather than guessed: it is a **rate** and never a per-shot
+      prediction, because where the victim stood when the round arrived is in
+      the stream once every `maxUnits` ticks; it is scored only over shots the
+      structural buckets clear; and its cell key is **(shooter type, weapon
+      slot, victim type or class)**, because holding the weapon class and
+      varying the victim moves the rate further than the reverse -- constant
+      speed reads 26.5% damageless against a building and 92.1% against an
+      aircraft. That makes it the first fixture to assert an interval rather
+      than an equality, which is what has to be designed first.
 - [x] `0x2c` (2026-09-17): decoded bit for bit over the whole corpus
       (`tadDecodeUnitState`, `tad_episodes --unit-state`). No kinematic corpus --
       positions go out once every `maxUnits` ticks -- but a replicated-path

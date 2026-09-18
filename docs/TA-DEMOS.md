@@ -636,6 +636,14 @@ subpackets, so splash damage is not arriving by that route either. Any oracle
 that wants total damage absorbed has to treat the absence as unknown rather than
 as zero.
 
+**It is incomplete for units that live, too, and by much less.** The figure
+above only ever measured dying units. Bracketing a shot with its victim's own
+`0x2c` full-state records either side of it puts a number on the other case:
+119 of 1,713 clean brackets show a victim losing health with nothing in the
+ledger at all, 6.9% before allowing for the instrument's own 82% sensitivity.
+See "Why 53,706 shots drew no damage" below, which is also where the sensitivity
+is measured and where the bias in that sample is spelt out.
+
 ### `0x0c`, death -- all 11 bytes, and this one confirms the disassembly
 
 | Offset | Size | Field |
@@ -773,6 +781,10 @@ floors positions onto sixteen-unit squares: a rounded coordinate on the wrong
 side of a boundary moved whole pairings, and `CORVAMP` read 52% in the script
 against 66% in the port. Regenerate an old dump before scoring it.
 
+**A shot also carries its rotation triple** as `rx`, `ry`, `rz`, which is what
+identified the field: see "Why 53,706 shots drew no damage". A dump written
+before that has no such keys and has to be regenerated to use them.
+
 #### A `0x0b` is sent by the attacker's owner, which is what makes this tractable
 
 The first thing the dump settled, and the most useful. Each peer emits the
@@ -803,7 +815,10 @@ corpus that keeps **35,535 of 631,578 shots**. The rejections are the shape to
 expect and are worth reading rather than summing: 405,784 shots have another
 shot at the same victim just before them and 111,547 just after -- which is what
 sustained fire looks like -- 53,706 have no damage recorded in the window at
-all, and 5,404 have several.
+all, and 5,404 have several. **The 53,706 are accounted for**, in "Why 53,706
+shots drew no damage" below: a quarter of them are rounds whose victim died
+before they arrived, and most of the rest are misses, held to the `0x2c` health
+stream rather than assumed from the ledger's silence.
 
 **The pairing is confirmed by a number it was not built from.** Group the
 survivors by (shooter type, weapon slot) and take the modal `damage` value of
@@ -1769,7 +1784,18 @@ reading remaining, has since been settled that way: see "Where a round stops".
 shot, against the `0x0b` damage recorded between them, is a direct test of how
 incomplete `0x0b` is and of whether a shot with no damage record really missed
 -- but only at 33-second resolution, so only for victims hit by little else in
-that window.
+that window. **Built**, and it is what unblocked the hit/miss half: see "Why
+53,706 shots drew no damage". Three things about it that were not obvious in
+advance and are worth knowing before reusing the bracket. A unit id that dies
+inside a bracket is a different unit at the far end even when the type reads the
+same, because TA rebuilds `ARMFAV`s and `ARMPEEP`s into their own slots
+constantly, and adding that one guard took the instrument's sensitivity from 75%
+to 82%. The 18% it still misses is mostly a repairer putting back what a round
+took, which a 33-second cycle is ample for. And the brackets that have to be
+thrown away are not a random loss: **32,524 of the 32,528** discarded for a
+changed type or a skipped cycle carry a `0x0c` for that victim inside them, so
+the instrument is blind to exactly the shots whose victim died -- which is why
+that case needs a bucket of its own rather than a health test.
 
 **For the economy stall work** it adds little: a nanoframe's build progress is
 sampled once a cycle, which is coarser than `0x28`'s 120 ticks.
@@ -2415,9 +2441,10 @@ They catch different things and should not share machinery.
       33**, which says every episode measures the stepping and not a constant.
 
       **What is left** is the three classes that still have no model, each of
-      which wants its own cells: ballistics (18 cells, and the one with a
-      decoding prize in it, because a ballistic shot is where the `0x0d`'s
-      rotation triple could be checked against the geometry), `vlaunch` (3) and
+      which wants its own cells: ballistics (18 cells; the `0x0d`'s rotation
+      triple has since been identified as the shot's own launch attitude, so
+      what a ballistic cell would check it against is the arc rather than the
+      field's meaning), `vlaunch` (3) and
       torpedoes (4) -- and `cruise`, now split out of the constant-speed table as
       a class of one. ~~The sub-tick residual~~ is closed: a round stops on the
       first step that puts it in one of the victim's footprint squares ("Where a
@@ -2426,12 +2453,27 @@ They catch different things and should not share machinery.
       What that reopened is **which tick a new round first steps on**: the old
       `-1` was the only evidence, and a first read of the binary disagrees with
       the corpus. It has to be settled before any of the classes above, and is
-      being. The height half of the collision test is not modelled either. And
-      the hit/miss half of the oracle, which is a different statistic
-      over the same pairings and where target type probably does belong in the
-      cell key -- but which has to answer why 53,706 shots drew no damage in the
-      window before it can call any of them misses, given that `0x0b` is not a
-      complete ledger.
+      being. The height half of the collision test is not modelled either.
+
+      ~~And the hit/miss half of the oracle, which has to answer why 53,706
+      shots drew no damage in the window before it can call any of them
+      misses.~~ **Answered, and it is unblocked.** `tad_episodes
+      --miss-buckets` sorts the 53,706: 36% structural, led by rounds whose
+      victim died before they arrived; 56% misses the drift bound explains; 8%
+      misses it does not, and what stays unexplained about those is the
+      mechanism rather than the disposition, because the `0x2c` health bracket
+      says about nine in ten of both open buckets took no damage at all. "Why
+      53,706 shots drew no damage" has the table, the instrument's own control,
+      and the residue. **What it settles for the fixture**: the oracle is a
+      RATE and never a per-shot prediction, since where the victim was when the
+      round arrived is only in the stream once every `maxUnits` ticks; it has to
+      be scored over shots the structural buckets clear, or it measures how
+      often the victim died first; and target type does belong in the cell key,
+      which is now measured rather than suspected -- holding the weapon class
+      and varying the victim moves the rate further than the reverse. It is a
+      fixture asserting an interval rather than an equality, which is a shape
+      none of the three checked in have, and designing it is the next piece of
+      work.
 
    Every one of those carries the expected-difference annotation described in
    "The hazard to design in from the start". A corpus is an efficient machine
