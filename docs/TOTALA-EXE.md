@@ -13075,3 +13075,77 @@ is a campaign TDF reader with the `MISSION%d` enumeration and the localised
 name, the header keys above added to `OtaRecord`, a `[units]` reader with the
 record's fields, and the `InitialMission` grammar as data; the interpreter's
 missions, the rules and the schema choice are the pieces after it.
+
+## 106. Blast impulse: `ImpulseFactor` and `ImpulseBoost` are not in this game
+
+Asked for from play: "powerful explosions create shockwaves that physically
+toss surrounding units." **The original does not do this.** There is no blast
+impulse in `TotalA.exe`, not even an unused one: the key names are not in the
+binary, nothing could read them if a TDF supplied them, and the blast code
+writes hit points and nothing else. This is a "not implemented" finding, not a
+"decoded but subtle" one, and it is recorded so that nobody ports it as a
+fidelity fix.
+
+**The strings are absent.** A case-insensitive search of the whole
+1,178,624-byte file, as ASCII and as UTF-16LE, for `impuls` -- shorter than
+either key, to catch any case or truncation -- finds **nothing**; nor do
+`knockback`, `kickback`, `blastforce`, `pushback`, `recoil` or `shove`. The
+controls each appear exactly once (`areaofeffect`, `edgeeffectiveness`,
+`weaponvelocity`), which is what a sound search should give: the parser holds
+each key it recognises as one literal.
+
+**That is the whole key space.** The weapon TDF parser's keys sit as one
+contiguous run in `.data`, roughly `0x503FE8`–`0x50410E`, directly after the
+FBI keys of §17:
+
+```
+firestarter, minbarrelangle, holdtime, flighttime, smokedelay, randomdecay,
+duration, sprayangle, burstrate, burst, noautorange, weapontimer,
+edgeeffectiveness, areaofeffect, metalpershot, energypershot, reloadtime,
+coverage, range, weaponacceleration, startvelocity, weaponvelocity
+```
+
+Each is fetched at its own call site through `0x4C4760` (`GetFloat(key,
+default)`: a binary search over the section's parsed key/value pairs,
+returning the caller's default when the key is absent) or its integer sibling
+`0x4C46C0`, with the key string pushed as a literal beside the call -- for
+example `push 0x504278` (`"edgeeffectiveness"`) at `0x42E59B`, stored to weapon
+`+0xD8`. A section is tokenised into that key/value array generically, so an
+`ImpulseFactor=1.5` written by a modder is parsed like any other line and then
+never retrieved, because no call site pushes its name. It is not clamped or
+defaulted; it simply has no reader and no struct offset.
+
+**The blast code moves nothing.** Both routines §6 decodes end every per-unit
+effect in the same three-argument call to `0x499CD0` (attacker, victim,
+scale): `0x499FA0`, the single-target path, pushes `1.0f`; `0x49A120`, the area
+path, pushes the §6 falloff scale at `0x49A3EE`–`0x49A3F5` after its box-clamp
+distance, and afterwards writes only its two per-owner damage accumulators.
+Neither reads or writes anything shaped like a velocity, and `0x499CD0` and the
+damage choke point `0x489BB0` behind it take no argument an impulse could ride
+in.
+
+**Nor does the shipped content try.** Every weapon TDF in the GOG install --
+the base game's 8 in `totala1.hpi`, 66 in Core Contingency's `ccdata.ccx` and 38
+in Battle Tactics' `btdata.ccx`, 112 in all -- was extracted with a
+reimplementation of RWE's HPI reader and checked against the archive
+directories: none contains either key. `COMMANDER_BLAST` (`weapons/UNITS.TDF`),
+the most violent explosion in the game, is `AreaOfEffect=950`,
+`EdgeEffectiveness=0.75`, `Damage=9999`, and nothing else of the kind.
+
+Verified by reading instructions or by exhaustive search: the absent strings;
+the key table and that it has no impulse entry; `0x4C4760` and `0x4C46C0` in
+full; that every recognised weapon key has its own literal call site; that
+`0x499FA0` and `0x49A120` end in `0x499CD0` with no velocity access; the 112
+data files. **Inferred, not checked:** that FBI parsing uses the identical
+accessor rather than an equivalent one; and that every damage entry point
+(contact fuzes, the D-gun's own dispatch, §92) passes through one of those two
+routines before `0x499CD0`, which was traced for the two paths §6 documents
+rather than rebuilt from every dispatcher. Where the belief comes from is
+also inference: `COMMANDER_BLAST` still does about 7500 at the rim of its
+475-unit radius, which reads as a shockwave without anything being thrown,
+and the Spring engine -- an independent reimplementation -- gives these same
+key names real physics, so TA-derived communities meet them there.
+
+For RWE: nothing to port. `WeaponTdf` does not parse either key and should
+not. A knockback added for feel would be a deliberate departure and belongs in
+§88 with the others, not in the simulation as though it matched the original.
