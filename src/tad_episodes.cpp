@@ -3942,7 +3942,7 @@ namespace rwe
 
     /** The bucket names, in the priority order a shot is tested against. */
     const std::array<const char*, 10> missBucketNames = {
-        "1. the shooter has no weapon in that slot",
+        "1. the slot names no weapon, or one that cannot fly a round",
         "2. the recording ends inside the window",
         "3. the victim died before the round could arrive",
         "4. the shot killed the victim; only the 0x0c records it",
@@ -4207,13 +4207,28 @@ namespace rwe
                 // The weapon, which decides how far a step goes and therefore
                 // when the round arrives. A shot whose (type, slot) names no
                 // weapon is not a weapon firing and is bucket 1.
+                //
+                // SO IS ONE WHOSE `weaponvelocity` IS NEGATIVE. Fourteen blocks
+                // in the Escalation data write one -- BOMB_SHOCK -400,
+                // VSPAM_ALL -10, NUKE_SUB_ARM -8 and friends -- and every one of
+                // them is `vlaunch`, whose round goes up before it goes
+                // anywhere and which no model here flies. WeaponFacts holds the
+                // field unsigned because parseWeaponTdf does, so a negative
+                // arrives as a value above INT32_MAX rather than as a small
+                // number: that is the exact test, not a threshold. Reading it as
+                // 4,294,967,286 would give a drift bound of five million world
+                // units a tick and put every shot from such a weapon on the
+                // wrong side of it, which is what it did for 311 shots before
+                // this guard. The flight-time cells are untouched by the same
+                // bug only because vlaunch is never scored.
                 const WeaponFacts* weapon = nullptr;
                 if (auto u = unitFacts.find(shot.shooter); u != unitFacts.end() && shot.slot < 3)
                 {
                     const auto& weaponName = u->second.weaponNames[shot.slot];
                     if (!weaponName.empty())
                     {
-                        if (auto w = weaponFacts.find(weaponName); w != weaponFacts.end())
+                        if (auto w = weaponFacts.find(weaponName); w != weaponFacts.end()
+                            && w->second.velocity <= static_cast<unsigned int>(INT32_MAX))
                         {
                             weapon = &w->second;
                         }
