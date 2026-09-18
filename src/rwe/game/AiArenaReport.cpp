@@ -95,10 +95,22 @@ namespace rwe
                 record.completed = true;
                 record.completedTick = now;
             }
+            // One line per death, because the arena's own lost= figure says
+            // how many and nothing at all about what. Reading a loss count
+            // of 286 and guessing at it cost an afternoon and two wrong
+            // fixes: the factory log said two hulls were ever ordered, so
+            // the frames looked like they had to be the commander's, and
+            // they were not -- a factory does not lose its queue entry when
+            // the frame on the slipway dies, and 283 of them came off two
+            // entries. Debug rather than info: an arena game produces a few
+            // hundred of these and the runs that want them already have
+            // debug on.
             if (!record.dead && unit.isDead())
             {
                 record.dead = true;
                 record.diedTick = now;
+                LOG_DEBUG << "ARENA-DEATH tick=" << now << " player=" << record.player << " type=" << record.unitType
+                          << " frame=" << (record.completed ? 0 : 1) << " born=" << record.bornTick;
             }
         }
 
@@ -114,6 +126,8 @@ namespace rwe
             {
                 record.dead = true;
                 record.diedTick = now;
+                LOG_DEBUG << "ARENA-GONE tick=" << now << " player=" << record.player << " type=" << record.unitType
+                         << " frame=" << (record.completed ? 0 : 1) << " born=" << record.bornTick;
             }
         }
     }

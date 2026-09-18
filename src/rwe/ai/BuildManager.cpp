@@ -1649,6 +1649,45 @@ namespace rwe
         for (auto factoryId : bb.factories)
         {
             const auto& factory = sim.getUnitState(factoryId);
+
+            // A besieged factory's queue is EMPTIED, not merely left alone.
+            //
+            // This is the whole of the all-water soft-lock and it is why
+            // declining to top the queue up was worth nothing: a factory
+            // does not lose its queue entry when the frame on the slipway
+            // dies. It starts the next one from the same entry, so a yard
+            // holding one queued destroyer produces a frame every
+            // twenty-nine ticks for the rest of the game, and the planner
+            // is never consulted again because the queue is never empty.
+            // Instrumented on Brain Coral, seed 3: two queue entries
+            // between them, 283 and 229 ARMROY frames born and shot.
+            //
+            // So the queue has to be taken off it, which is the same
+            // command a player cancelling a build order sends -- a negative
+            // count into ModifyBuildQueue. The yard idles until the gun has
+            // gone, and then the planner fills it again on the ordinary
+            // path below.
+            if (profile.noticeProductionHarassment && !factory.buildQueue.empty()
+                && std::find(bb.besiegedFactories.begin(), bb.besiegedFactories.end(), factoryId) != bb.besiegedFactories.end())
+            {
+                // Walked as the queue itself is held, an ordered vector, and
+                // not through getBuildQueueTotals, which is an unordered_map
+                // -- this runs inside the simulation, so the order commands
+                // come out in has to be the same on every peer.
+                for (const auto& [queuedType, queuedCount] : factory.buildQueue)
+                {
+                    if (queuedCount <= 0)
+                    {
+                        continue;
+                    }
+                    LOG_INFO << "AI factory: " << factory.unitType << " " << factoryId.value
+                             << " stops building " << queuedType << " (" << queuedCount
+                             << " queued); an armed enemy is sitting on it and every frame dies as it is born";
+                    outCommands.emplace_back(PlayerUnitCommand(factoryId, PlayerUnitCommand::ModifyBuildQueue{-queuedCount, queuedType}));
+                }
+                continue;
+            }
+
             if (!factory.buildQueue.empty())
             {
                 // A factory is only topped up once its queue drains, so a
