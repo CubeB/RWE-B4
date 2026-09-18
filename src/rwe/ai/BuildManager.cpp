@@ -1618,6 +1618,25 @@ namespace rwe
                 continue;
             }
 
+            // Not while something is standing over it shooting.
+            //
+            // A nanoframe has zero hit points the tick it is born, so a
+            // single gun parked off a shipyard kills every hull the yard
+            // makes, one at a time, for as long as the yard keeps making
+            // them. Topping the queue up there is not production, it is the
+            // whole economy being handed to a hundred-metal scout ship a
+            // frame at a time -- measured at 1408 destroyer frames in ten
+            // games. The yard is not told to stop; it is simply not asked
+            // for anything more until the gun has gone, which is what makes
+            // this self-clearing rather than a permanent shutdown.
+            if (profile.noticeProductionHarassment
+                && std::find(bb.besiegedFactories.begin(), bb.besiegedFactories.end(), factoryId) != bb.besiegedFactories.end())
+            {
+                LOG_DEBUG << "AI factory: " << factory.unitType << " " << factoryId.value
+                          << " not topped up, an armed enemy is sitting on it";
+                continue;
+            }
+
             std::string next;
             if (!s.airPlant.empty() && factory.unitType == s.airPlant)
             {
