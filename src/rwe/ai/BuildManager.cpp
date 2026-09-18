@@ -757,7 +757,6 @@ namespace rwe
         const std::string& unitType,
         std::minstd_rand& rng) const
     {
-        (void)profile;
         const auto defIt = sim.unitDefinitions.find(unitType);
         if (defIt == sim.unitDefinitions.end() || !bb.baseAnchor || bb.mapIntel.shipyardSites.empty())
         {
@@ -780,9 +779,29 @@ namespace rwe
         std::optional<SimScalar> bestDistance;
         std::optional<SimVector> bestOpen;
         std::optional<SimScalar> bestOpenDistance;
+        // Our own yards, to keep clear of; see shipyardSpacing.
+        std::vector<SimVector> ownYards;
+        for (auto factoryId : bb.factories)
+        {
+            auto factoryRef = sim.tryGetUnitState(factoryId);
+            if (!factoryRef)
+            {
+                continue;
+            }
+            const auto& type = factoryRef->get().unitType;
+            if (type == bb.sideUnits.shipyard || (!bb.sideUnits.advancedShipyard.empty() && type == bb.sideUnits.advancedShipyard))
+            {
+                ownYards.push_back(factoryRef->get().position);
+            }
+        }
+        auto spacingSquared = profile.shipyardSpacing * profile.shipyardSpacing;
         for (const auto& candidate : bb.mapIntel.shipyardSites)
         {
             if (siteFailedLately(sim, candidate.position))
+            {
+                continue;
+            }
+            if (std::any_of(ownYards.begin(), ownYards.end(), [&](const SimVector& yard) { return yard.distanceSquared(candidate.position) < spacingSquared; }))
             {
                 continue;
             }
@@ -2557,7 +2576,8 @@ namespace rwe
         // which is off. Only the PLAN would change: the siting below still
         // runs from where the ship is.
         const auto builderMc = sim.getAdHocMovementClass(builderDef.movementCollisionInfo);
-        const bool builderAfloat = profile.navalBuildersPlanForBase && builderDef.isMobile && !builderDef.canFly && builderMc.minWaterDepth > 0;
+        const bool builderIsShip = builderDef.isMobile && !builderDef.canFly && builderMc.minWaterDepth > 0;
+        const bool builderAfloat = profile.navalBuildersPlanForBase && builderIsShip;
         for (const auto& next : buildPriorities(profile, bb, builderAtBase || builderAfloat, outpost, builder.unitType, enemyNavalSeen))
         {
             auto nextDefIt = sim.unitDefinitions.find(next);
@@ -2987,6 +3007,50 @@ namespace rwe
                 }
             }
 
+            // Ground the enemy is working, or has just thrown us off. The
+            // extractor search has always refused a patch under enemy guns;
+            // nothing else did, so a builder would walk a solar collector or
+            // a shipyard into the middle of the map and into whatever was
+            // standing there. Remembered, so the builder is not handed the
+            // same place next pass, and forgotten with the other failed sites.
+            // Not for an extractor, which has a rule and a knob of its own
+            // for exactly this (mexAvoidsEnemyGunsRadius, in its search).
+            bool nextIsExtractor = next == sideUnits.metalExtractor
+                || (!sideUnits.underwaterMetalExtractor.empty() && next == sideUnits.underwaterMetalExtractor)
+                || (!sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor);
+            if (site && !nextIsExtractor && profile.builderAvoidsContestedRadius > 0_ss)
+            {
+                auto radiusSquared = profile.builderAvoidsContestedRadius * profile.builderAvoidsContestedRadius;
+                bool contested = false;
+                for (const auto& [_, enemy] : bb.knownEnemies)
+                {
+                    if (enemy.isArmed && !enemy.isAir && enemy.lastKnownPosition.distanceSquared(*site) <= radiusSquared)
+                    {
+                        contested = true;
+                        break;
+                    }
+                }
+                if (!contested && bb.baseAnchor && bb.baseAnchor->distanceSquared(*site) > (profile.defendRadius * profile.defendRadius))
+                {
+                    for (const auto& loss : bb.recentLosses)
+                    {
+                        if (loss.position.distanceSquared(*site) <= radiusSquared)
+                        {
+                            contested = true;
+                            break;
+                        }
+                    }
+                }
+                if (contested)
+                {
+                    LOG_DEBUG << "AI build: " << next << " at " << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value)
+                              << " is contested ground; left alone";
+                    auto cell = sim.terrain.worldToHeightmapCoordinate(*site);
+                    failedSites[std::make_pair(cell.x, cell.y)] = bb.now;
+                    site.reset();
+                }
+            }
+
             if (site && siteFailedLately(sim, *site))
             {
                 // The same site the last order was dropped at. The extractor
@@ -3068,9 +3132,15 @@ namespace rwe
         // between extractors. Metal first, nearest first; a tree is only
         // worth the walk when energy is actually wanted, which on the maps
         // measured it hardly ever is.
-        if (builderAtBase)
+        //
+        // A construction ship is never "at base" -- the ground labelling
+        // calls it stranded -- so it used to skip this and the factory assist
+        // below, and with no patch to take it simply stood there. It works
+        // from where it floats, and only what lies in water it can reach.
+        if (builderAtBase || builderIsShip)
         {
             const auto reachSquared = SimScalar(1200.0f * 1200.0f);
+            const auto& reclaimCentre = builderIsShip ? builder.position : *bb.baseAnchor;
             std::optional<FeatureId> best;
             bool bestHasMetal = false;
             auto bestDistanceSquared = reachSquared;
@@ -3093,8 +3163,12 @@ namespace rwe
                 {
                     continue;
                 }
-                auto distanceSquared = bb.baseAnchor->distanceSquared(feature.position);
+                auto distanceSquared = reclaimCentre.distanceSquared(feature.position);
                 if (distanceSquared >= reachSquared)
+                {
+                    continue;
+                }
+                if (builderIsShip && sim.terrain.getHeightAt(feature.position.x, feature.position.z) >= sim.terrain.getSeaLevel())
                 {
                     continue;
                 }
@@ -3113,9 +3187,46 @@ namespace rwe
         }
 
         // Otherwise lend a hand at the factory.
-        if (!bb.factories.empty() && builderAtBase && !saving)
+        //
+        // The nearest one that is actually building something, of the kind
+        // this builder can get to: a ship helps a yard and a kbot helps a
+        // plant on its own ground. It used to be the first factory on the
+        // list whatever it was doing, so with the first lab idle every spare
+        // builder stood idle beside it while the second one worked alone.
+        if (!bb.factories.empty() && (builderAtBase || builderIsShip) && !saving)
         {
-            auto factoryId = bb.factories.front();
+            std::optional<UnitId> busiest;
+            SimScalar busiestDistance = 0_ss;
+            for (auto candidateId : bb.factories)
+            {
+                auto candidateRef = sim.tryGetUnitState(candidateId);
+                if (!candidateRef || candidateRef->get().buildQueue.empty())
+                {
+                    continue;
+                }
+                const auto& candidate = candidateRef->get();
+                auto candidateDefIt = sim.unitDefinitions.find(candidate.unitType);
+                if (candidateDefIt == sim.unitDefinitions.end())
+                {
+                    continue;
+                }
+                auto candidateAfloat = sim.getAdHocMovementClass(candidateDefIt->second.movementCollisionInfo).minWaterDepth > 0;
+                if (candidateAfloat != builderIsShip && !builderDef.canFly)
+                {
+                    continue;
+                }
+                auto distance = builder.position.distanceSquared(candidate.position);
+                if (!busiest || distance < busiestDistance)
+                {
+                    busiest = candidateId;
+                    busiestDistance = distance;
+                }
+            }
+            if (!busiest)
+            {
+                return;
+            }
+            auto factoryId = *busiest;
             const auto& factory = sim.getUnitState(factoryId);
             // Already helping there. Now that an assisting builder is offered
             // to the planner again, re-issuing the order every pass would

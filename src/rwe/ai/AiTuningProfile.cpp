@@ -217,6 +217,8 @@ namespace rwe
             || setInt("saveUpSeconds", p.saveUpSeconds)
             || setInt("failedSiteMemorySeconds", p.failedSiteMemorySeconds)
             || setBool("surplusExpansion", p.surplusExpansion)
+            || setScalar("builderAvoidsContestedRadius", p.builderAvoidsContestedRadius)
+            || setScalar("shipyardSpacing", p.shipyardSpacing)
             || setInt("surplusFactoryIncomeStep", p.surplusFactoryIncomeStep)
             || setInt("surplusFactoryCap", p.surplusFactoryCap)
             || setInt("surplusFleetMultiplier", p.surplusFleetMultiplier)

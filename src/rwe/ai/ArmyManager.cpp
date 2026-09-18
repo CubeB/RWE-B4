@@ -442,15 +442,26 @@ namespace rwe
                 std::optional<SimVector> towards = bb.enemyBasePosition;
                 if (!towards)
                 {
-                    auto furthest = 0_ss;
+                    // Every start position but our own, taken in turn for two
+                    // minutes each, furthest first. It was the furthest one
+                    // alone, and on a map that declares ten starts and deals
+                    // the seats at random that is usually an empty corner: in
+                    // one ninety-minute game a fleet of thirty-nine hulls
+                    // sailed to it and lay there, with the enemy never found.
+                    std::vector<std::pair<SimScalar, SimVector>> candidates;
                     for (const auto& start : bb.mapIntel.startPositions)
                     {
                         auto d = bb.baseAnchor->distanceSquared(start);
-                        if (d > furthest)
+                        if (d > (profile.defendRadius * profile.defendRadius))
                         {
-                            furthest = d;
-                            towards = start;
+                            candidates.emplace_back(d, start);
                         }
+                    }
+                    std::stable_sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+                    if (!candidates.empty())
+                    {
+                        auto leg = static_cast<std::size_t>(bb.now.value / (120u * SimTicksPerSecond)) % candidates.size();
+                        towards = candidates[leg].second;
                     }
                 }
                 if (towards)

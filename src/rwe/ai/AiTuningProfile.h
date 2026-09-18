@@ -138,6 +138,17 @@ namespace rwe
          * does with it is build the means to spend it.
          */
         bool surplusExpansion{true};
+        /**
+         * How far from a known armed enemy, or from where a building of ours
+         * was lost lately, a builder will still put something down. The
+         * extractor search has long refused patches under enemy guns
+         * (mexAvoidsEnemyGunsRadius); this is the same caution for
+         * everything else a builder is sent to build, and for ground we have
+         * just been thrown off. Zero switches it off.
+         */
+        SimScalar builderAvoidsContestedRadius{450_ss};
+        /** Centre-to-centre distance kept between our own shipyards, so what one launches is not launched into the next. A yard is 128 across. */
+        SimScalar shipyardSpacing{448_ss};
         /** One more factory of a kind is allowed for every this much metal income a second, while the store is full. */
         int surplusFactoryIncomeStep{20};
         /** And never more than this many of one kind, however rich. */
