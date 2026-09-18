@@ -506,10 +506,22 @@ namespace rwe
         std::string unitType;
         std::vector<UnitMesh> pieces;
         std::unordered_map<std::string, int> pieceNameToIndices;
-        SimVector position;
-        SimVector previousPosition;
+
+        /**
+         * These three carry initialisers although the unit factory overwrites
+         * all of them before the unit is handed out, because "the factory
+         * always sets it" is not the property that matters. Both `position`
+         * and `owner` are hashed, and the constructor names only three of
+         * this class's members -- so between the constructor returning and
+         * the factory writing, a hashed member without an initialiser holds
+         * whatever the allocator handed over. That is exactly how `nanoPoint`
+         * desynced a replay. The rule is the one the hash needs: a member the
+         * sync hash reads is initialised by the time the unit exists.
+         */
+        SimVector position{0_ss, 0_ss, 0_ss};
+        SimVector previousPosition{0_ss, 0_ss, 0_ss};
         std::unique_ptr<CobEnvironment> cobEnvironment;
-        PlayerId owner;
+        PlayerId owner{0};
 
         /**
          * Anticlockwise rotation of the unit around the Y axis in radians.
@@ -549,9 +561,21 @@ namespace rwe
          * follows its nozzle, so the answer advanced twice and every tick
          * landed on the same side. One question a tick, remembered here, and
          * the two nozzles take their turn as they should.
+         *
+         * The point itself is initialised, and has to be. UnitState's
+         * constructor names three members and leaves the rest to their
+         * default member initialisers, so a member without one keeps
+         * whatever was in the memory the unit landed in -- and this one is
+         * hashed. Before the nozzle is first asked for, a unit's nanoPoint
+         * is therefore whatever the allocator handed over, which is zero
+         * often enough to look fine and is not zero once the heap has a
+         * history. Two peers, or a replay and the recording it is being
+         * compared against, would then hash differently for no reason that
+         * appears in the simulation at all. See the note by
+         * `computeHashOf(const UnitState&)`.
          */
         std::optional<GameTime> nanoPointQueriedAt;
-        SimVector nanoPoint;
+        SimVector nanoPoint{0_ss, 0_ss, 0_ss};
 
         /**
          * When the nanolathe arm is due to be put away, if it is.

@@ -249,6 +249,24 @@ The simulation is lockstep: peers exchange commands, not state, and a `GameHash`
 
 **Keep sim state in step across four places.** New state on `UnitState`, `MapFeature`, `GamePlayerInfo` or the simulation itself needs adding to `src/rwe/game/save_util.cpp` (serialization), `src/rwe/sim/GameHash_util.cpp` (the sync hash) and `src/rwe/game/dump_util.cpp` (desync diagnostics) as well as to the struct. The save round-trip test (`src/rwe/sim/saveload.test.cpp`) fails if hashed state is missed, but unhashed state needs the discipline: nothing will tell you.
 
+**A member the hash reads is initialised by the time the object exists.**
+`UnitState`'s constructor names three of its members and leaves every other
+one to its default member initialiser, so a hashed member without one holds
+whatever was in the memory the unit was built in. That is zero while the heap
+is young -- a page fresh from the operating system arrives zeroed -- and stops
+being zero once the process has a history, which is what makes the resulting
+desync intermittent and dependent on what ran before it. `nanoPoint`, the
+nanolathe nozzle's position, was such a member: meaningless until
+`QueryNanoPiece` is first asked, hashed from the moment the unit exists, and
+it failed the replay keyframe test about one run in ten and only after the
+rest of the suite had run. "The factory always sets it before anything reads
+it" is not the property that matters, because the hash reads it first;
+`position` and `owner` were in the same state for the same reason.
+`GameHash_util.test.cpp`'s "a new unit hashes the same wherever in memory it
+was built" builds a unit over storage filled with a byte, twice with
+different bytes, and requires the hashes to agree, which is the general form
+of the rule.
+
 A unit's **order queue is hashed**, position included, so state that lives on
 an order -- capture progress does, because that is where the original keeps it
 -- is covered like any other. It was not always: moving that progress off

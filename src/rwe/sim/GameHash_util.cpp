@@ -80,6 +80,17 @@ namespace rwe
             p.previousEnergyProductionBuffer);
     }
 
+    /**
+     * Every member named here has to be initialised by the time a unit
+     * exists, and UnitState's constructor names only three of its own -- the
+     * rest depend on having a default member initialiser. One without one
+     * holds whatever was in the memory the unit was built in, which is zero
+     * while the heap is young and rubbish once it is not, and that rubbish
+     * goes straight into the sync hash. `nanoPoint` was missing its
+     * initialiser and desynced a replay keyframe about one run in ten.
+     * "a new unit hashes the same wherever in memory it was built", in this
+     * file's test, is what stops the next one.
+     */
     GameHash computeHashOf(const UnitState& u)
     {
         return combineHashes(
