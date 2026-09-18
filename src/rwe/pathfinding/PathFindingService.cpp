@@ -43,6 +43,34 @@ namespace rwe
         activeSearch.reset();
     }
 
+    bool PathFindingService::onPathRequested(const GameSimulation& simulation, UnitId unitId)
+    {
+        if (!activeSearch || activeSearch->unitId != unitId)
+        {
+            return false;
+        }
+
+        auto unit = simulation.tryGetUnitState(unitId);
+        const auto* movingState = unit
+            ? std::get_if<NavigationStateMoving>(&unit->get().navigationState.state)
+            : nullptr;
+
+        if (movingState != nullptr && movingState->pathDestination == activeSearch->destination)
+        {
+            // The unit is asking for the place its search is already heading
+            // for, so there is nothing to queue: the search in flight is its
+            // own turn, and it must keep the head of the queue.
+            return true;
+        }
+
+        // The goal moved, or the unit stopped moving: the search in flight has
+        // nothing to say. Throw it away now rather than leaving a stale search
+        // for a save to write down or update() to discover.
+        abandonSearch();
+        ++counters.searchesAbandoned;
+        return false;
+    }
+
     std::optional<DiscreteRect> PathFindingService::suspendedSearchStart() const
     {
         if (!activeSearch)

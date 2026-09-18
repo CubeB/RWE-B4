@@ -571,4 +571,50 @@ namespace rwe
         REQUIRE(result.exhausted);
         REQUIRE(result.closedVertices.size() > 1000);
     }
+
+    TEST_CASE("a unit that asks again while its search is sliced keeps its place in the queue", "[pathing]")
+    {
+        // The scheduler serves the queue one search at a time and carries a
+        // search that outruns the tick into the next one. The request at the
+        // head of the queue is the one that search belongs to: update() asserts
+        // it when the search lands, and a save reads a suspended search off the
+        // head. A unit can ask again while its own search is in flight -- its
+        // goal is re-resolved each tick, or it finishes the straight line it
+        // was walking while it waited -- and requestPath used to shuffle it to
+        // the back for fairness, which left the head pointing at a different
+        // unit and tripped the assertion the moment the search completed
+        // (issue #72, seen in large fights where searches span many ticks).
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(24, 18), 0u, 0, 0);
+        auto player = addPlayer(sim);
+
+        // `first` is the unit whose search will be sliced; `second` only ever
+        // holds a request, so that the head is a different unit whenever
+        // `first` is asked again.
+        auto first = addTank(sim, player, 2, 2, script);
+        auto second = addTank(sim, player, 2, 5, script);
+
+        // One expansion a tick: no search can finish in the tick it began.
+        sim.pathFindingService.expansionBudgetPerTick = 1;
+
+        sim.getUnitState(first).orders.push_back(MoveOrder(cellCenter(sim, 20, 15)));
+
+        for (int i = 0; i < 400; ++i)
+        {
+            sim.tick();
+
+            // Stand in for the behaviour pass re-asking on the unit whose
+            // search is in flight (see the collision and end-of-path branches
+            // in groundUnitMoveTo, and the re-resolved-goal branch above them).
+            // The request is for the place `first` is already heading, so the
+            // search in flight is its turn and it must stay at the head.
+            sim.requestPath(second);
+            sim.requestPath(first);
+        }
+
+        // It got there in the end: the sliced search did complete and the
+        // unit followed the route rather than being wedged in the queue.
+        auto start = cellCenter(sim, 2, 2);
+        REQUIRE(sim.getUnitState(first).position.distanceSquared(start) > 0_ss);
+    }
 }
