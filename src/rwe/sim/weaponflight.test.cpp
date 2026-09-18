@@ -6,6 +6,7 @@
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitModelDefinition.h>
+#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/UnitWeapon.h>
 #include <rwe/sim/WeaponDefinition.h>
@@ -26,11 +27,16 @@
 // behaviour moved, and one of these failing means the behaviour no longer
 // matches what the original did.
 //
-// TWO CLASSES ARE HERE. Rounds that fly at a constant speed, and rounds with a
+// THREE CLASSES ARE HERE. Rounds that fly at a constant speed; rounds with a
 // motor -- a missile leaves at `startvelocity` and works up to `weaponvelocity`,
-// and the episode carries both along with what times the burn. A ballistic
-// round, a vertical launch, a torpedo, a cruise missile and a burst weapon are
-// each a different flight and none of them is here; see the fixture header.
+// and the episode carries both along with what times the burn; and rounds that
+// are lobbed, which get no direction from the test at all. A ballistic episode
+// hands the engine's OWN firing solution the muzzle and the aim point and fires
+// along whatever it returns, so what the case pins is not a speed but
+// computeBallisticHeadingAndPitch itself -- the flat root, the gravity it solves
+// against, and the cosine that falls out of the angle. A vertical launch, a
+// torpedo, a cruise missile and a burst weapon are each a different flight and
+// none of them is here; see the fixture header.
 //
 // WHAT IS DRIVEN. The real GameSimulation and the real Projectile, spawned by
 // spawnProjectile and stepped by tick(), fired at a real victim standing at the
@@ -123,6 +129,16 @@ namespace rwe
             w.damageRadius = 16_ss;
             w.damage["DEFAULT"] = episode.weaponDamage;
             w.physicsType = ProjectilePhysicsTypeLineOfSight();
+
+            if (episode.ballistic)
+            {
+                // A shell gets no `dieOnFrame` at all: createProjectileFromWeapon
+                // works a life out only for a line-of-sight round, and falls back
+                // on `weapontimer` otherwise -- which neither of these weapons
+                // names. So the range here is inert, and the round lives until it
+                // hits something.
+                w.physicsType = ProjectilePhysicsTypeBallistic();
+            }
 
             if (episode.selfPropelled)
             {
@@ -224,10 +240,30 @@ namespace rwe
             auto toTarget = at - from;
             auto distance = toTarget.length();
 
+            // WHERE A SHELL IS POINTED IS THE WHOLE OF THE CASE. Everything else
+            // here flies at the aim point, but a lobbed round leaves the barrel
+            // along an angle the engine SOLVES for, and that solution -- the flat
+            // root of the ballistic quadratic, against the same 112/900 gravity
+            // the projectile pass then applies -- is what the corpus is being
+            // held to. So the direction comes from the same two calls
+            // tryFireWeapon makes, with the shooter facing north and no
+            // `ballisticZOffset`, neither of which a demo records and neither of
+            // which can change the angle: the heading has the rotation taken off
+            // and added straight back on, and the offset is a muzzle position on
+            // a model this test does not build.
+            auto direction = toTarget.normalized();
+            if (episode.ballistic)
+            {
+                auto headingAndPitch = computeHeadingAndPitch(
+                    SimAngle(0), from, at, sim.weaponDefinitions.at("corpus").velocity,
+                    (112_ss / (30_ss * 30_ss)), 0_ss, sim.weaponDefinitions.at("corpus").physicsType);
+                direction = toDirection(headingAndPitch.first, -headingAndPitch.second);
+            }
+
             UnitWeapon weapon;
             weapon.weaponType = "corpus";
             sim.spawnProjectile(
-                shooter, weapon, from, toTarget.normalized(), distance, std::nullopt, std::nullopt, std::nullopt, at);
+                shooter, weapon, from, direction, distance, std::nullopt, std::nullopt, std::nullopt, at);
 
             for (unsigned int ticks = 1; ticks <= 4000u; ++ticks)
             {
