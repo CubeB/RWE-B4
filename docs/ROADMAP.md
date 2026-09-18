@@ -334,12 +334,31 @@ Everything tagged `[tad]` alone is still a decoder test.
       mission runs the build step twice on the tick it creates the nanoframe,
       and never waits for `INBUILDSTANCE` (`TOTALA-EXE.md` §107); 60 of 68
       builds land on that model and the rest are whole-second stalls.
-- [x] The weapon-event oracle -- the flight-time half, over two classes. A
+- [x] The weapon-event oracle -- the flight-time half, over three classes. A
       `0x0d`'s trailing byte is the shooter's weapon slot, a `0x0b` is sent by
       the attacker's owner, and a round stops on the first step that puts it in
-      one of the victim's footprint squares. All 37 scored cells land on +0 and
-      the four former exceptions are gone; `tad_weapon_episodes.h` fires 37
+      one of the victim's footprint squares. All 39 scored cells land on +0 and
+      the four former exceptions are gone; `tad_weapon_episodes.h` fires 39
       episodes at a real victim. `tools/tad-weapontime.py` is the reference.
+- [x] The ballistic class (2026-09-18). A shell is stepped **horizontally** at
+      `weaponvelocity / 30 * cos(pitch)` for ever, with the pitch the flat root
+      of the firing solution `0x49A890` finds -- the π/4 ceiling rejects the high
+      root for every target in range, so there is no lofted arc in the game --
+      and stopped on the same footprint. Gravity reaches a flight time only
+      through that angle: the ballistic branch of `updateProjectiles` touches
+      only `velocity.y`, and halving it moves **no** episode. What limits the
+      class is not the model but the original's own aim jitter, which for a
+      shell is a **range** error of `2·cot(2·pitch)·δ` rather than a speed error
+      -- ten percent of the flight at `CANNON_ART_MEDIUM`'s `accuracy=750`. So a
+      pairing is scored only where replaying the arc at the corners of the
+      weapon's own cone gives the same answer, and **2 of the 17 cells** keep
+      enough pairings at `--min-n 30`: `CORMORT` and `ARMBULL`, both landing on
+      +0. The other 15 are printed with what took them -- the artillery to the
+      cone, the tank cannons to the drift bound -- rather than checked in with an
+      offset. Two reclassifications came with it: `burst` is asked before
+      `ballistic` (`CANNON_FIDO` is both), and a `selfprop` `ballistic` weapon is
+      named rather than modelled. The height half of the collision test was tried
+      as the explanation for the class's spread and **refuted**.
 - [x] Which tick a new round first steps on (2026-09-17). TA fires and steps on
       the same tick, and so does RWE -- the corpus's extra tick is the demo
       clock, because a `0x0d` is queued before its tick's `0x2c` and a `0x0b`
@@ -350,8 +369,14 @@ Everything tagged `[tad]` alone is still a decoder test.
       appears and never waits for `INBUILDSTANCE`; three CORCA cells joined the
       fixture on the ordinary delta convention, and `aircraftbuild.test.cpp`
       covers the behaviour in the real simulation.
-- [ ] The weapon classes with no model yet: ballistic (18 cells), `vlaunch` (3),
-      torpedoes (4) and `cruise` (1). They should reuse the footprint stop.
+- [ ] The weapon classes with no model yet: `vlaunch` (3 cells), torpedoes (4)
+      and `cruise` (1). They should reuse the footprint stop.
+- [ ] The `0x0d`'s **rotation triple**, which the ballistic pass did not need and
+      did not collect. It is the one place the engine's firing solution could be
+      checked against its *output* rather than its inputs: a shell's launch
+      angle is solved, so if the triple is that angle the corpus would pin
+      `computeBallisticHeadingAndPitch` directly instead of through a flight
+      time. `--emit-shots` would have to carry it first.
 - [ ] The hit/miss half of the weapon oracle. 53,706 shots drew no damage in the
       window, and `0x0b` is not a complete ledger. `0x2c`'s per-cycle health is
       a way to test that; so is the pass-through the footprint model already

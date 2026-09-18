@@ -815,7 +815,7 @@ weapon's damage. This also closes the older note in the `0x0b` section above:
 the damage field **is** the weapon's damage, now checked against a weapon
 definition rather than inferred from looking small.
 
-#### Two models, one per scored class
+#### Three models, one per scored class
 
 With the pairing done, the implied speed -- straight-line distance from the
 shot's origin to its aim point, over the paired flight time -- lands on the
@@ -831,10 +831,12 @@ listing: it exits non-zero if a scored cell moves.
 tools/tad-weapontime.py --shots /tmp/shots.jsonl --units ~/ta-mods/x-esc --classes --drift
 ```
 
-**Both classes stop the same way: on the victim's footprint, not at the aim
-point.** The two models below differ only in how far each step goes. Where the
+**All three classes stop the same way: on the victim's footprint, not at the aim
+point.** The models below differ only in how far each step goes. Where the
 round stops is the section after them, "Where a round stops", and it is what
-makes all 37 scored cells land -- 24 constant-speed, 13 with a motor. Before it
+makes all 39 scored cells land -- 24 constant-speed, 13 with a motor and 2 that
+lob a shell, the last class added later and written up under "A shell: the flat
+root, and the cosine that falls out of it". Before the footprint stop
 the constant-speed model was `flight = ceil(d / v) - 1`, landing on 22 of 24
 cells, and its `-1` was read as a projectile taking its first step on the tick
 it is fired. That reading of the `-1` is retired -- the `-1` was the footprint.
@@ -1129,21 +1131,29 @@ victim it can name for the mirror-image reason: it does not need the bound.
 Both choices are visible in the script, and `--drift` prints the measurement
 either could be argued from.
 
-**And 37 of the 37 scored cells carry their firing weapon's own `[DAMAGE]
-default` as their modal damage,** across both classes. Nothing in the filters
-looks at the damage field, so that is the pairing checking itself against
+**And 39 of the 39 scored cells carry their firing weapon's own `[DAMAGE]
+default` as their modal damage,** across all three classes. Nothing in the
+filters looks at the damage field, so that is the pairing checking itself against
 evidence it was not built from.
 
-**The four classes neither model describes** are listed by `--classes` and never
+**The four classes no model describes** are listed by `--classes` and never
 scored. Each is explicable and each wants a model of its own:
 
-| class | cells | pairings | why neither model fits |
+| class | cells | pairings | why no model fits |
 |---|---|---|---|
-| ballistic | 18 | 4,946 | travels an arc, which is longer than the straight line measured |
-| `vlaunch` | 3 | 807 | goes up before it goes anywhere; `ARMMERL` reads +138 |
+| `vlaunch` | 3 | 780 | goes up before it goes anywhere; `ARMMERL` reads +136 |
 | `cruise` | 1 | 709 | climbs to a fixed altitude and crosses the aim point before descending |
-| `burst` | 6 | 312 | see below |
-| `waterweapon` | 4 | 299 | a torpedo's path from a surface launcher to a submerged target is not that line either |
+| `burst` | 7 | 630 | see below |
+| `waterweapon` | 4 | 297 | a torpedo's path from a surface launcher to a submerged target is not that line either |
+
+(A fifth name appears there, "ballistic selfprop", for a weapon carrying both
+flags: TA dispatches on `selfprop` first at `0x49B9C2`, so such a round is flown
+by the motor off a ballistic launch angle. `ROCKET_HEAVY` is the only one in this
+data set and nothing in the corpus fires it.) **Ballistic used to head this
+table** at 18 cells and 4,946 pairings, "travels an arc, which is longer than the
+straight line measured". It has a model now -- the arc is longer by exactly the
+cosine of the launch angle -- and seventeen cells, `CANNON_FIDO` having moved to
+`burst` where it belonged. Two of those seventeen are scoreable.
 
 The `burst` exclusion is the one worth spelling out, because it is what turned
 eight failures into two. A burst weapon fires `burst` rounds `burstrate` seconds
@@ -1153,7 +1163,9 @@ else: the shot that survives it is one round of several and the damage that
 arrives need not be its own. Six of the eight cells that failed the model before
 the class existed are burst weapons -- both flamethrowers, both `EMG`s,
 `EMG_VTOL`, `GAUSS_SPRAY` -- excluded on a criterion that has nothing to do with
-flight time.
+flight time. The seventh is `CANNON_FIDO`, which is `ballistic` as well and had
+been classed by that; `burst` is asked first now, because a burst weapon's
+isolation filter fails whatever shape its rounds fly.
 
 **The four exceptions the aim-point model carried all land on the footprint
 model**, and `KNOWN_EXCEPTIONS` is empty. Each read one tick low, and how firmly
@@ -1180,12 +1192,143 @@ replaying the checked-in episodes under the model with the one change, and each
 moved exactly the predicted episodes and no others:
 
 * stamping a unit's footprint with its edge **truncated** rather than rounded to
-  the nearest square (`computeFootprintRegion`) fails **14 of 37**, the fourteen
-  whose aim point sits where the two rules pick different squares;
+  the nearest square (`computeFootprintRegion`) fails **15 of 39**, the fifteen
+  whose aim point sits where the two rules pick different squares -- ten
+  constant-speed, four with a motor and `CORMORT` alone of the two shells,
+  `ARMBULL`'s aim point falling in the same square under either rule;
 * testing the occupied grid at the round's position **before** its move rather
-  than after fails **all 37**;
+  than after fails **all 37** (measured before the shell class existed);
 * a motor that **never accelerates** fails **10 of the 13** motor episodes and
-  none of the 24 others.
+  none of the 24 others;
+* taking the **high root** of the firing solution instead of the flat one
+  (`pitches->first`) fails **exactly the 2 shell episodes** and none of the other
+  37 -- `ARMBULL` reads 116 ticks against 23 and `CORMORT` 170 against 11,
+  because the high root is near the vertical and its cosine is almost nothing;
+* **halving the per-tick gravity in the ballistic branch of
+  `updateProjectiles`** fails **none of the 39**, which is the sharpest statement
+  of what the shell model claims: the launch angle decides the flight time and
+  the fall does not touch it. It does fail `wind.test.cpp`'s ballistic case,
+  which is watching the height it changes.
+
+### A shell: the flat root, and the cosine that falls out of it
+
+The ballistic cells had no model until 2026-09-18, and the one they have now is
+shorter than expected, because most of the arc turns out not to matter.
+
+**How far a shell goes in a tick.** `createProjectileFromWeapon` launches it at
+`direction * weaponvelocity`, with `direction` rebuilt from the heading and pitch
+the fire routine solved, and the ballistic branch of `updateProjectiles` then
+touches **only `velocity.y`**. So the horizontal half of that launch vector never
+changes: the round covers `weaponvelocity / 30 * cos(pitch)` world units a tick,
+for ever, and the footprint test is horizontal. **Gravity enters a flight time
+only through the launch angle.** That is what the gravity mutation above
+demonstrates, and it is why this model is a cosine rather than a replay.
+
+**Which pitch.** The flat root, always. `0x49A890` solves the standard ballistic
+quadratic -- the same discriminant RWE's `computeFiringAngles` forms, arrived at
+by a different factoring -- and chooses between the roots at `0x49AA11` against
+`minbarrelangle` as a floor and **π/4** as a ceiling. The high root exceeds 45°
+for every target inside the gun's maximum range and equals it only at the range
+itself, so the ceiling rejects it every time: there is no lofted artillery arc in
+Total Annihilation, and RWE's `pitches->second` is the same choice. See
+[TOTALA-EXE.md](TOTALA-EXE.md), "The ballistic firing solution". A geometry with
+no solution is a shot that never happened (`cmp ax,0x8000` at `0x49D61B`).
+
+The wind is the one term left out. `0x49BD10` adds the map's vector to a
+ballistic round's position every tick, a demo does not record it, and at a
+typical map's `maxwindspeed` of 3000 it is 0.09 world units a tick -- about six
+units over a Crusader's whole flight.
+
+#### The aim cone, which is why there are two shell cells and not seventeen
+
+The model above is not what limits this class. The original perturbs **every
+turret shot** before it spawns the round (`0x49D6D7`): `heading += rand(acc) -
+acc/2` and `pitch += rand(acc) - acc/2`, where `acc` is the weapon's `accuracy`
+widened by however hurt the shooter is and narrowed by its kills, with
+`sprayangle` a second draw on the heading. Every ballistic weapon in the data set
+but three is `turret=1`.
+
+For a round that flies level a pitch error of δ costs `tan(pitch)·δ` of the
+horizontal speed, under one percent for anything the other two classes fire. For
+a shell it is a **range** error of `2·cot(2·pitch)·δ`, because the range goes as
+`sin(2·pitch)`: at `CANNON_ART_MEDIUM`'s `accuracy=750` and an 18° elevation that
+is ten percent of the flight, six or seven ticks on a sixty-five-tick shell. The
+draw is nowhere in the stream.
+
+So a ballistic pairing is scored only where **the jitter cannot move the
+answer**: the whole arc is replayed at the corners of the weapon's own cone, and
+the pairing is kept only if every corner gives the same step. There is nothing in
+that to tune -- it is the weapon's declared `accuracy` run through the original's
+own formula. `tools/tad-weapontime.py --cone` prints the split it makes:
+
+| the drift-bounded ballistic pairings | n | at +0 |
+|---|---|---|
+| the aim cone **cannot** move the answer | 227 | **42%** |
+| it can | 389 | 17% |
+
+The replay follows the round in y as well as x and z for one reason the flight
+model does not need: a shell the jitter sends into the ground **short** of its
+victim was not stopped by the footprint at all, and its interval is measuring a
+blast radius rather than an arrival. That clause is what rejects `ARMVULC`, whose
+shells are independently seen to detonate thirty to fifty units *below* their aim
+point and outside the footprint entirely.
+
+**It is a lower bound on the jitter, not the whole of it.** The health term opens
+the cone for a damaged shooter and a demo does not carry hit points, so a pairing
+this bound keeps may still have been fired through a wider cone than the weapon
+asked for. That is most of what is left between the 42% here and the 98% the
+constant-speed class reaches at drift zero.
+
+#### What the class leaves, and what it does not
+
+**Two of the seventeen cells are scoreable at `--min-n 30`, and both land on the
+model**: `CORMORT` (`CANNON_MORT`, +0 over 38 pairings, 42% at the mode) and
+`ARMBULL` (`CANNON_BULL`, +0 over 36, 33%). They are the fixture's two shell
+episodes. The other fifteen are **printed with what took them** rather than
+dropped -- the script prints the table below whenever it runs -- because a cell
+that cannot be scored is a result:
+
+| | named | drift | cone | left |
+|---|---|---|---|---|
+| `ARMMART`, `CANNON_ART_MEDIUM` | 1463 | 1339 | 122 | 2 |
+| `CORMART`, `CANNON_ART_MEDIUM` | 1055 | 969 | 85 | 1 |
+| `CORGOL`, `CANNON_GOL` | 367 | 338 | 20 | 9 |
+| `CORTHUD`, `CANNON_ART_LIGHT` | 269 | 218 | 24 | 27 |
+| `ARMHAM`, `CANNON_ART_LIGHT` | 183 | 149 | 24 | 10 |
+| `ARMSTUMP`, `CANNON_TANK_LIGHT` | 136 | 113 | 0 | 23 |
+| `CORRAID`, `CANNON_TANK_LIGHT` | 113 | 94 | 0 | 19 |
+| `ARMVULC`, `CANNON_LRPC_ARM` | 35 | 0 | 32 | 3 |
+
+(and seven more; `drift` and `cone` are how many each bound took.) The shape is
+worth reading. The **artillery** cells, which have by far the most pairings in
+the corpus, lose nearly everything to the cone, because their `accuracy` is the
+widest in the data set. The **tank cannons**, whose cone is zero at full health,
+lose theirs to the drift bound instead: a shell spends thirty to sixty ticks in
+the air where a laser spends six, so a bound that costs the constant-speed class
+nothing costs this one almost everything. Nine of the fifteen would land at +0 if
+the threshold were dropped to ten pairings; it is not dropped, because a
+threshold chosen after seeing which cells it admits is not evidence.
+
+**Two reclassifications fell out of scoring the class, and both are corrections
+rather than conveniences.** `burst` is now asked **before** `ballistic`:
+`CANNON_FIDO` is both -- six shells from one trigger at `burstrate=0.001`, each
+thrown off the aim line by a 1536 `sprayangle` -- and it had been sitting in the
+ballistic table reading +5 while really being excluded for a reason that has
+nothing to do with flight time. And a weapon that is `selfprop` as well as
+`ballistic` is now named rather than modelled ("ballistic selfprop"), because TA
+dispatches a round's flight on `selfprop` first at `0x49B9C2`, so such a round is
+flown by the motor off a ballistic launch angle -- a fourth shape. `ROCKET_HEAVY`
+is the only one in this data set and nothing in the corpus fires it.
+
+**What stays open.** The height half of the collision test was the first
+explanation tried for this class's spread and it is **refuted**: replaying the
+drift-bounded pairings with a victim-top clause at every height from zero to
+sixty world units moves the pooled agreement by a single point, because a shell
+aimed at a unit arrives well below that unit's top. The residual is the aim cone
+and the shooter's hit points, not the geometry. `ARMVULC` remains genuinely
+unexplained beyond "it is splash": all 35 of its pairings are against one
+building type in one demo, and its shells arrive at roughly `d / (v·cos 45°)`
+whatever their solved pitch says, which nothing here accounts for.
 
 ### `0x10`, script call -- all 22 bytes
 
@@ -2201,9 +2344,11 @@ They catch different things and should not share machinery.
       and the four classes that need their own models are in "Pairing a
       `0x0d` to the `0x0b` it caused" above.
 
-      **The fixture and the test exist, over two classes.** `--emit-weapon-cpp`
-      writes `src/rwe/sim/tad_weapon_episodes.h`, 33 episodes over the cells a
-      model predicts -- 22 constant-speed and 11 with a motor -- with `UnitFacts`
+      **The fixture and the test exist, over three classes.** `--emit-weapon-cpp`
+      writes `src/rwe/sim/tad_weapon_episodes.h`, now 39 episodes over the cells
+      a model predicts -- 24 constant-speed, 13 with a motor and 2 that lob a
+      shell (it was 33 over two classes when this paragraph was written, 22 and
+      11) -- with `UnitFacts`
       widened to carry each FBI's `WeaponN` names and a second reader over the
       data set's weapon TDFs going through the engine's own `parseWeaponTdf`, so
       a fixture cannot disagree with the loader about what a field means.
@@ -2222,19 +2367,35 @@ They catch different things and should not share machinery.
       else; and taking away the projectile's first step of travel fails **all
       33**, which says every episode measures the stepping and not a constant.
 
-      **What is left** is the three classes that still have no model, each of
-      which wants its own cells: ballistics (18 cells, and the one with a
-      decoding prize in it, because a ballistic shot is where the `0x0d`'s
-      rotation triple could be checked against the geometry), `vlaunch` (3) and
-      torpedoes (4) -- and `cruise`, now split out of the constant-speed table as
-      a class of one. ~~The sub-tick residual~~ is closed: a round stops on the
+      ~~**What is left** is the three classes that still have no model~~ --
+      **ballistics is done**, and the write-up is "A shell: the flat root, and
+      the cosine that falls out of it" above. A shell is stepped horizontally at
+      `weaponvelocity / 30 * cos(pitch)`, with the pitch the flat root of the
+      solution `0x49A890` finds; gravity reaches the flight time only through
+      that angle, which is what a mutation halving it and moving no episode
+      demonstrates. Its cells are not what limits it: the aim cone the original
+      puts on every turret shot is a **range** error for a shell rather than a
+      speed error, so only 2 of its 17 cells keep enough pairings to be scored,
+      and the other 15 are printed with what took them. The decoding prize that
+      was hoped for there -- checking the `0x0d`'s **rotation triple** against
+      the geometry -- was **not** collected: `--emit-shots` does not carry the
+      triple and nothing here needed it, since the muzzle and the aim point
+      already determine the launch angle through the engine's own solver. It is
+      still the obvious next thing to try on this class, and it is the only way
+      to test the solver's *output* rather than its inputs.
+
+      What is left is `vlaunch` (3 cells), torpedoes (4) and `cruise` (1, split
+      out of the constant-speed table as a class of one).
+      ~~The sub-tick residual~~ is closed: a round stops on the
       first step that puts it in one of the victim's footprint squares ("Where a
       round stops"), every scored cell now lands on +0, the four named
-      exceptions are gone, and the fixture is 37 episodes fired at a real victim.
+      exceptions are gone, and the fixture is 39 episodes fired at a real victim.
       What that reopened is **which tick a new round first steps on**: the old
       `-1` was the only evidence, and a first read of the binary disagrees with
       the corpus. It has to be settled before any of the classes above, and is
-      being. The height half of the collision test is not modelled either. And
+      being. The height half of the collision test is not modelled either --
+      though it is no longer a *suspect*, having been tried as the explanation
+      for the shell class's spread and refuted there. And
       the hit/miss half of the oracle, which is a different statistic
       over the same pairings and where target type probably does belong in the
       cell key -- but which has to answer why 53,706 shots drew no damage in the
