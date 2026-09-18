@@ -5735,6 +5735,31 @@ click handler at `0x498F86` confirms independently:
 498f9f  push 0x509660            ; "oktobuild"
 ```
 
+### The margin round the map
+
+`0x47D2E0` refuses a site on its position alone before it reads a cell
+(`0x47D302`-`0x47D352`). The arguments are the footprint's top-left corner in
+build cells, and the footprint comes from the definition:
+
+```
+47d302  cmp  cx,0x1               ; x
+47d30b  jl   0x47d80f             ;   x < 1 -> refuse
+47d316  cmp  di,0x1               ; z
+47d31a  jl   0x47d80f             ;   z < 1 -> refuse
+47d32c  mov  eax,[ebp+0x14233]    ; map width in cells
+47d336  lea  ecx,[esi+edx]        ; x + footprintX
+47d339  cmp  ecx,eax
+47d33b  jge  0x47d80f             ;   x + footprintX >= width -> refuse
+47d349  lea  edi,[ecx+eax]        ; z + footprintZ
+47d34c  cmp  edi,[ebp+0x14237]    ; map height in cells
+47d352  jge  0x47d80f             ;   z + footprintZ >= height -> refuse
+```
+
+So a building never touches the edge of the map: one clear cell on every side.
+`gs+0x14233` is the same width the routine multiplies by a little further down
+to index the 13-byte cell array (`0x47D47E`), which is what identifies it.
+RWE had no such rule until 2026-09-18 (`GameSimulation::isInsideBuildableArea`).
+
 ### Correction: the gate is fog-aware, and this reading was wrong
 
 The passage above says bit 6 decides, and that `0x47D2E0` settles it from the

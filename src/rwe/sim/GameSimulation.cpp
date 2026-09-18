@@ -2230,8 +2230,28 @@ namespace rwe
         return unitId;
     }
 
+    bool GameSimulation::isInsideBuildableArea(unsigned int x, unsigned int y, unsigned int footprintX, unsigned int footprintZ) const
+    {
+        // The first thing 0x47D2E0 does, before it looks at a single cell
+        // (0x47D302-0x47D352): the footprint's corner must be at least one
+        // cell in from the top and the left -- `cmp cx,1 / jl refuse` for
+        // each axis -- and its far side must stop short of the last cell,
+        // `x + footprintX >= width` refusing at 0x47D339. So nothing is ever
+        // built touching the edge of the map, on any side. RWE had no such
+        // rule, and both the players and the computer could plant a
+        // building flush against the boundary.
+        auto width = static_cast<unsigned int>(occupiedGrid.getWidth());
+        auto height = static_cast<unsigned int>(occupiedGrid.getHeight());
+        return x >= 1u && y >= 1u && x + footprintX < width && y + footprintZ < height;
+    }
+
     bool GameSimulation::canBeBuiltAt(const rwe::MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y) const
     {
+        if (!isInsideBuildableArea(x, y, mc.footprintX, mc.footprintZ))
+        {
+            return false;
+        }
+
         if (isCollisionAt(DiscreteRect(x, y, mc.footprintX, mc.footprintZ)))
         {
             return false;
@@ -2252,6 +2272,11 @@ namespace rwe
 
     bool GameSimulation::canBeBuiltAtAsSeenBy(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y, PlayerId player) const
     {
+        if (!isInsideBuildableArea(x, y, mc.footprintX, mc.footprintZ))
+        {
+            return false;
+        }
+
         auto region = occupiedGrid.tryToRegion(DiscreteRect(x, y, mc.footprintX, mc.footprintZ));
         if (!region)
         {
