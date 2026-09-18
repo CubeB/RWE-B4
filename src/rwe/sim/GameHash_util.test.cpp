@@ -1,6 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/sim/GameHash_util.h>
+#include <rwe/sim/UnitState.h>
 #include <rwe/util/OpaqueId_io.h>
+#include <cstddef>
+#include <cstring>
+#include <memory>
+#include <new>
 
 namespace rwe
 {
@@ -100,6 +105,56 @@ namespace rwe
             auto hash = combineHashes(true, 25, GameHash(4));
             REQUIRE(hash == GameHash(30));
         }
+    }
+
+    namespace
+    {
+        /**
+         * Builds a unit in memory filled with the given byte and hashes it.
+         *
+         * UnitState's constructor names three members and leaves every other
+         * one to its default member initialiser, so a member that has none
+         * keeps whatever was already lying in the storage the unit was built
+         * in. Filling that storage first is the only way to see it: a fresh
+         * page from the operating system arrives zeroed, so such a member
+         * reads as zero for as long as the heap is young and stops doing so
+         * once it has a history.
+         */
+        GameHash hashOfNewUnitBuiltInMemoryFilledWith(unsigned char fill)
+        {
+            auto* storage = ::operator new(sizeof(UnitState), std::align_val_t{alignof(UnitState)});
+            std::memset(storage, fill, sizeof(UnitState));
+
+            // Every member of class type is constructed over the fill by the
+            // constructor, so only the plain ones can still be holding it,
+            // and destroying the unit afterwards is safe.
+            std::vector<UnitMesh> pieces;
+            auto* unit = new (storage) UnitState(pieces, std::unique_ptr<CobEnvironment>());
+            auto hash = computeHashOf(*unit);
+            unit->~UnitState();
+            ::operator delete(storage, std::align_val_t{alignof(UnitState)});
+            return hash;
+        }
+    }
+
+    TEST_CASE("a new unit hashes the same wherever in memory it was built")
+    {
+        // A desync with nothing in the simulation to explain it. A member of
+        // UnitState that is hashed but has no initialiser is read out of
+        // whatever the allocator handed over, so two peers -- or a replay
+        // keyframe and the recording it is checked against -- can disagree
+        // about a unit that has done nothing yet, and only once the process
+        // has allocated enough for the two to land on different rubbish.
+        // nanoPoint was such a member: it is the nanolathe nozzle's position,
+        // meaningless until the nozzle is first asked for, and hashed from
+        // the moment the unit exists.
+        //
+        // This runs the constructor over storage deliberately filled first,
+        // which is the whole point; the values it exposes are ones the
+        // simulation should never have been reading.
+        REQUIRE(hashOfNewUnitBuiltInMemoryFilledWith(0x00) == hashOfNewUnitBuiltInMemoryFilledWith(0xFF));
+        REQUIRE(hashOfNewUnitBuiltInMemoryFilledWith(0x00) == hashOfNewUnitBuiltInMemoryFilledWith(0x5A));
+        REQUIRE(hashOfNewUnitBuiltInMemoryFilledWith(0xA5) == hashOfNewUnitBuiltInMemoryFilledWith(0x3C));
     }
 
     TEST_CASE("the order queue is hashed, and its order matters")
