@@ -76,6 +76,11 @@ namespace rwe
             units.underwaterMetalExtractor = "CORUWMEX";
             units.floatingMetalMaker = "CORFMKR";
             units.geothermal = "CORGEO";
+            units.metalStorage = "CORMSTOR";
+            units.energyStorage = "CORESTOR";
+            units.underwaterMetalStorage = "CORUWMS";
+            units.underwaterEnergyStorage = "CORUWES";
+            units.underwaterFusion = "CORUWFUS";
         }
         else
         {
@@ -127,6 +132,11 @@ namespace rwe
             units.underwaterMetalExtractor = "ARMUWMEX";
             units.floatingMetalMaker = "ARMFMKR";
             units.geothermal = "ARMGEO";
+            units.metalStorage = "ARMMSTOR";
+            units.energyStorage = "ARMESTOR";
+            units.underwaterMetalStorage = "ARMUWMS";
+            units.underwaterEnergyStorage = "ARMUWES";
+            units.underwaterFusion = "ARMUWFUS";
         }
 
         auto check = [&](std::string& name) {
@@ -183,6 +193,11 @@ namespace rwe
         check(units.underwaterMetalExtractor);
         check(units.floatingMetalMaker);
         check(units.geothermal);
+        check(units.metalStorage);
+        check(units.energyStorage);
+        check(units.underwaterMetalStorage);
+        check(units.underwaterEnergyStorage);
+        check(units.underwaterFusion);
         return units;
     }
 

@@ -1323,6 +1323,41 @@ namespace rwe
         // income test for the reason the land step is: 2524 metal bought on
         // four a second is the whole game spent on a building with nothing
         // to build.
+        // Storage. A store found full is income thrown away, and a store of
+        // a thousand cannot hold the price of anything level two sells, so
+        // the first of each goes up with the tier and the rest when the
+        // store is pegged. The land kind is asked for first and the
+        // underwater kind after it: want() drops whichever this builder has
+        // no button for, and the site search drops whichever has no site.
+        auto wantStorage = [&](bool underwaterOnly) {
+            auto metalStores = total(s.metalStorage) + total(s.underwaterMetalStorage);
+            auto energyStores = total(s.energyStorage) + total(s.underwaterEnergyStorage);
+            auto metalPegged = bb.metalStorage.value > 0.0f && bb.currentMetal.value >= bb.metalStorage.value * 0.9f;
+            auto energyPegged = bb.energyStorage.value > 0.0f && bb.currentEnergy.value >= bb.energyStorage.value * 0.9f;
+            auto tierTwo = total(s.advancedLab) + total(s.advancedShipyard) >= 1;
+            auto hasFactory = total(s.lab) + total(s.vehiclePlant) + total(s.shipyard) >= 1;
+            if (!hasFactory)
+            {
+                return;
+            }
+            if (metalStores < profile.targetMetalStorageCount && ((tierTwo && metalStores < 1) || metalPegged))
+            {
+                if (!underwaterOnly)
+                {
+                    want(s.metalStorage);
+                }
+                want(s.underwaterMetalStorage);
+            }
+            if (energyStores < profile.targetEnergyStorageCount && ((tierTwo && energyStores < 1) || energyPegged))
+            {
+                if (!underwaterOnly)
+                {
+                    want(s.energyStorage);
+                }
+                want(s.underwaterEnergyStorage);
+            }
+        };
+
         auto wantAdvancedShipyard = [&]() {
             if (navalFleetTarget(profile, bb) > 0 && !s.advancedShipyard.empty() && total(s.shipyard) >= 1
                 && total(s.advancedShipyard) < profile.targetAdvancedShipyardCount
@@ -1352,6 +1387,21 @@ namespace rwe
             {
                 want(s.seaplanePlatform);
             }
+            // The reactor that goes under the sea, which is the advanced
+            // construction sub's and nobody else's. The first needs only the
+            // income, as the land one does; more need the energy to be short.
+            auto reactors = total(s.fusion) + total(s.underwaterFusion);
+            auto energyShort = bb.energyStalled
+                || (bb.energyStorage.value > 0.0f && bb.currentEnergy.value < bb.energyStorage.value * 0.25f);
+            if (!s.underwaterFusion.empty() && total(s.advancedShipyard) >= 1
+                && bb.metalIncome.value >= static_cast<float>(profile.navalTechMinMetalIncome)
+                && total(s.underwaterFusion) < profile.targetUnderwaterFusionCount && (reactors < 1 || energyShort))
+            {
+                want(s.underwaterFusion);
+            }
+            // Storage under the water, for a side with no ground to put the
+            // dry kind on. The construction ship has the buttons.
+            wantStorage(true);
             wantMetalExtractor();
             want(s.solar);
             return wanted;
@@ -1655,6 +1705,8 @@ namespace rwe
         // army.
         auto metalFull = bb.metalStorage.value > 0.0f && bb.currentMetal.value >= bb.metalStorage.value * 0.8f;
 
+        wantStorage(false);
+
         // Level two, and it goes above the surplus lab because a full store
         // buys more as an advanced lab than as a third level-one one.
         //
@@ -1870,6 +1922,35 @@ namespace rwe
         auto landArmyCapped = profile.isolatedLandArmyCap > 0 && bb.hasUnreachableGround && waterDominates
             && bb.armySize >= profile.isolatedLandArmyCap;
 
+        // Fighters to match the raid: as many as the most armed aircraft of
+        // theirs ever known at once, between the standing pair and the cap.
+        auto fighterTarget = std::clamp(bb.enemyArmedAirPeak, profile.targetFighterCount, std::max(profile.targetFighterCount, profile.maxReactiveFighterCount));
+
+        // The tier-two economy reserve; see tierTwoEconomyReserve.
+        auto completed = [&](const std::string& t) { return t.empty() ? 0 : countOf(bb.ownedCompletedCounts, t); };
+        bool reserveHolds = false;
+        if (profile.tierTwoEconomyReserve)
+        {
+            auto landBuilder = completed(s.advancedConstructor) >= 1;
+            auto seaBuilder = completed(s.advancedConstructionSub) >= 1;
+            auto mohoOwed = landBuilder && !s.mohoExtractor.empty() && completed(s.mohoExtractor) < 1;
+            auto reactorOwed = ((landBuilder && !s.fusion.empty()) || (seaBuilder && !s.underwaterFusion.empty()))
+                && completed(s.fusion) + completed(s.underwaterFusion) < 1;
+            if (mohoOwed || reactorOwed)
+            {
+                if (!tierTwoReserveStarted)
+                {
+                    tierTwoReserveStarted = bb.now;
+                    LOG_INFO << "AI build: holding the factories for the tier-two economy (" << (mohoOwed ? "moho " : "") << (reactorOwed ? "reactor" : "") << ")";
+                }
+                auto elapsed = bb.now.value - tierTwoReserveStarted->value;
+                auto inTime = elapsed < static_cast<unsigned int>(std::max(0, profile.tierTwoReserveMaxSeconds)) * SimTicksPerSecond;
+                auto quiet = bb.phase != GamePhase::Defend && bb.enemiesNearBase.empty();
+                auto armed = bb.armySize + static_cast<int>(bb.navalCombatUnits.size()) >= profile.tierTwoReserveMinArmySize;
+                reserveHolds = inTime && quiet && armed;
+            }
+        }
+
         for (auto factoryId : bb.factories)
         {
             const auto& factory = sim.getUnitState(factoryId);
@@ -1917,11 +1998,17 @@ namespace rwe
                 {
                     next = s.airTransport;
                 }
+                else if (bb.enemyAirThreat && bb.enemyArmedAirPeak > 0 && !s.fighter.empty() && total(s.fighter) < profile.targetFighterCount)
+                {
+                    // Bombers or torpedo bombers, not a scout: the first pair
+                    // of fighters comes before the constructor.
+                    next = s.fighter;
+                }
                 else if (!s.airConstructor.empty() && total(s.airConstructor) < profile.targetAirConstructorCount)
                 {
                     next = s.airConstructor;
                 }
-                else if (bb.enemyAirThreat && !s.fighter.empty() && total(s.fighter) < profile.targetFighterCount)
+                else if (bb.enemyAirThreat && !s.fighter.empty() && total(s.fighter) < fighterTarget)
                 {
                     // Fighters only once something of theirs is actually
                     // flying, for the same reason the anti-air kbot waits:
@@ -2028,6 +2115,12 @@ namespace rwe
                     && !s.seaplanePlatform.empty() && total(s.airPlant) < 1
                     && total(s.seaplanePlatform) < profile.targetSeaplanePlatformCount
                     && total(s.advancedConstructionSub) < 1 && cruisers >= 2;
+                // Or a reactor to build: the underwater fusion plant is the
+                // sub's alone as well, air plant or no air plant.
+                auto wantSubForReactor = profile.targetUnderwaterFusionCount > 0 && !s.advancedConstructionSub.empty()
+                    && !s.underwaterFusion.empty() && total(s.fusion) + total(s.underwaterFusion) < 1
+                    && total(s.advancedConstructionSub) < 1 && cruisers >= 2;
+                wantConstructionSub = wantConstructionSub || wantSubForReactor;
                 if (bb.enemyAirThreat && !s.antiAirShip.empty() && total(s.antiAirShip) < profile.targetAntiAirShipCount)
                 {
                     next = s.antiAirShip;
@@ -2054,7 +2147,7 @@ namespace rwe
                 // Cover when something of theirs is flying, otherwise the
                 // torpedo: nothing the other side floats can shoot up until
                 // it has seen an aircraft and built for one.
-                if (bb.enemyAirThreat && !s.seaplaneFighter.empty() && total(s.seaplaneFighter) < profile.targetFighterCount)
+                if (bb.enemyAirThreat && !s.seaplaneFighter.empty() && total(s.seaplaneFighter) < fighterTarget)
                 {
                     next = s.seaplaneFighter;
                 }
@@ -2134,6 +2227,17 @@ namespace rwe
                 else if (!s.rocketKbot.empty())
                 {
                     next = s.rocketKbot;
+                }
+            }
+
+            if (!next.empty() && reserveHolds)
+            {
+                // Builders are what the reserve is FOR, so they still come.
+                auto nextDef = sim.unitDefinitions.find(next);
+                if (nextDef != sim.unitDefinitions.end() && !nextDef->second.builder)
+                {
+                    LOG_DEBUG << "AI factory: " << factory.unitType << " " << factoryId.value << " holds " << next << " for the tier-two economy";
+                    next.clear();
                 }
             }
 
@@ -2330,7 +2434,10 @@ namespace rwe
                 && ((!sideUnits.tidalGenerator.empty() && t == sideUnits.tidalGenerator)
                     || (!sideUnits.sonar.empty() && t == sideUnits.sonar)
                     || (!sideUnits.torpedoLauncher.empty() && t == sideUnits.torpedoLauncher)
-                    || (!sideUnits.floatingMetalMaker.empty() && t == sideUnits.floatingMetalMaker));
+                    || (!sideUnits.floatingMetalMaker.empty() && t == sideUnits.floatingMetalMaker)
+                    || (!sideUnits.underwaterMetalStorage.empty() && t == sideUnits.underwaterMetalStorage)
+                    || (!sideUnits.underwaterEnergyStorage.empty() && t == sideUnits.underwaterEnergyStorage)
+                    || (!sideUnits.underwaterFusion.empty() && t == sideUnits.underwaterFusion));
             // The underwater extractor is NOT here. It stands in the water
             // like the rest, but it also has to stand on a metal patch, so it
             // goes through chooseMexSite with the moho extractor rather than
@@ -2722,6 +2829,7 @@ namespace rwe
                     || (!sideUnits.seaplanePlatform.empty() && next == sideUnits.seaplanePlatform)
                     || (!sideUnits.advancedShipyard.empty() && next == sideUnits.advancedShipyard)
                     || (!sideUnits.fusion.empty() && next == sideUnits.fusion)
+                    || (!sideUnits.underwaterFusion.empty() && next == sideUnits.underwaterFusion)
                     || (!sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor)
                     || (!sideUnits.heavyPlasmaTower.empty() && next == sideUnits.heavyPlasmaTower)
                     || (!sideUnits.heavyLaserTower.empty() && next == sideUnits.heavyLaserTower);

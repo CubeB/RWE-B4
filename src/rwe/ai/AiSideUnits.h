@@ -238,6 +238,32 @@ namespace rwe
          * map has a handful or none.
          */
         std::string geothermal;
+
+        // Storage, and the reactor that goes under the sea. Button pages read
+        // out of the shipped guis and download menus, 2026-09-18:
+        //
+        //   ARMMSTOR 305 metal, +1000 metal    } page one of every level-one
+        //   ARMESTOR 240 metal, +3000 energy   } constructor and the commander
+        //   ARMUWMS  360 metal, +1500 metal, MinWaterDepth=31   } commander page
+        //   ARMUWES  284 metal, +4000 energy, MinWaterDepth=30  } three, hovercraft
+        //                                        and seaplane constructors, and the
+        //                                        construction SHIP by download menu
+        //   ARMUWFUS 7085 metal, 1150 energy, MinWaterDepth=34 -- the advanced
+        //            construction SUB only (Armacsub1.gui), as the platform is.
+        //
+        // Core the same with CORMSTOR/CORESTOR/CORUWMS (depth 40)/CORUWES
+        // (31)/CORUWFUS (7210 metal, 1200 energy, depth 15).
+
+        /** Metal storage. */
+        std::string metalStorage;
+        /** Energy storage. */
+        std::string energyStorage;
+        /** Underwater metal storage. */
+        std::string underwaterMetalStorage;
+        /** Underwater energy storage. */
+        std::string underwaterEnergyStorage;
+        /** Underwater fusion plant. Counts as a reactor wherever the land one is counted. */
+        std::string underwaterFusion;
     };
 
     /** Looks up the side's unit names; anything the game data does not define is left empty and never built. */

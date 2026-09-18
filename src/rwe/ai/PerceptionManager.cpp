@@ -76,11 +76,16 @@ namespace rwe
         bb.knownEnemyAirCount = 0;
         SimVector sum(0_ss, 0_ss, 0_ss);
         int buildings = 0;
+        int armedAir = 0;
         for (const auto& [_, enemy] : bb.knownEnemies)
         {
             if (enemy.isAir)
             {
                 ++bb.knownEnemyAirCount;
+                if (enemy.isArmed)
+                {
+                    ++armedAir;
+                }
             }
             if (enemy.isBuilding)
             {
@@ -93,6 +98,7 @@ namespace rwe
         // sighting has to outlive the sight of it. Without the memory the AI
         // would start a tower, lose the bomber, drop the tower off its wanted
         // list, and be defenceless again by the time the bomber came back.
+        bb.enemyArmedAirPeak = std::max(bb.enemyArmedAirPeak, armedAir);
         bb.enemyAirThreat = bb.knownEnemyAirCount > 0
             || (bb.lastEnemyAirSeenAt && bb.now.value - bb.lastEnemyAirSeenAt->value <= AirThreatMemoryTicks);
         if (buildings > 0)

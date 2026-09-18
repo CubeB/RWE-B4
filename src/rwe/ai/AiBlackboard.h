@@ -251,6 +251,10 @@ namespace rwe
         std::optional<SimVector> enemyBasePosition;
         /** How many aircraft we currently believe the enemy has. */
         int knownEnemyAirCount{0};
+        /** The most ARMED enemy aircraft known at once, all game. Aircraft are seen in glimpses, so the count of the moment undersells the raid that is coming back. */
+        int enemyArmedAirPeak{0};
+        /** Set by BuildManager while the factories are held for the first moho and reactor; for the debug panel and the log. */
+        bool tierTwoReserveActive{false};
         /** When we last actually had eyes on one. Never reset, so the memory outlives the sighting. */
         std::optional<GameTime> lastEnemyAirSeenAt;
         /**

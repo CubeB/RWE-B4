@@ -389,6 +389,9 @@ namespace rwe
          */
         mutable std::vector<SimVector> geothermalVents;
         mutable bool geothermalVentsIndexed{false};
+
+        /** When the factories were first held for the tier-two economy; see tierTwoEconomyReserve. */
+        mutable std::optional<GameTime> tierTwoReserveStarted;
         void indexGeothermalVents(const GameSimulation& sim) const;
 
         void indexMetalPatches(const GameSimulation& sim) const;

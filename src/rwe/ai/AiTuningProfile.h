@@ -631,6 +631,34 @@ namespace rwe
          * full store like the rest of surplusExpansion.
          */
         int targetSeaplanePlatformCount{1};
+        /**
+         * Hold the factories while the first moho and the first reactor are
+         * paid for. Level two was reached in play and never spent: the lab
+         * went up, the factories went on taking every unit of metal as it
+         * arrived, and a 1508-metal moho was skipped as unaffordable on 26
+         * metal a second for the rest of the game. With this on, once a
+         * builder that can build them stands, factories make only builders
+         * until both exist -- unless the base is under attack, the army is
+         * under tierTwoReserveMinArmySize, or tierTwoReserveMaxSeconds have
+         * gone by, so a map with no patch left cannot hold production for
+         * ever.
+         */
+        bool tierTwoEconomyReserve{true};
+        int tierTwoReserveMinArmySize{6};
+        int tierTwoReserveMaxSeconds{480};
+        /** Underwater fusion plants wanted once an advanced construction sub can be had. Zero switches them off. */
+        int targetUnderwaterFusionCount{1};
+        /**
+         * Storage wanted, metal and energy each, counting the underwater
+         * kind with the land kind. One of each goes up with level two --
+         * a commander's 1000 metal cannot hold the price of anything the
+         * tier sells -- and the rest only when the store is found full,
+         * which is income being thrown away. Zero switches storage off.
+         */
+        int targetMetalStorageCount{2};
+        int targetEnergyStorageCount{2};
+        /** Fighters are matched to the most enemy aircraft seen at once, up to this many. targetFighterCount is the floor. */
+        int maxReactiveFighterCount{8};
         /** Torpedo seaplanes wanted from it. They fly in pairs at least, as the bombers do. */
         int targetTorpedoSeaplaneCount{6};
         /**

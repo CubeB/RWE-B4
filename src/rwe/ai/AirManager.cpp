@@ -322,8 +322,11 @@ namespace rwe
         {
             const auto& unit = sim.getUnitState(unitId);
 
+            // What carries a bomb or a torpedo before what only looks: a
+            // fighter that peels off after a scout leaves the torpedo
+            // bombers to their run on the fleet.
             std::optional<UnitId> target;
-            SimScalar nearest = 0_ss;
+            std::pair<bool, SimScalar> nearest{true, 0_ss};
             for (const auto& [_, enemy] : bb.knownEnemies)
             {
                 if (!enemy.isAir)
@@ -339,10 +342,10 @@ namespace rwe
                 {
                     continue;
                 }
-                auto distanceSquared = unit.position.distanceSquared(enemy.lastKnownPosition);
-                if (!target || distanceSquared < nearest)
+                auto key = std::make_pair(!enemy.isArmed, unit.position.distanceSquared(enemy.lastKnownPosition));
+                if (!target || key < nearest)
                 {
-                    nearest = distanceSquared;
+                    nearest = key;
                     target = enemy.unitId;
                 }
             }

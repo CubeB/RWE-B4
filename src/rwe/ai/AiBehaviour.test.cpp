@@ -751,6 +751,171 @@ namespace rwe
         }
     }
 
+    TEST_CASE("the factories are held while the first moho and reactor are paid for", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(200_ss, 0_ss, 200_ss), script);
+        addUnit(sim, "ARMCK", ai, SimVector(-100_ss, 0_ss, -100_ss), script);
+        addUnit(sim, "ARMALAB", ai, SimVector(-200_ss, 0_ss, -200_ss), script);
+        addUnit(sim, "ARMACK", ai, SimVector(-240_ss, 0_ss, -240_ss), script);
+        // An army, so that holding production is not leaving the base naked.
+        for (int i = 0; i < 6; ++i)
+        {
+            addUnit(sim, "ARMPW", ai, SimVector(SimScalar(-300.0f + i * 40.0f), 0_ss, 300_ss), script);
+        }
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+
+        SECTION("no assault kbots while neither stands")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMZEUS") == 0);
+            REQUIRE(countQueueCommands(commands, "ARMPW") == 0);
+            REQUIRE(countQueueCommands(commands, "ARMROCK") == 0);
+        }
+
+        SECTION("production resumes once both do")
+        {
+            addUnit(sim, "ARMMOHO", ai, SimVector(400_ss, 0_ss, -300_ss), script);
+            addUnit(sim, "ARMFUS", ai, SimVector(400_ss, 0_ss, -400_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMZEUS") == 1);
+        }
+
+        SECTION("switched off, the factories never stop")
+        {
+            profile.tierTwoEconomyReserve = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMZEUS") == 1);
+        }
+
+        SECTION("and an enemy at the gates ends the hold")
+        {
+            addUnit(sim, "ARMPW", PlayerId(0), SimVector(250_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMZEUS") == 1);
+        }
+    }
+
+    TEST_CASE("fighters are built to match the raid, and go for the bombers first", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto bomber = makeDef(false, false, true, "LASER", 200u);
+        bomber.canFly = true;
+        sim.unitDefinitions["ARMTHUND"] = bomber;
+        auto fighter = makeDef(false, false, true, "LASER", 200u);
+        fighter.canFly = true;
+        sim.unitDefinitions["ARMFIG"] = fighter;
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMAP", ai, SimVector(-200_ss, 0_ss, 200_ss), script);
+        auto fighterId = addUnit(sim, "ARMFIG", ai, SimVector(-100_ss, 60_ss, 100_ss), script);
+        addUnit(sim, "ARMFIG", ai, SimVector(-140_ss, 60_ss, 100_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.targetScoutPlaneCount = 0;
+        profile.targetAirConstructorCount = 0;
+        profile.targetBomberCount = 0;
+
+        SECTION("the standing pair is enough for a scout")
+        {
+            addUnit(sim, "ARMPEEP", human, SimVector(150_ss, 60_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMFIG") == 0);
+        }
+
+        SECTION("four bombers want four fighters")
+        {
+            for (int i = 0; i < 4; ++i)
+            {
+                addUnit(sim, "ARMTHUND", human, SimVector(SimScalar(100.0f + i * 30.0f), 60_ss, 60_ss), script);
+            }
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(controller.getBlackboard().enemyArmedAirPeak == 4);
+            REQUIRE(countQueueCommands(commands, "ARMFIG") == 1);
+        }
+
+        SECTION("a fighter takes the bomber further off before the scout beside it")
+        {
+            addUnit(sim, "ARMPEEP", human, SimVector(-80_ss, 60_ss, 100_ss), script);
+            auto bomberId = addUnit(sim, "ARMTHUND", human, SimVector(200_ss, 60_ss, 60_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            auto attacks = ordersFor<AttackOrder>(commands, fighterId);
+            REQUIRE(!attacks.empty());
+            auto target = std::get_if<UnitId>(&attacks.front().target);
+            REQUIRE(target != nullptr);
+            REQUIRE(*target == bomberId);
+        }
+    }
+
+    TEST_CASE("a metal maker is told to switch once, not once a tick", "[ai]")
+    {
+        // A command takes half a second to land, and the maker reads as it
+        // did until then. Told every pass, it was sent the same switch over
+        // and over -- and one of those copies arriving after the maker had
+        // been shot is what ended a game with a bad variant access.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto maker = makeDef(false, false, false, "", 50u);
+        maker.onOffable = true;
+        maker.makesMetal = Metal(1.0f);
+        sim.unitDefinitions["ARMMAKR"] = maker;
+        auto makerId = addUnit(sim, "ARMMAKR", ai, SimVector(200_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(makerId).activated = true;
+        // Nothing in the tank: the makers go off.
+        sim.getPlayer(ai).energy = Energy(0.0f);
+        sim.getPlayer(ai).maxEnergy = Energy(1000.0f);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        AiPlayerController controller(ai, profile, 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+        // Twenty ticks, in none of which the command is applied.
+        runTicks(sim, controller, 20, commands);
+
+        int switches = 0;
+        for (const auto& command : commands)
+        {
+            auto unitCommand = std::get_if<PlayerUnitCommand>(&command);
+            if (unitCommand != nullptr && unitCommand->unit == makerId && std::holds_alternative<PlayerUnitCommand::SetOnOff>(unitCommand->command))
+            {
+                REQUIRE_FALSE(std::get<PlayerUnitCommand::SetOnOff>(unitCommand->command).on);
+                ++switches;
+            }
+        }
+        REQUIRE(switches == 1);
+    }
+
     TEST_CASE("the AI only knows what it can see, unless it cheats", "[ai]")
     {
         auto script = makeEmptyCobScript();
@@ -3800,6 +3965,85 @@ namespace rwe
             runTicks(sim, controller, 31, commands);
             REQUIRE(countQueueCommands(commands, "ARMSEAP") == 1);
             REQUIRE(countQueueCommands(commands, "ARMSFIG") == 0);
+        }
+    }
+
+    TEST_CASE("naval: storage and the reactor go under the water", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        // The fixture's kbot wades any depth, which makes the whole sea part of
+        // the base and every ship a builder standing at home. A real one stops
+        // at the shore, and then a ship plans as the outpost builder it is.
+        sim.unitDefinitions["ARMCK"].movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 10u};
+        auto afloat = makeDef(false, true, true, "", 200u);
+        afloat.movementCollisionInfo = UnitDefinition::AdHocMovementClass{4u, 4u, 255u, 255u, 6u, 255u};
+        sim.unitDefinitions["ARMCS"] = afloat;
+        sim.unitDefinitions["ARMACSUB"] = afloat;
+        auto sunk = makeDef(false, false, false, "", 50u);
+        sunk.movementCollisionInfo = UnitDefinition::AdHocMovementClass{4u, 4u, 255u, 255u, 30u, 255u};
+        sim.unitDefinitions["ARMUWMS"] = sunk;
+        sim.unitDefinitions["ARMUWES"] = sunk;
+        sim.unitDefinitions["ARMUWFUS"] = sunk;
+        auto yard = makeDef(false, true, false, "", 200u);
+        yard.movementCollisionInfo = UnitDefinition::AdHocMovementClass{8u, 8u, 255u, 255u, 30u, 255u};
+        sim.unitDefinitions["ARMASY"] = yard;
+
+        // The commander is kept walking, so the one job a planning pass hands
+        // out goes to the builder under test.
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        sim.getUnitState(commanderId).addOrder(MoveOrder(SimVector(-420_ss, 90_ss, 400_ss)));
+        addUnit(sim, "ARMSY", ai, SimVector(0_ss, 60_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.navalTechMinMetalIncome = 0;
+        sim.getPlayer(ai).metal = Metal(1000.0f);
+        sim.getPlayer(ai).maxMetal = Metal(1000.0f);
+
+        auto tree = makeBuildTree();
+
+        SECTION("a construction ship with a full store builds underwater metal storage")
+        {
+            auto shipId = addUnit(sim, "ARMCS", ai, SimVector(100_ss, 60_ss, 100_ss), script);
+            tree.buildableBy["ARMCS"] = {"ARMUWMS", "ARMUWES"};
+            AiPlayerController controller(ai, profile, 42u, mapIntel, tree);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 61, commands);
+            auto builds = ordersFor<BuildOrder>(commands, shipId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMUWMS");
+        }
+
+        SECTION("not with storage switched off")
+        {
+            auto shipId = addUnit(sim, "ARMCS", ai, SimVector(100_ss, 60_ss, 100_ss), script);
+            tree.buildableBy["ARMCS"] = {"ARMUWMS", "ARMUWES"};
+            profile.targetMetalStorageCount = 0;
+            profile.targetEnergyStorageCount = 0;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, tree);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 61, commands);
+            REQUIRE(ordersFor<BuildOrder>(commands, shipId).empty());
+        }
+
+        SECTION("the advanced construction sub builds the underwater fusion plant")
+        {
+            addUnit(sim, "ARMASY", ai, SimVector(0_ss, 60_ss, 300_ss), script);
+            auto subId = addUnit(sim, "ARMACSUB", ai, SimVector(100_ss, 60_ss, 100_ss), script);
+            tree.buildableBy["ARMACSUB"] = {"ARMUWFUS"};
+            AiPlayerController controller(ai, profile, 42u, mapIntel, tree);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 61, commands);
+            auto builds = ordersFor<BuildOrder>(commands, subId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMUWFUS");
         }
     }
 
