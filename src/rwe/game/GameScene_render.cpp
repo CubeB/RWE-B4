@@ -514,6 +514,8 @@ namespace rwe
             chromeUiRenderService.drawTextCenteredX(centerX, GuiSizeTop + 8, speedText, *guiFont);
         }
 
+        renderSpaceTabs();
+
         renderConsole();
 
         // The menu screens are drawn over the game view -- the original folds
@@ -539,6 +541,131 @@ namespace rwe
             else
             {
                 chromeUiRenderService.drawTextCenteredX(centerX, centerY, "PAUSED", *guiFont);
+            }
+        }
+    }
+
+    void GameScene::renderSpaceTabs()
+    {
+        // TOTALA-EXE.md S:108. Holding Space does three things in the
+        // original and RWE did one of them: the side panel slides away (S:76),
+        // a list of the players with their kills and losses slides in at the
+        // top right on the SAME slide, and a strip with the game time, the
+        // local player's unit count and the game speed rises from the bottom
+        // on a slide of its own.
+        const auto screenWidth = static_cast<float>(sceneContext.viewport->width());
+        const auto screenHeight = static_cast<float>(sceneContext.viewport->height());
+
+        if (statsBarSlide > 0)
+        {
+            auto bar = gameMediaDatabase.getSpriteSeries("COMMONGUI", "LIGHTBAR");
+            const Sprite* barSprite = (bar && (*bar)->sprites.size() > 1) ? (*bar)->sprites[1].get() : nullptr;
+            auto barWidth = barSprite ? barSprite->bounds.width() : 507.0f;
+            auto barHeight = barSprite ? barSprite->bounds.height() : 32.0f;
+
+            // Centred under the world view, which starts where the side
+            // panel ends. Placement across the screen is RWE's: the decode
+            // has the strip anchored to the bottom of the viewport and moved
+            // by the slide, and did not resolve its x.
+            auto viewLeft = static_cast<float>(GuiSizeLeft) - std::round(panelSlide);
+            auto x = std::floor(viewLeft + ((screenWidth - viewLeft - barWidth) / 2.0f));
+            auto y = screenHeight - static_cast<float>(statsBarSlide) - 1.0f;
+            if (barSprite)
+            {
+                chromeUiRenderService.drawSpriteAbs(x, y, *barSprite);
+            }
+            else
+            {
+                chromeUiRenderService.fillColor(x, y, barWidth, barHeight, Color(0, 0, 0, 200));
+            }
+
+            // "%s : %02d:%02d:%02d" -- always with the hours.
+            auto totalSeconds = simulation.gameTime.value / SimTicksPerSecond;
+            char timeText[64];
+            std::snprintf(timeText, sizeof(timeText), "Game Time : %02u:%02u:%02u", totalSeconds / 3600u, (totalSeconds / 60u) % 60u, totalSeconds % 60u);
+
+            // The local player's own units, not everybody's. The original
+            // follows it with "(Max %d)", its unit limit; RWE has no limit
+            // to print, so the line stops at the count.
+            unsigned int ownUnits = 0;
+            for (const auto& [_, unit] : simulation.units)
+            {
+                if (unit.owner == localPlayerId && unit.isAlive())
+                {
+                    ++ownUnits;
+                }
+            }
+            auto unitsText = "Total Units : " + std::to_string(ownUnits);
+
+            // "Normal" at the default, otherwise the signed step from it, and
+            // no colon on this one: that is how the original has it.
+            std::string speedText = "Game Speed ";
+            if (gameSpeed.isDefault())
+            {
+                speedText += "Normal";
+            }
+            else
+            {
+                auto offset = gameSpeed.displayOffset();
+                speedText += (offset > 0 ? "+" : "") + std::to_string(offset);
+            }
+
+            auto textY = y + std::floor(barHeight / 2.0f) + 5.0f;
+            chromeUiRenderService.drawText(x + 24.0f, textY, timeText, *guiFont);
+            chromeUiRenderService.drawTextCenteredX(x + (barWidth / 2.0f), textY, unitsText, *guiFont);
+            chromeUiRenderService.drawTextAlignRight(x + barWidth - 24.0f, textY, speedText, *guiFont);
+        }
+
+        // The players' list shares the side panel's slide exactly (0x4948e0
+        // draws both), so it is out when the panel is away, F4 included.
+        if (panelSlide > 0.0f && guiVisible)
+        {
+            std::vector<std::pair<PlayerId, const GamePlayerInfo*>> rows;
+            for (Index i = 0; i < getSize(simulation.players); ++i)
+            {
+                const auto& player = simulation.players[i];
+                // The original drops a record that never had units; a player
+                // who has lost keeps the row, which is how the losses show.
+                rows.emplace_back(PlayerId(static_cast<int>(i)), &player);
+            }
+
+            const float boxWidth = 125.0f;
+            const float headerHeight = 46.0f;
+            const float rowHeight = 40.0f;
+            auto boxHeight = (rowHeight * static_cast<float>(rows.size())) + headerHeight;
+            auto shown = (panelSlide / static_cast<float>(PanelSlideTravel)) * boxWidth;
+            auto boxX = std::floor(screenWidth - shown);
+            auto boxY = static_cast<float>(GuiSizeTop);
+
+            chromeUiRenderService.fillColor(boxX, boxY, boxWidth, boxHeight, Color(0, 0, 0, 170));
+            chromeUiRenderService.drawTextAlignRight(boxX + 78.0f, boxY + 30.0f, "Kills", *guiFont);
+            chromeUiRenderService.drawTextAlignRight(boxX + boxWidth - 6.0f, boxY + 30.0f, "Losses", *guiFont);
+
+            auto rowY = boxY + headerHeight;
+            for (const auto& [playerId, player] : rows)
+            {
+                if (playerId == localPlayerId)
+                {
+                    // Two nested fills under the local player's row. Their
+                    // colours are raw indices the decode could not place in a
+                    // palette, so these two are RWE's.
+                    chromeUiRenderService.fillColor(boxX + 2.0f, rowY, boxWidth - 4.0f, rowHeight - 2.0f, Color(90, 90, 120, 200));
+                    chromeUiRenderService.fillColor(boxX + 3.0f, rowY + 1.0f, boxWidth - 6.0f, rowHeight - 4.0f, Color(40, 40, 64, 220));
+                }
+
+                // A swatch in the player's colour -- a graphic in the
+                // original, not tinted text -- then the name, and the two
+                // counts beneath it under their headings.
+                auto colorIndex = player->color.value;
+                if (minimapDots && colorIndex < minimapDots->sprites.size())
+                {
+                    chromeUiRenderService.drawSpriteAbs(boxX + 6.0f, rowY + 5.0f, *minimapDots->sprites[colorIndex]);
+                }
+                auto name = player->name ? *player->name : std::string(player->type == GamePlayerType::Computer ? "Computer" : "Player");
+                chromeUiRenderService.drawText(boxX + 20.0f, rowY + 15.0f, name, *guiFont);
+                chromeUiRenderService.drawTextAlignRight(boxX + 78.0f, rowY + 33.0f, std::to_string(player->unitsKilled), *guiFont);
+                chromeUiRenderService.drawTextAlignRight(boxX + boxWidth - 6.0f, rowY + 33.0f, std::to_string(player->unitsLost), *guiFont);
+                rowY += rowHeight;
             }
         }
     }

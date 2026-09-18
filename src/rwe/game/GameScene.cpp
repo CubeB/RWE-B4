@@ -353,6 +353,27 @@ namespace rwe
             && p.y < y + static_cast<int>(currentPanel->getHeight());
     }
 
+    void GameScene::updateStatsBarSlide(int millisecondsElapsed)
+    {
+        // 0x4689c0. Polled on a fifteen-millisecond throttle, and each poll
+        // moves the strip a third of the way it has left to go, never less
+        // than a pixel -- so it leaves quickly and settles gently, over about
+        // an eighth of a second. The key is read live, not as a press.
+        statsBarMillisecondsOwed += millisecondsElapsed;
+        auto wanted = (spaceDown && !isGameMenuOpen()) ? StatsBarTravel : 0;
+        while (statsBarMillisecondsOwed >= 15)
+        {
+            statsBarMillisecondsOwed -= 15;
+            if (statsBarSlide == wanted)
+            {
+                continue;
+            }
+            auto remaining = std::abs(wanted - statsBarSlide);
+            auto step = std::max(1, remaining / 3);
+            statsBarSlide += wanted > statsBarSlide ? step : -step;
+        }
+    }
+
     void GameScene::updatePanelSlide(int millisecondsElapsed)
     {
         // TOTALA-EXE.md 76. The original keeps a display word bit (game+0x37f06
@@ -794,6 +815,7 @@ namespace rwe
         // Straight after the swap, so a panel that arrived this frame is put
         // in the right place before anything draws it.
         updatePanelSlide(millisecondsElapsed);
+        updateStatsBarSlide(millisecondsElapsed);
 
         // The drift gate below asks the network thread what time everyone
         // else is at, and skips ticks to stay level with them. There is
@@ -821,8 +843,22 @@ namespace rwe
             ? 2000
             : (replayPlayback ? 10 * std::max(replaySpeed, 1) : 10);
         int ticksThisFrame = 0;
+        // Fast playback is bounded by the clock as well as by the count. At
+        // 64x a frame asks for thirty-odd ticks, and if those take longer
+        // than the frame the next one asks for more, and the one after for
+        // more again, until the viewer is drawing a frame every two seconds.
+        // Past the budget the rest of the backlog is dropped: the replay
+        // plays as fast as the machine can run it and the window stays live.
+        const auto frameTickingStarted = std::chrono::steady_clock::now();
+        const bool clockBounded = replayPlayback && !replaySeekTarget;
         for (; millisecondsBuffer >= SimMillisecondsPerTick && ticksThisFrame < maxTicksPerFrame; millisecondsBuffer -= SimMillisecondsPerTick)
         {
+            if (clockBounded && ticksThisFrame > 0
+                && std::chrono::steady_clock::now() - frameTickingStarted > std::chrono::milliseconds(40))
+            {
+                millisecondsBuffer = 0;
+                break;
+            }
             if (sceneTime % frameCheckInterval != SceneTime(0) || sceneTime <= highSceneTime)
             {
                 tryTickGame();

@@ -906,6 +906,20 @@ namespace rwe
         float panelSlide{0.0f};
 
         /**
+         * How far the Space key's bottom strip has risen, 0 to
+         * StatsBarTravel. TOTALA-EXE.md S:108: a slide of its own
+         * (game+0x37e90, 0 to -31), driven by Space alone -- F4, which
+         * latches the side panel out, does not touch it -- and eased a third
+         * of what is left at a time, at least a pixel, every fifteen
+         * milliseconds.
+         */
+        static constexpr int StatsBarTravel = 31;
+        int statsBarSlide{0};
+        int statsBarMillisecondsOwed{0};
+        void updateStatsBarSlide(int millisecondsElapsed);
+        void renderSpaceTabs();
+
+        /**
          * F4's latch -- the original's display word bit 7 at game+0x37f06
          * (76). That bit has no registry name and only F4 touches it, so it
          * lasts the session and no longer, and this bool does the same.

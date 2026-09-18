@@ -13278,3 +13278,71 @@ builder GUIs are read. The log line is the check: on the full install it reads
 Because the AI's build tree is made from the same pages, the AI gains all 53
 units by the same stroke -- which is what turned construction ships from a
 measured loss into a measured win (see `targetConstructionShipCount`).
+
+## 108. What Space shows: a strip from the bottom and the players at the top right
+
+**Why this was read.** Reported from play: in the original, while Space is
+held, a tab rises from the bottom of the screen with the game time, the
+player's own unit count and the game speed, and another at the top right lists
+the players in their colours with kills and losses. RWE slid the side panel
+away (§76) and showed neither. §76 is right and was incomplete: it stopped
+reading its function at the slide arithmetic.
+
+### Verified
+
+- **Space is polled, not pressed.** Both routines call `IsKeyDown`
+  (`0x4C1B80`) with a literal `0x20`. They are called one after the other from
+  the world render, `0x469F65` and `0x469F9F`, with the same rectangle.
+- **The players' list is drawn by the side panel's own updater**, `0x4948E0`,
+  on the side panel's own slide (`ds:0x51F2D8`, 0 to `0x7D`) and gate: the F4
+  latch (`game+0x37F06` bit 7), or Space held with the cursor off the panel.
+  The two always move together. F4 alone therefore brings the list out.
+- **The bottom strip is separate**, `0x4689C0`: its own slide at
+  `game+0x37E90`, a signed 0 to -31, driven by Space alone -- there is no test
+  of the F4 bit anywhere between the function's entry and its key poll. It is
+  polled on a throttle (`ds:0x51E544`, next poll fifteen timer units on) and
+  each poll moves it `max(1, remaining / 3)`. At exactly 0 every draw call is
+  skipped. It plays the side panel's two sounds, `Panel` on leaving rest and
+  `Options` on settling.
+- **Its graphic** is `LIGHTBAR` in `anims/commongui.GAF`, **frame 1**, 507 by
+  32, fetched once at `0x4679E3` and cached at `game+0x37E94`.
+- **Its text**, each format read at its address:
+  `"%s : %02d:%02d:%02d"` with `Game Time` -- always with the hours;
+  `"%s : %d  (Max %d)"` with `Total Units`, the count being the word at
+  player record `+0x144` of the LOCAL player (`game+0x2A42`) and the maximum
+  the first word of the settings block at `game+0x37EE6`;
+  `"%s %s"` with `Game Speed` and either `Normal` (speed word `game+0x38A4D`
+  equal to 10) or `"%+d"` of the word less ten -- no colon on this one -- and
+  a further `" (%+d)"` while the wanted speed (`game+0x38A4B`) has not landed.
+- **The list**: ten records at `game+0x1B63`, 331 bytes each. A row is a colour
+  swatch blitted as a graphic (the colour index is byte `+0x96` of the
+  sub-record at `+0x27`, looked up through the table at `game+0x148DB`), the
+  name at `+0x2B`, kills at `+0xFC` and losses at `+0xFE` as plain `"%d"`. The
+  local player's row has two nested filled rectangles under it. The box is
+  `40 * rows + 46` tall, at y = 32, its x being the screen width less the
+  slide plus 125 -- off the right edge at rest, flush with it when out.
+- **Order is a stored rank byte (`+0x148`), not a leaderboard.** It is closed
+  up when a player drops and otherwise left alone.
+- A row is skipped for an unused record, a state byte outside 1 to 3, a
+  `+0x146` of 10, a record that has and has had no units, or bit `0x40` of
+  `+0x9B` in the colour sub-record. **No alliance or visibility test was found
+  in the loop**, so it appears to list everyone.
+
+### Not found
+
+The font and colour handed to the text primitive `0x4A50E0`; where across the
+screen the strip sits and how its three lines are laid out inside 32 pixels;
+the list's exact width; what palette the highlight's two fill constants (31
+and 20) index; and the `game+0x37EF6 == 2` mode that reads kills and losses
+from `+0x104` / `+0x106` instead.
+
+### What RWE does
+
+`GameScene::updateStatsBarSlide` and `renderSpaceTabs`. The slides, the gates,
+the strings and formats, the graphic, the box height and the rule that the
+list rides the side panel are the original's. **RWE's own, for want of a
+decode:** the strip is centred under the world view with its three items laid
+left, centre and right on one line; the list is 125 wide on a translucent
+ground with RWE-chosen highlight colours, and uses the `radlogo` colour dots
+as swatches; and `Total Units` stops at the count, because RWE has no unit
+limit to print after it.

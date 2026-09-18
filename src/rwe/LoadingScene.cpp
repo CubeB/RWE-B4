@@ -1163,6 +1163,14 @@ namespace rwe
             }
         }
 
+        // The strip the Space key slides up from the bottom of the screen
+        // (TOTALA-EXE.md S:108): commongui's LIGHTBAR, of which the original
+        // draws frame 1, 507 by 32.
+        if (auto anim = sceneContext.textureService->tryGetGafEntry("anims/commongui.gaf", "LIGHTBAR"))
+        {
+            dataMaps.gameMediaDatabase.addSpriteSeries("COMMONGUI", "LIGHTBAR", *anim);
+        }
+
         // In-game titles: TA's own PAUSED / VICTORY / DEFEAT artwork.
         for (const auto& name : {"igpaused", "igvictory", "igdefeat"})
         {

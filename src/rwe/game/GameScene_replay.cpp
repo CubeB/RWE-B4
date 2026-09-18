@@ -165,7 +165,18 @@ namespace rwe
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(150.0f);
-        ImGui::SliderInt("Speed", &replaySpeed, 1, 16, "%dx");
+        ImGui::SliderInt("Speed", &replaySpeed, 1, 64, "%dx");
+        // One click for the speeds actually wanted: watching, skimming, and
+        // getting through an hour of an AI game to the part that matters.
+        for (int preset : {1, 4, 16, 64})
+        {
+            ImGui::SameLine();
+            auto label = std::to_string(preset) + "x";
+            if (ImGui::SmallButton(label.c_str()))
+            {
+                replaySpeed = preset;
+            }
+        }
 
         // The handle only follows the game when nobody is holding it. Setting
         // it from the playback position every frame, which is what this did,
