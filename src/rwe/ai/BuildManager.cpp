@@ -750,6 +750,22 @@ namespace rwe
             walkable);
     }
 
+    void BuildManager::indexGeothermalVents(const GameSimulation& sim) const
+    {
+        if (geothermalVentsIndexed)
+        {
+            return;
+        }
+        geothermalVentsIndexed = true;
+        for (const auto& [_, feature] : sim.features)
+        {
+            if (sim.getFeatureDefinition(feature.featureName).geothermal)
+            {
+                geothermalVents.push_back(feature.position);
+            }
+        }
+    }
+
     std::optional<SimVector> BuildManager::chooseShipyardSite(
         const GameSimulation& sim,
         const AiTuningProfile& profile,
@@ -789,7 +805,8 @@ namespace rwe
                 continue;
             }
             const auto& type = factoryRef->get().unitType;
-            if (type == bb.sideUnits.shipyard || (!bb.sideUnits.advancedShipyard.empty() && type == bb.sideUnits.advancedShipyard))
+            if (type == bb.sideUnits.shipyard || (!bb.sideUnits.advancedShipyard.empty() && type == bb.sideUnits.advancedShipyard)
+                || (!bb.sideUnits.seaplanePlatform.empty() && type == bb.sideUnits.seaplanePlatform))
             {
                 ownYards.push_back(factoryRef->get().position);
             }
@@ -1296,6 +1313,14 @@ namespace rwe
             // metal a second, against 18.4 and 32.6 for ships offered the
             // whole plan (navalBuildersPlanForBase).
             wantAdvancedShipyard();
+            // And the advanced construction sub's: the seaplane platform,
+            // which only it can build. want() drops it for everyone else.
+            auto storeFull = bb.metalStorage.value > 0.0f && bb.currentMetal.value >= bb.metalStorage.value * 0.8f;
+            if (profile.surplusExpansion && storeFull && !s.seaplanePlatform.empty() && total(s.airPlant) < 1
+                && total(s.advancedShipyard) >= 1 && total(s.seaplanePlatform) < profile.targetSeaplanePlatformCount)
+            {
+                want(s.seaplanePlatform);
+            }
             wantMetalExtractor();
             want(s.solar);
             return wanted;
@@ -1464,6 +1489,18 @@ namespace rwe
         // not about the plan: Core's Can is worth 9.4 times an A.K. per
         // metal and Arm's Zeus 1.44 times a Peewee, so the same rule techs
         // for one and declines for the other. §15.7.
+        // A vent, if the map has one. 250 energy that no weather touches,
+        // for about the price of four solar collectors and a fraction of
+        // their ground -- and neither side ever built one, because nothing
+        // asked. Once there is a factory, so it does not delay the opening,
+        // and as many as there are vents: the site search says when they
+        // have run out or are somebody else's.
+        if (!s.geothermal.empty() && !geothermalVents.empty() && (total(s.lab) >= 1 || total(s.shipyard) >= 1)
+            && total(s.geothermal) < static_cast<int>(geothermalVents.size()))
+        {
+            want(s.geothermal);
+        }
+
         auto incomeSupportsTech = bb.metalIncome.value >= static_cast<float>(profile.techMinMetalIncome);
         auto tierWorthIt = bb.advancedArmyValueRatio >= profile.techMinArmyValueRatio;
         if (profile.techLevelTwo && tierWorthIt && incomeSupportsTech && total(s.lab) >= 1 && total(s.advancedLab) < profile.targetAdvancedLabCount)
@@ -1493,7 +1530,15 @@ namespace rwe
         // five minutes at the point the economy most needed building. So on
         // land it waits until the extractors it is competing with are up.
         auto airPlantAffordable = airMatters || total(s.metalExtractor) >= profile.targetMetalExtractorCount;
-        if (total(s.lab) >= 1 && total(s.airPlant) < profile.targetAirPlantCount && total(s.solar) >= profile.openingSolarCount
+        // A factory and the opening's energy, of whichever kind the map
+        // allows. Asked as "a lab and four solar collectors" this could never
+        // be true on a map with no room for either, which is exactly the map
+        // where aircraft matter most: watched over three long games on
+        // Crystal Isles, neither side built one aeroplane, and neither side
+        // owned anything that could have shot one down.
+        auto hasFactory = total(s.lab) >= 1 || (navalFleetTarget(profile, bb) > 0 && total(s.shipyard) >= 1);
+        auto openingEnergy = total(s.solar) + total(s.tidalGenerator) >= profile.openingSolarCount;
+        if (hasFactory && total(s.airPlant) < profile.targetAirPlantCount && openingEnergy
             && airPlantAffordable
             && (airMatters || total(s.radar) >= profile.targetRadarCount))
         {
@@ -1807,6 +1852,15 @@ namespace rwe
                 continue;
             }
 
+            // Something for a transport to carry. wantsTransport says there
+            // is somewhere worth going that needs a lift; it does not say
+            // anyone is waiting for one. On a map with no room for a lab
+            // there is no construction kbot and no army that walks, and the
+            // yard built a 900-metal transport all the same, which then lay
+            // at anchor for the whole game.
+            bool hasCargo = !bb.combatUnits.empty() || total(s.constructor) > 0 || total(s.advancedConstructor) > 0
+                || total(s.lab) > 0 || total(s.vehiclePlant) > 0;
+
             std::string next;
             if (!s.airPlant.empty() && factory.unitType == s.airPlant)
             {
@@ -1828,7 +1882,7 @@ namespace rwe
                 {
                     next = s.scoutPlane;
                 }
-                else if (!s.airTransport.empty() && bb.wantsTransport && total(s.airTransport) < profile.targetTransportCount)
+                else if (!s.airTransport.empty() && bb.wantsTransport && hasCargo && total(s.airTransport) < profile.targetTransportCount)
                 {
                     next = s.airTransport;
                 }
@@ -1903,7 +1957,7 @@ namespace rwe
                     {
                         next = s.constructionShip;
                     }
-                    else if (!s.seaTransport.empty() && bb.wantsTransport && total(s.seaTransport) < profile.targetSeaTransportCount)
+                    else if (!s.seaTransport.empty() && bb.wantsTransport && hasCargo && total(s.seaTransport) < profile.targetSeaTransportCount)
                     {
                         next = s.seaTransport;
                     }
@@ -1936,9 +1990,20 @@ namespace rwe
                 auto fleetMultiplier = (profile.surplusExpansion && storeFull) ? std::max(1, profile.surplusFleetMultiplier) : 1;
                 auto cruiserTarget = profile.targetCruiserCount * fleetMultiplier;
                 auto battleshipTarget = profile.targetBattleshipCount * fleetMultiplier;
+                // The construction sub, once there is an escort afloat and
+                // only while it still has its one job to do: a platform to
+                // build on a map that gave the air plant no ground.
+                auto wantConstructionSub = profile.targetSeaplanePlatformCount > 0 && !s.advancedConstructionSub.empty()
+                    && !s.seaplanePlatform.empty() && total(s.airPlant) < 1
+                    && total(s.seaplanePlatform) < profile.targetSeaplanePlatformCount
+                    && total(s.advancedConstructionSub) < 1 && cruisers >= 2;
                 if (bb.enemyAirThreat && !s.antiAirShip.empty() && total(s.antiAirShip) < profile.targetAntiAirShipCount)
                 {
                     next = s.antiAirShip;
+                }
+                else if (wantConstructionSub)
+                {
+                    next = s.advancedConstructionSub;
                 }
                 else if (!s.cruiser.empty() && cruisers < cruiserTarget && cruisers < 2 * (battleships + 1))
                 {
@@ -1951,6 +2016,20 @@ namespace rwe
                 else if (!s.cruiser.empty() && cruisers < cruiserTarget)
                 {
                     next = s.cruiser;
+                }
+            }
+            else if (!s.seaplanePlatform.empty() && factory.unitType == s.seaplanePlatform)
+            {
+                // Cover when something of theirs is flying, otherwise the
+                // torpedo: nothing the other side floats can shoot up until
+                // it has seen an aircraft and built for one.
+                if (bb.enemyAirThreat && !s.seaplaneFighter.empty() && total(s.seaplaneFighter) < profile.targetFighterCount)
+                {
+                    next = s.seaplaneFighter;
+                }
+                else if (!s.torpedoSeaplane.empty() && total(s.torpedoSeaplane) < profile.targetTorpedoSeaplaneCount)
+                {
+                    next = s.torpedoSeaplane;
                 }
             }
             else if (!s.advancedLab.empty() && factory.unitType == s.advancedLab)
@@ -2072,6 +2151,7 @@ namespace rwe
         // underwater extractor has anywhere to stand, and it has no sim of
         // its own to work that out with.
         indexMetalPatches(sim);
+        indexGeothermalVents(sim);
         const auto& sideUnits = bb.sideUnits;
 
         planFactories(sim, profile, bb, outCommands);
@@ -2601,6 +2681,7 @@ namespace rwe
                 // simply unaffordable for ever -- the planner skips past it
                 // to something cheap every pass and the AI never techs.
                 auto isLevelTwo = (!sideUnits.advancedLab.empty() && next == sideUnits.advancedLab)
+                    || (!sideUnits.seaplanePlatform.empty() && next == sideUnits.seaplanePlatform)
                     || (!sideUnits.advancedShipyard.empty() && next == sideUnits.advancedShipyard)
                     || (!sideUnits.fusion.empty() && next == sideUnits.fusion)
                     || (!sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor)
@@ -2962,6 +3043,106 @@ namespace rwe
                 auto towerAnchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
                 site = chooseBuildSite(sim, profile, next, towerAnchor, rng, siteReachable);
             }
+            else if (!sideUnits.geothermal.empty() && next == sideUnits.geothermal)
+            {
+                // On a vent, and only there: the nearest one to the builder
+                // that it can walk to, has looked at, and can still be built
+                // on -- which is what says whether somebody has taken it.
+                auto mc = sim.getAdHocMovementClass(nextDefIt->second.movementCollisionInfo);
+                std::optional<SimScalar> nearest;
+                for (const auto& vent : geothermalVents)
+                {
+                    if (siteFailedLately(sim, vent) || (siteReachable && !siteReachable(vent)))
+                    {
+                        continue;
+                    }
+                    if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, vent))
+                    {
+                        continue;
+                    }
+                    auto rect = sim.computeFootprintRegion(vent, nextDefIt->second.movementCollisionInfo);
+                    if (rect.x < 0 || rect.y < 0
+                        || !sim.canBeBuiltAt(mc, nextDefIt->second.yardMap, nextDefIt->second.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+                    {
+                        continue;
+                    }
+                    auto distance = builder.position.distanceSquared(vent);
+                    if (!nearest || distance < *nearest)
+                    {
+                        nearest = distance;
+                        site = vent;
+                    }
+                }
+            }
+            else if (!sideUnits.torpedoLauncher.empty() && next == sideUnits.torpedoLauncher && !bb.factories.empty())
+            {
+                // Beside the yard, on the side the enemy comes from. It was
+                // laid out round the builder like a tidal generator, and the
+                // builder is the commander, on the beach: so the one defence
+                // bought against a hull shelling the shipyard stood somewhere
+                // along the shore, out of reach of both. A launcher reaches
+                // about 500; two hundred off the yard covers the yard and the
+                // water its hulls are launched into.
+                std::optional<SimVector> yard;
+                for (auto factoryId : bb.factories)
+                {
+                    auto factoryRef = sim.tryGetUnitState(factoryId);
+                    if (factoryRef && (factoryRef->get().unitType == sideUnits.shipyard
+                            || (!sideUnits.advancedShipyard.empty() && factoryRef->get().unitType == sideUnits.advancedShipyard)))
+                    {
+                        // The yard with the fewest launchers near it, so a
+                        // second launcher covers a second yard.
+                        if (!yard)
+                        {
+                            yard = factoryRef->get().position;
+                        }
+                        bool covered = false;
+                        for (const auto& [_, unit] : sim.units)
+                        {
+                            if (unit.owner == aiOwner && unit.isAlive() && unit.unitType == next
+                                && unit.position.distanceSquared(factoryRef->get().position) < 400_ss * 400_ss)
+                            {
+                                covered = true;
+                                break;
+                            }
+                        }
+                        if (!covered)
+                        {
+                            yard = factoryRef->get().position;
+                            break;
+                        }
+                    }
+                }
+                if (yard)
+                {
+                    std::optional<SimVector> threat;
+                    auto nearestThreat = 0_ss;
+                    for (const auto& [_, enemy] : bb.knownEnemies)
+                    {
+                        if (!enemy.isArmed || enemy.isAir || enemy.isBuilding)
+                        {
+                            continue;
+                        }
+                        auto d = yard->distanceSquared(enemy.lastKnownPosition);
+                        if (!threat || d < nearestThreat)
+                        {
+                            nearestThreat = d;
+                            threat = enemy.lastKnownPosition;
+                        }
+                    }
+                    if (!threat)
+                    {
+                        threat = bb.enemyBasePosition;
+                    }
+                    auto towards = threat ? (*threat - *yard).normalizedOr(SimVector(1_ss, 0_ss, 0_ss))
+                                          : (*yard - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+                    site = chooseBuildSite(sim, profile, next, *yard + (towards * 200_ss), rng);
+                }
+                if (!site)
+                {
+                    site = chooseBuildSite(sim, profile, next, anchor, rng);
+                }
+            }
             else if (isWaterStructure(next))
             {
                 // Deliberately without siteReachable -- see where it is
@@ -2972,7 +3153,8 @@ namespace rwe
                 site = chooseBuildSite(sim, profile, next, anchor, rng);
             }
             else if ((!sideUnits.shipyard.empty() && next == sideUnits.shipyard)
-                || (!sideUnits.advancedShipyard.empty() && next == sideUnits.advancedShipyard))
+                || (!sideUnits.advancedShipyard.empty() && next == sideUnits.advancedShipyard)
+                || (!sideUnits.seaplanePlatform.empty() && next == sideUnits.seaplanePlatform))
             {
                 // Not a ring search: an 8x8 footprint needing
                 // MinWaterDepth=30 would refuse every candidate a walk out

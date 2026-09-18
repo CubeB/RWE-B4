@@ -66,11 +66,16 @@ namespace rwe
             units.cruiser = "CORCRUS";
             units.battleship = "CORBATS";
             units.antiAirShip = "CORARCH";
+            units.advancedConstructionSub = "CORACSUB";
+            units.seaplanePlatform = "CORPLAT";
+            units.seaplaneFighter = "CORSFIG";
+            units.torpedoSeaplane = "CORSEAP";
             units.tidalGenerator = "CORTIDE";
             units.sonar = "CORSONAR";
             units.torpedoLauncher = "CORTL";
             units.underwaterMetalExtractor = "CORUWMEX";
             units.floatingMetalMaker = "CORFMKR";
+            units.geothermal = "CORGEO";
         }
         else
         {
@@ -112,11 +117,16 @@ namespace rwe
             units.cruiser = "ARMCRUS";
             units.battleship = "ARMBATS";
             units.antiAirShip = "ARMAAS";
+            units.advancedConstructionSub = "ARMACSUB";
+            units.seaplanePlatform = "ARMPLAT";
+            units.seaplaneFighter = "ARMSFIG";
+            units.torpedoSeaplane = "ARMSEAP";
             units.tidalGenerator = "ARMTIDE";
             units.sonar = "ARMSONAR";
             units.torpedoLauncher = "ARMTL";
             units.underwaterMetalExtractor = "ARMUWMEX";
             units.floatingMetalMaker = "ARMFMKR";
+            units.geothermal = "ARMGEO";
         }
 
         auto check = [&](std::string& name) {
@@ -163,11 +173,16 @@ namespace rwe
         check(units.cruiser);
         check(units.battleship);
         check(units.antiAirShip);
+        check(units.advancedConstructionSub);
+        check(units.seaplanePlatform);
+        check(units.seaplaneFighter);
+        check(units.torpedoSeaplane);
         check(units.tidalGenerator);
         check(units.sonar);
         check(units.torpedoLauncher);
         check(units.underwaterMetalExtractor);
         check(units.floatingMetalMaker);
+        check(units.geothermal);
         return units;
     }
 

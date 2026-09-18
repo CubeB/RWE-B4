@@ -382,6 +382,15 @@ namespace rwe
          */
         mutable int submergedMetalPatches{0};
 
+        /**
+         * Where the map's geothermal vents are, found once. A vent is a
+         * feature and an indestructible one, so the list never changes;
+         * whether one is free is asked of the simulation each time.
+         */
+        mutable std::vector<SimVector> geothermalVents;
+        mutable bool geothermalVentsIndexed{false};
+        void indexGeothermalVents(const GameSimulation& sim) const;
+
         void indexMetalPatches(const GameSimulation& sim) const;
 
         /** What the next idle builder should build, most wanted first. */

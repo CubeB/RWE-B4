@@ -2502,6 +2502,76 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a geothermal plant goes on a vent, and is not asked for where there is none", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.lineOfSightMode = LineOfSightMode::Circular;
+        sim.unitDefinitions["ARMGEO"] = makeDef(false, false, false, "", 50u);
+
+        auto profile = makeDefaultStandardProfile();
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(commanderId).addOrder(MoveOrder(SimVector(600_ss, 0_ss, 600_ss)));
+        addUnit(sim, "ARMLAB", ai, SimVector(200_ss, 0_ss, 200_ss), script);
+        auto kbotId = addUnit(sim, "ARMCK", ai, SimVector(-100_ss, 0_ss, -100_ss), script);
+
+        // The opening already built, so the plan has got as far as the vent.
+        for (int i = 0; i < profile.targetSolarCount; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(-600.0f + i * 100.0f), 0_ss, 500_ss), script);
+        }
+        for (int i = 0; i < profile.targetMetalExtractorCount; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(SimScalar(-600.0f + i * 100.0f), 0_ss, 650_ss), script);
+        }
+        // And everything the plan puts ahead of it.
+        addUnit(sim, "ARMRAD", ai, SimVector(-600_ss, 0_ss, -500_ss), script);
+        addUnit(sim, "ARMRL", ai, SimVector(-500_ss, 0_ss, -500_ss), script);
+        for (int i = 0; i < profile.targetDefenceCount; ++i)
+        {
+            addUnit(sim, "ARMLLT", ai, SimVector(SimScalar(-400.0f + i * 100.0f), 0_ss, -500_ss), script);
+        }
+        sim.getPlayer(ai).metal = Metal(1000.0f);
+        sim.getPlayer(ai).maxMetal = Metal(2000.0f);
+
+        auto tree = makeBuildTree();
+        tree.buildableBy["ARMCK"].insert("ARMGEO");
+
+        SECTION("on the vent")
+        {
+            FeatureDefinition vent{};
+            vent.name = "steamvent";
+            vent.footprintX = 2;
+            vent.footprintZ = 2;
+            vent.geothermal = true;
+            auto ventDef = sim.featureDefinitions.insert(vent);
+            auto ventId = sim.addFeature(ventDef, 26, 28).value();
+            auto where = sim.getFeature(ventId).position;
+
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, tree);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 61, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, kbotId);
+            auto geo = std::find_if(builds.begin(), builds.end(), [](const BuildOrder& o) { return o.unitType == "ARMGEO"; });
+            REQUIRE(geo != builds.end());
+            REQUIRE(geo->position.x.value == where.x.value);
+            REQUIRE(geo->position.z.value == where.z.value);
+        }
+
+        SECTION("nothing, with no vent on the map")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, tree);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 61, commands);
+            auto types = buildOrderTypes(commands);
+            REQUIRE(std::find(types.begin(), types.end(), "ARMGEO") == types.end());
+        }
+    }
+
     TEST_CASE("the site search walks outward past a ring the builder cannot reach", "[ai]")
     {
         // The ring walk stops at the NEAREST ring with room on it, which is
@@ -3472,6 +3542,73 @@ namespace rwe
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 31, commands);
             REQUIRE(countQueueCommands(commands, "ARMAAS") == 0);
+        }
+    }
+
+    TEST_CASE("naval: with no ground for an air plant, the yard builds the sub that builds the seaplane platform", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto yard = makeDef(false, true, false, "", 200u);
+        yard.movementCollisionInfo = UnitDefinition::AdHocMovementClass{8u, 8u, 255u, 255u, 30u, 255u};
+        sim.unitDefinitions["ARMASY"] = yard;
+        auto platform = yard;
+        platform.movementCollisionInfo = UnitDefinition::AdHocMovementClass{7u, 7u, 255u, 255u, 30u, 255u};
+        sim.unitDefinitions["ARMPLAT"] = platform;
+        auto hull = makeDef(false, false, true, "LASER", 300u);
+        hull.movementCollisionInfo = UnitDefinition::AdHocMovementClass{5u, 5u, 255u, 255u, 30u, 255u};
+        sim.unitDefinitions["ARMCRUS"] = hull;
+        sim.unitDefinitions["ARMBATS"] = hull;
+        auto sub = makeDef(false, true, true, "", 200u);
+        sub.movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 3u, 255u, 255u, 20u, 255u};
+        sim.unitDefinitions["ARMACSUB"] = sub;
+        auto plane = makeDef(false, false, true, "LASER", 300u);
+        plane.canFly = true;
+        sim.unitDefinitions["ARMSEAP"] = plane;
+        sim.unitDefinitions["ARMSFIG"] = plane;
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+
+        SECTION("the sub, once two cruisers stand")
+        {
+            addUnit(sim, "ARMASY", ai, SimVector(0_ss, 60_ss, 0_ss), script);
+            addUnit(sim, "ARMCRUS", ai, SimVector(160_ss, 60_ss, 0_ss), script);
+            addUnit(sim, "ARMCRUS", ai, SimVector(160_ss, 60_ss, 160_ss), script);
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMACSUB") == 1);
+        }
+
+        SECTION("not where an air plant already stands")
+        {
+            addUnit(sim, "ARMASY", ai, SimVector(0_ss, 60_ss, 0_ss), script);
+            addUnit(sim, "ARMCRUS", ai, SimVector(160_ss, 60_ss, 0_ss), script);
+            addUnit(sim, "ARMCRUS", ai, SimVector(160_ss, 60_ss, 160_ss), script);
+            addUnit(sim, "ARMAP", ai, SimVector(-420_ss, 90_ss, 200_ss), script);
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMACSUB") == 0);
+        }
+
+        SECTION("and the platform builds torpedo seaplanes against an empty sky")
+        {
+            addUnit(sim, "ARMPLAT", ai, SimVector(0_ss, 60_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMSEAP") == 1);
+            REQUIRE(countQueueCommands(commands, "ARMSFIG") == 0);
         }
     }
 

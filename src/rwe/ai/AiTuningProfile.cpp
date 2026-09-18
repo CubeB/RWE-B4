@@ -212,6 +212,8 @@ namespace rwe
             || setInt("targetCruiserCount", p.targetCruiserCount)
             || setInt("targetBattleshipCount", p.targetBattleshipCount)
             || setInt("targetAntiAirShipCount", p.targetAntiAirShipCount)
+            || setInt("targetSeaplanePlatformCount", p.targetSeaplanePlatformCount)
+            || setInt("targetTorpedoSeaplaneCount", p.targetTorpedoSeaplaneCount)
             || setInt("attackNavalSize", p.attackNavalSize)
             || setInt("navalAttackFleetSize", p.navalAttackFleetSize)
             || setInt("saveUpSeconds", p.saveUpSeconds)

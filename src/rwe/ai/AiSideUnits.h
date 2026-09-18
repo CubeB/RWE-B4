@@ -129,6 +129,21 @@ namespace rwe
         std::string cruiser;
         /** Battleship. ARMBATS 4404 metal (MinWaterDepth=30), CORBATS 4181 (MinWaterDepth=15), 6x6. Outranges everything afloat and most of what stands on a shore. */
         std::string battleship;
+        // Aircraft for a map with no ground to put an air plant on. It is a
+        // chain and every link is the only one: the advanced shipyard builds
+        // the advanced construction sub, which alone has the seaplane
+        // platform's button (Armacsub1.gui / Coracsub1.gui, Core
+        // Contingency), which builds the seaplanes.
+
+        /** Advanced construction sub. ARMACSUB 695 metal, CORACSUB 690, MinWaterDepth=20. */
+        std::string advancedConstructionSub;
+        /** Seaplane platform. ARMPLAT 2223 metal, CORPLAT 2305, 7x7, MinWaterDepth=30 -- inside a shipyard site's 8x8, so it is sited as one. */
+        std::string seaplanePlatform;
+        /** Seaplane fighter. ARMSFIG 187 metal, CORSFIG 182. */
+        std::string seaplaneFighter;
+        /** Torpedo seaplane. ARMSEAP 557 metal, CORSEAP 545. A torpedo, so it can only hurt what is in the water. */
+        std::string torpedoSeaplane;
+
         /** Anti-air ship. ARMAAS 1358 metal, CORARCH 1314, 3x3, MinWaterDepth=30. Three missile mounts and nothing else -- the fleet's only answer to a torpedo bomber. */
         std::string antiAirShip;
 
@@ -216,6 +231,13 @@ namespace rwe
          * that has none, and is listed after it for the same reason.
          */
         std::string floatingMetalMaker;
+        /**
+         * Geothermal plant. ARMGEO / CORGEO, on the construction kbot's,
+         * vehicle's and aircraft's third page and not the commander's. 250
+         * energy for no wind, no tide and no sun -- but only on a vent, and a
+         * map has a handful or none.
+         */
+        std::string geothermal;
     };
 
     /** Looks up the side's unit names; anything the game data does not define is left empty and never built. */

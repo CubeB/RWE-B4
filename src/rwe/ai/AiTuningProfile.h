@@ -614,6 +614,16 @@ namespace rwe
         /** Anti-air ships wanted, and only once enemy aircraft have been seen -- the same rule the anti-air kbot and the fighter follow. */
         int targetAntiAirShipCount{2};
         /**
+         * Seaplane platforms wanted once an advanced shipyard stands and
+         * there is no air plant -- the map had no ground for one. Zero
+         * switches the whole seaplane chain off, the construction sub with
+         * it. About 2900 metal before the first aircraft, so it waits for a
+         * full store like the rest of surplusExpansion.
+         */
+        int targetSeaplanePlatformCount{1};
+        /** Torpedo seaplanes wanted from it. They fly in pairs at least, as the bombers do. */
+        int targetTorpedoSeaplaneCount{6};
+        /**
          * Hulls that will call the attack on their own, with no land army.
          *
          * armySize counts combatUnits, and warships are deliberately kept

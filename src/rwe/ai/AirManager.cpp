@@ -66,7 +66,7 @@ namespace rwe
         ticksSinceLastUpdate = 0;
 
         const auto& s = bb.sideUnits;
-        if (!bb.sideUnitsResolved || (s.fighter.empty() && s.bomber.empty()))
+        if (!bb.sideUnitsResolved || (s.fighter.empty() && s.bomber.empty() && s.seaplaneFighter.empty() && s.torpedoSeaplane.empty()))
         {
             return;
         }
@@ -74,6 +74,7 @@ namespace rwe
         // Ours, finished and alive, in id order.
         std::vector<UnitId> fighters;
         std::vector<UnitId> bombers;
+        std::vector<UnitId> torpedoPlanes;
         for (const auto& [unitId, unit] : sim.units)
         {
             if (unit.owner != aiOwner || !unit.isAlive())
@@ -85,9 +86,13 @@ namespace rwe
             {
                 continue;
             }
-            if (!s.fighter.empty() && unit.unitType == s.fighter)
+            if ((!s.fighter.empty() && unit.unitType == s.fighter) || (!s.seaplaneFighter.empty() && unit.unitType == s.seaplaneFighter))
             {
                 fighters.push_back(UnitId(unitId));
+            }
+            else if (!s.torpedoSeaplane.empty() && unit.unitType == s.torpedoSeaplane)
+            {
+                torpedoPlanes.push_back(UnitId(unitId));
             }
             else if (!s.bomber.empty() && unit.unitType == s.bomber)
             {
@@ -254,6 +259,60 @@ namespace rwe
             if (bb.baseAnchor && unit.orders.empty() && unit.position.distanceSquared(*bb.baseAnchor) > (profile.fighterLeash * profile.fighterLeash))
             {
                 outCommands.push_back(moveCommand(unitId, *bb.baseAnchor));
+            }
+        }
+
+        // Torpedo seaplanes. A torpedo only hurts what is in the water, so
+        // the bombers' question -- the dearest thing they own -- is the wrong
+        // one: it names a fusion plant on a hill. Theirs is the nearest thing
+        // of the enemy's that is over water and seen lately, hulls before
+        // buildings, and in pairs at least for the bombers' reason.
+        if (!torpedoPlanes.empty())
+        {
+            std::optional<UnitId> torpedoTarget;
+            std::pair<bool, SimScalar> best{true, 0_ss};
+            if (static_cast<int>(torpedoPlanes.size()) >= 2)
+            {
+                for (const auto& [_, enemy] : bb.knownEnemies)
+                {
+                    if (enemy.isAir || !inSightRecently(bb, profile, enemy))
+                    {
+                        continue;
+                    }
+                    auto enemyRef = sim.tryGetUnitState(enemy.unitId);
+                    if (!enemyRef || enemyRef->get().isDead())
+                    {
+                        continue;
+                    }
+                    auto ground = sim.terrain.tryGetHeightAt(enemy.lastKnownPosition.x, enemy.lastKnownPosition.z);
+                    if (!ground || *ground >= sim.terrain.getSeaLevel())
+                    {
+                        continue;
+                    }
+                    auto distance = bb.baseAnchor ? bb.baseAnchor->distanceSquared(enemy.lastKnownPosition) : 0_ss;
+                    auto key = std::make_pair(enemy.isBuilding, distance);
+                    if (!torpedoTarget || key < best)
+                    {
+                        best = key;
+                        torpedoTarget = enemy.unitId;
+                    }
+                }
+            }
+            for (auto unitId : torpedoPlanes)
+            {
+                const auto& unit = sim.getUnitState(unitId);
+                if (torpedoTarget)
+                {
+                    if (!isAttackingUnit(unit, *torpedoTarget))
+                    {
+                        outCommands.push_back(attackCommand(unitId, *torpedoTarget));
+                    }
+                    continue;
+                }
+                if (bb.baseAnchor && unit.orders.empty() && unit.position.distanceSquared(*bb.baseAnchor) > (profile.fighterLeash * profile.fighterLeash))
+                {
+                    outCommands.push_back(moveCommand(unitId, *bb.baseAnchor));
+                }
             }
         }
 
