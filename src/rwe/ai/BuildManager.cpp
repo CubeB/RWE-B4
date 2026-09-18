@@ -510,6 +510,84 @@ namespace rwe
         }
     }
 
+    void BuildManager::noteStandingBuildings(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile)
+    {
+        std::map<unsigned int, StandingBuilding> standing;
+        for (const auto& [unitId, unit] : sim.units)
+        {
+            if (unit.owner != aiOwner || !unit.isAlive())
+            {
+                continue;
+            }
+            const auto& def = sim.unitDefinitions.at(unit.unitType);
+            // Finished, immobile structures only: a nanoframe is not yet
+            // part of the base, and a mobile unit is not a structure. The
+            // commander is mobile and so is never remembered this way.
+            if (def.isMobile || unit.isBeingBuilt(def))
+            {
+                continue;
+            }
+            standing[unitId.value] = StandingBuilding{unit.unitType, unit.position};
+        }
+
+        // Whatever stood last pass and does not now was destroyed since.
+        // Iterating the map keeps the order of the queued losses fixed.
+        for (const auto& [rawId, lost] : standingBuildings)
+        {
+            if (standing.find(rawId) == standing.end())
+            {
+                recentLosses.push_back(lost);
+            }
+        }
+
+        // Remember only as many losses as this difficulty wants to recover.
+        auto limit = profile.maxRememberedLosses;
+        if (limit < 0)
+        {
+            limit = 0;
+        }
+        if (static_cast<int>(recentLosses.size()) > limit)
+        {
+            recentLosses.erase(recentLosses.begin(), recentLosses.end() - limit);
+        }
+
+        standingBuildings = std::move(standing);
+    }
+
+    std::optional<SimVector> BuildManager::rebuildSite(
+        const GameSimulation& sim,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        const StandingBuilding& lost,
+        std::minstd_rand& rng) const
+    {
+        const auto defIt = sim.unitDefinitions.find(lost.unitType);
+        if (defIt == sim.unitDefinitions.end())
+        {
+            return std::nullopt;
+        }
+        const auto& def = defIt->second;
+        const auto mc = sim.getAdHocMovementClass(def.movementCollisionInfo);
+
+        // The spot it stood on first: putting the building back where it was
+        // is the whole point of remembering the site.
+        auto rect = sim.computeFootprintRegion(lost.site, def.movementCollisionInfo);
+        if (rect.x >= 0 && rect.y >= 0
+            && sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+        {
+            return lost.site;
+        }
+
+        // The site is blocked -- usually by the wreck the building left --
+        // so take the nearest equivalent spot instead. Extractors have to
+        // sit on metal; everything else wants ordinary clear ground.
+        if (lost.unitType == bb.sideUnits.metalExtractor)
+        {
+            return chooseMexSite(sim, lost.unitType, lost.site, profile.maxMexSearchRadius, rng);
+        }
+        return chooseBuildSite(sim, profile, lost.unitType, lost.site, rng);
+    }
+
     std::optional<SimVector> BuildManager::chooseBuildSite(
         const GameSimulation& sim,
         const AiTuningProfile& profile,
@@ -1819,6 +1897,10 @@ namespace rwe
         }
         ticksSinceLastPlanning = 0;
 
+        // Note what we lost before the builder check below: a pass with every
+        // builder busy must still remember the hole in the base.
+        noteStandingBuildings(sim, aiOwner, profile);
+
         if (!bb.baseAnchor || !bb.sideUnitsResolved)
         {
             return;
@@ -2282,6 +2364,25 @@ namespace rwe
         if (builderAtBase)
         {
             outpost = planOutpostDefence(sim, aiOwner, profile, bb);
+        }
+
+        // A structure lost since the last pass goes back before anything new
+        // is started. Repairing the base is worth more than expanding it, and
+        // the wreck list alone cannot say where the building stood. The loss
+        // is dropped once a rebuild is issued; a site we cannot find is left
+        // queued and retried next pass rather than blocking the planner.
+        if (profile.rebuildLostBuildings)
+        {
+            for (auto it = recentLosses.begin(); it != recentLosses.end(); ++it)
+            {
+                if (auto site = rebuildSite(sim, profile, bb, *it, rng))
+                {
+                    LOG_DEBUG << "AI rebuild: unit " << builderId.value << " to rebuild " << it->unitType << " at " << site->x.value << "," << site->z.value;
+                    outCommands.push_back(buildCommand(builderId, it->unitType, *site));
+                    recentLosses.erase(it);
+                    return;
+                }
+            }
         }
 
         for (const auto& next : buildPriorities(profile, bb, builderAtBase, outpost, builder.unitType, enemyNavalSeen))

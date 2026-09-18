@@ -1102,6 +1102,100 @@ namespace rwe
         }
     }
 
+    TEST_CASE("the AI rebuilds a destroyed structure ahead of new expansion", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        // An established base: past the opening quotas on power and metal,
+        // with a factory and a radar but no defences. Its ordinary build list
+        // is therefore expanding -- a tower next -- rather than replacing.
+        std::vector<UnitId> solars;
+        for (int i = 0; i < 10; ++i)
+        {
+            solars.push_back(addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(-180.0f + i * 40.0f), 0_ss, -200_ss), script));
+        }
+        for (int i = 0; i < 8; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(SimScalar(-180.0f + i * 40.0f), 0_ss, 200_ss), script);
+        }
+        addUnit(sim, "ARMLAB", ai, SimVector(0_ss, 0_ss, 350_ss), script);
+        addUnit(sim, "ARMRAD", ai, SimVector(0_ss, 0_ss, -350_ss), script);
+
+        auto destroyedSolar = solars.front();
+        auto destroyedSite = sim.getUnitState(destroyedSolar).position;
+
+        SECTION("the lost structure is put back on its old site before the next new build")
+        {
+            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+
+            // One planning pass so the AI records what is standing.
+            runTicks(sim, controller, 31, commands);
+            commands.clear();
+
+            sim.quietlyKillUnit(destroyedSolar);
+            runTicks(sim, controller, 31, commands);
+
+            auto types = buildOrderTypes(commands);
+            REQUIRE(types == std::vector<std::string>{"ARMSOLAR"});
+
+            auto rebuilds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(rebuilds.size() == 1);
+            REQUIRE(rebuilds.front().unitType == "ARMSOLAR");
+            // Put back on the site it stood on, not just anywhere in the base.
+            REQUIRE(rebuilds.front().position.distanceSquared(destroyedSite) < 1_ss);
+        }
+
+        SECTION("with rebuilds disabled the build list carries on as before")
+        {
+            auto profile = makeDefaultStandardProfile();
+            profile.rebuildLostBuildings = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+
+            runTicks(sim, controller, 31, commands);
+            commands.clear();
+
+            sim.quietlyKillUnit(destroyedSolar);
+            runTicks(sim, controller, 31, commands);
+
+            // The ordinary build list carries on. It may well want a solar of
+            // its own, so the test is that nothing is put back on the lost
+            // site, rather than that no solar is ordered at all.
+            REQUIRE(!buildOrderTypes(commands).empty());
+            for (const auto& order : ordersFor<BuildOrder>(commands, commanderId))
+            {
+                REQUIRE(order.position.distanceSquared(destroyedSite) >= 1_ss);
+            }
+        }
+
+        SECTION("each loss is remembered and rebuilt, one per planning pass")
+        {
+            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+
+            runTicks(sim, controller, 31, commands);
+            commands.clear();
+
+            sim.quietlyKillUnit(solars[0]);
+            sim.quietlyKillUnit(solars[1]);
+
+            // The first pass puts one back...
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(buildOrderTypes(commands) == std::vector<std::string>{"ARMSOLAR"});
+
+            // ...and the second loss is still queued for the pass after.
+            commands.clear();
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(buildOrderTypes(commands) == std::vector<std::string>{"ARMSOLAR"});
+        }
+    }
+
     TEST_CASE("difficulty profiles differ in aggression", "[ai]")
     {
         REQUIRE(makeProfileForDifficulty(AiDifficulty::Easy).attackArmySize > makeProfileForDifficulty(AiDifficulty::Hard).attackArmySize);

@@ -32,6 +32,7 @@ namespace rwe
         p.navalFleetSize = 12;
         p.targetSubmarineCount = 4;
         p.submarineMinDestroyerCount = 2;
+        p.maxRememberedLosses = 12;
         return p;
     }
 
@@ -41,6 +42,8 @@ namespace rwe
         p.name = "IDLE";
         p.difficulty = AiDifficulty::Idle;
         p.idle = true;
+        // An idle player builds nothing, so there is nothing to rebuild.
+        p.rebuildLostBuildings = false;
         return p;
     }
 
@@ -88,6 +91,8 @@ namespace rwe
                 // to show.
                 p.navalFleetSize = 3;
                 p.targetSubmarineCount = 0;
+                // Recovers, but only the first couple of holes in the base.
+                p.maxRememberedLosses = 2;
                 return p;
             }
             case AiDifficulty::Standard:
@@ -116,6 +121,8 @@ namespace rwe
                 p.navalFleetSize = 9;
                 p.targetSubmarineCount = 3;
                 p.submarineMinDestroyerCount = 2;
+                // Works through a whole flattened base.
+                p.maxRememberedLosses = 12;
                 return p;
             }
             case AiDifficulty::Brutal:
@@ -242,6 +249,8 @@ namespace rwe
             || setInt("outpostDefenceValueSecondsPerExtractor", p.outpostDefenceValueSecondsPerExtractor)
             || setInt("buildSiteGuardSize", p.buildSiteGuardSize)
             || setScalar("buildSiteGuardMinDistance", p.buildSiteGuardMinDistance)
+            || setBool("rebuildLostBuildings", p.rebuildLostBuildings)
+            || setInt("maxRememberedLosses", p.maxRememberedLosses)
             || setInt("buildSiteGuardTimeoutSeconds", p.buildSiteGuardTimeoutSeconds)
             || setBool("cheatModeOmniscient", p.cheatModeOmniscient)
             || setInt("targetMemoryTicks", p.targetMemoryTicks)

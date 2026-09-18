@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <optional>
 #include <random>
 #include <rwe/ai/AiBlackboard.h>
@@ -286,6 +287,30 @@ namespace rwe
     private:
         int ticksSinceLastPlanning{0};
 
+        /** A structure the AI owned: its type and the site it stood on. */
+        struct StandingBuilding
+        {
+            std::string unitType;
+            SimVector site;
+        };
+
+        /**
+         * Every finished building the AI owned at the last planning pass,
+         * keyed by raw unit id so the diff and its iteration are ordered.
+         */
+        std::map<unsigned int, StandingBuilding> standingBuildings;
+
+        /**
+         * Buildings seen standing last pass that are gone now, oldest first.
+         *
+         * The wreck list cannot tell us where a building stood -- a corpse
+         * spawns at the dying unit's feet but the AI has no reason to own it
+         * yet -- so the site is remembered here, next to the rest of the AI's
+         * state. The AI's blackboard is not saved or hashed today, so this
+         * carries the same limitation (docs/ROADMAP.md).
+         */
+        std::vector<StandingBuilding> recentLosses;
+
         /**
          * Which of the available builders is planned for this pass. In id
          * order the commander is first and was always the one served; with
@@ -358,6 +383,21 @@ namespace rwe
         mutable int submergedMetalPatches{0};
 
         void indexMetalPatches(const GameSimulation& sim) const;
+
+        /**
+         * Diffs this pass's finished buildings against the last, queuing a
+         * rebuild for each that has gone. Runs before the builder check so a
+         * pass with every builder busy still remembers the loss.
+         */
+        void noteStandingBuildings(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile);
+
+        /** Where a lost `lost` building should go back, or nowhere. */
+        std::optional<SimVector> rebuildSite(
+            const GameSimulation& sim,
+            const AiTuningProfile& profile,
+            const AiBlackboard& bb,
+            const StandingBuilding& lost,
+            std::minstd_rand& rng) const;
 
         /** What the next idle builder should build, most wanted first. */
         /**

@@ -1003,6 +1003,25 @@ namespace rwe
         /** Weighting of enemy anti-ground threat against economic value when choosing targets. */
         SimScalar threatAversion{1_ss};
 
+        // --- Recuperation ---
+        /**
+         * Put a destroyed structure back before starting anything new.
+         *
+         * On for every difficulty except an idle one: a computer player that
+         * carries on down its build list after an attack, as if the hole in
+         * its base were not there, never recovers from a raid. Folded in as a
+         * knob of its own so the idle tier turns it off without a second
+         * pass over the build list.
+         */
+        bool rebuildLostBuildings{true};
+        /**
+         * How many destroyed structures to remember for rebuilding.
+         *
+         * The thoroughness scaling: a low tier forgets all but the last few
+         * losses, a high one works through a whole flattened base.
+         */
+        int maxRememberedLosses{6};
+
         /**
          * When set the controller returns from tick() before doing anything.
          * See AiDifficulty::Idle.
