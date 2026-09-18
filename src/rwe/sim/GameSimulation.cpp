@@ -2710,9 +2710,26 @@ namespace rwe
         // we'll assume that they no longer care about their old request
         // and that their new request is for some new path,
         // so we'll move them to the back of the queue for fairness.
+        //
+        // Unless they are at the FRONT. A search is sliced across ticks, and
+        // the pathfinder's half-finished search always belongs to the front
+        // of this queue: it says so with an assertion when the search
+        // completes, and pops the front to retire it. Moving the front unit
+        // to the back broke that -- in a Debug build the assertion, in a
+        // Release build the wrong request popped and the right one left
+        // behind for a unit whose path had already been delivered. It took a
+        // unit asking twice while its own search was suspended, which needs
+        // a busy queue and a goal that moves: thirty hulls sailing at a
+        // remembered enemy is both. Left at the front, a changed destination
+        // is already handled where the search is resumed, which abandons it
+        // and starts again; an unchanged one simply finishes.
         auto it = std::find(pathRequests.begin(), pathRequests.end(), request);
         if (it != pathRequests.end())
         {
+            if (it == pathRequests.begin())
+            {
+                return;
+            }
             pathRequests.erase(it);
         }
 

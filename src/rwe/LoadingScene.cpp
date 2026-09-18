@@ -204,6 +204,29 @@ namespace rwe
 
         simulation.unitDefinitions = std::move(dataMaps.unitDefinitions);
         simulation.weaponDefinitions = std::move(dataMaps.weaponDefinitions);
+
+        // A death weapon that does not exist. The shipped data has one:
+        // eleven units -- eight of Core Contingency's, the torpedo seaplanes
+        // among them, and three of the v3.1 patch's -- say
+        // ExplodeAs=MEDIUM_UNITEX, and no weapon file anywhere defines it
+        // (MEDIUM_UNIT is what was meant). The original evidently shrugs,
+        // since those units die in it without incident. RWE looked the name
+        // up unchecked the moment one died and the game ended with
+        // "unordered_map::at" -- found the day the AI first built seaplanes.
+        // Cleared here, once, so neither the simulation nor the scene has a
+        // name to trip on: the unit dies with no blast, as it must there.
+        for (auto& [unitType, definition] : simulation.unitDefinitions)
+        {
+            for (auto* deathWeapon : {&definition.explodeAs, &definition.selfDestructAs})
+            {
+                if (!deathWeapon->empty() && simulation.weaponDefinitions.count(*deathWeapon) == 0
+                    && simulation.weaponDefinitions.count(toUpper(*deathWeapon)) == 0)
+                {
+                    LOG_WARN << "Unit " << unitType << " dies as " << *deathWeapon << ", which no weapon file defines; it will die without a blast";
+                    deathWeapon->clear();
+                }
+            }
+        }
         simulation.movementClassDatabase = std::move(dataMaps.movementClassDatabase);
         simulation.movementClassCollisionService = std::move(movementClassCollisionService);
         simulation.unitModelDefinitions = dataMaps.modelDefinitions;
