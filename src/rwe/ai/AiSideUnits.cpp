@@ -62,6 +62,10 @@ namespace rwe
             units.destroyer = "CORROY";
             units.seaTransport = "CORTSHIP";
             units.submarine = "CORSUB";
+            units.advancedShipyard = "CORASY";
+            units.cruiser = "CORCRUS";
+            units.battleship = "CORBATS";
+            units.antiAirShip = "CORARCH";
             units.tidalGenerator = "CORTIDE";
             units.sonar = "CORSONAR";
             units.torpedoLauncher = "CORTL";
@@ -104,6 +108,10 @@ namespace rwe
             units.destroyer = "ARMROY";
             units.seaTransport = "ARMTSHIP";
             units.submarine = "ARMSUB";
+            units.advancedShipyard = "ARMASY";
+            units.cruiser = "ARMCRUS";
+            units.battleship = "ARMBATS";
+            units.antiAirShip = "ARMAAS";
             units.tidalGenerator = "ARMTIDE";
             units.sonar = "ARMSONAR";
             units.torpedoLauncher = "ARMTL";
@@ -151,6 +159,10 @@ namespace rwe
         check(units.destroyer);
         check(units.seaTransport);
         check(units.submarine);
+        check(units.advancedShipyard);
+        check(units.cruiser);
+        check(units.battleship);
+        check(units.antiAirShip);
         check(units.tidalGenerator);
         check(units.sonar);
         check(units.torpedoLauncher);

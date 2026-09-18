@@ -118,6 +118,20 @@ namespace rwe
         /** Submarine. ARMSUB 1151 metal (3x3), CORSUB 1199 (4x4), MinWaterDepth=20 -- the two do not even share a footprint. */
         std::string submarine;
 
+        // The second naval tier. The advanced shipyard is on the construction
+        // SHIP's first page (ARMCS1.GUI/CORCS1.GUI) and on nobody else's that
+        // the AI owns on a water map -- not the commander's -- so a side with
+        // no construction ship never reaches any of this.
+
+        /** Advanced shipyard. ARMASY 2524 metal, CORASY 2460, 8x8, MinWaterDepth=30 -- the shipyard's footprint and draught, so it is sited the same way. */
+        std::string advancedShipyard;
+        /** Cruiser. ARMCRUS 1719 metal, CORCRUS 1724, 5x5, MinWaterDepth=30. A long gun AND a depth charge, so it is the one surface hull that answers a submarine. */
+        std::string cruiser;
+        /** Battleship. ARMBATS 4404 metal (MinWaterDepth=30), CORBATS 4181 (MinWaterDepth=15), 6x6. Outranges everything afloat and most of what stands on a shore. */
+        std::string battleship;
+        /** Anti-air ship. ARMAAS 1358 metal, CORARCH 1314, 3x3, MinWaterDepth=30. Three missile mounts and nothing else -- the fleet's only answer to a torpedo bomber. */
+        std::string antiAirShip;
+
         // Water structures, all of them on the COMMANDER's own build pages
         // -- see the note above for why that is not what this file used to
         // say. Values below are out of the shipped FBIs, and the two sides

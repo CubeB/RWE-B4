@@ -3300,6 +3300,84 @@ namespace rwe
         }
     }
 
+    TEST_CASE("naval: an advanced shipyard builds cruisers, then a battleship behind them", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        // Shipped footprints, draughts and prices.
+        auto armasy = makeDef(false, true, false, "", 200u);
+        armasy.movementCollisionInfo = UnitDefinition::AdHocMovementClass{8u, 8u, 255u, 255u, 30u, 255u};
+        armasy.buildCostMetal = Metal(2524.0f);
+        sim.unitDefinitions["ARMASY"] = armasy;
+        auto armcrus = makeDef(false, false, true, "LASER", 300u);
+        armcrus.movementCollisionInfo = UnitDefinition::AdHocMovementClass{5u, 5u, 255u, 255u, 30u, 255u};
+        armcrus.buildCostMetal = Metal(1719.0f);
+        sim.unitDefinitions["ARMCRUS"] = armcrus;
+        auto armbats = armcrus;
+        armbats.movementCollisionInfo = UnitDefinition::AdHocMovementClass{6u, 6u, 255u, 255u, 30u, 255u};
+        armbats.buildCostMetal = Metal(4404.0f);
+        sim.unitDefinitions["ARMBATS"] = armbats;
+        auto armaas = armcrus;
+        armaas.movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 3u, 255u, 255u, 30u, 255u};
+        armaas.buildCostMetal = Metal(1358.0f);
+        sim.unitDefinitions["ARMAAS"] = armaas;
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMASY", ai, SimVector(0_ss, 60_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.targetAdvancedShipyardCount = 1;
+
+        SECTION("the hull with the depth charge first")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMCRUS") == 1);
+            REQUIRE(countQueueCommands(commands, "ARMBATS") == 0);
+        }
+
+        SECTION("a battleship once two cruisers stand to escort it")
+        {
+            addUnit(sim, "ARMCRUS", ai, SimVector(120_ss, 60_ss, 0_ss), script);
+            addUnit(sim, "ARMCRUS", ai, SimVector(120_ss, 60_ss, 120_ss), script);
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMBATS") == 1);
+            REQUIRE(countQueueCommands(commands, "ARMCRUS") == 0);
+        }
+
+        SECTION("and cover before either, once something of theirs is flying")
+        {
+            auto bomber = makeDef(false, false, true, "LASER", 200u);
+            bomber.canFly = true;
+            sim.unitDefinitions["ARMTHUND"] = bomber;
+            addUnit(sim, "ARMTHUND", human, SimVector(60_ss, 140_ss, 60_ss), script);
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(controller.getBlackboard().enemyAirThreat);
+            REQUIRE(countQueueCommands(commands, "ARMAAS") == 1);
+            REQUIRE(countQueueCommands(commands, "ARMCRUS") == 0);
+        }
+
+        SECTION("no anti-air ship against an empty sky")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMAAS") == 0);
+        }
+    }
+
     TEST_CASE("naval: a warship is never sent inland", "[ai]")
     {
         // Without MapIntel::sameWaterBody filtering the target, the land

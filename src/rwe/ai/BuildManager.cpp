@@ -1236,8 +1236,31 @@ namespace rwe
         // A builder ferried to an island the base cannot walk to runs an
         // outpost: it takes the metal there and powers its own extractors,
         // but leaves the factories and towers to the main base.
+        // The naval tech step; see targetAdvancedShipyardCount. Behind an
+        // income test for the reason the land step is: 2524 metal bought on
+        // four a second is the whole game spent on a building with nothing
+        // to build.
+        auto wantAdvancedShipyard = [&]() {
+            if (navalFleetTarget(profile, bb) > 0 && !s.advancedShipyard.empty() && total(s.shipyard) >= 1
+                && total(s.advancedShipyard) < profile.targetAdvancedShipyardCount
+                && bb.metalIncome.value >= static_cast<float>(profile.navalTechMinMetalIncome))
+            {
+                want(s.advancedShipyard);
+            }
+        };
+
         if (!builderAtBase)
         {
+            // A construction ship lands here -- the ground labelling calls
+            // anything afloat stranded -- and it is the only builder with the
+            // advanced shipyard's button, so the one base job it is given is
+            // asked for here or never. want() drops it for a kbot on an
+            // island, which has no such button. Everything else a ship might
+            // do for the base it is better off not doing: measured, ships
+            // that kept to extractors finished with 28.1 of them and 52.3
+            // metal a second, against 18.4 and 32.6 for ships offered the
+            // whole plan (navalBuildersPlanForBase).
+            wantAdvancedShipyard();
             wantMetalExtractor();
             want(s.solar);
             return wanted;
@@ -1251,6 +1274,18 @@ namespace rwe
         if (bb.energyStalled)
         {
             want(s.solar);
+            // And the one that can stand in water, where ships matter. The
+            // planner takes the first of these it finds a site for, so on dry
+            // ground this changes nothing; on a map with none, the solar
+            // collector finds no site for ever and the stall was never
+            // answered at all. Measured on Brain Coral at twenty-five
+            // minutes: metal store full at sixty a second coming in, energy
+            // at 157 in and 156 out, and six tidal generators because six is
+            // targetTidalCount. This is what lets the count follow the need.
+            if (navalFleetTarget(profile, bb) > 0)
+            {
+                want(s.tidalGenerator);
+            }
         }
         if (totalExtractors() < profile.openingMetalExtractorCount)
         {
@@ -1493,6 +1528,9 @@ namespace rwe
             {
                 want(s.torpedoLauncher);
             }
+            // After the launcher, because a yard under fire wants its answer
+            // before it wants a second yard.
+            wantAdvancedShipyard();
         }
 
         // Growth, once the plan above is satisfied. The targets are where
@@ -1795,6 +1833,33 @@ namespace rwe
                 else if (wantConstructionShip)
                 {
                     next = s.constructionShip;
+                }
+            }
+            else if (!s.advancedShipyard.empty() && factory.unitType == s.advancedShipyard)
+            {
+                // Cover first if there is anything to cover against: a
+                // torpedo bomber kills a battleship for a twentieth of its
+                // price, and nothing else afloat can shoot at one. Then two
+                // cruisers to every battleship, cruisers first -- they are
+                // the hull with the depth charge, so they are also what keeps
+                // a submarine off the 4404 metal that follows them.
+                auto cruisers = total(s.cruiser);
+                auto battleships = total(s.battleship);
+                if (bb.enemyAirThreat && !s.antiAirShip.empty() && total(s.antiAirShip) < profile.targetAntiAirShipCount)
+                {
+                    next = s.antiAirShip;
+                }
+                else if (!s.cruiser.empty() && cruisers < profile.targetCruiserCount && cruisers < 2 * (battleships + 1))
+                {
+                    next = s.cruiser;
+                }
+                else if (!s.battleship.empty() && battleships < profile.targetBattleshipCount)
+                {
+                    next = s.battleship;
+                }
+                else if (!s.cruiser.empty() && cruisers < profile.targetCruiserCount)
+                {
+                    next = s.cruiser;
                 }
             }
             else if (!s.advancedLab.empty() && factory.unitType == s.advancedLab)
@@ -2372,7 +2437,16 @@ namespace rwe
             outpost = planOutpostDefence(sim, aiOwner, profile, bb);
         }
 
-        for (const auto& next : buildPriorities(profile, bb, builderAtBase, outpost, builder.unitType, enemyNavalSeen))
+        // Whether a builder afloat plans for the base or for an outpost. The
+        // ground labelling calls every ship stranded -- it is standing on
+        // water no kbot can walk to -- and a stranded builder is offered an
+        // extractor and a solar collector and little else. That looked like
+        // a defect and measured as a virtue; see navalBuildersPlanForBase,
+        // which is off. Only the PLAN would change: the siting below still
+        // runs from where the ship is.
+        const auto builderMc = sim.getAdHocMovementClass(builderDef.movementCollisionInfo);
+        const bool builderAfloat = profile.navalBuildersPlanForBase && builderDef.isMobile && !builderDef.canFly && builderMc.minWaterDepth > 0;
+        for (const auto& next : buildPriorities(profile, bb, builderAtBase || builderAfloat, outpost, builder.unitType, enemyNavalSeen))
         {
             auto nextDefIt = sim.unitDefinitions.find(next);
             if (nextDefIt == sim.unitDefinitions.end())
@@ -2395,6 +2469,7 @@ namespace rwe
                 // simply unaffordable for ever -- the planner skips past it
                 // to something cheap every pass and the AI never techs.
                 auto isLevelTwo = (!sideUnits.advancedLab.empty() && next == sideUnits.advancedLab)
+                    || (!sideUnits.advancedShipyard.empty() && next == sideUnits.advancedShipyard)
                     || (!sideUnits.fusion.empty() && next == sideUnits.fusion)
                     || (!sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor)
                     || (!sideUnits.heavyPlasmaTower.empty() && next == sideUnits.heavyPlasmaTower)
@@ -2647,7 +2722,8 @@ namespace rwe
                 // otherwise refuse the lot of them.
                 site = chooseBuildSite(sim, profile, next, anchor, rng);
             }
-            else if (!sideUnits.shipyard.empty() && next == sideUnits.shipyard)
+            else if ((!sideUnits.shipyard.empty() && next == sideUnits.shipyard)
+                || (!sideUnits.advancedShipyard.empty() && next == sideUnits.advancedShipyard))
             {
                 // Not a ring search: an 8x8 footprint needing
                 // MinWaterDepth=30 would refuse every candidate a walk out

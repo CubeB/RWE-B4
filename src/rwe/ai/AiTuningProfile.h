@@ -533,6 +533,56 @@ namespace rwe
          */
         int submarineMinDestroyerCount{3};
         /**
+         * Advanced shipyards wanted, once a shipyard stands and the income
+         * below is met. Zero leaves the navy at its first tier, which is what
+         * it was before this knob.
+         *
+         * The reasoning is the land tech step's: a destroyer fleet stops
+         * scaling. A cruiser outranges a destroyer and carries the depth
+         * charge a destroyer does not, a battleship outranges the torpedo
+         * launcher that is the first tier's whole coastal defence, and the
+         * anti-air ship is the only thing afloat that can answer a torpedo
+         * bomber. Only the construction ship has the button, so this does
+         * nothing for a side that has not built one.
+         *
+         * Measured: ten games on Brain Coral, ARM against ARM over 1500
+         * seconds, seats alternating. The side with the yard built it in
+         * every game, with 1.3 cruisers and 0.8 battleships, and finished
+         * with 44.0 units and an army of 6.6 having lost 30.2, against 35.5,
+         * 3.9 and 148.8 lost without it -- on the same metal, 35.7 a second
+         * against 37.3. It does not cost the economy; it stops the fleet
+         * being fed to the other side a destroyer at a time.
+         */
+        int targetAdvancedShipyardCount{1};
+        /**
+         * Whether a construction ship is offered the base's whole plan or
+         * only an outpost's -- the extractor, and the advanced shipyard above
+         * when its gate is met.
+         *
+         * OFF, because the arena said so. Ten games on Brain Coral, ARM
+         * against ARM over 1500 seconds, seats alternating: with ships kept
+         * to extractors a side finished with 44.0 units, 37.6 buildings, 28.1
+         * underwater extractors and 52.3 metal a second; offered the whole
+         * plan, 34.3, 27.7, 18.4 and 32.6, and lost twice as much. A ship
+         * that stops to put up a tidal generator or a second yard is a ship
+         * not taking metal, and on that map metal is what everything else is
+         * bought with.
+         */
+        bool navalBuildersPlanForBase{false};
+        /**
+         * Metal a second before the advanced shipyard is asked for. ARMASY is
+         * 2524 metal and the cheapest thing it builds that fights is 1358;
+         * below this the yard would stand idle, and the 240-second tech
+         * save-up window would starve the first-tier fleet to pay for it.
+         */
+        int navalTechMinMetalIncome{15};
+        /** Cruisers wanted from the advanced shipyard. */
+        int targetCruiserCount{4};
+        /** Battleships wanted from the advanced shipyard. One is asked for after every two cruisers, so the escort exists before the thing it escorts. */
+        int targetBattleshipCount{2};
+        /** Anti-air ships wanted, and only once enemy aircraft have been seen -- the same rule the anti-air kbot and the fighter follow. */
+        int targetAntiAirShipCount{2};
+        /**
          * Hulls that will call the attack on their own, with no land army.
          *
          * armySize counts combatUnits, and warships are deliberately kept

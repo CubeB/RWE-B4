@@ -231,6 +231,9 @@ namespace rwe
             else if (def.isMobile && !isFerryPassenger
                 && ((!bb.sideUnits.destroyer.empty() && unit.unitType == bb.sideUnits.destroyer)
                     || (!bb.sideUnits.submarine.empty() && unit.unitType == bb.sideUnits.submarine)
+                    || (!bb.sideUnits.cruiser.empty() && unit.unitType == bb.sideUnits.cruiser)
+                    || (!bb.sideUnits.battleship.empty() && unit.unitType == bb.sideUnits.battleship)
+                    || (!bb.sideUnits.antiAirShip.empty() && unit.unitType == bb.sideUnits.antiAirShip)
                     || (!bb.sideUnits.scoutShip.empty() && unit.unitType == bb.sideUnits.scoutShip)))
             {
                 // Hulls. See AiBlackboard::navalCombatUnits for why these are
