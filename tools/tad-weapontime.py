@@ -184,6 +184,7 @@ import json
 import math
 import os
 import re
+import struct
 import sys
 
 
@@ -426,6 +427,23 @@ GRAVITY = 112.0 / (30.0 * 30.0)
 ANGLE_UNIT = 2.0 * math.pi / 65536.0
 
 
+def flat_distance(origin, target):
+    """The horizontal distance, as a plain square root of the sum of squares.
+
+    DELIBERATELY NOT math.dist, which the other two classes use. CPython's is a
+    scaled summation accurate to within an ulp and C++'s `sqrt(dx*dx + dz*dz)`
+    is not, and the ballistic model floors the result onto sixteen-unit squares:
+    a last-place difference on a square boundary moves a whole pairing, and
+    src/tad_episodes.cpp read one more ARMBULL pairing than this file did until
+    the two computed it the same way. The straight-flying classes were never
+    exposed to it -- they measure along a line rather than stepping a solved
+    angle -- so their spans are left alone rather than churned.
+    """
+    dx = target[0] - origin[0]
+    dz = target[2] - origin[2]
+    return math.sqrt(dx * dx + dz * dz)
+
+
 def ballistic_pitch(block, origin, target):
     """The angle a ballistic gun elevates to, or None where it cannot reach.
 
@@ -443,7 +461,7 @@ def ballistic_pitch(block, origin, target):
     account for.
     """
     speed = (num(block, "weaponvelocity", 0.0) or 0.0) / 30.0
-    flat = math.dist((origin[0], origin[2]), (target[0], target[2]))
+    flat = flat_distance(origin, target)
     if speed <= 0.0 or flat <= 0.0:
         return None
     rise = target[1] - origin[1]
@@ -539,7 +557,7 @@ def span_of(kind, origin, target):
     level.
     """
     if kind == "ballistic":
-        return math.dist((origin[0], origin[2]), (target[0], target[2]))
+        return flat_distance(origin, target)
     return math.dist(origin, target)
 
 
@@ -640,14 +658,26 @@ def drift_of(units, victim, flight):
 
     None where the victim could not be named -- the id's build was not seen. That is not the same as a drift of zero
     and must not be scored as though it were, so the bound rejects it.
+
+    `maxvelocity` IS ROUNDED TO A FLOAT FIRST, which looks like pedantry and is
+    not. The engine's own FBI parser keeps the field in a float and the C++
+    miner reads it through that parser, so the two ran the same bound over two
+    slightly different numbers -- and the bound is a product compared against a
+    step, which lands exactly on the boundary sooner or later. It did: CORGOL's
+    0.9 over a ten-tick ARMBULL shell is 9.0 against a step of 9.0, which a
+    double rejects and the float's 8.99999976 keeps, and the port read one more
+    ARMBULL pairing than this file until they rounded alike. Nothing else in the
+    model needs it, because nothing else compares a parsed field to a computed
+    one.
     """
     unit = units.get(victim)
     if not unit:
         return None
     try:
-        return float(unit.get("maxvelocity", 0) or 0) * flight
+        rounded = struct.unpack("f", struct.pack("f", float(unit.get("maxvelocity", 0) or 0)))[0]
     except ValueError:
         return None
+    return rounded * flight
 
 
 def within_drift_bound(units, block, observation):
@@ -716,7 +746,7 @@ def ballistic_arc(origin, target, footprint, block, pitch, heading_error):
     """
     fx, fz = footprint
     x0, z0 = footprint_squares(target, footprint)
-    flat = math.dist((origin[0], origin[2]), (target[0], target[2]))
+    flat = flat_distance(origin, target)
     if flat <= 0.0:
         return None
     speed = num(block, "weaponvelocity") / 30.0
@@ -739,7 +769,7 @@ def ballistic_arc(origin, target, footprint, block, pitch, heading_error):
         # the ground took the round and the footprint did not.
         if rise < 0.0 and y < target[1]:
             return None
-        if math.dist((origin[0], origin[2]), (x, z)) > give_up:
+        if flat_distance(origin, (x, 0.0, z)) > give_up:
             return None
     return None
 
