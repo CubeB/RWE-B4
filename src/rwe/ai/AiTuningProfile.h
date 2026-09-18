@@ -532,6 +532,28 @@ namespace rwe
          * are above 40%, and even at 92% both sides field a land army.
          */
         int attackNavalSize{0};
+        /**
+         * How many hulls, not counting the one lent to scouting, before the
+         * fleet goes looking for something to sink. 0 keeps it at home.
+         *
+         * Deliberately separate from attackNavalSize above, which is a term
+         * in the whole AI's phase decision: raising that to make the navy
+         * fight would flip a mixed map's LAND army into Attack as a side
+         * effect of having built three ships. The navy judges its own
+         * readiness and leaves the phase alone.
+         *
+         * This exists because until it did, `updateNavy` had no offensive
+         * branch whatever -- a hull shot what came within engageRadius and
+         * otherwise held station at the shipyard, so a navy that was never
+         * met at home never fought at all. Watched on Brain Coral: the yard
+         * turns out warships and they sit beside it for the rest of the
+         * game while the enemy does as it likes.
+         *
+         * Three is a first guess and has not been through the arena. It is
+         * the smallest number that is a fleet rather than a scout, and small
+         * enough to matter on a map whose economy supports few hulls.
+         */
+        int navalAttackFleetSize{3};
 
         // --- Site search ---
         /**
@@ -887,6 +909,39 @@ namespace rwe
          * that answers it.
          */
         bool holdWhenOutnumbered{true};
+        /**
+         * With no combat units at all, the commander answers up to this many
+         * armed intruders near the base itself. 0 switches it off.
+         *
+         * Defend picks the intruder nearest home and hands it to the wave,
+         * and the wave is drawn from combatUnits. Where every hull dies as a
+         * nanoframe before it can float -- Brain Coral, where one enemy scout
+         * ship parks off the shipyard and shoots each one as it is born, and
+         * a frame has no hit points to lose -- that list is empty, so the
+         * phase fires exactly as designed and sends nobody. Measured over ten
+         * games: the victim entered Defend at tick 3523 and never left it,
+         * while the ship shooting it survived to the final tick, unopposed
+         * for thirteen minutes. Everything built to break the siege died at
+         * nought hit points on the slipway.
+         *
+         * The commander is the one unit that lives through that, and it is
+         * armed. It is kept out of combatUnits deliberately -- it is a
+         * builder, and an AI that walks its commander at every raider loses
+         * it -- so this is the narrowest case that breaks the lock: only when
+         * there is nothing else whatever to send. Where the AI has any army
+         * it is dead code.
+         *
+         * Counted rather than a flag because the natural guard cannot be
+         * reused: holdWhenOutnumbered compares intruders against combatUnits,
+         * which is empty here by construction, so that test is always true
+         * and would make this never fire. A lone harasser is worth the
+         * commander's attention; a raiding party of nine is a game already
+         * lost, and walking the commander into it only loses it faster.
+         *
+         * No leash is needed. The intruder comes from enemiesNearBase, which
+         * PerceptionManager already bounds by defendRadius.
+         */
+        int commanderDefendsAloneMaxIntruders{1};
         /**
          * While a wave is out, an intruder at home is answered by the units
          * gathering for the next wave, and the wave carries on. Off, one

@@ -279,6 +279,52 @@ namespace rwe
             return;
         }
 
+        // Whether there is a fleet, as opposed to a ship or two. The hull on
+        // loan to ScoutManager is not part of it -- it is already busy, and
+        // counting it would send the rest off a ship short.
+        auto fleetSize = static_cast<int>(bb.navalCombatUnits.size()) - (bb.navalScoutUnitId ? 1 : 0);
+        auto fleetReady = profile.navalAttackFleetSize > 0 && fleetSize >= profile.navalAttackFleetSize;
+
+        // An upper bound on any distance on this map, so "the nearest one
+        // anywhere" costs no knob of its own. It is only ever handed to
+        // nearestNavalEnemy, whose sameWaterBody test is what keeps the
+        // search honest: it will not name a target the hull cannot swim to,
+        // so widening the radius cannot send a fleet at an inland base.
+        auto wholeMap = sim.terrain.getWidthInWorldUnits() + sim.terrain.getHeightInWorldUnits();
+
+        // Where the fleet is going, if it is going anywhere: the nearest
+        // enemy on our own water, REMEMBERED rather than currently seen.
+        //
+        // nearestNavalEnemy insists on inSightRecently, and that is right for
+        // choosing what to shoot -- targetMemoryTicks is five seconds, and a
+        // weapon should not fire at a memory. It is wrong for choosing where
+        // to sail. Asking the shooting question of a going decision is what
+        // the first version of this did, and it never once left harbour:
+        // measured on Brain Coral the AI sits at "known enemies 0" for
+        // forty-three of sixty-two samples and never sees more than one, so
+        // the tuned and control arms came out byte-identical over ten games.
+        //
+        // sameWaterBody still applies, so a remembered target on the wrong
+        // sea is no more sailed at than a visible one would be.
+        std::optional<SimVector> fleetObjective;
+        if (fleetReady && bb.mapIntel.valid)
+        {
+            auto bestDistanceSquared = wholeMap * wholeMap;
+            for (const auto& [_, enemy] : bb.knownEnemies)
+            {
+                if (!sameWaterBody(bb.mapIntel, sim.terrain, *navalHome, enemy.lastKnownPosition))
+                {
+                    continue;
+                }
+                auto d = navalHome->distanceSquared(enemy.lastKnownPosition);
+                if (d <= bestDistanceSquared)
+                {
+                    bestDistanceSquared = d;
+                    fleetObjective = enemy.lastKnownPosition;
+                }
+            }
+        }
+
         for (auto shipId : bb.navalCombatUnits)
         {
             auto shipRef = sim.tryGetUnitState(shipId);
@@ -305,6 +351,28 @@ namespace rwe
                 if (!isAttackingUnit(ship, *enemy))
                 {
                     outCommands.push_back(attackCommand(shipId, *enemy));
+                }
+                continue;
+            }
+
+            // With a fleet gathered, go and find them rather than waiting to
+            // be visited. The test above is bounded by engageRadius and so
+            // only ever answers what is already in front of us; this is the
+            // same question asked across our own sea.
+            //
+            // Not gated on the land army's Attack phase on purpose. That
+            // phase turns on attackArmySize, which counts units that walk,
+            // and on an all-water map it is never reached -- so a fleet
+            // waiting for it would be waiting on an army that cannot exist.
+            if (fleetObjective)
+            {
+                // Sail at it rather than attack-order it: the memory is a
+                // place, and the unit that was there may be gone or unseen.
+                // The engage test above is what opens fire, once something
+                // is actually in front of us.
+                if (!isMovingTo(ship, *fleetObjective))
+                {
+                    outCommands.push_back(moveCommand(shipId, *fleetObjective));
                 }
                 continue;
             }
@@ -700,6 +768,29 @@ namespace rwe
             {
                 auto divisor = static_cast<float>(counted);
                 waveObjective = SimVector(SimScalar(sumX / divisor), 0_ss, SimScalar(sumZ / divisor));
+            }
+        }
+
+        // Nothing else can answer, so the commander answers itself.
+        //
+        // This sits outside the loop below on purpose: that loop walks
+        // combatUnits, and the case this exists for is the one where
+        // combatUnits is empty. See commanderDefendsAloneMaxIntruders for the
+        // measurements, and for why the outnumbered guard used below cannot
+        // be reused here.
+        if (profile.commanderDefendsAloneMaxIntruders > 0
+            && bb.phase == GamePhase::Defend
+            && bb.combatUnits.empty()
+            && intruder
+            && bb.commanderUnitId
+            && static_cast<int>(bb.enemiesNearBase.size()) <= profile.commanderDefendsAloneMaxIntruders)
+        {
+            if (auto commanderRef = sim.tryGetUnitState(*bb.commanderUnitId))
+            {
+                if (!isAttackingUnit(commanderRef->get(), *intruder))
+                {
+                    outCommands.push_back(attackCommand(*bb.commanderUnitId, *intruder));
+                }
             }
         }
 

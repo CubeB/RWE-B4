@@ -850,6 +850,78 @@ namespace rwe
         }
     }
 
+    TEST_CASE("the commander answers a lone raider when there is nothing else to send", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+
+        SECTION("with no combat units at all, the commander goes at the intruder itself")
+        {
+            auto raiderId = addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
+            REQUIRE(controller.getBlackboard().combatUnits.empty());
+
+            auto attacks = ordersFor<AttackOrder>(commands, commanderId);
+            REQUIRE(!attacks.empty());
+            auto target = std::get_if<UnitId>(&attacks.front().target);
+            REQUIRE(target != nullptr);
+            REQUIRE(*target == raiderId);
+        }
+
+        SECTION("switched off, it stands there as it used to")
+        {
+            addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 0_ss), script);
+            profile.commanderDefendsAloneMaxIntruders = 0;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
+            REQUIRE(ordersFor<AttackOrder>(commands, commanderId).empty());
+        }
+
+        SECTION("with an army to send, the army goes and the commander stays home")
+        {
+            auto raiderId = addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 0_ss), script);
+            auto defenderId = addUnit(sim, "ARMPW", ai, SimVector(-100_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(!controller.getBlackboard().combatUnits.empty());
+            REQUIRE(!ordersFor<AttackOrder>(commands, defenderId).empty());
+            REQUIRE(ordersFor<AttackOrder>(commands, commanderId).empty());
+            (void)raiderId;
+        }
+
+        SECTION("a raiding party is not the commander's problem")
+        {
+            // Two intruders against the default of one. A lone harasser is
+            // worth the commander's attention; a party is a game already lost,
+            // and walking the commander into it only loses it faster.
+            addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 0_ss), script);
+            addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 60_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(controller.getBlackboard().enemiesNearBase.size() == 2);
+            REQUIRE(ordersFor<AttackOrder>(commands, commanderId).empty());
+        }
+    }
+
     TEST_CASE("the army attacks in waves and holds when outnumbered", "[ai]")
     {
         auto script = makeEmptyCobScript();
