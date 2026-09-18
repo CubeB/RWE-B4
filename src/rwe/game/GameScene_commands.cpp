@@ -528,23 +528,25 @@ namespace rwe
             // hide half of what there is to watch, and a lit map hides the
             // thing the fog is interesting for -- who had eyes where, and
             // when. Rebuilt when the tick moves on, because visibility does.
+            //
+            // Only the visible grid is combined. Explored ground is no longer
+            // kept per player: it is the simulation's one shared bitmap, a bit
+            // per line-of-sight group, so every group's bit is already in the
+            // one grid and there is nothing to combine. localExploredGrid
+            // reads the spectator's remembered ground straight out of it.
             if (!combinedVisibility
                 || combinedVisibilityTick != simulation.gameTime.value
-                || combinedVisibility->explored.getWidth() != vis.explored.getWidth()
-                || combinedVisibility->explored.getHeight() != vis.explored.getHeight())
+                || combinedVisibility->visible.getWidth() != vis.visible.getWidth()
+                || combinedVisibility->visible.getHeight() != vis.visible.getHeight())
             {
-                PlayerVisibility combined(vis.explored.getWidth(), vis.explored.getHeight());
-                auto& explored = combined.explored.getVector();
+                PlayerVisibility combined(vis.visible.getWidth(), vis.visible.getHeight());
                 auto& visible = combined.visible.getVector();
-                std::fill(explored.begin(), explored.end(), static_cast<unsigned char>(0));
                 std::fill(visible.begin(), visible.end(), static_cast<unsigned char>(0));
                 for (const auto& other : simulation.playerVisibility)
                 {
-                    const auto& otherExplored = other.explored.getVector();
                     const auto& otherVisible = other.visible.getVector();
-                    for (std::size_t i = 0; i < explored.size() && i < otherExplored.size(); ++i)
+                    for (std::size_t i = 0; i < visible.size() && i < otherVisible.size(); ++i)
                     {
-                        explored[i] = explored[i] || otherExplored[i];
                         visible[i] = visible[i] || otherVisible[i];
                     }
                 }
@@ -555,22 +557,65 @@ namespace rwe
         }
 
         // Fog off is a fully lit map rather than a second way of drawing one:
-        // the same grids, with every cell already seen and remembered. The
-        // simulation's own copy is left alone, since what this client chooses
-        // to look at must not reach the simulation.
-        auto width = vis.explored.getWidth();
-        auto height = vis.explored.getHeight();
-        if (!revealedVisibility || revealedVisibility->explored.getWidth() != width || revealedVisibility->explored.getHeight() != height)
+        // the same visible grid, with every cell seen. The simulation's own
+        // copy is left alone, since what this client chooses to look at must
+        // not reach the simulation. Explored ground for this client comes from
+        // localExploredGrid, which fills in the same way when the fog is off.
+        auto width = vis.visible.getWidth();
+        auto height = vis.visible.getHeight();
+        if (!revealedVisibility || revealedVisibility->visible.getWidth() != width || revealedVisibility->visible.getHeight() != height)
         {
             PlayerVisibility revealed(width, height);
-            auto& explored = revealed.explored.getVector();
-            std::fill(explored.begin(), explored.end(), static_cast<unsigned char>(1));
             auto& visible = revealed.visible.getVector();
             std::fill(visible.begin(), visible.end(), static_cast<unsigned char>(1));
             revealedVisibility = std::move(revealed);
         }
 
         return *revealedVisibility;
+    }
+
+    const Grid<unsigned char>& GameScene::localExploredGrid() const
+    {
+        const auto& vis = simulation.playerVisibility.at(localPlayerId.value);
+        auto width = vis.visible.getWidth();
+        auto height = vis.visible.getHeight();
+        if (localExploredView.getWidth() != width || localExploredView.getHeight() != height)
+        {
+            localExploredView = Grid<unsigned char>(width, height, static_cast<unsigned char>(0));
+        }
+
+        auto& out = localExploredView.getVector();
+        if (!fogOfWarEnabled)
+        {
+            // A fully lit map is a fully remembered one.
+            std::fill(out.begin(), out.end(), static_cast<unsigned char>(1));
+            return localExploredView;
+        }
+
+        const auto& shared = simulation.explored.getVector();
+        if (replayPlayback)
+        {
+            // Watching a recording with the fog on shows what both sides could
+            // see, so remembered ground is every group's bit and not one
+            // player's. There is no per-player explored grid left to combine:
+            // the one shared bitmap already holds each group's bit, so the
+            // spectator's explored ground is simply every bit set.
+            for (std::size_t i = 0; i < out.size() && i < shared.size(); ++i)
+            {
+                out[i] = shared[i] != 0 ? static_cast<unsigned char>(1) : static_cast<unsigned char>(0);
+            }
+            return localExploredView;
+        }
+
+        // The local player's bit in the shared grid, projected per cell. The
+        // visible grid holds no explored state of its own any more: the one
+        // grid and the group bit are where a player's memory lives.
+        auto bit = simulation.losGroupBitFor(localPlayerId);
+        for (std::size_t i = 0; i < out.size() && i < shared.size(); ++i)
+        {
+            out[i] = (shared[i] & bit) != 0 ? static_cast<unsigned char>(1) : static_cast<unsigned char>(0);
+        }
+        return localExploredView;
     }
 
     bool GameScene::unitIsVisibleToLocalPlayer(UnitId unitId, const UnitState& unit) const
@@ -641,7 +686,21 @@ namespace rwe
 
     bool GameScene::positionIsExploredByLocalPlayer(const SimVector& position) const
     {
-        return localPlayerVisibility().isExplored(simulation.visionCellAt(position));
+        if (!fogOfWarEnabled)
+        {
+            // Fog off is the whole map remembered; the only thing that is not
+            // explored is ground off the map.
+            return simulation.playerVisibility.at(localPlayerId.value).contains(simulation.visionCellAt(position));
+        }
+
+        if (replayPlayback)
+        {
+            // Watching a recording with the fog on shows both sides, so
+            // remembered ground is every group's bit and not one player's.
+            return simulation.isExploredByAnyGroup(position);
+        }
+
+        return simulation.isExploredBy(localPlayerId, position);
     }
 
     bool GameScene::positionIsVisibleToLocalPlayer(const SimVector& position) const
@@ -980,9 +1039,10 @@ namespace rwe
         }
 
         const auto& vis = localPlayerVisibility();
+        const auto& explored = localExploredGrid();
 
-        auto cellsWide = vis.explored.getWidth();
-        auto cellsHigh = vis.explored.getHeight();
+        auto cellsWide = vis.visible.getWidth();
+        auto cellsHigh = vis.visible.getHeight();
         // The vision grid starts at the map's top-left corner and covers whole
         // cells, which may extend slightly past the map's edge.
         auto cellWorldUnits = simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) * static_cast<float>(PlayerVisibility::VisionCellSizeInTiles);
@@ -1020,7 +1080,7 @@ namespace rwe
         // Rebuilding is the expensive part. The rasteriser keeps a window a
         // little larger than the view, tracks the corner codes it last drew,
         // and reports only the patch of texture that moved.
-        auto update = fogRasterizer.update(*fogTiles, vis.visible, vis.explored, cellsInView);
+        auto update = fogRasterizer.update(*fogTiles, vis.visible, explored, cellsInView);
         if (update)
         {
             auto overlayWidth = static_cast<unsigned int>(fogRasterizer.getWidth());
@@ -1053,12 +1113,12 @@ namespace rwe
         // It is only a hundred-odd pixels across, so the authored tiles would
         // be thrown away by the downscale anyway, and this way it does not have
         // to care where the world's window happens to be.
-        if (fogSprite && vis.visible.getVector() == fogVisibleSnapshot && vis.explored.getVector() == fogExploredSnapshot)
+        if (fogSprite && vis.visible.getVector() == fogVisibleSnapshot && explored.getVector() == fogExploredSnapshot)
         {
             return;
         }
         fogVisibleSnapshot = vis.visible.getVector();
-        fogExploredSnapshot = vis.explored.getVector();
+        fogExploredSnapshot = explored.getVector();
 
         minimapFogPixels.resize(static_cast<size_t>(cellsWide) * static_cast<size_t>(cellsHigh));
         auto* out = minimapFogPixels.data();
@@ -1070,7 +1130,7 @@ namespace rwe
                 {
                     *out++ = Color(0, 0, 0, 0);
                 }
-                else if (vis.explored.get(x, y))
+                else if (explored.get(x, y))
                 {
                     *out++ = Color(0, 0, 0, 120);
                 }

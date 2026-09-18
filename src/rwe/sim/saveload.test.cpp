@@ -516,4 +516,46 @@ namespace rwe
             REQUIRE(!simB.getUnitState(tankId).pieces.front().shaded);
         }
     }
+
+    TEST_CASE("the one explored grid survives a save and a load", "[saveload]")
+    {
+        // The explored grid is the one piece of visibility a load cannot
+        // recompute, and it is now a single grid with a bit per line-of-sight
+        // group rather than a grid per player. It is hashed, so a dropped save
+        // would show up in the replay test above -- but only on the permanent
+        // sight mode that reads it back. This pins the values directly.
+        auto simA = makeBaseSim();
+        buildScenario(simA);
+        for (int i = 0; i < 30; ++i)
+        {
+            simA.tick();
+        }
+
+        // The scenario's units have walked some ground by now, so there is
+        // something to lose.
+        bool anyExplored = false;
+        for (auto cell : simA.explored.getVector())
+        {
+            if (cell != 0)
+            {
+                anyExplored = true;
+                break;
+            }
+        }
+        REQUIRE(anyExplored);
+
+        auto saved = saveSimulationToJson(simA);
+
+        auto simB = makeBaseSim();
+        loadSimulationFromJson(saved, simB);
+
+        REQUIRE(simB.explored.getVector() == simA.explored.getVector());
+
+        // And the bits are still read the way they were: a cell the first
+        // player walked is explored for that player on the other side too.
+        auto us = PlayerId(0);
+        auto somewhereExplored = SimVector(0_ss, 0_ss, 0_ss);
+        REQUIRE(simA.isExploredBy(us, somewhereExplored));
+        REQUIRE(simB.isExploredBy(us, somewhereExplored));
+    }
 }

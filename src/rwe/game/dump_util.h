@@ -81,6 +81,9 @@ namespace rwe
 
     nlohmann::json dumpJson(const DiscreteRect& r);
 
+    /** The explored grid as a flat array of its per-cell group masks. */
+    nlohmann::json dumpJson(const Grid<ExploredMask>& grid);
+
     nlohmann::json dumpJson(const GameSimulation& simulation);
 
     template <typename T, typename Tag>

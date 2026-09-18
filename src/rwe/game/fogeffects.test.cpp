@@ -111,13 +111,13 @@ namespace rwe
         {
             // Remembered ground keeps its terrain and the features that stood
             // on it. What is happening there now is not part of the memory.
-            vis.explored.set(cell.x, cell.y, 1);
+            sim.explored.set(cell.x, cell.y, sim.losGroupBitFor(us));
             REQUIRE(drawnLineCount(sim, vis, db) == 0);
         }
 
         SECTION("ground in sight draws the round")
         {
-            vis.explored.set(cell.x, cell.y, 1);
+            sim.explored.set(cell.x, cell.y, sim.losGroupBitFor(us));
             vis.visible.set(cell.x, cell.y, 1);
             REQUIRE(drawnLineCount(sim, vis, db) == 4);
         }
@@ -158,7 +158,7 @@ namespace rwe
 
         REQUIRE_FALSE(effectIsVisibleToPlayer(sim, vis, position));
 
-        vis.explored.set(cell.x, cell.y, 1);
+        sim.explored.set(cell.x, cell.y, sim.losGroupBitFor(us));
         REQUIRE_FALSE(effectIsVisibleToPlayer(sim, vis, position));
 
         vis.visible.set(cell.x, cell.y, 1);

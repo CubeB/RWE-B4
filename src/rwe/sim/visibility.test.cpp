@@ -84,6 +84,26 @@ namespace rwe
             return unitId;
         }
 
+        /** A player on a lobby team, so it shares vision with that team. */
+        PlayerId addTeamPlayer(GameSimulation& sim, const std::string& name, int team)
+        {
+            GamePlayerInfo p{
+                std::optional<std::string>(name),
+                GamePlayerType::Human,
+                PlayerColorIndex(0),
+                GamePlayerStatus::Alive,
+                std::string("ARM"),
+                Metal(1000.0f),
+                Energy(1000.0f),
+                Metal(1000.0f),
+                Energy(1000.0f),
+                Metal(1000.0f),
+                Energy(1000.0f),
+            };
+            p.teamId = team;
+            return sim.addPlayer(p);
+        }
+
         /** The cell `cells` to the east of the one holding `origin`. */
         Point eastOf(const GameSimulation& sim, const SimVector& origin, int cells)
         {
@@ -132,6 +152,95 @@ namespace rwe
         {
             REQUIRE_FALSE(sim.isVisibleTo(us, SimVector(-5000_ss, 0_ss, 0_ss)));
             REQUIRE_FALSE(sim.isExploredBy(us, SimVector(0_ss, 0_ss, 5000_ss)));
+        }
+    }
+
+    TEST_CASE("allied players share one explored grid through their group bit", "[visibility]")
+    {
+        // The original keeps ONE explored array, a bit per line-of-sight
+        // group, and a lobby team is one such group. RWE used to keep a grid
+        // per player and light an ally's by contributing the ally's units to
+        // it; here the two players simply own the same bit, so ground one of
+        // them has walked is explored for the other without a copy.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto us = addTeamPlayer(sim, "us", 1);
+        auto ally = addTeamPlayer(sim, "ally", 1);
+        auto them = addPlayer(sim, "them"); // no team, so a group of its own
+
+        defineUnit(sim, "scout", /*sight*/ 100u, /*radar*/ 0u, false);
+
+        // Well separated patches, so the ground under test was only ever seen
+        // by the one scout that walked it.
+        auto ourGround = SimVector(200_ss, 0_ss, 200_ss);
+        auto allyGround = SimVector(-200_ss, 0_ss, -200_ss);
+        auto theirGround = SimVector(450_ss, 0_ss, -450_ss);
+
+        SECTION("one bit belongs to the team, and a teamless player gets its own")
+        {
+            REQUIRE(sim.losGroupBitFor(us) == sim.losGroupBitFor(ally));
+            REQUIRE(sim.losGroupBitFor(us) != sim.losGroupBitFor(them));
+        }
+
+        SECTION("any group's mark is what a spectator's combined view sees")
+        {
+            // isExploredByAnyGroup is the union a recording's spectator sees:
+            // a cell is remembered if ANY group has set its bit. It is the
+            // union the old per-player grids had to build by copying.
+            REQUIRE_FALSE(sim.isExploredByAnyGroup(allyGround));
+
+            addUnit(sim, "scout", them, theirGround, script);
+            sim.tick();
+            REQUIRE(sim.isExploredByAnyGroup(theirGround));
+            REQUIRE_FALSE(sim.isExploredByAnyGroup(allyGround));
+        }
+
+        SECTION("an ally's scout sets the shared bit, and only that bit")
+        {
+            addUnit(sim, "scout", ally, allyGround, script);
+            sim.tick();
+
+            // Exactly the group's one bit, not a per-player mark: this is the
+            // representation difference the issue is about.
+            auto cell = sim.visionCellAt(allyGround);
+            REQUIRE(sim.explored.get(cell.x, cell.y) == sim.losGroupBitFor(us));
+
+            REQUIRE(sim.isExploredBy(ally, allyGround));
+            REQUIRE(sim.isExploredBy(us, allyGround));
+            REQUIRE_FALSE(sim.isExploredBy(them, allyGround));
+        }
+
+        SECTION("the team keeps the ground after the scout that saw it is gone")
+        {
+            auto scoutId = addUnit(sim, "scout", ally, allyGround, script);
+            sim.tick();
+            sim.getUnitState(scoutId).markAsDeadNoCorpse();
+            sim.tick();
+
+            REQUIRE_FALSE(sim.isVisibleTo(us, allyGround));
+            REQUIRE(sim.isExploredBy(us, allyGround));
+            REQUIRE(sim.isExploredBy(ally, allyGround));
+            REQUIRE_FALSE(sim.isExploredBy(them, allyGround));
+        }
+
+        SECTION("your own scout explores for your ally too")
+        {
+            addUnit(sim, "scout", us, ourGround, script);
+            sim.tick();
+
+            REQUIRE(sim.isExploredBy(us, ourGround));
+            REQUIRE(sim.isExploredBy(ally, ourGround));
+            REQUIRE_FALSE(sim.isExploredBy(them, ourGround));
+        }
+
+        SECTION("a teamless player's scout explores only for that player")
+        {
+            addUnit(sim, "scout", them, theirGround, script);
+            sim.tick();
+
+            REQUIRE(sim.isExploredBy(them, theirGround));
+            REQUIRE_FALSE(sim.isExploredBy(us, theirGround));
+            REQUIRE_FALSE(sim.isExploredBy(ally, theirGround));
         }
     }
 

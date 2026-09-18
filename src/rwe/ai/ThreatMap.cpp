@@ -125,8 +125,8 @@ namespace rwe
     void ThreatMap::rebuild(const GameSimulation& sim, PlayerId aiOwner, const AiBlackboard& bb, bool omniscient)
     {
         const auto& vis = sim.playerVisibility.at(aiOwner.value);
-        auto width = vis.explored.getWidth();
-        auto height = vis.explored.getHeight();
+        auto width = vis.visible.getWidth();
+        auto height = vis.visible.getHeight();
         if (width != antiGround.getWidth() || height != antiGround.getHeight())
         {
             antiGround = Grid<float>(width, height, 0.0f);

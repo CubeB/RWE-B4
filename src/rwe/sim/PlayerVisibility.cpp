@@ -50,20 +50,14 @@ namespace rwe
     }
 
     PlayerVisibility::PlayerVisibility(int width, int height)
-        : explored(width, height, static_cast<unsigned char>(0)),
-          visible(width, height, static_cast<unsigned char>(0)),
+        : visible(width, height, static_cast<unsigned char>(0)),
           seenStamp(width, height, 0u)
     {
     }
 
     bool PlayerVisibility::contains(const Point& cell) const
     {
-        return cell.x >= 0 && cell.y >= 0 && cell.x < explored.getWidth() && cell.y < explored.getHeight();
-    }
-
-    bool PlayerVisibility::isExplored(const Point& cell) const
-    {
-        return contains(cell) && explored.get(cell.x, cell.y) != 0;
+        return cell.x >= 0 && cell.y >= 0 && cell.x < visible.getWidth() && cell.y < visible.getHeight();
     }
 
     bool PlayerVisibility::isVisible(const Point& cell) const
@@ -98,7 +92,7 @@ namespace rwe
         }
     }
 
-    void PlayerVisibility::revealCell(int x, int y)
+    void PlayerVisibility::revealCell(int x, int y, const ExploredMark& explored)
     {
         if (seenStamp.get(x, y) == currentStamp)
         {
@@ -111,7 +105,7 @@ namespace rwe
         {
             visible.set(x, y, static_cast<unsigned char>(count + 1));
         }
-        explored.set(x, y, 1);
+        explored.mark(x, y);
     }
 
     void PlayerVisibility::revealWithLineOfSight(
@@ -119,7 +113,8 @@ namespace rwe
         int radius,
         const VisionHeightGrid& heights,
         int eyeHeight,
-        const LosTables& tables)
+        const LosTables& tables,
+        const ExploredMark& explored)
     {
         beginReveal();
 
@@ -133,7 +128,7 @@ namespace rwe
         if (contains(center))
         {
             // Even a blind unit knows where it is standing.
-            revealCell(center.x, center.y);
+            revealCell(center.x, center.y, explored);
         }
 
         radius = std::min(radius, tables.maxRadius());
@@ -186,7 +181,7 @@ namespace rwe
 
                     if (lo * bestStep > bestSlope * t)
                     {
-                        revealCell(x, y);
+                        revealCell(x, y, explored);
 
                         // The horizon only rises on cells that were actually
                         // revealed, so once a ray is blocked it stops rising
@@ -202,7 +197,7 @@ namespace rwe
         }
     }
 
-    void PlayerVisibility::revealCircle(const Point& center, int radius)
+    void PlayerVisibility::revealCircle(const Point& center, int radius, const ExploredMark& explored)
     {
         beginReveal();
 
@@ -212,7 +207,7 @@ namespace rwe
         if (contains(center))
         {
             // Even a blind unit knows where it is standing.
-            revealCell(center.x, center.y);
+            revealCell(center.x, center.y, explored);
         }
 
         if (radius <= 0)
@@ -234,29 +229,31 @@ namespace rwe
                 auto dx = x - center.x;
                 if (((dx * dx) + (dy * dy)) <= radiusSquared)
                 {
-                    revealCell(x, y);
+                    revealCell(x, y, explored);
                 }
             }
         }
     }
 
-    void PlayerVisibility::makeExploredVisible()
+    void PlayerVisibility::makeExploredVisible(const ExploredMark& explored)
     {
         auto& visibleCells = visible.getVector();
-        const auto& exploredCells = explored.getVector();
+        const auto& exploredCells = explored.grid->getVector();
         for (std::size_t i = 0; i < visibleCells.size(); ++i)
         {
-            if (exploredCells[i] != 0 && visibleCells[i] == 0)
+            if ((exploredCells[i] & explored.bit) != 0 && visibleCells[i] == 0)
             {
                 visibleCells[i] = 1;
             }
         }
     }
 
-    void PlayerVisibility::exploreAll()
+    void PlayerVisibility::exploreAll(const ExploredMark& explored)
     {
-        auto& cells = explored.getVector();
-        std::fill(cells.begin(), cells.end(), static_cast<unsigned char>(1));
+        for (auto& cell : explored.grid->getVector())
+        {
+            cell = static_cast<ExploredMask>(cell | explored.bit);
+        }
     }
 
     VisionHeightGrid computeVisionHeights(const Grid<unsigned char>& heightmap, unsigned char seaLevel)
