@@ -1055,6 +1055,8 @@ namespace rwe
         void emitBlackSmokeFromPiece(UnitId unitId, const std::string& pieceName);
 
         void emitWakeFromPiece(UnitId unitId, const std::string& pieceName, bool reverse, unsigned int rampPeriod);
+        /** SFXTYPE_SUBBUBBLES: the wake emitter pointed at the surface. TOTALA-EXE.md S:4. */
+        void emitBubblesFromPiece(UnitId unitId, const std::string& pieceName);
 
         /** An aircraft's exhaust: small warm sparks dropped under a thruster piece, left behind as a trail. */
         void emitVtolFromPiece(UnitId unitId, const std::string& pieceName, unsigned int divisor);
@@ -1525,7 +1527,7 @@ namespace rwe
         /** This tick's steam from every thermal vent on the map. */
         void spawnGeoVentSteam();
 
-        void spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration, unsigned int rampPeriod, GameTime startTime);
+        void spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration, unsigned int rampPeriod, GameTime startTime, bool reverseRamp = false);
 
         /** Emits this tick's nanolathe spray for every builder the local player can see. */
         void spawnNanoParticles();

@@ -405,6 +405,12 @@ namespace rwe
             Vtol,
             /** The same emitter as Vtol, one step longer and slower. */
             Thrust,
+            /**
+             * Bubbles off something under water: a submarine under way, an
+             * underwater extractor turning. The original makes these with the
+             * wake emitter, aimed at the surface instead of along the piece.
+             */
+            SubBubbles,
         };
 
         SfxType sfxType;

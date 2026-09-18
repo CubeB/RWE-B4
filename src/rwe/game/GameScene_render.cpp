@@ -1383,7 +1383,7 @@ namespace rwe
         // the shaders they use do not declare that output at all, so leaving
         // the second target enabled for them would write undefined values into
         // it. See unitTexture.frag.
-        auto haloWanted = antiAliasEnabled && buildingHaloEnabled && buildingHaloStrength > 0;
+        auto haloWanted = BuildingHaloWired && antiAliasEnabled && buildingHaloEnabled && buildingHaloStrength > 0;
 
         // The mask has a second reader now, and it does not care whether
         // there is a building anywhere: the resolve uses the ground flag to

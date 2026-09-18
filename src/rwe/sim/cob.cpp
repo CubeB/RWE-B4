@@ -254,6 +254,9 @@ namespace rwe
                     case CobSfxType::Thrust:
                         simulation.events.push_back(EmitParticleFromPieceEvent{EmitParticleFromPieceEvent::SfxType::Thrust, unitId, objectName});
                         break;
+                    case CobSfxType::SubBubbles:
+                        simulation.events.push_back(EmitParticleFromPieceEvent{EmitParticleFromPieceEvent::SfxType::SubBubbles, unitId, objectName});
+                        break;
                 }
             });
     }

@@ -487,7 +487,7 @@ literal at the call site, not a property of the effect.
 | 2–5 | the four wakes | `0x472430` | 2 | `smoke 1`, palette 97–103 |
 | 257 | `SFXTYPE_WHITESMOKE` | `0x472810` | 9 | `smoke 1` |
 | 258 | `SFXTYPE_BLACKSMOKE` | `0x4728F0` | 9 | `smoke 2` |
-| 259 | `SFXTYPE_SUBBUBBLES` | `0x472530` | 7 | — |
+| 259 | `SFXTYPE_SUBBUBBLES` | `0x472530` | 7 | the wake's dot, palette 103–97 (below) |
 
 The sequences all come out of `anims/FX.GAF`, loaded once at `0x429870` into a
 run of slots on the globals block: `+0x147CF` `smoke 1`, `+0x147D3` `smoke 2`,
@@ -503,6 +503,45 @@ and immediately loads `0x61` and `0x67` — palette 97–103, pale blue to deep
 blue, which is water foam and so has to be `smoke 1`; the Atlas exhaust at
 `0x474526` loads `+0x147F3`, which is `flamestream`. Both identifications below
 stand; only the explanation of why did not.
+
+### `SFXTYPE_SUBBUBBLES` — there is no bubble emitter
+
+Read 2026-09-18, because an underwater metal extractor sheds bubbles as it
+turns in the original and shed nothing in RWE.
+
+**The scripts do not say 259.** `ARMUWMEX.COB`, `CORUWMEX.COB`, `ARMSUB.COB`
+and `CORSUB.COB` all push `3`, OR it with a `256` already on the stack
+(`0x10036000`), and emit that -- the compiler's spelling of
+`SFXTYPE_SUBBUBBLES | 3`... which is simply 259. A scan for the constant 259
+in every shipped script finds nothing, which is why this looked unused. The
+extractor emits from three pieces (its arms), the submarines from one.
+
+**The engine builds the wake emitter, pointed up.** The dispatcher's branch for
+259 (`0x4810D4`) makes the emitter's two points itself: the piece's first
+vertex, and a copy of it whose height is overwritten with the sea level (the
+byte at globals `+0x1427F`, shifted into the high word). It passes those with a
+period of **8** and layer **7** to `0x472530`, which is `0x472430` -- the wake
+handler -- instruction for instruction, the same 0x48-byte object with the same
+vtable `0x4FD5F8`, but for one argument to `Init` (`0x474760`): the wakes push
+`1` where the bubbles push `0`. `Init` stores it at `+0x44`.
+
+**That flag's one reader is the colour ramp**, at `0x474A85`. Both cases load
+the `smoke 1` slot and the palette bounds `0x61` and `0x67`. Set, the particle
+starts at 97 and steps `+1`: foam, darkening into the sea. Clear, it starts at
+103 and steps `-1`: a bubble, paling as it rises.
+
+So a bubble is a dot of foam that leaves the piece, climbs straight toward the
+surface at the wake's half a world unit a tick (the difference of the two
+points is normalised, so depth does not change the speed), lives the wake's six
+steps of eight ticks, and runs the seven blues backwards. Forty-eight ticks is
+twenty-four units of climb, so from any depth it fades on the way up and does
+not reach the surface. Two dots a call, the second a tick later, each scattered
+by -3..3 on all three axes, as the wake.
+
+For RWE: `GameScene::emitBubblesFromPiece` calls the wake's own
+`computeWakeEmission` and `spawnWake`, with `reverseRamp` on
+`ParticleRenderTypeWake`. **Not carried over:** the layer. The original files
+bubbles in particle layer 7 where wakes go in 2; RWE draws both with the wakes.
 
 ### `SFXTYPE_VTOL` — the Atlas exhaust
 

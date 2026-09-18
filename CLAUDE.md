@@ -187,7 +187,10 @@ of `TotalA.exe` instead of guessed at.
   running its table rather than imitating its output — the buildings' palette
   indices go into a mask and each 2x2 block is filtered down through the
   shipped `PALETTE.ALP` with the original's three chained lookups, an
-  uncovered sample standing in as index 253, plain magenta (§101), and the
+  uncovered sample standing in as index 253, plain magenta (§101; **unwired
+  since 2026-09-18 by request** -- all of it is kept, and
+  `BuildingHaloWired` in `GlobalConfig.h` is the one switch that brings the
+  filter and its two options buttons back), and the
   ground path follower — the aim point projected eighty units along the
   segment the unit is walking, and the two brake tests that slow it into a
   corner (§102, and issue #36), and what a click on a unit does: the two

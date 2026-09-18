@@ -59,6 +59,15 @@ namespace rwe
 
         /** Ticks between colour steps: 16 for Wake1, 8 for the faster Wake2. */
         unsigned int rampPeriod{16};
+
+        /**
+         * Walk the same seven blues the other way, 103 down to 97. This is
+         * the whole of what makes a bubble a bubble in the original: the
+         * emitter takes one flag, and it chooses between starting at 97 and
+         * stepping +1 (foam, fading into the sea) and starting at 103 and
+         * stepping -1 (a bubble, paling as it nears the light). 0x474A85.
+         */
+        bool reverseRamp{false};
     };
 
     /**
