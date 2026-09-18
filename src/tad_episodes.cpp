@@ -3970,6 +3970,22 @@ namespace rwe
         /** Bucket 9 and bucket 10's health verdicts: (flat, fell). */
         std::array<std::pair<unsigned long, unsigned long>, 2> health{};
 
+        /**
+         * Buckets 9 and 10 broken down by (weapon class, victim kind), which is
+         * what says where the unexplained ones are: a class with no model and a
+         * victim that cannot dodge is the ballistic arc, not a ledger gap.
+         */
+        std::map<std::tuple<std::size_t, std::string, std::string>, unsigned long> openCells;
+
+        /**
+         * Every isolated shot by (weapon class, victim kind), and how many of
+         * them drew no damage. This is the argument for what a hit/miss cell
+         * should be keyed on: a flight time depends on the weapon and the
+         * geometry, but a hit RATE depends on the victim as much as on the
+         * weapon, and this is the table that shows by how much.
+         */
+        std::map<std::pair<std::string, std::string>, std::pair<unsigned long, unsigned long>> rateCells;
+
         /** The control: brackets over shots known to have drawn damage. */
         unsigned long controlDetected = 0;
         unsigned long controlMissed = 0;
@@ -3995,6 +4011,15 @@ namespace rwe
             }
             controlDetected += o.controlDetected;
             controlMissed += o.controlMissed;
+            for (const auto& [key, n] : o.openCells)
+            {
+                openCells[key] += n;
+            }
+            for (const auto& [key, n] : o.rateCells)
+            {
+                rateCells[key].first += n.first;
+                rateCells[key].second += n.second;
+            }
         }
     };
 
@@ -4268,6 +4293,23 @@ namespace rwe
                 auto arrival = steps ? std::optional<uint32_t>(shot.tick + static_cast<uint32_t>(*steps))
                                      : std::nullopt;
 
+                if (weapon != nullptr)
+                {
+                    std::string kind = "victim unnamed";
+                    if (victim != nullptr)
+                    {
+                        kind = victim->maxVelocity == 0.0f ? "immobile"
+                            : victim->canFly                ? "aircraft"
+                                                            : "mobile ground";
+                    }
+                    auto& cell = report.rateCells[{weaponClass(*weapon), kind}];
+                    ++cell.first;
+                    if (inside == 0)
+                    {
+                        ++cell.second;
+                    }
+                }
+
                 // The drift axis, over every isolated shot with a named victim
                 // and a modellable speed -- the population the table is about.
                 if (weapon && victim && steps)
@@ -4440,6 +4482,17 @@ namespace rwe
                 // The health verdict, over the two buckets that are still open.
                 if (bucket == 8 || bucket == 9)
                 {
+                    std::string kind = "victim unnamed";
+                    if (victim != nullptr)
+                    {
+                        kind = victim->maxVelocity == 0.0f ? "immobile"
+                            : victim->canFly                ? "aircraft"
+                                                            : "mobile ground";
+                    }
+                    ++report.openCells[{bucket, weaponClass(*weapon), kind}];
+                }
+                if (bucket == 8 || bucket == 9)
+                {
                     if (auto b = bracket(key.second, shot.tick, arrival))
                     {
                         bool ledger = false;
@@ -4544,6 +4597,32 @@ namespace rwe
                           << "% really lost health, so " << 100.0 * (1.0 - lost)
                           << "% are genuine misses\n";
             }
+        }
+
+        std::cout << "\n  the no-damage rate of an isolated shot by weapon class and victim kind.\n"
+                  << "  This is the argument for what a hit/miss cell is keyed on: a flight time\n"
+                  << "  depends on the weapon, a hit rate depends on the victim as well.\n\n"
+                  << "  " << std::left << std::setw(18) << "weapon class" << std::setw(16) << "victim"
+                  << std::right << std::setw(9) << "shots" << std::setw(11) << "no damage"
+                  << std::setw(8) << "rate" << "\n";
+        for (const auto& [key, cell] : r.rateCells)
+        {
+            std::cout << "  " << std::left << std::setw(18) << key.first << std::setw(16) << key.second
+                      << std::right << std::setw(9) << cell.first << std::setw(11) << cell.second
+                      << std::setw(7)
+                      << (cell.first ? 100.0 * static_cast<double>(cell.second) / static_cast<double>(cell.first) : 0.0)
+                      << "%\n";
+        }
+
+        std::cout << "\n  buckets 9 and 10 by weapon class and victim kind. A class with no\n"
+                  << "  model and a victim that cannot dodge is where an unexplained miss sits.\n\n"
+                  << "  " << std::left << std::setw(8) << "bucket" << std::setw(18) << "weapon class"
+                  << std::setw(16) << "victim" << std::right << std::setw(9) << "shots" << "\n";
+        for (const auto& [key, n] : r.openCells)
+        {
+            const auto& [bucket, className, kind] = key;
+            std::cout << "  " << std::left << std::setw(8) << (bucket + 1) << std::setw(18) << className
+                      << std::setw(16) << kind << std::right << std::setw(9) << n << "\n";
         }
         std::cout << std::defaultfloat;
     }

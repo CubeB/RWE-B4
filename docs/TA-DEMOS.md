@@ -1187,6 +1187,198 @@ moved exactly the predicted episodes and no others:
 * a motor that **never accelerates** fails **10 of the 13** motor episodes and
   none of the 24 others.
 
+#### Why 53,706 shots drew no damage, and what that means for a hit/miss oracle
+
+The pairing above keeps 35,535 shots. The largest rejection that is not simply
+sustained fire is **53,706 that drew no damage in the window at all**, and the
+hit/miss half of the oracle was blocked on them: `0x0b` is not a complete
+ledger, so silence is unknown rather than zero and no shot may be called a miss
+on it alone. `tad_episodes --miss-buckets` is the re-runnable answer.
+
+```bash
+./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc --miss-buckets
+```
+
+**The buckets**, in the priority order a shot is tested against. A shot lands in
+the first that fits, so the counts sum to the 53,706 and nothing is claimed
+twice.
+
+| bucket | shots | share |
+|---|---|---|
+| 1. the slot names no weapon, or one that cannot fly a round | 1,068 | 2.0% |
+| 2. the recording ends inside the window | 192 | 0.4% |
+| 3. the victim died before the round could arrive | **13,991** | **26.1%** |
+| 4. the shot killed the victim; only the `0x0c` records it | 47 | 0.1% |
+| 5. the round damaged a bystander instead | 3,381 | 6.3% |
+| 6. the victim cannot be named, or has no footprint to occupy | 153 | 0.3% |
+| 7. the round steps over the victim's footprint | 117 | 0.2% |
+| 8. the damage arrived just outside the window | 375 | 0.7% |
+| 9. the victim could outrun the round | **30,185** | **56.2%** |
+| 10. **unexplained**: the victim could not outrun the round | **4,197** | **7.8%** |
+
+Buckets 1 to 8 are structural: the round had nothing to hit, or it hit something
+else, or the record it drew is outside what the filter looked at. Together they
+are **19,324 shots, 36.0%**, and the largest of them is worth spelling out
+because it is a fact about the engine rather than about the recording. **A round
+in flight when its victim dies flies on.** `0x49B090` reads the square's unit
+slots, and by the time the round gets there the slot is empty, so there is
+nothing to damage and no record to emit. That accounts for a quarter of the
+53,706 on its own, and it is corroborated by an instrument that knows nothing
+about the model: of the brackets the health test below has to throw away because
+the victim's `0x2c` slot changed type or skipped a cycle, **32,524 of 32,528
+carry a `0x0c` for that victim inside them**. A victim that vanishes from the
+`0x2c` stream is a victim that died.
+
+Bucket 9 uses the **same drift bound the missile class already uses** -- the
+victim could travel further than one step of the projectile while the round was
+in the air -- so it is not a bound chosen here, and buckets 9 and 10 are the two
+halves of what is left rather than an explanation and a residue.
+
+**The drift axis is what says these are misses.** If a no-damage shot were the
+ledger dropping a record, its rate would have no reason to depend on how fast
+the victim can move. It depends on nothing else:
+
+| drift, world units | isolated shots | no damage | rate |
+|---|---|---|---|
+| 0 (immobile victim) | 4,954 | 1,892 | 38% |
+| 0-8 | 3,088 | 428 | **14%** |
+| 8-16 | 5,853 | 1,532 | 26% |
+| 16-32 | 15,296 | 5,568 | 36% |
+| 32-64 | 20,232 | 10,810 | 53% |
+| 64-128 | 16,637 | 12,660 | 76% |
+| 128-256 | 12,126 | 9,078 | 75% |
+| 256+ | 13,612 | 10,505 | **77%** |
+
+Fourteen per cent to seventy-seven, monotone but for the last pair, over an axis
+the ledger cannot see. The population it is drawn from is the same one the
+flight-time table is drawn from, which is why the two can be read together: the
+rows where a flight time lands on its model are the rows where a shot draws
+damage. The immobile row at 38% sits above the 0-8 row and is the one anomaly;
+it is artillery, which arcs. `--miss-buckets` prints the same rate split by
+weapon class and victim kind, and there a constant-speed round at an immobile
+victim reads **26.5%** against a ballistic one's **48.7%** at the same victim.
+
+**The `0x2c` health bracket is the direct test**, and it is the one that settles
+whether the remainder are misses or gaps. A unit's full state goes out once
+every `maxUnits` ticks, so a shot can be bracketed by the victim's own records
+either side of it. The bracket is used only where it is clean -- the same type at
+both ends, a finished unit, the unit id not recycled inside it (a `0x0c` for that
+id disqualifies it), the round's arrival inside it, and **no damage record
+against that victim anywhere in it**. Then the health difference is the whole
+truth about what the victim absorbed and the ledger says nothing happened.
+
+The control comes first, because an instrument that cannot see a hit it is
+looking at proves nothing about one it cannot find. Over shots **known** to have
+drawn damage, bracketed the same way, the loss shows **781 times of 954, 82%**.
+The 18% it misses are mostly small fast units at full health at both ends: a
+cycle is 33 seconds, which is long enough for a repairer to put back what a
+round took (§94 -- one hit point per repairer per tick), and adding the
+recycling guard alone took the sensitivity from 75% to 82%.
+
+Against that:
+
+| | clean brackets | health flat | health fell |
+|---|---|---|---|
+| bucket 9 (could outrun the round) | 1,528 | **1,426 (93%)** | 102 |
+| bucket 10 (could not) | 185 | **168 (91%)** | 17 |
+
+Corrected for the instrument's 82% sensitivity, **8% of bucket 9 and 11% of
+bucket 10 really lost health**, so about **90% of both are genuine misses** and
+about 10% are ledger gaps. The two buckets read the same, which is the useful
+part: whatever makes bucket 10's shots miss is not the victim outrunning them.
+
+**The honest residue.** Of the 53,706: 19,324 (36.0%) are structural and named;
+30,185 (56.2%) are misses the drift bound explains and the health test confirms
+at about nine in ten; 4,197 (7.8%) are misses the drift bound does **not**
+explain, of which the health test again says about nine in ten really are
+misses. **So what is unexplained is the mechanism behind those 4,197, not their
+disposition** -- they are misses, and nothing here says why. Their shape points
+at things this document already has open, and `--miss-buckets` prints it:
+**1,963** are constant-speed rounds at mobile ground victims, **351** are
+ballistic rounds at *immobile* ones -- which is the ballistic arc no model here
+flies -- **452** are `vlaunch`, **380** are accelerating rounds at victims that
+cannot outrun them, and the height half of `0x49B090`, which nothing scores,
+would show exactly here.
+
+**And the ledger gaps are real but small.** 119 shots across both open buckets
+have a clean bracket in which the victim demonstrably lost health with nothing
+in the ledger at all. As a share of the 1,713 clean brackets that is 6.9%, or
+8.5% once the instrument's own 82% sensitivity is allowed for. Whether that
+share holds over the 34,382 shots the brackets are sampled from is the weakest
+number in this section and should be read as an order of magnitude rather than
+an estimate -- a clean bracket needs a quiet 33 seconds and a surviving victim,
+which is not a fair sample of a firefight. What the 119 do establish without any
+extrapolation is that `0x0b` drops records **for units that live**, where the
+older figure (17,526 of 56,913 deaths carrying no damage at all) only ever
+measured it on units that died.
+
+**Two things the pass found on the way that are not about misses.**
+
+*The `0x0d`'s rotation triple is the shot's own launch attitude.* `--emit-shots`
+now carries it. `ry` against `atan2(dx, dz)` over the aim line has a circular
+correlation of **0.984** with a constant offset of half a circle, so it is a
+yaw; `rx` never leaves -494..182 and tracks the aim line's elevation, so it is a
+pitch. The yaw is not the aim bearing exactly -- its departure has a median of
+**1.8 degrees** and a 90th percentile of 7 -- so it records a real aiming error,
+which is the first thing in the stream that does. But it does **not** decide a
+shot: bucketing isolated shots by that departure gives a no-damage rate flat at
+50-55% across every bucket from a sixteenth of a degree to thirty. Flying the
+round along the recorded yaw instead of along the aim line does separate them,
+and that is the strongest single geometric signal found -- 70% of the
+damage-drawing shots still enter the victim's footprint against 50% of the
+damageless ones -- but half of each is on the wrong side, so it classifies a
+population and not a shot.
+
+*Fourteen weapon blocks declare a negative `weaponvelocity`* -- `BOMB_SHOCK`
+-400, `VSPAM_ALL` -10, `NUKE_SUB_ARM` -8 and friends. `WeaponFacts` holds the
+field unsigned because `parseWeaponTdf` does, so the sign wraps to a value above
+`INT32_MAX` and any bound computed from it is nonsense. Every one of the
+fourteen is `vlaunch`, which no model here flies and which the flight-time cells
+never score, so nothing checked in moves -- but it was worth 311 shots in this
+pass before the guard, and it is the whole of what the port and the reference
+script disagreed about. It was found by diffing the two per shot rather than by
+argument, which is the method this document keeps recommending.
+
+**So: is the hit/miss oracle feasible?** Yes, and not as the statistic it was
+first imagined to be. Three things constrain it.
+
+* **It can only ever be a rate, never a per-shot prediction.** The `0x0d`
+  records where the shot was *aimed* -- and, in the rotation triple, roughly
+  where it was pointed -- but whether it connected depends on where the victim
+  was when it arrived, and the victim's position is in the stream once every
+  `maxUnits` ticks. A cell's hit *share* is measurable; "did this shot hit" is
+  not.
+* **It must be scored over shots the structural buckets clear.** A cell computed
+  over raw silence would be measuring how often the victim died first, which is
+  a quarter of the corpus and has nothing to do with the weapon.
+* **Target type belongs in the cell key, and the flight-time cells' key does
+  not.** A flight time depends on the weapon and the geometry, so
+  (shooter type, weapon slot) is enough. A hit rate depends on the victim as
+  much as on the weapon, and by more than it depends on the weapon. Holding the
+  weapon class and varying the victim moves the damageless rate further than
+  holding the victim and varying the class:
+
+  | weapon class | immobile | mobile ground | aircraft |
+  |---|---|---|---|
+  | constant speed | 26.5% | 33.0% | **92.1%** |
+  | accelerating | 32.1% | 27.4% | 67.6% |
+  | ballistic | 48.7% | **70.2%** | 82.6% |
+  | burst | 29.9% | 38.9% | 83.2% |
+  | `vlaunch` | 48.4% | **92.2%** | 91.5% |
+
+  So the key wants to be **(shooter type, weapon slot, victim type)**, or
+  (shooter type, weapon slot, victim class) where a type is too thin -- and the
+  drift table is the argument that "immobile / mobile ground / aircraft" is the
+  right coarsening, because that is the axis the rate moves on. Note what the
+  table does *not* say: a ballistic round is worse against a moving ground unit
+  (70.2%) than a constant-speed one is (33.0%), which is a fact about the arc
+  and not about the target, so the weapon half of the key earns its place too.
+
+What it would assert against RWE is a share, so it wants an interval rather than
+an equality, and `expectedDurationDelta`'s analogue here is a tolerance. That is
+a different shape of fixture from the three already checked in, and designing it
+is the next piece of work rather than this one.
+
 ### `0x10`, script call -- all 22 bytes
 
 `u16` unit, `u16` script index into that unit's own COB, `u8` argument count,
