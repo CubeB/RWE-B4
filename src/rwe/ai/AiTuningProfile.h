@@ -499,26 +499,24 @@ namespace rwe
          * maps showed that the water fraction says little about what lies
          * under it.
          *
-         * OFF BY DEFAULT, because the arena said so and the data says why.
-         * At 2, over ten games on Brain Coral with seats alternating, the side
-         * building them finished with 3.5 extractors and 7.7 metal a second
-         * against 5.9 and 10.9 for the side that did not -- more builders,
-         * fewer extractors, in game after game. The construction ship cannot
-         * build an underwater extractor at all: ARMCS1.GUI and CORCS1.GUI
-         * offer the advanced shipyard, shipyard, tidal generator, sonar,
-         * torpedo launcher and light laser, and in the shipped menus only the
-         * commander (ARMCOM3/CORCOM3) and Core Contingency's construction
-         * seaplane (ARMCSA4/CORCSA4) carry one. So the ships found nothing on
-         * the plan they could build, and the planner serves one builder per
-         * pass: every pass spent on an idle ship was a pass the commander --
-         * the one unit that could build the extractors -- did not get.
+         * Measured, and by a wide margin: over ten games on Brain Coral, ARM
+         * against ARM with seats alternating, the side building two finished
+         * with 32.9 units, 26.3 buildings, 17.1 underwater extractors and
+         * 27.4 metal a second, against 20.0, 14.8, 5.4 and 10.2 for the side
+         * that did not -- ahead in every one of the ten games.
          *
-         * Worth revisiting once the planner stops spending passes on builders
-         * with nothing to do. Then ships taking the tidals and the launcher
-         * would leave the commander free for the metal, which is the division
-         * of labour this was meant to be.
+         * It first measured the other way, and the reason is worth keeping.
+         * RWE was not reading the menu entries in the download directory, and the
+         * construction ship's second and third pages -- the underwater
+         * extractor among them -- are nothing but those. So in RWE the ship
+         * had one page and no extractor on it; it found nothing on the plan it
+         * could build, and since the planner serves one builder per pass,
+         * every pass spent on an idle ship was one the commander did not get.
+         * The side building them ended with FEWER extractors, 3.5 to 5.9. It
+         * was the menu, not the idea: see DownloadMenus.h. Reported from play,
+         * the construction ship "should have three pages of build options."
          */
-        int targetConstructionShipCount{0};
+        int targetConstructionShipCount{2};
         /**
          * Submarines wanted, out of navalFleetSize, once the destroyer core
          * below is standing. A submarine's only weapon is a waterweapon

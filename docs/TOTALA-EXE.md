@@ -13149,3 +13149,93 @@ key names real physics, so TA-derived communities meet them there.
 For RWE: nothing to port. `WeaponTdf` does not parse either key and should
 not. A knockback added for feel would be a deliberate departure and belongs in
 §88 with the others, not in the simulation as though it matched the original.
+
+## 107. Download menus: how a patch adds a button to a builder it does not ship
+
+**Why this was read.** Reported from play: "the construction ship should have
+three pages of build options." RWE showed one. `ARMCS1.GUI` is the only page
+the construction ship ships, and nothing in RWE looked anywhere else. The rest
+of its menu is 70 small TDFs under `download/`, shaped like this:
+
+    [MENUENTRY1] { UNITMENU=ARMCS; MENU=3; BUTTON=5; UNITNAME=ARMUWMEX; }
+
+**How much was missing.** Audited over the whole install (`rev31.gp3`,
+`btdata.ccx`, `ccdata.ccx`, `totala1.hpi`, `totala2.hpi`, in RWE's mount
+order): **111 buttons on 26 builders, and for 53 units this is the only way
+they can be built at all** -- the Vulcan, the Buzzsaw, the Krogoth gantry, the
+Flakker, the fortification wall, the Sniper, the Spy, the floating defences and
+the underwater extractor on the construction ship. None could be built in RWE.
+There was a second, smaller bug under it: RWE's default for the directory was
+`downloads`, and the original's is `download`.
+
+### Verified, from the binary
+
+- **The loader is `0x42DCF0`, called exactly once**, from `0x4918CF`, in the
+  long row of no-argument initialisers that runs at startup. There is no other
+  caller in `.text`. Download menus are read once, not per map and not when a
+  panel opens.
+- **It scans `download\*.TDF`**: the three literals are `"download"`
+  (`0x503730`), `"*"` (`0x50372C`) and `"TDF"` (`0x50341C`), handed to the
+  path builder at `0x4290F0` and then the directory enumeration at `0x4BCA30`.
+- **The string `MENUENTRY` is not in the binary.** Zero hits. The block's name
+  is not looked for; the blocks of a download TDF are walked by position.
+- **Four keys are read**: `UNITMENU` and `UNITNAME` through the string fetch
+  (`0x4C48C0`), `MENU` and `BUTTON` through the integer fetch (`0x4C46C0`) with
+  a default of 0. The fifth string in that cluster, `DOWNLOADMENU`, is not a
+  key: it is the allocation tag handed to `0x4D83B0`. Nobody should look for a
+  `DOWNLOADMENU=` field.
+- **The fill routine is `0x41ACE0`**, called from the panel refresh near
+  `0x41B800` whenever the displayed unit changes. For each record it compares
+  the stored `MENU` word, raw, against the open page's own field at `+0x21E`,
+  then the `BUTTON` byte against the slot, and on a match writes the unit name
+  into the gadget (`+2`) and marks it live (clears bit 0 of the word at
+  `+0x13C`, sets the byte at `+0x2A` to 4, ORs 1 into the word at `+0xB4`).
+  **It is one mechanism**: nothing in it distinguishes a page that shipped a
+  GUI file from one that did not.
+- **`%sGEN.GUI` is a dead end**, recorded so it is not walked again.
+  `0x41B0F0` loads `ARMGEN.GUI` / `CORGEN.GUI`, and they exist, but it is the
+  *alternative* branch to `0x41ACE0` (flag at `0x37EBE`), and the file holds
+  the generic orders strip -- no `IGPATCH`, no build grid.
+
+### Verified, from the data
+
+- **`page = MENU - 1`, counting pages from one.** `ARMACK2.GUI` holds three
+  units and then three gadgets named `IGPATCH`; ARMACK's download entries at
+  `MENU=3` are `BUTTON=3,4,5`, landing exactly on those three. The construction
+  ship's entries are six at `MENU=3` and one at `MENU=4`: pages two and three,
+  which is the three pages reported. No builder's numbering has a gap.
+- **`BUTTON` is a 0-based index into the 2x3 grid**, row-major: `(0,27)
+  (64,27) (0,91) (64,91) (0,155) (64,155)`, each 64x64. `BUTTON=0` is real
+  (`ARMFDRAG` on the ship's third page). The binary compares `BUTTON - 1`
+  against the slot the caller passes; that caller was not traced, so the two
+  presumably cancel. **Trust the data here, not that decrement.**
+- **An empty slot is a Button named `IGPATCH`, or one carrying attribute 32.**
+  Both tests are needed: `CORACA2.GUI` is the one shipped page whose `IGPATCH`
+  gadgets have `attribs=0`, and asking only for the attribute left `CORFLAK`,
+  `CORFORT` and `CORTOAST` nowhere. With both, 49 of 49 shipped pages resolve
+  to six slots.
+- **No download unit has a frame in its builder's page GAF.** All 111 ship a
+  `unitpics/<UNIT>.pcx` instead, which is therefore what the button is drawn
+  from.
+
+### Inferred, and built anyway
+
+- **What a page with no GUI file looks like.** The code that makes the six
+  gadgets for such a page was not found, and no template file exists. Since
+  the fill routine cannot tell the two cases apart, and every shipped build
+  page has the identical grid, RWE copies the builder's first page, blanks its
+  six slots to `IGPATCH`, and fills from there. This is RWE's choice.
+- **Two entries for one slot**: not traced. RWE keeps the first, in VFS order.
+- **An unknown `UNITMENU` or `UNITNAME`**: the shape of a not-found path was
+  seen and its outcome was not. RWE skips the entry.
+- The record layout (189 bytes a file, 37 a record, so perhaps five records a
+  file) is arithmetic only. No shipped file has more than three.
+
+### What RWE does
+
+`src/rwe/game/DownloadMenus.{h,cpp}`, called from `LoadingScene` after the
+builder GUIs are read. The log line is the check: on the full install it reads
+`Download menus: 111 buttons placed, 0 skipped`, which is the audit's figure.
+Because the AI's build tree is made from the same pages, the AI gains all 53
+units by the same stroke -- which is what turned construction ships from a
+measured loss into a measured win (see `targetConstructionShipCount`).

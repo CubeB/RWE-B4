@@ -160,7 +160,7 @@ Much of the current work is matching the original's behaviour down to the
 arithmetic. Where a behaviour is meant to match TA, it has usually been read out
 of `TotalA.exe` instead of guessed at.
 
-- `docs/TOTALA-EXE.md` — the findings, numbered up to §106 (§83 and §84 do not
+- `docs/TOTALA-EXE.md` — the findings, numbered up to §107 (§83 and §84 do not
   exist, so the count is two short of the last number): the flight
   model, fog of war and line of sight, the damage pipeline, missile flight,
   target selection and eligibility, the economy, the nanolathe and construction
@@ -199,7 +199,11 @@ of `TotalA.exe` instead of guessed at.
   seven bars run up left to right with the score read out of the map's own
   killmul and timemul (§104), and that the blast impulse players remember --
   explosions throwing units about -- is not in the game at all: the key names
-  are not even in the binary, so there is nothing to port (§106). §88 and
+  are not even in the binary, so there is nothing to port (§106), and the
+  `download/*.tdf` menu entries by which the patches and expansions add
+  buttons to builders they do not ship -- 111 of them, the only way 53
+  units can be built, the construction ship's second and third pages
+  among them (§107). §88 and
   §91 are the ones to read first if
   you are about to change something — where RWE **deliberately** differs, so
   those do not get "corrected" back, and what is decoded but not ported.

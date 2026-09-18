@@ -3138,11 +3138,10 @@ namespace rwe
         auto profile = makeDefaultStandardProfile();
         profile.scoutCount = 0;
 
-        SECTION("asked for, with metal under the water, a builder comes before the warships")
+        SECTION("with metal under the water, a builder comes before the warships")
         {
             // Open water east of the shelf, sixty deep.
             sim.metalGrid.set(40, 32, static_cast<unsigned char>(200));
-            profile.targetConstructionShipCount = 2;
             AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 31, commands);
@@ -3150,9 +3149,8 @@ namespace rwe
             REQUIRE(countQueueCommands(commands, "ARMROY") == 0);
         }
 
-        SECTION("asked for, with no metal under the water, the yard goes to warships")
+        SECTION("with no metal under the water, the yard goes to warships as it always did")
         {
-            profile.targetConstructionShipCount = 2;
             AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 31, commands);
@@ -3160,12 +3158,10 @@ namespace rwe
             REQUIRE(countQueueCommands(commands, "ARMROY") == 1);
         }
 
-        SECTION("by default it does not, even with metal to take")
+        SECTION("switched off, it does not, even with metal to take")
         {
-            // Off by default: the shipped construction ship has no underwater
-            // extractor on its menu, and measured, building them cost the
-            // commander planning passes. See targetConstructionShipCount.
             sim.metalGrid.set(40, 32, static_cast<unsigned char>(200));
+            profile.targetConstructionShipCount = 0;
             AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 31, commands);
