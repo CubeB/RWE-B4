@@ -1309,7 +1309,166 @@ namespace rwe
         return plan;
     }
 
-    std::vector<std::string> BuildManager::buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::string& builderType, bool enemyNavalSeen) const
+    std::optional<BuildManager::FortificationPlan> BuildManager::planFortification(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        std::minstd_rand& rng) const
+    {
+        const auto& s = bb.sideUnits;
+        if (!profile.fortifyTowers || !bb.baseAnchor || s.lightLaserTower.empty())
+        {
+            return std::nullopt;
+        }
+        const UnitDefinition* teethDef = nullptr;
+        if (profile.fortifyTeethPerTower > 0 && !s.dragonsTeeth.empty())
+        {
+            if (auto it = sim.unitDefinitions.find(s.dragonsTeeth); it != sim.unitDefinitions.end())
+            {
+                teethDef = &it->second;
+            }
+        }
+        const bool wantMissiles = profile.fortifyMissileTower && !s.antiAirTower.empty() && sim.unitDefinitions.count(s.antiAirTower) != 0;
+        if (teethDef == nullptr && !wantMissiles)
+        {
+            return std::nullopt;
+        }
+
+        // What of ours is already there or on its way: the towers to
+        // fortify, and every tooth and missile tower standing, going up or
+        // ordered. An order counts because a builder takes a while to walk
+        // to its site, and without it the next pass would send a second
+        // builder to the same tooth.
+        std::vector<std::pair<UnitId, SimVector>> towers;
+        std::vector<SimVector> teeth;
+        std::vector<SimVector> missiles;
+        for (const auto& [unitId, unit] : sim.units)
+        {
+            if (unit.owner != aiOwner || !unit.isAlive())
+            {
+                continue;
+            }
+            if (unit.unitType == s.lightLaserTower && !unit.isBeingBuilt(sim.unitDefinitions.at(unit.unitType)))
+            {
+                towers.emplace_back(unitId, unit.position);
+            }
+            else if (teethDef != nullptr && unit.unitType == s.dragonsTeeth)
+            {
+                teeth.push_back(unit.position);
+            }
+            else if (wantMissiles && unit.unitType == s.antiAirTower)
+            {
+                missiles.push_back(unit.position);
+            }
+            for (const auto& order : unit.orders)
+            {
+                if (auto build = std::get_if<BuildOrder>(&order); build != nullptr)
+                {
+                    if (teethDef != nullptr && build->unitType == s.dragonsTeeth)
+                    {
+                        teeth.push_back(build->position);
+                    }
+                    else if (wantMissiles && build->unitType == s.antiAirTower)
+                    {
+                        missiles.push_back(build->position);
+                    }
+                }
+            }
+        }
+        if (towers.empty())
+        {
+            return std::nullopt;
+        }
+
+        SimScalar toothWidth = 32_ss;
+        if (teethDef != nullptr)
+        {
+            auto [footprintX, footprintZ] = sim.getFootprintXZ(teethDef->movementCollisionInfo);
+            toothWidth = SimScalar(static_cast<float>(std::max(footprintX, footprintZ))) * MapTerrain::HeightTileWidthInWorldUnits;
+        }
+        const auto toothTaken = toothWidth / 2_ss;
+
+        for (const auto& [towerId, tower] : towers)
+        {
+            // The approach is the way the enemy is, from this tower; before
+            // anyone has seen their base, it is straight out from ours.
+            auto towards = bb.enemyBasePosition
+                ? SimVector(bb.enemyBasePosition->x - tower.x, 0_ss, bb.enemyBasePosition->z - tower.z)
+                : SimVector(tower.x - bb.baseAnchor->x, 0_ss, tower.z - bb.baseAnchor->z);
+            if (towards.x == 0_ss && towards.z == 0_ss)
+            {
+                continue;
+            }
+            towards = towards.normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+            const SimVector across(-towards.z, 0_ss, towards.x);
+
+            if (teethDef != nullptr)
+            {
+                auto mc = sim.getAdHocMovementClass(teethDef->movementCollisionInfo);
+                const auto centre = tower + (towards * profile.fortifyTeethDistance);
+                // From the middle outward -- 0, +1, -1, +2, -2 -- so a line
+                // left half built still stands across the straight approach.
+                for (int i = 0; i < profile.fortifyTeethPerTower; ++i)
+                {
+                    const int step = ((i + 1) / 2) * ((i % 2) == 1 ? 1 : -1);
+                    auto slot = centre + (across * (toothWidth * SimScalar(static_cast<float>(step))));
+                    slot.y = sim.terrain.getHeightAt(slot.x, slot.z);
+                    bool taken = false;
+                    for (const auto& tooth : teeth)
+                    {
+                        if (flatDistance(tooth, slot) < toothTaken)
+                        {
+                            taken = true;
+                            break;
+                        }
+                    }
+                    // Not under a gun either: a frame is born with no hit
+                    // points, and a tooth put down under one is only a loss.
+                    if (taken || siteFailedLately(sim, slot) || siteUnderEnemyGuns(profile, bb, slot))
+                    {
+                        continue;
+                    }
+                    auto rect = sim.computeFootprintRegion(slot, teethDef->movementCollisionInfo);
+                    if (rect.x < 0 || rect.y < 0
+                        || !sim.canBeBuiltAt(mc, teethDef->yardMap, teethDef->yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+                    {
+                        continue;
+                    }
+                    return FortificationPlan{s.dragonsTeeth, slot, towerId};
+                }
+            }
+
+            if (wantMissiles)
+            {
+                bool covered = false;
+                for (const auto& missile : missiles)
+                {
+                    if (flatDistance(missile, tower) <= profile.fortifyMissileCoverRadius)
+                    {
+                        covered = true;
+                        break;
+                    }
+                }
+                if (!covered)
+                {
+                    // Behind the tower and close to it: the laser takes what
+                    // reaches the teeth, and this reaches past them.
+                    const auto behind = tower - (towards * profile.fortifyMissileDistance);
+                    auto site = chooseBuildSite(sim, profile, bb, s.antiAirTower, behind, rng, [&](const SimVector& p) {
+                        return flatDistance(p, tower) <= profile.fortifyMissileCoverRadius && (p - tower).dot(towards) <= 0_ss;
+                    });
+                    if (site)
+                    {
+                        return FortificationPlan{s.antiAirTower, *site, towerId};
+                    }
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::vector<std::string> BuildManager::buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::optional<FortificationPlan>& fortify, const std::string& builderType, bool enemyNavalSeen) const
     {
         const auto& s = bb.sideUnits;
         // Count what exists or is already going up, so we don't double up.
@@ -1594,6 +1753,14 @@ namespace rwe
         if (!metalShort && total(s.lightLaserTower) < profile.targetDefenceCount && total(s.lab) >= 1)
         {
             want(s.lightLaserTower);
+        }
+        // And each of them fortified: teeth in front, a missile tower
+        // behind. Right after the towers because it is what makes them
+        // hold; a tooth is eleven metal, so this is energy and builder time
+        // more than it is metal. An enemy at the door is no reason to stop.
+        if (fortify && (!metalShort || !bb.enemiesNearBase.empty()))
+        {
+            want(fortify->unitType);
         }
         // Holding what was taken. An expansion is a place, not a mex, and
         // the AI used to defend nothing but the base: measured over thirty
@@ -2904,6 +3071,18 @@ namespace rwe
             outpost = planOutpostDefence(sim, aiOwner, profile, bb);
         }
 
+        // The next piece of a laser tower's fortification, asked only of a
+        // builder that has a button for one: the commander has neither the
+        // teeth nor the missile tower, and walking the base for it would
+        // be wasted.
+        std::optional<FortificationPlan> fortify;
+        if (builderAtBase && profile.fortifyTowers
+            && ((!sideUnits.dragonsTeeth.empty() && bb.buildTree.canBuild(builder.unitType, sideUnits.dragonsTeeth))
+                || (!sideUnits.antiAirTower.empty() && bb.buildTree.canBuild(builder.unitType, sideUnits.antiAirTower))))
+        {
+            fortify = planFortification(sim, aiOwner, profile, bb, rng);
+        }
+
         // An extractor upgrade in hand; see ExtractorUpgrade. Given up if it
         // has run too long or its builder is gone, and otherwise carried on
         // by the builder that began it, ahead of anything the plan might
@@ -2954,7 +3133,7 @@ namespace rwe
         const auto builderMc = sim.getAdHocMovementClass(builderDef.movementCollisionInfo);
         const bool builderIsShip = builderDef.isMobile && !builderDef.canFly && builderMc.minWaterDepth > 0;
         const bool builderAfloat = profile.navalBuildersPlanForBase && builderIsShip;
-        for (const auto& next : buildPriorities(profile, bb, builderAtBase || builderAfloat, outpost, builder.unitType, enemyNavalSeen))
+        for (const auto& next : buildPriorities(profile, bb, builderAtBase || builderAfloat, outpost, fortify, builder.unitType, enemyNavalSeen))
         {
             auto nextDefIt = sim.unitDefinitions.find(next);
             if (nextDefIt == sim.unitDefinitions.end())
@@ -3042,6 +3221,9 @@ namespace rwe
             // so the value gate after the site search knows how many
             // extractors it is being asked to justify a tower for.
             bool isOutpostTower = false;
+            // And when it is a laser tower's fortification, which that gate
+            // does not ask about: it is part of a tower already judged worth it.
+            bool isFortification = false;
             // A moho extractor stands on a metal patch exactly as the
             // level-one one does, and must go through the same search: the
             // ordinary site chooser deliberately refuses a patch, so a moho
@@ -3309,6 +3491,13 @@ namespace rwe
                     }
                 }
             }
+            else if (fortify && next == fortify->unitType)
+            {
+                site = fortify->site;
+                isFortification = true;
+                LOG_INFO << "AI build: unit " << builderId.value << " fortifies tower " << fortify->tower.value << " with " << next << " at "
+                         << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value);
+            }
             else if (next == sideUnits.lightLaserTower && outpost && (outpost->raided || countOf(bb.ownedTotalCounts, next) >= profile.targetDefenceCount))
             {
                 // The outpost tower, at the cluster it is to cover. The
@@ -3477,7 +3666,7 @@ namespace rwe
                     || (!sideUnits.heavyLaserTower.empty() && next == sideUnits.heavyLaserTower)
                     || (!sideUnits.heavyPlasmaTower.empty() && next == sideUnits.heavyPlasmaTower);
                 bool urgent = (isOutpostTower && outpost && outpost->raided) || !bb.enemiesNearBase.empty();
-                if (isTowerType && !urgent
+                if (isTowerType && !urgent && !isFortification
                     && !towerCostJustified(profile, bb, nextDefIt->second, (isOutpostTower && outpost) ? outpost->extractors : 0))
                 {
                     LOG_DEBUG << "AI build: " << next << " at " << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value)

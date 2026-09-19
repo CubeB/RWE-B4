@@ -168,6 +168,34 @@ namespace rwe
             const AiTuningProfile& profile,
             const AiBlackboard& bb) const;
 
+        /** The next piece of a laser tower's fortification, and where it goes. */
+        struct FortificationPlan
+        {
+            std::string unitType;
+            SimVector site;
+            UnitId tower;
+        };
+
+        /**
+         * What a finished laser tower of ours still lacks of its
+         * fortification (AiTuningProfile::fortifyTowers): the first tooth of
+         * its line not yet up, going up or ordered, from the middle out, and
+         * then a missile tower behind it if none covers it. Towers are
+         * walked in id order, so the oldest is finished first, and the
+         * teeth sites are exact rather than searched for, because a line is
+         * only a line if its teeth touch. A tooth site the ground will not
+         * take is passed over rather than moved.
+         *
+         * Draws on the RNG only for the missile tower's site, and only when
+         * the knob is on, so with it off nothing here changes a game.
+         */
+        std::optional<FortificationPlan> planFortification(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            const AiTuningProfile& profile,
+            const AiBlackboard& bb,
+            std::minstd_rand& rng) const;
+
         /**
          * `accept`, when set, is asked about every candidate before the ring
          * walk counts it -- which is the whole point of passing it down
@@ -421,7 +449,7 @@ namespace rwe
          * `builderType` actually has a button for. Every rule reads as a need
          * of the base; the filter is what turns that into this builder's job.
          */
-        std::vector<std::string> buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::string& builderType, bool enemyNavalSeen) const;
+        std::vector<std::string> buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::optional<FortificationPlan>& fortify, const std::string& builderType, bool enemyNavalSeen) const;
 
         void planFactories(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const;
     };

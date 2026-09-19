@@ -2388,6 +2388,115 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a laser tower is fortified: teeth across the approach, a missile tower behind", "[ai]")
+    {
+        // A base built out as far as its own two towers, the commander
+        // walking away so the construction kbot is the only builder the
+        // planner has, and the enemy's lab in sight to the east so the
+        // approach has a direction. The shipped geometry is what the
+        // profile holds; the test world's numbers only have to leave room.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.unitDefinitions["ARMDRAG"] = makeDef(false, false, false, "", 10u);
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(commanderId).addOrder(MoveOrder(SimVector(-400_ss, 0_ss, 400_ss)));
+        auto kbotId = addUnit(sim, "ARMCK", ai, SimVector(-60_ss, 0_ss, 60_ss), script);
+        for (int i = 0; i < 4; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(-200.0f + i * 40.0f), 0_ss, 150_ss), script);
+        }
+        for (int i = 0; i < 3; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(-200_ss, 0_ss, SimScalar(-40.0f + i * 40.0f)), script);
+        }
+        addUnit(sim, "ARMLAB", ai, SimVector(0_ss, 0_ss, 200_ss), script);
+        addUnit(sim, "ARMVP", ai, SimVector(-120_ss, 0_ss, 220_ss), script);
+        addUnit(sim, "ARMRAD", ai, SimVector(-100_ss, 0_ss, 100_ss), script);
+        const SimVector tower(100_ss, 0_ss, -100_ss);
+        auto towerId = addUnit(sim, "ARMLLT", ai, tower, script);
+        addUnit(sim, "ARMLLT", ai, SimVector(-100_ss, 0_ss, -100_ss), script);
+        addUnit(sim, "ARMLAB", human, SimVector(450_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.cheatModeOmniscient = true;
+        profile.fortifyTowers = true;
+        auto tree = makeBuildTree();
+        tree.buildableBy["ARMCK"].insert("ARMDRAG");
+
+        // The way from the first tower to the enemy's base, flat.
+        auto towardsEnemy = SimVector(450_ss - tower.x, 0_ss, 0_ss - tower.z).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+
+        SECTION("the first tooth goes across the approach, in front of the first tower")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, tree);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(controller.getBlackboard().enemyBasePosition.has_value());
+
+            BuildManager planner;
+            std::minstd_rand rng(42u);
+            auto plan = planner.planFortification(sim, ai, profile, controller.getBlackboard(), rng);
+            REQUIRE(plan.has_value());
+            REQUIRE(plan->unitType == "ARMDRAG");
+            REQUIRE(plan->tower == towerId);
+            // The middle of the line, profile.fortifyTeethDistance out along
+            // the approach: inside a tower's reach, outside a raider's.
+            auto out = (plan->site - tower).dot(towardsEnemy);
+            REQUIRE(out > profile.fortifyTeethDistance - 20_ss);
+            REQUIRE(out < profile.fortifyTeethDistance + 20_ss);
+            REQUIRE(flatDistanceBetween(plan->site, tower) < profile.fortifyTeethDistance + 20_ss);
+
+            // And the construction kbot, which has the button, is sent to it.
+            auto orders = ordersFor<BuildOrder>(commands, kbotId);
+            REQUIRE(std::any_of(orders.begin(), orders.end(), [](const BuildOrder& o) { return o.unitType == "ARMDRAG"; }));
+        }
+
+        SECTION("a full line wants a missile tower behind it")
+        {
+            BuildManager planner;
+            std::minstd_rand rng(42u);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, tree);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 2, commands);
+
+            // Stand up every tooth the plan asks for, in turn, until it asks
+            // for something else.
+            std::optional<BuildManager::FortificationPlan> plan;
+            for (int i = 0; i < profile.fortifyTeethPerTower + 1; ++i)
+            {
+                plan = planner.planFortification(sim, ai, profile, controller.getBlackboard(), rng);
+                REQUIRE(plan.has_value());
+                if (plan->unitType != "ARMDRAG")
+                {
+                    break;
+                }
+                addUnit(sim, "ARMDRAG", ai, plan->site, script);
+            }
+            REQUIRE(plan->unitType == "ARMRL");
+            REQUIRE(plan->tower == towerId);
+            REQUIRE((plan->site - tower).dot(towardsEnemy) <= 0_ss);
+            REQUIRE(flatDistanceBetween(plan->site, tower) <= profile.fortifyMissileCoverRadius);
+        }
+
+        SECTION("off, nothing is fortified")
+        {
+            profile.fortifyTowers = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, tree);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            BuildManager planner;
+            std::minstd_rand rng(42u);
+            REQUIRE_FALSE(planner.planFortification(sim, ai, profile, controller.getBlackboard(), rng).has_value());
+            auto orders = ordersFor<BuildOrder>(commands, kbotId);
+            REQUIRE(std::none_of(orders.begin(), orders.end(), [](const BuildOrder& o) { return o.unitType == "ARMDRAG"; }));
+        }
+    }
+
     TEST_CASE("a tower faces where losses actually came from, not the enemy's unseen base", "[ai]")
     {
         // threatDirection falls back to the world origin when no enemy base

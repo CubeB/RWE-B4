@@ -1156,6 +1156,35 @@ namespace rwe
         int vehicleTankShare{1};
         int vehicleMissileTruckShare{0};
         int vehicleMediumTankShare{0};
+
+        /**
+         * Fortify each finished light laser tower the way a CORE player
+         * holds off an early Peewee and Flash rush: a line of dragon's teeth
+         * across the approach in front of it, and a missile tower behind it.
+         *
+         * The geometry is the shipped numbers. The Peewee's and the Flash's
+         * guns reach 180, a light laser tower 300 and a missile tower 700,
+         * so a raider held up at a line 220 in front of the tower is inside
+         * the tower's reach and the tower is outside the raider's. The
+         * missile tower (Pulverizer, Defender) fires at the ground as well
+         * as the air, which is what makes it worth putting behind the
+         * laser rather than in the middle of the base.
+         *
+         * Off by default until it is measured: the death columns in the
+         * arena events file say CORE loses its extractors a quarter of the
+         * way from its own base, which is the ground this covers.
+         */
+        bool fortifyTowers{false};
+        /** How many teeth in a tower's line, laid from the middle outward. */
+        int fortifyTeethPerTower{5};
+        /** How far in front of the tower the line runs. */
+        SimScalar fortifyTeethDistance{220_ss};
+        /** Whether a missile tower goes behind each fortified laser tower. */
+        bool fortifyMissileTower{true};
+        /** How far behind the tower the missile tower is wanted. */
+        SimScalar fortifyMissileDistance{96_ss};
+        /** A missile tower this near a laser tower already covers it. */
+        SimScalar fortifyMissileCoverRadius{200_ss};
         /**
          * Units built during an attack gather at the rally point for the
          * next wave instead of walking to the front one at a time. The

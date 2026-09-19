@@ -42,6 +42,13 @@ namespace rwe
         std::string missileTruck;
         std::string mediumTank;
         std::string artilleryKbot;
+        /**
+         * Dragon's teeth: an 11-metal block with 3600 hit points and no
+         * weapon, on the construction kbot's, vehicle's and aircraft's third
+         * page and not on the commander's. A line of them stops a raider or
+         * makes it walk round, which is the whole of what it is for.
+         */
+        std::string dragonsTeeth;
 
         // Anti-air. Both sides carry a cheap missile tower a constructor can
         // put up (ARMRL "Defender" at 79 metal, CORRL "Pulverizer" at 76) and

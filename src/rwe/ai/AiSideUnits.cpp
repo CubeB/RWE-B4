@@ -49,6 +49,7 @@ namespace rwe
             units.missileTruck = "CORMIST";
             units.mediumTank = "CORRAID";
             units.artilleryKbot = "CORTHUD";
+            units.dragonsTeeth = "CORDRAG";
             units.antiAirTower = "CORRL";
             units.antiAirKbot = "CORCRASH";
             units.advancedLab = "CORALAB";
@@ -108,6 +109,7 @@ namespace rwe
             units.missileTruck = "ARMSAM";
             units.mediumTank = "ARMSTUMP";
             units.artilleryKbot = "ARMHAM";
+            units.dragonsTeeth = "ARMDRAG";
             units.antiAirTower = "ARMRL";
             units.antiAirKbot = "ARMJETH";
             units.advancedLab = "ARMALAB";
@@ -172,6 +174,7 @@ namespace rwe
         check(units.missileTruck);
         check(units.mediumTank);
         check(units.artilleryKbot);
+        check(units.dragonsTeeth);
         check(units.antiAirTower);
         check(units.antiAirKbot);
         check(units.advancedLab);
