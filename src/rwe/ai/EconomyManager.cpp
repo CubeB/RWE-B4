@@ -18,8 +18,6 @@ namespace rwe
         const AiTuningProfile& profile,
         AiBlackboard& bb) const
     {
-        (void)profile;
-
         bb.now = sim.gameTime;
 
         // Reset per-tick state.
@@ -79,6 +77,13 @@ namespace rwe
         // peer.
         std::map<unsigned int, StandingBuilding> standingNow;
 
+        // And everything that is not one: mobile units, finished or not, and
+        // frames of any kind. The same diff, for the losses the building one
+        // cannot see -- a production run killed as fast as it is made leaves
+        // no trace in standingNow at all, because nothing in it ever
+        // finished. See AiBlackboard::StandingUnit.
+        std::map<unsigned int, StandingUnit> standingUnitsNow;
+
         // Frames on the ground, and the frames some builder of ours is
         // attending to; the difference is what has been abandoned. A builder
         // counts as attending from the moment it is ordered there, not from
@@ -121,6 +126,10 @@ namespace rwe
             ++bb.ownedTotalCounts[unit.unitType];
 
             const bool isCompleted = !unit.isBeingBuilt(def);
+            if (!isCompleted || def.isMobile)
+            {
+                standingUnitsNow.emplace(unitId.value, StandingUnit{unit.unitType, unit.position, !isCompleted});
+            }
             if (!isCompleted)
             {
                 if (!def.isMobile)
@@ -354,6 +363,59 @@ namespace rwe
                 bb.recentLosses.end(),
                 [&](const LostBuilding& loss) { return bb.now.value - loss.lostAt.value > LossMemoryTicks; }),
             bb.recentLosses.end());
+
+        // The same diff again for everything that is not a standing
+        // building. Skipped on the first pass for the same reason, and a
+        // frame that finished is not a loss: an immobile one moves out of
+        // standingUnits and into standingBuildings on the tick it goes up,
+        // so both maps have to be asked before calling it gone.
+        if (!bb.standingUnits.empty())
+        {
+            for (const auto& [unitId, standing] : bb.standingUnits)
+            {
+                if (standingUnitsNow.count(unitId) != 0 || bb.standingBuildings.count(unitId) != 0)
+                {
+                    continue;
+                }
+                bb.recentUnitLosses.insert(
+                    bb.recentUnitLosses.begin(),
+                    LostUnit{standing.unitType, standing.position, bb.now, standing.underConstruction});
+            }
+            if (bb.recentUnitLosses.size() > MaxRememberedUnitLosses)
+            {
+                bb.recentUnitLosses.resize(MaxRememberedUnitLosses);
+            }
+        }
+        bb.standingUnits = std::move(standingUnitsNow);
+        bb.recentUnitLosses.erase(
+            std::remove_if(
+                bb.recentUnitLosses.begin(),
+                bb.recentUnitLosses.end(),
+                [&](const LostUnit& loss) { return bb.now.value - loss.lostAt.value > UnitLossMemoryTicks; }),
+            bb.recentUnitLosses.end());
+
+        // Which of our factories have been losing hulls where they are born.
+        // Memory only -- whether anything is still there to do it again is
+        // PerceptionManager's half, since it is the pass that knows what we
+        // can see.
+        bb.harassedFactories.clear();
+        auto harassRadiusSquared = profile.productionHarassRadius * profile.productionHarassRadius;
+        for (auto factoryId : bb.factories)
+        {
+            const auto& factoryPosition = sim.getUnitState(factoryId).position;
+            for (const auto& loss : bb.recentUnitLosses)
+            {
+                if (!loss.underConstruction)
+                {
+                    continue;
+                }
+                if (factoryPosition.distanceSquared(loss.position) <= harassRadiusSquared)
+                {
+                    bb.harassedFactories.push_back(factoryId);
+                    break;
+                }
+            }
+        }
 
         bb.armySize = static_cast<int>(bb.combatUnits.size()) - (bb.scoutUnitId ? 1 : 0);
         if (bb.armySize < 0)

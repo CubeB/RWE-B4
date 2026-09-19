@@ -238,6 +238,17 @@ namespace rwe
             return MapTerrain(std::move(heights), 60_ss);
         }
 
+        /**
+         * A blank blackboard for the site-search cases below, which call
+         * chooseBuildSite directly rather than through a controller. It
+         * only has to know of no enemies: the search asks it nothing else.
+         */
+        const AiBlackboard& siteTestBlackboard()
+        {
+            static const AiBlackboard bb{};
+            return bb;
+        }
+
         template <typename Order>
         std::vector<Order> ordersFor(const std::vector<PlayerCommand>& commands, UnitId unit)
         {
@@ -2185,7 +2196,17 @@ namespace rwe
 
             SECTION("with the rule off it walks into them")
             {
+                // Both rules, because there are two now and they ask the
+                // same question of different things.
+                // mexAvoidsEnemyGunsRadius steers the extractor SEARCH to
+                // another patch; noticeProductionHarassment declines any
+                // site at all that has a gun on it, at the point the order
+                // would be issued, which is the backstop for everything
+                // that is not an extractor. Switching off only the first no
+                // longer walks into the guns, because the second still
+                // refuses the order.
                 profile.mexAvoidsEnemyGunsRadius = 0_ss;
+                profile.noticeProductionHarassment = false;
                 AiPlayerController controller(ai, profile, 42u, MapIntel{});
                 std::vector<PlayerCommand> commands;
                 runTicks(sim, controller, 31, commands);
@@ -3047,7 +3068,7 @@ namespace rwe
 
         BuildManager buildManager;
         std::minstd_rand rng(1u);
-        auto site = buildManager.chooseBuildSite(sim, profile, "SOLAR", anchor, rng, farSideOnly);
+        auto site = buildManager.chooseBuildSite(sim, profile, siteTestBlackboard(), "SOLAR", anchor, rng, farSideOnly);
 
         REQUIRE(site.has_value());
         REQUIRE(site->x < -300_ss);
@@ -3078,7 +3099,7 @@ namespace rwe
         // Where it goes with nothing in the way.
         BuildManager clean;
         std::minstd_rand rngA(1u);
-        auto firstSite = clean.chooseBuildSite(sim, profile, "SOLAR", anchor, rngA);
+        auto firstSite = clean.chooseBuildSite(sim, profile, siteTestBlackboard(), "SOLAR", anchor, rngA);
         REQUIRE(firstSite.has_value());
         auto firstRect = sim.computeFootprintRegion(*firstSite, solarDef.movementCollisionInfo);
 
@@ -3090,7 +3111,7 @@ namespace rwe
 
         BuildManager retry;
         std::minstd_rand rngB(1u);
-        auto secondSite = retry.chooseBuildSite(sim, profile, "SOLAR", anchor, rngB);
+        auto secondSite = retry.chooseBuildSite(sim, profile, siteTestBlackboard(), "SOLAR", anchor, rngB);
         REQUIRE(secondSite.has_value());
         auto secondRect = sim.computeFootprintRegion(*secondSite, solarDef.movementCollisionInfo);
 
@@ -3134,7 +3155,7 @@ namespace rwe
         std::minstd_rand rng(1u);
         BuildManager buildManager;
 
-        auto site = buildManager.chooseBuildSite(sim, profile, "SOLAR", anchor, rng);
+        auto site = buildManager.chooseBuildSite(sim, profile, siteTestBlackboard(), "SOLAR", anchor, rng);
         REQUIRE(site.has_value());
 
         auto rect = sim.computeFootprintRegion(*site, solarDef.movementCollisionInfo);
@@ -3226,7 +3247,7 @@ namespace rwe
             // documented way to switch the behaviour off.
             profile.buildSiteFallbackRadius = profile.maxMexSearchRadius;
 
-            REQUIRE_FALSE(buildManager.chooseBuildSite(sim, profile, "LAB", anchor, rng).has_value());
+            REQUIRE_FALSE(buildManager.chooseBuildSite(sim, profile, siteTestBlackboard(), "LAB", anchor, rng).has_value());
         }
 
         SECTION("with it on, the far patch is found")
@@ -3234,7 +3255,7 @@ namespace rwe
             auto profile = makeDefaultStandardProfile();
             REQUIRE(profile.buildSiteFallbackRadius > profile.maxMexSearchRadius);
 
-            auto site = buildManager.chooseBuildSite(sim, profile, "LAB", anchor, rng);
+            auto site = buildManager.chooseBuildSite(sim, profile, siteTestBlackboard(), "LAB", anchor, rng);
             REQUIRE(site.has_value());
 
             // It really is the far patch, not somewhere the near rings could
@@ -3722,6 +3743,285 @@ namespace rwe
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 31, commands);
             REQUIRE(countQueueCommands(commands, "ARMROY") == 1);
+        }
+    }
+
+    TEST_CASE("naval: a yard whose hulls are shot as they are born stops feeding them in", "[ai]")
+    {
+        // The all-water soft-lock, in miniature. A nanoframe spawns with
+        // zero hit points -- they are trunc(progress * maxdamage) -- so any
+        // damage at all kills it, and one enemy scout ship parked off a
+        // shipyard therefore destroys every hull the yard makes, for the
+        // whole game, at a hundredth of what it costs us. Measured over ten
+        // games on Brain Coral: 1910 quiet deaths, every one a weapon kill,
+        // 1408 of them ARMROY frames killed by a single CORPT. See ROADMAP
+        // Phase 2 and commit 42160d59 for the diagnosis.
+        //
+        // Nothing could notice, which is what made it a soft-lock rather
+        // than a loss: recentLosses is diffed from standingBuildings and so
+        // holds buildings only, so a whole production run could be
+        // destroyed without a word, and enemiesNearBase was measured from
+        // the base anchor rather than from the thing being shot.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        // The base stands on the dry strip in the west and the yard is off
+        // the far corner: 1160 units between the commander and the gun,
+        // against a defendRadius of 900. That gap is the point of the
+        // fixture -- it is what makes the base anchor the wrong place to
+        // measure this from, which is where the old code measured from.
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, -400_ss), script);
+        auto yardId = addUnit(sim, "ARMSY", ai, SimVector(400_ss, 60_ss, 400_ss), script);
+        // Eyes already covered, so the yard's next job is a destroyer.
+        addUnit(sim, "ARMPT", ai, SimVector(360_ss, 60_ss, 400_ss), script);
+        auto harasserId = addUnit(sim, "ARMPT", human, SimVector(440_ss, 60_ss, 380_ss), script);
+
+        // The hull on the slipway. A frame, which is to say no hit points.
+        auto frameId = addUnit(sim, "ARMROY", ai, SimVector(430_ss, 60_ss, 400_ss), script);
+        sim.getUnitState(frameId).buildTimeCompleted = 0;
+        sim.getUnitState(frameId).hitPoints = 0;
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+
+        SECTION("the loss is remembered, the siege is seen, and the queue is left alone")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            const auto& bb = controller.getBlackboard();
+            std::vector<PlayerCommand> commands;
+
+            // The first pass has nothing to diff against, exactly as the
+            // building side does not.
+            runTicks(sim, controller, 2, commands);
+            REQUIRE(bb.standingUnits.count(frameId.value) == 1);
+            REQUIRE(bb.recentUnitLosses.empty());
+
+            sim.getUnitState(frameId).markAsDead();
+            runTicks(sim, controller, 2, commands);
+
+            REQUIRE(bb.recentUnitLosses.size() == 1);
+            REQUIRE(bb.recentUnitLosses.front().unitType == "ARMROY");
+            REQUIRE(bb.recentUnitLosses.front().underConstruction);
+            REQUIRE(bb.harassedFactories == std::vector<UnitId>{yardId});
+            REQUIRE(bb.besiegedFactories == std::vector<UnitId>{yardId});
+
+            // And the gun counts as an enemy at the base although the base
+            // anchor is nowhere near it, which is what lets everything
+            // hanging off enemiesNearBase answer at all.
+            REQUIRE(std::find(bb.enemiesNearBase.begin(), bb.enemiesNearBase.end(), harasserId) != bb.enemiesNearBase.end());
+
+            // Nothing more is handed to the gun. The yard is not told to
+            // stop -- it is simply not topped up while the gun is there.
+            std::vector<PlayerCommand> later;
+            runTicks(sim, controller, 90, later);
+            REQUIRE(countQueueCommands(later, "ARMROY") == 0);
+            REQUIRE(countQueueCommands(later, "ARMPT") == 0);
+        }
+
+        SECTION("with the knob off, the old behaviour exactly")
+        {
+            profile.noticeProductionHarassment = false;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            const auto& bb = controller.getBlackboard();
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 2, commands);
+            sim.getUnitState(frameId).markAsDead();
+            runTicks(sim, controller, 2, commands);
+
+            // The memory itself is unconditional -- it costs a map diff and
+            // nothing reads it unless the knob is on -- but nothing is done
+            // with it, and a gun 1160 units from the anchor is invisible to
+            // every defensive rule the AI has.
+            REQUIRE(bb.recentUnitLosses.size() == 1);
+            REQUIRE(bb.besiegedFactories.empty());
+            REQUIRE(bb.enemiesNearBase.empty());
+
+            std::vector<PlayerCommand> later;
+            runTicks(sim, controller, 90, later);
+            REQUIRE(countQueueCommands(later, "ARMROY") >= 1);
+        }
+
+    }
+
+    TEST_CASE("naval: a yard goes back to work once the gun has gone", "[ai]")
+    {
+        // The pause is not a shutdown. The memory of the frames lost there
+        // lasts UnitLossMemoryTicks, but the live half -- an armed enemy
+        // actually sitting on the place -- does not wait for that to age
+        // out, so the yard resumes the moment the gun dies or leaves.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMSY", ai, SimVector(0_ss, 60_ss, 0_ss), script);
+        addUnit(sim, "ARMPT", ai, SimVector(-60_ss, 60_ss, 0_ss), script);
+        auto harasserId = addUnit(sim, "ARMPT", human, SimVector(60_ss, 60_ss, 0_ss), script);
+        auto frameId = addUnit(sim, "ARMROY", ai, SimVector(30_ss, 60_ss, 0_ss), script);
+        sim.getUnitState(frameId).buildTimeCompleted = 0;
+        sim.getUnitState(frameId).hitPoints = 0;
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+
+        AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+        const auto& bb = controller.getBlackboard();
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 2, commands);
+        sim.getUnitState(frameId).markAsDead();
+        runTicks(sim, controller, 2, commands);
+        REQUIRE(bb.besiegedFactories.size() == 1);
+
+        sim.getUnitState(harasserId).markAsDead();
+        std::vector<PlayerCommand> after;
+        runTicks(sim, controller, 90, after);
+        REQUIRE(bb.besiegedFactories.empty());
+        // The memory is still there; it is the live half that cleared.
+        REQUIRE(!bb.recentUnitLosses.empty());
+        REQUIRE(countQueueCommands(after, "ARMROY") >= 1);
+    }
+
+    TEST_CASE("the commander answers a besieged production site, but only when asked", "[ai]")
+    {
+        // The third candidate from the diagnosis, and the one that is off
+        // by default: the commander is the base's whole build capacity and
+        // the game's loss condition, and on the map this is for it is as
+        // likely to end up walking at water it cannot cross as at the gun.
+        // It fires only with nothing else to send -- which on a besieged
+        // water map is the usual state of affairs, since everything that
+        // would otherwise go is dying as a frame before it can move.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMSY", ai, SimVector(-250_ss, 60_ss, 0_ss), script);
+        auto harasserId = addUnit(sim, "ARMPT", human, SimVector(-200_ss, 60_ss, 0_ss), script);
+        auto frameId = addUnit(sim, "ARMROY", ai, SimVector(-260_ss, 60_ss, 0_ss), script);
+        sim.getUnitState(frameId).buildTimeCompleted = 0;
+        sim.getUnitState(frameId).hitPoints = 0;
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+        // There is a second way to send the commander at an intruder --
+        // commanderDefendsAloneMaxIntruders, which is on by default -- and the
+        // harasser here answers it too. Off, so the sortie this test is about
+        // is the only one that can appear.
+        profile.commanderDefendsAloneMaxIntruders = 0;
+
+        SECTION("asked")
+        {
+            profile.commanderAnswersHarassment = true;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 2, commands);
+            sim.getUnitState(frameId).markAsDead();
+            runTicks(sim, controller, 60, commands);
+            REQUIRE(controller.getBlackboard().besiegedFactories.size() == 1);
+            auto attacks = ordersFor<AttackOrder>(commands, commanderId);
+            REQUIRE(!attacks.empty());
+            REQUIRE(std::get<UnitId>(attacks.front().target) == harasserId);
+        }
+
+        SECTION("not asked")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 2, commands);
+            sim.getUnitState(frameId).markAsDead();
+            runTicks(sim, controller, 60, commands);
+            REQUIRE(ordersFor<AttackOrder>(commands, commanderId).empty());
+        }
+    }
+
+    TEST_CASE("nothing at all is built under an enemy gun, not just an extractor", "[ai]")
+    {
+        // What the all-water games actually lost, which is not what the
+        // shipyard loses: two commanders replacing tidal generators under
+        // an enemy scout ship, 286 and 232 units in one game. The extractor
+        // search has refused a patch under guns since the Crystal Maze
+        // measurement, but a frame has no hit points whatever it is going
+        // to become, so the rule was never really about extractors.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        auto gunId = addUnit(sim, "ARMPT", human, SimVector(-330_ss, 60_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+        // Off, so that only the general rule can rule a site out: an
+        // extractor refused by the extractor search would prove nothing
+        // about anything else.
+        profile.mexAvoidsEnemyGunsRadius = 0_ss;
+        // The gun is an intruder, and commanderDefendsAloneMaxIntruders is on
+        // by default, so the commander would be sent at it instead of
+        // building. What this test measures is where the building goes.
+        profile.commanderDefendsAloneMaxIntruders = 0;
+        // And the gun is inside commanderDangerRadius, so the commander would
+        // run rather than build; this is the same switch the tests above use.
+        profile.commanderDangerRadius = 0_ss;
+        // builderAvoidsContestedRadius refuses any site near an armed enemy
+        // too, which would leave the control below with nothing to find.
+        profile.builderAvoidsContestedRadius = 0_ss;
+
+        const auto& gunPosition = sim.getUnitState(gunId).position;
+        auto radiusSquared = profile.productionHarassRadius * profile.productionHarassRadius;
+
+        SECTION("every site the planner issues is out of its reach")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 200, commands);
+            auto orders = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!orders.empty());
+            for (const auto& order : orders)
+            {
+                REQUIRE(gunPosition.distanceSquared(order.position) > radiusSquared);
+            }
+        }
+
+        SECTION("and with the knob off, at least one is not")
+        {
+            profile.noticeProductionHarassment = false;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 200, commands);
+            auto orders = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!orders.empty());
+            auto underGuns = std::count_if(orders.begin(), orders.end(), [&](const BuildOrder& o) {
+                return gunPosition.distanceSquared(o.position) <= radiusSquared;
+            });
+            REQUIRE(underGuns > 0);
         }
     }
 

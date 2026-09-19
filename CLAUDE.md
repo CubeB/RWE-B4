@@ -91,6 +91,187 @@ Reaching for a screenshot is usually not the fastest way to settle a question, a
 - **`battle_test`** — a standing battle. Spawns a fixed number of units for each of two players at opposite start positions, walks them at each other, and replaces them as they die, with a live unit-count slider in the F10 debug panel so the fight can be pushed until something gives without restarting. It goes through `GameLaunch::run`, so it is the same renderer, simulation and scene loop as `rwe.exe`, which is the only way its numbers mean anything. `battle_test --map "Coast To Coast" --units 200 --unit-type CORAK`; `--list-maps` and `--list-units` say what is available. Writes `battle_test.log` in the local data directory, flushed a line at a time, because these runs normally end under `taskkill`.
 - **`ui_probe`** — builds the real UI panels from the real game data headlessly, dumps every gadget's hitbox, and delivers clicks the way the scenes deliver them, printing which gadget takes each event and what message comes out. It diagnoses layout and dispatch faults without a window.
 - **`solar_probe <file.3do>`** — replays the engine's own shading pipeline over a model and prints the shade row each polygon would get. This is how the vertex-normal convention was settled, and it takes one command where a play-test took a round trip.
+- **`tad_probe --file <demo.ted>`** — reads Total Annihilation demo recordings (`.tad`/`.ted`) and prints the header, players, extra sectors, tick range and a histogram of subpacket codes, plus a count of anything it could not account for. `--dir` walks a corpus and exits non-zero if any file desynchronises, which is what makes it a check rather than a listing; `--dump-unknown` explains what it could not size. Offline — no SDL, no GL, no VFS. Demos are not checked in; `tools/fetch-demos.py` fetches a small corpus, and read the warning at the top of it before running it.
+- **`tad_episodes`** — mines the same corpus for short bounded episodes with real
+  numbers in them, currently the build-timing ones: `0x09` nanoframe to `0x12`
+  finish, with the filters that make a duration mean anything (speed changes,
+  damage to the frame or its builder, and a stalled owner all disqualify a
+  window, and every rejection is counted rather than dropped). Deliberately not a
+  `tad_probe` mode — that tool's contract is "non-zero if anything walked out of
+  step" and an extractor exits non-zero for different reasons. `--emit-json`
+  writes the episodes; the console summary prints the **modal** duration per unit
+  type, which is the number to consume, since assists shorten a build and missed
+  micro-stalls lengthen it. `--units <dir>` names each type: a `0x09` carries a
+  1-based index into the sorted `units\*.FBI` names of the merged VFS, so point
+  it at the data set the demo was recorded on and the episodes stop being
+  anonymous. It warns if the demo's own type count disagrees with the directory.
+
+  Other modes. `--emit-resources` dumps every `0x28` resource sample as
+  JSON, collapsed: a sender emits `numPlayers - 1` **identical** copies of one
+  record on one tick, one unicast per peer, so a burst carries one state and it
+  is the sender's own. The dump keeps the burst length beside each sample and
+  counts any burst whose copies disagreed, which is the number that would
+  overturn that reading. `--emit-cpp` writes the checked-in fixture,
+  `src/rwe/sim/tad_economy_episodes.h` — storage episodes for the
+  `[economy][corpus]` tests, with each unit type's own FBI values transcribed
+  inline. It needs `--units`, emits in a deterministic order with no timestamp
+  and no path, and reads the old file back so a regeneration prints `unchanged`
+  or `CHANGED`. Do not hand-edit the header; regenerate it. See
+  `docs/TA-DEMOS.md`, "What an episode looks like".
+
+  `--cells` prints the (builder type, product type) **build-timing** cells --
+  the same grouping and the same float32 completion model
+  `tools/tad-buildtime.py` scores, ported, and checked against it cell for cell
+  -- and `--emit-build-cpp` writes them as the second fixture,
+  `src/rwe/sim/tad_build_episodes.h`, for the `[build][corpus]` tests. Unlike
+  the storage pass this one is corpus-wide, because a cell pools across games,
+  which is also why a demo whose own type count disagrees with `--units` is
+  dropped from it outright rather than merely warned about. Immobile and
+  airborne builders become episodes, each scored against its own model — a
+  construction aircraft's first tick pays two increments (`docs/TOTALA-EXE.md`
+  §110), which RWE reproduces, so its cells carry the ordinary
+  `expectedDurationDelta` and nothing of their own. A ground mobile builder
+  never becomes one. `--max-cells` caps how many, keeping every cell whose
+  `BuildTime` divides exactly by the rate, because those are the ones that carry
+  a non-zero delta, and every airborne cell, because there are three.
+
+  `--emit-shots` dumps every `0x0d`, `0x0b` and `0x0c` as **JSON Lines** (about
+  1.5 million records, 320 MB, coordinates exact), shooters and victims already
+  named, so the weapon-event pairing can be argued over the data before any
+  miner is written. What it established: a `0x0b` is sent by the **attacker's**
+  owner and never the victim's, 797,783 to 0, so a shot and its damage share one
+  clock; and a round stops on the **victim's footprint**, not at its aim point,
+  so the flight time is the first step that puts it in one of the victim's
+  squares. See `docs/TA-DEMOS.md`,
+  "Pairing a `0x0d` to the `0x0b` it caused", for the filters, the rejection
+  counts and the classes that need models of their own.
+
+  `--weapon-cells` prints the (shooter type, weapon slot) **flight-time** cells
+  — the same filters and the same four models `tools/tad-weapontime.py` scores,
+  ported and checked against it cell for cell — and `--emit-weapon-cpp` writes
+  them as the third fixture, `src/rwe/sim/tad_weapon_episodes.h`, for the
+  `[weapon][corpus]` tests. Four classes become episodes: rounds that fly at a
+  constant speed, rounds with a motor (flown by a port of the engine's own
+  `updateSelfPropelledProjectile` and scored only over victims that could not
+  outrun a step of the round), rounds that are **lobbed**, stepped
+  horizontally at `weaponvelocity / 30 * cos(pitch)` off the flat root of the
+  engine's own firing solution and scored only where the weapon's own aim cone
+  could not have moved the answer, and one carrying an **inert `cruise`** — the
+  clause is read only through an aim point a round that cannot steer never asks
+  for, so such a weapon is a motor round wearing the flag, and one that *can*
+  steer is named "cruise steering" and left unscored. Only the cells a model
+  predicts -- all 40 of them; a cell that does not is skipped with a printed
+  reason rather than checked in with its offset, the same rule that keeps
+  airborne builders out of the build fixture, and fifteen of the seventeen
+  ballistic cells are skipped that way.
+  Needs `--units`, which also reads the data set's `weapon*/*.tdf` through the
+  engine's own `parseWeaponTdf`. `--window` and `--min-pairings` are the script's
+  two knobs and mean the same things.
+
+  `--weapon-slots` is the evidence that a `0x0d`'s trailing byte is the
+  shooter's **weapon slot**, a 0-based index into its FBI's
+  `Weapon1`/`Weapon2`/`Weapon3`: it checks every slot each type was seen firing
+  against the slots that type's FBI fills, and prints the naive
+  `slot < weapon count` tally beside it, and a third for naming a shooter by its
+  id's first build rather than its most recent. The three read 112, **14** and
+  453 over the corpus: the first gap is the standard TA convention of putting
+  the anti-air weapon in slot 3 and leaving slot 2 empty, which is the argument
+  that the byte is a slot at all, and the second is what unit-id recycling costs
+  anything that names a unit from its id. The build cells scope the same way
+  now; `docs/TA-DEMOS.md`, the `0x0d` section, says what that bought.
+
+  `--stall-episodes` prints the **stall** report -- where every sender's settles
+  fall, how many late factory builds are late by whole seconds, and the scored
+  episodes, in which a factory refused into its next job by a stalled settle is
+  late by exactly `30 - start % 30` plus whole seconds -- line for line with
+  `tools/tad-stalltime.py`, and `--emit-stall-cpp` writes the fourth fixture,
+  `src/rwe/sim/tad_stall_episodes.h`, for `[economy][corpus]` cases that replay
+  each episode through `GameSimulation::tick`. `docs/TOTALA-EXE.md` §111 is the
+  settle it rests on.
+
+  `--miss-buckets` answers why 53,706 of the paired shots drew **no** damage in
+  the window, which was what blocked the hit/miss half of the weapon oracle. It
+  sorts them into ten named buckets in a priority order -- a quarter are rounds
+  whose victim died before they arrived, which is `0x49B090` finding the
+  square's unit slot empty -- prints the no-damage rate down the same drift axis
+  the flight-time work uses, and then holds what is left to the `0x2c` health
+  stream, with the same bracket over shots *known* to have drawn damage as the
+  control that says how often the instrument misses one. Absence in `0x0b` is
+  still unknown rather than zero; the point of the pass is that it no longer has
+  to be. `docs/TA-DEMOS.md`, "Why 53,706 shots drew no damage".
+
+  `--unit-state` decodes every `0x2c` and holds the decode to the rest of the
+  stream -- a `0x09`'s type and position, `MaxVelocity`, a building staying put,
+  where a `0x0d` aims -- and exits non-zero if one fails to decode;
+  `--emit-unit-state` dumps the result as JSON Lines, with `--with-updates` for
+  the per-tick path and goal half. A `0x2c` is a bit stream: every tick, the
+  path or goal of each unit that changed it, and one unit's full state
+  round-robin, so a position is sent once every `maxUnits` ticks and there is no
+  kinematic corpus in it. `docs/TA-DEMOS.md`, "`0x2c`, unit state".
+- **`tools/tad-buildtime.py`** — scores the corpus's modal build durations
+  against TA's own completion arithmetic, which is a **float32** fraction and
+  not `ceil(BuildTime / (WorkerTime/30))`; the difference is a tick, and where
+  `BuildTime` divides exactly it is the tick that tells the two apart. Exits
+  non-zero if a scored pair stops agreeing, so it is a check rather than a
+  listing — but also when there is *nothing* to score, so read the message and
+  not just the status. The single ProTA demo hits that: it has one scoreable
+  immobile pair and needs `--min-builds 3`. Builders split three ways and the split matters: **immobile** ones
+  are scored cell by cell, **airborne** ones are scored pair by pair against
+  two increments on the nanoframe's own tick, because a construction aircraft's
+  mission runs its build step twice on that tick (`docs/TOTALA-EXE.md` §110), and
+  **ground mobile** ones are never scored at all, because they pay their own COB
+  deploy before `INBUILDSTANCE` and that belongs to the mod rather than the
+  engine. `--overheads` lists those. `docs/TOTALA-EXE.md` §23 and
+  `docs/TA-DEMOS.md`. The same arithmetic, ported, is what feeds
+  `--emit-build-cpp`; the two must keep agreeing, and the script is the
+  reference.
+- **`tools/tad-weapontime.py`** — the reference for the weapon oracle, the same
+  role `tad-buildtime.py` plays for build timing. It pairs each `0x0d` to the
+  `0x0b` it caused (nothing in the stream links them, so the filters are the
+  work) and scores the result. A round detonates the first tick its move puts
+  it in a map square the victim occupies (`0x49B090`), so the flight time is the
+  first step that lands the round, flown along its aim line, in the victim's
+  **footprint** -- 792 of 810 constant-speed pairings against still victims,
+  where the old aim-point model `ceil(distance / (weaponvelocity / 30)) - 1` took
+  65% and its `-1` was really the footprint. How far a step goes is the class:
+  `weaponvelocity / 30` for a constant-speed round, for one with a **motor**
+  a tick-by-tick replay out of `startvelocity`, `weaponacceleration` and the
+  burn -- a port of the engine's own `createProjectileFromWeapon` and
+  `updateSelfPropelledProjectile` -- and for a **shell** that same
+  `weaponvelocity / 30` times the cosine of the angle the gun elevated to, which
+  is the flat root of the solution at `0x49A890` and the only way gravity
+  reaches a flight time at all. All 40 scored cells land on it. The missile
+  class is scored only over the pairings whose victim could not have outrun
+  **one step** of the round, because a `0x0d` records where the shot was
+  *aimed*; `--drift` prints the measurement that bound comes from, which is one
+  falling curve both classes sit on. The shell class takes that bound and a
+  second one of its own -- the original jitters every turret shot's pitch, which
+  for a shell is a *range* error rather than a speed error -- and `--cone` prints
+  the split it makes and the cells it costs. `--classes` lists
+  the three it deliberately does not score — `vlaunch`, `waterweapon` and
+  `burst` — and `--unmodelled` is the measurement behind each, which is what
+  makes those exclusions results rather than sentences: a vertical launch spends
+  about 190 ticks in the air and arrives with a twenty-tick spread and no mode
+  even over victims that cannot move at all; no torpedo cell keeps `--min-n`
+  pairings after the drift bound, whatever sea level was, though the one fired
+  from below the surface reads the best share in the corpus; and a burst
+  weapon's deltas come off a **comb**, because one `0x0d` stands for several
+  rounds. `--replay` prints the instrument behind all three — the whole of
+  `updateSelfPropelledProjectile`, which scores nothing and gives the
+  step-length model's own answer on every pairing it is run over, and which is
+  what caught `cruise` being excluded for a clause its one cell cannot reach.
+  `--footprint` prints the evidence for the stop.
+  Exits non-zero if a scored cell moves. `docs/TA-DEMOS.md`, "Pairing a
+  `0x0d` to the `0x0b` it caused", "Where a round stops", "A shell: the flat
+  root, and the cosine that falls out of it" and "The three classes no model
+  describes".
+- **`tools/tad-stalltime.py`** — the reference for the stall oracle. It imports
+  `tad-buildtime.py`'s model rather than copying it, uses the `0x28` stream
+  only as the witness that a settle stalled, and scores factory builds whose
+  lateness a stall should fix to a residue. Exits non-zero on a miss, on a
+  named exception moving, or on nothing to score. It needs the episodes with
+  `--all` and `--emit-resources` beside them; `docs/TA-DEMOS.md`, "What a
+  stalled settle costs a factory".
 - **`tools/visual-test.ps1`** — when only the renderer will do. It launches `build-release/rwe.exe`, finds the window, and then *drives* it: real clicks at client-relative coordinates, screenshots cropped and nearest-neighbour magnified around the thing under test. `-phase build|air|ship` are the scripted sequences already written; adding one is a few lines. Prefer this to ad-hoc screenshotting — a scripted click sequence is repeatable and an eyeballed one is not.
 - **`tools/crash-catch.cmd`** runs the Debug build under gdb and writes a backtrace to `crash.txt`. Play normally, reproduce the crash, close the window.
 - **Reading an arena run:** `tools/arena-analyse.py <outDir>` turns a run's CSVs, event files and logs into milestones, build orders, a five-minute checkpoint table and efficiency figures (stalled, capped, wasted, idle builders, idle factories) per side, and an aggregate that splits tuned from control; `--brief` for the aggregate alone, `--game 3` for one seed, `--json` to keep the figures. `tools/arena-paired.py <outDir>...` compares each tuned seed with its own control, side by side -- use it, not the arena's tuned/untuned table, whenever `-sideA` and `-sideB` differ, because `-tune` alternates which player is tuned and that table then mixes the knob with the faction. `tools/ai-profile.py <game log>` totals the `RWE_AI_PROFILE=1` summaries per pass and names the heaviest windows. Reach for these before reading a log by eye: the wasted-energy figure that led to `solarOnDemand` is not visible in any one line of any log. Two traps: **`MapIntel::shipyardSites` is every cell a shipyard fits on, hundreds of thousands on a water map** -- anything that walks it belongs behind a memo or a cheap prefilter, never in a per-pass loop -- and **never edit a source file while a `make` is running in either tree**, a background one included: objects compiled from the old header finish after the edit, make believes them current, and the binary has two layouts of one struct. The signature is nonsense incomes in the AI status line, every arena game ending at once, and exit code 0xC0000005; `touch` the header and rebuild both trees.
@@ -106,6 +287,24 @@ The simulation is lockstep: peers exchange commands, not state, and a `GameHash`
 **That cleanup is finished, as of 2026-09-08.** This paragraph used to say ten such draws remained in `GameSimulation.cpp` and `cob.cpp` and two more in `ai/BuildManager.cpp`; audited, there are none left anywhere in the simulation. Every surviving mention of `uniform_int_distribution` under `src/rwe/` is either a comment warning against it (`SimRandom.h`, `GameSimulation.h`, three sites in `UnitBehaviorService.cpp`) or code outside the sim: `GameNetworkService.h`, and four presentation draws in `GameScene.cpp` for particle lifetime, screen shake and jitter. Those four are safe for a second reason worth knowing — `GameScene` draws from its own `effectsRng`, not `simulation.rng`, so rendering cannot advance the simulation's sequence. **Keep it that way:** presentation code that reaches into `simulation.rng` is a desync even if the value is only ever drawn on screen.
 
 **Keep sim state in step across four places.** New state on `UnitState`, `MapFeature`, `GamePlayerInfo` or the simulation itself needs adding to `src/rwe/game/save_util.cpp` (serialization), `src/rwe/sim/GameHash_util.cpp` (the sync hash) and `src/rwe/game/dump_util.cpp` (desync diagnostics) as well as to the struct. The save round-trip test (`src/rwe/sim/saveload.test.cpp`) fails if hashed state is missed, but unhashed state needs the discipline: nothing will tell you.
+
+**A member the hash reads is initialised by the time the object exists.**
+`UnitState`'s constructor names three of its members and leaves every other
+one to its default member initialiser, so a hashed member without one holds
+whatever was in the memory the unit was built in. That is zero while the heap
+is young -- a page fresh from the operating system arrives zeroed -- and stops
+being zero once the process has a history, which is what makes the resulting
+desync intermittent and dependent on what ran before it. `nanoPoint`, the
+nanolathe nozzle's position, was such a member: meaningless until
+`QueryNanoPiece` is first asked, hashed from the moment the unit exists, and
+it failed the replay keyframe test about one run in ten and only after the
+rest of the suite had run. "The factory always sets it before anything reads
+it" is not the property that matters, because the hash reads it first;
+`position` and `owner` were in the same state for the same reason.
+`GameHash_util.test.cpp`'s "a new unit hashes the same wherever in memory it
+was built" builds a unit over storage filled with a byte, twice with
+different bytes, and requires the hashes to agree, which is the general form
+of the rule.
 
 A unit's **order queue is hashed**, position included, so state that lives on
 an order -- capture progress does, because that is where the original keeps it
@@ -164,7 +363,7 @@ Much of the current work is matching the original's behaviour down to the
 arithmetic. Where a behaviour is meant to match TA, it has usually been read out
 of `TotalA.exe` instead of guessed at.
 
-- `docs/TOTALA-EXE.md` — the findings, numbered up to §108 (§83 and §84 do not
+- `docs/TOTALA-EXE.md` — the findings, numbered up to §111 (§83 and §84 do not
   exist, so the count is two short of the last number): the flight
   model, fog of war and line of sight, the damage pipeline, missile flight,
   target selection and eligibility, the economy, the nanolathe and construction
@@ -213,7 +412,12 @@ of `TotalA.exe` instead of guessed at.
   among them (§107), and what holding Space shows -- a strip from the
   bottom with the time, the unit count and the speed, and the players'
   kills and losses at the top right, riding the side panel's own slide
-  (§108). §88 and
+  (§108), and the `0x1a` unit-table packet builder together with the
+  checksum behind it that got away (§109 — included because it *failed*,
+  and the shape of the failure is what stops the next attempt repeating
+  it), and why a construction aircraft finishes a build a tick before a
+  factory would (§110), and what one resource settle does and where every
+  player's falls (§111). §88 and
   §91 are the ones to read first if
   you are about to change something — where RWE **deliberately** differs, so
   those do not get "corrected" back, and what is decoded but not ported.
@@ -252,6 +456,20 @@ of `TotalA.exe` instead of guessed at.
   changes the simulation in exactly one place (the pathfinding budget, raised
   fifty-fold), which RWE is already past. What is left is a handful of v3.1
   interface features, listed there and in the roadmap.
+- `docs/TA-DEMOS.md` — the `.tad`/`.ted` demo format, and why a demo is a stream
+  of *state and effects* rather than of orders: TA is owner-authoritative, not
+  lockstep, so a demo cannot be fed to `GameSimulation` and playback would
+  have to puppet the units directly. What they are good for instead is a
+  conformance corpus — build timings, economy curves and weapon events pulled
+  out as short bounded episodes with real numbers in them — plus the filters
+  that make such an episode mean anything. The container and the three
+  transforms are ported (`src/rwe/io/tad/`) and verified over thirteen real games,
+  so the format sections are no longer the bare transcription they were; the
+  *interpretation* of most subpacket payloads still is, and none of it comes
+  out of `TotalA.exe`. The correction worth knowing about is that `0x20` is 186
+  bytes in the packet stream and 192 in the header's status record — the
+  reference has the second number in the table it walks the first with, which
+  silently swallows nine tenths of the alliance records.
 - `docs/REVERSE-ENGINEERING-PRIORITIES.md` — what is worth reading out of the
   binary next, ranked, with the evidence that each is a real gap and a string
   or offset to pivot on. **The ranked list is empty as of 2026-09-15** -- every

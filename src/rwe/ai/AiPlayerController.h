@@ -94,6 +94,8 @@ namespace rwe
         int ticksSinceReachabilityRebuild{0};
         /** So the air-threat line is logged when it changes rather than every tick. */
         bool loggedAirThreat{false};
+        /** The same, for a production site under siege. */
+        bool loggedProductionSiege{false};
 
         PerceptionManager perception;
         EconomyManager economy;

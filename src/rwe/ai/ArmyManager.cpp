@@ -838,6 +838,65 @@ namespace rwe
         }
     }
 
+    void ArmyManager::answerHarassmentWithCommander(
+        const GameSimulation& sim,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        std::vector<PlayerCommand>& outCommands) const
+    {
+        if (!profile.commanderAnswersHarassment || bb.besiegedFactories.empty() || !bb.commanderUnitId)
+        {
+            return;
+        }
+
+        // Only when there is genuinely nothing else. The commander is the
+        // base's entire build capacity and the game's loss condition, so it
+        // goes at a raider as a last resort rather than as a tactic -- and a
+        // production site under siege is exactly the case where "last
+        // resort" and "usual state of affairs" coincide, because everything
+        // that would otherwise answer is dying as a frame before it can
+        // move.
+        if (!bb.combatUnits.empty() || !bb.navalCombatUnits.empty())
+        {
+            return;
+        }
+
+        auto commanderRef = sim.tryGetUnitState(*bb.commanderUnitId);
+        if (!commanderRef || commanderRef->get().isDead())
+        {
+            return;
+        }
+        const auto& commander = commanderRef->get();
+        if (!commander.orders.empty())
+        {
+            // Busy. Building something is worth more than a shot at a scout,
+            // and a commander already attacking needs no second order.
+            return;
+        }
+
+        // BuildManager runs earlier in the same tick and may have just given
+        // the commander a job; the order has not reached its queue yet -- a
+        // PlayerCommand takes at least a tick to land -- so the queue above
+        // cannot see it. This flag is what does.
+        if (bb.commanderTasked)
+        {
+            return;
+        }
+
+        // Leashed to the same radius any other unit of ours picks a fight
+        // at. The commander does not cross the map for this: if the gun is
+        // further off than that, walking to it is a base left unbuilt, and
+        // on the map this is for it is as likely to be water the commander
+        // cannot cross as ground it can.
+        auto enemy = nearestKnownEnemy(sim, profile, bb, commander.position, profile.engageRadius);
+        if (!enemy)
+        {
+            return;
+        }
+        LOG_INFO << "AI army: the commander answers the siege of a production site, attacking " << enemy->value;
+        outCommands.push_back(attackCommand(*bb.commanderUnitId, *enemy));
+    }
+
     std::optional<UnitId> ArmyManager::chooseRaidTarget(
         const GameSimulation& sim,
         const AiTuningProfile& profile,
@@ -1229,6 +1288,8 @@ namespace rwe
                 waveObjective = SimVector(SimScalar(sumX / divisor), 0_ss, SimScalar(sumZ / divisor));
             }
         }
+
+        answerHarassmentWithCommander(sim, profile, bb, outCommands);
 
         // Nothing else can answer, so the commander answers itself.
         //

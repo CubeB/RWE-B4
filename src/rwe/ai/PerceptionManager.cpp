@@ -106,6 +106,36 @@ namespace rwe
             bb.enemyBasePosition = SimVector(sum.x / SimScalar(static_cast<float>(buildings)), 0_ss, sum.z / SimScalar(static_cast<float>(buildings)));
         }
 
+        // Which of our harassed factories still has a gun sitting on it.
+        //
+        // EconomyManager has already said where our frames have been dying;
+        // this is the other half of the same question, and it is asked here
+        // because this is the pass that knows what we can see. A factory
+        // that lost hulls a minute ago and has nothing near it now is not
+        // besieged, and its queue goes back to being topped up.
+        bb.besiegedFactories.clear();
+        auto harassRadiusSquared = profile.productionHarassRadius * profile.productionHarassRadius;
+        if (profile.noticeProductionHarassment)
+        {
+            for (auto factoryId : bb.harassedFactories)
+            {
+                auto factoryRef = sim.tryGetUnitState(factoryId);
+                if (!factoryRef || factoryRef->get().isDead())
+                {
+                    continue;
+                }
+                const auto& factoryPosition = factoryRef->get().position;
+                for (const auto& [_, enemy] : bb.knownEnemies)
+                {
+                    if (enemy.isArmed && factoryPosition.distanceSquared(enemy.lastKnownPosition) <= harassRadiusSquared)
+                    {
+                        bb.besiegedFactories.push_back(factoryId);
+                        break;
+                    }
+                }
+            }
+        }
+
         // What the radar says is coming. A contact is an enemy we cannot see
         // standing where our radar reaches -- the dot on a player's minimap,
         // with no name on it -- and one that is inside the warning ring and
@@ -174,13 +204,34 @@ namespace rwe
         }
 
         // Anyone knocking on the door?
+        //
+        // Measured from the base anchor, and -- since the thing being shot
+        // at is not always the base -- from any production site of ours that
+        // is under siege. Without the second the AI could lose an entire
+        // production run to one gun and never enter Defend, never answer the
+        // intruder and never put up a tower, because the anchor was a
+        // thousand units away and perfectly quiet. See
+        // AiTuningProfile::noticeProductionHarassment.
+        //
+        // One pass over knownEnemies rather than two, so the result stays in
+        // raw-id order however many places contributed to it.
         bb.enemiesNearBase.clear();
-        if (bb.baseAnchor)
+        if (bb.baseAnchor || !bb.besiegedFactories.empty())
         {
             auto radiusSquared = profile.defendRadius * profile.defendRadius;
             for (const auto& [_, enemy] : bb.knownEnemies)
             {
-                if (enemy.isArmed && bb.baseAnchor->distanceSquared(enemy.lastKnownPosition) <= radiusSquared)
+                if (!enemy.isArmed)
+                {
+                    continue;
+                }
+                bool near = bb.baseAnchor && bb.baseAnchor->distanceSquared(enemy.lastKnownPosition) <= radiusSquared;
+                for (auto factoryId = bb.besiegedFactories.begin(); !near && factoryId != bb.besiegedFactories.end(); ++factoryId)
+                {
+                    auto factoryRef = sim.tryGetUnitState(*factoryId);
+                    near = factoryRef && factoryRef->get().position.distanceSquared(enemy.lastKnownPosition) <= harassRadiusSquared;
+                }
+                if (near)
                 {
                     bb.enemiesNearBase.push_back(enemy.unitId);
                 }

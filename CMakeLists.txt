@@ -406,6 +406,13 @@ set(SOURCE_FILES
     src/rwe/io/io_util.h
     src/rwe/io/smk/SmkDecoder.cpp
     src/rwe/io/smk/SmkDecoder.h
+    src/rwe/io/tad/TadReader.cpp
+    src/rwe/io/tad/TadReader.h
+    src/rwe/io/tad/tad_events.cpp
+    src/rwe/io/tad/tad_events.h
+    src/rwe/io/tad/tad_headers.h
+    src/rwe/io/tad/tad_util.cpp
+    src/rwe/io/tad/tad_util.h
     src/rwe/MovieScene.cpp
     src/rwe/MovieScene.h
     src/rwe/ui/UiSlider.cpp
@@ -904,6 +911,8 @@ set(TEST_FILES
     src/rwe/io/gui/gui.test.cpp
     src/rwe/io/hpi/hpi_util.test.cpp
     src/rwe/io/ota/ota.test.cpp
+    src/rwe/io/tad/tad.test.cpp
+    src/rwe/io/tad/tad_events.test.cpp
     src/rwe/io/pcx/pcx.test.cpp
     src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
@@ -929,6 +938,8 @@ set(TEST_FILES
     src/rwe/game/wake.test.cpp
     src/rwe/game/viewcull.test.cpp
     src/rwe/sim/buildangle.test.cpp
+    src/rwe/sim/buildtime.test.cpp
+    src/rwe/sim/aircraftbuild.test.cpp
     src/rwe/sim/bombsight.test.cpp
     src/rwe/sim/brakerate.test.cpp
     src/rwe/sim/cob.test.cpp
@@ -945,6 +956,8 @@ set(TEST_FILES
     src/rwe/sim/unitnotifications.test.cpp
     src/rwe/sim/burning.test.cpp
     src/rwe/sim/waterbuilding.test.cpp
+    src/rwe/sim/weaponflight.test.cpp
+    src/rwe/sim/weaponfiretick.test.cpp
     src/rwe/setup/TaInstall.test.cpp
     src/rwe/sim/wreckcollision.test.cpp
     src/rwe/sim/wreckage.test.cpp
@@ -1064,6 +1077,12 @@ target_link_libraries(ui_probe librwe)
 
 add_executable(solar_probe src/solar_probe.cpp)
 target_link_libraries(solar_probe librwe)
+
+add_executable(tad_probe src/tad_probe.cpp)
+target_link_libraries(tad_probe librwe)
+
+add_executable(tad_episodes src/tad_episodes.cpp)
+target_link_libraries(tad_episodes librwe)
 
 add_executable(battle_test src/battle_test.cpp)
 target_link_libraries(battle_test librwe)

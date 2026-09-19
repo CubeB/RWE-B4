@@ -17,6 +17,10 @@ otherwise a wrapper — a DirectDraw replacement, a megamap, a replay recorder,
 raised unit limits. The one behavioural change to `TotalA.exe` is the
 pathfinding budget, `1333 → 66650`, and RWE has already gone past it.
 
+**A third patch turned up later**: TA: Escalation 10.2 ships a genuinely
+modified `TotalA.exe`, which matters because most of the demo corpus was
+recorded on it. That is the last section here.
+
 ## Establishing that the GOG build is 3.1
 
 The v3.1 readme's headline feature is the multiplayer resource-sharing chat
@@ -141,6 +145,97 @@ RWE does not need it. `expansionBudgetPerTick` is 4000 against the original's
 budget increase did — exhausted searches fell 443 → 6 and expansions 149,199 →
 32,292 while arrivals rose 96 → 116. Raising the budget was the original's
 only lever; RWE has a better one.
+
+## A third patch: TA: Escalation 10.2 patches the engine
+
+Neither of the two above, and it came up because twelve of the thirteen demos
+in the conformance corpus (`docs/TA-DEMOS.md`) were recorded on it.
+
+A TA mod is normally pure data -- HPI/UFO files of FBIs and TDFs on an
+unmodified engine -- and a demo recorded under one is therefore evidence about
+`TotalA.exe`'s arithmetic just as a vanilla demo is. That is worth stating
+because it is what makes a modded corpus usable at all. It also has to be
+*checked* rather than assumed, and the two mods in the corpus come out
+differently:
+
+| Mod | Bundled `TotalA.exe` | Verdict |
+|---|---|---|
+| ProTA 4.8 | md5 `8e74a1dffa1f5988624c52048f5b20cd` | **byte-identical to the GOG binary** every finding was read out of |
+| TA: Escalation 10.2 | md5 `1e677a7f92c79b5ab35440853d822c17` | same size, 4,425 bytes changed |
+
+Both also ship patched DLLs (`tplayx.dll`/`eplayx.dll`, `tdraw.dll`/`ddraw.dll`,
+`win32.dll`) which are network, render and platform shims and do not bear on the
+simulation.
+
+Escalation's binary is the same 1,178,624 bytes as the GOG one, so it is a set
+of in-place byte patches: **869 runs, 4,425 bytes**, of which 211 runs / 2,875
+bytes are in `.text`, 608 runs / 1,413 bytes in `.rsrc`, 36 / 95 in `.data`,
+9 / 34 in `.rdata` and 5 / 8 in the PE header. The `.rsrc` bulk is branding --
+`"Cavedog Entertainment"` becomes `"TA Esc"`, `"DDRAW"` becomes `"TAESC"`, and
+similar window-class and registry-path substrings.
+
+The `.text` runs span `0x402608` to `0x49e9c9`. Mapped against the routines
+`TOTALA-EXE.md` names:
+
+**Changed, with evidence in the bytes:**
+
+- **D-gun / `commandfire` mission completion** (`0x4035ee`, `0x4037e0`,
+  `0x403975`, `0x403d28`) -- §85's territory.
+- **Aircraft repair-pad seeking** (§94): a new per-unit-definition flag,
+  `def+0x247` bit 3, gates whether a damaged aircraft looks for a pad at all.
+- **The AI production handicap constant**, `-0.7` to `-2.0` (`0x4fc480`,
+  `0x4fd040`).
+- **A per-tick weapon motor-function swap** (`0x49e01e`-`0x49e03c`).
+- **The reclaim power-switch gate** (`0x402608`) and the "I have been
+  attacked" / kamikaze reaction cluster (`0x406fb4`-`0x408e53`).
+- **Pervasive mission-state renumbering** (`0x414abd`-`0x4153b3`), consistent
+  with a new order type inserted into TA's mission enum.
+- **A clamp inverted at `0x41BD90` and `0x41BD9A`**, two `jl` turned into `jge`
+  (`0x7C` to `0x7D`) inside the routine at `0x41BD10`. GOG forces the value
+  *down* to 1 whenever it is at least 1; Escalation forces it *up* to 1 whenever
+  it is below. The routine returns 0 unless `unit+0x108` (health) has reached
+  `def+0x1FA` (maxdamage) and then derives two truncated integers from
+  `def+0x1EA` (buildtime) and `def+0x186` (buildcostenergy) scaled by an
+  argument, clamping each. **What it computes is not identified** and is left
+  that way rather than guessed at; it is listed because it is the nearest patch
+  to the build pipeline and somebody will want to know it is not in it.
+
+**Confirmed unchanged, by reading the bytes rather than by not finding any:**
+
+- The **wreck spawner** `0x486360`-`0x486600`, the **kill routine and the
+  `Killed` severity** `0x4864b0`-`0x4865b0`, the **feature creation and sink
+  physics** `0x423c50` and `0x424214`, the **damage pipeline**
+  `0x489bd1`-`0x489e00`, and the **per-player economy settle** `0x464f80`. Not
+  one patched byte falls within 512 bytes of any of them. That is what licenses
+  the corpse-severity finding in `TOTALA-EXE-WRECKS.md` to use all thirteen
+  demos rather than the one unpatched game.
+- The **build pipeline**: the build-rate routine `0x41BA60`, whose body runs to
+  the `ret 0xC` at `0x41BCCF`, and the short routine after it (`0x41BCD0` to the
+  `ret 8` at `0x41BD02`). **Not one patched byte inside either.** The nearest
+  patched `.text` byte is 3,838 bytes below and 192 bytes above, and the one
+  above is at `0x41BD90`, in the *next* routine again — two `ret`-plus-padding
+  boundaries away, which is why the 512-byte halo flags it and reading the
+  boundaries clears it. This is what licenses the twelve Escalation demos to
+  carry the build-timing finding in `TOTALA-EXE.md` §23, whose discriminating
+  evidence — the fifteen exactly-divisible pairs — comes from them and not from
+  the single unpatched ProTA game.
+- The select-same-type UI cluster (`0x48be4f`-`0x48bee3`) and the `.rsrc` and
+  `.data` string changes, all cosmetic.
+
+About thirty small `.text` runs were not chased to a subsystem, so "no patched
+byte nearby" is weaker evidence than the confirmed-by-content rows above.
+
+**What follows for the corpus:** the single ProTA demo is the clean reference
+case, and the twelve Escalation ones must not be used as oracles for D-gun or
+`commandfire` completion, aircraft repair-pad seeking, AI economy, or reclaim's
+power-switch edge case. They remain good for death, wreckage, damage, the
+economy settle and **build timing**, which are confirmed untouched.
+
+`tools/exe/patchdiff.py` is the re-runnable version of this mapping. It
+reproduces the run and byte counts above, and `--range` answers "is this routine
+patched?" for the next subject that needs clearing. Prefer it to `--near`: a
+512-byte halo crosses function boundaries and over-reports, which is exactly
+what happened with the build pipeline above.
 
 ## What is worth doing
 

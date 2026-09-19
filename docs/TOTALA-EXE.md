@@ -911,6 +911,21 @@ otherwise **zero**. So `startvelocity` is the launch speed and
 `weaponvelocity` is the cap — never the other way round, and a missile with an
 acceleration and no `startvelocity` starts from a standstill.
 
+**Both comparisons are unsigned**, and that is load-bearing rather than
+incidental: `jae` and `jbe`, not `jge` and `jle`. A weapon whose
+`weaponvelocity` is **negative** — fourteen blocks in the Escalation data write
+one — therefore has a cap near 2^32 after the conversion, so the clamp can never
+fire. Its entire function is to *disable the ceiling*, which is what lets the
+negative `weaponacceleration` those same blocks carry decelerate the round from
+a large positive `startvelocity` for as long as the motor burns. `VSPAM_ALL` is
+the pattern: 480 off the rail, losing 0.083 a tick. A decelerating missile has
+no other spelling in this format. (`BOMB_MS` and `BOMB_SHOCK` are the degenerate
+case — `startvelocity` negative and equal to the cap, so the first `jae` is
+taken and the speed never changes, leaving a round that flies backward along its
+nose, which for a vertical launch is straight down.) None of the fourteen is
+ported or scored; `docs/TA-DEMOS.md`, "Fourteen weapon blocks declare a negative
+`weaponvelocity`", has what it cost the miner before the guard.
+
 Velocity is rebuilt from the missile's own attitude every tick rather than
 being steered as a vector (`0x49BA74`): `vy = sin(pitch)·speed`, and the
 horizontal `cos(pitch)·speed` is split by heading. A missile therefore flies
@@ -935,6 +950,79 @@ a torpedo go off at the end of its run.
 Note the consequence for an accelerating missile: `ARMKBOT_MISSILE` gets
 `604 / (650/30)` = 27 ticks of motor, and covers only about 447 units of its
 604 range under power before it starts coasting.
+
+**This section is now checked against real games.** Replaying exactly the above
+-- the launch speed picked the way `0x49C980` picks it, the cap and the
+acceleration as converted here, the burn as `0x49C920` times it, and coasting
+after -- reproduces the observed flight time in **13 of 13** (shooter, weapon)
+cells mined from a demo corpus once the round is stopped on the victim's
+footprint (below), against **0 of 27** for a model that flies a missile at its
+`weaponvelocity` from the muzzle to its aim point. All thirteen are checked in
+as conformance episodes in `src/rwe/sim/tad_weapon_episodes.h`. Two details of
+this reading are what the corpus is agreeing with rather than incidental: a
+`startvelocity` of zero meaning full speed with no motor and a standstill with
+one, and the burn being range-derived unless `noautorange`. The burn is thinly
+covered: one checked-in episode outlives its own motor and coasts the last two
+ticks in, and the rest arrive before theirs stops, so that half is confirmed as
+arithmetic more than as an outcome. See `docs/TA-DEMOS.md`,
+"Pairing a `0x0d` to the `0x0b` it caused".
+
+### Where a round stops, `0x49B090`
+
+Called at `0x49BD88`, after every kind's move. It takes the map square the round
+now stands in (`0x4815A0`) and tests, in order: the square's first unit slot
+(`WORD sq+0x0`) -- a unit not owned by the round's owner, with the round below
+`unit+0x6E + def+0x16E`, the top of its model; the second slot (`WORD sq+0x2`),
+the same with a floor at `def+0x162`; the feature (§24); then the ground. Any hit
+goes to `0x499EB0`. A unit fills the slots of the squares its footprint covers,
+so a round detonates **on the victim's footprint, about half a footprint short
+of the point it was aimed at**, and not at that point. Against the demo corpus
+that stop takes 792 of 810 constant-speed pairings on still victims where the
+aim point took 65%, flat across footprints 2 to 8. RWE's
+`checkProjectileCollision` is already this shape -- move, then the occupied
+grid, then the model-height test -- and `weaponflight.test.cpp` now drives it
+against a victim with the episode's own footprint.
+
+### Which tick a new round first moves on
+
+**The tick it is fired.** The order in one sim step (§111, `0x4954BD`) is: game
+tick incremented, unit pass `0x48AD30`, projectile pass `0x49B720`
+(`0x495513`), feature pass, per-player settle. The fire routine runs inside the
+unit pass, reached from the per-tick weapon update `0x49E1A0`, and at
+`0x49D77E` it calls `0x49C9C0`, which appends the round to the flat projectile
+array -- count at `globals+0x141F3`, base at `+0x141F7`, stride 107 -- and
+increments the count before returning. It then builds the 36-byte `0x0d` and
+queues it (`0x49D859`).
+
+The projectile pass reads that count **once** into its trip counter
+(`0x49B728`, stored at `0x49B740`) and counts it down (`0x49BE41`) without
+re-reading it. The round created a moment earlier is inside the count, so it is
+walked: it moves (`0x49BD41`) and `0x49B090` tests the square it now stands in
+straight afterwards (`0x49BD88`). A hit goes `0x499EB0` → `0x499CD0` →
+`0x489BB0`, synchronously, which is where the damage and its `0x0b` happen.
+
+So a round fired on tick T detonates on **`T + k - 1`** for `k` steps to the
+footprint, and there is no creation-tick guard anywhere in that chain. The only
+per-round time test on the way in is the **burst** gate at `0x49B790`, and a
+burst is not a deferral for an ordinary weapon: `0x49CB79` copies the new
+round's `proj+0x60` from `wdef+0xEA`, which the parser at `0x42E619` defaults
+to zero, and a zero sends the record down the ordinary flying path. A non-zero
+one makes the record a template that emits one copy per `burstrate` and never
+flies itself, and those copies *are* a tick late -- `0x49B810` appends them past
+the trip count the pass had already latched, which is the one place the
+snapshot is observable.
+
+The demo corpus records the interval between a shot and its damage as `k`
+rather than `k - 1`, and that extra tick is the demo's clock and not the
+engine's: an event is stamped with the last `0x2c` before it in its sender's
+stream, the `0x2c` is queued at the end of that player's unit sub-pass
+(`0x48B003`), and so a `0x0d` is stamped a tick early while its `0x0b` is
+stamped true. `docs/TA-DEMOS.md`, "Which tick a round first moves on", has the
+stream measurement that confirms it and the Escalation patch check for every
+routine named here. RWE's own order is the same -- `spawnProjectile` emplaces
+during the behaviour pass and `updateProjectiles` walks the new round in the
+same tick, applying damage inline on the collision -- and
+`src/rwe/sim/weaponfiretick.test.cpp` pins it end to end through `tick()`.
 
 ### Guidance, `0x49B520`
 
@@ -967,6 +1055,17 @@ overwrites the high half of the aim point's Y), which is what makes a nuke fly
 in flat and then come down; otherwise a target projectile if it has one (that
 is the anti-nuke intercepting), then a target unit, then the fixed point it was
 fired at.
+
+**This routine is reached from one place only: the guidance step of the motor
+update**, the `twoPhase ? secondPhase : guidance` test at `0x49BA44`. So every
+behaviour in it — the cruise clause included — is unreachable for a round that
+cannot steer, meaning one with neither `guidance` nor `twophase`, or with a
+`turnrate` that truncates to nothing per tick. Such a round flies wherever it
+was pointed at launch whatever flags it carries. That is not a curiosity:
+`ROCKET_HRK` is exactly it, and reading `cruise=1` as a shape of flight rather
+than as a clause of the aim point is what had its demo cells excluded from the
+weapon oracle for nothing. `docs/TA-DEMOS.md`, "And `cruise` has left the table
+altogether".
 
 ### Vertical launch, `0x49CC20`
 
@@ -1048,6 +1147,14 @@ simulation already keeps.
 - **Smoke drifting with the wind** (§4 — the same two words the projectiles
   use, scaled by 8 a tick) is decoded but not ported. The wind on the
   projectiles themselves, which used to head this list, is ported now.
+- **Escalation changes what an expired ballistic round does.** The GOG binary
+  tests `burnblow` (bit 23) at `0x49BC67` -- `shr eax,0x17` then `je` past the
+  detonation -- and Escalation patches the two bytes to `shr eax,0x1b` and
+  `jne`, so it tests `noautorange` (bit 27) and in the opposite sense. The
+  selfprop equivalent at `0x49BAC3` is unpatched and so is everything else in
+  `0x49B720`. Nothing scored today goes near it, but the ballistic oracle is
+  the next one to be written and it would be scored against Escalation demos,
+  so it has to use Escalation's rule and not this one.
 - The `meteor` projectile kind (`0x49BD46`, flag bit 5) adds a per-tick spin to
   the projectile's own heading and pitch from two words at `proj+0x1E` and
   `proj+0x26`, each shifted left by 8. Only `METEORS.TDF` uses it and RWE has no
@@ -4424,7 +4531,9 @@ reaches `0x465077`:
 
 `global+0x38A47` is the game tick counter. `player+0xF0` is pushed thirty ticks
 ahead every time it fires, so the settle at `0x46555A -> 0x401360` runs **once a
-second per player**, staggered by whatever each player's counter started at. The
+second per player**, on whatever tick each player's counter started at -- which
+§111 finds is the same tick for every player of a game, so in practice they all
+settle together. The
 gate the call itself sits behind (`0x46554F`, a word at `global+0x39239` that
 must be negative) is initialised to `0xFFFF` at `0x498199` and only ever moved by
 the endgame sequences, so in ordinary play it is always open.
@@ -4508,8 +4617,10 @@ reduced rate.
 
 ### Build rate, `0x41BA60`
 
-Called as `(builder, target, amount)`. Every caller passes the same amount
-(`0x402A09`, `0x403E43`, `0x404139`, `0x414235`, `0x414656`):
+Called as `(builder, target, amount)`. Every mission that lathes passes the same
+amount (`0x402A09`, `0x403E43`, `0x404139`, `0x414235`, `0x414656`); the sixth
+caller, `0x41BCFB`, passes a negative one for nanoframe decay (§110 attributes
+all six):
 
 ```
 4029db  mov eax,0x88888889
@@ -4542,9 +4653,9 @@ crediting `EnergyMake` and storage. One call does:
 ```
 
 So the per-tick spend is `buildCost * (workerTime / 30) / buildTime` for each
-resource, the whole job takes `buildTime * 30 / workerTime` ticks, and the
-answer to "what happens to progress when the spend is throttled" is: **nothing
-happens to it**. Progress is applied in full on the ticks the request is
+resource, the whole job takes about `buildTime * 30 / workerTime` ticks -- see
+below, "about" is doing real work in that sentence -- and the answer to "what
+happens to progress when the spend is throttled" is: **nothing happens to it**. Progress is applied in full on the ticks the request is
 accepted and not at all on the ticks it is refused. The throttle acts on the
 resources; the debt it leaves behind is what stops the builder next tick.
 
@@ -4556,6 +4667,56 @@ Replaying this against real FBI data, an ARMCOM (`WorkerTime=300`) building an
 ARMSOLAR (`BuildTime=2495`, `BuildCostMetal=145`, `BuildCostEnergy=760`) takes
 250 ticks — 8.33 seconds — and drains 17.43 metal and 91.38 energy per second,
 which are the numbers the original shows.
+
+#### The tick count is not a division, and the corpus can tell
+
+`buildTime * 30 / workerTime` is the right answer to the wrong question. The
+routine above does not divide to find a duration: it steps `unit+0x104` by
+`amount / buildTime` once a tick and stops when it reaches the end, and
+`unit+0x104` is a **4-byte float** — `0x485B27` stores the constant
+`0x3f800000` into it and `0x489B7D` compares it with `fcomp 1.0f`. So the count
+is however many single-precision steps it takes, which is `ceil` of the division
+except when the division comes out exact, where it depends on whether the
+repeated addition lands on the endpoint or steps past it.
+
+> **Unresolved, and it is about this field.** This document reads
+> `unit+0x104`'s polarity both ways and they cannot both be right. §23's listing
+> has `0x41BAD7` doing `progress - amount/buildTime`, and both §9 (target
+> eligibility) and §23 itself test `unit+0x104 == 0` for *fully built*; but the
+> layout table in §30 has `0x485B27` writing `1.0f` into it at spawn, and §31's
+> transport load check at `0x489B7D` rejects any candidate whose value is not
+> exactly `1.0f`, which only makes sense if `1.0f` is the complete end.
+> Whoever settles it should fix the losing side rather than add a third reading.
+> Nothing below depends on the answer — the corpus replay gives the same tick
+> count counting up to 1.0 or down to 0.0, so what follows is about the *width*,
+> which both readings agree on.
+
+That is not a distinction worth asserting from a listing, so it was checked
+against real games. Over the demo corpus there are 15 builder/product pairs
+whose `BuildTime` is an exact multiple of the builder's `workerTime / 30`; ten
+of them take an extra tick and five do not, the float32 replay predicts which
+ten, and the same replay in `double` gets 6 of 15. Across all 41 scored
+pairs the replay is exact where `ceil` manages 10 and `floor` 36. The evidence,
+the table and the re-runnable check are in
+[TA-DEMOS.md](TA-DEMOS.md), under `0x09`.
+
+Two things fall out of that for anyone reading this section:
+
+- **The first increment lands on the tick the nanoframe is created**, not the
+  tick after. The corpus measures nanoframe-to-finish as one less than the
+  number of increments, without exception on a factory build.
+- **RWE's integer `addBuildProgress` is already right** everywhere `BuildTime`
+  is not a multiple of the rate, and one tick fast where it is. Putting a
+  `float` in the simulation to close that is very likely a bad trade; see the
+  determinism rules in `CLAUDE.md`.
+
+One thing did not fall out, and is now explained in §110: **a construction
+aircraft finishes one tick sooner than the replay allows**, 60 of its 68 builds
+in the Escalation corpus with none faster. It gets two increments on the
+creation tick where a factory gets one: `VTOL_MobileBuild` discards the answer
+of its stance wait, and the wait's wake mask lets a COB event left pending since
+the last `set` run the lathe a second time before the tick ends. The call-site
+list above is also short by one; §110 has all six, attributed to their missions.
 
 ### What counts as production
 
@@ -4697,7 +4858,13 @@ What did not, and now does:
   `PlayerEnergyStorage` and `PlayerMetalStorage` on the player, gated by a flag
   read out of a save or scenario file; where a skirmish gets its own values from
   has not been found. RWE keeps giving the commander the side's starting
-  stockpile as storage instead.
+  stockpile as storage instead. **The demo corpus says that route reaches the
+  right number**, which is as close to an answer as the binary has given: every
+  one of the 86 players in the thirteen demos opens on a capacity of exactly
+  1000 metal and 1000 energy, with a stockpile that started at 1000 as well, and
+  neither data set's commander declares any `MetalStorage` or `EnergyStorage` of
+  its own. So in a skirmish the base is the starting stockpile, whichever field
+  the original reads it out of. See `docs/TA-DEMOS.md`.
 - **Reclaiming a unit** is instantaneous in the original, metal only, and
   RWE's is gradual and pays energy too. Changing it would be a gameplay
   decision rather than a correction, and `0x402640` is reached from one caller
@@ -9285,6 +9452,31 @@ original:
   rockets are `turret=0`, so §11 applies to them and the original holds fire
   until the nose is within the weapon's tolerance, which for `vtol_rocket` and
   friends is 8000, about 44°. RWE now does the same.
+- **A nanoframe appears a tick after the order that asked for it, and a
+  factory's first lathe a tick after that.** The original creates the frame and
+  lathes it inside one mission pass; RWE cannot create a unit during the
+  behaviour pass (it is walking the unit map), so every builder defers to
+  `spawnNewUnits` at the end of the tick and meets its own frame on the next
+  one. That is where the first lathe lands — for a mobile builder and, since
+  §110 was ported, for the two that a construction aircraft pays there. A
+  factory takes one tick more: its state machine spends the tick it picks the
+  creation up starting `StartBuilding` and lathes from the tick after. None of
+  this changes a job's *length*, which is what the corpus measures and what the
+  build fixture asserts; it shifts the whole job a tick or two later against the
+  order. Closing it means creating units inside the behaviour pass, which is the
+  iterator hazard that section exists to avoid.
+- **Build progress is an integer accumulator, not the original's float.** The
+  original steps a 4-byte float by `p / BuildTime` a tick and stops at the end
+  value (§23), so where `BuildTime` is an exact multiple of `p` it sometimes
+  needs one step more than the division says — ten of the fifteen such pairs in
+  the demo corpus do. RWE's `UnitState::addBuildProgress` adds
+  `workerTimePerTick` to an unsigned counter and finishes at `buildTime`, which
+  agrees with the original on every job whose `BuildTime` is *not* an exact
+  multiple, and is one tick fast on the rest. Kept deliberately: closing it
+  means putting a `float` in hashed simulation state, which is the determinism
+  hazard `CLAUDE.md` opens with, and the prize is one tick on a minority of
+  builds. If it is ever closed, it must be closed with fixed-point or a
+  precomputed step count, never with a `float`.
 - **The waypoint trail marches off the global clock.** The original takes each
   segment's phase from the age of the order being drawn (§26), so two orders
   queued a few ticks apart march very slightly out of step. RWE's orders do not
@@ -9353,6 +9545,19 @@ original:
   runs a move mission first and its footer says `Moving`; RWE's single
   `BuildOrder` covers the walk and the work, so the mission line changes one
   order earlier (S:99).
+- ~~**Every player's economy settles on the same tick.**~~ **Not a divergence
+  after all** (§111). This entry said the original staggers the settle per
+  player because `player+0xF0` starts at whatever each player's counter started
+  at. It starts at the current game tick, written for all ten player slots in
+  one loop (`0x464990` -> `0x464700`), so every player of a game settles on the
+  same tick, as RWE's `gameTime % 30 == 0` does. Only a saved game that
+  recorded different `UpdateTime`s could stagger them. The demo corpus agrees:
+  60,588 of 60,760 `0x28` samples from all 86 senders sit within 6 ticks of a
+  multiple of 30, and the stall episodes in `src/rwe/sim/tad_stall_episodes.h`
+  would move for every player but the first under a per-player phase. Two
+  players' `0x28` samples on nearby ticks can therefore be compared, within the
+  few ticks each sender's clock lags. The storage episodes stay per player
+  because a sample is its sender's own state, not because of the phase.
 - **A transport only picks up your own units.** The original applies no
   ownership or alliance test anywhere on the load path: not in `CanLoadUnit`
   (§31), not at any of its five call sites, and not in the LOAD button's
@@ -9546,6 +9751,13 @@ there is a regression test for it now.
 - **The anti-missile coverage ring** (§25) is decoded -- one dashed ring per
   `interceptor` weapon on an `antiweapons` unit, radius `coverage - 512` -- but
   not drawn.
+- ~~Why a construction aircraft finishes a build one tick early~~ Resolved: two
+  increments on the creation tick, because `VTOL_MobileBuild` discards its stance
+  wait's answer and a pending COB event re-runs the lathe in the same tick; see
+  §110, which also accounts for the 8 builds off the model (late by whole
+  seconds). **Ported**: RWE credits a construction aircraft twice on the tick it
+  first has a frame to lathe and never makes one wait for its stance, and the
+  airborne cells are in the build fixture on the ordinary §88 delta.
 - The exact tick at which the original commits a **bomb release** inside its
   weapon code is still not pinned down; RWE uses its own bombsight.
 - **`unit+0x110` bits 2–3.** They pick the loose 2000 default over the tight 150
@@ -13371,3 +13583,459 @@ left, centre and right on one line; the list is 125 wide on a translucent
 ground with RWE-chosen highlight colours, and uses the `radlogo` colour dots
 as swatches; and `Total Units` stops at the count, because RWE has no unit
 limit to print after it.
+
+---
+
+## 109. `0x46d630`, the unit-table packet builder, and the checksum behind it that got away
+
+This one is included because it **failed**, and the shape of the failure is
+worth having written down before someone spends the same two days on it again.
+
+A `.tad` demo carries a `UnitData` record listing every unit type the game
+knew, as 14-byte `0x1a` subpackets (see `docs/TA-DEMOS.md`). The stream then
+refers to unit types by an *index into that table*, so a demo's build events
+cannot be attributed to a named unit without knowing how the table's ids are
+computed. That is the whole reason for looking.
+
+### The packet builder, decoded
+
+`0x46d630`, one of four near-identical siblings at `0x46d500`, `0x46d530`,
+`0x46d5b0` and `0x46d630` laid out contiguously with `nop` padding — apparently
+send-path variants over one payload shape:
+
+```
+46d63a  mov  al,[esp+0x18]      ; the caller's 'sub' argument, 2 or 3
+46d63f  mov  [buf+1],al
+46d643  mov  eax,[esp+0x20]     ; a pointer to a per-unit-type record
+46d64b  movb [buf+0],0x1a
+46d650  mov  edx,[eax+0x0]      ; record+0x0 ...
+46d652  mov  [buf+6],edx        ; ... is the id, buf[6:10]
+46d656  mov  dl,[eax+0x8]
+46d659  mov  [buf+10],dl        ; record+0x8 -> buf[10]
+46d65d  mov  dl,[eax+0xa]
+46d660  mov  ax,[eax+0xc]
+46d664  mov  [buf+11],dl        ; record+0xa -> buf[11]
+46d668  mov  [buf+12],ax        ; record+0xc -> buf[12:14]
+```
+
+Two things fall out, both **VERIFIED** against thirteen real demos:
+
+- **`buf[2:6]` is never written.** The "zero" field of the record layout is
+  whatever the caller left in its scratch buffer, not a field.
+- **`buf[10:14]` is three fields, not one dword.** That is exactly why the
+  corpus shows `0xffff0101` on every restricted-block entry but one: a constant
+  low byte, a flag byte, and a `0xffff` sentinel word. The exception has the
+  flag byte cleared, and is the same id in demos of two entirely unrelated data
+  sets — so it is a fixed pseudo-entry rather than a unit type.
+
+### Where it stopped, and why
+
+The id is a dword at offset 0 of that record, and the record is **not** the
+585-byte FBI-parse struct. That struct was mapped along the way and is worth
+recording: the loader from `0x42aa66` enumerates `units\*.FBI`, writes the file
+count to `globals+0x1438f` and allocates `count * 585` at `globals+0x1439b` —
+the `shl eax,6; add ebx` then `lea ebp,[eax+eax*8]` at `0x42aa72`/`0x42aa7d` is
+`*65` then `*9`, and the restriction dialog at `0x44ca4e` strides by the same
+`0x249`. Confirmed fields: `+0x186` and `+0x18a` are the build costs as floats
+(already at §on the economy), `+0x21e` is the unit's own table index written at
+`0x42ab51`, `+0x241`/`+0x245` are the packed flag words, `+0x15a` is
+initialised to `-1`.
+
+**Nothing in the per-unit FBI read block writes a checksum-shaped value to
+offset 0**, and the first write to a freshly indexed record is `+0x21e`. So
+`0x46d630`'s record is a separate transient structure built for the lobby
+exchange, and its construction site was not found. Two obstacles, both worth
+knowing about generally:
+
+- `0x46d630`, `0x46d530` and `0x46d5b0` have **zero call sites** findable either
+  by `xref.py` (absolute references only, per `tools/exe/README.md`) or by
+  grepping the full objdump listing for their addresses as resolved call
+  targets. Only `0x46d500` has one, from `0x4559b7` inside a large incoming
+  DirectPlay message dispatcher.
+- **objdump's linear sweep desynchronises here.** The switch table at `0x46d84c`
+  is data and disassembles as nonsense (`inc edx`, `fadds`, ...); its five
+  entries had to be read by hand as `0x46d842, 0x46d738, 0x46d748, 0x46d842,
+  0x46d7a5`. A second table nearby whose bytes decode as *plausible*
+  instructions would swallow a real call and give no sign of it. That is the
+  likely reason the caller could not be found — offered as the best explanation,
+  not as a certainty.
+
+### What was ruled out, so nobody repeats it
+
+Against both mods' real shipped data and their real demo tables: 88 name-hash
+and case/suffix/path combinations; crc32 and adler32 of the raw FBI bytes, of
+`\r`-stripped and case-folded forms, and of a canonical sorted `key=value;`
+serialisation with comments stripped; the same over the referenced `.3do` and
+`.cob` files; and every 1-, 2- and 3-field permutation of the obvious FBI fields
+under four separators. Zero matches throughout. `tools/exe/unitsync.py` runs
+these against a ground-truth CSV so the negative is reproducible and a new
+candidate can be checked before it is believed.
+
+Next time: a recursive-descent disassembly of `0x455000`-`0x46e000`, or a live
+breakpoint on the restrictions-dialog arrays at `0x44ca4e`.
+
+### What it was wanted for, and why that no longer needs it
+
+The checksum was chased in order to name the unit type a demo's `0x09` refers
+to. It turns out not to be on that path at all: the `0x09` index is not an index
+into the `0x1a` table, but the **load-order index this section already
+documents** — the one written to `+0x21e` at `0x42ab51`. The order the
+enumeration at `0x42aa66` produces was then recovered from the demo corpus
+rather than from the binary: sort every `units\*.FBI` name the merged VFS
+presents and number from one. `docs/TA-DEMOS.md`, `0x09`, carries the evidence
+and the two data sets it replicates across.
+
+So the useful part of this section was the struct map, not the packet builder,
+and the part that got away is wanted only for reproducing the table itself. The
+lesson for the next dead end is the one this section was written to record: the
+thing the work was blocked on was not the thing it was chasing, and an hour
+spent testing whether the blocker was real would have been worth more than the
+day spent on the checksum.
+
+## 110. Why a construction aircraft finishes a build one tick early: a second lathe on the creation tick
+
+Over the demo corpus a construction aircraft finishes one tick sooner than §23's
+float32 replay allows, where a factory lands on it exactly. The cause is not a
+different build call, a different rate or a different place in the tick. It is
+the mission service loop running the aircraft's build state **twice on the tick
+the nanoframe is created**, so the job gets two increments on that tick where a
+factory gets one. What sets it off is a COB event nothing had consumed, and
+what lets it through is one discarded return value in `VTOL_MobileBuild`.
+
+### The two packets bound the increments exactly
+
+- The `0x09` is sent from inside the unit constructor `0x485F50`, at `0x486115`
+  (`call 0x456050`, which writes the 23-byte record and hands it to
+  `0x451DF0`). Every build mission creates its nanoframe through that
+  constructor, so the `0x09` goes out on the tick of creation, from inside the
+  mission handler.
+- The `0x12` is sent from inside `0x41BA60` itself: when a step leaves
+  `unit+0x104` at `0.0f` (`0x41BCAA`), it calls `0x41B8D0`, which sends it at
+  `0x41BA26` (`call 0x4560C0`, 5 bytes). `0x48612A` is the only other sender,
+  for a unit created already complete.
+
+So an episode's `finishTick - startTick` counts the increments between the two
+and nothing else; neither packet batching nor end-of-build bookkeeping can move
+it.
+
+### Six call sites, three missions
+
+`0x41BA60` has **six** callers, not the five §23 listed. Attributed through the
+mission tables (ground at `0x4FC490`, VTOL at `0x4FCA18`; 25-byte records,
+handler at `+4`, layout in `TOTALA-EXE-MISSIONS.md` §1):
+
+| Call | Mission | Handler |
+|---|---|---|
+| `0x402A09` | `BuildingBuild` (a factory) | `0x402640` |
+| `0x403E43` | `MobileBuild` (a ground constructor) | `0x403A20` |
+| `0x404139` | `HelpBuild` | `0x403F70` |
+| `0x414235` | `VTOL_MobileBuild` | `0x413D80` |
+| `0x414656` | `VTOL_HelpBuild` | `0x414380` |
+| `0x41BCFB` | `0x41BCD0`, a negative amount: the nanoframe decay `GetBuilt` runs at `0x402F6B` (§93) | — |
+
+The three that start a job order their states differently, and the difference
+is the finding:
+
+| Mission | Jump table | Order of events |
+|---|---|---|
+| `BuildingBuild` | `0x402B5C` | wait for `INBUILDSTANCE` (`0x4027CA`), **then** create (`0x4028EA`), return 1; lathe every tick (`0x4029CA`) |
+| `MobileBuild` | `0x403F5C` | create (`0x403D5B`) and start `StartBuilding`, return 1; wait for `INBUILDSTANCE` and **return its answer** (`0x403DF5`); lathe (`0x403E0C`) |
+| `VTOL_MobileBuild` | `0x414330` | create (`0x41409B`) and start `StartBuilding`, return 1; call the wait and **discard its answer**, falling straight into the lathe (`0x414136` → `0x414149` → `0x414235`) |
+
+The lathe tail is the same in all three: call `0x41BA60`, and if the job is not
+done set a one-tick timer (`0x439E80`, which also sets wake bit 0), OR `0xA`
+into the wake mask and return 2.
+
+### The pieces
+
+**The stance wait, `0x438700(unit, mission, mask)`.** If `unit+0x10F` bit 0
+(`INBUILDSTANCE`) is set it returns 1 and touches nothing. Otherwise it
+**writes the mission's wake mask** to `mask | 4` and returns 2. Bit 2 of a wake
+mask answers bit 2 of the unit's event word `unit+0xBA`.
+
+**Every COB `set` raises that bit.** `SET_VALUE` (`0x10082000`, dispatched at
+`0x4B1B48`, called at `0x4B1BD2`) goes through the unit callback's vtable slot
+at `0x4FD6D8`, which is `0x480B20`. That routine switches on the port, and every
+arm, the default included, ends in `or byte ptr [unit+0xBA], 4` (`0x480B57`,
+`0x480B73`, `0x480B97`, `0x480BB3`, `0x480BD2`, `0x480BF1`). Port 5,
+`INBUILDSTANCE`, is the arm at `0x480B62` that writes `unit+0x10F` bit 0; port
+20, `ARMORED`, calls `0x48B090` first. Nothing clears the bit except the service
+loop consuming it for a mission that waits on it, and `0x438700` and its sibling
+`0x438730` have eleven callers of which **`VTOL_MobileBuild` is the only VTOL
+mission**. So on an aircraft the bit is sticky: the first `set` after the last
+build leaves it pending until the next one.
+
+**`StartBuilding` is queued, not run.** `0x438590` starts it through `0x4B0B00`
+with the run-now argument zero (tested at `0x4B0B82`), so the script's own
+`set INBUILDSTANCE to 1` happens in a later COB pass, never inside the mission
+that asked for it. On the creation tick an aircraft's stance is still clear.
+
+**The service loop re-runs the head mission in the same tick** (`0x43B7C0`).
+After a handler returns it jumps back to the top (`0x43B99F` → `0x43B7DD`) and
+leaves only when the wake mask is non-zero **and** no pending bit matches it
+(`0x43B817`–`0x43B81D`). Pending means `mission+0x4E | unit+0xBA`; the matched
+bits are cleared and the mask zeroed before the handler runs (`0x43B831`,
+`0x43B83D`, `0x43B846`). A handler that returns 1 has left the mask at zero, so
+the next state runs at once, which is why every mission creates and lathes on
+the same tick.
+
+### The creation tick, for each
+
+A construction aircraft with a `set` pending from earlier:
+
+1. State 2 creates the nanoframe (`0x09` sent), queues `StartBuilding`, returns
+   1. The mask is zero, so the loop runs state 3 immediately.
+2. State 3: `0x438700` finds the stance clear and writes the mask to `0xE`; the
+   answer is discarded; `0x41BA60` lathes (**increment 1**); the timer and `0xA`
+   make the mask `0xF`; return 2.
+3. The loop checks: the timer is a tick away, but `unit+0xBA` bit 2 is pending
+   and the mask now has bit 2. It consumes the bit and runs state 3 again.
+4. State 3 again: stance still clear, mask `0xE`, **increment 2**, mask `0xF`,
+   return 2. Nothing is pending now; the loop leaves.
+
+From the next tick on there is one increment a tick. The queued `StartBuilding`
+has set the stance by then, raising bit 2 again, but that bit is consumed in the
+same pass as the timer's; and with the stance set `0x438700` stops putting bit 2
+in the mask at all. So the job gets exactly one extra increment over its life,
+on the creation tick.
+
+A **factory** waits for the stance *before* creating, so its lathe state never
+calls the wait and its mask stays `0xB`: one increment on the creation tick. A
+**ground constructor** does wait after creating, but its wait state returns the
+answer, so a stale bit 2 re-runs the *wait*, which lathes nothing, and the lathe
+starts only once the stance is set. That delay is the constructor's own script,
+which §23 and `TA-DEMOS.md` already treat as mod data.
+
+`tools/exe/buildloop.py` transcribes exactly these pieces and prints the three
+durations. For `CORCA` on `CORDRAG` (`BuildTime` 1130, p=2, 566 increments):
+factory 565, ground constructor 566 (with a `StartBuilding` that does not
+sleep), aircraft **564** with a stale event and 565 without. The answers are the
+same whichever order the COB and mission passes run in, which is not settled
+here.
+
+### Why the event is always there in Escalation
+
+The corpus's three airborne builders ship scripts (read with
+`tools/exe/coblist.py`) in which `StartBuilding` and `StopBuilding` are each one
+unconditional `set INBUILDSTANCE`, and `Activate` and `Deactivate` `set ARMORED`.
+So the previous job's `StopBuilding` leaves bit 2 pending and the stance clear.
+An aircraft's first build is covered too: `VTOL_MobileBuild`'s state 0 turns
+activation on (`0x413E40`, `0x48B090(1,1)`), which queues `Activate` through
+`0x4B0940` if the aircraft was not active, and `Activate` `set`s `ARMORED`. The
+prediction that follows, that an aircraft whose scripts had `set` nothing before
+its build would land on the factory model and not a tick under it, has no build
+in the corpus to test it.
+
+### Against the corpus
+
+Scoring airborne builders against `ticks_to_build - 2` instead of `- 1`, over
+the Escalation demos as `tad_episodes` emits them now (68 airborne builds under
+the -20..+120 cap; the "58 of 66" this was first reported as predates the id
+scoping):
+
+- **60 of 68 builds land on the model exactly, and none is early**, across all
+  three builders (`CORCA` 47 of 55, `CORACA` 9 of 9, `ARMCA` 4 of 4) and both
+  rates.
+- **All 15 (builder, product) modes agree**, including the 10 pairs whose
+  `BuildTime` divides exactly by p, where the float32 accumulator decides whether
+  one more increment is needed: `CORDRAG`, `CORMEX`, `CORMOHO`, `CORHP` and
+  `CORMAKR` take it, `ARMDRAG`, `ARMRL`, `CORARAD`, `CORSES` and `CORSMS` do
+  not, and the corpus follows each. So the aircraft's shortfall is a shift in the
+  count of the same accumulator, not a rate or a rounding of its own. Most of
+  those cells hold one to three builds, which makes this corroboration rather
+  than proof; the three `CORCA` cells with seven or more builds are what
+  `tools/tad-buildtime.py` scores by default.
+- **The other eight are late by whole seconds**: +30 twice, +60 three times,
+  +120 three times. That is not an aircraft effect. It reads as a resource stall
+  under §23's throttle, where a refused builder's debt is looked at only by the
+  once-a-second settle, and factories show the same shape: of the 384 factory
+  builds late against the model, **347 are late by an exact multiple of 30**.
+
+### Escalation's binary
+
+Escalation's patched `TotalA.exe` changes none of it. `tools/exe/patchdiff.py
+--range` finds no patched byte in `VTOL_MobileBuild` (`0x413D80`–`0x414350`),
+`VTOL_HelpBuild`, `BuildingBuild`, the service loop (`0x43B7C0`–`0x43BAD0`),
+`0x438590`–`0x438760`, `0x439E80`, the set callback (`0x480B20`–`0x480C30`) or
+its vtable, the VM's `SET_VALUE` dispatch, `0x4B08C0`–`0x4B0BB5`, `0x48B090`,
+`0x41B8D0`, the unit constructor `0x485F50` or the `0x09` sender. The nearest
+change on a build path is two bytes in the ground `MobileBuild` at `0x403D29`,
+retargeting a call made before the nanoframe exists (`0x4898B0` to `0x489800`).
+It is not on the lathe path and was not followed. The unit-initialisation patch
+at `0x485C69` moves the code around the write of `unit+0xBA` but still zeroes
+it.
+
+### What it means for RWE, and what was done about it
+
+**Ported**, in `UnitBehaviorService.cpp`. Both halves:
+
+- `deployBuildArm` no longer gates a `canfly` builder on `inBuildStance`. The
+  gate stays for a factory and a ground constructor, which is where the
+  original has it, and it covers assisting as well as building because both go
+  through that one handler -- `VTOL_HelpBuild` does not consult the stance
+  either.
+- `buildUnit` passes `frameJustCreated` on the tick it picks its own finished
+  creation up, and that tick runs the lathe **twice**. The lathe moved into
+  `latheNanoframe` so it can be called twice in a tick the way the service loop
+  calls it, and the sequence in the handler is the original's: deploy (which is
+  `StartBuilding`, queued), lathe, lathe. No new simulation state -- the second
+  increment is sequenced inside the one call rather than remembered across
+  ticks -- so there is nothing for the four-places rule to catch.
+
+**Where the creation tick is, in RWE.** The original creates the nanoframe and
+lathes it inside one mission pass on one tick. RWE cannot: a behaviour handler
+may not add a unit while the behaviour pass is walking the unit map, so a build
+order pushes onto `unitCreationRequests` and `spawnNewUnits` lays the frame down
+at the end of that tick. The builder meets its own frame on the **next** tick,
+as `UnitCreationStatusDone`, and that is the tick RWE treats as the creation
+tick: the first tick on which there is a frame to lathe at all. The two
+increments land there. So the relation the corpus actually pins -- two
+increments on the job's first tick and one a tick after, ending a tick before a
+factory at the same rate -- holds exactly; what differs is a fixed tick of
+scheduling latency between the order and the frame, which no episode measures.
+A factory pays one tick more of that latency still (§88).
+
+**The fixture.** Airborne cells are now in it, on the same delta convention as
+the factory ones, because the emitter subtracts two increments rather than one
+for that class: `CORCA` to `CORDRAG` -1, to `CORMEX` -1, to `CORRAD` 0. The -1s
+are §88's integer accumulator on a divisible pair and nothing else, which is the
+point of porting rather than licensing -- there is no airborne delta left to
+write down. `buildtime.test.cpp` drives the accumulator with the double credit
+and carries a case showing what it buys: credited once, all three cells come out
+a tick late against the games they were measured in. The behaviour half is
+`aircraftbuild.test.cpp`, in the real simulation on `CORCA`'s own FBI figures.
+
+It took one session. The discarded return value at `0x41413E` was visible as
+soon as the two mobile build handlers were read side by side; what took the time
+was finding what could make the service loop run a waiting mission again in the
+same tick, and that was the sticky event bit.
+
+## 111. The settle, re-read: one phase for every player, and what a refusal costs
+
+§23 decoded the once-a-second settle and RWE ported it. This section is the
+second reading, done to check §23 against the demo corpus's stall evidence
+before anything was asserted from it. It confirms the arithmetic, corrects the
+claim that players settle on staggered ticks, and lists everywhere RWE's port
+still differs. The corpus side is in [TA-DEMOS.md](TA-DEMOS.md), under `0x28`,
+"What a stalled settle costs a factory".
+
+**Escalation did not touch any of it.** `tools/exe/patchdiff.py --range` finds
+no patched byte in `0x4011C0`–`0x401360` (the request and the three direct
+charges), `0x401360`–`0x401C20` (the settle), `0x464F80`–`0x4655B0` (the
+per-player pass), `0x402640`–`0x402B80` (`BuildingBuild`) or `0x41BA60`–`0x41BCD0`
+(the lathe). So the Escalation demos are valid evidence for everything below.
+
+### One settle, in order
+
+`0x401360(player)`:
+
+1. **Unit sweep**, every unit with `unit+0x110` bit 28, stride `0x118`:
+   - **`EnergyUse` is asked for here, once, for the whole second**, not a tick
+     at a time. On the switch path (bit 29, unit on) and on the no-switch path
+     (on or moving, bits 2-3) alike, `EnergyUse > 0` adds to *asked*
+     (`+0xC0`) and, only if the unit's **energy** owed (`+0xC8`) is not
+     positive, to *granted* (`+0xC4`) and sets the powered flag
+     (`0x4013F9`, `0x40164F`). That gate reads energy owed only; the request
+     routine `0x4011C0` a builder uses tests both.
+   - `EnergyUse < 0` is production, handicapped for a computer player, and
+     **leaves the powered flag clear** (`0x40147E`), so such a unit never takes
+     the extraction or metal-maker branch that follows.
+   - The extraction / `makesmetal` / wind / tidal chain is on the switch path
+     only; the no-switch path jumps straight to `0x4016C5`. §23 reads bit 29 as
+     "has a switch". That reading is not confirmed here -- the constructor does
+     not copy `onoffable` (`def+0x245` bit 2, stored at `0x42C8C9`) into it
+     directly -- and it matters for four Escalation metal makers that declare
+     no `OnOffable` (ARMFORGE, CORVAULT, ARMUWMFUS, CORUWMFUS).
+   - `EnergyMake`, `MetalMake` and both storage figures, for `unit+0x104 == 0`.
+   - **Cloak** (`0x4017D9`): the cost is truncated (`0x4E43A0`), compared with
+     the player's energy **stockpile** and, if covered, *subtracted from the
+     stockpile on the spot* (`0x40184A`), with the amount added to *asked* for
+     the display only. It never enters *granted*, so it is never throttled and
+     never becomes debt.
+   - The unit's eight live figures are added to the running totals.
+2. **Player block** `player+0xEC`, the same layout, added to the totals; then
+   the per-player base storage when `player+0x149` bit 0.
+3. Display copies and the lifetime totals (the qwords at `player+0xAC`-`+0xC4`).
+4. `S = stockpile + produced` per resource (`0x401A1D`, `0x401A25`).
+5. **The fractions**, energy then metal, `0x401A4D`, exactly as §23 has them.
+   The arithmetic runs on the x87 stack at 80 bits, but the two fractions are
+   stored as 4-byte floats (`fstp dword` at `0x401A72` and `0x401A9F`) before
+   the per-unit pass reads them back.
+6. Stockpile clamped to the storage **this same settle** rebuilt, the excess
+   added to the waste total.
+7. **Per-unit debt** `0x401B37`, then the player block's at `0x401BAE`:
+   `owed' = (granted - granted * newFraction) + (owed - owed * debtFraction)`,
+   the display copies taken, and produced, asked and granted zeroed.
+
+### What a refusal costs
+
+A factory's lathe charges its own block through `0x4011C0` (`0x41BC60`), which
+refuses when **either** resource is owed, records the ask for the display, and
+applies no progress. Nothing but step 7 writes *owed*, so:
+
+- A builder granted anything in a second whose settle falls short carries debt
+  out of it and is refused **every tick** until a settle pays it.
+- A settle that can pay it all has `debtFraction = 1.0`, and `owed - owed * 1.0`
+  is exactly zero, so the refusal ends **on** that settle and on no other tick.
+- A settle that cannot pay it leaves `debtFraction < 1` and the builder still
+  owes, so a long stall costs a whole second per settle.
+
+So a stall delays a job by whole seconds, and a job started while its factory
+still owes for the one before is delayed to the next settle that pays. The
+corpus shows both; see TA-DEMOS.md.
+
+### Every player settles on the same tick
+
+§23 and §88 said the settle is staggered per player "by whatever each player's
+counter started at". The counter is `player+0xF0`, and it has exactly two
+writers besides the `+= 30` at `0x465092`:
+
+- `0x464715`, in `0x464700(player)`, which stores the current game tick
+  (`global+0x38A47`). Its one caller, `0x464990`, walks **all ten player slots
+  in one loop** (`global+0x1B63`, stride `0x14B`), so every player of a game
+  gets the same tick.
+- `0x46623F`, which reads `UpdateTime` back out of a saved game.
+
+So in a game started normally every player settles on the same tick, and the
+stagger exists only if a saved game recorded different `UpdateTime`s. The corpus
+agrees without exception worth the name: 60,588 of the 60,760 non-watcher `0x28`
+samples, from all 86 senders in the twelve Escalation demos, are stamped within
+6 ticks of a multiple of 30 of the demo clock, and the least aligned sender still
+has 208 of 211 there.
+
+**Inside a tick**, the step at `0x4954BD` increments the game tick, then runs
+`0x48AD30` -- the unit pass, which reaches the mission service loop `0x43B7C0`
+at `0x48AF98` -- and only after the projectile (`0x49B720`) and feature
+(`0x420F30`) passes calls the per-player pass `0x464F80`. So a tick's lathe is
+counted into that same tick's settle. The corpus puts a stalled factory's first
+accepted increment on demo ticks that are multiples of 30, which with that order
+means either the settle runs at internal ticks one short of a multiple of 30 or
+the demo clock is stamped a tick behind the internal one. **It is the second.**
+The weapon work settled it: everything queued during the unit pass -- a `0x09`
+among it -- goes into the sender's buffer *before* that tick's `0x2c`
+(`0x48B003`), so it is stamped with the previous tick's serial. See §7, "Which
+tick a new round first moves on", and `docs/TA-DEMOS.md`, "Which tick a round
+first moves on", for the decode and the stream measurement behind that. Nothing
+depended on it either way: the seconds partition the lathes the same way.
+
+### Where RWE's economy differs
+
+Checked against `GameSimulation::updateResources`, `settleResourcePool`,
+`UnitState::addResourceDelta` / `settleResources` and the builder paths in
+`UnitBehaviorService`.
+
+| # | Difference | Documented before? | Effect |
+|---|---|---|---|
+| 1 | RWE settles every player when `gameTime % 30 == 0`. | §88, as a deliberate divergence from a stagger. | **None in a normal game** -- the original does the same, above. §88 is updated. |
+| 2 | RWE settles before the behaviour pass in a tick; the original after the unit pass. | No. | None: both count a tick's lathe into the same second (RWE's settle at 30 closes ticks 0-29). The stall episodes replay RWE's order and land on the corpus. |
+| 3 | RWE's `EnergyUse` request goes through `UnitState::addResourceDelta`, which refuses a unit owing **metal** as well; the original's settle sweep checks energy owed only. | No. | A unit with `EnergyUse` that also owes metal goes unpowered for a second in RWE. Small; not changed. |
+| 4 | RWE treats a negative `EnergyUse` as production **and** reports the unit powered, so it still extracts or makes metal; the original leaves it unpowered. | No. | None on Escalation's data: no unit has both a negative `EnergyUse` and an extractor or metal maker. |
+| 5 | RWE runs the make-and-use pass for any `activated` unit; the original runs the extraction/maker/wind/tidal chain only on the bit-29 path and charges a no-switch unit's `EnergyUse` while it is on **or moving**. | No. | Open while bit 29 is unconfirmed; see the four Escalation metal makers above. **Decided 2026-09-17: not chased.** It moves four units in one mod and nothing depends on it; the bit stays an open question. |
+| 6 | **Cloak**: RWE compares the untruncated cost with the stockpile and then *requests* it through `addResourceDelta`, so a cloak joins the throttled pool, can become debt, and is not charged at all while the unit already owes. The original subtracts the truncated cost from the stockpile directly. The comment in `updateResources` describes the original, not the code under it. | No. | Small. Not changed: nothing in the corpus pins it. |
+| 7 | **Weapons** (`energypershot`, `metalpershot`): RWE checks the stockpile, then *requests* the cost through `addResourceDelta` rather than subtracting it (`UnitBehaviorService.cpp`, the non-stockpile fire path). Several shots in one second each see the unreduced stockpile and can overdraw it into a throttle for every builder, and a shooter that already owes fires for **free**, because the refused request's return value is ignored. The original takes it from the stockpile on the spot (`0x401220`, `0x401260`, `0x4012A0`). | No; the comment at the call site says it is asked against the stores directly, which the code does not do. | **Reads as a bug.** Heavy energy-weapon fire can overdraw the stockpile and throttle every builder the player has for a second. **Decided 2026-09-17: recorded, not fixed.** The corpus tests do not cover it and a fix moves every energy weapon's economy, so it waits for a pass of its own with its own tests and a play-test. |
+| 8 | Debt carried as `owed * (1 - f)` in float against the original's `owed - owed * f` at 80 bits. | No. | Sub-ulp. A fully paid debt is exactly zero in both. |
+| 9 | RWE clamps a negative supply to zero before settling. | In the code. | None: the original's stockpile cannot go negative. |
+| 10 | The computer player's production handicap. | §23, not ported. | Tuning, not compatibility. |
+
+Nothing in the table was changed. Row 7 is the one worth a decision.
+

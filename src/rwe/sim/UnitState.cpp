@@ -146,6 +146,24 @@ namespace rwe
         return BuildCostInfo{buildTimeContribution, deltaEnergy, deltaMetal};
     }
 
+    /**
+     * Integer build points, finishing when they reach buildTime -- which is a
+     * DELIBERATE difference from the original and is not an oversight to
+     * correct. TotalA.exe steps a 4-byte float by workerTime/30 over buildTime
+     * each tick and stops at the end value, so where buildTime divides exactly
+     * by the rate it sometimes takes one step more than the division says: ten
+     * of the fifteen such pairs in the demo corpus do, and replaying that
+     * arithmetic in float32 predicts which ten where float64 gets six.
+     *
+     * This accumulator agrees with the original on every job whose buildTime is
+     * not an exact multiple of the rate, and is one tick fast on the rest. That
+     * is kept on purpose: a float here is hashed simulation state, which is the
+     * determinism hazard CLAUDE.md opens with. If it is ever closed, close it
+     * with fixed-point or a precomputed step count, never with a float.
+     *
+     * docs/TOTALA-EXE.md sections 23 and 88, and docs/TA-DEMOS.md under 0x09
+     * for the corpus evidence.
+     */
     bool UnitState::addBuildProgress(const UnitDefinition& unitDefinition, unsigned int buildTimeContribution)
     {
         auto remainingBuildTime = unitDefinition.buildTime - buildTimeCompleted;

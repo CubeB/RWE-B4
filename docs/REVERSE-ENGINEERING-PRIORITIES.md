@@ -83,7 +83,12 @@ appended here when somebody finds one.
   is §22's formula with `unit+0xF7` taken as zero, since that term still has no
   known writer anywhere in the binary, and the level the script writes back is
   read out of the COB thread and walked along the `featuredead` chain.
-  `sim/aircraftwreck.test.cpp`.
+  `sim/aircraftwreck.test.cpp`. The `0x0c` death records of the demo corpus
+  are the check on it (2026-09-08, `TOTALA-EXE-WRECKS.md`, "What 60,075
+  recorded deaths say about the severity"): the stock scripts' rungs sit at
+  severity 26 and 51 exactly, and the severity really is the overkill term.
+  They cannot separate `unit+0xF7` from the overkill, so its writer is still
+  the piece to go and find.
 - **Aircraft leave no wreck at all.** It turned out RWE already did this: every
   aircraft FBI omits `Corpse`, `readOrDefault` leaves the string empty and
   `deleteDeadUnits` already skipped it. The entry was wrong about RWE rather

@@ -1,14 +1,22 @@
+#include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
+#include <optional>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/UnitMesh.h>
 #include <rwe/sim/UnitState.h>
-#include <memory>
 #include <rwe/sim/sim_test_util.h>
+#include <rwe/sim/tad_economy_episodes.h>
+#include <rwe/sim/tad_stall_episodes.h>
+#include <set>
+#include <string>
+#include <vector>
 
 namespace rwe
 {
@@ -294,6 +302,189 @@ namespace rwe
         }
     }
 
+    // ------------------------------------------------------------------
+    // Everything above is hand-written: a case is whatever it took to pin one
+    // rule. Everything below comes out of real games -- the episodes in
+    // tad_economy_episodes.h, mined from the demo corpus by tad_episodes
+    // --emit-cpp. The two kinds sit together deliberately, because a reader
+    // needs to be able to tell at a glance which numbers somebody chose and
+    // which ones a game produced.
+    // ------------------------------------------------------------------
+
+    namespace
+    {
+        /**
+         * Rebuilds an episode's player: the lobby's storage setting, then one
+         * unit per unit the player owned at the sample, each carrying the
+         * storage figures the episode transcribed out of its FBI.
+         *
+         * Units under construction are given a build time they have not
+         * finished paying, which is all `isBeingBuilt` looks at.
+         */
+        PlayerId rebuildEpisode(GameSimulation& sim, const TadStorageEpisode& episode)
+        {
+            GamePlayerInfo p{
+                std::optional<std::string>("player"),
+                GamePlayerType::Human,
+                PlayerColorIndex(0),
+                GamePlayerStatus::Alive,
+                std::string("ARM"),
+                Metal(0.0f),
+                Energy(0.0f),
+                Metal(0.0f),
+                Energy(0.0f),
+                Metal(episode.startingMetal),
+                Energy(episode.startingEnergy),
+            };
+            auto player = sim.addPlayer(p);
+
+            // The commander is not in the composition -- see the header -- but
+            // the capacity it carries is credited per commander, so one has to
+            // stand in the world for the settle to count it.
+            UnitDefinition commander{};
+            commander.maxHitPoints = 100;
+            commander.buildTime = 0u;
+            commander.commander = true;
+            commander.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
+            sim.unitDefinitions["commander"] = commander;
+
+            auto script = makeEmptyCobScript();
+            auto next = 0;
+            auto place = [&]() {
+                auto x = SimScalar(static_cast<float>(64 + 16 * (next % 8)));
+                auto z = SimScalar(static_cast<float>(64 + 16 * (next / 8)));
+                ++next;
+                return SimVector(x, 0_ss, z);
+            };
+
+            addUnitOfType(sim, "commander", player, place(), script);
+
+            auto add = [&](const TadEpisodeComposition* composition, std::size_t count, bool finished) {
+                for (std::size_t i = 0; i < count; ++i)
+                {
+                    const auto& entry = composition[i];
+                    auto type = std::string(entry.unitName) + (finished ? "" : "_nanoframe");
+
+                    UnitDefinition def{};
+                    def.maxHitPoints = 100;
+                    def.buildTime = finished ? 0u : 1000u;
+                    def.metalStorage = Metal(entry.metalStorage);
+                    def.energyStorage = Energy(entry.energyStorage);
+                    def.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
+                    sim.unitDefinitions[type] = def;
+
+                    for (unsigned int n = 0; n < entry.count; ++n)
+                    {
+                        auto unitId = addUnitOfType(sim, type, player, place(), script);
+                        if (!finished)
+                        {
+                            sim.getUnitState(unitId).buildTimeCompleted = 0u;
+                        }
+                    }
+                }
+            };
+
+            add(episode.finished, episode.finishedCount, true);
+            add(episode.building, episode.buildingCount, false);
+
+            return player;
+        }
+
+        std::string episodeName(const TadStorageEpisode& episode)
+        {
+            return std::string(episode.demo) + " block " + std::to_string(episode.ownerBlock)
+                + " tick " + std::to_string(episode.sampleTick);
+        }
+    }
+
+    TEST_CASE("storage capacity is what real games report", "[economy][corpus]")
+    {
+        // The capacity is a plain sum over what the player has FINISHED, and
+        // the corpus says so on its own terms: base plus the transcribed FBI
+        // figures tracks the reported capacity from the opening sample of all
+        // 86 players in the corpus, for hundreds of samples each, and two
+        // players match every sample to the end of their recording.
+        for (const auto& episode : tadStorageEpisodes)
+        {
+            DYNAMIC_SECTION(episodeName(episode))
+            {
+                GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+                auto player = rebuildEpisode(sim, episode);
+
+                tickOneSecond(sim);
+
+                REQUIRE(sim.getPlayer(player).maxMetal.value
+                    == Catch::Approx(episode.metalStorage + episode.expectedMetalStorageDelta));
+                REQUIRE(sim.getPlayer(player).maxEnergy.value
+                    == Catch::Approx(episode.energyStorage + episode.expectedEnergyStorageDelta));
+            }
+        }
+    }
+
+    TEST_CASE("a nanoframe holds nothing until it is finished", "[economy][corpus]")
+    {
+        // The falsifiable half of the same episodes. Nine of the thirteen had
+        // a nanoframe standing when the sample was taken, and two of those
+        // nanoframes were of a type that holds something -- so crediting them
+        // would move the capacity off what the game reported, and finishing
+        // them has to move it by exactly what they carry.
+        for (const auto& episode : tadStorageEpisodes)
+        {
+            DYNAMIC_SECTION(episodeName(episode))
+            {
+                GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+                auto player = rebuildEpisode(sim, episode);
+
+                tickOneSecond(sim);
+                auto withNanoframes = sim.getPlayer(player).maxMetal.value;
+
+                // Finish them, and the capacity moves by exactly what they carry.
+                float pending = 0.0f;
+                for (std::size_t i = 0; i < episode.buildingCount; ++i)
+                {
+                    pending += episode.building[i].metalStorage * static_cast<float>(episode.building[i].count);
+                }
+                for (auto& entry : sim.units)
+                {
+                    entry.second.buildTimeCompleted = sim.unitDefinitions.at(entry.second.unitType).buildTime;
+                }
+
+                tickOneSecond(sim);
+
+                REQUIRE(sim.getPlayer(player).maxMetal.value == Catch::Approx(withNanoframes + pending));
+            }
+        }
+    }
+
+    TEST_CASE("income above a real game's storage cap is thrown away", "[economy][corpus]")
+    {
+        // Across the corpus, stored never once exceeded capacity in 61,709
+        // samples, and it sat exactly ON the capacity in 27,688 of them. Where
+        // an episode caught that, the observed stockpile IS the cap, so the
+        // clamp has a number out of a real game to land on.
+        for (const auto& episode : tadStorageEpisodes)
+        {
+            if (episode.energyStored != episode.energyStorage)
+            {
+                continue;
+            }
+
+            DYNAMIC_SECTION(episodeName(episode))
+            {
+                GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+                auto player = rebuildEpisode(sim, episode);
+
+                auto anyUnit = sim.units.begin()->first;
+                sim.addResourceDelta(UnitId(anyUnit), Energy(1000000.0f), Metal(1000000.0f));
+
+                tickOneSecond(sim);
+
+                REQUIRE(sim.getPlayer(player).energy.value
+                    == Catch::Approx(episode.energyStored + episode.expectedEnergyStorageDelta));
+            }
+        }
+    }
+
     TEST_CASE("the wind factor never exceeds a full gale", "[economy]")
     {
         // A map whose wind range sits above what a generator can use still
@@ -301,5 +492,260 @@ namespace rwe
         GameSimulation sim(makeFlatTerrain(), 0u, MaxUtilizableWindSpeed * 3, MaxUtilizableWindSpeed * 4);
         sim.tick();
         REQUIRE(sim.currentWindGenerationFactor.value == Catch::Approx(1.0f));
+    }
+
+    // ------------------------------------------------------------------
+    // The stall episodes: tad_stall_episodes.h, mined by tad_episodes
+    // --emit-stall-cpp and scored by tools/tad-stalltime.py.
+    //
+    // Each is a factory that finished a job in a second whose settle a 0x28
+    // sample caught stalled, and started its next job before the following
+    // settle. What the corpus says happened is that the new job was refused
+    // from its first tick until a settle paid the factory's debt, and not a
+    // tick sooner or later, so it finished late by 30 - start % 30 plus whole
+    // seconds. The replay below does not model that: it empties the store the
+    // sample saw empty for exactly the settles the episode stalled on, refills
+    // it after, and lets GameSimulation::tick and UnitState's debt gate decide
+    // when the factory works.
+    //
+    // WHAT IS NOT DRIVEN THROUGH THE PIPELINE, and why. The lathe itself is
+    // called by the test rather than by UnitBehaviorService, for the reason
+    // buildtime.test.cpp gives: RWE's factory path does not credit progress on
+    // the tick the nanoframe appears, and the corpus number is chosen to
+    // exclude a builder's deploy. So the test calls the same two things the
+    // factory path calls, in the same order -- GameSimulation::addResourceDelta
+    // with the job's per-tick cost, then UnitState::addBuildProgress if it was
+    // accepted -- once per tick, AFTER sim.tick() returns, which is where the
+    // behaviour pass sits relative to updateResources inside tick(). The
+    // settle's cadence, its phase and the debt rule are all the engine's own.
+    //
+    // THE CLOCK. The replay's gameTime is the demo's tick. The 0x09's tick is
+    // where TA's first increment lands (buildtime.test.cpp), and the corpus
+    // puts every settle of every player on a multiple of 30 of that clock
+    // (docs/TOTALA-EXE.md section 111), which is where RWE settles.
+    // ------------------------------------------------------------------
+
+    namespace
+    {
+        UnitDefinition stallProduct(unsigned int buildTime, unsigned int metal, unsigned int energy)
+        {
+            UnitDefinition def{};
+            def.maxHitPoints = 100u;
+            def.buildTime = buildTime;
+            def.buildCostMetal = Metal(static_cast<float>(metal));
+            def.buildCostEnergy = Energy(static_cast<float>(energy));
+            return def;
+        }
+
+        UnitState stallNanoframe(const std::shared_ptr<CobScript>& script)
+        {
+            std::vector<UnitMesh> pieces;
+            UnitState unit(pieces, std::make_unique<CobEnvironment>(script.get()));
+            unit.buildTimeCompleted = 0u;
+            unit.hitPoints = 0u;
+            return unit;
+        }
+
+        struct StallReplay
+        {
+            /** Whether the settle the sample saw really did stall in the replay. */
+            bool settleStalled = false;
+            std::optional<unsigned int> firstAcceptedTick;
+            std::optional<unsigned int> finishTick;
+        };
+
+        StallReplay replayStall(const TadStallEpisode& episode)
+        {
+            GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+
+            // One player per owner block up to the episode's, and the factory
+            // belongs to the last: TA settles every player on the same tick,
+            // and an engine that did not would move the episodes of every
+            // player but the first.
+            PlayerId owner;
+            for (unsigned int i = 0; i <= episode.ownerBlock; ++i)
+            {
+                owner = addPlayerWithResources(sim, 1000000.0f, 1000000.0f);
+            }
+
+            auto p = episode.workerTime / 30u;
+            auto factoryDef = makeInertDef(1.0e9f);
+            factoryDef.workerTimePerTick = p;
+            sim.unitDefinitions["factory"] = factoryDef;
+            auto script = makeEmptyCobScript();
+            auto factory = addUnitOfType(sim, "factory", owner, SimVector(64_ss, 0_ss, 64_ss), script);
+
+            // The job it was finishing: one tick of it is left, on
+            // previousFinishTick, which is all the stall needs of it.
+            auto previousDef = stallProduct(episode.previousBuildTime, episode.previousBuildCostMetal, episode.previousBuildCostEnergy);
+            auto previous = stallNanoframe(script);
+            previous.buildTimeCompleted = previousDef.buildTime - std::min(p, previousDef.buildTime);
+
+            auto productDef = stallProduct(episode.buildTime, episode.buildCostMetal, episode.buildCostEnergy);
+            auto product = stallNanoframe(script);
+
+            // What UnitBehaviorService's factory path does with a tick: ask for
+            // the step's cost, and build only if the answer is yes.
+            auto lathe = [&](UnitState& target, const UnitDefinition& def, bool& finished) {
+                auto costs = target.getBuildCostInfo(def, p);
+                auto accepted = sim.addResourceDelta(
+                    factory,
+                    -Energy(def.buildCostEnergy.value * static_cast<float>(p) / static_cast<float>(def.buildTime)),
+                    -Metal(def.buildCostMetal.value * static_cast<float>(p) / static_cast<float>(def.buildTime)),
+                    -costs.energyCost,
+                    -costs.metalCost);
+                finished = accepted && target.addBuildProgress(def, p);
+                return accepted;
+            };
+
+            auto lastStalledSettle = episode.stalledSettleTick + 30u * episode.furtherStalledSettles;
+
+            StallReplay replay;
+            sim.gameTime = GameTime(episode.previousFinishTick - 1u);
+            for (auto t = episode.previousFinishTick; t < episode.startTick + 400000u; ++t)
+            {
+                auto& player = sim.getPlayer(owner);
+                if (t >= episode.stalledSettleTick && t <= lastStalledSettle)
+                {
+                    if (episode.metalEmpty)
+                    {
+                        player.metal = Metal(0.0f);
+                    }
+                    else
+                    {
+                        player.energy = Energy(0.0f);
+                    }
+                }
+                else if (t == lastStalledSettle + 1u)
+                {
+                    player.metal = Metal(1000000.0f);
+                    player.energy = Energy(1000000.0f);
+                }
+
+                sim.tick();
+                if (sim.gameTime != GameTime(t))
+                {
+                    return replay;
+                }
+
+                if (t == episode.stalledSettleTick)
+                {
+                    replay.settleStalled = episode.metalEmpty ? player.metalStalled : player.energyStalled;
+                }
+
+                bool finished = false;
+                if (t == episode.previousFinishTick)
+                {
+                    lathe(previous, previousDef, finished);
+                }
+
+                if (t >= episode.startTick && lathe(product, productDef, finished))
+                {
+                    if (!replay.firstAcceptedTick)
+                    {
+                        replay.firstAcceptedTick = t;
+                    }
+                    if (finished)
+                    {
+                        replay.finishTick = t;
+                        return replay;
+                    }
+                }
+            }
+
+            return replay;
+        }
+
+        std::string stallEpisodeName(const TadStallEpisode& episode)
+        {
+            return std::string(episode.builderName) + " " + episode.previousProductName + " -> "
+                + episode.productName + " (" + episode.demo + " block " + std::to_string(episode.ownerBlock)
+                + " tick " + std::to_string(episode.startTick) + ")";
+        }
+    }
+
+    TEST_CASE("a factory stalled at the end of one job is refused into the next until a settle", "[economy][corpus]")
+    {
+        // The whole observation: finishTick - startTick, which is the build
+        // model's duration plus 30 - start % 30 plus whole stalled seconds.
+        // expectedDurationDelta is RWE's integer accumulator finishing a tick
+        // early on the two episodes whose BuildTime divides exactly by the rate
+        // (docs/TOTALA-EXE.md section 88), and nothing about the settle.
+        for (const auto& episode : tadStallEpisodes)
+        {
+            DYNAMIC_SECTION(stallEpisodeName(episode))
+            {
+                auto replay = replayStall(episode);
+                CHECK(replay.settleStalled);
+                REQUIRE(replay.finishTick.has_value());
+
+                auto duration = static_cast<int>(*replay.finishTick) - static_cast<int>(episode.startTick);
+                REQUIRE(duration
+                    == static_cast<int>(episode.finishTick - episode.startTick) + episode.expectedDurationDelta);
+            }
+        }
+    }
+
+    TEST_CASE("the refusal ends on a settle, and on the first one that pays the debt", "[economy][corpus]")
+    {
+        // The half of the same replay that does not go through the accumulator:
+        // the factory's first accepted tick is a settle tick, and it is exactly
+        // the residue plus the stalled seconds after the start, which is the
+        // number the corpus says and which the section 88 accumulator cannot touch.
+        for (const auto& episode : tadStallEpisodes)
+        {
+            DYNAMIC_SECTION(stallEpisodeName(episode))
+            {
+                auto replay = replayStall(episode);
+                REQUIRE(replay.firstAcceptedTick.has_value());
+                REQUIRE(*replay.firstAcceptedTick % 30u == 0u);
+                REQUIRE(*replay.firstAcceptedTick - episode.startTick
+                    == episode.residueTicks + 30u * episode.furtherStalledSettles);
+            }
+        }
+    }
+
+    TEST_CASE("the stall episodes cover the second and more than one player", "[economy][corpus]")
+    {
+        // What makes the replays above worth anything: residues spread across
+        // the second, so a settle off by a tick or on a different cadence moves
+        // them; owners other than the first player, so a per-player phase does;
+        // and deltas only where the accumulator licenses one.
+        std::set<unsigned int> residues;
+        std::set<unsigned int> blocks;
+        bool metal = false;
+        bool energy = false;
+        for (const auto& episode : tadStallEpisodes)
+        {
+            residues.insert(episode.residueTicks);
+            blocks.insert(episode.ownerBlock);
+            (episode.metalEmpty ? metal : energy) = true;
+
+            // The episode is internally what its header says it is.
+            REQUIRE(episode.residueTicks == 30u - episode.startTick % 30u);
+            REQUIRE(episode.stalledSettleTick == episode.startTick - episode.startTick % 30u);
+            REQUIRE(episode.previousFinishTick + 30u >= episode.stalledSettleTick);
+            REQUIRE(episode.previousFinishTick < episode.stalledSettleTick);
+            REQUIRE(episode.lateTicks == episode.residueTicks + 30u * episode.furtherStalledSettles);
+            REQUIRE(episode.finishTick - episode.startTick == episode.modelDurationTicks + episode.lateTicks);
+
+            auto divisible = episode.buildTime % (episode.workerTime / 30u) == 0u;
+            if (episode.expectedDurationDelta != 0)
+            {
+                REQUIRE(episode.expectedDurationDelta == -1);
+                REQUIRE(divisible);
+                REQUIRE(episode.expectedDifference != nullptr);
+            }
+            else
+            {
+                REQUIRE(episode.expectedDifference == nullptr);
+            }
+        }
+
+        REQUIRE(residues.size() >= 20u);
+        REQUIRE(blocks.size() >= 3u);
+        REQUIRE(*blocks.rbegin() > 0u);
+        REQUIRE(metal);
+        REQUIRE(energy);
     }
 }

@@ -1215,6 +1215,60 @@ namespace rwe
          */
         bool reserveAnswersIntruders{true};
         /**
+         * Notice that a production site is being shot up, and stop feeding
+         * it.
+         *
+         * A nanoframe spawns with zero hit points, so any damage at all
+         * kills it. One enemy scout ship parked off a shipyard therefore
+         * destroys every hull the yard makes, for the whole game, at a
+         * hundredth of what it costs us -- and before this the AI could not
+         * see it happen: recentLosses is diffed from standingBuildings and
+         * so holds buildings only, and enemiesNearBase was measured from
+         * the base anchor rather than from the thing being shot. The
+         * diagnosis is ROADMAP Phase 2, the all-water entry, and commit
+         * 42160d59.
+         *
+         * On it, three things follow. The AI remembers frames it lost where
+         * they were born (bb.recentUnitLosses); an armed enemy sitting on
+         * such a place counts as an enemy at the base, so everything hanging
+         * off enemiesNearBase -- the Defend phase, the intruder answer, the
+         * urgent tower -- fires for it; and the besieged factory's queue is
+         * not topped up while the gun is still there, which stops the
+         * economy being poured a frame at a time into a scout ship's guns.
+         *
+         * Off restores exactly the old behaviour, which is what the arena
+         * measures it against.
+         */
+        bool noticeProductionHarassment{true};
+        /**
+         * How near a factory a frame has to have died, and how near an armed
+         * enemy has to be sitting now, for that factory to count as
+         * besieged.
+         *
+         * One radius for both halves because both are asking about the same
+         * few hundred units of water: a hull is born on the yard's own
+         * footprint, and the gun that kills it is inside its own weapon
+         * range of that. 400 covers an 8x8 shipyard's footprint (128) plus
+         * the reach of the light guns that do this -- a CORPT's is well
+         * inside it -- without taking in a fight happening elsewhere in the
+         * base.
+         */
+        SimScalar productionHarassRadius{400_ss};
+        /**
+         * Send the commander at whatever is besieging a production site,
+         * when nothing else of ours can answer it.
+         *
+         * The third candidate from the diagnosis: the commander is armed, it
+         * survives what kills the frames, and while the yard is feeding a
+         * gun it is usually idle. Off by default because it has not been
+         * measured, and because the map this is for is the one where it is
+         * most likely to go wrong -- a commander sent at a hull in deep water
+         * is a commander walking towards something it cannot reach. It is
+         * leashed to engageRadius and only fires when the army and the fleet
+         * have nothing that can go instead.
+         */
+        bool commanderAnswersHarassment{false};
+        /**
          * Units built while a wave is out join it once this many have
          * gathered, rather than waiting for the wave to be spent. This keeps
          * what attackInWaves was for -- a lone kbot does not walk to the

@@ -179,6 +179,7 @@ namespace rwe
         std::optional<SimVector> chooseBuildSite(
             const GameSimulation& sim,
             const AiTuningProfile& profile,
+            const AiBlackboard& bb,
             const std::string& unitType,
             const SimVector& anchor,
             std::minstd_rand& rng,
@@ -200,6 +201,7 @@ namespace rwe
         std::optional<SimVector> chooseScoredBuildSite(
             const GameSimulation& sim,
             const AiTuningProfile& profile,
+            const AiBlackboard& bb,
             const std::string& unitType,
             const SimVector& anchor,
             std::minstd_rand& rng,
@@ -344,6 +346,23 @@ namespace rwe
 
         /** Whether an order to this site was dropped lately. */
         bool siteFailedLately(const GameSimulation& sim, const SimVector& site) const;
+
+        /**
+         * Whether an armed enemy is sitting close enough to this site to
+         * shoot whatever we put there.
+         *
+         * The same question the extractor search has always asked about a
+         * metal patch (mexAvoidsEnemyGunsRadius, and the measurement in its
+         * own comment: a commander ordered one site 232 times in five
+         * hundred seconds, each frame living a second or two), asked of
+         * every site instead of only that one. A frame is born with no hit
+         * points whatever it is going to become, so nothing about that
+         * pathology was ever specific to extractors -- and on an all-water
+         * map what the commander actually feeds to the gun is tidal
+         * generators, which the extractor rule never covered. Gated by
+         * noticeProductionHarassment and measured by productionHarassRadius.
+         */
+        bool siteUnderEnemyGuns(const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& site) const;
 
         /**
          * Where extractors of ours were destroyed, by heightmap cell, with

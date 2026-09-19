@@ -110,6 +110,19 @@ namespace rwe
             std::vector<PlayerCommand>& outCommands) const;
 
         /**
+         * The commander goes at whatever is besieging a production site,
+         * when nothing else of ours is left to send.
+         *
+         * Off unless AiTuningProfile::commanderAnswersHarassment says
+         * otherwise; see that knob for why it is not on by default.
+         */
+        void answerHarassmentWithCommander(
+            const GameSimulation& sim,
+            const AiTuningProfile& profile,
+            const AiBlackboard& bb,
+            std::vector<PlayerCommand>& outCommands) const;
+
+        /**
          * The enemy's outlying economy: a building of theirs away from their
          * base with nothing covering it. Nothing to raid returns nothing.
          */

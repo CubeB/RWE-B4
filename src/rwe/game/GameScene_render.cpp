@@ -2439,6 +2439,8 @@ namespace rwe
                     bb.currentEnergy.value, bb.energyStorage.value, bb.energyStalled ? " (stalled)" : "");
                 ImGui::Text("  builders idle %d, factories %d, army %d, scout %s", bb.idleBuilderCount, static_cast<int>(bb.factories.size()), bb.armySize, bb.scoutUnitId ? "yes" : "no");
                 ImGui::Text("  known enemies %d, near base %d, enemy base %s", static_cast<int>(bb.knownEnemies.size()), static_cast<int>(bb.enemiesNearBase.size()), bb.enemyBasePosition ? "known" : "unknown");
+                ImGui::Text("  lost lately: buildings %d, units/frames %d; factories besieged %d",
+                    static_cast<int>(bb.recentLosses.size()), static_cast<int>(bb.recentUnitLosses.size()), static_cast<int>(bb.besiegedFactories.size()));
                 if (bb.attackTarget)
                 {
                     ImGui::Text("  attacking %.0f, %.0f", bb.attackTarget->x.value, bb.attackTarget->z.value);
