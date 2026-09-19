@@ -31,6 +31,19 @@ namespace rwe
         const unsigned int seaLevel;
         const unsigned int footprintX;
         const unsigned int footprintZ;
+        /**
+         * The cells the unit's own footprint occupies right now.
+         *
+         * A unit can be standing inside a blocking feature -- a corpse over
+         * the ground it stands on, or an order to reclaim what it is already
+         * inside. Every one of its eight neighbouring footprints then also
+         * collides, so a search from it has no successors at all and quietly
+         * yields a one-point path: the unit is told it has arrived where it
+         * stands and never moves. Treating the cells it is already on as
+         * passable for the search lets it step across its own body and out,
+         * while leaving every other cell blocking. See TOTALA-EXE.md §95.
+         */
+        const DiscreteRect selfRegion;
         /** Slopes steeper than this count as rough terrain (double cost). */
         const unsigned int roughSlope;
         /**

@@ -2550,27 +2550,49 @@ namespace rwe
             return true;
         }
 
-        return occupiedGrid.any(*region, [&](const auto& cell) {
-            if (cell.mobileUnitId && *cell.mobileUnitId != self)
-            {
-                return true;
-            }
-            if (cell.buildingInfo && !cell.buildingInfo->passable)
-            {
-                return true;
-            }
-            if (cell.featureId)
-            {
-                const auto& f = getFeature(*cell.featureId);
-                const auto& def = getFeatureDefinition(f.featureName);
-                if (def.blocking)
-                {
-                    return true;
-                }
-            }
+        return region->any([&](const GridCoordinates& c) { return cellBlocksUnit(occupiedGrid.get(c), self); });
+    }
 
-            return false;
+    bool GameSimulation::isCollisionAt(const DiscreteRect& rect, UnitId self, const DiscreteRect& passableRegion) const
+    {
+        auto region = occupiedGrid.tryToRegion(rect);
+        if (!region)
+        {
+            return true;
+        }
+
+        return region->any([&](const GridCoordinates& c) {
+            // The unit is already standing on this cell, so stepping across it
+            // is not entering an obstacle. Everything else blocks as usual.
+            if (passableRegion.contains(Point(c.x, c.y)))
+            {
+                return false;
+            }
+            return cellBlocksUnit(occupiedGrid.get(c), self);
         });
+    }
+
+    bool GameSimulation::cellBlocksUnit(const OccupiedCell& cell, UnitId self) const
+    {
+        if (cell.mobileUnitId && *cell.mobileUnitId != self)
+        {
+            return true;
+        }
+        if (cell.buildingInfo && !cell.buildingInfo->passable)
+        {
+            return true;
+        }
+        if (cell.featureId)
+        {
+            const auto& f = getFeature(*cell.featureId);
+            const auto& def = getFeatureDefinition(f.featureName);
+            if (def.blocking)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     bool GameSimulation::isYardmapBlocked(unsigned int x, unsigned int y, const Grid<YardMapCell>& yardMap, bool open, UnitId self) const

@@ -454,6 +454,62 @@ namespace rwe
         REQUIRE(units == 1);
     }
 
+    TEST_CASE("a unit standing inside a blocking feature can walk out of it", "[pathing]")
+    {
+        // A builder standing inside a wreck it was told to reclaim -- or one a
+        // corpse was dropped on top of -- must still be able to walk away.
+        // Before the fix every one of the eight neighbouring footprints also
+        // collided with the wreck, so the search had no successors, returned a
+        // one-point path, and the unit was told it had arrived where it stood.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto player = addPlayer(sim);
+
+        // ARMCK: the 2x2-footprint construction kbot the autoreclaim tests use.
+        UnitDefinition kbot = makeTankDef(255u);
+        kbot.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+        sim.unitDefinitions["armck"] = kbot;
+
+        // armsolar_dead from features/Corpses/arm_corpses.tdf: five cells
+        // across and blocking, so it blocks every movement class the same way
+        // (TOTALA-EXE.md §95).
+        FeatureDefinition wreckDef{};
+        wreckDef.name = "armsolar_dead";
+        wreckDef.footprintX = 5;
+        wreckDef.footprintZ = 5;
+        wreckDef.height = 40_ss;
+        wreckDef.reclaimable = true;
+        wreckDef.metal = 116;
+        wreckDef.damage = 261;
+        wreckDef.blocking = true;
+        auto wreck = sim.featureDefinitions.insert(wreckDef);
+        auto wreckId = sim.addFeature(wreck, 20, 20).value();
+        auto wreckPosition = sim.getFeature(wreckId).position;
+
+        // Thirty world units from the wreck's centre: the kbot's 2x2 footprint
+        // and all eight of its neighbours lie on the wreck's cells 20..24.
+        auto unitId = addUnitOfType(sim, "armck", player, wreckPosition + SimVector(30_ss, 0_ss, 0_ss), script);
+        const auto& unitDefinition = sim.unitDefinitions.at("armck");
+        auto startRegion = sim.computeFootprintRegion(sim.getUnitState(unitId).position, unitDefinition.movementCollisionInfo);
+        REQUIRE(sim.isCollisionAt(startRegion, unitId));
+
+        auto destination = cellCenter(sim, 34, 22);
+        sim.getUnitState(unitId).orders.push_back(MoveOrder(destination));
+
+        for (int i = 0; i < 2000 && !sim.getUnitState(unitId).orders.empty(); ++i)
+        {
+            sim.tick();
+        }
+
+        // The order completed, and it completed somewhere off the wreck.
+        REQUIRE(sim.getUnitState(unitId).orders.empty());
+        auto endRegion = sim.computeFootprintRegion(sim.getUnitState(unitId).position, unitDefinition.movementCollisionInfo);
+        INFO("start=" << startRegion.x << "," << startRegion.y << " end=" << endRegion.x << "," << endRegion.y);
+        REQUIRE_FALSE(sim.isCollisionAt(endRegion, unitId));
+        // Every footprint cell is outside the wreck's 5x5 footprint.
+        REQUIRE((endRegion.x + endRegion.width <= 20 || endRegion.x >= 25 || endRegion.y + endRegion.height <= 20 || endRegion.y >= 25));
+    }
+
     TEST_CASE("computeSlopeSpeedFactor", "[pathing]")
     {
         auto script = makeEmptyCobScript();
