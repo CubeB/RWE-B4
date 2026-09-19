@@ -184,20 +184,22 @@ TA has nothing to say here. A change that departs from a decoded behaviour on
 purpose is neither — it is `divergence`, and §88 has to say so before the label
 is honest.
 
-### The older labels — finer subjects, applied with the pair
+### Other labels
 
-Three are retired for the axes: `fidelity` is `purpose:conformance`,
-`maintenance` is `purpose:maintenance` name for name, and `launcher` is
-`scope:launcher`. The rest stay, applied with the pair and never instead of it.
-`renderer`, `ui` and `media` are the parts of `scope:client` that work is filed
-under; `ai`, `multiplayer`, `save-load`, `io`, `diagnostics` and
-`compatibility` name subjects no scope names — `compatibility` for community
-content and mods, where `io` is the parsers themselves. `performance` and
-`refactor` name the kind of change, so a refactor is `purpose:maintenance`
-*and* `refactor`, never `refactor` alone. `ci:full` is not on the axes at all
-— it is the switch `build.yml` reads to run the whole matrix — and the GitHub
-defaults stay as they are, `bug` and `enhancement` included: they say what the
-item is, not where the change lands or why.
+Retired, because an axis already says them:
+
+- `fidelity` — `purpose:conformance` says the same thing.
+- `maintenance` — `purpose:maintenance`, name for name.
+- `launcher` — `scope:launcher`, the same words.
+
+Kept, applied with the pair and never instead of it:
+
+- `renderer`, `ui`, `media` — the parts of `scope:client` that work is filed under.
+- `ai`, `multiplayer`, `save-load`, `io`, `diagnostics` — subjects no scope names.
+- `compatibility` — community content and mods: map packs, Core Contingency and Battle Tactics, where `io` is the parsers themselves.
+- `performance`, `refactor` — the kind of change, so a refactor is `purpose:maintenance` *and* `refactor`, never `refactor` alone.
+- `ci:full` — not on the axes at all: it is the switch `build.yml` reads to run the whole matrix.
+- `bug`, `enhancement` and the other GitHub defaults — unchanged; they say what the item is, not where the change lands or why.
 
 ## Saved games
 
