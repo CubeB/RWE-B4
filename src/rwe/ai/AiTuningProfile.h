@@ -113,6 +113,13 @@ namespace rwe
          * stall. arena-analyse.py is what asked for it: a side at its energy
          * cap for 71% of a game, 490 energy a second against 12 metal, with
          * one maker standing.
+         *
+         * Measured twice at 6 and off both times. ARM against ARM it was
+         * inside the noise. ARM against CORE on Great Divide, eight seeds,
+         * where CORE's geothermal plant is what makes that surplus, the
+         * tuned side came to 41.9 units and an army of 12.4 against 51.4
+         * and 17.9 for the untuned side of the same games: the builder
+         * time the makers took was worth more than the metal they made.
          */
         int maxSurplusMetalMakerCount{0};
         /**
