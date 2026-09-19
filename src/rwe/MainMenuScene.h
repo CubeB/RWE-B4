@@ -159,6 +159,9 @@ namespace rwe
 
         void cyclePlayerTeam(int playerIndex);
 
+        /** Steps a computer player through the AI personalities, forwards or back. */
+        void cyclePlayerPersonality(int playerIndex, int step);
+
         void cycleSkirmishOption(const std::string& optionName);
 
         void startGame();
@@ -190,6 +193,17 @@ namespace rwe
          * it is over none of them, which is when the line is blank.
          */
         std::string hoveredSkirmishOption;
+
+        /**
+         * The AI personalities a computer player can be given, name and
+         * description, built-ins first: read again each time the skirmish
+         * screen opens, so a file dropped into the `ai` folder shows up
+         * without a restart.
+         */
+        std::vector<std::pair<std::string, std::string>> aiPersonalities;
+
+        /** "Rush: Raids early and ..." for the help line, or just the name if it is not known. */
+        std::string describeAiPersonality(const std::string& name) const;
 
         /**
          * Hooks the staged option buttons on the right of the skirmish

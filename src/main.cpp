@@ -9,6 +9,7 @@
 #include <rwe/setup/TaInstall.h>
 #include <rwe/game/SaveFile.h>
 #include <rwe/Viewport.h>
+#include <rwe/ai/AiPersonality.h>
 #include <rwe/config.h>
 #include <rwe/game/PlayerColorIndex.h>
 #include <rwe/io/tdf/tdf.h>
@@ -115,6 +116,9 @@ int main(int argc, char* argv[])
                       << "                        runs flat out, writes ai-arena.csv and quits\n"
                       << "  --seed <n>            vary the simulation seed, for averaging arena runs\n"
                       << "  --ai-tune <p>:<k>=<v> override one AI knob for player p (see applyAiTuning)\n"
+                      << "  --ai-personality <p>:<name>  play computer player p as a personality:\n"
+                      << "                        Balanced, Rush, Turtle, Tech Rush, Easy, Medium, Hard,\n"
+                      << "                        or one written in the local data folder's ai directory\n"
                       << "  --record-replay <f>   write every command to a replay file as you play\n"
                       << "  --replay <file>       watch a replay instead of playing\n"
                       << "  --width <pixels>      Window width (default: 800)\n"
@@ -296,6 +300,34 @@ int main(int argc, char* argv[])
                 {
                     gameParameters->players[playerIndex] = rwe::parsePlayerInfoFromArg(playerString);
                     ++playerIndex;
+                }
+                const auto personalityArgs = args.getMulti("ai-personality");
+                if (!personalityArgs.empty())
+                {
+                    auto personalities = rwe::loadAiPersonalities(rwe::aiPersonalityDirectory());
+                    for (const auto& entry : personalityArgs)
+                    {
+                        auto colon = entry.find(':');
+                        if (colon == std::string::npos)
+                        {
+                            throw std::runtime_error("--ai-personality wants <player>:<name>, got " + entry);
+                        }
+                        auto slot = std::stoul(entry.substr(0, colon));
+                        if (slot >= gameParameters->players.size() || !gameParameters->players[slot])
+                        {
+                            throw std::runtime_error("--ai-personality: there is no player " + entry.substr(0, colon));
+                        }
+                        // A misspelt name that quietly played the default
+                        // would make an arena comparison between two
+                        // identical AIs look like a result, as with
+                        // --ai-tune, so it is fatal.
+                        auto personality = rwe::findAiPersonality(personalities, entry.substr(colon + 1));
+                        if (!personality)
+                        {
+                            throw std::runtime_error("--ai-personality: no such personality: " + entry.substr(colon + 1));
+                        }
+                        gameParameters->players[slot]->aiPersonality = personality->name;
+                    }
                 }
             }
 

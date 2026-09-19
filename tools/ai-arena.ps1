@@ -69,6 +69,8 @@ param(
     [string]$tune = "",           # the change under test: alternates sides, self-controls
     [string]$tuneA = "",          # legacy: pin a change to player 0, no control
     [string]$tuneB = "",          # legacy: pin a change to player 1, no control
+    [string]$personalityA = "",   # an AI personality for player 0 in every game (Rush, Turtle, Tech Rush, ...)
+    [string]$personalityB = "",   # the same for player 1; -tune still goes on top
     [switch]$noControl,           # skip the control arm when only the A/B is wanted
     [string]$countTypes = "",     # comma-separated unit types to add as columns
     [string]$exe = "D:\RWE\build-release\rwe.exe",
@@ -122,6 +124,8 @@ function Invoke-ArenaGame {
             $gameArgs += @('--ai-tune', ("$tunedPlayer" + ':' + $t))
         }
     }
+    if ($personalityA) { $gameArgs += @('--ai-personality', ('"0:' + $personalityA + '"')) }
+    if ($personalityB) { $gameArgs += @('--ai-personality', ('"1:' + $personalityB + '"')) }
     foreach ($t in ($tuneA -split ',' | Where-Object { $_ })) { $gameArgs += @('--ai-tune', ('0:' + $t)) }
     foreach ($t in ($tuneB -split ',' | Where-Object { $_ })) { $gameArgs += @('--ai-tune', ('1:' + $t)) }
 

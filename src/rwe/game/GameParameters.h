@@ -66,6 +66,15 @@ namespace rwe
          * Players sharing a team share sight and radar.
          */
         std::optional<int> teamId;
+
+        /**
+         * The AI personality a computer player plays, by name (see
+         * AiPersonality.h), or nothing for its difficulty's profile as tuned.
+         * Read from the built-ins and the local `ai` folder when the game
+         * loads, so a peer whose folder differs would play it differently:
+         * the launcher does not send one, and a network game has none.
+         */
+        std::optional<std::string> aiPersonality;
     };
 
     /** SKIRMISH.GUI's Line of Sight button. */

@@ -55,6 +55,8 @@ namespace rwe
             BehaviorSubject<std::optional<int>> teamIndex;
             BehaviorSubject<Metal> metal;
             BehaviorSubject<Energy> energy;
+            /** The AI personality a computer player plays, by name (see AiPersonality.h). */
+            BehaviorSubject<std::string> personality{std::string("Balanced")};
         };
 
     public:

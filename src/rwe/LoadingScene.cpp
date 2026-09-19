@@ -5,6 +5,7 @@
 #include <rwe/util/SpanStream.h>
 #include <rwe/LoadingScene_util.h>
 #include <rwe/ai/AiBuildTree.h>
+#include <rwe/ai/AiPersonality.h>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/game/DownloadMenus.h>
 #include <rwe/game/ReplayFile.h>
@@ -374,6 +375,9 @@ namespace rwe
         auto buildTree = buildTreeFromBuilderGuis(dataMaps.builderGuisDatabase, knownUnitTypes);
         LOG_INFO << "AI build tree: " << buildTree.buildableBy.size() << " builders with a build menu";
 
+        // Read once, and only if some seat asks for a personality.
+        std::optional<std::vector<AiPersonality>> aiPersonalities;
+
         // Instantiate one AiPlayerController per Computer player.
         // The controller's RNG is sub-seeded from simulation.rng so its
         // sequence is part of the seeded sim and survives replays
@@ -395,13 +399,46 @@ namespace rwe
                 continue;
             }
 
+            // The personality chosen for this seat, if any. The seat is the
+            // lobby's slot, which is not the player's index once an empty
+            // slot has been skipped.
+            std::optional<AiPersonality> personality;
+            for (Index slot = 0; slot < getSize(gamePlayers); ++slot)
+            {
+                if (gamePlayers[slot] != aiPlayerId || !gameParameters.players[slot] || !gameParameters.players[slot]->aiPersonality)
+                {
+                    continue;
+                }
+                const auto& name = *gameParameters.players[slot]->aiPersonality;
+                if (!aiPersonalities)
+                {
+                    aiPersonalities = loadAiPersonalities(aiPersonalityDirectory());
+                }
+                personality = findAiPersonality(*aiPersonalities, name);
+                if (!personality)
+                {
+                    // A saved game can outlive the file it was played with;
+                    // the game still loads, as the difficulty's own.
+                    LOG_WARN << "Player " << i << ": no AI personality called " << name << ", playing the default";
+                }
+            }
+
             // Every computer player in a game shares the difficulty chosen for
-            // the game (--ai-difficulty, or rwe.cfg). Per-slot difficulty can
-            // follow once the lobby exposes it.
-            auto profile = makeProfileForDifficulty(gameParameters.aiDifficulty);
-            // What this player's faction plays differently, before any
-            // --ai-tune, so that an arena run can still set a knob back.
+            // the game (--ai-difficulty, rwe.cfg or the skirmish menu), unless
+            // its personality names one of its own.
+            auto profile = makeProfileForDifficulty(personality && personality->difficulty ? *personality->difficulty : gameParameters.aiDifficulty);
+            // What this player's faction plays differently, before its
+            // personality and any --ai-tune, so that either can set a knob
+            // back.
             applyFactionDefaults(profile, player.side);
+            if (personality)
+            {
+                if (auto knob = applyAiPersonality(profile, *personality))
+                {
+                    LOG_WARN << "Player " << i << ": the " << personality->name << " personality sets " << *knob << ", which is no AI knob";
+                }
+                LOG_INFO << "Player " << i << " plays the " << personality->name << " personality";
+            }
             for (const auto& entry : gameParameters.aiTuning)
             {
                 auto colon = entry.find(':');

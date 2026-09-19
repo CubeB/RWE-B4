@@ -34,6 +34,10 @@ namespace rwe
             {
                 j["teamId"] = *p.teamId;
             }
+            if (p.aiPersonality)
+            {
+                j["aiPersonality"] = *p.aiPersonality;
+            }
             return j;
         }
 
@@ -58,6 +62,10 @@ namespace rwe
             if (j.contains("teamId"))
             {
                 p.teamId = j.at("teamId").get<int>();
+            }
+            if (j.contains("aiPersonality"))
+            {
+                p.aiPersonality = j.at("aiPersonality").get<std::string>();
             }
             return p;
         }
