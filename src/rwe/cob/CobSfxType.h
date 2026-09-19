@@ -14,5 +14,7 @@ namespace rwe
 
         WhiteSmoke = 257,
         BlackSmoke,
+        /** 259. Bubbles rising from something under water; see TOTALA-EXE.md S:4. */
+        SubBubbles,
     };
 }

@@ -551,7 +551,12 @@ namespace rwe
          * the two nozzles take their turn as they should.
          */
         std::optional<GameTime> nanoPointQueriedAt;
-        SimVector nanoPoint;
+        // Initialised, which it was not until 2026-09-18: it is hashed and
+        // saved from the unit's first tick, long before any nozzle is asked
+        // about, so a new unit carried whatever the heap had there -- a
+        // desync between peers and, one run in six, between a replay and
+        // its own keyframe.
+        SimVector nanoPoint{0_ss, 0_ss, 0_ss};
 
         /**
          * When the nanolathe arm is due to be put away, if it is.

@@ -123,4 +123,39 @@ namespace rwe
             REQUIRE_FALSE(sim.canBeBuiltAtAsSeenBy(mc, hutDefinition.yardMap, hutDefinition.yardMapContainsGeo, rect.x, rect.y, us));
         }
     }
+
+    TEST_CASE("nothing is built touching the edge of the map", "[fogplacement]")
+    {
+        // 0x47D2E0 opens with it: the footprint's corner at least one cell in
+        // from the top and left, its far side short of the last cell.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFogTerrain(), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        registerFogModel(sim);
+        sim.unitDefinitions["HUT"] = makeHutDef();
+        sim.unitScriptDefinitions["HUT"] = *script;
+
+        const auto& hut = sim.unitDefinitions.at("HUT");
+        auto mc = sim.getAdHocMovementClass(hut.movementCollisionInfo);
+        auto width = static_cast<unsigned int>(sim.occupiedGrid.getWidth());
+        auto height = static_cast<unsigned int>(sim.occupiedGrid.getHeight());
+        auto fx = mc.footprintX;
+        auto fz = mc.footprintZ;
+
+        auto both = [&](unsigned int x, unsigned int y) {
+            auto a = sim.canBeBuiltAt(mc, hut.yardMap, hut.yardMapContainsGeo, x, y);
+            auto b = sim.canBeBuiltAtAsSeenBy(mc, hut.yardMap, hut.yardMapContainsGeo, x, y, us);
+            REQUIRE(a == b);
+            return a;
+        };
+
+        REQUIRE_FALSE(both(0, 5));
+        REQUIRE_FALSE(both(5, 0));
+        REQUIRE(both(1, 1));
+
+        // Flush against the far sides, and one cell in from them.
+        REQUIRE_FALSE(both(width - fx, 5));
+        REQUIRE_FALSE(both(5, height - fz));
+        REQUIRE(both(width - fx - 1, height - fz - 1));
+    }
 }

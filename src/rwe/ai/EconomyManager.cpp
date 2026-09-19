@@ -231,6 +231,9 @@ namespace rwe
             else if (def.isMobile && !isFerryPassenger
                 && ((!bb.sideUnits.destroyer.empty() && unit.unitType == bb.sideUnits.destroyer)
                     || (!bb.sideUnits.submarine.empty() && unit.unitType == bb.sideUnits.submarine)
+                    || (!bb.sideUnits.cruiser.empty() && unit.unitType == bb.sideUnits.cruiser)
+                    || (!bb.sideUnits.battleship.empty() && unit.unitType == bb.sideUnits.battleship)
+                    || (!bb.sideUnits.antiAirShip.empty() && unit.unitType == bb.sideUnits.antiAirShip)
                     || (!bb.sideUnits.scoutShip.empty() && unit.unitType == bb.sideUnits.scoutShip)))
             {
                 // Hulls. See AiBlackboard::navalCombatUnits for why these are
@@ -326,6 +329,12 @@ namespace rwe
             {
                 if (standingNow.count(unitId) != 0)
                 {
+                    continue;
+                }
+                if (bb.ownReclaimTarget && bb.ownReclaimTarget->value == unitId)
+                {
+                    // Taken down by us, on purpose. See ownReclaimTarget.
+                    bb.ownReclaimTarget.reset();
                     continue;
                 }
                 bb.recentLosses.insert(bb.recentLosses.begin(), LostBuilding{standing.unitType, standing.position, bb.now});

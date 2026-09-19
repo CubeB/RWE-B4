@@ -3,6 +3,7 @@
 #include <rwe/ai/AiBlackboard.h>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/game/PlayerCommand.h>
+#include <map>
 #include <rwe/sim/PlayerId.h>
 #include <vector>
 
@@ -44,5 +45,14 @@ namespace rwe
          * while the level sits on it.
          */
         bool makersOn{false};
+
+        /**
+         * When each maker was last told, by unit id. A command takes half a
+         * second to land, so a maker goes on reading as it did for a dozen
+         * passes after it has been told otherwise, and one told every pass
+         * was sent fifteen copies of the same switch -- for ever, if it was a
+         * frame that cannot be switched at all.
+         */
+        std::map<unsigned int, GameTime> lastToldAt;
     };
 }
