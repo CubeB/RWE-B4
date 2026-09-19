@@ -405,6 +405,12 @@ namespace rwe
             Vtol,
             /** The same emitter as Vtol, one step longer and slower. */
             Thrust,
+            /**
+             * Bubbles off something under water: a submarine under way, an
+             * underwater extractor turning. The original makes these with the
+             * wake emitter, aimed at the surface instead of along the piece.
+             */
+            SubBubbles,
         };
 
         SfxType sfxType;
@@ -1001,6 +1007,8 @@ namespace rwe
          * could be built at given location on the map -- i.e. it is valid terrain
          * for the unit, it is not occupied by something else, and it contains geo if required.
          */
+        /** The one-cell margin the original keeps clear all round the map; see the definition. */
+        bool isInsideBuildableArea(unsigned int x, unsigned int y, unsigned int footprintX, unsigned int footprintZ) const;
         bool canBeBuiltAt(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y) const;
 
         /**

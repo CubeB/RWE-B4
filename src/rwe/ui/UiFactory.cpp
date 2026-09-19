@@ -818,6 +818,13 @@ namespace rwe
         auto graphics = textureService->getGuiTexture(guiName, name);
         if (!graphics)
         {
+            // A build button a download file put on this page: the page's
+            // own GAF has no frame for its unit, and the unit's build
+            // picture is where its art comes from. See TextureService.
+            graphics = textureService->getUnitPic(name);
+        }
+        if (!graphics)
+        {
             graphics = getDefaultButtonGraphics(guiName, width, height);
         }
 

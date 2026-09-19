@@ -82,8 +82,21 @@ namespace rwe
         auto it = std::find_if(threads.begin(), threads.end(), [thread](const auto& t) { return t.get() == thread; });
         if (it != threads.end())
         {
+            deadThreads.push_back(std::move(*it));
             threads.erase(it);
         }
+    }
+
+    bool CobEnvironment::ownsThread(const CobThread* thread) const
+    {
+        return thread != nullptr
+            && std::any_of(threads.begin(), threads.end(), [thread](const auto& t) { return t.get() == thread; });
+    }
+
+    void CobEnvironment::sweepDeadThreads()
+    {
+        deadThreadsFromLastSweep = std::move(deadThreads);
+        deadThreads.clear();
     }
 
     bool CobEnvironment::isThreadRunning(const std::string& functionName) const
@@ -100,7 +113,8 @@ namespace rwe
                 // remove references to the thread
                 removeThreadFromQueues(it->get());
 
-                // delete the thread
+                // delete the thread -- kept, not freed; see deadThreads
+                deadThreads.push_back(std::move(*it));
                 it = threads.erase(it);
             }
             else

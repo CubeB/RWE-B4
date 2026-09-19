@@ -62,11 +62,25 @@ namespace rwe
             units.destroyer = "CORROY";
             units.seaTransport = "CORTSHIP";
             units.submarine = "CORSUB";
+            units.advancedShipyard = "CORASY";
+            units.cruiser = "CORCRUS";
+            units.battleship = "CORBATS";
+            units.antiAirShip = "CORARCH";
+            units.advancedConstructionSub = "CORACSUB";
+            units.seaplanePlatform = "CORPLAT";
+            units.seaplaneFighter = "CORSFIG";
+            units.torpedoSeaplane = "CORSEAP";
             units.tidalGenerator = "CORTIDE";
             units.sonar = "CORSONAR";
             units.torpedoLauncher = "CORTL";
             units.underwaterMetalExtractor = "CORUWMEX";
             units.floatingMetalMaker = "CORFMKR";
+            units.geothermal = "CORGEO";
+            units.metalStorage = "CORMSTOR";
+            units.energyStorage = "CORESTOR";
+            units.underwaterMetalStorage = "CORUWMS";
+            units.underwaterEnergyStorage = "CORUWES";
+            units.underwaterFusion = "CORUWFUS";
         }
         else
         {
@@ -104,11 +118,25 @@ namespace rwe
             units.destroyer = "ARMROY";
             units.seaTransport = "ARMTSHIP";
             units.submarine = "ARMSUB";
+            units.advancedShipyard = "ARMASY";
+            units.cruiser = "ARMCRUS";
+            units.battleship = "ARMBATS";
+            units.antiAirShip = "ARMAAS";
+            units.advancedConstructionSub = "ARMACSUB";
+            units.seaplanePlatform = "ARMPLAT";
+            units.seaplaneFighter = "ARMSFIG";
+            units.torpedoSeaplane = "ARMSEAP";
             units.tidalGenerator = "ARMTIDE";
             units.sonar = "ARMSONAR";
             units.torpedoLauncher = "ARMTL";
             units.underwaterMetalExtractor = "ARMUWMEX";
             units.floatingMetalMaker = "ARMFMKR";
+            units.geothermal = "ARMGEO";
+            units.metalStorage = "ARMMSTOR";
+            units.energyStorage = "ARMESTOR";
+            units.underwaterMetalStorage = "ARMUWMS";
+            units.underwaterEnergyStorage = "ARMUWES";
+            units.underwaterFusion = "ARMUWFUS";
         }
 
         auto check = [&](std::string& name) {
@@ -151,11 +179,25 @@ namespace rwe
         check(units.destroyer);
         check(units.seaTransport);
         check(units.submarine);
+        check(units.advancedShipyard);
+        check(units.cruiser);
+        check(units.battleship);
+        check(units.antiAirShip);
+        check(units.advancedConstructionSub);
+        check(units.seaplanePlatform);
+        check(units.seaplaneFighter);
+        check(units.torpedoSeaplane);
         check(units.tidalGenerator);
         check(units.sonar);
         check(units.torpedoLauncher);
         check(units.underwaterMetalExtractor);
         check(units.floatingMetalMaker);
+        check(units.geothermal);
+        check(units.metalStorage);
+        check(units.energyStorage);
+        check(units.underwaterMetalStorage);
+        check(units.underwaterEnergyStorage);
+        check(units.underwaterFusion);
         return units;
     }
 

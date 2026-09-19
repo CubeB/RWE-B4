@@ -196,6 +196,7 @@ namespace rwe
                  << " under water, deepest " << deepest;
     }
 
+
     namespace
     {
         /**
@@ -356,6 +357,37 @@ namespace rwe
                         if (accept && !accept(candidate))
                         {
                             continue;
+                        }
+                        // Nor on a geothermal vent, unless it is the plant
+                        // that wants one. A vent blocks nothing, so the
+                        // placement test is perfectly happy to put a solar
+                        // collector on it -- watched in a replay -- and the
+                        // 250 energy under it is then gone for good.
+                        if (!def.yardMapContainsGeo)
+                        {
+                            // The simulation's own vent grid, a tile wider
+                            // than the footprint all round.
+                            bool onVent = false;
+                            const int geoWidth = sim.geoGrid.getWidth();
+                            const int geoHeight = sim.geoGrid.getHeight();
+                            for (int gy = std::max(0, rect.y - 1); gy < std::min(geoHeight, rect.y + rect.height + 1) && !onVent; ++gy)
+                            {
+                                for (int gx = std::max(0, rect.x - 1); gx < std::min(geoWidth, rect.x + rect.width + 1); ++gx)
+                                {
+                                    // Through the vector, as the simulation reads it:
+                                    // Grid<bool>::get cannot return a reference into a
+                                    // vector<bool>.
+                                    if (sim.geoGrid.getVector()[static_cast<std::size_t>((gy * geoWidth) + gx)])
+                                    {
+                                        onVent = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (onVent)
+                            {
+                                continue;
+                            }
                         }
                         // Don't plant a building on a metal patch; mexes want
                         // those. Still checked before canBeBuiltAt, which is
@@ -749,6 +781,22 @@ namespace rwe
             walkable);
     }
 
+    void BuildManager::indexGeothermalVents(const GameSimulation& sim) const
+    {
+        if (geothermalVentsIndexed)
+        {
+            return;
+        }
+        geothermalVentsIndexed = true;
+        for (const auto& [_, feature] : sim.features)
+        {
+            if (sim.getFeatureDefinition(feature.featureName).geothermal)
+            {
+                geothermalVents.push_back(feature.position);
+            }
+        }
+    }
+
     std::optional<SimVector> BuildManager::chooseShipyardSite(
         const GameSimulation& sim,
         const AiTuningProfile& profile,
@@ -756,7 +804,6 @@ namespace rwe
         const std::string& unitType,
         std::minstd_rand& rng) const
     {
-        (void)profile;
         const auto defIt = sim.unitDefinitions.find(unitType);
         if (defIt == sim.unitDefinitions.end() || !bb.baseAnchor || bb.mapIntel.shipyardSites.empty())
         {
@@ -772,11 +819,37 @@ namespace rwe
         // at home has any hope of reaching it, and distance is what answers
         // that in practice: a site half the map away is a site the shore
         // never gets close enough to work, whatever body of water it is on.
+        // With sea room round it if any such site exists within reach of the
+        // nearest one; see NavalSite::open. The allowance keeps the yard from
+        // being sent across the map for the sake of a tidy harbour.
         std::vector<SimVector> best;
         std::optional<SimScalar> bestDistance;
+        std::optional<SimVector> bestOpen;
+        std::optional<SimScalar> bestOpenDistance;
+        // Our own yards, to keep clear of; see shipyardSpacing.
+        std::vector<SimVector> ownYards;
+        for (auto factoryId : bb.factories)
+        {
+            auto factoryRef = sim.tryGetUnitState(factoryId);
+            if (!factoryRef)
+            {
+                continue;
+            }
+            const auto& type = factoryRef->get().unitType;
+            if (type == bb.sideUnits.shipyard || (!bb.sideUnits.advancedShipyard.empty() && type == bb.sideUnits.advancedShipyard)
+                || (!bb.sideUnits.seaplanePlatform.empty() && type == bb.sideUnits.seaplanePlatform))
+            {
+                ownYards.push_back(factoryRef->get().position);
+            }
+        }
+        auto spacingSquared = profile.shipyardSpacing * profile.shipyardSpacing;
         for (const auto& candidate : bb.mapIntel.shipyardSites)
         {
             if (siteFailedLately(sim, candidate.position))
+            {
+                continue;
+            }
+            if (std::any_of(ownYards.begin(), ownYards.end(), [&](const SimVector& yard) { return yard.distanceSquared(candidate.position) < spacingSquared; }))
             {
                 continue;
             }
@@ -786,6 +859,11 @@ namespace rwe
                 continue;
             }
             auto distance = flatDistance(candidate.position, *bb.baseAnchor);
+            if (candidate.open && (!bestOpenDistance || distance < *bestOpenDistance))
+            {
+                bestOpenDistance = distance;
+                bestOpen = candidate.position;
+            }
             if (!bestDistance || distance < *bestDistance)
             {
                 bestDistance = distance;
@@ -800,6 +878,12 @@ namespace rwe
         if (best.empty())
         {
             return std::nullopt;
+        }
+        // Sixteen tiles further is a short sail and a long walk saved for
+        // every hull the yard will ever launch.
+        if (bestOpen && bestDistance && *bestOpenDistance <= *bestDistance + (16_ss * MapTerrain::HeightTileWidthInWorldUnits))
+        {
+            return bestOpen;
         }
         return best[randomBelow(rng, static_cast<unsigned int>(best.size()))];
     }
@@ -888,9 +972,33 @@ namespace rwe
             return std::tie(a.ring, a.dz, a.dx) < std::tie(b.ring, b.dz, b.dx);
         });
 
-        // Take the richest buildable patch on the nearest ring that has one.
+        // Take the richest buildable footprint on the nearest ring that has
+        // one -- and then keep walking inward for as long as each further ring
+        // does strictly better.
+        //
+        // The first half alone was the rule, and it put extractors on the
+        // edge of every deposit larger than about two cells square. A patch
+        // here is one metal CELL, not one deposit, so the nearest ring to
+        // turn anything up is the deposit's near edge, and a 3x3 footprint
+        // centred there hangs half off it. Extraction is the sum of the metal
+        // grid under the footprint (GameSimulation's resource tick), so that
+        // is real income lost, not a cosmetic offset: a 4x4 deposit taken
+        // from the side gives 800 at its edge against 1800 at its heart.
+        // Reported from a replay on Brain Coral as extractors "not central to
+        // the metal spot".
+        //
+        // Stopping at the first ring that does not improve keeps the old
+        // behaviour for small and isolated spots, where the next ring holds
+        // no metal. A GAP in the ring numbers stops it too: only rings that
+        // hold metal are in this list at all, so a gap means the deposit has
+        // ended, and without that test a builder standing at a small spot
+        // would be sent past it to a large deposit ten rings further out.
+        // Ties are kept to the ring that set the best, so equal cells further
+        // in do not drag the choice outward, and the single draw at the end
+        // is unchanged.
         std::vector<SimVector> tiedCandidates;
         unsigned int bestMetal = 0;
+        int bestRing = -1;
         for (std::size_t i = 0; i < ringCells.size(); ++i)
         {
             const int gx = anchorHm.x + ringCells[i].dx;
@@ -911,21 +1019,33 @@ namespace rwe
                     if (metal > bestMetal)
                     {
                         bestMetal = metal;
+                        bestRing = ringCells[i].ring;
                         tiedCandidates.clear();
                         tiedCandidates.push_back(candidate);
                     }
-                    else if (metal == bestMetal && metal > 0)
+                    else if (metal == bestMetal && metal > 0 && ringCells[i].ring == bestRing)
                     {
                         tiedCandidates.push_back(candidate);
                     }
                 }
             }
 
-            // Stop at the end of the first ring that turned something up.
-            bool ringEnds = (i + 1 == ringCells.size()) || ringCells[i + 1].ring != ringCells[i].ring;
+            bool lastCell = i + 1 == ringCells.size();
+            bool ringEnds = lastCell || ringCells[i + 1].ring != ringCells[i].ring;
             if (ringEnds && !tiedCandidates.empty())
             {
-                break;
+                // This ring did not beat what an earlier one found: the
+                // deposit's heart has been passed.
+                if (bestRing != ringCells[i].ring)
+                {
+                    break;
+                }
+                // The next ring holding any metal is not the adjacent one, so
+                // the rings between are bare and the deposit has ended.
+                if (lastCell || ringCells[i + 1].ring != ringCells[i].ring + 1)
+                {
+                    break;
+                }
             }
         }
 
@@ -1162,12 +1282,127 @@ namespace rwe
             }
         };
 
+        // Metal, of whichever kind this map's patches will take.
+        //
+        // Every extractor rule below used to name the dry one alone, and on a
+        // map where every patch is submerged that is a rule which can never be
+        // satisfied: ARMMEX is MaxWaterDepth=0, so it finds no site at all.
+        // The opening then falls through to the first thing that CAN stand on
+        // water -- the shipyard, and then tidal generators -- and never
+        // recovers, because by the time the submerged extractor is reached at
+        // the bottom of this list the starting stockpile is spent and income
+        // is the metal a commander makes by itself. Watched on Brain Coral
+        // (1170 patches, all 1170 of them under water) that is exactly the
+        // opening the AI plays: a naval yard, then tidals, then warships that
+        // idle by the yard, and 449 'cannot afford ARMUWMEX, skipping' in a
+        // single game against an income of one to two a second.
+        //
+        // Listing the submerged one directly after the dry one costs a land
+        // map nothing. The planner takes the first entry it can find a site
+        // for, so wherever there is a dry patch the dry extractor still wins
+        // and this is never reached -- it is the same rule that already sits
+        // at the foot of this function, applied where the opening can use it.
+        auto wantMetalExtractor = [&]() {
+            want(s.metalExtractor);
+            if (submergedMetalPatches > 0)
+            {
+                want(s.underwaterMetalExtractor);
+            }
+        };
+
+        // Both kinds count toward the extractor targets. Counting only the dry
+        // ones leaves every gate below permanently unsatisfied on a map with
+        // no dry patch to take: it reads as "still no metal extractors"
+        // however many are actually mining, so the opening never finishes.
+        auto totalExtractors = [&]() { return total(s.metalExtractor) + total(s.underwaterMetalExtractor); };
+
         // A builder ferried to an island the base cannot walk to runs an
         // outpost: it takes the metal there and powers its own extractors,
         // but leaves the factories and towers to the main base.
+        // The naval tech step; see targetAdvancedShipyardCount. Behind an
+        // income test for the reason the land step is: 2524 metal bought on
+        // four a second is the whole game spent on a building with nothing
+        // to build.
+        // Storage. A store found full is income thrown away, and a store of
+        // a thousand cannot hold the price of anything level two sells, so
+        // the first of each goes up with the tier and the rest when the
+        // store is pegged. The land kind is asked for first and the
+        // underwater kind after it: want() drops whichever this builder has
+        // no button for, and the site search drops whichever has no site.
+        auto wantStorage = [&](bool underwaterOnly) {
+            auto metalStores = total(s.metalStorage) + total(s.underwaterMetalStorage);
+            auto energyStores = total(s.energyStorage) + total(s.underwaterEnergyStorage);
+            auto metalPegged = bb.metalStorage.value > 0.0f && bb.currentMetal.value >= bb.metalStorage.value * 0.9f;
+            auto energyPegged = bb.energyStorage.value > 0.0f && bb.currentEnergy.value >= bb.energyStorage.value * 0.9f;
+            auto tierTwo = total(s.advancedLab) + total(s.advancedShipyard) >= 1;
+            auto hasFactory = total(s.lab) + total(s.vehiclePlant) + total(s.shipyard) >= 1;
+            if (!hasFactory)
+            {
+                return;
+            }
+            if (metalStores < profile.targetMetalStorageCount && ((tierTwo && metalStores < 1) || metalPegged))
+            {
+                if (!underwaterOnly)
+                {
+                    want(s.metalStorage);
+                }
+                want(s.underwaterMetalStorage);
+            }
+            if (energyStores < profile.targetEnergyStorageCount && ((tierTwo && energyStores < 1) || energyPegged))
+            {
+                if (!underwaterOnly)
+                {
+                    want(s.energyStorage);
+                }
+                want(s.underwaterEnergyStorage);
+            }
+        };
+
+        auto wantAdvancedShipyard = [&]() {
+            if (navalFleetTarget(profile, bb) > 0 && !s.advancedShipyard.empty() && total(s.shipyard) >= 1
+                && total(s.advancedShipyard) < profile.targetAdvancedShipyardCount
+                && bb.metalIncome.value >= static_cast<float>(profile.navalTechMinMetalIncome))
+            {
+                want(s.advancedShipyard);
+            }
+        };
+
         if (!builderAtBase)
         {
-            want(s.metalExtractor);
+            // A construction ship lands here -- the ground labelling calls
+            // anything afloat stranded -- and it is the only builder with the
+            // advanced shipyard's button, so the one base job it is given is
+            // asked for here or never. want() drops it for a kbot on an
+            // island, which has no such button. Everything else a ship might
+            // do for the base it is better off not doing: measured, ships
+            // that kept to extractors finished with 28.1 of them and 52.3
+            // metal a second, against 18.4 and 32.6 for ships offered the
+            // whole plan (navalBuildersPlanForBase).
+            wantAdvancedShipyard();
+            // And the advanced construction sub's: the seaplane platform,
+            // which only it can build. want() drops it for everyone else.
+            auto storeFull = bb.metalStorage.value > 0.0f && bb.currentMetal.value >= bb.metalStorage.value * 0.8f;
+            if (profile.surplusExpansion && storeFull && !s.seaplanePlatform.empty() && total(s.airPlant) < 1
+                && total(s.advancedShipyard) >= 1 && total(s.seaplanePlatform) < profile.targetSeaplanePlatformCount)
+            {
+                want(s.seaplanePlatform);
+            }
+            // The reactor that goes under the sea, which is the advanced
+            // construction sub's and nobody else's. The first needs only the
+            // income, as the land one does; more need the energy to be short.
+            auto reactors = total(s.fusion) + total(s.underwaterFusion);
+            auto energyShort = bb.energyStalled
+                || (bb.energyStorage.value > 0.0f && bb.currentEnergy.value < bb.energyStorage.value * 0.25f);
+            if (!s.underwaterFusion.empty() && total(s.advancedShipyard) >= 1
+                && bb.metalIncome.value >= static_cast<float>(profile.navalTechMinMetalIncome)
+                && total(s.underwaterFusion) < profile.targetUnderwaterFusionCount && (reactors < 1 || energyShort))
+            {
+                want(s.underwaterFusion);
+            }
+            // Storage under the water, for a side with no ground to put the
+            // dry kind on. The construction ship has the buttons.
+            wantStorage(true);
+            wantMetalExtractor();
             want(s.solar);
             return wanted;
         }
@@ -1180,10 +1415,22 @@ namespace rwe
         if (bb.energyStalled)
         {
             want(s.solar);
+            // And the one that can stand in water, where ships matter. The
+            // planner takes the first of these it finds a site for, so on dry
+            // ground this changes nothing; on a map with none, the solar
+            // collector finds no site for ever and the stall was never
+            // answered at all. Measured on Brain Coral at twenty-five
+            // minutes: metal store full at sixty a second coming in, energy
+            // at 157 in and 156 out, and six tidal generators because six is
+            // targetTidalCount. This is what lets the count follow the need.
+            if (navalFleetTarget(profile, bb) > 0)
+            {
+                want(s.tidalGenerator);
+            }
         }
-        if (total(s.metalExtractor) < profile.openingMetalExtractorCount)
+        if (totalExtractors() < profile.openingMetalExtractorCount)
         {
-            want(s.metalExtractor);
+            wantMetalExtractor();
         }
         if (total(s.solar) < profile.openingSolarCount)
         {
@@ -1195,9 +1442,9 @@ namespace rwe
 
         // Don't sink the commander into a factory while metal is short; more
         // extractors first, as long as there are patches to take.
-        if (metalShort && total(s.metalExtractor) < profile.targetMetalExtractorCount)
+        if (metalShort && totalExtractors() < profile.targetMetalExtractorCount)
         {
-            want(s.metalExtractor);
+            wantMetalExtractor();
         }
         if (total(s.lab) < 1)
         {
@@ -1323,6 +1570,18 @@ namespace rwe
         // not about the plan: Core's Can is worth 9.4 times an A.K. per
         // metal and Arm's Zeus 1.44 times a Peewee, so the same rule techs
         // for one and declines for the other. §15.7.
+        // A vent, if the map has one. 250 energy that no weather touches,
+        // for about the price of four solar collectors and a fraction of
+        // their ground -- and neither side ever built one, because nothing
+        // asked. Once there is a factory, so it does not delay the opening,
+        // and as many as there are vents: the site search says when they
+        // have run out or are somebody else's.
+        if (!s.geothermal.empty() && !geothermalVents.empty() && (total(s.lab) >= 1 || total(s.shipyard) >= 1)
+            && total(s.geothermal) < static_cast<int>(geothermalVents.size()))
+        {
+            want(s.geothermal);
+        }
+
         auto incomeSupportsTech = bb.metalIncome.value >= static_cast<float>(profile.techMinMetalIncome);
         auto tierWorthIt = bb.advancedArmyValueRatio >= profile.techMinArmyValueRatio;
         if (profile.techLevelTwo && tierWorthIt && incomeSupportsTech && total(s.lab) >= 1 && total(s.advancedLab) < profile.targetAdvancedLabCount)
@@ -1352,7 +1611,15 @@ namespace rwe
         // five minutes at the point the economy most needed building. So on
         // land it waits until the extractors it is competing with are up.
         auto airPlantAffordable = airMatters || total(s.metalExtractor) >= profile.targetMetalExtractorCount;
-        if (total(s.lab) >= 1 && total(s.airPlant) < profile.targetAirPlantCount && total(s.solar) >= profile.openingSolarCount
+        // A factory and the opening's energy, of whichever kind the map
+        // allows. Asked as "a lab and four solar collectors" this could never
+        // be true on a map with no room for either, which is exactly the map
+        // where aircraft matter most: watched over three long games on
+        // Crystal Isles, neither side built one aeroplane, and neither side
+        // owned anything that could have shot one down.
+        auto hasFactory = total(s.lab) >= 1 || (navalFleetTarget(profile, bb) > 0 && total(s.shipyard) >= 1);
+        auto openingEnergy = total(s.solar) + total(s.tidalGenerator) >= profile.openingSolarCount;
+        if (hasFactory && total(s.airPlant) < profile.targetAirPlantCount && openingEnergy
             && airPlantAffordable
             && (airMatters || total(s.radar) >= profile.targetRadarCount))
         {
@@ -1422,6 +1689,9 @@ namespace rwe
             {
                 want(s.torpedoLauncher);
             }
+            // After the launcher, because a yard under fire wants its answer
+            // before it wants a second yard.
+            wantAdvancedShipyard();
         }
 
         // Growth, once the plan above is satisfied. The targets are where
@@ -1434,6 +1704,8 @@ namespace rwe
         // is being thrown away, and another lab is what turns it into an
         // army.
         auto metalFull = bb.metalStorage.value > 0.0f && bb.currentMetal.value >= bb.metalStorage.value * 0.8f;
+
+        wantStorage(false);
 
         // Level two, and it goes above the surplus lab because a full store
         // buys more as an advanced lab than as a third level-one one.
@@ -1483,7 +1755,12 @@ namespace rwe
             // affordable now beats 5130 that is not -- above it, saving for
             // the reactor suppresses everything cheaper and the radar never
             // gets built.
-            if ((energyBinding || metalFull) && total(s.fusion) < profile.targetFusionCount)
+            // The FIRST reactor needs no such reason once the income is
+            // there: an advanced lab's units and a moho's appetite are both
+            // energy the level-one base was never sized for, and waiting for
+            // the stall means meeting it with the reactor still to pay for.
+            auto firstReactorDue = incomeSupportsTech && total(s.fusion) < 1;
+            if ((energyBinding || metalFull || firstReactorDue) && total(s.fusion) < profile.targetFusionCount)
             {
                 want(s.fusion);
             }
@@ -1508,6 +1785,46 @@ namespace rwe
         if (metalFull && !techWanted && total(s.lab) >= 1 && total(s.lab) < 1 + profile.surplusLabCount)
         {
             want(s.lab);
+        }
+        // The base grows with what it earns; see surplusExpansion. Only with
+        // the store full, so none of this competes with a plan still being
+        // paid for, and the number of factories follows the income that
+        // would have to feed them.
+        if (profile.surplusExpansion && metalFull)
+        {
+            auto step = std::max(1, profile.surplusFactoryIncomeStep);
+            auto allowed = std::min(profile.surplusFactoryCap, 1 + static_cast<int>(bb.metalIncome.value) / step);
+            // The tech step, whatever the knob says about choosing it: that
+            // argument is about whether the tier repays its price in a short
+            // game, and a store that is full has already paid it.
+            if (bb.metalIncome.value >= static_cast<float>(2 * profile.techMinMetalIncome) && total(s.lab) >= 1 && total(s.advancedLab) < 1)
+            {
+                want(s.advancedLab);
+            }
+            if (navalFleetTarget(profile, bb) > 0)
+            {
+                if (total(s.shipyard) < allowed)
+                {
+                    want(s.shipyard);
+                }
+                // Nothing the other side builds on a water map shoots up
+                // until it has seen an aircraft, so the first ones are free.
+                if (total(s.airPlant) < 1)
+                {
+                    want(s.airPlant);
+                }
+            }
+            else
+            {
+                if (total(s.lab) < allowed)
+                {
+                    want(s.lab);
+                }
+                if (total(s.vehiclePlant) < allowed)
+                {
+                    want(s.vehiclePlant);
+                }
+            }
         }
         want(s.metalExtractor);
         // And the submerged patches, once the dry ones are gone. This sits
@@ -1605,6 +1922,35 @@ namespace rwe
         auto landArmyCapped = profile.isolatedLandArmyCap > 0 && bb.hasUnreachableGround && waterDominates
             && bb.armySize >= profile.isolatedLandArmyCap;
 
+        // Fighters to match the raid: as many as the most armed aircraft of
+        // theirs ever known at once, between the standing pair and the cap.
+        auto fighterTarget = std::clamp(bb.enemyArmedAirPeak, profile.targetFighterCount, std::max(profile.targetFighterCount, profile.maxReactiveFighterCount));
+
+        // The tier-two economy reserve; see tierTwoEconomyReserve.
+        auto completed = [&](const std::string& t) { return t.empty() ? 0 : countOf(bb.ownedCompletedCounts, t); };
+        bool reserveHolds = false;
+        if (profile.tierTwoEconomyReserve)
+        {
+            auto landBuilder = completed(s.advancedConstructor) >= 1;
+            auto seaBuilder = completed(s.advancedConstructionSub) >= 1;
+            auto mohoOwed = landBuilder && !s.mohoExtractor.empty() && completed(s.mohoExtractor) < 1;
+            auto reactorOwed = ((landBuilder && !s.fusion.empty()) || (seaBuilder && !s.underwaterFusion.empty()))
+                && completed(s.fusion) + completed(s.underwaterFusion) < 1;
+            if (mohoOwed || reactorOwed)
+            {
+                if (!tierTwoReserveStarted)
+                {
+                    tierTwoReserveStarted = bb.now;
+                    LOG_INFO << "AI build: holding the factories for the tier-two economy (" << (mohoOwed ? "moho " : "") << (reactorOwed ? "reactor" : "") << ")";
+                }
+                auto elapsed = bb.now.value - tierTwoReserveStarted->value;
+                auto inTime = elapsed < static_cast<unsigned int>(std::max(0, profile.tierTwoReserveMaxSeconds)) * SimTicksPerSecond;
+                auto quiet = bb.phase != GamePhase::Defend && bb.enemiesNearBase.empty();
+                auto armed = bb.armySize + static_cast<int>(bb.navalCombatUnits.size()) >= profile.tierTwoReserveMinArmySize;
+                reserveHolds = inTime && quiet && armed;
+            }
+        }
+
         for (auto factoryId : bb.factories)
         {
             const auto& factory = sim.getUnitState(factoryId);
@@ -1617,6 +1963,15 @@ namespace rwe
                           << " skipped, queue holds " << factory.buildQueue.size();
                 continue;
             }
+
+            // Something for a transport to carry. wantsTransport says there
+            // is somewhere worth going that needs a lift; it does not say
+            // anyone is waiting for one. On a map with no room for a lab
+            // there is no construction kbot and no army that walks, and the
+            // yard built a 900-metal transport all the same, which then lay
+            // at anchor for the whole game.
+            bool hasCargo = !bb.combatUnits.empty() || total(s.constructor) > 0 || total(s.advancedConstructor) > 0
+                || total(s.lab) > 0 || total(s.vehiclePlant) > 0;
 
             std::string next;
             if (!s.airPlant.empty() && factory.unitType == s.airPlant)
@@ -1639,15 +1994,21 @@ namespace rwe
                 {
                     next = s.scoutPlane;
                 }
-                else if (!s.airTransport.empty() && bb.wantsTransport && total(s.airTransport) < profile.targetTransportCount)
+                else if (!s.airTransport.empty() && bb.wantsTransport && hasCargo && total(s.airTransport) < profile.targetTransportCount)
                 {
                     next = s.airTransport;
+                }
+                else if (bb.enemyAirThreat && bb.enemyArmedAirPeak > 0 && !s.fighter.empty() && total(s.fighter) < profile.targetFighterCount)
+                {
+                    // Bombers or torpedo bombers, not a scout: the first pair
+                    // of fighters comes before the constructor.
+                    next = s.fighter;
                 }
                 else if (!s.airConstructor.empty() && total(s.airConstructor) < profile.targetAirConstructorCount)
                 {
                     next = s.airConstructor;
                 }
-                else if (bb.enemyAirThreat && !s.fighter.empty() && total(s.fighter) < profile.targetFighterCount)
+                else if (bb.enemyAirThreat && !s.fighter.empty() && total(s.fighter) < fighterTarget)
                 {
                     // Fighters only once something of theirs is actually
                     // flying, for the same reason the anti-air kbot waits:
@@ -1686,6 +2047,22 @@ namespace rwe
                 // submarine's only weapon is a waterweapon (S:13.2), so it
                 // cannot answer anything that is not afloat.
                 auto fleetTarget = navalFleetTarget(profile, bb);
+                // A full store means the fleet is not what is holding the
+                // metal back, so build more of it; see surplusExpansion.
+                auto storeFull = bb.metalStorage.value > 0.0f && bb.currentMetal.value >= bb.metalStorage.value * 0.8f;
+                if (profile.surplusExpansion && storeFull)
+                {
+                    fleetTarget *= std::max(1, profile.surplusFleetMultiplier);
+                }
+                // Builders for the metal under the sea; see
+                // targetConstructionShipCount. Second only to the scout, the
+                // way the lab makes its constructor before any army: each one
+                // is income, and the fleet is paid for out of income. Asked
+                // whether or not the map wants a fleet, because a yard that
+                // stands on a map with submerged metal is worth a builder
+                // even where it is worth no warships.
+                auto wantConstructionShip = !s.constructionShip.empty() && submergedMetalPatches > 0
+                    && total(s.constructionShip) < profile.targetConstructionShipCount;
                 if (fleetTarget > 0)
                 {
                     auto submarineTarget = std::min(profile.targetSubmarineCount, fleetTarget);
@@ -1694,7 +2071,11 @@ namespace rwe
                     {
                         next = s.scoutShip;
                     }
-                    else if (!s.seaTransport.empty() && bb.wantsTransport && total(s.seaTransport) < profile.targetSeaTransportCount)
+                    else if (wantConstructionShip)
+                    {
+                        next = s.constructionShip;
+                    }
+                    else if (!s.seaTransport.empty() && bb.wantsTransport && hasCargo && total(s.seaTransport) < profile.targetSeaTransportCount)
                     {
                         next = s.seaTransport;
                     }
@@ -1707,6 +2088,72 @@ namespace rwe
                     {
                         next = s.submarine;
                     }
+                }
+                else if (wantConstructionShip)
+                {
+                    next = s.constructionShip;
+                }
+            }
+            else if (!s.advancedShipyard.empty() && factory.unitType == s.advancedShipyard)
+            {
+                // Cover first if there is anything to cover against: a
+                // torpedo bomber kills a battleship for a twentieth of its
+                // price, and nothing else afloat can shoot at one. Then two
+                // cruisers to every battleship, cruisers first -- they are
+                // the hull with the depth charge, so they are also what keeps
+                // a submarine off the 4404 metal that follows them.
+                auto cruisers = total(s.cruiser);
+                auto battleships = total(s.battleship);
+                auto storeFull = bb.metalStorage.value > 0.0f && bb.currentMetal.value >= bb.metalStorage.value * 0.8f;
+                auto fleetMultiplier = (profile.surplusExpansion && storeFull) ? std::max(1, profile.surplusFleetMultiplier) : 1;
+                auto cruiserTarget = profile.targetCruiserCount * fleetMultiplier;
+                auto battleshipTarget = profile.targetBattleshipCount * fleetMultiplier;
+                // The construction sub, once there is an escort afloat and
+                // only while it still has its one job to do: a platform to
+                // build on a map that gave the air plant no ground.
+                auto wantConstructionSub = profile.targetSeaplanePlatformCount > 0 && !s.advancedConstructionSub.empty()
+                    && !s.seaplanePlatform.empty() && total(s.airPlant) < 1
+                    && total(s.seaplanePlatform) < profile.targetSeaplanePlatformCount
+                    && total(s.advancedConstructionSub) < 1 && cruisers >= 2;
+                // Or a reactor to build: the underwater fusion plant is the
+                // sub's alone as well, air plant or no air plant.
+                auto wantSubForReactor = profile.targetUnderwaterFusionCount > 0 && !s.advancedConstructionSub.empty()
+                    && !s.underwaterFusion.empty() && total(s.fusion) + total(s.underwaterFusion) < 1
+                    && total(s.advancedConstructionSub) < 1 && cruisers >= 2;
+                wantConstructionSub = wantConstructionSub || wantSubForReactor;
+                if (bb.enemyAirThreat && !s.antiAirShip.empty() && total(s.antiAirShip) < profile.targetAntiAirShipCount)
+                {
+                    next = s.antiAirShip;
+                }
+                else if (wantConstructionSub)
+                {
+                    next = s.advancedConstructionSub;
+                }
+                else if (!s.cruiser.empty() && cruisers < cruiserTarget && cruisers < 2 * (battleships + 1))
+                {
+                    next = s.cruiser;
+                }
+                else if (!s.battleship.empty() && battleships < battleshipTarget)
+                {
+                    next = s.battleship;
+                }
+                else if (!s.cruiser.empty() && cruisers < cruiserTarget)
+                {
+                    next = s.cruiser;
+                }
+            }
+            else if (!s.seaplanePlatform.empty() && factory.unitType == s.seaplanePlatform)
+            {
+                // Cover when something of theirs is flying, otherwise the
+                // torpedo: nothing the other side floats can shoot up until
+                // it has seen an aircraft and built for one.
+                if (bb.enemyAirThreat && !s.seaplaneFighter.empty() && total(s.seaplaneFighter) < fighterTarget)
+                {
+                    next = s.seaplaneFighter;
+                }
+                else if (!s.torpedoSeaplane.empty() && total(s.torpedoSeaplane) < profile.targetTorpedoSeaplaneCount)
+                {
+                    next = s.torpedoSeaplane;
                 }
             }
             else if (!s.advancedLab.empty() && factory.unitType == s.advancedLab)
@@ -1783,6 +2230,17 @@ namespace rwe
                 }
             }
 
+            if (!next.empty() && reserveHolds)
+            {
+                // Builders are what the reserve is FOR, so they still come.
+                auto nextDef = sim.unitDefinitions.find(next);
+                if (nextDef != sim.unitDefinitions.end() && !nextDef->second.builder)
+                {
+                    LOG_DEBUG << "AI factory: " << factory.unitType << " " << factoryId.value << " holds " << next << " for the tier-two economy";
+                    next.clear();
+                }
+            }
+
             if (!next.empty())
             {
                 // One line per unit a factory takes on. A factory is only
@@ -1828,6 +2286,7 @@ namespace rwe
         // underwater extractor has anywhere to stand, and it has no sim of
         // its own to work that out with.
         indexMetalPatches(sim);
+        indexGeothermalVents(sim);
         const auto& sideUnits = bb.sideUnits;
 
         planFactories(sim, profile, bb, outCommands);
@@ -1848,6 +2307,13 @@ namespace rwe
         ++plannerCursor;
         const auto& builder = sim.getUnitState(builderId);
         const auto& builderDef = sim.unitDefinitions.at(builder.unitType);
+
+        // A commander being shot at is ArmyManager's to move, and is not
+        // handed a solar collector to go and build while it runs.
+        if (builderDef.commander && bb.commanderFleeing)
+        {
+            return;
+        }
 
         // Did this builder's last order come to anything? It is idle again;
         // if nothing of ours stands where it was sent, the order was
@@ -1968,7 +2434,10 @@ namespace rwe
                 && ((!sideUnits.tidalGenerator.empty() && t == sideUnits.tidalGenerator)
                     || (!sideUnits.sonar.empty() && t == sideUnits.sonar)
                     || (!sideUnits.torpedoLauncher.empty() && t == sideUnits.torpedoLauncher)
-                    || (!sideUnits.floatingMetalMaker.empty() && t == sideUnits.floatingMetalMaker));
+                    || (!sideUnits.floatingMetalMaker.empty() && t == sideUnits.floatingMetalMaker)
+                    || (!sideUnits.underwaterMetalStorage.empty() && t == sideUnits.underwaterMetalStorage)
+                    || (!sideUnits.underwaterEnergyStorage.empty() && t == sideUnits.underwaterEnergyStorage)
+                    || (!sideUnits.underwaterFusion.empty() && t == sideUnits.underwaterFusion));
             // The underwater extractor is NOT here. It stands in the water
             // like the rest, but it also has to stand on a metal patch, so it
             // goes through chooseMexSite with the moho extractor rather than
@@ -2284,7 +2753,57 @@ namespace rwe
             outpost = planOutpostDefence(sim, aiOwner, profile, bb);
         }
 
-        for (const auto& next : buildPriorities(profile, bb, builderAtBase, outpost, builder.unitType, enemyNavalSeen))
+        // An extractor upgrade in hand; see ExtractorUpgrade. Given up if it
+        // has run too long or its builder is gone, and otherwise carried on
+        // by the builder that began it, ahead of anything the plan might
+        // offer: a patch standing empty is income lost every second.
+        if (extractorUpgrade)
+        {
+            const auto timeoutTicks = static_cast<unsigned int>(std::max(0, profile.extractorUpgradeTimeoutSeconds)) * SimTicksPerSecond;
+            auto upgrader = sim.tryGetUnitState(extractorUpgrade->builder);
+            bool upgraderLives = upgrader && upgrader->get().isAlive() && upgrader->get().owner == aiOwner;
+            if (!upgraderLives || bb.now.value - extractorUpgrade->at.value > timeoutTicks)
+            {
+                LOG_INFO << "AI build: extractor upgrade at " << static_cast<int>(extractorUpgrade->site.x.value) << ","
+                         << static_cast<int>(extractorUpgrade->site.z.value) << " given up ("
+                         << (upgraderLives ? "took too long" : "its builder is gone") << "); the patch is released";
+                extractorUpgrade.reset();
+            }
+        }
+        if (extractorUpgrade && extractorUpgrade->builder == builderId)
+        {
+            auto old = sim.tryGetUnitState(extractorUpgrade->oldExtractor);
+            // Same id, same type, same place: a unit id freed by a death may
+            // be handed to something else entirely.
+            bool standing = old && old->get().isAlive() && old->get().owner == aiOwner
+                && old->get().unitType == sideUnits.metalExtractor
+                && old->get().position.distanceSquared(extractorUpgrade->site) < 1_ss;
+            if (standing)
+            {
+                outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(ReclaimOrder(extractorUpgrade->oldExtractor), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                return;
+            }
+            auto site = extractorUpgrade->site;
+            extractorUpgrade.reset();
+            LOG_INFO << "AI build: unit " << builderId.value << " to build " << sideUnits.mohoExtractor << " at " << site.x.value << "," << site.z.value
+                     << " where its extractor stood";
+            savingFor.clear();
+            issuedOrders[builderId.value] = IssuedOrder{sideUnits.mohoExtractor, site, bb.now};
+            outCommands.push_back(buildCommand(builderId, sideUnits.mohoExtractor, site));
+            return;
+        }
+
+        // Whether a builder afloat plans for the base or for an outpost. The
+        // ground labelling calls every ship stranded -- it is standing on
+        // water no kbot can walk to -- and a stranded builder is offered an
+        // extractor and a solar collector and little else. That looked like
+        // a defect and measured as a virtue; see navalBuildersPlanForBase,
+        // which is off. Only the PLAN would change: the siting below still
+        // runs from where the ship is.
+        const auto builderMc = sim.getAdHocMovementClass(builderDef.movementCollisionInfo);
+        const bool builderIsShip = builderDef.isMobile && !builderDef.canFly && builderMc.minWaterDepth > 0;
+        const bool builderAfloat = profile.navalBuildersPlanForBase && builderIsShip;
+        for (const auto& next : buildPriorities(profile, bb, builderAtBase || builderAfloat, outpost, builder.unitType, enemyNavalSeen))
         {
             auto nextDefIt = sim.unitDefinitions.find(next);
             if (nextDefIt == sim.unitDefinitions.end())
@@ -2307,13 +2826,41 @@ namespace rwe
                 // simply unaffordable for ever -- the planner skips past it
                 // to something cheap every pass and the AI never techs.
                 auto isLevelTwo = (!sideUnits.advancedLab.empty() && next == sideUnits.advancedLab)
+                    || (!sideUnits.seaplanePlatform.empty() && next == sideUnits.seaplanePlatform)
+                    || (!sideUnits.advancedShipyard.empty() && next == sideUnits.advancedShipyard)
                     || (!sideUnits.fusion.empty() && next == sideUnits.fusion)
+                    || (!sideUnits.underwaterFusion.empty() && next == sideUnits.underwaterFusion)
                     || (!sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor)
                     || (!sideUnits.heavyPlasmaTower.empty() && next == sideUnits.heavyPlasmaTower)
                     || (!sideUnits.heavyLaserTower.empty() && next == sideUnits.heavyLaserTower);
-                auto window = isLevelTwo ? profile.techSaveUpSeconds : profile.saveUpSeconds;
+                // So is the one answer the AI has to a hull at its shipyard.
+                // The torpedo launcher is only wanted once an enemy ship has
+                // actually been seen, so by the time it is on this list it is
+                // a response rather than a luxury -- and at 804 metal it is as
+                // far out of the ordinary minute's reach as an advanced lab.
+                // Judged against that minute on Brain Coral it was skipped
+                // 2140 times in ten games and never built once, while a single
+                // scout ship shot every hull the yard started. The commander
+                // cannot answer that ship itself: it walks the seabed there,
+                // and nothing but a waterweapon fires from under the sea.
+                auto isThreatAnswer = !sideUnits.torpedoLauncher.empty() && next == sideUnits.torpedoLauncher;
+                auto window = (isLevelTwo || isThreatAnswer) ? profile.techSaveUpSeconds : profile.saveUpSeconds;
                 if (!canAfford(bb, estimate))
                 {
+                    // Deliberately NOT gated on whether the map has room for
+                    // the thing anywhere. On Brain Coral, with no dry ground,
+                    // the commander saves all game for a lab and a solar
+                    // collector it can never place, and that looks like a bug.
+                    // It was tried as a fix and measured over the same ten
+                    // seeds, and it was ruinous: 18.9 units, 14.3 buildings and
+                    // 10 metal a second without the gate, against 13, 8.7 and
+                    // 7.8 with it, and the torpedo launcher went from built in
+                    // four games in ten to none. Saving only ever holds back
+                    // what is NOT economy -- extractors and collectors are
+                    // exempt, below -- so saving for the impossible makes the
+                    // commander a pure economy builder, which on a map like
+                    // that is exactly right. Without it the metal went on
+                    // sonar and a second shipyard.
                     if (canAfford(bb, estimate, window))
                     {
                         // Within reach: wait for it rather than spend the
@@ -2400,6 +2947,11 @@ namespace rwe
                 auto leashSquared = profile.commanderMexSearchRadius * profile.commanderMexSearchRadius;
                 auto walkable = [&](const SimVector& p) {
                     if (builderDef.commander && builderAtBase && bb.baseAnchor->distanceSquared(p) > leashSquared)
+                    {
+                        return false;
+                    }
+                    // Kept for the moho that is about to stand there.
+                    if (extractorUpgrade && extractorUpgrade->site.distanceSquared(p) < 64_ss * 64_ss)
                     {
                         return false;
                     }
@@ -2493,6 +3045,118 @@ namespace rwe
                                   << guarded << " under enemy guns, " << unwalkable << " unreachable or beyond the commander's leash, the rest taken or unbuildable";
                     }
                 }
+
+                // The nearer patch, wet or dry. The dry extractor is listed
+                // first and the planner takes the first entry with a site, so
+                // a commander standing in the shallows beside a submerged
+                // patch walked past it -- and past the next -- to a dry one
+                // inland; watched in a replay. When the builder has both
+                // buttons and the wet patch is closer, this entry stands
+                // aside and the submerged extractor's own, next on the list,
+                // takes it.
+                if (site && next == sideUnits.metalExtractor && !sideUnits.underwaterMetalExtractor.empty() && submergedMetalPatches > 0
+                    && bb.buildTree.canBuild(builder.unitType, sideUnits.underwaterMetalExtractor))
+                {
+                    auto wetAcceptable = [&](const SimVector& p) {
+                        if (builderDef.commander && builderAtBase && bb.baseAnchor->distanceSquared(p) > leashSquared)
+                        {
+                            return false;
+                        }
+                        if (extractorUpgrade && extractorUpgrade->site.distanceSquared(p) < 64_ss * 64_ss)
+                        {
+                            return false;
+                        }
+                        return !underGuns(p) && !siteFailedLately(sim, p);
+                    };
+                    auto wet = chooseMexSite(sim, sideUnits.underwaterMetalExtractor, builder.position, profile.nearMexSearchRadius, rng, wetAcceptable);
+                    if (wet && builder.position.distanceSquared(*wet) < builder.position.distanceSquared(*site))
+                    {
+                        site.reset();
+                    }
+                }
+
+                // No free patch for a moho: replace an extractor instead. One
+                // at a time, never while another moho is still a frame, and
+                // only with enough of its price in hand that the moho follows
+                // the reclaim at once -- the patch earns nothing in between.
+                // Not with the lights out either: a moho draws far more
+                // energy than the extractor it replaces.
+                bool isMoho = !sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor;
+                if (!site && isMoho && builderAtBase && profile.extractorUpgrades && !extractorUpgrade && !bb.energyStalled
+                    && bb.currentMetal.value >= nextDefIt->second.buildCostMetal.value * profile.extractorUpgradeMinMetalFraction)
+                {
+                    bool mohoUnderWay = false;
+                    for (const auto& [unitId, unit] : sim.units)
+                    {
+                        if (unit.owner == aiOwner && unit.isAlive() && unit.unitType == next && unit.isBeingBuilt(nextDefIt->second))
+                        {
+                            mohoUnderWay = true;
+                            break;
+                        }
+                    }
+
+                    // The nearest standing extractor the builder can walk to,
+                    // with room round it: a moho is 5x5 where the extractor
+                    // is 3x3, and what the larger footprint would hit cannot
+                    // be tested while the smaller one is still in the way.
+                    std::optional<UnitId> chosen;
+                    SimScalar chosenDistance = 0_ss;
+                    if (!mohoUnderWay)
+                    {
+                        for (const auto& [unitId, unit] : sim.units)
+                        {
+                            if (unit.owner != aiOwner || !unit.isAlive() || unit.unitType != sideUnits.metalExtractor)
+                            {
+                                continue;
+                            }
+                            auto extractorDefIt = sim.unitDefinitions.find(unit.unitType);
+                            if (extractorDefIt == sim.unitDefinitions.end() || unit.isBeingBuilt(extractorDefIt->second))
+                            {
+                                continue;
+                            }
+                            if (underGuns(unit.position) || (siteReachable && !siteReachable(unit.position)))
+                            {
+                                continue;
+                            }
+                            bool crowded = false;
+                            for (const auto& [otherId, other] : sim.units)
+                            {
+                                if (otherId == unitId || !other.isAlive())
+                                {
+                                    continue;
+                                }
+                                auto otherDefIt = sim.unitDefinitions.find(other.unitType);
+                                if (otherDefIt != sim.unitDefinitions.end() && !otherDefIt->second.isMobile
+                                    && other.position.distanceSquared(unit.position) < 72_ss * 72_ss)
+                                {
+                                    crowded = true;
+                                    break;
+                                }
+                            }
+                            if (crowded)
+                            {
+                                continue;
+                            }
+                            auto distance = builder.position.distanceSquared(unit.position);
+                            if (!chosen || distance < chosenDistance)
+                            {
+                                chosen = unitId;
+                                chosenDistance = distance;
+                            }
+                        }
+                    }
+                    if (chosen)
+                    {
+                        const auto& old = sim.getUnitState(*chosen);
+                        extractorUpgrade = ExtractorUpgrade{builderId, *chosen, old.position, bb.now};
+                        bb.ownReclaimTarget = *chosen;
+                        LOG_INFO << "AI build: unit " << builderId.value << " reclaims its extractor at " << static_cast<int>(old.position.x.value) << ","
+                                 << static_cast<int>(old.position.z.value) << " to put a " << next << " there; " << bb.currentMetal.value << " metal in hand";
+                        savingFor.clear();
+                        outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(ReclaimOrder(*chosen), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                        return;
+                    }
+                }
             }
             else if (next == sideUnits.lightLaserTower && outpost && (outpost->raided || countOf(bb.ownedTotalCounts, next) >= profile.targetDefenceCount))
             {
@@ -2525,6 +3189,106 @@ namespace rwe
                 auto towerAnchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
                 site = chooseBuildSite(sim, profile, next, towerAnchor, rng, siteReachable);
             }
+            else if (!sideUnits.geothermal.empty() && next == sideUnits.geothermal)
+            {
+                // On a vent, and only there: the nearest one to the builder
+                // that it can walk to, has looked at, and can still be built
+                // on -- which is what says whether somebody has taken it.
+                auto mc = sim.getAdHocMovementClass(nextDefIt->second.movementCollisionInfo);
+                std::optional<SimScalar> nearest;
+                for (const auto& vent : geothermalVents)
+                {
+                    if (siteFailedLately(sim, vent) || (siteReachable && !siteReachable(vent)))
+                    {
+                        continue;
+                    }
+                    if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, vent))
+                    {
+                        continue;
+                    }
+                    auto rect = sim.computeFootprintRegion(vent, nextDefIt->second.movementCollisionInfo);
+                    if (rect.x < 0 || rect.y < 0
+                        || !sim.canBeBuiltAt(mc, nextDefIt->second.yardMap, nextDefIt->second.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+                    {
+                        continue;
+                    }
+                    auto distance = builder.position.distanceSquared(vent);
+                    if (!nearest || distance < *nearest)
+                    {
+                        nearest = distance;
+                        site = vent;
+                    }
+                }
+            }
+            else if (!sideUnits.torpedoLauncher.empty() && next == sideUnits.torpedoLauncher && !bb.factories.empty())
+            {
+                // Beside the yard, on the side the enemy comes from. It was
+                // laid out round the builder like a tidal generator, and the
+                // builder is the commander, on the beach: so the one defence
+                // bought against a hull shelling the shipyard stood somewhere
+                // along the shore, out of reach of both. A launcher reaches
+                // about 500; two hundred off the yard covers the yard and the
+                // water its hulls are launched into.
+                std::optional<SimVector> yard;
+                for (auto factoryId : bb.factories)
+                {
+                    auto factoryRef = sim.tryGetUnitState(factoryId);
+                    if (factoryRef && (factoryRef->get().unitType == sideUnits.shipyard
+                            || (!sideUnits.advancedShipyard.empty() && factoryRef->get().unitType == sideUnits.advancedShipyard)))
+                    {
+                        // The yard with the fewest launchers near it, so a
+                        // second launcher covers a second yard.
+                        if (!yard)
+                        {
+                            yard = factoryRef->get().position;
+                        }
+                        bool covered = false;
+                        for (const auto& [_, unit] : sim.units)
+                        {
+                            if (unit.owner == aiOwner && unit.isAlive() && unit.unitType == next
+                                && unit.position.distanceSquared(factoryRef->get().position) < 400_ss * 400_ss)
+                            {
+                                covered = true;
+                                break;
+                            }
+                        }
+                        if (!covered)
+                        {
+                            yard = factoryRef->get().position;
+                            break;
+                        }
+                    }
+                }
+                if (yard)
+                {
+                    std::optional<SimVector> threat;
+                    auto nearestThreat = 0_ss;
+                    for (const auto& [_, enemy] : bb.knownEnemies)
+                    {
+                        if (!enemy.isArmed || enemy.isAir || enemy.isBuilding)
+                        {
+                            continue;
+                        }
+                        auto d = yard->distanceSquared(enemy.lastKnownPosition);
+                        if (!threat || d < nearestThreat)
+                        {
+                            nearestThreat = d;
+                            threat = enemy.lastKnownPosition;
+                        }
+                    }
+                    if (!threat)
+                    {
+                        threat = bb.enemyBasePosition;
+                    }
+                    auto towards = threat ? (*threat - *yard).normalizedOr(SimVector(1_ss, 0_ss, 0_ss))
+                                          : (*yard - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+                    site = chooseBuildSite(sim, profile, next, *yard + (towards * 200_ss), rng);
+                }
+                if (!site)
+                {
+                    site = chooseBuildSite(sim, profile, next, anchor, rng);
+                }
+            }
             else if (isWaterStructure(next))
             {
                 // Deliberately without siteReachable -- see where it is
@@ -2534,7 +3298,9 @@ namespace rwe
                 // otherwise refuse the lot of them.
                 site = chooseBuildSite(sim, profile, next, anchor, rng);
             }
-            else if (!sideUnits.shipyard.empty() && next == sideUnits.shipyard)
+            else if ((!sideUnits.shipyard.empty() && next == sideUnits.shipyard)
+                || (!sideUnits.advancedShipyard.empty() && next == sideUnits.advancedShipyard)
+                || (!sideUnits.seaplanePlatform.empty() && next == sideUnits.seaplanePlatform))
             {
                 // Not a ring search: an 8x8 footprint needing
                 // MinWaterDepth=30 would refuse every candidate a walk out
@@ -2565,6 +3331,50 @@ namespace rwe
                 {
                     LOG_DEBUG << "AI build: " << next << " at " << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value)
                               << " is not worth its metal against income " << bb.metalIncome.value << "/s; skipping";
+                    site.reset();
+                }
+            }
+
+            // Ground the enemy is working, or has just thrown us off. The
+            // extractor search has always refused a patch under enemy guns;
+            // nothing else did, so a builder would walk a solar collector or
+            // a shipyard into the middle of the map and into whatever was
+            // standing there. Remembered, so the builder is not handed the
+            // same place next pass, and forgotten with the other failed sites.
+            // Not for an extractor, which has a rule and a knob of its own
+            // for exactly this (mexAvoidsEnemyGunsRadius, in its search).
+            bool nextIsExtractor = next == sideUnits.metalExtractor
+                || (!sideUnits.underwaterMetalExtractor.empty() && next == sideUnits.underwaterMetalExtractor)
+                || (!sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor);
+            if (site && !nextIsExtractor && profile.builderAvoidsContestedRadius > 0_ss)
+            {
+                auto radiusSquared = profile.builderAvoidsContestedRadius * profile.builderAvoidsContestedRadius;
+                bool contested = false;
+                for (const auto& [_, enemy] : bb.knownEnemies)
+                {
+                    if (enemy.isArmed && !enemy.isAir && enemy.lastKnownPosition.distanceSquared(*site) <= radiusSquared)
+                    {
+                        contested = true;
+                        break;
+                    }
+                }
+                if (!contested && bb.baseAnchor && bb.baseAnchor->distanceSquared(*site) > (profile.defendRadius * profile.defendRadius))
+                {
+                    for (const auto& loss : bb.recentLosses)
+                    {
+                        if (loss.position.distanceSquared(*site) <= radiusSquared)
+                        {
+                            contested = true;
+                            break;
+                        }
+                    }
+                }
+                if (contested)
+                {
+                    LOG_DEBUG << "AI build: " << next << " at " << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value)
+                              << " is contested ground; left alone";
+                    auto cell = sim.terrain.worldToHeightmapCoordinate(*site);
+                    failedSites[std::make_pair(cell.x, cell.y)] = bb.now;
                     site.reset();
                 }
             }
@@ -2650,9 +3460,15 @@ namespace rwe
         // between extractors. Metal first, nearest first; a tree is only
         // worth the walk when energy is actually wanted, which on the maps
         // measured it hardly ever is.
-        if (builderAtBase)
+        //
+        // A construction ship is never "at base" -- the ground labelling
+        // calls it stranded -- so it used to skip this and the factory assist
+        // below, and with no patch to take it simply stood there. It works
+        // from where it floats, and only what lies in water it can reach.
+        if (builderAtBase || builderIsShip)
         {
             const auto reachSquared = SimScalar(1200.0f * 1200.0f);
+            const auto& reclaimCentre = builderIsShip ? builder.position : *bb.baseAnchor;
             std::optional<FeatureId> best;
             bool bestHasMetal = false;
             auto bestDistanceSquared = reachSquared;
@@ -2675,8 +3491,12 @@ namespace rwe
                 {
                     continue;
                 }
-                auto distanceSquared = bb.baseAnchor->distanceSquared(feature.position);
+                auto distanceSquared = reclaimCentre.distanceSquared(feature.position);
                 if (distanceSquared >= reachSquared)
+                {
+                    continue;
+                }
+                if (builderIsShip && sim.terrain.getHeightAt(feature.position.x, feature.position.z) >= sim.terrain.getSeaLevel())
                 {
                     continue;
                 }
@@ -2695,9 +3515,46 @@ namespace rwe
         }
 
         // Otherwise lend a hand at the factory.
-        if (!bb.factories.empty() && builderAtBase && !saving)
+        //
+        // The nearest one that is actually building something, of the kind
+        // this builder can get to: a ship helps a yard and a kbot helps a
+        // plant on its own ground. It used to be the first factory on the
+        // list whatever it was doing, so with the first lab idle every spare
+        // builder stood idle beside it while the second one worked alone.
+        if (!bb.factories.empty() && (builderAtBase || builderIsShip) && !saving)
         {
-            auto factoryId = bb.factories.front();
+            std::optional<UnitId> busiest;
+            SimScalar busiestDistance = 0_ss;
+            for (auto candidateId : bb.factories)
+            {
+                auto candidateRef = sim.tryGetUnitState(candidateId);
+                if (!candidateRef || candidateRef->get().buildQueue.empty())
+                {
+                    continue;
+                }
+                const auto& candidate = candidateRef->get();
+                auto candidateDefIt = sim.unitDefinitions.find(candidate.unitType);
+                if (candidateDefIt == sim.unitDefinitions.end())
+                {
+                    continue;
+                }
+                auto candidateAfloat = sim.getAdHocMovementClass(candidateDefIt->second.movementCollisionInfo).minWaterDepth > 0;
+                if (candidateAfloat != builderIsShip && !builderDef.canFly)
+                {
+                    continue;
+                }
+                auto distance = builder.position.distanceSquared(candidate.position);
+                if (!busiest || distance < busiestDistance)
+                {
+                    busiest = candidateId;
+                    busiestDistance = distance;
+                }
+            }
+            if (!busiest)
+            {
+                return;
+            }
+            auto factoryId = *busiest;
             const auto& factory = sim.getUnitState(factoryId);
             // Already helping there. Now that an assisting builder is offered
             // to the planner again, re-issuing the order every pass would
