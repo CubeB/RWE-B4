@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Replay the three build missions through TA's mission service loop, tick by tick.
 
-This is the transcription behind docs/TOTALA-EXE.md §107, kept so the reading
+This is the transcription behind docs/TOTALA-EXE.md §110, kept so the reading
 can be re-run instead of trusted. It answers one question: from the tick a
 nanoframe is created (the 0x09 is sent inside 0x485F50) to the tick it finishes
 (the 0x12 is sent inside 0x41BA60, via 0x41B8D0), how many ticks pass, for a

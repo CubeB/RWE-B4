@@ -1500,7 +1500,7 @@ namespace rwe
     // the job finishes when a single-precision fraction counted up by
     // p / BuildTime passes 1.0f. A construction aircraft gets a SECOND
     // increment on that first tick, because its mission runs the lathe twice
-    // before the tick ends (docs/TOTALA-EXE.md section 107), so its duration is
+    // before the tick ends (docs/TOTALA-EXE.md section 110), so its duration is
     // two less than its increment count where everything else is one less.
     // tools/tad-buildtime.py is the same arithmetic
     // and is the re-runnable check; this is the port that feeds the fixture.
@@ -1715,7 +1715,7 @@ namespace rwe
 
             // The increments that do not show up as duration: one for the tick
             // the 0x09 is sent, and a second for the construction aircraft's
-            // repeat of its own lathe state on that tick (section 107). The
+            // repeat of its own lathe state on that tick (section 110). The
             // reference script subtracts the same number in the same place, and
             // it has to be subtracted BEFORE the outlier cap, or an airborne
             // cell would keep a different set of builds than the script does.
@@ -1906,7 +1906,7 @@ namespace rwe
 // which has nothing to deploy either -- the original never makes a construction
 // aircraft wait for its stance -- and whose extra tick is no longer a mystery:
 // it lathes twice on the tick it creates the nanoframe (docs/TOTALA-EXE.md
-// section 107), which RWE now does too. A ground mobile builder pays its own COB
+// section 110), which RWE now does too. A ground mobile builder pays its own COB
 // deploy sequence before INBUILDSTANCE, which is the mod's data rather than the
 // engine's behaviour, and is never an episode. See docs/TA-DEMOS.md.
 //
@@ -2007,7 +2007,7 @@ namespace rwe
     // The stall half of the economy oracle. TA settles each player's resources
     // once a second and carries whatever a consumer was granted and not paid for
     // as DEBT on that consumer; between settles a unit in debt is refused
-    // outright (docs/TOTALA-EXE.md section 23, and section 108 for the decode
+    // outright (docs/TOTALA-EXE.md section 23, and section 111 for the decode
     // this pass rests on). The corpus samples a player's stores one settle in
     // four, so a settle's fractions cannot be read off it -- but the debt rule
     // leaves a shape on factory build timings that can be, with the 0x28 stream
@@ -2647,7 +2647,7 @@ namespace rwe
 // second, so the settle left it in debt, so the new job is refused from its
 // first tick until a settle pays the debt off. TA settles every player on the
 // same ticks, multiples of 30 of the demo clock (docs/TOTALA-EXE.md section
-// 108), so the job starts late by exactly 30 - startTick % 30, plus a whole 30
+// 111), so the job starts late by exactly 30 - startTick % 30, plus a whole 30
 // for every further settle the player stayed stalled.
 //
 // WHAT IS PREDICTED AND WHAT IS READ. residueTicks comes from the start tick and
@@ -3971,7 +3971,7 @@ namespace rwe
      * in with its offset written into expectedFlightDelta, because that field
      * is for a divergence somebody decided on and not for an observation nobody
      * has explained -- the same rule that once kept airborne builders out of
-     * the build fixture, until TOTALA-EXE.md §107 explained their tick and RWE
+     * the build fixture, until TOTALA-EXE.md §110 explained their tick and RWE
      * was changed to match. Under the footprint model there are no skipped
      * cells; under the aim-point model it replaced there were four.
      *
@@ -6195,7 +6195,7 @@ int main(int argc, char* argv[])
         }
 
         // The airborne table, against two increments on the 0x09's tick
-        // (TOTALA-EXE.md section 107). Its model column is already two less
+        // (TOTALA-EXE.md section 110). Its model column is already two less
         // than the increment count, which is why it is printed rather than the
         // immobile table's "extra": the two would not mean the same thing.
         std::sort(airborne.begin(), airborne.end(), [](const BuildCell* a, const BuildCell* b) {

@@ -522,7 +522,7 @@ namespace rwe
     // THE CLOCK. The replay's gameTime is the demo's tick. The 0x09's tick is
     // where TA's first increment lands (buildtime.test.cpp), and the corpus
     // puts every settle of every player on a multiple of 30 of that clock
-    // (docs/TOTALA-EXE.md section 108), which is where RWE settles.
+    // (docs/TOTALA-EXE.md section 111), which is where RWE settles.
     // ------------------------------------------------------------------
 
     namespace

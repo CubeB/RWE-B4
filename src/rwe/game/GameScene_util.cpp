@@ -1238,7 +1238,12 @@ namespace rwe
         // original advances the palette index by one every rampPeriod ticks
         // and never wraps, because the life is exactly six steps long.
         auto age = static_cast<unsigned int>((currentTime - particle.startTime).value);
-        const auto& color = WakeColors[wakeColorIndex(age, wakeRenderInfo->rampPeriod)];
+        auto colorIndex = wakeColorIndex(age, wakeRenderInfo->rampPeriod);
+        if (wakeRenderInfo->reverseRamp)
+        {
+            colorIndex = (WakeColors.size() - 1) - colorIndex;
+        }
+        const auto& color = WakeColors[colorIndex];
 
         pushTriangle(batch.triangles, topLeft, bottomLeft, bottomRight, color);
         pushTriangle(batch.triangles, topLeft, bottomRight, topRight, color);

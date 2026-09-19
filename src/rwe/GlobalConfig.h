@@ -6,6 +6,15 @@
 
 namespace rwe
 {
+    /**
+     * Whether the purple building fringe (TOTALA-EXE.md S:101) is wired up
+     * at all. OFF for now, by request: the filter, its shader, its mask, its
+     * settings and its rwe.cfg keys all stay exactly as they are, and this is
+     * the one switch that stops the frame asking for it and takes its button
+     * off the two options screens. Set it true and everything comes back.
+     */
+    inline constexpr bool BuildingHaloWired = false;
+
     /** SOUNDS.GUI's Sound Mode: Off | Mono | 3D. */
     enum class SoundMode
     {

@@ -325,6 +325,14 @@ namespace rwe
          * BuildManager and ArmyManager.
          */
         std::vector<UnitId> besiegedFactories;
+        /**
+         * A building of our own that BuildManager has ordered reclaimed --
+         * the extractor a moho is about to replace. Its disappearance is not
+         * a loss: read as one, it would put the base on a war footing and
+         * ask for the very extractor back that was just taken down on
+         * purpose. Written by BuildManager, read where losses are diffed.
+         */
+        std::optional<UnitId> ownReclaimTarget;
 
         // --- Enemy ---
         /** Keyed by the enemy unit's raw id so iteration is deterministic. */
@@ -333,6 +341,10 @@ namespace rwe
         std::optional<SimVector> enemyBasePosition;
         /** How many aircraft we currently believe the enemy has. */
         int knownEnemyAirCount{0};
+        /** The most ARMED enemy aircraft known at once, all game. Aircraft are seen in glimpses, so the count of the moment undersells the raid that is coming back. */
+        int enemyArmedAirPeak{0};
+        /** Set by BuildManager while the factories are held for the first moho and reactor; for the debug panel and the log. */
+        bool tierTwoReserveActive{false};
         /** When we last actually had eyes on one. Never reset, so the memory outlives the sighting. */
         std::optional<GameTime> lastEnemyAirSeenAt;
         /**
@@ -366,6 +378,50 @@ namespace rwe
          * skips scoutUnitId, so two managers never order the same ship.
          */
         std::optional<UnitId> navalScoutUnitId;
+        /**
+         * Whether the fleet is out. Set when navalAttackFleetSize hulls have
+         * gathered at the yard, cleared when fewer than half that are left.
+         *
+         * It has to be remembered rather than worked out each pass. Asked
+         * afresh, "are enough hulls together" stops being true the moment the
+         * first of them sails, and what that looked like from the other side
+         * of the water, watched in a replay, was single ships arriving one
+         * after another to be sunk one after another.
+         */
+        bool navalSortieActive{false};
+
+        /**
+         * The commander is being shot at, or has something armed close
+         * enough to start. Set by ArmyManager and kept for a few seconds past
+         * the last cause so it does not flicker; while it stands the
+         * commander is ArmyManager's to move and BuildManager leaves it
+         * alone, and whatever can reach it goes to it.
+         */
+        bool commanderInDanger{false};
+        /** In danger AND running from it, rather than standing to fight. Only then is it taken off BuildManager's hands. */
+        bool commanderFleeing{false};
+        GameTime commanderDangerUntil{0};
+        unsigned int commanderLastHitPoints{0};
+        /** What is threatening it, if that is known: the nearest armed enemy seen lately. */
+        std::optional<UnitId> commanderThreat;
+
+        /**
+         * Enemy units our radar can see and our eyes cannot, by unit id, with
+         * how far each stood from the base on the last pass. A player reads a
+         * blip's drift off the minimap; this is the same reading.
+         */
+        std::map<unsigned int, SimScalar> radarContactDistance;
+        /**
+         * Where an attack is coming from, when radar says one is: the middle
+         * of the contacts that are inside the warning ring and closing. The
+         * army forms up facing it rather than standing at the rally point
+         * until the first shot lands.
+         */
+        std::optional<SimVector> incomingAttackFrom;
+        /** When the contacts were last read -- once a second, since a blip's drift over one tick is noise. */
+        GameTime radarSampleAt{0};
+        /** The warning stands until here: a column that pauses has not gone home. */
+        GameTime incomingAttackUntil{0};
         /** Where each scout is heading, keyed by raw unit id, so two scouts do not chase the same ground. */
         std::map<unsigned int, SimVector> scoutTargets;
         /** Units booked onto a transport, keyed by raw unit id; the other managers leave them alone. */

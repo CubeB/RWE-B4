@@ -20,7 +20,7 @@
 // second, so the settle left it in debt, so the new job is refused from its
 // first tick until a settle pays the debt off. TA settles every player on the
 // same ticks, multiples of 30 of the demo clock (docs/TOTALA-EXE.md section
-// 108), so the job starts late by exactly 30 - startTick % 30, plus a whole 30
+// 111), so the job starts late by exactly 30 - startTick % 30, plus a whole 30
 // for every further settle the player stayed stalled.
 //
 // WHAT IS PREDICTED AND WHAT IS READ. residueTicks comes from the start tick and

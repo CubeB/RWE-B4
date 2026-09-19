@@ -682,6 +682,24 @@ each of the four densities the shipped data uses and requires it to stop every
 time, so nobody implements the guess later. `TOTALA-EXE.md` §27's note should be
 read together with §NN.
 
+### 18. Explosion impulse — `ImpulseFactor` / `ImpulseBoost` — **refuted; nothing to implement**
+
+Asked for from play: big explosions throwing nearby units. **The strings
+`impulsefactor` and `impulseboost` do not occur anywhere in `TotalA.exe`**
+(nor does `impuls` in any case, as ASCII or UTF-16LE), while every control key
+checked the same way appears exactly once. The weapon parser fetches each key
+it knows by a literal at its own call site, and the full key table
+(`0x503FE8`–`0x50410E`) has no impulse entry, so a modder's `ImpulseFactor=`
+line is tokenised and never read. Both blast routines, `0x499FA0` and
+`0x49A120`, end in `0x499CD0` with no velocity read or write, and none of the
+112 shipped weapon TDFs across the base game and both expansions carries the
+key. The feature belongs to the Spring engine, which reuses the names. RWE
+already does exactly what the original does -- it does not parse the keys --
+so **no code was changed**. No test was added either, unlike `hitDensity`
+above: there is no parsed field for a later change to switch on by accident,
+so porting it would take deliberate new code, and whoever writes that will
+meet §106 of `TOTALA-EXE.md` first.
+
 ---
 
 ## Tier 3 — nice to have

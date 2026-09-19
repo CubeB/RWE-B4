@@ -487,7 +487,7 @@ literal at the call site, not a property of the effect.
 | 2–5 | the four wakes | `0x472430` | 2 | `smoke 1`, palette 97–103 |
 | 257 | `SFXTYPE_WHITESMOKE` | `0x472810` | 9 | `smoke 1` |
 | 258 | `SFXTYPE_BLACKSMOKE` | `0x4728F0` | 9 | `smoke 2` |
-| 259 | `SFXTYPE_SUBBUBBLES` | `0x472530` | 7 | — |
+| 259 | `SFXTYPE_SUBBUBBLES` | `0x472530` | 7 | the wake's dot, palette 103–97 (below) |
 
 The sequences all come out of `anims/FX.GAF`, loaded once at `0x429870` into a
 run of slots on the globals block: `+0x147CF` `smoke 1`, `+0x147D3` `smoke 2`,
@@ -503,6 +503,45 @@ and immediately loads `0x61` and `0x67` — palette 97–103, pale blue to deep
 blue, which is water foam and so has to be `smoke 1`; the Atlas exhaust at
 `0x474526` loads `+0x147F3`, which is `flamestream`. Both identifications below
 stand; only the explanation of why did not.
+
+### `SFXTYPE_SUBBUBBLES` — there is no bubble emitter
+
+Read 2026-09-18, because an underwater metal extractor sheds bubbles as it
+turns in the original and shed nothing in RWE.
+
+**The scripts do not say 259.** `ARMUWMEX.COB`, `CORUWMEX.COB`, `ARMSUB.COB`
+and `CORSUB.COB` all push `3`, OR it with a `256` already on the stack
+(`0x10036000`), and emit that -- the compiler's spelling of
+`SFXTYPE_SUBBUBBLES | 3`... which is simply 259. A scan for the constant 259
+in every shipped script finds nothing, which is why this looked unused. The
+extractor emits from three pieces (its arms), the submarines from one.
+
+**The engine builds the wake emitter, pointed up.** The dispatcher's branch for
+259 (`0x4810D4`) makes the emitter's two points itself: the piece's first
+vertex, and a copy of it whose height is overwritten with the sea level (the
+byte at globals `+0x1427F`, shifted into the high word). It passes those with a
+period of **8** and layer **7** to `0x472530`, which is `0x472430` -- the wake
+handler -- instruction for instruction, the same 0x48-byte object with the same
+vtable `0x4FD5F8`, but for one argument to `Init` (`0x474760`): the wakes push
+`1` where the bubbles push `0`. `Init` stores it at `+0x44`.
+
+**That flag's one reader is the colour ramp**, at `0x474A85`. Both cases load
+the `smoke 1` slot and the palette bounds `0x61` and `0x67`. Set, the particle
+starts at 97 and steps `+1`: foam, darkening into the sea. Clear, it starts at
+103 and steps `-1`: a bubble, paling as it rises.
+
+So a bubble is a dot of foam that leaves the piece, climbs straight toward the
+surface at the wake's half a world unit a tick (the difference of the two
+points is normalised, so depth does not change the speed), lives the wake's six
+steps of eight ticks, and runs the seven blues backwards. Forty-eight ticks is
+twenty-four units of climb, so from any depth it fades on the way up and does
+not reach the surface. Two dots a call, the second a tick later, each scattered
+by -3..3 on all three axes, as the wake.
+
+For RWE: `GameScene::emitBubblesFromPiece` calls the wake's own
+`computeWakeEmission` and `spawnWake`, with `reverseRamp` on
+`ParticleRenderTypeWake`. **Not carried over:** the layer. The original files
+bubbles in particle layer 7 where wakes go in 2; RWE draws both with the wakes.
 
 ### `SFXTYPE_VTOL` — the Atlas exhaust
 
@@ -946,7 +985,7 @@ against a victim with the episode's own footprint.
 
 ### Which tick a new round first moves on
 
-**The tick it is fired.** The order in one sim step (§108, `0x4954BD`) is: game
+**The tick it is fired.** The order in one sim step (§111, `0x4954BD`) is: game
 tick incremented, unit pass `0x48AD30`, projectile pass `0x49B720`
 (`0x495513`), feature pass, per-player settle. The fire routine runs inside the
 unit pass, reached from the per-tick weapon update `0x49E1A0`, and at
@@ -4493,7 +4532,7 @@ reaches `0x465077`:
 `global+0x38A47` is the game tick counter. `player+0xF0` is pushed thirty ticks
 ahead every time it fires, so the settle at `0x46555A -> 0x401360` runs **once a
 second per player**, on whatever tick each player's counter started at -- which
-§108 finds is the same tick for every player of a game, so in practice they all
+§111 finds is the same tick for every player of a game, so in practice they all
 settle together. The
 gate the call itself sits behind (`0x46554F`, a word at `global+0x39239` that
 must be negative) is initialised to `0xFFFF` at `0x498199` and only ever moved by
@@ -4580,7 +4619,7 @@ reduced rate.
 
 Called as `(builder, target, amount)`. Every mission that lathes passes the same
 amount (`0x402A09`, `0x403E43`, `0x404139`, `0x414235`, `0x414656`); the sixth
-caller, `0x41BCFB`, passes a negative one for nanoframe decay (§107 attributes
+caller, `0x41BCFB`, passes a negative one for nanoframe decay (§110 attributes
 all six):
 
 ```
@@ -4671,13 +4710,13 @@ Two things fall out of that for anyone reading this section:
   `float` in the simulation to close that is very likely a bad trade; see the
   determinism rules in `CLAUDE.md`.
 
-One thing did not fall out, and is now explained in §107: **a construction
+One thing did not fall out, and is now explained in §110: **a construction
 aircraft finishes one tick sooner than the replay allows**, 60 of its 68 builds
 in the Escalation corpus with none faster. It gets two increments on the
 creation tick where a factory gets one: `VTOL_MobileBuild` discards the answer
 of its stance wait, and the wait's wake mask lets a COB event left pending since
 the last `set` run the lathe a second time before the tick ends. The call-site
-list above is also short by one; §107 has all six, attributed to their missions.
+list above is also short by one; §110 has all six, attributed to their missions.
 
 ### What counts as production
 
@@ -5862,6 +5901,31 @@ click handler at `0x498F86` confirms independently:
 498f98  call 0x419670            ; bit set   -> issue the order
 498f9f  push 0x509660            ; "oktobuild"
 ```
+
+### The margin round the map
+
+`0x47D2E0` refuses a site on its position alone before it reads a cell
+(`0x47D302`-`0x47D352`). The arguments are the footprint's top-left corner in
+build cells, and the footprint comes from the definition:
+
+```
+47d302  cmp  cx,0x1               ; x
+47d30b  jl   0x47d80f             ;   x < 1 -> refuse
+47d316  cmp  di,0x1               ; z
+47d31a  jl   0x47d80f             ;   z < 1 -> refuse
+47d32c  mov  eax,[ebp+0x14233]    ; map width in cells
+47d336  lea  ecx,[esi+edx]        ; x + footprintX
+47d339  cmp  ecx,eax
+47d33b  jge  0x47d80f             ;   x + footprintX >= width -> refuse
+47d349  lea  edi,[ecx+eax]        ; z + footprintZ
+47d34c  cmp  edi,[ebp+0x14237]    ; map height in cells
+47d352  jge  0x47d80f             ;   z + footprintZ >= height -> refuse
+```
+
+So a building never touches the edge of the map: one clear cell on every side.
+`gs+0x14233` is the same width the routine multiplies by a little further down
+to index the 13-byte cell array (`0x47D47E`), which is what identifies it.
+RWE had no such rule until 2026-09-18 (`GameSimulation::isInsideBuildableArea`).
 
 ### Correction: the gate is fog-aware, and this reading was wrong
 
@@ -9394,7 +9458,7 @@ original:
   behaviour pass (it is walking the unit map), so every builder defers to
   `spawnNewUnits` at the end of the tick and meets its own frame on the next
   one. That is where the first lathe lands — for a mobile builder and, since
-  §107 was ported, for the two that a construction aircraft pays there. A
+  §110 was ported, for the two that a construction aircraft pays there. A
   factory takes one tick more: its state machine spends the tick it picks the
   creation up starting `StartBuilding` and lathes from the tick after. None of
   this changes a job's *length*, which is what the corpus measures and what the
@@ -9482,7 +9546,7 @@ original:
   `BuildOrder` covers the walk and the work, so the mission line changes one
   order earlier (S:99).
 - ~~**Every player's economy settles on the same tick.**~~ **Not a divergence
-  after all** (§108). This entry said the original staggers the settle per
+  after all** (§111). This entry said the original staggers the settle per
   player because `player+0xF0` starts at whatever each player's counter started
   at. It starts at the current game tick, written for all ten player slots in
   one loop (`0x464990` -> `0x464700`), so every player of a game settles on the
@@ -9690,7 +9754,7 @@ there is a regression test for it now.
 - ~~Why a construction aircraft finishes a build one tick early~~ Resolved: two
   increments on the creation tick, because `VTOL_MobileBuild` discards its stance
   wait's answer and a pending COB event re-runs the lathe in the same tick; see
-  §107, which also accounts for the 8 builds off the model (late by whole
+  §110, which also accounts for the 8 builds off the model (late by whole
   seconds). **Ported**: RWE credits a construction aircraft twice on the tick it
   first has a frame to lathe and never makes one wait for its stance, and the
   airborne cells are in the build fixture on the ordinary §88 delta.
@@ -13288,9 +13352,241 @@ name, the header keys above added to `OtaRecord`, a `[units]` reader with the
 record's fields, and the `InitialMission` grammar as data; the interpreter's
 missions, the rules and the schema choice are the pieces after it.
 
+## 106. Blast impulse: `ImpulseFactor` and `ImpulseBoost` are not in this game
+
+Asked for from play: "powerful explosions create shockwaves that physically
+toss surrounding units." **The original does not do this.** There is no blast
+impulse in `TotalA.exe`, not even an unused one: the key names are not in the
+binary, nothing could read them if a TDF supplied them, and the blast code
+writes hit points and nothing else. This is a "not implemented" finding, not a
+"decoded but subtle" one, and it is recorded so that nobody ports it as a
+fidelity fix.
+
+**The strings are absent.** A case-insensitive search of the whole
+1,178,624-byte file, as ASCII and as UTF-16LE, for `impuls` -- shorter than
+either key, to catch any case or truncation -- finds **nothing**; nor do
+`knockback`, `kickback`, `blastforce`, `pushback`, `recoil` or `shove`. The
+controls each appear exactly once (`areaofeffect`, `edgeeffectiveness`,
+`weaponvelocity`), which is what a sound search should give: the parser holds
+each key it recognises as one literal.
+
+**That is the whole key space.** The weapon TDF parser's keys sit as one
+contiguous run in `.data`, roughly `0x503FE8`–`0x50410E`, directly after the
+FBI keys of §17:
+
+```
+firestarter, minbarrelangle, holdtime, flighttime, smokedelay, randomdecay,
+duration, sprayangle, burstrate, burst, noautorange, weapontimer,
+edgeeffectiveness, areaofeffect, metalpershot, energypershot, reloadtime,
+coverage, range, weaponacceleration, startvelocity, weaponvelocity
+```
+
+Each is fetched at its own call site through `0x4C4760` (`GetFloat(key,
+default)`: a binary search over the section's parsed key/value pairs,
+returning the caller's default when the key is absent) or its integer sibling
+`0x4C46C0`, with the key string pushed as a literal beside the call -- for
+example `push 0x504278` (`"edgeeffectiveness"`) at `0x42E59B`, stored to weapon
+`+0xD8`. A section is tokenised into that key/value array generically, so an
+`ImpulseFactor=1.5` written by a modder is parsed like any other line and then
+never retrieved, because no call site pushes its name. It is not clamped or
+defaulted; it simply has no reader and no struct offset.
+
+**The blast code moves nothing.** Both routines §6 decodes end every per-unit
+effect in the same three-argument call to `0x499CD0` (attacker, victim,
+scale): `0x499FA0`, the single-target path, pushes `1.0f`; `0x49A120`, the area
+path, pushes the §6 falloff scale at `0x49A3EE`–`0x49A3F5` after its box-clamp
+distance, and afterwards writes only its two per-owner damage accumulators.
+Neither reads or writes anything shaped like a velocity, and `0x499CD0` and the
+damage choke point `0x489BB0` behind it take no argument an impulse could ride
+in.
+
+**Nor does the shipped content try.** Every weapon TDF in the GOG install --
+the base game's 8 in `totala1.hpi`, 66 in Core Contingency's `ccdata.ccx` and 38
+in Battle Tactics' `btdata.ccx`, 112 in all -- was extracted with a
+reimplementation of RWE's HPI reader and checked against the archive
+directories: none contains either key. `COMMANDER_BLAST` (`weapons/UNITS.TDF`),
+the most violent explosion in the game, is `AreaOfEffect=950`,
+`EdgeEffectiveness=0.75`, `Damage=9999`, and nothing else of the kind.
+
+Verified by reading instructions or by exhaustive search: the absent strings;
+the key table and that it has no impulse entry; `0x4C4760` and `0x4C46C0` in
+full; that every recognised weapon key has its own literal call site; that
+`0x499FA0` and `0x49A120` end in `0x499CD0` with no velocity access; the 112
+data files. **Inferred, not checked:** that FBI parsing uses the identical
+accessor rather than an equivalent one; and that every damage entry point
+(contact fuzes, the D-gun's own dispatch, §92) passes through one of those two
+routines before `0x499CD0`, which was traced for the two paths §6 documents
+rather than rebuilt from every dispatcher. Where the belief comes from is
+also inference: `COMMANDER_BLAST` still does about 7500 at the rim of its
+475-unit radius, which reads as a shockwave without anything being thrown,
+and the Spring engine -- an independent reimplementation -- gives these same
+key names real physics, so TA-derived communities meet them there.
+
+For RWE: nothing to port. `WeaponTdf` does not parse either key and should
+not. A knockback added for feel would be a deliberate departure and belongs in
+§88 with the others, not in the simulation as though it matched the original.
+
+## 107. Download menus: how a patch adds a button to a builder it does not ship
+
+**Why this was read.** Reported from play: "the construction ship should have
+three pages of build options." RWE showed one. `ARMCS1.GUI` is the only page
+the construction ship ships, and nothing in RWE looked anywhere else. The rest
+of its menu is 70 small TDFs under `download/`, shaped like this:
+
+    [MENUENTRY1] { UNITMENU=ARMCS; MENU=3; BUTTON=5; UNITNAME=ARMUWMEX; }
+
+**How much was missing.** Audited over the whole install (`rev31.gp3`,
+`btdata.ccx`, `ccdata.ccx`, `totala1.hpi`, `totala2.hpi`, in RWE's mount
+order): **111 buttons on 26 builders, and for 53 units this is the only way
+they can be built at all** -- the Vulcan, the Buzzsaw, the Krogoth gantry, the
+Flakker, the fortification wall, the Sniper, the Spy, the floating defences and
+the underwater extractor on the construction ship. None could be built in RWE.
+There was a second, smaller bug under it: RWE's default for the directory was
+`downloads`, and the original's is `download`.
+
+### Verified, from the binary
+
+- **The loader is `0x42DCF0`, called exactly once**, from `0x4918CF`, in the
+  long row of no-argument initialisers that runs at startup. There is no other
+  caller in `.text`. Download menus are read once, not per map and not when a
+  panel opens.
+- **It scans `download\*.TDF`**: the three literals are `"download"`
+  (`0x503730`), `"*"` (`0x50372C`) and `"TDF"` (`0x50341C`), handed to the
+  path builder at `0x4290F0` and then the directory enumeration at `0x4BCA30`.
+- **The string `MENUENTRY` is not in the binary.** Zero hits. The block's name
+  is not looked for; the blocks of a download TDF are walked by position.
+- **Four keys are read**: `UNITMENU` and `UNITNAME` through the string fetch
+  (`0x4C48C0`), `MENU` and `BUTTON` through the integer fetch (`0x4C46C0`) with
+  a default of 0. The fifth string in that cluster, `DOWNLOADMENU`, is not a
+  key: it is the allocation tag handed to `0x4D83B0`. Nobody should look for a
+  `DOWNLOADMENU=` field.
+- **The fill routine is `0x41ACE0`**, called from the panel refresh near
+  `0x41B800` whenever the displayed unit changes. For each record it compares
+  the stored `MENU` word, raw, against the open page's own field at `+0x21E`,
+  then the `BUTTON` byte against the slot, and on a match writes the unit name
+  into the gadget (`+2`) and marks it live (clears bit 0 of the word at
+  `+0x13C`, sets the byte at `+0x2A` to 4, ORs 1 into the word at `+0xB4`).
+  **It is one mechanism**: nothing in it distinguishes a page that shipped a
+  GUI file from one that did not.
+- **`%sGEN.GUI` is a dead end**, recorded so it is not walked again.
+  `0x41B0F0` loads `ARMGEN.GUI` / `CORGEN.GUI`, and they exist, but it is the
+  *alternative* branch to `0x41ACE0` (flag at `0x37EBE`), and the file holds
+  the generic orders strip -- no `IGPATCH`, no build grid.
+
+### Verified, from the data
+
+- **`page = MENU - 1`, counting pages from one.** `ARMACK2.GUI` holds three
+  units and then three gadgets named `IGPATCH`; ARMACK's download entries at
+  `MENU=3` are `BUTTON=3,4,5`, landing exactly on those three. The construction
+  ship's entries are six at `MENU=3` and one at `MENU=4`: pages two and three,
+  which is the three pages reported. No builder's numbering has a gap.
+- **`BUTTON` is a 0-based index into the 2x3 grid**, row-major: `(0,27)
+  (64,27) (0,91) (64,91) (0,155) (64,155)`, each 64x64. `BUTTON=0` is real
+  (`ARMFDRAG` on the ship's third page). The binary compares `BUTTON - 1`
+  against the slot the caller passes; that caller was not traced, so the two
+  presumably cancel. **Trust the data here, not that decrement.**
+- **An empty slot is a Button named `IGPATCH`, or one carrying attribute 32.**
+  Both tests are needed: `CORACA2.GUI` is the one shipped page whose `IGPATCH`
+  gadgets have `attribs=0`, and asking only for the attribute left `CORFLAK`,
+  `CORFORT` and `CORTOAST` nowhere. With both, 49 of 49 shipped pages resolve
+  to six slots.
+- **No download unit has a frame in its builder's page GAF.** All 111 ship a
+  `unitpics/<UNIT>.pcx` instead, which is therefore what the button is drawn
+  from.
+
+### Inferred, and built anyway
+
+- **What a page with no GUI file looks like.** The code that makes the six
+  gadgets for such a page was not found, and no template file exists. Since
+  the fill routine cannot tell the two cases apart, and every shipped build
+  page has the identical grid, RWE copies the builder's first page, blanks its
+  six slots to `IGPATCH`, and fills from there. This is RWE's choice.
+- **Two entries for one slot**: not traced. RWE keeps the first, in VFS order.
+- **An unknown `UNITMENU` or `UNITNAME`**: the shape of a not-found path was
+  seen and its outcome was not. RWE skips the entry.
+- The record layout (189 bytes a file, 37 a record, so perhaps five records a
+  file) is arithmetic only. No shipped file has more than three.
+
+### What RWE does
+
+`src/rwe/game/DownloadMenus.{h,cpp}`, called from `LoadingScene` after the
+builder GUIs are read. The log line is the check: on the full install it reads
+`Download menus: 111 buttons placed, 0 skipped`, which is the audit's figure.
+Because the AI's build tree is made from the same pages, the AI gains all 53
+units by the same stroke -- which is what turned construction ships from a
+measured loss into a measured win (see `targetConstructionShipCount`).
+
+## 108. What Space shows: a strip from the bottom and the players at the top right
+
+**Why this was read.** Reported from play: in the original, while Space is
+held, a tab rises from the bottom of the screen with the game time, the
+player's own unit count and the game speed, and another at the top right lists
+the players in their colours with kills and losses. RWE slid the side panel
+away (§76) and showed neither. §76 is right and was incomplete: it stopped
+reading its function at the slide arithmetic.
+
+### Verified
+
+- **Space is polled, not pressed.** Both routines call `IsKeyDown`
+  (`0x4C1B80`) with a literal `0x20`. They are called one after the other from
+  the world render, `0x469F65` and `0x469F9F`, with the same rectangle.
+- **The players' list is drawn by the side panel's own updater**, `0x4948E0`,
+  on the side panel's own slide (`ds:0x51F2D8`, 0 to `0x7D`) and gate: the F4
+  latch (`game+0x37F06` bit 7), or Space held with the cursor off the panel.
+  The two always move together. F4 alone therefore brings the list out.
+- **The bottom strip is separate**, `0x4689C0`: its own slide at
+  `game+0x37E90`, a signed 0 to -31, driven by Space alone -- there is no test
+  of the F4 bit anywhere between the function's entry and its key poll. It is
+  polled on a throttle (`ds:0x51E544`, next poll fifteen timer units on) and
+  each poll moves it `max(1, remaining / 3)`. At exactly 0 every draw call is
+  skipped. It plays the side panel's two sounds, `Panel` on leaving rest and
+  `Options` on settling.
+- **Its graphic** is `LIGHTBAR` in `anims/commongui.GAF`, **frame 1**, 507 by
+  32, fetched once at `0x4679E3` and cached at `game+0x37E94`.
+- **Its text**, each format read at its address:
+  `"%s : %02d:%02d:%02d"` with `Game Time` -- always with the hours;
+  `"%s : %d  (Max %d)"` with `Total Units`, the count being the word at
+  player record `+0x144` of the LOCAL player (`game+0x2A42`) and the maximum
+  the first word of the settings block at `game+0x37EE6`;
+  `"%s %s"` with `Game Speed` and either `Normal` (speed word `game+0x38A4D`
+  equal to 10) or `"%+d"` of the word less ten -- no colon on this one -- and
+  a further `" (%+d)"` while the wanted speed (`game+0x38A4B`) has not landed.
+- **The list**: ten records at `game+0x1B63`, 331 bytes each. A row is a colour
+  swatch blitted as a graphic (the colour index is byte `+0x96` of the
+  sub-record at `+0x27`, looked up through the table at `game+0x148DB`), the
+  name at `+0x2B`, kills at `+0xFC` and losses at `+0xFE` as plain `"%d"`. The
+  local player's row has two nested filled rectangles under it. The box is
+  `40 * rows + 46` tall, at y = 32, its x being the screen width less the
+  slide plus 125 -- off the right edge at rest, flush with it when out.
+- **Order is a stored rank byte (`+0x148`), not a leaderboard.** It is closed
+  up when a player drops and otherwise left alone.
+- A row is skipped for an unused record, a state byte outside 1 to 3, a
+  `+0x146` of 10, a record that has and has had no units, or bit `0x40` of
+  `+0x9B` in the colour sub-record. **No alliance or visibility test was found
+  in the loop**, so it appears to list everyone.
+
+### Not found
+
+The font and colour handed to the text primitive `0x4A50E0`; where across the
+screen the strip sits and how its three lines are laid out inside 32 pixels;
+the list's exact width; what palette the highlight's two fill constants (31
+and 20) index; and the `game+0x37EF6 == 2` mode that reads kills and losses
+from `+0x104` / `+0x106` instead.
+
+### What RWE does
+
+`GameScene::updateStatsBarSlide` and `renderSpaceTabs`. The slides, the gates,
+the strings and formats, the graphic, the box height and the rule that the
+list rides the side panel are the original's. **RWE's own, for want of a
+decode:** the strip is centred under the world view with its three items laid
+left, centre and right on one line; the list is 125 wide on a translucent
+ground with RWE-chosen highlight colours, and uses the `radlogo` colour dots
+as swatches; and `Total Units` stops at the count, because RWE has no unit
+limit to print after it.
+
 ---
 
-## 106. `0x46d630`, the unit-table packet builder, and the checksum behind it that got away
+## 109. `0x46d630`, the unit-table packet builder, and the checksum behind it that got away
 
 This one is included because it **failed**, and the shape of the failure is
 worth having written down before someone spends the same two days on it again.
@@ -13396,7 +13692,7 @@ thing the work was blocked on was not the thing it was chasing, and an hour
 spent testing whether the blocker was real would have been worth more than the
 day spent on the checksum.
 
-## 107. Why a construction aircraft finishes a build one tick early: a second lathe on the creation tick
+## 110. Why a construction aircraft finishes a build one tick early: a second lathe on the creation tick
 
 Over the demo corpus a construction aircraft finishes one tick sooner than §23's
 float32 replay allows, where a factory lands on it exactly. The cause is not a
@@ -13614,7 +13910,7 @@ soon as the two mobile build handlers were read side by side; what took the time
 was finding what could make the service loop run a waiting mission again in the
 same tick, and that was the sticky event bit.
 
-## 108. The settle, re-read: one phase for every player, and what a refusal costs
+## 111. The settle, re-read: one phase for every player, and what a refusal costs
 
 §23 decoded the once-a-second settle and RWE ported it. This section is the
 second reading, done to check §23 against the demo corpus's stall evidence

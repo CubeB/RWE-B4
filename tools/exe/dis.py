@@ -9,7 +9,7 @@ mapping is needed. Written for the 0x2c decode (docs/TA-DEMOS.md, "0x2c, unit
 state"), where the useful unit of reading was one routine at a time: the
 builder, then each serialiser its calls lead to.
 
-Two cautions carried over from docs/TOTALA-EXE.md section 106. objdump sweeps
+Two cautions carried over from docs/TOTALA-EXE.md section 109. objdump sweeps
 linearly, so a jump table inside the range disassembles as nonsense and can hide
 a real instruction after it; and a `call` target is resolved for you here, which
 is what makes grepping a full listing for `call   0x415c10` find every user of a

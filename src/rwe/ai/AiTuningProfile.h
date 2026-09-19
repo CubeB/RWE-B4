@@ -124,6 +124,47 @@ namespace rwe
          * player buys with a surplus.
          */
         int surplusLabCount{1};
+        /**
+         * Whether a full metal store buys more of the base: more factories
+         * as income grows, the tech step whatever techLevelTwo says, and a
+         * fleet past navalFleetSize.
+         *
+         * Every target above is where the base starts. Watched in two long
+         * replays on water maps, it was also where the base stopped: at
+         * ninety minutes and at two hours both sides sat on a full store at
+         * fifty to a hundred metal a second with idle builders and the same
+         * two shipyards they had at minute ten, and neither game ended. A
+         * store that stays full is income thrown away, and what a player
+         * does with it is build the means to spend it.
+         */
+        bool surplusExpansion{true};
+        /** An armed enemy this close to the commander, seen lately, puts it in danger; so does any loss of hit points. Zero switches commander safety off. */
+        SimScalar commanderDangerRadius{450_ss};
+        /** Combat units and hulls within this distance of an endangered commander go to it. */
+        SimScalar commanderGuardRadius{1500_ss};
+        /** Radar contacts count as incoming inside this many defendRadius of the base, when closing. Zero switches the radar warning off. */
+        float radarWarningRings{2.5f};
+        /** Contacts that must be closing before the army forms up; one blip is a scout. */
+        int radarWarningMinContacts{2};
+        /** Seconds a hull may fire at one target without hurting it before it is moved to try from somewhere else. Zero switches it off. */
+        int navalStalledAttackSeconds{12};
+        /**
+         * How far from a known armed enemy, or from where a building of ours
+         * was lost lately, a builder will still put something down. The
+         * extractor search has long refused patches under enemy guns
+         * (mexAvoidsEnemyGunsRadius); this is the same caution for
+         * everything else a builder is sent to build, and for ground we have
+         * just been thrown off. Zero switches it off.
+         */
+        SimScalar builderAvoidsContestedRadius{450_ss};
+        /** Centre-to-centre distance kept between our own shipyards, so what one launches is not launched into the next. A yard is 128 across. */
+        SimScalar shipyardSpacing{448_ss};
+        /** One more factory of a kind is allowed for every this much metal income a second, while the store is full. */
+        int surplusFactoryIncomeStep{20};
+        /** And never more than this many of one kind, however rich. */
+        int surplusFactoryCap{4};
+        /** With the store full, the fleet's size targets are multiplied by this. */
+        int surplusFleetMultiplier{3};
 
         // --- Level two ---
         /**
@@ -483,6 +524,41 @@ namespace rwe
          */
         int targetSeaTransportCount{1};
         /**
+         * Construction ships the shipyard makes once the map has metal under
+         * its water. 0 leaves the commander to mine the sea by itself.
+         *
+         * Nothing queued one before this. sideUnits.constructionShip resolved
+         * on both sides, and its only reader picked a movement class for the
+         * naval reachability layer. On a map with no dry ground there is no
+         * lab and so no constructor either, which left the commander as the
+         * only builder the AI would ever own: one unit walking the seabed,
+         * against Brain Coral's 1170 submerged patches, reaching three to
+         * seven extractors in fifteen minutes.
+         *
+         * Gated on submerged metal rather than on how wet the map is, for the
+         * reason the underwater extractor is: the census of all 52 shipped
+         * maps showed that the water fraction says little about what lies
+         * under it.
+         *
+         * Measured, and by a wide margin: over ten games on Brain Coral, ARM
+         * against ARM with seats alternating, the side building two finished
+         * with 32.9 units, 26.3 buildings, 17.1 underwater extractors and
+         * 27.4 metal a second, against 20.0, 14.8, 5.4 and 10.2 for the side
+         * that did not -- ahead in every one of the ten games.
+         *
+         * It first measured the other way, and the reason is worth keeping.
+         * RWE was not reading the menu entries in the download directory, and the
+         * construction ship's second and third pages -- the underwater
+         * extractor among them -- are nothing but those. So in RWE the ship
+         * had one page and no extractor on it; it found nothing on the plan it
+         * could build, and since the planner serves one builder per pass,
+         * every pass spent on an idle ship was one the commander did not get.
+         * The side building them ended with FEWER extractors, 3.5 to 5.9. It
+         * was the menu, not the idea: see DownloadMenus.h. Reported from play,
+         * the construction ship "should have three pages of build options."
+         */
+        int targetConstructionShipCount{2};
+        /**
          * Submarines wanted, out of navalFleetSize, once the destroyer core
          * below is standing. A submarine's only weapon is a waterweapon
          * (TOTALA-EXE.md and S:13.2), so it cannot answer anything on land
@@ -497,6 +573,94 @@ namespace rwe
          * shoot back at whatever is shelling the coast.
          */
         int submarineMinDestroyerCount{3};
+        /**
+         * Advanced shipyards wanted, once a shipyard stands and the income
+         * below is met. Zero leaves the navy at its first tier, which is what
+         * it was before this knob.
+         *
+         * The reasoning is the land tech step's: a destroyer fleet stops
+         * scaling. A cruiser outranges a destroyer and carries the depth
+         * charge a destroyer does not, a battleship outranges the torpedo
+         * launcher that is the first tier's whole coastal defence, and the
+         * anti-air ship is the only thing afloat that can answer a torpedo
+         * bomber. Only the construction ship has the button, so this does
+         * nothing for a side that has not built one.
+         *
+         * Measured: ten games on Brain Coral, ARM against ARM over 1500
+         * seconds, seats alternating. The side with the yard built it in
+         * every game, with 1.3 cruisers and 0.8 battleships, and finished
+         * with 44.0 units and an army of 6.6 having lost 30.2, against 35.5,
+         * 3.9 and 148.8 lost without it -- on the same metal, 35.7 a second
+         * against 37.3. It does not cost the economy; it stops the fleet
+         * being fed to the other side a destroyer at a time.
+         */
+        int targetAdvancedShipyardCount{1};
+        /**
+         * Whether a construction ship is offered the base's whole plan or
+         * only an outpost's -- the extractor, and the advanced shipyard above
+         * when its gate is met.
+         *
+         * OFF, because the arena said so. Ten games on Brain Coral, ARM
+         * against ARM over 1500 seconds, seats alternating: with ships kept
+         * to extractors a side finished with 44.0 units, 37.6 buildings, 28.1
+         * underwater extractors and 52.3 metal a second; offered the whole
+         * plan, 34.3, 27.7, 18.4 and 32.6, and lost twice as much. A ship
+         * that stops to put up a tidal generator or a second yard is a ship
+         * not taking metal, and on that map metal is what everything else is
+         * bought with.
+         */
+        bool navalBuildersPlanForBase{false};
+        /**
+         * Metal a second before the advanced shipyard is asked for. ARMASY is
+         * 2524 metal and the cheapest thing it builds that fights is 1358;
+         * below this the yard would stand idle, and the 240-second tech
+         * save-up window would starve the first-tier fleet to pay for it.
+         */
+        int navalTechMinMetalIncome{15};
+        /** Cruisers wanted from the advanced shipyard. */
+        int targetCruiserCount{4};
+        /** Battleships wanted from the advanced shipyard. One is asked for after every two cruisers, so the escort exists before the thing it escorts. */
+        int targetBattleshipCount{2};
+        /** Anti-air ships wanted, and only once enemy aircraft have been seen -- the same rule the anti-air kbot and the fighter follow. */
+        int targetAntiAirShipCount{2};
+        /**
+         * Seaplane platforms wanted once an advanced shipyard stands and
+         * there is no air plant -- the map had no ground for one. Zero
+         * switches the whole seaplane chain off, the construction sub with
+         * it. About 2900 metal before the first aircraft, so it waits for a
+         * full store like the rest of surplusExpansion.
+         */
+        int targetSeaplanePlatformCount{1};
+        /**
+         * Hold the factories while the first moho and the first reactor are
+         * paid for. Level two was reached in play and never spent: the lab
+         * went up, the factories went on taking every unit of metal as it
+         * arrived, and a 1508-metal moho was skipped as unaffordable on 26
+         * metal a second for the rest of the game. With this on, once a
+         * builder that can build them stands, factories make only builders
+         * until both exist -- unless the base is under attack, the army is
+         * under tierTwoReserveMinArmySize, or tierTwoReserveMaxSeconds have
+         * gone by, so a map with no patch left cannot hold production for
+         * ever.
+         */
+        bool tierTwoEconomyReserve{true};
+        int tierTwoReserveMinArmySize{6};
+        int tierTwoReserveMaxSeconds{480};
+        /** Underwater fusion plants wanted once an advanced construction sub can be had. Zero switches them off. */
+        int targetUnderwaterFusionCount{1};
+        /**
+         * Storage wanted, metal and energy each, counting the underwater
+         * kind with the land kind. One of each goes up with level two --
+         * a commander's 1000 metal cannot hold the price of anything the
+         * tier sells -- and the rest only when the store is found full,
+         * which is income being thrown away. Zero switches storage off.
+         */
+        int targetMetalStorageCount{2};
+        int targetEnergyStorageCount{2};
+        /** Fighters are matched to the most enemy aircraft seen at once, up to this many. targetFighterCount is the floor. */
+        int maxReactiveFighterCount{8};
+        /** Torpedo seaplanes wanted from it. They fly in pairs at least, as the bombers do. */
+        int targetTorpedoSeaplaneCount{6};
         /**
          * Hulls that will call the attack on their own, with no land army.
          *
@@ -532,6 +696,28 @@ namespace rwe
          * are above 40%, and even at 92% both sides field a land army.
          */
         int attackNavalSize{0};
+        /**
+         * How many hulls, not counting the one lent to scouting, before the
+         * fleet goes looking for something to sink. 0 keeps it at home.
+         *
+         * Deliberately separate from attackNavalSize above, which is a term
+         * in the whole AI's phase decision: raising that to make the navy
+         * fight would flip a mixed map's LAND army into Attack as a side
+         * effect of having built three ships. The navy judges its own
+         * readiness and leaves the phase alone.
+         *
+         * This exists because until it did, `updateNavy` had no offensive
+         * branch whatever -- a hull shot what came within engageRadius and
+         * otherwise held station at the shipyard, so a navy that was never
+         * met at home never fought at all. Watched on Brain Coral: the yard
+         * turns out warships and they sit beside it for the rest of the
+         * game while the enemy does as it likes.
+         *
+         * Three is a first guess and has not been through the arena. It is
+         * the smallest number that is a fleet rather than a scout, and small
+         * enough to matter on a map whose economy supports few hulls.
+         */
+        int navalAttackFleetSize{3};
 
         // --- Site search ---
         /**
@@ -842,6 +1028,23 @@ namespace rwe
          * standing there to have moved; the ground itself does not change.
          */
         int failedSiteMemorySeconds{120};
+        /**
+         * Whether a builder with the moho's button replaces a standing
+         * extractor once there is no free patch left to put a moho on. One at
+         * a time, and see BuildManager::ExtractorUpgrade for why. A moho on a
+         * free patch is always preferred: it costs the base no income while
+         * it goes up.
+         */
+        bool extractorUpgrades{true};
+        /**
+         * How much of the moho's price must already be in the store before
+         * the old extractor is taken down. The patch earns nothing from the
+         * reclaim until the moho finishes, so the reclaim waits until the
+         * moho can follow it promptly rather than when it is merely wanted.
+         */
+        float extractorUpgradeMinMetalFraction{0.5f};
+        /** How long an upgrade may run from the reclaim order to the moho's build order before the patch is released. */
+        int extractorUpgradeTimeoutSeconds{180};
 
         // --- Cadence (ticks) ---
         int buildPlannerTickInterval{30};
@@ -887,6 +1090,39 @@ namespace rwe
          * that answers it.
          */
         bool holdWhenOutnumbered{true};
+        /**
+         * With no combat units at all, the commander answers up to this many
+         * armed intruders near the base itself. 0 switches it off.
+         *
+         * Defend picks the intruder nearest home and hands it to the wave,
+         * and the wave is drawn from combatUnits. Where every hull dies as a
+         * nanoframe before it can float -- Brain Coral, where one enemy scout
+         * ship parks off the shipyard and shoots each one as it is born, and
+         * a frame has no hit points to lose -- that list is empty, so the
+         * phase fires exactly as designed and sends nobody. Measured over ten
+         * games: the victim entered Defend at tick 3523 and never left it,
+         * while the ship shooting it survived to the final tick, unopposed
+         * for thirteen minutes. Everything built to break the siege died at
+         * nought hit points on the slipway.
+         *
+         * The commander is the one unit that lives through that, and it is
+         * armed. It is kept out of combatUnits deliberately -- it is a
+         * builder, and an AI that walks its commander at every raider loses
+         * it -- so this is the narrowest case that breaks the lock: only when
+         * there is nothing else whatever to send. Where the AI has any army
+         * it is dead code.
+         *
+         * Counted rather than a flag because the natural guard cannot be
+         * reused: holdWhenOutnumbered compares intruders against combatUnits,
+         * which is empty here by construction, so that test is always true
+         * and would make this never fire. A lone harasser is worth the
+         * commander's attention; a raiding party of nine is a game already
+         * lost, and walking the commander into it only loses it faster.
+         *
+         * No leash is needed. The intruder comes from enemiesNearBase, which
+         * PerceptionManager already bounds by defendRadius.
+         */
+        int commanderDefendsAloneMaxIntruders{1};
         /**
          * While a wave is out, an intruder at home is answered by the units
          * gathering for the next wave, and the wave carries on. Off, one

@@ -88,7 +88,7 @@ namespace rwe
          * permutation gives that for one demo with probability about 4e-13.
          *
          * It is TA's load-order index, which the FBI loader assigns to each unit
-         * type and stores at record+0x21e (docs/TOTALA-EXE.md section 106). The
+         * type and stores at record+0x21e (docs/TOTALA-EXE.md section 109). The
          * order is the one tadUnitLoadOrder produces: every units\*.FBI name in
          * the merged VFS, sorted, numbered from one. See that function for the
          * evidence, and docs/TA-DEMOS.md for the whole argument.

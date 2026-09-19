@@ -137,11 +137,19 @@ namespace rwe
         }
 
         /**
-         * tryGetUnitState rather than getUnitState: over five hundred ticks
-         * of twenty-six units crowding one small target, an occasional
-         * attacker can be gone by the time this runs (a stray footprint
-         * collision working itself out), and that is not what this test is
-         * checking for -- it should just count as not engaging.
+         * tryGetUnitState rather than getUnitState: over a long enough run
+         * an attacker can be gone by the time this runs, and that is not what
+         * this test is checking for -- it should just count as not engaging.
+         *
+         * Gone because it was SHOT, by its own side. This was filed as a
+         * unit vanishing from the simulation (#73) and guessed to be a
+         * footprint collision; a probe that logged every attacker's hit
+         * points settled it. The ones at the back fire line-of-sight shots
+         * through the ones in front, five points a hit from tick 36, and the
+         * first of four dies at tick 592 on exactly a hundred points of it.
+         * Friendly fire is unconditional in the original (TOTALA-EXE.md,
+         * "Friendly fire is unconditional"), so that is the engine being
+         * right, and a dead unit with no corpse leaves the unit list.
          */
         bool isEngaging(GameSimulation& sim, UnitId attackerId, UnitId targetId)
         {

@@ -40,7 +40,7 @@ builders fall into three classes that have to be scored apart:
     ignores its answer, and the wait's side effect -- adding event bit 0x4 to
     the wake mask -- matches the 0x4 every COB `set` leaves pending, so the
     service loop 0x43B7C0 runs the lathe a second time before the tick ends.
-    docs/TOTALA-EXE.md section 107 has the addresses and
+    docs/TOTALA-EXE.md section 110 has the addresses and
     tools/exe/buildloop.py the replay. Over the Escalation corpus 60 of 68 such
     builds land on the model exactly and the other eight are late by whole
     seconds (the stall shape), none early. Scored cell by cell, like a factory,
@@ -198,7 +198,7 @@ def cells(episodes, units, min_builds):
 
         kind = builder_class(units[builder])
         # One increment lands on the 0x09's tick; a construction aircraft gets a
-        # second one there too (docs/TOTALA-EXE.md section 107).
+        # second one there too (docs/TOTALA-EXE.md section 110).
         predicted = ticks_to_build(build_time, p) - (2 if kind == "airborne" else 1)
         # Assisted builds are the bulk of a competitive game and only ever
         # shorten; a cap either side keeps them and the badly stalled ones from

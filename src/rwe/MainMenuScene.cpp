@@ -264,12 +264,15 @@ namespace rwe
         // gadgets rather than written down, and the call is identical to the
         // in-game one. It also does nothing on the pages that have no shadows
         // toggle, which is what keeps it off the sound and interface pages.
-        uiFactory.addStagedButtonBelow(active, "STARTOPT", "BSHADOWS", "HALO", "BSHADOWS", "ANTI", {"Fringe Off", "Fringe On"}, pendingBuildingHalo ? 1 : 0);
+        if (BuildingHaloWired)
+        {
+            uiFactory.addStagedButtonBelow(active, "STARTOPT", "BSHADOWS", "HALO", "BSHADOWS", "ANTI", {"Fringe Off", "Fringe On"}, pendingBuildingHalo ? 1 : 0);
+        }
         // ...and how far the 2x2 filter reaches, which the original never let
         // past a building's cached bitmap. Anchored to the fringe toggle put
         // there a line ago, so it lands one row under it on whichever page it
         // finds them, and is absent from the pages that carry neither.
-        uiFactory.addStagedButtonBelow(active, "STARTOPT", "BSHADOWS", "AAUNITS", "HALO", "BSHADOWS", {"Units Sharp", "Units Smooth"}, pendingAntiAliasUnits ? 1 : 0);
+        uiFactory.addStagedButtonBelow(active, "STARTOPT", "BSHADOWS", "AAUNITS", BuildingHaloWired ? "HALO" : "BSHADOWS", BuildingHaloWired ? "BSHADOWS" : "ANTI", {"Units Sharp", "Units Smooth"}, pendingAntiAliasUnits ? 1 : 0);
 
         auto state = currentOptions();
 

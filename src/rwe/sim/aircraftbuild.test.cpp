@@ -119,7 +119,7 @@ namespace rwe
             "YardMap=oooooooooooooooooooooooooooooooooooo;\n";
 
         // x-esc unitsE/CORDRAG.fbi -- dragon's teeth. BuildTime 1130 divides
-        // exactly by CORCA's rate, which is what makes it the pair section 107
+        // exactly by CORCA's rate, which is what makes it the pair section 110
         // works through.
         const char* CorDragKeys =
             "FootprintX=2;\n"
@@ -294,7 +294,7 @@ namespace rwe
         // 569 increments finish it. The first tick pays two of them, which
         // leaves 567 ticks after it -- one fewer than the 568 the same 569
         // increments would take one at a time. That one tick is the whole of
-        // what section 107 explains, and 567 is what the demo corpus shows for
+        // what section 110 explains, and 567 is what the demo corpus shows for
         // this exact pair over 19 builds.
         auto script = makeEmptyCobScript({"base"});
         GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
