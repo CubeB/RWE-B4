@@ -2810,6 +2810,19 @@ namespace rwe
 
     void GameSimulation::requestPath(UnitId unitId)
     {
+        // A search that outlived its tick is still the unit's turn: it holds
+        // the head of the queue, and a unit that asks again for the same place
+        // while it runs must leave it there. Moving it to the back would put a
+        // different unit at the head and break the scheduler's assumption that
+        // the search belongs to the request at the head (and the save format,
+        // which reads a suspended search off the head). If the unit's goal has
+        // moved on, the search in flight is thrown away and the request is
+        // queued normally below.
+        if (pathFindingService.onPathRequested(*this, unitId))
+        {
+            return;
+        }
+
         PathRequest request{unitId};
 
         // If the unit is already in the queue for a path,

@@ -80,6 +80,25 @@ namespace rwe
         void abandonSearch();
 
         /**
+         * A unit has asked for a path. Returns true if the search already in
+         * flight for that unit will answer it, in which case the caller must
+         * leave the unit's place in the queue alone.
+         *
+         * A search that outlived its tick owns the request at the head of the
+         * queue -- the save format reads the suspended search off the head, and
+         * update() asserts the two agree when the search lands -- so a unit
+         * that asks for the same place again while its search is part way
+         * through must not be shuffled to the back of the queue. It has not
+         * been served yet; the search that is running is its turn.
+         *
+         * If the unit's goal has moved on instead, the search in flight is for
+         * somewhere the unit no longer wants to go: it is thrown away here, so
+         * that no stale search is left for a save to serialise, and false is
+         * returned so the caller queues the request like any other.
+         */
+        bool onPathRequested(const GameSimulation& simulation, UnitId unitId);
+
+        /**
          * What a save needs to write down about a search in progress, and all
          * of it: five integers.
          *
