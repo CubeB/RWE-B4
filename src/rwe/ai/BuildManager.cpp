@@ -2010,6 +2010,31 @@ namespace rwe
                 || total(s.lab) > 0 || total(s.vehiclePlant) > 0;
 
             std::string next;
+
+            // Whichever type is furthest below its share of the line.
+            // Cross-multiplied so it stays in integers, and strictly
+            // less so that a tie goes to the first named, which is what
+            // makes 2:1 come out as "raider while raiders <= 2 * rockets".
+            auto pickByShare = [&](std::initializer_list<std::pair<const std::string*, int>> line) {
+                const std::string* best = nullptr;
+                long long bestCount = 0;
+                long long bestShare = 0;
+                for (const auto& [type, share] : line)
+                {
+                    if (type->empty() || share <= 0)
+                    {
+                        continue;
+                    }
+                    auto count = static_cast<long long>(countOf(bb.ownedTotalCounts, *type));
+                    if (!best || count * bestShare < bestCount * share)
+                    {
+                        best = type;
+                        bestCount = count;
+                        bestShare = share;
+                    }
+                }
+                return best ? *best : std::string();
+            };
             if (!s.airPlant.empty() && factory.unitType == s.airPlant)
             {
                 // Eyes first, then lift when it is needed, and then the
@@ -2068,7 +2093,7 @@ namespace rwe
                     // A tank cannot cross water either. The scout above is
                     // exempt for the same reason the constructor is: eyes
                     // and builders are not the raiding army.
-                    next = s.tank;
+                    next = pickByShare({{&s.tank, profile.vehicleTankShare}, {&s.missileTruck, profile.vehicleMissileTruckShare}, {&s.mediumTank, profile.vehicleMediumTankShare}});
                 }
             }
             else if (!s.shipyard.empty() && factory.unitType == s.shipyard)
@@ -2249,20 +2274,11 @@ namespace rwe
                     // an idle factory is not spending, which is the whole
                     // point.
                 }
-                else if (!s.raider.empty() && !s.rocketKbot.empty())
+                else
                 {
-                    // Two raiders for every rocket kbot.
-                    auto raiders = countOf(bb.ownedTotalCounts, s.raider);
-                    auto rockets = countOf(bb.ownedTotalCounts, s.rocketKbot);
-                    next = raiders <= rockets * 2 ? s.raider : s.rocketKbot;
-                }
-                else if (!s.raider.empty())
-                {
-                    next = s.raider;
-                }
-                else if (!s.rocketKbot.empty())
-                {
-                    next = s.rocketKbot;
+                    // Two raiders for every rocket kbot, as shipped; the
+                    // profile holds the ratio.
+                    next = pickByShare({{&s.raider, profile.labRaiderShare}, {&s.rocketKbot, profile.labRocketKbotShare}, {&s.artilleryKbot, profile.labArtilleryKbotShare}});
                 }
             }
 

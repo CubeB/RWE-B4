@@ -32,6 +32,16 @@ namespace rwe
         std::string vehiclePlant;
         std::string scoutVehicle;
         std::string tank;
+        /**
+         * The rest of the level-one line, which the factories make only when
+         * the profile gives them a share: the missile truck that outranges a
+         * Flash or an Instigator several times over, the medium tank that
+         * holds ground where the light one raids, and the plasma kbot that
+         * lobs into a crowd.
+         */
+        std::string missileTruck;
+        std::string mediumTank;
+        std::string artilleryKbot;
 
         // Anti-air. Both sides carry a cheap missile tower a constructor can
         // put up (ARMRL "Defender" at 79 metal, CORRL "Pulverizer" at 76) and

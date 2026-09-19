@@ -1144,6 +1144,19 @@ namespace rwe
         /** Fall back to the rally point when the attacking army drops below this. */
         int retreatArmySize{3};
         /**
+         * What the level-one kbot lab makes, as a ratio: this many raiders to
+         * that many rocket kbots. Two integers and not a fraction because the
+         * choice is made inside the simulation, where a float comparison is
+         * one more thing that has to come out the same on every machine.
+         */
+        int labRaiderShare{2};
+        int labRocketKbotShare{1};
+        int labArtilleryKbotShare{0};
+        /** The same for the vehicle plant: light tank, missile truck, medium tank. */
+        int vehicleTankShare{1};
+        int vehicleMissileTruckShare{0};
+        int vehicleMediumTankShare{0};
+        /**
          * Units built during an attack gather at the rally point for the
          * next wave instead of walking to the front one at a time. The
          * attack is over when the wave that set out has fallen below
