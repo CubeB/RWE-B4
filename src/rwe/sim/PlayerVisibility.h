@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <rwe/grid/Grid.h>
 #include <rwe/grid/Point.h>
 #include <rwe/sim/LosTables.h>
@@ -22,6 +23,48 @@ namespace rwe
 
         /** Min-biased height: decides whether a cell blocks sight past it. */
         Grid<unsigned char> occlude;
+    };
+
+    /**
+     * One cell of the explored grid: a bit per line-of-sight group.
+     *
+     * The original keeps ONE explored array of `uint16` used as a bitmask, a
+     * bit per LOS group (see TOTALA-EXE.md section 2), and RWE keeps the same
+     * single grid on GameSimulation. Sixteen bits is the original's width, so
+     * the type follows it rather than the lobby's ten slots.
+     */
+    using ExploredMask = std::uint16_t;
+
+    /**
+     * One line-of-sight group's claim on the shared explored grid: the grid
+     * itself, and the one bit the group owns in every cell.
+     *
+     * Revealing ground is setting the group's bit and asking whether ground is
+     * known is testing it, which is the whole of how allied vision falls out
+     * of the original's representation: players on one team share a bit, so a
+     * cell one of them has seen is seen by all of them without anyone having
+     * to copy it between grids.
+     *
+     * Passing this rather than the grid and the bit separately keeps the
+     * reveal routines ignorant of where the grid lives and of who owns which
+     * bit.
+     */
+    struct ExploredMark
+    {
+        Grid<ExploredMask>* grid;
+        ExploredMask bit;
+
+        /** Whether this group has explored the cell. */
+        bool isMarked(int x, int y) const
+        {
+            return ((*grid).get(x, y) & bit) != 0;
+        }
+
+        /** Sets this group's bit on the cell, leaving the other groups alone. */
+        void mark(int x, int y) const
+        {
+            (*grid).set(x, y, static_cast<ExploredMask>((*grid).get(x, y) | bit));
+        }
     };
 
     /**
@@ -67,12 +110,13 @@ namespace rwe
             bool sonar{false};
         };
 
-        /** Cells that have been seen at some point. Never cleared. */
-        Grid<unsigned char> explored;
-
         /**
          * Reference count per cell: how many of the player's units currently
          * see it. Non-zero means visible. Rebuilt every tick.
+         *
+         * There is deliberately no explored grid here. That state is the one
+         * shared bitmask on GameSimulation, one bit per line-of-sight group;
+         * this per-player struct keeps only what belongs to the player alone.
          */
         Grid<unsigned char> visible;
 
@@ -117,7 +161,6 @@ namespace rwe
         PlayerVisibility(int width, int height);
 
         bool contains(const Point& cell) const;
-        bool isExplored(const Point& cell) const;
         bool isVisible(const Point& cell) const;
 
         /** How many of the player's units see the cell; 0 outside the grid. */
@@ -137,14 +180,16 @@ namespace rwe
          * tested against a fresh line.
          *
          * Every cell revealed by this call counts once towards the visible
-         * reference count, however many rays reach it.
+         * reference count, however many rays reach it, and every such cell
+         * also sets the group's bit in the shared explored grid.
          */
         void revealWithLineOfSight(
             const Point& center,
             int radius,
             const VisionHeightGrid& heights,
             int eyeHeight,
-            const LosTables& tables);
+            const LosTables& tables,
+            const ExploredMark& explored);
 
         /**
          * Reveals a flat disc of radius cells around the centre, paying no
@@ -159,7 +204,7 @@ namespace rwe
          * As with the line-of-sight march, the centre cell is always revealed
          * and every revealed cell counts once towards the reference count.
          */
-        void revealCircle(const Point& center, int radius);
+        void revealCircle(const Point& center, int radius, const ExploredMark& explored);
 
         /**
          * Lights every cell that has ever been explored.
@@ -170,19 +215,20 @@ namespace rwe
          * units standing on that ground back with it, which is exactly what
          * the option is for.
          *
-         * A cell already lit by a live unit keeps its reference count; a
+         * The remembered ground is the group's bit in the shared explored
+         * grid. A cell already lit by a live unit keeps its reference count; a
          * merely remembered one is given a count of one. Nothing ever
          * subtracts from these counts -- the grid is rebuilt from nothing
          * every tick -- so handing out a count here costs nothing later.
          */
-        void makeExploredVisible();
+        void makeExploredVisible(const ExploredMark& explored);
 
         /**
          * Marks the whole map explored, which is what the Mapped option does
          * before the game starts. Explored, not visible: mapping hands over
          * the ground and never the units standing on it.
          */
-        void exploreAll();
+        void exploreAll(const ExploredMark& explored);
 
     private:
         /**
@@ -193,7 +239,7 @@ namespace rwe
         unsigned int currentStamp{0};
 
         void beginReveal();
-        void revealCell(int x, int y);
+        void revealCell(int x, int y, const ExploredMark& explored);
     };
 
     /**

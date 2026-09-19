@@ -194,6 +194,10 @@ namespace rwe
           surfaceMetal(surfaceMetal),
           visionHeights(computeVisionHeights(this->terrain.getHeightMap(), static_cast<unsigned char>(std::min(simScalarToUInt(this->terrain.getSeaLevel()), 255u)))),
           losTables(generateLosTables(DefaultLosTableCount - 1)),
+          explored(
+              (this->terrain.getHeightMap().getWidth() + PlayerVisibility::VisionCellSizeInTiles - 1) / PlayerVisibility::VisionCellSizeInTiles,
+              (this->terrain.getHeightMap().getHeight() + PlayerVisibility::VisionCellSizeInTiles - 1) / PlayerVisibility::VisionCellSizeInTiles,
+              static_cast<ExploredMask>(0)),
           geoGrid(this->terrain.getHeightMap().getWidth() - 1, this->terrain.getHeightMap().getHeight() - 1, false),
           minWindSpeed(minWindSpeed),
           maxWindSpeed(maxWindSpeed),
@@ -1314,6 +1318,7 @@ namespace rwe
     {
         PlayerId id(players.size());
         players.push_back(info);
+        playerLosGroupBits.push_back(nextLosGroupBit());
 
         const auto& heights = terrain.getHeightMap();
         auto cells = PlayerVisibility::VisionCellSizeInTiles;
@@ -1325,10 +1330,57 @@ namespace rwe
             // the ground: the map comes up explored but unlit, so terrain is
             // drawn in memory grey and anything standing on it stays hidden
             // until something actually looks at it.
-            vis.exploreAll();
+            vis.exploreAll(ExploredMark{&explored, losGroupBitFor(id)});
         }
 
         return id;
+    }
+
+    ExploredMask GameSimulation::nextLosGroupBit() const
+    {
+        // The player just appended shares a bit with the earliest earlier
+        // player on its team, or opens the lowest bit nobody is using yet.
+        // Scanning in player order and handing out the lowest free bit makes
+        // the assignment a pure function of the player list, so every peer --
+        // and a load replaying the same players in the same order -- comes out
+        // with the same bits.
+        const auto& team = players.back().teamId;
+        if (team.has_value())
+        {
+            for (std::size_t i = 0; i + 1 < players.size(); ++i)
+            {
+                const auto& other = players[i].teamId;
+                if (other.has_value() && *other == *team)
+                {
+                    return playerLosGroupBits[i];
+                }
+            }
+        }
+
+        ExploredMask used = 0;
+        for (auto bit : playerLosGroupBits)
+        {
+            used |= bit;
+        }
+        ExploredMask bit = 1;
+        while ((used & bit) != 0)
+        {
+            bit = static_cast<ExploredMask>(bit << 1);
+        }
+        return bit;
+    }
+
+    ExploredMask GameSimulation::losGroupBitFor(PlayerId player) const
+    {
+        if (player.value < playerLosGroupBits.size())
+        {
+            return playerLosGroupBits[player.value];
+        }
+
+        // Not a player this simulation has. Answer with a bit no real group
+        // can hold so a stray query explores nothing rather than someone
+        // else's ground.
+        return 0;
     }
 
     namespace
@@ -1361,13 +1413,34 @@ namespace rwe
 
     bool GameSimulation::isExploredBy(PlayerId player, const SimVector& position) const
     {
-        return playerVisibility.at(player.value).isExplored(visionCellAt(position));
+        auto cell = visionCellAt(position);
+        if (cell.x < 0 || cell.y < 0 || cell.x >= explored.getWidth() || cell.y >= explored.getHeight())
+        {
+            return false;
+        }
+        return (explored.get(cell.x, cell.y) & losGroupBitFor(player)) != 0;
+    }
+
+    bool GameSimulation::isExploredByAnyGroup(const SimVector& position) const
+    {
+        auto cell = visionCellAt(position);
+        if (cell.x < 0 || cell.y < 0 || cell.x >= explored.getWidth() || cell.y >= explored.getHeight())
+        {
+            return false;
+        }
+        return explored.get(cell.x, cell.y) != 0;
     }
 
     void GameSimulation::clearPlayers()
     {
         players.clear();
         playerVisibility.clear();
+        playerLosGroupBits.clear();
+
+        // The explored grid belongs to the players whose groups own its bits,
+        // so it goes with them. Leaving it set would hand a fresh game the
+        // ground the last one had walked.
+        std::fill(explored.getVector().begin(), explored.getVector().end(), static_cast<ExploredMask>(0));
     }
 
     bool GameSimulation::arePlayersAllied(PlayerId a, PlayerId b) const
@@ -1713,14 +1786,22 @@ namespace rwe
                 circular ? MaxCircularSightRadiusInCells : losTables.maxRadius());
 
             auto cell = visionCellAt(unit.position);
+
+            // The unit's bit in the one shared explored grid. Every player in
+            // the owner's line-of-sight group owns that same bit, so revealing
+            // for the owner and each ally writes it more than once for the same
+            // cell -- harmlessly, since setting a bit twice sets it once -- and
+            // the grounds are shared without a rival grid per player.
+            auto exploredMark = ExploredMark{&explored, losGroupBitFor(unit.owner)};
+
             auto revealFor = [&](PlayerVisibility& vis) {
                 if (circular)
                 {
-                    vis.revealCircle(cell, radius);
+                    vis.revealCircle(cell, radius, exploredMark);
                 }
                 else
                 {
-                    vis.revealWithLineOfSight(cell, radius, visionHeights, eyeHeight, losTables);
+                    vis.revealWithLineOfSight(cell, radius, visionHeights, eyeHeight, losTables, exploredMark);
                 }
             };
 
@@ -1817,9 +1898,9 @@ namespace rwe
         // first tick, so the whole map is lit from the start.
         if (lineOfSightMode == LineOfSightMode::Permanent)
         {
-            for (auto& v : playerVisibility)
+            for (std::size_t i = 0; i < playerVisibility.size(); ++i)
             {
-                v.makeExploredVisible();
+                playerVisibility[i].makeExploredVisible(ExploredMark{&explored, losGroupBitFor(PlayerId(static_cast<unsigned int>(i)))});
             }
         }
 

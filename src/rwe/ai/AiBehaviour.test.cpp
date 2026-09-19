@@ -2135,8 +2135,10 @@ namespace rwe
             runTicks(sim, controller, 31, commands);
             REQUIRE(countOrdersFor(commands, "ARMMEX") == 0);
 
-            // Mapped: the ground is handed over, and the patch with it.
-            sim.playerVisibility.at(ai.value).exploreAll();
+            // Mapped: the ground is handed over, and the patch with it. The
+            // one shared explored grid is marked with the AI's group bit, which
+            // is what isExploredBy reads.
+            sim.playerVisibility.at(ai.value).exploreAll(ExploredMark{&sim.explored, sim.losGroupBitFor(ai)});
             sim.getUnitState(commanderId).orders.clear();
             commands.clear();
             runTicks(sim, controller, 31, commands);

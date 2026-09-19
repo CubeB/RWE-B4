@@ -104,6 +104,16 @@ namespace rwe
 
     GameHash computeHashOf(const GameSimulation& simulation);
 
+    /**
+     * The one shared explored grid, folded positionally.
+     *
+     * The vector helper sums its elements, which a grid cannot use: two
+     * different layouts of the same marks would sum to the same hash, and a
+     * desync turns on exactly that difference. Mixing each cell into a running
+     * accumulator keeps the position in the result.
+     */
+    GameHash computeHashOf(const Grid<ExploredMask>& grid);
+
     template <typename... Ts>
     GameHash combineHashes(const Ts&... items);
 

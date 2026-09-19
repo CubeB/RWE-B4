@@ -611,12 +611,35 @@ namespace rwe
          */
         LosTables losTables;
 
+        /**
+         * The one explored grid, a bit per line-of-sight group: every cell
+         * the original remembers, with a bit set for each group that has seen
+         * it (TOTALA-EXE.md section 2). Set-only and never cleared.
+         *
+         * It is shared rather than kept per player, which is what makes an
+         * ally's ground known to the ally: players on one team own the same
+         * bit, so a cell either of them has looked at is explored for both
+         * without anything being copied between grids. The bit a player reads
+         * and writes is losGroupBitFor.
+         */
+        Grid<ExploredMask> explored;
+
         Grid<bool> geoGrid;
 
         std::vector<GamePlayerInfo> players;
 
         /** One entry per player, indexed by PlayerId. Derived state: rebuilt every tick, not hashed. */
         std::vector<PlayerVisibility> playerVisibility;
+
+        /**
+         * One explored bit per player, indexed by PlayerId: a small pure
+         * function of `players`, handed out in player order.
+         *
+         * Derived, and never saved or hashed: on a load the players are added
+         * in the saved order and the bits come out identical, so there is
+         * nothing here a save would have to restore. See losGroupBitFor.
+         */
+        std::vector<ExploredMask> playerLosGroupBits;
 
         VectorMap<MapFeature, FeatureIdTag> features;
 
@@ -885,6 +908,27 @@ namespace rwe
         bool isVisibleTo(PlayerId player, const SimVector& position) const;
 
         /**
+         * True when any line-of-sight group has explored the position.
+         *
+         * The one shared grid holds every group's bit, so this asks whether the
+         * cell has any bit set at all. A spectator watching a recording with
+         * the fog on sees every side, and this is the union of what all of them
+         * have walked -- the same union the old per-player explored grids had
+         * to build by hand.
+         */
+        bool isExploredByAnyGroup(const SimVector& position) const;
+
+        /**
+         * The bit a player reads and writes in the shared explored grid.
+         *
+         * The original keeps one grid and a bit per line-of-sight group, and a
+         * lobby team is one such group: every player on it hands back the same
+         * bit, so ground one of them has seen is explored for all of them. A
+         * player with no team is a group of its own.
+         */
+        ExploredMask losGroupBitFor(PlayerId player) const;
+
+        /**
          * True when the two players are on the same lobby team, or are the
          * same player. A player with no team has no allies but itself.
          */
@@ -1006,7 +1050,7 @@ namespace rwe
          * Returns true if a unit with the given movementclass attributes
          * could be built at given location on the map -- i.e. it is valid terrain
          * for the unit, it is not occupied by something else, and it contains geo if required.
-         */
+         */
         /** The one-cell margin the original keeps clear all round the map; see the definition. */
         bool isInsideBuildableArea(unsigned int x, unsigned int y, unsigned int footprintX, unsigned int footprintZ) const;
         bool canBeBuiltAt(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y) const;
@@ -1375,6 +1419,14 @@ namespace rwe
         void updateFeatureRegrowth();
 
         void updateVisibility();
+
+        /**
+         * The explored bit for the player just appended to `players`: shared
+         * with the earliest earlier player on its team, or the lowest bit no
+         * group holds yet. Called from addPlayer, so the assignment follows
+         * player order and is a pure function of the player list.
+         */
+        ExploredMask nextLosGroupBit() const;
 
         /**
          * Holds off the cloak of any cloakable unit with a live enemy standing

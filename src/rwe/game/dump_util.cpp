@@ -351,6 +351,15 @@ namespace rwe
             {"width", r.width},
             {"height", r.height}};
     }
+    nlohmann::json dumpJson(const Grid<ExploredMask>& grid)
+    {
+        auto cells = nlohmann::json::array();
+        for (auto cell : grid.getVector())
+        {
+            cells.push_back(static_cast<std::uint32_t>(cell));
+        }
+        return cells;
+    }
     nlohmann::json dumpJson(const GameSimulation& simulation)
     {
         return nlohmann::json{
@@ -360,6 +369,7 @@ namespace rwe
             {"projectiles", dumpJson(simulation.projectiles)},
             {"currentWindVector", dumpJson(simulation.currentWindVector)},
             {"featureRegrowthCursor", simulation.featureRegrowthCursor},
+            {"explored", dumpJson(simulation.explored)},
         };
     }
 }

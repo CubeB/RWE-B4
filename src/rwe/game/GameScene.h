@@ -470,14 +470,26 @@ namespace rwe
 
         /**
          * Stands in for the local player's vision while the fog is switched
-         * off: every cell explored and in sight. Switching the fog off means
-         * the map is permanently seen and mapped, not that the fog machinery
-         * is stepped around -- everything that draws or picks still asks the
-         * same questions of the same kind of grid, and simply gets "yes" for
-         * an answer. Built the first time it is wanted, and rebuilt if the
-         * simulation's grids are ever a different size.
+         * off: every cell in sight. Switching the fog off means the map is
+         * permanently seen and mapped, not that the fog machinery is stepped
+         * around -- everything that draws or picks still asks the same
+         * questions of the same kind of grid, and simply gets "yes" for an
+         * answer. Explored ground for the same case is every cell set, which
+         * localExploredGrid fills in. Built the first time it is wanted, and
+         * rebuilt if the simulation's grids are ever a different size.
          */
         mutable std::optional<PlayerVisibility> revealedVisibility;
+
+        /**
+         * The local player's explored ground, materialised from the one shared
+         * bitmask (GameSimulation::explored) for this client alone. The
+         * simulation keeps a bit per line-of-sight group and nothing per
+         * player; the fog rasteriser and the minimap still want a per-cell
+         * yes/no grid, so localExploredGrid projects the local player's bit
+         * into this scratch grid. With the fog off it is filled in: the whole
+         * map is remembered. Not simulation state and never saved or hashed.
+         */
+        mutable Grid<unsigned char> localExploredView;
 
         /** F1: the hotkey reference overlay. */
         bool helpVisible{false};
@@ -659,9 +671,11 @@ namespace rwe
         std::optional<PlayerId> hudPlayerOverride;
 
         /**
-         * Both sides' fog at once, rebuilt when the tick moves on. A spectator
-         * with the fog on wants to see what each side could see, which is
-         * neither player's own grid nor a fully lit map.
+         * Both sides' visible fog at once, rebuilt when the tick moves on. A
+         * spectator with the fog on wants to see what each side could see,
+         * which is neither player's own grid nor a fully lit map. Only the
+         * visible grid is combined: explored ground is the simulation's one
+         * shared bitmap and is read from there (see localExploredGrid).
          */
         mutable std::optional<PlayerVisibility> combinedVisibility;
         mutable unsigned int combinedVisibilityTick{0};
@@ -1278,6 +1292,13 @@ namespace rwe
          * so there is only one render path rather than one per setting.
          */
         const PlayerVisibility& localPlayerVisibility() const;
+
+        /**
+         * The local player's explored ground as a per-cell grid, projected out
+         * of the simulation's shared explored bitmask for this frame. With the
+         * fog off it is every cell set, matching the fully lit map.
+         */
+        const Grid<unsigned char>& localExploredGrid() const;
 
         bool unitIsVisibleToLocalPlayer(UnitId unitId, const UnitState& unit) const;
 

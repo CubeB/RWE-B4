@@ -395,6 +395,16 @@ namespace rwe
             f.nextSpark);
     }
 
+    GameHash computeHashOf(const Grid<ExploredMask>& grid)
+    {
+        std::uint32_t accumulator = 0;
+        for (auto cell : grid.getVector())
+        {
+            accumulator = (accumulator * 31u) + static_cast<std::uint32_t>(cell);
+        }
+        return GameHash(accumulator);
+    }
+
     GameHash computeHashOf(const GameSimulation& simulation)
     {
         return combineHashes(
@@ -404,6 +414,11 @@ namespace rwe
             simulation.projectiles,
             simulation.features,
             simulation.currentWindVector,
-            simulation.featureRegrowthCursor);
+            simulation.featureRegrowthCursor,
+            // The explored grid is per line-of-sight group and feeds canSeeUnit
+            // in Permanent mode, where it decides targets. A peer that disagrees
+            // about what it has seen is a desync to catch, not player-facing
+            // state to leave out.
+            simulation.explored);
     }
 }

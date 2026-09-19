@@ -1940,27 +1940,27 @@ namespace rwe
         }
     }
 
-    nlohmann::json saveExploredGrid(const Grid<unsigned char>& grid)
+    nlohmann::json saveExploredGrid(const Grid<ExploredMask>& grid)
     {
-        std::vector<std::uint32_t> runs;
-        unsigned char current = 0;
-        std::uint32_t count = 0;
-
-        for (auto cell : grid.getVector())
+        // Runs of equal cell values rather than a bit per position: the grid
+        // is almost all zeros with a few explored blobs, so a long-game map
+        // comes out as a handful of pairs rather than tens of thousands of
+        // numbers. The value is written out rather than implied, because with
+        // one bit per group a cell is a small mask and not just 0 or 1.
+        auto runs = json::array();
+        const auto& cells = grid.getVector();
+        std::size_t i = 0;
+        while (i < cells.size())
         {
-            unsigned char bit = cell != 0 ? 1 : 0;
-            if (bit == current)
+            auto mask = cells[i];
+            std::size_t j = i;
+            while (j < cells.size() && cells[j] == mask)
             {
-                ++count;
+                ++j;
             }
-            else
-            {
-                runs.push_back(count);
-                current = bit;
-                count = 1;
-            }
+            runs.push_back(json::array({mask, static_cast<std::uint32_t>(j - i)}));
+            i = j;
         }
-        runs.push_back(count);
 
         return json{
             {"width", grid.getWidth()},
@@ -1968,7 +1968,7 @@ namespace rwe
             {"runs", runs}};
     }
 
-    void loadExploredGrid(const nlohmann::json& j, Grid<unsigned char>& grid)
+    void loadExploredGrid(const nlohmann::json& j, Grid<ExploredMask>& grid)
     {
         // A save from a different map, or a different vision cell size,
         // cannot be laid over this grid. Leaving it unexplored is the safe
@@ -1976,31 +1976,28 @@ namespace rwe
         // failing outright.
         auto width = j.at("width").get<std::size_t>();
         auto height = j.at("height").get<std::size_t>();
-        if (width != grid.getWidth() || height != grid.getHeight())
+        if (width != static_cast<std::size_t>(grid.getWidth()) || height != static_cast<std::size_t>(grid.getHeight()))
         {
             return;
         }
 
         auto& cells = grid.getVector();
-        std::fill(cells.begin(), cells.end(), static_cast<unsigned char>(0));
+        std::fill(cells.begin(), cells.end(), static_cast<ExploredMask>(0));
 
         std::size_t index = 0;
-        unsigned char current = 0;
         for (const auto& runJson : j.at("runs"))
         {
-            auto run = runJson.get<std::uint32_t>();
-            if (current != 0)
+            auto mask = runJson.at(0).get<ExploredMask>();
+            auto run = runJson.at(1).get<std::uint32_t>();
+
+            // The bound is on the cell being written, not on the start of the
+            // run: guarding `index` alone lets a run that begins in range
+            // finish past the end of the vector.
+            for (std::uint32_t i = 0; i < run && index < cells.size(); ++i)
             {
-                // The bound is on the cell being written, not on the
-                // start of the run: guarding `index` alone lets a run that
-                // begins in range finish past the end of the vector.
-                for (std::uint32_t i = 0; i < run && index + i < cells.size(); ++i)
-                {
-                    cells[index + i] = 1;
-                }
+                cells[index] = mask;
+                ++index;
             }
-            index += run;
-            current = current != 0 ? 0 : 1;
             if (index >= cells.size())
             {
                 break;
@@ -2068,17 +2065,11 @@ namespace rwe
         }
         j["players"] = players;
 
-        // What each player has explored. Saved beside the players and in the
-        // same order, because it belongs to them; the visible grid is not
-        // saved at all, since the load recomputes it from where the units are.
-        {
-            auto exploredJson = json::array();
-            for (const auto& vis : sim.playerVisibility)
-            {
-                exploredJson.push_back(saveExploredGrid(vis.explored));
-            }
-            j["explored"] = exploredJson;
-        }
+        // The one explored grid, a bit per line-of-sight group. Saved whole
+        // and once, because it belongs to the game rather than to any player;
+        // the visible grid is not saved at all, since the load recomputes it
+        // from where the units are.
+        j["explored"] = saveExploredGrid(sim.explored);
 
         json features = json::array();
         for (const auto& [_, f] : sim.features)
@@ -2386,11 +2377,7 @@ namespace rwe
         // did before any of this was written.
         if (j.contains("explored"))
         {
-            const auto& exploredJson = j.at("explored");
-            for (std::size_t i = 0; i < exploredJson.size() && i < sim.playerVisibility.size(); ++i)
-            {
-                loadExploredGrid(exploredJson[i], sim.playerVisibility[i].explored);
-            }
+            loadExploredGrid(j.at("explored"), sim.explored);
         }
 
         // Last of all, because rebuilding a suspended path search runs the

@@ -37,14 +37,16 @@ namespace rwe
      *   way the dangling pointer it replaces did.
      */
     /**
-     * The explored grid as alternating run lengths, starting with unexplored.
+     * The one explored grid -- a bit per line-of-sight group -- as run lengths
+     * of equal cell values, each run a (mask, length) pair over the cells in
+     * row-major order.
      *
      * Exposed for its own test: the grid is the one piece of visibility a load
      * cannot recompute, and an encoder that loses or gains a cell would be
      * invisible inside a whole-simulation round trip.
      */
-    nlohmann::json saveExploredGrid(const Grid<unsigned char>& grid);
-    void loadExploredGrid(const nlohmann::json& j, Grid<unsigned char>& grid);
+    nlohmann::json saveExploredGrid(const Grid<ExploredMask>& grid);
+    void loadExploredGrid(const nlohmann::json& j, Grid<ExploredMask>& grid);
 
     nlohmann::json saveSimulationToJson(const GameSimulation& sim);
 
