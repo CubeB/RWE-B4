@@ -130,6 +130,19 @@ function Invoke-ArenaGame {
     foreach ($t in ($tuneB -split ',' | Where-Object { $_ })) { $gameArgs += @('--ai-tune', ('1:' + $t)) }
 
     $p = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -ArgumentList $gameArgs -PassThru -Wait
+
+    # The economy samples and events are written to one fixed pair of files
+    # in the data folder, so each game overwrites the last. Keep a copy per
+    # game, named as the log is: a stall that shows in the averages needs the
+    # run it came from. This used to be done once a seed, after the control
+    # game, so under -tune every game-N file was the CONTROL game's and the
+    # tuned game's samples were lost -- two identical controls in two
+    # different -tune folders are what gave it away.
+    foreach ($name in @('ai-arena.csv', 'ai-arena-events.csv')) {
+        $src = Join-Path $env:APPDATA ("RWE/" + $name)
+        if (Test-Path $src) { Copy-Item $src (Join-Path $outDir ("$tag-" + $name)) -Force }
+    }
+
     if ($p.ExitCode -ne 0) { Write-Warning "$tag exited $($p.ExitCode)"; return $null }
 
     $line = Select-String -Path $log -Pattern 'AI-ARENA-RESULT' -SimpleMatch | Select-Object -Last 1
@@ -258,14 +271,6 @@ function Invoke-Phase {
                 $rows += $r
                 Write-Host ("[{0}] game {1,-3} {2}" -f $phase, $seed, ($r.text -replace '.*AI-ARENA-RESULT ', ''))
             }
-        }
-
-        # The economy samples and events are written to one fixed pair of files
-        # in the data folder, so each game overwrites the last. Keep a copy per
-        # game: a stall that shows in the averages needs the run it came from.
-        foreach ($name in @('ai-arena.csv', 'ai-arena-events.csv')) {
-            $src = Join-Path $env:APPDATA ("RWE/" + $name)
-            if (Test-Path $src) { Copy-Item $src (Join-Path $outDir ("game-$seed-" + $name)) -Force }
         }
     }
 
