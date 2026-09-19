@@ -98,5 +98,21 @@ namespace rwe
         {
             return MIX_PlayAudio(mixer, audio);
         }
+
+        /** A mixing group. The mixer owns it and frees it with itself. */
+        MIX_Group* createGroup()
+        {
+            return MIX_CreateGroup(mixer);
+        }
+
+        bool setTrackGroup(MIX_Track* track, MIX_Group* group)
+        {
+            return MIX_SetTrackGroup(track, group);
+        }
+
+        bool setGroupPostMixCallback(MIX_Group* group, MIX_GroupMixCallback cb, void* userdata)
+        {
+            return MIX_SetGroupPostMixCallback(group, cb, userdata);
+        }
     };
 }

@@ -583,20 +583,33 @@ namespace rwe
                 }
                 if (towards)
                 {
-                    auto best = wholeMap * wholeMap;
-                    for (const auto& site : bb.mapIntel.shipyardSites)
+                    // Asked once per destination, not once per pass. The
+                    // site list is every heightmap cell a shipyard fits on,
+                    // which on an open sea is most of the map: profiled on
+                    // Crystal Isles this scan alone was 6 ms a pass and
+                    // four-fifths of everything the AI cost in the game.
+                    // The answer depends on nothing but the two places, so
+                    // remembering it cannot change it.
+                    if (!navalWaypointMemo || navalWaypointMemo->towards != *towards || navalWaypointMemo->home != *navalHome)
                     {
-                        if (!sameWaterBody(bb.mapIntel, sim.terrain, *navalHome, site.position))
+                        NavalWaypointMemo memo{*towards, *navalHome, std::nullopt};
+                        auto best = wholeMap * wholeMap;
+                        for (const auto& site : bb.mapIntel.shipyardSites)
                         {
-                            continue;
+                            if (!sameWaterBody(bb.mapIntel, sim.terrain, *navalHome, site.position))
+                            {
+                                continue;
+                            }
+                            auto d = towards->distanceSquared(site.position);
+                            if (d < best)
+                            {
+                                best = d;
+                                memo.site = site.position;
+                            }
                         }
-                        auto d = towards->distanceSquared(site.position);
-                        if (d < best)
-                        {
-                            best = d;
-                            fleetObjective = site.position;
-                        }
+                        navalWaypointMemo = memo;
                     }
+                    fleetObjective = navalWaypointMemo->site;
                 }
             }
         }

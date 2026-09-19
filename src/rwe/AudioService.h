@@ -3,7 +3,9 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <atomic>
 #include <optional>
+#include <rwe/audio/EffectsCompressor.h>
 #include <rwe/observable/Subject.h>
 #include <rwe/sdl/SdlContext.h>
 #include <rwe/sdl/SdlMixerContext.h>
@@ -110,6 +112,22 @@ namespace rwe
         std::vector<SdlMixerContext::TrackPtr> tracks;
         unsigned int reservedCount{0};
 
+        /**
+         * Every pooled track -- weapon fire, impacts, unit reports -- mixes
+         * into this group, and the group's finished mix goes through a
+         * downward compressor before it joins the music (#58, and the
+         * suggestion on it). The loudness law in GameScene_audio shares a
+         * fixed budget out by COUNTING sounds, which cannot know that four
+         * explosions landing on one sample add up to more than four lasers
+         * spread across a second; this listens to the sum itself. Music and
+         * the one-shot interface sounds are not in the group and are not
+         * touched. The compressor's state belongs to the audio thread alone;
+         * the switch is the only thing both threads read.
+         */
+        MIX_Group* effectsGroup{nullptr};
+        EffectsCompressor effectsCompressor;
+        std::atomic<bool> effectsCompressorEnabled{true};
+
         // Parallel to tracks: the sound each one was last given, so
         // selectTrackForSound can count how many copies of a sample are
         // already sounding. Stale once a track finishes, but findTrackForSound
@@ -170,6 +188,11 @@ namespace rwe
         std::optional<SoundHandle> loadSound(const std::string& soundName);
 
         void reserveChannels(unsigned int count);
+
+        /** On by default. Off, the effects group is mixed as it comes, which is how it was before 2026-09-19. */
+        void setEffectsCompressorEnabled(bool enabled);
+
+        ~AudioService();
 
         void playSoundIfFree(const SoundHandle& sound, unsigned int channel);
 

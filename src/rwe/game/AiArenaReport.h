@@ -69,6 +69,23 @@ namespace rwe
             int builders;
             int unitsLost;
             int buildingsLost;
+
+            // What the counts above cannot say: whether the base is being
+            // built WELL. A builder with no orders and a factory with an
+            // empty queue are capacity paid for and not used; excess is
+            // income that arrived at a full store and was thrown away; the
+            // army's worth in metal is what the economy actually bought.
+            // Appended after the original columns so older readers of the
+            // file, which index by name, are not disturbed.
+            int idleBuilders;
+            int factories;
+            int idleFactories;
+            float armyMetal;
+            float metalProduced;
+            float metalExcess;
+            float energyProduced;
+            float energyExcess;
+            std::string phase;
         };
 
         /**

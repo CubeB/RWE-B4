@@ -207,6 +207,8 @@ set(SOURCE_FILES
     src/rwe/ai/ThreatMap.h
     src/rwe/AudioService.cpp
     src/rwe/AudioService.h
+    src/rwe/audio/EffectsCompressor.cpp
+    src/rwe/audio/EffectsCompressor.h
     src/rwe/BoxTreeSplit.cpp
     src/rwe/BoxTreeSplit.h
     src/rwe/ColorPalette.cpp
@@ -855,6 +857,7 @@ set(TEST_FILES
     src/rwe/ai/ArmyTactics.test.cpp
     src/rwe/ai/AirTactics.test.cpp
     src/rwe/AudioService.test.cpp
+    src/rwe/audio/EffectsCompressor.test.cpp
     src/rwe/BoxTreeSplit.test.cpp
     src/rwe/AlphaTable.test.cpp
     src/rwe/ShadeTable.test.cpp

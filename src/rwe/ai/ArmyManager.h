@@ -52,6 +52,19 @@ namespace rwe
         /** A ship on its way to a new firing position: where, and until when. */
         mutable std::map<unsigned int, std::pair<SimVector, GameTime>> navalRepositioning;
 
+        /**
+         * The open water nearest a place the fleet is sailing towards, and
+         * the two places it was worked out for. See updateNavy: the search
+         * behind it walks every shipyard site on the map.
+         */
+        struct NavalWaypointMemo
+        {
+            SimVector towards;
+            SimVector home;
+            std::optional<SimVector> site;
+        };
+        mutable std::optional<NavalWaypointMemo> navalWaypointMemo;
+
         void updateCommanderSafety(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const;
 
         void updateRallyPoint(const AiTuningProfile& profile, AiBlackboard& bb) const;

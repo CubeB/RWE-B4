@@ -105,6 +105,35 @@ namespace rwe
         int targetRadarCount{1};
         int targetMetalMakerCount{2};
         /**
+         * Makers beyond targetMetalMakerCount, paid for out of energy that is
+         * otherwise thrown away: with the store near full and generation
+         * running ahead of demand by more than a maker draws (and a quarter
+         * again), another is wanted, up to this many, whether or not metal
+         * is short. Zero keeps the old rule, two makers and only in a metal
+         * stall. arena-analyse.py is what asked for it: a side at its energy
+         * cap for 71% of a game, 490 energy a second against 12 metal, with
+         * one maker standing.
+         */
+        int maxSurplusMetalMakerCount{0};
+        /**
+         * Past the opening, a solar collector only when energy is wanted:
+         * not while the store is four fifths full with generation ahead of
+         * demand. targetSolarCount is then a ceiling and not a quota. Six
+         * games measured a quarter to a third of ALL energy produced thrown
+         * away at a full store, which is several hundred metal of
+         * collectors in the first ten minutes that bought nothing.
+         *
+         * On. Measured in Arm mirror games on Great Divide, eight seeds with
+         * their controls, forty-minute cap: the side with it finished on
+         * 73.4 units, an army of 27 and 24.8 metal a second against 38, 11.8
+         * and 13 for the side without, and died once where the other died
+         * three times. maxSurplusMetalMakerCount in the same run was within
+         * the noise alone (47.1 units against 44.5) and made this one WORSE
+         * when combined with it (56.6 units, army level), so it stays at
+         * zero: the cure for wasted energy was not to make it.
+         */
+        bool solarOnDemand{true};
+        /**
          * Metal makers switch off below this share of energy storage and back
          * on above the other one. Two marks rather than one because a single
          * threshold makes them flap on and off every tick at the boundary.
@@ -189,10 +218,21 @@ namespace rwe
          * and the risk lands in the first twenty minutes, which is most of a
          * normal game.
          *
-         * So it stays off until the tier arrives early enough to stop being
-         * a gamble. §15.7 says what is left to try.
+         * So it stayed off until the tier arrived early enough to stop being
+         * a gamble. §15.7 says what was left to try.
+         *
+         * ON since 2026-09-19. What changed is what the tier buys: the moho,
+         * the reactor and the factory hold that pays for them came after the
+         * measurement above, which priced level two as a Zeus against a
+         * Peewee and nothing else. Re-measured on Great Divide, ten seeds,
+         * Arm against Core, each with its own control and the alliances
+         * alternated: Arm's games were identical to their controls -- its
+         * own techMinArmyValueRatio still declines -- and of Core's five,
+         * which it lost five times out of five untuned, two became wins
+         * with Cans and mohos on the field and three were unchanged because
+         * Core was dead before the lab was due. Never worse, in ten games.
          */
-        bool techLevelTwo{false};
+        bool techLevelTwo{true};
         /**
          * Metal income before teching is worth considering, per second.
          *
@@ -645,6 +685,15 @@ namespace rwe
          */
         bool tierTwoEconomyReserve{true};
         int tierTwoReserveMinArmySize{6};
+        /**
+         * Whether the hold also covers the advanced lab itself, from this
+         * many seconds into the game (zero: it does not). With teching
+         * allowed the lab was still not ORDERED until the half hour, for the
+         * moho's reason -- 2007 metal is never affordable while the
+         * factories spend income as it arrives -- and a tier that arrives at
+         * minute thirty is the gamble techLevelTwo's note describes.
+         */
+        int tierTwoReserveCoversLabAfterSeconds{0};
         int tierTwoReserveMaxSeconds{480};
         /** Underwater fusion plants wanted once an advanced construction sub can be had. Zero switches them off. */
         int targetUnderwaterFusionCount{1};

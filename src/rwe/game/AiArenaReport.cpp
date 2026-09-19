@@ -1,6 +1,7 @@
 #include "AiArenaReport.h"
 
 #include <fstream>
+#include <rwe/ai/AiPlayerController.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
@@ -140,6 +141,14 @@ namespace rwe
             r.energyIncome = p.previousEnergyProductionBuffer.value;
             r.metalDemand = p.previousDesiredMetalConsumptionBuffer.value;
             r.energyDemand = p.previousDesiredEnergyConsumptionBuffer.value;
+            r.metalProduced = p.metalProduced.value;
+            r.metalExcess = p.metalExcess.value;
+            r.energyProduced = p.energyProduced.value;
+            r.energyExcess = p.energyExcess.value;
+            auto controller = sim.aiControllers.find(PlayerId(static_cast<unsigned int>(i)));
+            r.phase = controller != sim.aiControllers.end() && controller->second
+                ? gamePhaseName(controller->second->getBlackboard().phase)
+                : "-";
             current.push_back(r);
         }
 
@@ -153,17 +162,34 @@ namespace rwe
             const auto& def = sim.unitDefinitions.at(unit.unitType);
             auto& r = current[static_cast<std::size_t>(owner)];
             ++r.units;
+            const bool finished = !unit.isBeingBuilt(def);
             if (!def.isMobile)
             {
                 ++r.buildings;
+                if (def.builder && finished)
+                {
+                    ++r.factories;
+                    if (unit.buildQueue.empty())
+                    {
+                        ++r.idleFactories;
+                    }
+                }
             }
             else if (def.builder)
             {
                 ++r.builders;
+                if (finished && unit.orders.empty())
+                {
+                    ++r.idleBuilders;
+                }
             }
             else if (def.canAttack && (!def.weapon1.empty() || !def.weapon2.empty()))
             {
                 ++r.army;
+                if (finished)
+                {
+                    r.armyMetal += def.buildCostMetal.value;
+                }
             }
         }
 
@@ -207,7 +233,9 @@ namespace rwe
         {
             out << "tick,seconds,player,side,status,metal,energy,maxMetal,maxEnergy,"
                    "metalIncome,energyIncome,metalDemand,energyDemand,"
-                   "units,buildings,army,builders,unitsLost,buildingsLost\n";
+                   "units,buildings,army,builders,unitsLost,buildingsLost,"
+                   "idleBuilders,factories,idleFactories,armyMetal,"
+                   "metalProduced,metalExcess,energyProduced,energyExcess,phase\n";
             for (const auto& r : rows)
             {
                 out << r.tick << ',' << (r.tick / ticksPerSecond) << ','
@@ -217,7 +245,10 @@ namespace rwe
                     << r.metalIncome << ',' << r.energyIncome << ','
                     << r.metalDemand << ',' << r.energyDemand << ','
                     << r.units << ',' << r.buildings << ',' << r.army << ',' << r.builders << ','
-                    << r.unitsLost << ',' << r.buildingsLost << '\n';
+                    << r.unitsLost << ',' << r.buildingsLost << ','
+                    << r.idleBuilders << ',' << r.factories << ',' << r.idleFactories << ',' << r.armyMetal << ','
+                    << r.metalProduced << ',' << r.metalExcess << ',' << r.energyProduced << ',' << r.energyExcess << ','
+                    << r.phase << '\n';
             }
         }
         else

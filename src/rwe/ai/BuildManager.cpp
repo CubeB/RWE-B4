@@ -845,6 +845,18 @@ namespace rwe
         auto spacingSquared = profile.shipyardSpacing * profile.shipyardSpacing;
         for (const auto& candidate : bb.mapIntel.shipyardSites)
         {
+            // The distance first, because it is the cheap question and it
+            // settles most of them: a site further off than the best so far
+            // can change nothing below, so there is no call to ask whether
+            // it could be built on. On an open sea the list is most of the
+            // map, and asking canBeBuiltAt of all of it was an 85 ms pass.
+            auto distance = flatDistance(candidate.position, *bb.baseAnchor);
+            bool couldBeNearest = !bestDistance || distance <= *bestDistance;
+            bool couldBeNearestOpen = candidate.open && (!bestOpenDistance || distance < *bestOpenDistance);
+            if (!couldBeNearest && !couldBeNearestOpen)
+            {
+                continue;
+            }
             if (siteFailedLately(sim, candidate.position))
             {
                 continue;
@@ -858,7 +870,6 @@ namespace rwe
             {
                 continue;
             }
-            auto distance = flatDistance(candidate.position, *bb.baseAnchor);
             if (candidate.open && (!bestOpenDistance || distance < *bestOpenDistance))
             {
                 bestOpenDistance = distance;
@@ -1516,7 +1527,13 @@ namespace rwe
         // tank that only looks full because nothing can afford to spend it.
         auto energySurplus = bb.energyIncome.value > bb.energyDemand.value;
         auto energyRich = bb.energyStorage.value > 0.0f && bb.currentEnergy.value >= bb.energyStorage.value * 0.8f && energySurplus;
-        if (metalShort && energyRich && total(s.metalMaker) + total(s.floatingMetalMaker) < profile.targetMetalMakerCount && total(s.lab) >= 1)
+        // One more out of the surplus itself, a maker at a time: each one
+        // that comes on raises demand, so the question answers itself anew
+        // on the next pass and the count settles where the energy runs out.
+        auto makers = total(s.metalMaker) + total(s.floatingMetalMaker);
+        auto surplusBuysAnother = profile.maxSurplusMetalMakerCount > 0 && makers < profile.maxSurplusMetalMakerCount
+            && bb.energyIncome.value - bb.energyDemand.value > 75.0f;
+        if ((metalShort || surplusBuysAnother) && energyRich && (makers < profile.targetMetalMakerCount || surplusBuysAnother) && total(s.lab) >= 1)
         {
             want(s.metalMaker);
             // The floating one second, and counted against the same target,
@@ -1625,7 +1642,9 @@ namespace rwe
         {
             want(s.airPlant);
         }
-        if (total(s.solar) < profile.targetSolarCount)
+        auto energyToSpare = bb.energyStorage.value > 0.0f && bb.currentEnergy.value >= bb.energyStorage.value * 0.8f
+            && bb.energyIncome.value > bb.energyDemand.value;
+        if (total(s.solar) < profile.targetSolarCount && !(profile.solarOnDemand && energyToSpare))
         {
             want(s.solar);
         }
@@ -1936,12 +1955,20 @@ namespace rwe
             auto mohoOwed = landBuilder && !s.mohoExtractor.empty() && completed(s.mohoExtractor) < 1;
             auto reactorOwed = ((landBuilder && !s.fusion.empty()) || (seaBuilder && !s.underwaterFusion.empty()))
                 && completed(s.fusion) + completed(s.underwaterFusion) < 1;
-            if (mohoOwed || reactorOwed)
+            // The lab itself, when asked to: teching allowed and worth it for
+            // this side, the income there, a constructor to build it, and
+            // the game old enough that the opening army exists.
+            auto labOwed = profile.tierTwoReserveCoversLabAfterSeconds > 0 && profile.techLevelTwo && !s.advancedLab.empty()
+                && completed(s.advancedLab) < 1 && completed(s.lab) >= 1 && completed(s.constructor) >= 1
+                && bb.advancedArmyValueRatio >= profile.techMinArmyValueRatio
+                && bb.metalIncome.value >= static_cast<float>(profile.techMinMetalIncome)
+                && bb.now.value >= static_cast<unsigned int>(profile.tierTwoReserveCoversLabAfterSeconds) * SimTicksPerSecond;
+            if (mohoOwed || reactorOwed || labOwed)
             {
                 if (!tierTwoReserveStarted)
                 {
                     tierTwoReserveStarted = bb.now;
-                    LOG_INFO << "AI build: holding the factories for the tier-two economy (" << (mohoOwed ? "moho " : "") << (reactorOwed ? "reactor" : "") << ")";
+                    LOG_INFO << "AI build: holding the factories for the tier-two economy (" << (labOwed ? "lab " : "") << (mohoOwed ? "moho " : "") << (reactorOwed ? "reactor" : "") << ")";
                 }
                 auto elapsed = bb.now.value - tierTwoReserveStarted->value;
                 auto inTime = elapsed < static_cast<unsigned int>(std::max(0, profile.tierTwoReserveMaxSeconds)) * SimTicksPerSecond;

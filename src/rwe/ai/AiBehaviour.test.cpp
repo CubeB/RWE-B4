@@ -374,6 +374,89 @@ namespace rwe
         }
     }
 
+    TEST_CASE("the AI builds no further solar collector while energy is going spare", "[ai]")
+    {
+        // Measured on Great Divide, a quarter to a third of all the energy a
+        // side made was thrown away, because collectors were built out to
+        // targetSolarCount whatever the grid was doing. solarOnDemand skips
+        // the next one while the store is four-fifths full and income is
+        // ahead of demand; the metal goes to whatever is wanted next.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        // The opening collectors are not the rule's business: a side with
+        // nothing built has no grid to read. It governs the ones after.
+        auto profile = makeDefaultStandardProfile();
+        REQUIRE(profile.targetSolarCount > profile.openingSolarCount);
+        for (int i = 0; i < profile.openingSolarCount; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(100.0f + i * 40.0f), 0_ss, 0_ss), script);
+        }
+
+        // What the commander is asked for over its next several jobs, each
+        // one stood up finished the moment it is ordered so the plan moves
+        // on. Where a collector falls among the other wants is the plan's
+        // affair and changes; whether one is asked for at all is the rule.
+        //
+        // The economy figures are the simulation's own, rewritten each tick,
+        // so they are put in place between its tick and the AI's.
+        auto collectorsOrdered = [&](const AiTuningProfile& p, float stored, float income, float demand) {
+            AiPlayerController controller(ai, p, 42u, MapIntel{});
+            int collectors = 0;
+            for (int job = 0; job < 8; ++job)
+            {
+                std::vector<PlayerCommand> commands;
+                for (int i = 0; i < 31; ++i)
+                {
+                    sim.tick();
+                    auto& player = sim.getPlayer(ai);
+                    player.maxEnergy = Energy(1000.0f);
+                    player.energy = Energy(stored);
+                    player.previousEnergyProductionBuffer = Energy(income);
+                    player.previousDesiredEnergyConsumptionBuffer = Energy(demand);
+                    controller.tick(sim, commands);
+                }
+                auto types = buildOrderTypes(commands);
+                if (types.empty())
+                {
+                    break;
+                }
+                if (types.front() == "ARMSOLAR")
+                {
+                    ++collectors;
+                }
+                addUnit(sim, types.front(), ai, SimVector(SimScalar(-440.0f + job * 110.0f), 0_ss, -330_ss), script);
+                sim.getUnitState(commanderId).orders.clear();
+            }
+            return collectors;
+        };
+
+        SECTION("a full store and a surplus: none")
+        {
+            REQUIRE(collectorsOrdered(profile, 950.0f, 60.0f, 20.0f) == 0);
+        }
+
+        SECTION("a full store but more drawn than made: collectors")
+        {
+            REQUIRE(collectorsOrdered(profile, 950.0f, 20.0f, 60.0f) > 0);
+        }
+
+        SECTION("a surplus but a store half empty: collectors")
+        {
+            REQUIRE(collectorsOrdered(profile, 500.0f, 60.0f, 20.0f) > 0);
+        }
+
+        SECTION("with the rule off, collectors whatever the grid is doing")
+        {
+            profile.solarOnDemand = false;
+            REQUIRE(collectorsOrdered(profile, 950.0f, 60.0f, 20.0f) > 0);
+        }
+    }
+
     TEST_CASE("the AI opens with power, metal and a factory, then produces constructors", "[ai]")
     {
         auto script = makeEmptyCobScript();

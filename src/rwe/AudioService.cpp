@@ -58,8 +58,44 @@ namespace rwe
         return channelScale * baseGain * volumeScale;
     }
 
+    AudioService::~AudioService()
+    {
+        // The callback holds `this`, and the mixer outlives the service.
+        if (effectsGroup != nullptr)
+        {
+            sdlMixerContext->setGroupPostMixCallback(effectsGroup, nullptr, nullptr);
+        }
+    }
+
+    void AudioService::setEffectsCompressorEnabled(bool enabled)
+    {
+        effectsCompressorEnabled.store(enabled);
+    }
+
     void AudioService::allocateTracks(unsigned int count)
     {
+        if (effectsGroup == nullptr)
+        {
+            // Failing to get a group is not worth refusing to make sound
+            // over: the tracks then mix straight into the master as before.
+            effectsGroup = sdlMixerContext->createGroup();
+            if (effectsGroup != nullptr)
+            {
+                sdlMixerContext->setGroupPostMixCallback(
+                    effectsGroup,
+                    [](void* userdata, MIX_Group*, const SDL_AudioSpec* spec, float* pcm, int samples)
+                    {
+                        // The audio thread. No locks, no allocation.
+                        auto* self = static_cast<AudioService*>(userdata);
+                        if (spec != nullptr && self->effectsCompressorEnabled.load(std::memory_order_relaxed))
+                        {
+                            self->effectsCompressor.process(pcm, samples, spec->channels, spec->freq);
+                        }
+                    },
+                    this);
+            }
+        }
+
         tracks.reserve(count);
         trackSoundKey.reserve(count);
         for (unsigned int i = tracks.size(); i < count; ++i)
@@ -68,6 +104,10 @@ namespace rwe
             if (!track)
             {
                 throw std::runtime_error("Failed to create mixer track");
+            }
+            if (effectsGroup != nullptr)
+            {
+                sdlMixerContext->setTrackGroup(track.get(), effectsGroup);
             }
             tracks.push_back(std::move(track));
             trackSoundKey.push_back(nullptr);
