@@ -2508,7 +2508,20 @@ namespace rwe
             else
             {
                 auto constructors = s.constructor.empty() ? 0 : countOf(bb.ownedTotalCounts, s.constructor);
-                if (!s.constructor.empty() && constructors < profile.targetConstructorCount)
+                // One more while a laser tower is still short of its teeth
+                // (fortifyExtraConstructors): counted from what stands and
+                // what is going up, which is all this needs to know.
+                auto constructorTarget = profile.targetConstructorCount;
+                if (profile.fortifyTowers && !s.dragonsTeeth.empty() && !s.lightLaserTower.empty())
+                {
+                    auto towers = countOf(bb.ownedTotalCounts, s.lightLaserTower);
+                    auto teeth = countOf(bb.ownedTotalCounts, s.dragonsTeeth);
+                    if (towers > 0 && teeth < towers * profile.fortifyTeethPerTower)
+                    {
+                        constructorTarget += profile.fortifyExtraConstructors;
+                    }
+                }
+                if (!s.constructor.empty() && constructors < constructorTarget)
                 {
                     next = s.constructor;
                 }

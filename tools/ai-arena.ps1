@@ -57,6 +57,7 @@
 
 param(
     [int]$games = 10,
+    [int]$firstSeed = 1,          # the seeds are firstSeed .. firstSeed+games-1; a second batch starts past the first
     [int]$seconds = 900,          # screening length; a cap, not the length
     [int]$confirmSeconds = 1800,  # used by -confirm
     [switch]$confirm,
@@ -228,7 +229,7 @@ function Invoke-Phase {
     $rows = @()
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
-    for ($seed = 1; $seed -le $games; $seed++) {
+    for ($seed = $firstSeed; $seed -lt $firstSeed + $games; $seed++) {
         if ($tune) {
             # Odd seeds give the change to player 0, even seeds to player 1, so
             # a stronger seat is shared between the arms rather than confounded

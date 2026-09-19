@@ -1507,6 +1507,30 @@ namespace rwe
         }
     }
 
+    TEST_CASE("CORE plays its own line of kbots, and a knob set by hand still wins", "[ai]")
+    {
+        auto plain = makeDefaultStandardProfile();
+
+        auto core = makeDefaultStandardProfile();
+        applyFactionDefaults(core, "Core");
+        REQUIRE(core.labRaiderShare == 1);
+        REQUIRE(core.labRocketKbotShare == 2);
+        REQUIRE(core.labArtilleryKbotShare == 1);
+        REQUIRE(core.attackArmySize == 14);
+
+        auto arm = makeDefaultStandardProfile();
+        applyFactionDefaults(arm, "ARM");
+        REQUIRE(arm.labRaiderShare == plain.labRaiderShare);
+        REQUIRE(arm.labRocketKbotShare == plain.labRocketKbotShare);
+        REQUIRE(arm.labArtilleryKbotShare == plain.labArtilleryKbotShare);
+        REQUIRE(arm.attackArmySize == plain.attackArmySize);
+
+        // LoadingScene lays --ai-tune over the faction's defaults, so this
+        // is the order a knob set by hand meets them in.
+        REQUIRE(applyAiTuning(core, "labRaiderShare", "2"));
+        REQUIRE(core.labRaiderShare == 2);
+    }
+
     TEST_CASE("an AI knob can be set by name", "[ai]")
     {
         auto p = makeDefaultStandardProfile();
@@ -2484,12 +2508,25 @@ namespace rwe
             REQUIRE(flatDistanceBetween(plan->site, tower) <= profile.fortifyMissileCoverRadius);
         }
 
+        SECTION("a tower short of its teeth gets a constructor of its own")
+        {
+            // One construction kbot stands, which is the whole of
+            // targetConstructorCount; the teeth it owes are what ask for
+            // a second.
+            REQUIRE(profile.targetConstructorCount == 1);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, tree);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMCK") >= 1);
+        }
+
         SECTION("off, nothing is fortified")
         {
             profile.fortifyTowers = false;
             AiPlayerController controller(ai, profile, 42u, MapIntel{}, tree);
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMCK") == 0);
 
             BuildManager planner;
             std::minstd_rand rng(42u);

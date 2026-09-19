@@ -1170,9 +1170,12 @@ namespace rwe
          * as the air, which is what makes it worth putting behind the
          * laser rather than in the middle of the base.
          *
-         * Off by default until it is measured: the death columns in the
-         * arena events file say CORE loses its extractors a quarter of the
-         * way from its own base, which is the ground this covers.
+         * Measured and left off. With fortifyExtraConstructors it is on
+         * time -- the first tooth at 4 to 9 minutes -- and still does not
+         * pay: over sixteen Great Divide seeds for CORE it was better in
+         * nine and worse in seven, and the construction kbots that walk out
+         * in front of the towers to lay the line are lost to the raids it is
+         * meant to stop. ROADMAP, 2026-09-19.
          */
         bool fortifyTowers{false};
         /** How many teeth in a tower's line, laid from the middle outward. */
@@ -1185,6 +1188,17 @@ namespace rwe
         SimScalar fortifyMissileDistance{96_ss};
         /** A missile tower this near a laser tower already covers it. */
         SimScalar fortifyMissileCoverRadius{200_ss};
+        /**
+         * Constructors built beyond targetConstructorCount while a laser
+         * tower still waits for its teeth. Measured without it, the
+         * fortification arrived at 13 to 25 minutes, after the raids it is
+         * for: CORE usually keeps one construction kbot, that kbot is also
+         * the expansion builder, the geothermal builder and the reclaimer,
+         * and the commander has neither the teeth nor the missile tower on
+         * its menu. One more, built at the lab and so at the base when it is
+         * finished, takes the fortification up as soon as the towers stand.
+         */
+        int fortifyExtraConstructors{1};
         /**
          * Units built during an attack gather at the rally point for the
          * next wave instead of walking to the front one at a time. The
@@ -1431,4 +1445,12 @@ namespace rwe
      * know; the caller decides whether that is fatal.
      */
     bool applyAiTuning(AiTuningProfile& profile, const std::string& knob, const std::string& value);
+
+    /**
+     * What one faction plays differently from the other, laid over the
+     * difficulty's profile and under any --ai-tune, so that an arena run can
+     * still override it knob by knob. The side is matched without regard to
+     * case; a side with nothing of its own is left exactly as it was.
+     */
+    void applyFactionDefaults(AiTuningProfile& p, const std::string& side);
 }

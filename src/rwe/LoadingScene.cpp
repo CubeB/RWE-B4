@@ -399,6 +399,9 @@ namespace rwe
             // the game (--ai-difficulty, or rwe.cfg). Per-slot difficulty can
             // follow once the lobby exposes it.
             auto profile = makeProfileForDifficulty(gameParameters.aiDifficulty);
+            // What this player's faction plays differently, before any
+            // --ai-tune, so that an arena run can still set a knob back.
+            applyFactionDefaults(profile, player.side);
             for (const auto& entry : gameParameters.aiTuning)
             {
                 auto colon = entry.find(':');

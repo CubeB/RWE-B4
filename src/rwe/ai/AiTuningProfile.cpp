@@ -1,4 +1,5 @@
 #include "AiTuningProfile.h"
+#include <cctype>
 #include <stdexcept>
 
 namespace rwe
@@ -124,6 +125,33 @@ namespace rwe
         return makeDefaultStandardProfile();
     }
 
+    void applyFactionDefaults(AiTuningProfile& p, const std::string& side)
+    {
+        std::string upper;
+        for (auto c : side)
+        {
+            upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+        }
+        if (upper == "CORE")
+        {
+            // CORE does not win the raider fight and should not try to. At the
+            // same price and weight the Peewee's EMG does about 60 damage a
+            // second to the A.K. laser's 35, and the Flash 60 to the
+            // Instigator's 44. So the damage comes from Storms, which outrange
+            // both of ARM's raiders, and Thuds lobbing into the crowd, with one
+            // raider to each Thud as the screen in front of them, and the
+            // waves are big enough to stay together. Measured against the
+            // shared defaults on Great Divide, CORE only, three batches of
+            // eight seeds: CORE finished ahead in 6 of 8 against 2, in 5 of 8
+            // against 1 once PR #82 was in, and in 6 of 8 against 2 on seeds
+            // it was never tuned on (ROADMAP, 2026-09-19).
+            p.labRaiderShare = 1;
+            p.labRocketKbotShare = 2;
+            p.labArtilleryKbotShare = 1;
+            p.attackArmySize = 14;
+        }
+    }
+
     bool applyAiTuning(AiTuningProfile& p, const std::string& knob, const std::string& value)
     {
         auto asInt = [&] { return std::stoi(value); };
@@ -199,6 +227,7 @@ namespace rwe
             || setBool("fortifyMissileTower", p.fortifyMissileTower)
             || setScalar("fortifyMissileDistance", p.fortifyMissileDistance)
             || setScalar("fortifyMissileCoverRadius", p.fortifyMissileCoverRadius)
+            || setInt("fortifyExtraConstructors", p.fortifyExtraConstructors)
             || setInt("techSaveUpSeconds", p.techSaveUpSeconds)
             || setInt("targetAdvancedLabCount", p.targetAdvancedLabCount)
             || setInt("targetAdvancedConstructorCount", p.targetAdvancedConstructorCount)
