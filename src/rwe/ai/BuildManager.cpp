@@ -1636,8 +1636,17 @@ namespace rwe
         // owned anything that could have shot one down.
         auto hasFactory = total(s.lab) >= 1 || (navalFleetTarget(profile, bb) > 0 && total(s.shipyard) >= 1);
         auto openingEnergy = total(s.solar) + total(s.tidalGenerator) >= profile.openingSolarCount;
+        // With vehiclePlantFirst the order of the two is turned round, unless
+        // the map is one aircraft are needed to cross: there the air plant is
+        // how anything arrives at all, and does not wait.
+        auto vehiclePlantFirst = profile.vehiclePlantFirst && !airMatters && !s.vehiclePlant.empty();
+        if (vehiclePlantFirst && !metalShort && hasFactory && openingEnergy && total(s.vehiclePlant) < profile.targetVehiclePlantCount)
+        {
+            want(s.vehiclePlant);
+        }
         if (hasFactory && total(s.airPlant) < profile.targetAirPlantCount && openingEnergy
             && airPlantAffordable
+            && (!vehiclePlantFirst || total(s.vehiclePlant) >= profile.targetVehiclePlantCount)
             && (airMatters || total(s.radar) >= profile.targetRadarCount))
         {
             want(s.airPlant);

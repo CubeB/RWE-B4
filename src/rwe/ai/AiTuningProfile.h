@@ -123,6 +123,20 @@ namespace rwe
          */
         int maxSurplusMetalMakerCount{0};
         /**
+         * The vehicle plant ahead of the air plant, except where the map needs
+         * aircraft. The plan had it the other way round, the vehicle plant
+         * waiting on an air plant that itself waits to be affordable: CORE on
+         * Great Divide reached its vehicle plant at 18:35 where ARM reached
+         * its own at 9:18, in whichever seat it sat.
+         *
+         * Measured there over ten seeds, each against its own control. The
+         * five with CORE tuned: two outright wins and a 79-to-28 lead where
+         * the controls had ARM ahead every time, one level game where the
+         * control lost its commander, and one the other way. The five with
+         * ARM tuned: never worse. So it is on.
+         */
+        bool vehiclePlantFirst{true};
+        /**
          * Past the opening, a solar collector only when energy is wanted:
          * not while the store is four fifths full with generation ahead of
          * demand. targetSolarCount is then a ceiling and not a quota. Six

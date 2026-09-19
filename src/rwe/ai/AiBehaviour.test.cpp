@@ -407,13 +407,15 @@ namespace rwe
         auto collectorsOrdered = [&](const AiTuningProfile& p, float stored, float income, float demand) {
             AiPlayerController controller(ai, p, 42u, MapIntel{});
             int collectors = 0;
-            for (int job = 0; job < 8; ++job)
+            for (int job = 0; job < 14; ++job)
             {
                 std::vector<PlayerCommand> commands;
                 for (int i = 0; i < 31; ++i)
                 {
                     sim.tick();
                     auto& player = sim.getPlayer(ai);
+                    player.maxMetal = Metal(5000.0f);
+                    player.metal = Metal(5000.0f);
                     player.maxEnergy = Energy(1000.0f);
                     player.energy = Energy(stored);
                     player.previousEnergyProductionBuffer = Energy(income);
@@ -423,13 +425,16 @@ namespace rwe
                 auto types = buildOrderTypes(commands);
                 if (types.empty())
                 {
-                    break;
+                    // A pass spent on something other than a building.
+                    sim.getUnitState(commanderId).orders.clear();
+                    continue;
                 }
+                UNSCOPED_INFO("job " << job << ": " << types.front());
                 if (types.front() == "ARMSOLAR")
                 {
                     ++collectors;
                 }
-                addUnit(sim, types.front(), ai, SimVector(SimScalar(-440.0f + job * 110.0f), 0_ss, -330_ss), script);
+                addUnit(sim, types.front(), ai, SimVector(SimScalar(-420.0f + (job % 7) * 130.0f), 0_ss, SimScalar(-400.0f + (job / 7) * 150.0f)), script);
                 sim.getUnitState(commanderId).orders.clear();
             }
             return collectors;

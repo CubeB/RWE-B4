@@ -215,6 +215,7 @@ namespace rwe
             || setInt("targetSeaplanePlatformCount", p.targetSeaplanePlatformCount)
             || setInt("maxSurplusMetalMakerCount", p.maxSurplusMetalMakerCount)
             || setBool("solarOnDemand", p.solarOnDemand)
+            || setBool("vehiclePlantFirst", p.vehiclePlantFirst)
             || setBool("tierTwoEconomyReserve", p.tierTwoEconomyReserve)
             || setInt("tierTwoReserveMinArmySize", p.tierTwoReserveMinArmySize)
             || setInt("tierTwoReserveCoversLabAfterSeconds", p.tierTwoReserveCoversLabAfterSeconds)
