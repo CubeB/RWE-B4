@@ -125,6 +125,17 @@ namespace rwe
         return makeDefaultStandardProfile();
     }
 
+    BuilderSafetyParams builderSafetyParams(const AiTuningProfile& p)
+    {
+        BuilderSafetyParams params;
+        params.memoryTicks = static_cast<unsigned int>(std::max(0, p.targetMemoryTicks));
+        params.mobileThreatMargin = p.builderSafetyMargin;
+        params.coverRadius = p.builderSafetyCoverRadius;
+        params.protectionRatio = p.builderSafetyProtectionRatio;
+        params.commanderCoverMetal = static_cast<float>(p.commanderFightsUpToMetal);
+        return params;
+    }
+
     void applyFactionDefaults(AiTuningProfile& p, const std::string& side)
     {
         std::string upper;
@@ -196,8 +207,16 @@ namespace rwe
             || setInt("targetSolarCount", p.targetSolarCount)
             || setInt("targetMetalExtractorCount", p.targetMetalExtractorCount)
             || setInt("targetConstructorCount", p.targetConstructorCount)
+            || setInt("expansionConstructors", p.expansionConstructors)
+            || setInt("freeDepositsPerExpansionConstructor", p.freeDepositsPerExpansionConstructor)
             || setInt("targetDefenceCount", p.targetDefenceCount)
             || setInt("outpostDefenceCount", p.outpostDefenceCount)
+            || setInt("outpostTowerIncomeStep", p.outpostTowerIncomeStep)
+            || setInt("outpostDefenceMax", p.outpostDefenceMax)
+            || setBool("answerOutpostRaids", p.answerOutpostRaids)
+            || setScalar("outpostRaidRadius", p.outpostRaidRadius)
+            || setScalar("outpostResponseRadius", p.outpostResponseRadius)
+            || setFloat("outpostResponseStrength", p.outpostResponseStrength)
             || setInt("outpostDefenceMinExtractors", p.outpostDefenceMinExtractors)
             || setInt("outpostRaidMemorySeconds", p.outpostRaidMemorySeconds)
             || setInt("baseAntiAirTowerCount", p.baseAntiAirTowerCount)
@@ -224,6 +243,9 @@ namespace rwe
             || setBool("fortifyTowers", p.fortifyTowers)
             || setInt("fortifyTeethPerTower", p.fortifyTeethPerTower)
             || setScalar("fortifyTeethDistance", p.fortifyTeethDistance)
+            || setBool("fortifyTeethWrap", p.fortifyTeethWrap)
+            || setInt("fortifyWrapGapTiles", p.fortifyWrapGapTiles)
+            || setInt("fortifyWrapTeeth", p.fortifyWrapTeeth)
             || setBool("fortifyMissileTower", p.fortifyMissileTower)
             || setScalar("fortifyMissileDistance", p.fortifyMissileDistance)
             || setScalar("fortifyMissileCoverRadius", p.fortifyMissileCoverRadius)
@@ -298,6 +320,15 @@ namespace rwe
             || setInt("commanderFightsUpToMetal", p.commanderFightsUpToMetal)
             || setInt("commanderRetreatBelowPercent", p.commanderRetreatBelowPercent)
             || setBool("commanderUsesDgun", p.commanderUsesDgun)
+            || setBool("commanderKeepsFrames", p.commanderKeepsFrames)
+            || setBool("builderSafety", p.builderSafety)
+            || setScalar("builderSafetyMargin", p.builderSafetyMargin)
+            || setScalar("builderSafetyCoverRadius", p.builderSafetyCoverRadius)
+            || setFloat("builderSafetyProtectionRatio", p.builderSafetyProtectionRatio)
+            || setInt("builderShelterSeconds", p.builderShelterSeconds)
+            || setInt("commanderFrameAbsenceSeconds", p.commanderFrameAbsenceSeconds)
+            || setScalar("commanderFrameCoverRadius", p.commanderFrameCoverRadius)
+            || setScalar("commanderFrameHandoverRadius", p.commanderFrameHandoverRadius)
             || setScalar("commanderAssistRadius", p.commanderAssistRadius)
             || setBool("outpostTowersLeftToConstructors", p.outpostTowersLeftToConstructors)
             || setScalar("commanderGuardRadius", p.commanderGuardRadius)

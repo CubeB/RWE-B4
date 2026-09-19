@@ -10,6 +10,7 @@
 namespace rwe
 {
     struct GameSimulation;
+    class UnitState;
 
     /**
      * Commands the combat units as one body: gather at the rally point,
@@ -66,6 +67,19 @@ namespace rwe
         mutable std::optional<NavalWaypointMemo> navalWaypointMemo;
 
         void updateCommanderSafety(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const;
+        /**
+         * Whether the commander, about to fight, stays on the frame it is
+         * putting up instead; when it goes, hands the frame to a builder if
+         * one is free. See AiTuningProfile::commanderKeepsFrames.
+         */
+        bool commanderStaysOnFrame(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            const AiTuningProfile& profile,
+            AiBlackboard& bb,
+            const UnitState& commander,
+            float threatMetal,
+            std::vector<PlayerCommand>& outCommands) const;
 
         void updateRallyPoint(const AiTuningProfile& profile, AiBlackboard& bb) const;
         std::optional<UnitId> nearestKnownEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly = false) const;

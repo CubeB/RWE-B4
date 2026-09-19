@@ -1,5 +1,6 @@
 #pragma once
 
+#include <rwe/ai/BuilderSafety.h>
 #include <rwe/sim/SimScalar.h>
 #include <string>
 
@@ -49,6 +50,26 @@ namespace rwe
          * constraint; metal was.
          */
         int targetConstructorCount{1};
+        /**
+         * Construction units beyond targetConstructorCount while metal lies
+         * unclaimed on our side of the map: one for every
+         * freeDepositsPerExpansionConstructor deposits no extractor stands
+         * on -- ours or one the enemy has been seen to own -- nearer our base
+         * than theirs, within expansionMexSearchRadius and out of reach of a
+         * known gun, up to expansionConstructors. Those extra builders expand
+         * first: an extractor heads their list while such a deposit is left.
+         *
+         * The single constructor above was measured when metal, not build
+         * power, was the limit, and an extra builder only split the budget.
+         * A replay review found the other limit: "there were still alot of
+         * free metal spots when the ai should be expanding". Over a forty-
+         * minute ARM-against-CORE game on Great Divide, twenty of the 38
+         * rocks stood empty at every five-minute mark while each side held
+         * six to twelve, and the one construction kbot each side had was
+         * busy with everything else on the list.
+         */
+        int expansionConstructors{2};
+        int freeDepositsPerExpansionConstructor{4};
         int targetDefenceCount{2};
         /**
          * Towers put up at extractor clusters beyond the base's own cover,
@@ -63,6 +84,15 @@ namespace rwe
          * shoots at nothing until a raid comes.
          */
         int outpostDefenceCount{3};
+        /**
+         * One more outpost tower allowed for every outpostTowerIncomeStep
+         * metal a second coming in, up to outpostDefenceMax: the cap above
+         * grows with what there is to defend and what there is to pay for
+         * it with. A replay review: "ai didnt protect its far out metal spots
+         * very well". 0 keeps the flat cap.
+         */
+        int outpostTowerIncomeStep{8};
+        int outpostDefenceMax{8};
         /**
          * Extractors a cluster needs before it earns a tower of its own;
          * the cluster with the most gets it first, and a raid counts for
@@ -222,6 +252,66 @@ namespace rwe
          * whatever it touches, and it does not ask whose it is.
          */
         bool commanderUsesDgun{true};
+        /**
+         * The commander does not walk off a frame to fight when the frame
+         * would rot before it came back -- a frame left alone loses a flat
+         * energy-point of its cost a tick (TOTALA-EXE.md s93), so a laser
+         * tower a tenth built is gone in seconds -- and somebody else can do
+         * the fighting: armed units of ours within commanderFrameCoverRadius
+         * worth at least what the threats cost. It stays and finishes it. If
+         * nobody can fight it goes, and hands the frame to the nearest
+         * construction unit within commanderFrameHandoverRadius that is
+         * doing nothing that matters; either way it is ordered back to the
+         * frame once the fight is done. A frame that would outlast
+         * commanderFrameAbsenceSeconds on its own is simply left for a
+         * while. A replay review found tower frames started, walked away
+         * from and gone three times over before one stood: "commander
+         * should only abandon nanoframes if there is no other units to
+         * engage enemies or finish the structure first unless leaving for
+         * a bit is unlikely to make it disappear".
+         */
+        bool commanderKeepsFrames{true};
+        /**
+         * Raiders at a building of ours beyond the base's defendRadius are
+         * answered: armed enemies within outpostRaidRadius of it, seen lately,
+         * are attacked by the reserve -- units in no wave, raid or guard --
+         * within outpostResponseRadius of the place, when those units are
+         * worth outpostResponseStrength times what the raiders cost. Before
+         * this the army answered only what came inside the base's radius, and
+         * an extractor out on the map was left to whatever tower stood there.
+         * The base comes first: nothing goes out while an intruder is at home.
+         */
+        bool answerOutpostRaids{true};
+        SimScalar outpostRaidRadius{350_ss};
+        SimScalar outpostResponseRadius{1500_ss};
+        float outpostResponseStrength{1.2f};
+        /**
+         * Construction units keep out of fights they are not covered in. A
+         * builder is exposed where armed enemy ground units it knows of --
+         * seen within targetMemoryTicks -- could reach it, their weapon range
+         * plus builderSafetyMargin for one that walks, and what of ours
+         * stands between it and them is worth less than
+         * builderSafetyProtectionRatio of what they cost: armed units of ours
+         * within builderSafetyCoverRadius of it and not behind it, towers that
+         * reach the attackers or the builder, and the commander at
+         * commanderFightsUpToMetal. An exposed builder backs off to past the
+         * longest of their ranges, homewards when home is the safe side, and
+         * is given no new job for builderShelterSeconds; nobody is sent to
+         * mend the commander where it is exposed, the commander itself not
+         * counted, and an abandoned frame is not resumed where a builder
+         * would be exposed at it. Asked for after a replay review:
+         * "constructors regularly die whilst attempting to repair the
+         * commander. They should avoid enemy units where possible unless they
+         * have protection between them and the units attacking them."
+         */
+        bool builderSafety{true};
+        SimScalar builderSafetyMargin{150_ss};
+        SimScalar builderSafetyCoverRadius{500_ss};
+        float builderSafetyProtectionRatio{1.0f};
+        int builderShelterSeconds{10};
+        int commanderFrameAbsenceSeconds{20};
+        SimScalar commanderFrameCoverRadius{800_ss};
+        SimScalar commanderFrameHandoverRadius{800_ss};
         /**
          * With nothing of its own to build, the commander helps finish a
          * frame of ours within this distance -- its nanolathe is three times
@@ -1225,6 +1315,26 @@ namespace rwe
         int fortifyTeethPerTower{5};
         /** How far in front of the tower the line runs. */
         SimScalar fortifyTeethDistance{220_ss};
+        /**
+         * Teeth wrap the defence they protect instead of standing in a line
+         * out in front of it: a ring of tooth-sized sites hugging the
+         * defence's footprint, fortifyWrapGapTiles clear of it, filled from
+         * the middle of the side the attack comes from, then its corners,
+         * then round the sides towards the back. The line 220 in front held
+         * a raider inside the tower's reach, but a construction kbot had to
+         * walk out in front of the tower to lay it, and a replay review put
+         * it plainly: "Dragons Teeth should wrap around the structure not be
+         * so far infront". Off, the line comes back, fortifyTeethDistance in
+         * front and across the approach.
+         *
+         * fortifyWrapTeeth is how many of the ring the reactive and the
+         * rebuilt fortifications fill -- five is the attacked face and its
+         * two corners, then a site either side -- where the line took
+         * fortifyReactiveTeeth. fortifyTowers keeps fortifyTeethPerTower.
+         */
+        bool fortifyTeethWrap{true};
+        int fortifyWrapGapTiles{0};
+        int fortifyWrapTeeth{5};
         /** Whether a missile tower goes behind each fortified laser tower. */
         bool fortifyMissileTower{true};
         /** How far behind the tower the missile tower is wanted. */
@@ -1587,6 +1697,9 @@ namespace rwe
     AiTuningProfile makeDefaultBrutalProfile();
     AiTuningProfile makeIdleProfile();
     AiTuningProfile makeProfileForDifficulty(AiDifficulty difficulty);
+
+    /** The builderSafety knobs, in the form BuilderSafety.h takes them. */
+    BuilderSafetyParams builderSafetyParams(const AiTuningProfile& p);
     const char* aiDifficultyName(AiDifficulty difficulty);
 
     /**

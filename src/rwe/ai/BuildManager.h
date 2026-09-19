@@ -169,6 +169,14 @@ namespace rwe
             const AiTuningProfile& profile,
             const AiBlackboard& bb) const;
 
+        /**
+         * How many metal deposits are free for the taking on our side: no
+         * extractor of ours or of theirs that we know of on them, nearer our
+         * base than theirs, within expansionMexSearchRadius, and out of reach
+         * of a known gun. See AiTuningProfile::expansionConstructors.
+         */
+        int freeDepositsOnOurSide(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb) const;
+
         /** The next piece of a laser tower's fortification, and where it goes. */
         struct FortificationPlan
         {
@@ -267,6 +275,12 @@ namespace rwe
          * repairSearchRadius of `from`, accepted by `reachable` when that is
          * set, and not already held by repairersPerStructure of ours.
          */
+        /**
+         * Sends every construction unit caught in a fight it is not covered
+         * in back out of it. See AiTuningProfile::builderSafety.
+         */
+        void keepBuildersOutOfFights(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, const AiBlackboard& bb, std::vector<PlayerCommand>& outCommands);
+
         std::optional<UnitId> chooseRepairTarget(
             const GameSimulation& sim,
             PlayerId aiOwner,
@@ -493,6 +507,15 @@ namespace rwe
 
         /** When sendRepairersToCommander last looked. */
         std::optional<GameTime> commanderRepairCheckedAt;
+        /**
+         * Builders that backed off from a fight, and until when they are
+         * given no new job; and when that was last looked at. See
+         * AiTuningProfile::builderSafety.
+         */
+        std::map<unsigned int, GameTime> builderShelteredUntil;
+        std::optional<GameTime> builderSafetyCheckedAt;
+        /** Whether the commander's being too exposed to mend has been logged this spell. */
+        bool commanderExposedLogged{false};
 
         /** See recordLostDefences. In the order first lost. */
         std::vector<LostDefenceSite> lostDefenceSites;
@@ -562,6 +585,9 @@ namespace rwe
          */
         mutable std::vector<Point> metalPatches;
         mutable bool metalPatchesIndexed{false};
+        /** The middle of each deposit, numbered as metalPatchDeposit numbers them. */
+        mutable std::vector<SimVector> depositCentres;
+
         /** Which deposit each of metalPatches belongs to, numbered from 0; the same length as metalPatches. */
         mutable std::vector<int> metalPatchDeposit;
         mutable int metalDepositCount{0};

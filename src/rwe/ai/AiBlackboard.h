@@ -411,6 +411,16 @@ namespace rwe
          * own theirs.
          */
         std::optional<UnitId> commanderEngagedTarget;
+        /**
+         * The frame the commander was putting up when it went to fight, which
+         * it is ordered back to once the fight is called off; and the frame
+         * it is staying on while others fight, kept so that is logged once.
+         * See AiTuningProfile::commanderKeepsFrames.
+         */
+        std::optional<UnitId> commanderReturnFrame;
+        /** The raider at an outpost the reserve was last sent at, so the sending is logged once. */
+        std::optional<UnitId> outpostRaidAnswered;
+        std::optional<UnitId> commanderKeptFrame;
 
         /**
          * Enemy units our radar can see and our eyes cannot, by unit id, with

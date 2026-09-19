@@ -1,7 +1,10 @@
 #include "ArmyManager.h"
 #include <algorithm>
+#include <set>
 #include <rwe/ai/AiMapBounds.h>
+#include <rwe/ai/BuilderSafety.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/util/SimpleLogger.h>
@@ -119,6 +122,64 @@ namespace rwe
         {
             auto defIt = sim.unitDefinitions.find(unit.unitType);
             return defIt != sim.unitDefinitions.end() && unit.isBeingBuilt(defIt->second);
+        }
+
+        /**
+         * The frame a builder is putting up at this moment, if any: the one
+         * its nanolathe is on, the one its build order has placed, or the one
+         * it has been told to finish.
+         */
+        std::optional<UnitId> frameInHand(const GameSimulation& sim, const UnitState& builder)
+        {
+            std::optional<UnitId> frameId;
+            if (auto building = std::get_if<UnitBehaviorStateBuilding>(&builder.behaviourState); building != nullptr)
+            {
+                frameId = building->targetUnit;
+            }
+            else if (builder.buildOrderUnitId)
+            {
+                frameId = builder.buildOrderUnitId;
+            }
+            else if (!builder.orders.empty())
+            {
+                if (auto repair = std::get_if<RepairOrder>(&builder.orders.front()); repair != nullptr)
+                {
+                    frameId = repair->target;
+                }
+                else if (auto complete = std::get_if<CompleteBuildOrder>(&builder.orders.front()); complete != nullptr)
+                {
+                    frameId = complete->target;
+                }
+            }
+            if (!frameId)
+            {
+                return std::nullopt;
+            }
+            auto frameRef = sim.tryGetUnitState(*frameId);
+            if (!frameRef || frameRef->get().isDead() || !isNanoframe(sim, frameRef->get()))
+            {
+                return std::nullopt;
+            }
+            return frameId;
+        }
+
+        /**
+         * How long a frame left alone from now would last before it rotted
+         * away, in ticks. It loses a flat energy-point of its cost a tick,
+         * whatever the unit (GameSimulation::updateNanoframeDecay,
+         * TOTALA-EXE.md s93), so what stands of it lasts what is built of it
+         * times its energy cost. The second's grace before the rot starts is
+         * left out: it may be nearly spent.
+         */
+        unsigned int frameLifeTicks(const GameSimulation& sim, const UnitState& frame)
+        {
+            const auto& def = sim.unitDefinitions.at(frame.unitType);
+            auto energyCost = static_cast<unsigned long long>(def.buildCostEnergy.value);
+            if (energyCost == 0 || def.buildTime == 0)
+            {
+                return 0;
+            }
+            return static_cast<unsigned int>(static_cast<unsigned long long>(frame.buildTimeCompleted) * energyCost / def.buildTime);
         }
 
         bool isMovingTo(const UnitState& unit, const SimVector& destination)
@@ -419,6 +480,116 @@ namespace rwe
         }
     }
 
+    bool ArmyManager::commanderStaysOnFrame(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        AiBlackboard& bb,
+        const UnitState& commander,
+        float threatMetal,
+        std::vector<PlayerCommand>& outCommands) const
+    {
+        auto frameId = frameInHand(sim, commander);
+        if (!frameId)
+        {
+            bb.commanderKeptFrame.reset();
+            return false;
+        }
+        bb.commanderReturnFrame = frameId;
+        const auto& frame = sim.getUnitState(*frameId);
+        const auto awayTicks = static_cast<unsigned int>(std::max(0, profile.commanderFrameAbsenceSeconds)) * SimTicksPerSecond;
+        if (frameLifeTicks(sim, frame) >= awayTicks)
+        {
+            // It will keep while the commander is away.
+            bb.commanderKeptFrame.reset();
+            return false;
+        }
+
+        // Somebody else to do the fighting: armed units of ours near enough
+        // to be there first, in id order.
+        const auto coverSquared = profile.commanderFrameCoverRadius * profile.commanderFrameCoverRadius;
+        float cover = 0.0f;
+        for (const auto& [unitId, unit] : sim.units)
+        {
+            if (unit.owner != aiOwner || !unit.isAlive() || unitId == *bb.commanderUnitId)
+            {
+                continue;
+            }
+            const auto& def = sim.unitDefinitions.at(unit.unitType);
+            if (!def.canAttack || def.canFly || unit.isBeingBuilt(def))
+            {
+                continue;
+            }
+            if (unit.position.distanceSquared(commander.position) <= coverSquared)
+            {
+                cover += def.buildCostMetal.value;
+            }
+        }
+        if (cover >= threatMetal)
+        {
+            if (bb.commanderKeptFrame != frameId)
+            {
+                LOG_INFO << "AI player " << aiOwner.value << ": the commander stays on its " << frame.unitType << " frame " << frameId->value
+                         << " and leaves the fight to the army (" << static_cast<int>(cover) << " metal against " << static_cast<int>(threatMetal) << ")";
+            }
+            bb.commanderKeptFrame = frameId;
+            return true;
+        }
+        bb.commanderKeptFrame.reset();
+
+        // Nobody to fight: the commander goes. Somebody to finish the frame,
+        // then -- the nearest construction unit doing nothing that matters,
+        // which is nothing at all, guarding, patrolling or walking.
+        const auto handoverSquared = profile.commanderFrameHandoverRadius * profile.commanderFrameHandoverRadius;
+        std::optional<UnitId> helper;
+        SimScalar helperDistance = 0_ss;
+        for (const auto& [unitId, unit] : sim.units)
+        {
+            if (unit.owner != aiOwner || !unit.isAlive() || unitId == *bb.commanderUnitId)
+            {
+                continue;
+            }
+            const auto& def = sim.unitDefinitions.at(unit.unitType);
+            if (!def.builder || !def.isMobile || def.commander || !def.canReclamate || unit.isBeingBuilt(def))
+            {
+                continue;
+            }
+            if (!unit.orders.empty())
+            {
+                const auto& order = unit.orders.front();
+                if (auto repair = std::get_if<RepairOrder>(&order); repair != nullptr && repair->target == *frameId)
+                {
+                    // Already on it.
+                    return false;
+                }
+                if (!std::holds_alternative<GuardOrder>(order) && !std::holds_alternative<PatrolOrder>(order) && !std::holds_alternative<MoveOrder>(order))
+                {
+                    continue;
+                }
+            }
+            auto distance = unit.position.distanceSquared(frame.position);
+            if (distance <= handoverSquared && (!helper || distance < helperDistance))
+            {
+                helper = unitId;
+                helperDistance = distance;
+            }
+        }
+        // Not into a fight nothing of ours covers: the frame is not worth
+        // the construction unit. The commander counts, because it is going
+        // out to take this very fight -- it only does when it can -- and
+        // stands between the raiders and the frame while it does.
+        if (helper && profile.builderSafety && assessExposure(sim, aiOwner, bb, builderSafetyParams(profile), frame.position, std::nullopt).exposed)
+        {
+            helper.reset();
+        }
+        if (helper)
+        {
+            LOG_INFO << "AI player " << aiOwner.value << ": the commander hands its " << frame.unitType << " frame " << frameId->value << " to unit " << helper->value;
+            outCommands.push_back(PlayerUnitCommand(*helper, PlayerUnitCommand::IssueOrder(RepairOrder(*frameId), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+        }
+        return false;
+    }
+
     void ArmyManager::updateCommanderSafety(
         const GameSimulation& sim,
         PlayerId aiOwner,
@@ -521,8 +692,19 @@ namespace rwe
             }
             else if (commander.position.distanceSquared(target->get().position) > chase * chase)
             {
-                outCommands.push_back(moveCommand(*bb.commanderUnitId, commander.position));
+                // Back to the frame it left, if that still stands; otherwise
+                // stop where it is.
+                auto frame = bb.commanderReturnFrame ? sim.tryGetUnitState(*bb.commanderReturnFrame) : std::nullopt;
+                if (frame && !frame->get().isDead() && isNanoframe(sim, frame->get()))
+                {
+                    outCommands.push_back(PlayerUnitCommand(*bb.commanderUnitId, PlayerUnitCommand::IssueOrder(RepairOrder(*bb.commanderReturnFrame), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                }
+                else
+                {
+                    outCommands.push_back(moveCommand(*bb.commanderUnitId, commander.position));
+                }
                 bb.commanderEngagedTarget.reset();
+                bb.commanderReturnFrame.reset();
             }
         }
 
@@ -554,6 +736,26 @@ namespace rwe
         {
             if (profile.commanderStandsItsGround && nearestOnLand)
             {
+                // A frame in hand is finished first when the army can take
+                // the fight and the frame would not keep.
+                bool engaged = bb.commanderEngagedTarget.has_value();
+                if (!engaged && profile.commanderKeepsFrames && commanderStaysOnFrame(sim, aiOwner, profile, bb, commander, threatMetal, outCommands))
+                {
+                    return;
+                }
+                // The frame it goes from is where it comes back to once the
+                // fight is done, queued behind the fight.
+                std::optional<UnitId> returnTo;
+                if (!engaged && profile.commanderKeepsFrames && bb.commanderReturnFrame && frameInHand(sim, commander) == bb.commanderReturnFrame)
+                {
+                    returnTo = bb.commanderReturnFrame;
+                }
+                auto queueReturn = [&]() {
+                    if (returnTo)
+                    {
+                        outCommands.push_back(PlayerUnitCommand(*bb.commanderUnitId, PlayerUnitCommand::IssueOrder(RepairOrder(*returnTo), PlayerUnitCommand::IssueOrder::IssueKind::Queued)));
+                    }
+                };
                 // The D-gun first, when there is something in its reach.
                 if (profile.commanderUsesDgun)
                 {
@@ -563,6 +765,7 @@ namespace rwe
                         {
                             LOG_INFO << "AI player " << aiOwner.value << ": the commander D-guns " << shot->value;
                             outCommands.push_back(PlayerUnitCommand(*bb.commanderUnitId, PlayerUnitCommand::IssueOrder(DgunOrder(*shot), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                            queueReturn();
                         }
                         bb.commanderEngagedTarget = *shot;
                         return;
@@ -574,6 +777,7 @@ namespace rwe
                 if (!dgunning && !isAttackingUnit(commander, *nearestOnLand))
                 {
                     outCommands.push_back(attackCommand(*bb.commanderUnitId, *nearestOnLand));
+                    queueReturn();
                     bb.commanderEngagedTarget = *nearestOnLand;
                 }
             }
@@ -1420,6 +1624,91 @@ namespace rwe
             }
         }
 
+        // Raiders at a building of ours out beyond the base, and the reserve
+        // near enough and strong enough to answer them (answerOutpostRaids).
+        // Only when nothing is at home: the base comes first.
+        std::optional<UnitId> outpostRaider;
+        std::set<unsigned int> outpostResponders;
+        if (profile.answerOutpostRaids && bb.baseAnchor && !intruder)
+        {
+            const auto baseRadiusSquared = profile.defendRadius * profile.defendRadius;
+            const auto raidSquared = profile.outpostRaidRadius * profile.outpostRaidRadius;
+            std::optional<SimVector> site;
+            for (const auto& [_, standing] : bb.standingBuildings)
+            {
+                if (standing.position.distanceSquared(*bb.baseAnchor) <= baseRadiusSquared)
+                {
+                    continue;
+                }
+                for (const auto& [__, enemy] : bb.knownEnemies)
+                {
+                    if (!enemy.isArmed || enemy.isAir || enemy.isBuilding || !inSightRecently(bb, profile, enemy))
+                    {
+                        continue;
+                    }
+                    if (enemy.lastKnownPosition.distanceSquared(standing.position) <= raidSquared)
+                    {
+                        auto enemyRef = sim.tryGetUnitState(enemy.unitId);
+                        if (enemyRef && !enemyRef->get().isDead())
+                        {
+                            site = standing.position;
+                            outpostRaider = enemy.unitId;
+                            break;
+                        }
+                    }
+                }
+                if (site)
+                {
+                    break;
+                }
+            }
+            if (site)
+            {
+                // What the raiders there are worth, and what of the reserve
+                // could get there.
+                float raiders = 0.0f;
+                for (const auto& [_, enemy] : bb.knownEnemies)
+                {
+                    if (enemy.isArmed && !enemy.isAir && !enemy.isBuilding && inSightRecently(bb, profile, enemy)
+                        && enemy.lastKnownPosition.distanceSquared(*site) <= raidSquared)
+                    {
+                        if (auto defIt = sim.unitDefinitions.find(enemy.unitType); defIt != sim.unitDefinitions.end())
+                        {
+                            raiders += defIt->second.buildCostMetal.value;
+                        }
+                    }
+                }
+                const auto responseSquared = profile.outpostResponseRadius * profile.outpostResponseRadius;
+                float responders = 0.0f;
+                for (auto id : bb.combatUnits)
+                {
+                    if ((bb.scoutUnitId && *bb.scoutUnitId == id) || bb.attackGroup.count(id.value) != 0 || bb.raidGroup.count(id.value) != 0
+                        || bb.guardGroup.count(id.value) != 0)
+                    {
+                        continue;
+                    }
+                    const auto& unit = sim.getUnitState(id);
+                    if (unit.position.distanceSquared(*site) > responseSquared)
+                    {
+                        continue;
+                    }
+                    outpostResponders.insert(id.value);
+                    responders += sim.unitDefinitions.at(unit.unitType).buildCostMetal.value;
+                }
+                if (outpostResponders.empty() || responders < raiders * profile.outpostResponseStrength)
+                {
+                    outpostResponders.clear();
+                    outpostRaider.reset();
+                }
+                else if (bb.outpostRaidAnswered != outpostRaider)
+                {
+                    LOG_INFO << "AI army: " << outpostResponders.size() << " answer raiders (" << static_cast<int>(raiders) << " metal) at "
+                             << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value);
+                }
+            }
+        }
+        bb.outpostRaidAnswered = outpostRaider;
+
         // Where the wave is, taken as one thing. Every member is handed the
         // same destination and paths to it alone, so without this the wave is
         // a column sorted by speed and the enemy meets it three at a time.
@@ -1555,6 +1844,16 @@ namespace rwe
                     }
                     continue;
                 }
+            }
+
+            // Answering a raid on an outpost.
+            if (outpostRaider && outpostResponders.count(unitId.value) != 0)
+            {
+                if (!isAttackingUnit(unit, *outpostRaider))
+                {
+                    outCommands.push_back(attackCommand(unitId, *outpostRaider));
+                }
+                continue;
             }
 
             // A guard stands over the builder it was sent to protect
