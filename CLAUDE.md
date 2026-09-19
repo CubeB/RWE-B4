@@ -186,13 +186,7 @@ is honest.
 
 ### Other labels
 
-Retired, because an axis already says them:
-
-- `fidelity` — `purpose:conformance` says the same thing.
-- `maintenance` — `purpose:maintenance`, name for name.
-- `launcher` — `scope:launcher`, the same words.
-
-Kept, applied with the pair and never instead of it:
+Applied with the pair and never instead of it:
 
 - `renderer`, `ui`, `media` — the parts of `scope:client` that work is filed under.
 - `ai`, `multiplayer`, `save-load`, `io`, `diagnostics` — subjects no scope names.
