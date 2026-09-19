@@ -6,6 +6,7 @@
 #include <rwe/LoadingScene_util.h>
 #include <rwe/ai/AiBuildTree.h>
 #include <rwe/ai/AiPlayerController.h>
+#include <rwe/game/DownloadMenus.h>
 #include <rwe/game/ReplayFile.h>
 #include <rwe/game/featureplacement.h>
 #include <set>
@@ -203,6 +204,29 @@ namespace rwe
 
         simulation.unitDefinitions = std::move(dataMaps.unitDefinitions);
         simulation.weaponDefinitions = std::move(dataMaps.weaponDefinitions);
+
+        // A death weapon that does not exist. The shipped data has one:
+        // eleven units -- eight of Core Contingency's, the torpedo seaplanes
+        // among them, and three of the v3.1 patch's -- say
+        // ExplodeAs=MEDIUM_UNITEX, and no weapon file anywhere defines it
+        // (MEDIUM_UNIT is what was meant). The original evidently shrugs,
+        // since those units die in it without incident. RWE looked the name
+        // up unchecked the moment one died and the game ended with
+        // "unordered_map::at" -- found the day the AI first built seaplanes.
+        // Cleared here, once, so neither the simulation nor the scene has a
+        // name to trip on: the unit dies with no blast, as it must there.
+        for (auto& [unitType, definition] : simulation.unitDefinitions)
+        {
+            for (auto* deathWeapon : {&definition.explodeAs, &definition.selfDestructAs})
+            {
+                if (!deathWeapon->empty() && simulation.weaponDefinitions.count(*deathWeapon) == 0
+                    && simulation.weaponDefinitions.count(toUpper(*deathWeapon)) == 0)
+                {
+                    LOG_WARN << "Unit " << unitType << " dies as " << *deathWeapon << ", which no weapon file defines; it will die without a blast";
+                    deathWeapon->clear();
+                }
+            }
+        }
         simulation.movementClassDatabase = std::move(dataMaps.movementClassDatabase);
         simulation.movementClassCollisionService = std::move(movementClassCollisionService);
         simulation.unitModelDefinitions = dataMaps.modelDefinitions;
@@ -1045,9 +1069,6 @@ namespace rwe
                     dataMaps.builderGuisDatabase.addBuilderGui(fbi.unitName, std::move(*guiPages));
                 }
 
-                // TODO: if no gui defined, attempt to build it dynamically?
-                // Need a database of download.tdf mappings first...
-
                 auto meshInfo = meshService.loadUnitMesh(fbi.objectName);
                 dataMaps.modelDefinitions.insert({toUpper(fbi.objectName), std::move(meshInfo.modelDefinition)});
                 for (const auto& m : meshInfo.pieceMeshes)
@@ -1063,6 +1084,36 @@ namespace rwe
                     requiredFeaturesSet.insert(toUpper(fbi.corpse));
                 }
             }
+        }
+
+        // The buttons the expansions and patches add to builders that already
+        // ship pages, through download/*.tdf rather than new GUI files. Read
+        // once every builder's own pages are in, because an entry can land
+        // on one of those pages as well as past the end of them. See
+        // DownloadMenus.h.
+        {
+            std::vector<DownloadMenuEntry> downloadEntries;
+            for (const auto& name : sceneContext.vfs->getFileNames(sceneContext.pathMapping->downloads, ".tdf"))
+            {
+                auto bytes = sceneContext.vfs->readFile(sceneContext.pathMapping->downloads + "/" + name);
+                if (!bytes)
+                {
+                    continue;
+                }
+                try
+                {
+                    auto entries = parseDownloadMenuEntries(parseListTdfFromBytes(*bytes));
+                    downloadEntries.insert(downloadEntries.end(), entries.begin(), entries.end());
+                }
+                catch (const std::exception& e)
+                {
+                    // Six of these come from third-party downloadable units;
+                    // one that will not parse costs its own buttons, not the load.
+                    LOG_WARN << "Skipping download menu file " << name << ": " << e.what();
+                }
+            }
+            auto placed = applyDownloadMenuEntries(dataMaps.builderGuisDatabase, downloadEntries);
+            LOG_INFO << "Download menus: " << placed.placed << " buttons placed, " << placed.skipped << " skipped";
         }
 
         // read feature TDFs
@@ -1133,6 +1184,14 @@ namespace rwe
             {
                 dataMaps.gameMediaDatabase.addSpriteSeries("FX", name, *anim);
             }
+        }
+
+        // The strip the Space key slides up from the bottom of the screen
+        // (TOTALA-EXE.md S:108): commongui's LIGHTBAR, of which the original
+        // draws frame 1, 507 by 32.
+        if (auto anim = sceneContext.textureService->tryGetGafEntry("anims/commongui.gaf", "LIGHTBAR"))
+        {
+            dataMaps.gameMediaDatabase.addSpriteSeries("COMMONGUI", "LIGHTBAR", *anim);
         }
 
         // In-game titles: TA's own PAUSED / VICTORY / DEFEAT artwork.

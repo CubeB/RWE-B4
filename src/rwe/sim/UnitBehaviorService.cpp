@@ -1137,6 +1137,19 @@ namespace rwe
                             aimingState->attackInfo = UnitWeaponStateAttacking::IdleInfo{};
                         }
                     }
+                    else if (!unit.cobEnvironment->ownsThread(aimInfo->thread))
+                    {
+                        // The aim thread is gone without an answer: killed
+                        // by a later aim's signal -- a commander's laser and
+                        // its D-gun share one -- or finished and swept in a
+                        // pass this weapon did not get to look at. Nothing
+                        // will ever answer, so ask again. It used to wait
+                        // here for good, a gun that never fired again until
+                        // its target was cleared; or, when the allocator
+                        // handed the dead thread's address to the next one,
+                        // to take that thread's answer for its own.
+                        aimingState->attackInfo = UnitWeaponStateAttacking::IdleInfo{};
+                    }
                 }
 
                 // Aimed, and waiting for the reload. The original does not

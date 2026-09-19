@@ -162,6 +162,48 @@ namespace rwe
         return std::nullopt;
     }
 
+    std::optional<std::shared_ptr<SpriteSeries>> TextureService::getUnitPic(const std::string& unitName)
+    {
+        auto key = toUpper(unitName);
+        if (auto it = unitPicCache.find(key); it != unitPicCache.end())
+        {
+            return it->second;
+        }
+
+        auto entry = fileSystem->readFile("unitpics/" + unitName + ".pcx");
+        if (!entry)
+        {
+            unitPicCache.emplace(key, std::nullopt);
+            return std::nullopt;
+        }
+
+        PcxDecoder<std::vector<char>::const_iterator> decoder(entry->begin(), entry->end());
+        auto decodedData = decoder.decodeImage();
+        auto palette = decoder.decodePalette();
+        auto width = decoder.getWidth();
+        auto height = decoder.getHeight();
+
+        std::vector<Color> buffer(decodedData.size());
+        for (std::size_t i = 0; i < decodedData.size(); ++i)
+        {
+            auto paletteIndex = static_cast<unsigned char>(decodedData[i]);
+            assert(paletteIndex < palette.size());
+            buffer[i] = palette[paletteIndex].toColor();
+        }
+
+        SharedTextureHandle handle(graphics->createTexture(width, height, buffer));
+        auto bounds = Rectangle2f::fromTopLeft(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
+        auto region = Rectangle2f::fromTopLeft(0.0f, 0.0f, 1.0f, 1.0f);
+        auto sprite = std::make_shared<Sprite>(graphics->createSprite(bounds, region, handle));
+
+        // Three faces, because that is what UiFactory reads a button's GAF
+        // entry as: the normal stage, then pressed, then disabled.
+        auto series = std::make_shared<SpriteSeries>();
+        series->sprites = {sprite, sprite, sprite};
+        unitPicCache.emplace(key, series);
+        return series;
+    }
+
     SharedTextureHandle TextureService::getBitmap(const std::string& bitmapName)
     {
         auto info = getBitmapInternal(bitmapName);

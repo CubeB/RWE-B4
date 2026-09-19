@@ -30,6 +30,30 @@ namespace rwe
     private:
         int ticksSinceLastUpdate{0};
 
+        /**
+         * A target our hulls are firing at, and whether it is getting hurt.
+         * A torpedo runs along the water and stops at whatever seabed rises
+         * in front of it, so a ship in the shallows can fire at an
+         * underwater extractor for the rest of the game and never touch it.
+         * When a target's hit points have not moved for
+         * navalStalledAttackSeconds the attempt number goes up, and each
+         * ship that has not yet answered that attempt is moved to deep water
+         * on another side of the target to try from there.
+         */
+        struct NavalTargetProgress
+        {
+            unsigned int hitPoints{0};
+            GameTime since{0};
+            int attempt{0};
+        };
+        mutable std::map<unsigned int, NavalTargetProgress> navalTargetProgress;
+        /** The attempt each ship last answered, by target: ship id, then target id. */
+        mutable std::map<std::pair<unsigned int, unsigned int>, int> navalAttemptAnswered;
+        /** A ship on its way to a new firing position: where, and until when. */
+        mutable std::map<unsigned int, std::pair<SimVector, GameTime>> navalRepositioning;
+
+        void updateCommanderSafety(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const;
+
         void updateRallyPoint(const AiTuningProfile& profile, AiBlackboard& bb) const;
         std::optional<UnitId> nearestKnownEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly = false) const;
 

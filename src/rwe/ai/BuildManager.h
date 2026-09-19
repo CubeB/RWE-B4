@@ -272,7 +272,9 @@ namespace rwe
 
         /**
          * The richest buildable metal patch on the nearest ring around the
-         * anchor, within the radius. The optional predicate can rule sites
+         * anchor that has one, walking on inward while each further ring does
+         * strictly better, so a deposit is taken at its heart rather than its
+         * near edge. Within the radius. The optional predicate can rule sites
          * out (for example, only ground the base cannot walk to).
          */
         std::optional<SimVector> chooseMexSite(
@@ -282,7 +284,6 @@ namespace rwe
             SimScalar radius,
             std::minstd_rand& rng,
             const std::function<bool(const SimVector&)>& accept = nullptr) const;
-
     private:
         int ticksSinceLastPlanning{0};
 
@@ -303,6 +304,30 @@ namespace rwe
             GameTime at{0};
         };
         std::map<unsigned int, IssuedOrder> issuedOrders;
+
+        /**
+         * The one extractor being replaced by a moho, if any.
+         *
+         * The original refuses a building placed over a standing unit of any
+         * kind (TOTALA-EXE.md, the footprint test at 0x47D547), so an upgrade
+         * is two jobs: reclaim the old extractor, then build on the patch it
+         * leaves. Between the two the patch earns nothing, which is why there
+         * is only ever one of these: a base that reclaimed its extractors
+         * together would have no income to build their replacements with.
+         *
+         * While it stands, the patch is kept for the moho -- no builder is
+         * offered it for an ordinary extractor -- and it is given up after
+         * extractorUpgradeTimeoutSeconds, or if the builder dies, so a job
+         * that went wrong costs one patch for a while and not for good.
+         */
+        struct ExtractorUpgrade
+        {
+            UnitId builder;
+            UnitId oldExtractor;
+            SimVector site;
+            GameTime at{0};
+        };
+        std::optional<ExtractorUpgrade> extractorUpgrade;
 
         /**
          * Sites whose orders were dropped, by heightmap cell, with when.
@@ -356,6 +381,18 @@ namespace rwe
          * and about 3500 failed searches in a single game.
          */
         mutable int submergedMetalPatches{0};
+
+        /**
+         * Where the map's geothermal vents are, found once. A vent is a
+         * feature and an indestructible one, so the list never changes;
+         * whether one is free is asked of the simulation each time.
+         */
+        mutable std::vector<SimVector> geothermalVents;
+        mutable bool geothermalVentsIndexed{false};
+
+        /** When the factories were first held for the tier-two economy; see tierTwoEconomyReserve. */
+        mutable std::optional<GameTime> tierTwoReserveStarted;
+        void indexGeothermalVents(const GameSimulation& sim) const;
 
         void indexMetalPatches(const GameSimulation& sim) const;
 

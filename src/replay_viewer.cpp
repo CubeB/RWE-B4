@@ -56,7 +56,7 @@ namespace
         m.anims = "anims";
         m.bitmaps = "bitmaps";
         m.camps = "camps";
-        m.downloads = "downloads";
+        m.downloads = "download";
         m.features = "features";
         m.fonts = "fonts";
         m.gamedata = "gamedata";

@@ -118,6 +118,35 @@ namespace rwe
         /** Submarine. ARMSUB 1151 metal (3x3), CORSUB 1199 (4x4), MinWaterDepth=20 -- the two do not even share a footprint. */
         std::string submarine;
 
+        // The second naval tier. The advanced shipyard is on the construction
+        // SHIP's first page (ARMCS1.GUI/CORCS1.GUI) and on nobody else's that
+        // the AI owns on a water map -- not the commander's -- so a side with
+        // no construction ship never reaches any of this.
+
+        /** Advanced shipyard. ARMASY 2524 metal, CORASY 2460, 8x8, MinWaterDepth=30 -- the shipyard's footprint and draught, so it is sited the same way. */
+        std::string advancedShipyard;
+        /** Cruiser. ARMCRUS 1719 metal, CORCRUS 1724, 5x5, MinWaterDepth=30. A long gun AND a depth charge, so it is the one surface hull that answers a submarine. */
+        std::string cruiser;
+        /** Battleship. ARMBATS 4404 metal (MinWaterDepth=30), CORBATS 4181 (MinWaterDepth=15), 6x6. Outranges everything afloat and most of what stands on a shore. */
+        std::string battleship;
+        // Aircraft for a map with no ground to put an air plant on. It is a
+        // chain and every link is the only one: the advanced shipyard builds
+        // the advanced construction sub, which alone has the seaplane
+        // platform's button (Armacsub1.gui / Coracsub1.gui, Core
+        // Contingency), which builds the seaplanes.
+
+        /** Advanced construction sub. ARMACSUB 695 metal, CORACSUB 690, MinWaterDepth=20. */
+        std::string advancedConstructionSub;
+        /** Seaplane platform. ARMPLAT 2223 metal, CORPLAT 2305, 7x7, MinWaterDepth=30 -- inside a shipyard site's 8x8, so it is sited as one. */
+        std::string seaplanePlatform;
+        /** Seaplane fighter. ARMSFIG 187 metal, CORSFIG 182. */
+        std::string seaplaneFighter;
+        /** Torpedo seaplane. ARMSEAP 557 metal, CORSEAP 545. A torpedo, so it can only hurt what is in the water. */
+        std::string torpedoSeaplane;
+
+        /** Anti-air ship. ARMAAS 1358 metal, CORARCH 1314, 3x3, MinWaterDepth=30. Three missile mounts and nothing else -- the fleet's only answer to a torpedo bomber. */
+        std::string antiAirShip;
+
         // Water structures, all of them on the COMMANDER's own build pages
         // -- see the note above for why that is not what this file used to
         // say. Values below are out of the shipped FBIs, and the two sides
@@ -202,6 +231,39 @@ namespace rwe
          * that has none, and is listed after it for the same reason.
          */
         std::string floatingMetalMaker;
+        /**
+         * Geothermal plant. ARMGEO / CORGEO, on the construction kbot's,
+         * vehicle's and aircraft's third page and not the commander's. 250
+         * energy for no wind, no tide and no sun -- but only on a vent, and a
+         * map has a handful or none.
+         */
+        std::string geothermal;
+
+        // Storage, and the reactor that goes under the sea. Button pages read
+        // out of the shipped guis and download menus, 2026-09-18:
+        //
+        //   ARMMSTOR 305 metal, +1000 metal    } page one of every level-one
+        //   ARMESTOR 240 metal, +3000 energy   } constructor and the commander
+        //   ARMUWMS  360 metal, +1500 metal, MinWaterDepth=31   } commander page
+        //   ARMUWES  284 metal, +4000 energy, MinWaterDepth=30  } three, hovercraft
+        //                                        and seaplane constructors, and the
+        //                                        construction SHIP by download menu
+        //   ARMUWFUS 7085 metal, 1150 energy, MinWaterDepth=34 -- the advanced
+        //            construction SUB only (Armacsub1.gui), as the platform is.
+        //
+        // Core the same with CORMSTOR/CORESTOR/CORUWMS (depth 40)/CORUWES
+        // (31)/CORUWFUS (7210 metal, 1200 energy, depth 15).
+
+        /** Metal storage. */
+        std::string metalStorage;
+        /** Energy storage. */
+        std::string energyStorage;
+        /** Underwater metal storage. */
+        std::string underwaterMetalStorage;
+        /** Underwater energy storage. */
+        std::string underwaterEnergyStorage;
+        /** Underwater fusion plant. Counts as a reactor wherever the land one is counted. */
+        std::string underwaterFusion;
     };
 
     /** Looks up the side's unit names; anything the game data does not define is left empty and never built. */

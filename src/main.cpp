@@ -64,7 +64,7 @@ rwe::PathMapping constructDefaultPathMapping()
     m.anims = "anims";
     m.bitmaps = "bitmaps";
     m.camps = "camps";
-    m.downloads = "downloads";
+    m.downloads = "download";
     m.features = "features";
     m.fonts = "fonts";
     m.gamedata = "gamedata";
@@ -340,7 +340,7 @@ int main(int argc, char* argv[])
             pathMapping.anims = args.getString("dir-anims", "anims");
             pathMapping.bitmaps = args.getString("dir-bitmaps", "bitmaps");
             pathMapping.camps = args.getString("dir-camps", "camps");
-            pathMapping.downloads = args.getString("dir-downloads", "downloads");
+            pathMapping.downloads = args.getString("dir-downloads", "download");
             pathMapping.fonts = args.getString("dir-fonts", "fonts");
             pathMapping.gamedata = args.getString("dir-gamedata", "gamedata");
             pathMapping.guis = args.getString("dir-guis", "guis");

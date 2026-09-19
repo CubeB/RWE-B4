@@ -293,6 +293,8 @@ set(SOURCE_FILES
     src/rwe/float_math.h
     src/rwe/game/BuilderGuisDatabase.cpp
     src/rwe/game/BuilderGuisDatabase.h
+    src/rwe/game/DownloadMenus.cpp
+    src/rwe/game/DownloadMenus.h
     src/rwe/game/DefaultAction.cpp
     src/rwe/game/DefaultAction.h
     src/rwe/game/FeatureMediaInfo.cpp
@@ -849,6 +851,7 @@ set(TEST_FILES
     src/rwe/ai/ReachabilityMap.test.cpp
     src/rwe/ai/TransportManager.test.cpp
     src/rwe/ai/AiBuildTree.test.cpp
+    src/rwe/game/DownloadMenus.test.cpp
     src/rwe/ai/ArmyTactics.test.cpp
     src/rwe/ai/AirTactics.test.cpp
     src/rwe/AudioService.test.cpp

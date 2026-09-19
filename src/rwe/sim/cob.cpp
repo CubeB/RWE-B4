@@ -254,6 +254,9 @@ namespace rwe
                     case CobSfxType::Thrust:
                         simulation.events.push_back(EmitParticleFromPieceEvent{EmitParticleFromPieceEvent::SfxType::Thrust, unitId, objectName});
                         break;
+                    case CobSfxType::SubBubbles:
+                        simulation.events.push_back(EmitParticleFromPieceEvent{EmitParticleFromPieceEvent::SfxType::SubBubbles, unitId, objectName});
+                        break;
                 }
             });
     }
@@ -527,6 +530,9 @@ namespace rwe
         auto& env = *unit.cobEnvironment;
 
         assert(env.isNotCorrupt());
+
+        // and free, at last, the ones deleted a whole pass ago
+        env.sweepDeadThreads();
 
         // clean up any finished threads that were not reaped last frame
         for (const auto& thread : env.finishedQueue)
