@@ -149,19 +149,30 @@ GitHub Actions (`.github/workflows/build.yml`) runs Linux (gcc-14, clang-18 on u
 ## Labels
 
 Every issue and pull request carries **two** labels, one from each axis: where
-the change lands, and why it exists. Each axis takes exactly one label, so the
-pair reads at a glance as "sim, conformance" or "client, maintenance" — apply
-them when you open the thing, to your own opening description or to one you are
-asked to triage, rather than tagging it afterwards: `gh issue edit <n>
+the change lands, and why it exists. The purpose axis takes exactly one label,
+the scope axis one where one fits, so the pair reads at a glance as "sim,
+conformance" or "client, maintenance" — apply them when you open the thing, to
+your own opening description or to one you are asked to triage, rather than
+tagging it afterwards: `gh issue edit <n>
 --add-label scope:sim --add-label purpose:conformance` for an existing one, or
 the same two `--label` flags on `gh issue create` and `gh pr create`.
 
-### Scope — where the change lands (exactly one)
+### Scope — where the change lands (one where one fits)
 
 - `scope:sim` — Deterministic simulation: hashed state, unit, weapon and economy behaviour.
 - `scope:client` — Engine code outside the simulation: renderer, sound, UI, camera, effects.
+- `scope:launcher` — The Electron launcher and lobby: its app, master server and game server.
 - `scope:demos` — Reading `.tad` recordings and mining them into fixtures: tools, decodes, episodes.
+- `scope:tests` — Test code and the harness it runs on: `*.test.cpp`, the shared fixtures, the `rwe_test` target.
+- `scope:tooling` — Scripts run by hand: the arena and `TotalA.exe` probes in `tools/`, the root format and fixup scripts.
+- `scope:build` — How the tree is configured and compiled: `CMakeLists.txt`, `cmake/`, the `devbox` and Nix toolchains.
+- `scope:ci` — The workflows themselves: `.github/workflows/`, the build matrix, what a pull request waits on.
 - `scope:docs` — The registers and working notes: `TOTALA-EXE.md`, `TA-DEMOS.md`, `ROADMAP.md`.
+
+`tests` is the one that cuts across the rest, naming the change's own subject
+rather than the subsystem it touches: a test is `scope:tests` even when it sits
+beside the code it exercises, and a change that spans two scopes — a fix and
+its regression test — is honest under either.
 
 ### Purpose — why it exists (exactly one)
 
@@ -179,14 +190,19 @@ is honest.
 
 Colour follows the axis rather than the label: every `scope:*` blue, the four
 purposes distinct — so a glance at an issue list shows where the work lands and
-what kind of claim it is making. These eight commands are the definitions of
+what kind of claim it is making. These thirteen commands are the definitions of
 record, and `--force` is deliberate: it re-applies a drifted description or
 colour, which is the only way an existing label gets corrected.
 
 ```bash
 gh label create "scope:sim"           --color 1D76DB --description "Deterministic simulation: hashed state, unit, weapon and economy behaviour." --force
 gh label create "scope:client"        --color 1D76DB --description "Engine code outside the simulation: renderer, sound, UI, camera, effects." --force
+gh label create "scope:launcher"      --color 1D76DB --description "The Electron launcher and lobby: its app, master server and game server." --force
 gh label create "scope:demos"         --color 1D76DB --description "Reading .tad recordings and mining them into fixtures: tools, decodes, episodes." --force
+gh label create "scope:tests"         --color 1D76DB --description "Test code and the harness it runs on: *.test.cpp, the shared fixtures, the rwe_test target." --force
+gh label create "scope:tooling"       --color 1D76DB --description "Scripts run by hand: the arena and TotalA.exe probes in tools/, the root format and fixup scripts." --force
+gh label create "scope:build"         --color 1D76DB --description "How the tree is configured and compiled: CMakeLists.txt, cmake/, the devbox and Nix toolchains." --force
+gh label create "scope:ci"            --color 1D76DB --description "The workflows themselves: .github/workflows/, the build matrix, what a pull request waits on." --force
 gh label create "scope:docs"          --color 1D76DB --description "The registers and working notes: TOTALA-EXE.md, TA-DEMOS.md, ROADMAP.md." --force
 gh label create "purpose:conformance" --color 0E8A16 --description "Behaviour decoded from TotalA.exe that RWE should match. Evidence is a routine or a fixture." --force
 gh label create "purpose:rwe-original" --color 5319E7 --description "Behaviour TA has no counterpart for: RWE's AI, UI and own design choices. Not a gap." --force
