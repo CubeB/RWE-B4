@@ -94,6 +94,7 @@ namespace rwe
           seaLevel(simScalarToUInt(simulation->terrain.getSeaLevel())),
           footprintX(footprintX),
           footprintZ(footprintZ),
+          selfRegion(simulation->computeFootprintRegion(simulation->getUnitState(self).position, footprintX, footprintZ)),
           roughSlope(computeRoughSlope(*simulation, self)),
           waterIsSlow(computeWaterIsSlow(*simulation, self))
     {
@@ -243,7 +244,7 @@ namespace rwe
     {
         DiscreteRect rect(p.x, p.y, footprintX, footprintZ);
         return (walkableGrid == nullptr || walkableGrid->tryGetValue(p).value_or(false))
-            && !simulation->isCollisionAt(rect, self);
+            && !simulation->isCollisionAt(rect, self, selfRegion);
     }
 
     bool AbstractUnitPathFinder::computeRoughTerrain(const Point& p) const
