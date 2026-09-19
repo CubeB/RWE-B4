@@ -13,6 +13,7 @@
 #include <rwe/game/PlayerCommand.h>
 #include <map>
 #include <rwe/grid/Point.h>
+#include <rwe/sim/FeatureId.h>
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/PlayerId.h>
 #include <rwe/sim/SimVector.h>
@@ -206,6 +207,60 @@ namespace rwe
          */
         void watchDefences(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb);
 
+        /** A defence of ours that was destroyed, and where it stood (AiTuningProfile::rebuildLostDefences). */
+        struct LostDefenceSite
+        {
+            std::string unitType;
+            SimVector position;
+            GameTime lostAt;
+            int timesLost{0};
+        };
+
+        /**
+         * Reads the defences lost since the last look out of bb.recentLosses
+         * into lostDefenceSites, one entry per place, counting how often each
+         * has been lost, and forgets those older than lostDefenceMemorySeconds
+         * or lost more than maxDefenceRebuilds times.
+         */
+        void recordLostDefences(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb);
+
+        const std::vector<LostDefenceSite>& getLostDefenceSites() const { return lostDefenceSites; }
+
+        struct DefenceRebuildPlan
+        {
+            std::string unitType;
+            SimVector site;
+            /** Its wreck, where that is still lying on the spot: reclaimed first. */
+            std::optional<FeatureId> wreck;
+        };
+
+        /**
+         * The first lost defence due to be put back: past rebuildDelaySeconds,
+         * nothing of ours there or ordered there, no armed enemy near, and
+         * ground that takes it once its wreck -- if any -- is gone.
+         */
+        std::optional<DefenceRebuildPlan> planDefenceRebuild(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            const AiTuningProfile& profile,
+            const AiBlackboard& bb) const;
+
+        /**
+         * Where the next of an energy building goes when it is laid out in
+         * rows (AiTuningProfile::energyInRows): beside one of its kind already
+         * standing, near the base, behind it, near the builder.
+         */
+        std::optional<SimVector> chooseEnergyRowSite(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            const AiTuningProfile& profile,
+            const AiBlackboard& bb,
+            const std::string& unitType,
+            const SimVector& anchor,
+            const SimVector& builderPosition,
+            std::minstd_rand& rng,
+            const std::function<bool(const SimVector&)>& accept) const;
+
         /**
          * The damaged structure this builder should mend, if any: a defence
          * before a factory, the nearest of the more important kind, within
@@ -325,11 +380,21 @@ namespace rwe
             std::minstd_rand& rng) const;
 
         /**
-         * The richest buildable metal patch on the nearest ring around the
-         * anchor that has one, walking on inward while each further ring does
-         * strictly better, so a deposit is taken at its heart rather than its
-         * near edge. Within the radius. The optional predicate can rule sites
-         * out (for example, only ground the base cannot walk to).
+         * The best placement on the nearest metal deposit around the anchor,
+         * within the radius. A deposit is a run of patch cells touching at
+         * edges or corners, and it is taken at its heart -- the placement
+         * with the most metal under it, nearest first among equals -- or not
+         * at all.
+         *
+         * The two predicates are asked different questions. `admit` is about
+         * ground: may this deposit be taken at all (the commander's leash,
+         * our side of the map, somewhere the builder can walk)? A deposit is
+         * admitted if any of its cells passes, so a rule whose boundary runs
+         * through a deposit no longer pushes the extractor onto whichever
+         * edge is inside it. `accept` is about one site: is the placement
+         * the deposit would be given free to use (not dropped lately, not
+         * kept for a moho)? A deposit whose best placement is refused is
+         * passed over, rather than settled with a lesser placement beside it.
          */
         std::optional<SimVector> chooseMexSite(
             const GameSimulation& sim,
@@ -337,7 +402,8 @@ namespace rwe
             const SimVector& anchor,
             SimScalar radius,
             std::minstd_rand& rng,
-            const std::function<bool(const SimVector&)>& accept = nullptr) const;
+            const std::function<bool(const SimVector&)>& accept = nullptr,
+            const std::function<bool(const SimVector&)>& admit = nullptr) const;
     private:
         int ticksSinceLastPlanning{0};
 
@@ -427,6 +493,11 @@ namespace rwe
 
         /** When sendRepairersToCommander last looked. */
         std::optional<GameTime> commanderRepairCheckedAt;
+
+        /** See recordLostDefences. In the order first lost. */
+        std::vector<LostDefenceSite> lostDefenceSites;
+        /** The newest loss already read, so each is counted once. */
+        std::optional<GameTime> lostDefencesReadUpTo;
         /**
          * Whether the commander's current spell below the repair line has
          * been logged. Written to the log and read by nothing else, so it
@@ -491,6 +562,15 @@ namespace rwe
          */
         mutable std::vector<Point> metalPatches;
         mutable bool metalPatchesIndexed{false};
+        /** Which deposit each of metalPatches belongs to, numbered from 0; the same length as metalPatches. */
+        mutable std::vector<int> metalPatchDeposit;
+        mutable int metalDepositCount{0};
+        /**
+         * Deposits whose heart was last found with a unit standing on it, and
+         * since when; see chooseMexSite. Mutable for the same reason as the
+         * patch index: the search is const.
+         */
+        mutable std::map<int, GameTime> depositHeartBlockedSince;
 
         /**
          * How many of those patches have water over them, counted on the same
@@ -523,7 +603,7 @@ namespace rwe
          * `builderType` actually has a button for. Every rule reads as a need
          * of the base; the filter is what turns that into this builder's job.
          */
-        std::vector<std::string> buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::optional<FortificationPlan>& fortify, const std::string& builderType, bool enemyNavalSeen) const;
+        std::vector<std::string> buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::optional<FortificationPlan>& fortify, const std::optional<DefenceRebuildPlan>& rebuild, const std::string& builderType, bool enemyNavalSeen) const;
 
         void planFactories(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const;
     };

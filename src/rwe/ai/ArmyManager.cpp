@@ -1,5 +1,6 @@
 #include "ArmyManager.h"
 #include <algorithm>
+#include <rwe/ai/AiMapBounds.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -33,6 +34,21 @@ namespace rwe
         bool inSightRecently(const AiBlackboard& bb, const AiTuningProfile& profile, const KnownEnemy& enemy)
         {
             return bb.now.value <= enemy.lastSeen.value + static_cast<unsigned int>(profile.targetMemoryTicks);
+        }
+
+        bool isDgunning(const UnitState& unit, UnitId target)
+        {
+            if (unit.orders.empty())
+            {
+                return false;
+            }
+            auto dgun = std::get_if<DgunOrder>(&unit.orders.front());
+            if (dgun == nullptr)
+            {
+                return false;
+            }
+            auto aimed = std::get_if<UnitId>(&dgun->target);
+            return aimed != nullptr && *aimed == target;
         }
 
         bool isAttackingUnit(const UnitState& unit, UnitId target)
@@ -306,6 +322,103 @@ namespace rwe
         return best;
     }
 
+    namespace
+    {
+        /**
+         * What the commander's D-gun should be fired at now, if anything: the
+         * nearest armed enemy in the weapon's reach, when the energy for a
+         * shot is in the bank and nothing of ours stands near the line of
+         * fire. The weapon is slot 2 -- Weapon3 -- because that is the slot
+         * DgunOrder fires (UnitBehaviorService::handleDgunOrder).
+         */
+        std::optional<UnitId> chooseDgunTarget(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            const AiTuningProfile& profile,
+            const AiBlackboard& bb,
+            UnitId commanderId,
+            const UnitState& commander,
+            const UnitDefinition& commanderDef)
+        {
+            if (!commanderDef.canDgun || commanderDef.weapon3.empty())
+            {
+                return std::nullopt;
+            }
+            auto weaponIt = sim.weaponDefinitions.find(commanderDef.weapon3);
+            if (weaponIt == sim.weaponDefinitions.end())
+            {
+                return std::nullopt;
+            }
+            const auto& weapon = weaponIt->second;
+            if (sim.getPlayer(aiOwner).energy.value < weapon.energyPerShot.value)
+            {
+                return std::nullopt;
+            }
+            const auto reachSquared = weapon.maxRange * weapon.maxRange;
+            std::optional<UnitId> best;
+            SimVector bestPosition;
+            SimScalar bestDistanceSquared = 0_ss;
+            for (const auto& [_, enemy] : bb.knownEnemies)
+            {
+                if (!enemy.isArmed || enemy.isAir || !inSightRecently(bb, profile, enemy))
+                {
+                    continue;
+                }
+                auto enemyRef = sim.tryGetUnitState(enemy.unitId);
+                if (!enemyRef || enemyRef->get().isDead() || isNanoframe(sim, enemyRef->get()))
+                {
+                    continue;
+                }
+                const auto& position = enemyRef->get().position;
+                if (sim.terrain.getHeightAt(position.x, position.z) < sim.terrain.getSeaLevel())
+                {
+                    continue;
+                }
+                auto dx = position.x - commander.position.x;
+                auto dz = position.z - commander.position.z;
+                auto distanceSquared = (dx * dx) + (dz * dz);
+                if (distanceSquared > reachSquared)
+                {
+                    continue;
+                }
+                if (!best || distanceSquared < bestDistanceSquared)
+                {
+                    best = enemy.unitId;
+                    bestPosition = position;
+                    bestDistanceSquared = distanceSquared;
+                }
+            }
+            if (!best)
+            {
+                return std::nullopt;
+            }
+
+            // Nothing of ours within 48 of the line from the commander out
+            // to the end of the weapon's reach in that direction.
+            const auto direction = SimVector(bestPosition.x - commander.position.x, 0_ss, bestPosition.z - commander.position.z).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+            const auto lineEnd = weapon.maxRange + 32_ss;
+            const auto clearanceSquared = 48_ss * 48_ss;
+            for (const auto& [unitId, unit] : sim.units)
+            {
+                if (unit.owner != aiOwner || unitId == commanderId || unit.isDead())
+                {
+                    continue;
+                }
+                const SimVector offset(unit.position.x - commander.position.x, 0_ss, unit.position.z - commander.position.z);
+                const auto along = offset.dot(direction);
+                if (along < 0_ss || along > lineEnd)
+                {
+                    continue;
+                }
+                if (offset.lengthSquared() - (along * along) < clearanceSquared)
+                {
+                    return std::nullopt;
+                }
+            }
+            return best;
+        }
+    }
+
     void ArmyManager::updateCommanderSafety(
         const GameSimulation& sim,
         PlayerId aiOwner,
@@ -313,21 +426,23 @@ namespace rwe
         AiBlackboard& bb,
         std::vector<PlayerCommand>& outCommands) const
     {
-        (void)aiOwner;
         bb.commanderThreat.reset();
         bb.commanderFleeing = false;
         if (profile.commanderDangerRadius <= 0_ss || !bb.commanderUnitId)
         {
             bb.commanderInDanger = false;
+            bb.commanderEngagedTarget.reset();
             return;
         }
         auto commanderRef = sim.tryGetUnitState(*bb.commanderUnitId);
         if (!commanderRef || commanderRef->get().isDead())
         {
             bb.commanderInDanger = false;
+            bb.commanderEngagedTarget.reset();
             return;
         }
         const auto& commander = commanderRef->get();
+        const auto& commanderDef = sim.unitDefinitions.at(commander.unitType);
 
         // Two causes: it has lost hit points since the last pass, or there
         // is something armed beside it. Either keeps the alarm up for ten
@@ -338,6 +453,15 @@ namespace rwe
         auto radiusSquared = profile.commanderDangerRadius * profile.commanderDangerRadius;
         SimScalar nearest = 0_ss;
         int threats = 0;
+        // What the threats cost to build, summed in id order, which is the
+        // measure of whether the commander can take them on.
+        float threatMetal = 0.0f;
+        // And the nearest of them standing on land, which is the only kind
+        // it is sent at: a ship off the shore is a threat to it, but walked
+        // after, the commander ends up on the seabed where it cannot fire --
+        // the reason commanderAnswersHarassment is off by default.
+        std::optional<UnitId> nearestOnLand;
+        SimScalar nearestOnLandDistance = 0_ss;
         for (const auto& [_, enemy] : bb.knownEnemies)
         {
             // Not aircraft: there is no running from a bomber, and the
@@ -357,6 +481,14 @@ namespace rwe
                 continue;
             }
             ++threats;
+            threatMetal += sim.unitDefinitions.at(enemyRef->get().unitType).buildCostMetal.value;
+            const auto& enemyPosition = enemyRef->get().position;
+            if (sim.terrain.getHeightAt(enemyPosition.x, enemyPosition.z) >= sim.terrain.getSeaLevel()
+                && (!nearestOnLand || d < nearestOnLandDistance))
+            {
+                nearestOnLand = enemy.unitId;
+                nearestOnLandDistance = d;
+            }
             if (!bb.commanderThreat || d < nearest)
             {
                 nearest = d;
@@ -374,23 +506,80 @@ namespace rwe
             LOG_INFO << "AI player " << aiOwner.value << ": the commander is in danger (" << (hurt ? "taking damage" : "armed enemy close")
                      << ") at " << static_cast<int>(commander.position.x.value) << "," << static_cast<int>(commander.position.z.value);
         }
+        // A chase this rule started that has run on past where the fight
+        // was: called off, and the commander back in the planner's hands.
+        // Raiders are faster than a commander, and one walked after them is
+        // one walked out of its base.
+        if (bb.commanderEngagedTarget)
+        {
+            auto target = sim.tryGetUnitState(*bb.commanderEngagedTarget);
+            bool onIt = isAttackingUnit(commander, *bb.commanderEngagedTarget) || isDgunning(commander, *bb.commanderEngagedTarget);
+            auto chase = profile.commanderDangerRadius + (profile.commanderDangerRadius / 2_ss);
+            if (!onIt || !target || target->get().isDead())
+            {
+                bb.commanderEngagedTarget.reset();
+            }
+            else if (commander.position.distanceSquared(target->get().position) > chase * chase)
+            {
+                outCommands.push_back(moveCommand(*bb.commanderUnitId, commander.position));
+                bb.commanderEngagedTarget.reset();
+            }
+        }
+
         if (!bb.commanderInDanger)
         {
             return;
         }
 
-        // A lone raider it can shoot is already answered further down, and a
-        // commander is the best gun the base owns: it runs only from what it
-        // cannot fight -- more than it may take on alone, something it
-        // cannot fire at from where it stands, or a fight it is losing.
-        auto maxHitPoints = sim.unitDefinitions.at(commander.unitType).maxHitPoints;
-        bool losing = commander.hitPoints * 2u < maxHitPoints;
-        bool canFight = canFireFrom(sim, commander)
-            && std::max(threats, static_cast<int>(bb.enemiesNearBase.size())) <= std::max(1, profile.commanderDefendsAloneMaxIntruders) && !losing;
+        auto maxHitPoints = commanderDef.maxHitPoints;
+        bool canFight;
+        if (profile.commanderStandsItsGround)
+        {
+            // It runs from a fight it is losing, from more than it can take
+            // on, and from what it cannot fire at where it stands.
+            bool low = static_cast<long long>(commander.hitPoints) * 100 < static_cast<long long>(maxHitPoints) * profile.commanderRetreatBelowPercent;
+            canFight = canFireFrom(sim, commander) && !low && threatMetal <= static_cast<float>(profile.commanderFightsUpToMetal);
+        }
+        else
+        {
+            // A lone raider it can shoot is already answered further down, and a
+            // commander is the best gun the base owns: it runs only from what it
+            // cannot fight -- more than it may take on alone, something it
+            // cannot fire at from where it stands, or a fight it is losing.
+            bool losing = commander.hitPoints * 2u < maxHitPoints;
+            canFight = canFireFrom(sim, commander)
+                && std::max(threats, static_cast<int>(bb.enemiesNearBase.size())) <= std::max(1, profile.commanderDefendsAloneMaxIntruders) && !losing;
+        }
         if (canFight)
         {
+            if (profile.commanderStandsItsGround && nearestOnLand)
+            {
+                // The D-gun first, when there is something in its reach.
+                if (profile.commanderUsesDgun)
+                {
+                    if (auto shot = chooseDgunTarget(sim, aiOwner, profile, bb, *bb.commanderUnitId, commander, commanderDef))
+                    {
+                        if (!isDgunning(commander, *shot))
+                        {
+                            LOG_INFO << "AI player " << aiOwner.value << ": the commander D-guns " << shot->value;
+                            outCommands.push_back(PlayerUnitCommand(*bb.commanderUnitId, PlayerUnitCommand::IssueOrder(DgunOrder(*shot), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                        }
+                        bb.commanderEngagedTarget = *shot;
+                        return;
+                    }
+                }
+                // Otherwise the nearest of them, unless a D-gun order is
+                // still walking into reach of another.
+                bool dgunning = !commander.orders.empty() && std::holds_alternative<DgunOrder>(commander.orders.front());
+                if (!dgunning && !isAttackingUnit(commander, *nearestOnLand))
+                {
+                    outCommands.push_back(attackCommand(*bb.commanderUnitId, *nearestOnLand));
+                    bb.commanderEngagedTarget = *nearestOnLand;
+                }
+            }
             return;
         }
+        bb.commanderEngagedTarget.reset();
 
         // Where to: home if it is away from home, since home is where the
         // towers and the army are; and if it is already there, straight away
@@ -407,6 +596,11 @@ namespace rwe
             {
                 auto away = (commander.position - threat->second.lastKnownPosition).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
                 refuge = commander.position + (away * 350_ss);
+                // Never out of sight: straight away from a threat on the
+                // near side of a corner start is straight off the visible
+                // map, which is where one commander in a replay ran to and
+                // died.
+                refuge = clampInsideVisibleMap(sim.terrain, *refuge, 64_ss);
             }
         }
         else if (bb.rallyPoint)

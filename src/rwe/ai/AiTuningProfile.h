@@ -192,6 +192,49 @@ namespace rwe
         SimScalar commanderDangerRadius{450_ss};
         /** Combat units and hulls within this distance of an endangered commander go to it. */
         SimScalar commanderGuardRadius{1500_ss};
+        /**
+         * The commander fights what comes at it instead of walking away.
+         *
+         * It used to run from anything more than one armed enemy within
+         * commanderDangerRadius -- the bound was commanderDefendsAloneMaxIntruders,
+         * which is 1 -- so two raiders were enough to take it off its work,
+         * and in a replay it was "constantly walking away from enemy units".
+         * A commander is the strongest unit either side fields in the first
+         * twenty minutes: 3000 hit points, the fastest nanolathe, and a D-gun
+         * that kills whatever it touches. What a player does with it is take
+         * out a small level-one party, and keep it safe once it is hurt.
+         *
+         * So it stands while the armed ground enemies near it add up to no
+         * more than commanderFightsUpToMetal of build cost (600 is five or six
+         * Flashes, or a dozen Peewees) and it is above
+         * commanderRetreatBelowPercent of its hit points, and it goes for the
+         * nearest of them -- not chasing past half again the danger radius.
+         * Past either line it goes home, where the towers are and the
+         * construction units can mend it (repairCommander). Off, the old rule.
+         */
+        bool commanderStandsItsGround{true};
+        int commanderFightsUpToMetal{600};
+        int commanderRetreatBelowPercent{50};
+        /**
+         * The D-gun, at the nearest armed enemy in its reach (240 on both
+         * commanders), whenever the energy for a shot is in the bank. Not
+         * with anything of ours near the line of fire: the round destroys
+         * whatever it touches, and it does not ask whose it is.
+         */
+        bool commanderUsesDgun{true};
+        /**
+         * With nothing of its own to build, the commander helps finish a
+         * frame of ours within this distance -- its nanolathe is three times
+         * a construction kbot's -- before it goes out reclaiming rocks. Zero
+         * switches it off.
+         */
+        SimScalar commanderAssistRadius{800_ss};
+        /**
+         * A tower for a raided outpost is a construction unit's job while
+         * there is one: the commander walking out to the edge of the base to
+         * put it up was the other half of "moving around gratuitously".
+         */
+        bool outpostTowersLeftToConstructors{true};
         /** Radar contacts count as incoming inside this many defendRadius of the base, when closing. Zero switches the radar warning off. */
         float radarWarningRings{2.5f};
         /** Contacts that must be closing before the army forms up; one blip is a scout. */
@@ -1228,6 +1271,44 @@ namespace rwe
         int fortifyAttackGapSeconds{20};
         int fortifyAttackMemorySeconds{600};
         SimScalar fortifyAttackerRadius{500_ss};
+
+        /**
+         * A defence of ours that is destroyed is put back where it stood,
+         * once rebuildDelaySeconds have passed and no armed enemy is near the
+         * spot -- clearing its wreck first -- rather than the planner carrying
+         * on down the list and siting the next tower wherever the ring search
+         * lands. Up to maxDefenceRebuilds times at one place; a site lost more
+         * often than that is a lost cause. Remembered for
+         * lostDefenceMemorySeconds.
+         *
+         * Put back, it is fortified: fortifyRebuiltDefences lays
+         * fortifyReactiveTeeth teeth in front of it on the side away from the
+         * base, which is the side it was lost from; and if it is lost again
+         * with its teeth in front, reinforceTwiceLostDefences adds a missile
+         * tower -- Pulverizer, Defender -- behind it as well. Asked for after
+         * a replay review: "when a defense is destroyed it should be rebuilt
+         * with fortification ... and an additional defensive structure behind
+         * it if the reinforced one gets destroyed."
+         */
+        bool rebuildLostDefences{true};
+        int rebuildDelaySeconds{20};
+        int maxDefenceRebuilds{3};
+        int lostDefenceMemorySeconds{1200};
+        bool fortifyRebuiltDefences{true};
+        bool reinforceTwiceLostDefences{true};
+
+        /**
+         * Solar collectors in rows: each new one on the site grid beside one
+         * already standing -- in its row or column first -- on the nearest
+         * ring of the base that has one, on the side away from the enemy, and
+         * nearest the builder among equals. The grid keeps the two-tile lanes
+         * and the factories' clearance it always kept. Before this each one
+         * went to a random free site on the nearest ring, so a base's solars
+         * were scattered round it and the builder walked between them; asked
+         * for after a replay review: "organised rows not too far to reduce
+         * the time it takes to walk".
+         */
+        bool energyInRows{true};
 
         /**
          * Builders mend before they build: a damaged defence first, then a

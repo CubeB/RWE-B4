@@ -174,6 +174,7 @@ set(SOURCE_FILES
     src/rwe/AbstractViewport.h
     src/rwe/ai/AiBlackboard.cpp
     src/rwe/ai/AiBlackboard.h
+    src/rwe/ai/AiMapBounds.h
     src/rwe/ai/AiPlayerController.cpp
     src/rwe/ai/AiPlayerController.h
     src/rwe/ai/AiTuningProfile.cpp

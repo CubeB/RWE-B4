@@ -168,7 +168,7 @@ namespace rwe
 
         // The nearest rich patch on ground the base cannot walk to, anywhere on the map.
         auto radius = rweMax(sim.terrain.getWidthInWorldUnits(), sim.terrain.getHeightInWorldUnits());
-        expansionSite = build.chooseMexSite(sim, bb.sideUnits.metalExtractor, *bb.baseAnchor, radius, rng, [&](const SimVector& p) {
+        expansionSite = build.chooseMexSite(sim, bb.sideUnits.metalExtractor, *bb.baseAnchor, radius, rng, nullptr, [&](const SimVector& p) {
             return !reachability.isReachable(sim, p) && reachability.isWalkable(sim, p);
         });
     }

@@ -1127,6 +1127,11 @@ namespace rwe
         auto profile = makeDefaultStandardProfile();
         profile.scoutCount = 0;
 
+        // These pin the defend-alone rule, which was written against the old
+        // safety rule; under commanderStandsItsGround the commander answers
+        // whatever small party comes near it anyway, which is tested below.
+        profile.commanderStandsItsGround = false;
+
         SECTION("with no combat units at all, the commander goes at the intruder itself")
         {
             auto raiderId = addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 0_ss), script);
@@ -1201,6 +1206,8 @@ namespace rwe
 
         SECTION("a raiding party beside it: it runs the other way, builds nothing, and the army goes for the nearest of them")
         {
+            // More than it takes on: 800 metal of raiders against 600.
+            sim.unitDefinitions["ARMPW"].buildCostMetal = Metal(400.0f);
             auto nearId = addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 0_ss), script);
             addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 60_ss), script);
             auto defenderId = addUnit(sim, "ARMPW", ai, SimVector(-200_ss, 0_ss, 0_ss), script);
@@ -1258,6 +1265,189 @@ namespace rwe
 
             REQUIRE(!controller.getBlackboard().commanderInDanger);
             REQUIRE(ordersFor<MoveOrder>(commands, commanderId).empty());
+        }
+    }
+
+    TEST_CASE("a commander run from its corner stays where a player could see it", "[ai]")
+    {
+        // The fixture is 1024 across; a base in its bottom right corner, with
+        // the threat coming from the top left, runs straight on past the
+        // camera's cut-off -- which on Great Divide is where one commander
+        // ran to and died.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.unitDefinitions["ARMPW"].buildCostMetal = Metal(400.0f);
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(440_ss, 0_ss, 360_ss), script);
+        addUnit(sim, "ARMPW", human, SimVector(300_ss, 0_ss, 200_ss), script);
+        addUnit(sim, "ARMPW", human, SimVector(300_ss, 0_ss, 260_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        AiPlayerController controller(ai, profile, 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 20, commands);
+
+        REQUIRE(controller.getBlackboard().commanderFleeing);
+        REQUIRE(ordersFor<AttackOrder>(commands, commanderId).empty());
+        auto moves = ordersFor<MoveOrder>(commands, commanderId);
+        REQUIRE(!moves.empty());
+        REQUIRE(moves.back().destination.x <= sim.terrain.rightCutoffInWorldUnits() - 64_ss);
+        REQUIRE(moves.back().destination.z <= sim.terrain.bottomCutoffInWorldUnits() - 64_ss);
+    }
+
+    TEST_CASE("the commander takes on a small party, and the D-gun goes first", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.unitDefinitions["ARMPW"].buildCostMetal = Metal(50.0f);
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-100_ss, 0_ss, -100_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+
+        auto attackTarget = [&](const std::vector<PlayerCommand>& commands) -> std::optional<UnitId> {
+            auto attacks = ordersFor<AttackOrder>(commands, commanderId);
+            if (attacks.empty())
+            {
+                return std::nullopt;
+            }
+            auto target = std::get_if<UnitId>(&attacks.back().target);
+            return target == nullptr ? std::nullopt : std::optional<UnitId>(*target);
+        };
+
+        SECTION("two raiders: it goes for the nearer, and does not run")
+        {
+            auto nearId = addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 0_ss), script);
+            addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 60_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(controller.getBlackboard().commanderInDanger);
+            REQUIRE_FALSE(controller.getBlackboard().commanderFleeing);
+            REQUIRE(attackTarget(commands) == std::optional<UnitId>(nearId));
+            REQUIRE(ordersFor<MoveOrder>(commands, commanderId).empty());
+        }
+
+        SECTION("switched off, the same two send it running")
+        {
+            addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 0_ss), script);
+            addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 60_ss), script);
+            profile.commanderStandsItsGround = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(controller.getBlackboard().commanderFleeing);
+            REQUIRE_FALSE(attackTarget(commands).has_value());
+        }
+
+        SECTION("with a D-gun and the energy for it")
+        {
+            auto& commanderDef = sim.unitDefinitions["ARMCOM"];
+            commanderDef.canDgun = true;
+            commanderDef.weapon3 = "DGUN";
+            WeaponDefinition dgun{};
+            dgun.maxRange = 240_ss;
+            dgun.energyPerShot = Energy(500.0f);
+            dgun.commandFire = true;
+            sim.weaponDefinitions["DGUN"] = dgun;
+            sim.getPlayer(ai).energy = Energy(1000.0f);
+            sim.getPlayer(ai).maxEnergy = Energy(1000.0f);
+
+            SECTION("a raider in reach is D-gunned")
+            {
+                auto raiderId = addUnit(sim, "ARMPW", human, SimVector(200_ss, 0_ss, 0_ss), script);
+                AiPlayerController controller(ai, profile, 42u, MapIntel{});
+                std::vector<PlayerCommand> commands;
+                runTicks(sim, controller, 20, commands);
+
+                auto shots = ordersFor<DgunOrder>(commands, commanderId);
+                REQUIRE(!shots.empty());
+                REQUIRE(*std::get_if<UnitId>(&shots.front().target) == raiderId);
+            }
+
+            SECTION("not without the energy for a shot: it fights with the laser")
+            {
+                sim.getPlayer(ai).energy = Energy(100.0f);
+                auto raiderId = addUnit(sim, "ARMPW", human, SimVector(200_ss, 0_ss, 0_ss), script);
+                AiPlayerController controller(ai, profile, 42u, MapIntel{});
+                std::vector<PlayerCommand> commands;
+                runTicks(sim, controller, 20, commands);
+
+                REQUIRE(ordersFor<DgunOrder>(commands, commanderId).empty());
+                REQUIRE(attackTarget(commands) == std::optional<UnitId>(raiderId));
+            }
+
+            SECTION("not through something of ours")
+            {
+                addUnit(sim, "ARMPW", ai, SimVector(100_ss, 0_ss, 10_ss), script);
+                addUnit(sim, "ARMPW", human, SimVector(200_ss, 0_ss, 0_ss), script);
+                AiPlayerController controller(ai, profile, 42u, MapIntel{});
+                std::vector<PlayerCommand> commands;
+                runTicks(sim, controller, 20, commands);
+
+                REQUIRE(ordersFor<DgunOrder>(commands, commanderId).empty());
+            }
+
+            SECTION("not with the D-gun switched off")
+            {
+                profile.commanderUsesDgun = false;
+                addUnit(sim, "ARMPW", human, SimVector(200_ss, 0_ss, 0_ss), script);
+                AiPlayerController controller(ai, profile, 42u, MapIntel{});
+                std::vector<PlayerCommand> commands;
+                runTicks(sim, controller, 20, commands);
+
+                REQUIRE(ordersFor<DgunOrder>(commands, commanderId).empty());
+            }
+        }
+    }
+
+    TEST_CASE("an idle commander helps finish a frame before it goes looking for rocks", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        // A construction kbot at work on a tower, so the frame is nobody's
+        // orphan: only the commander's own rule can send it there.
+        auto kbotId = addUnit(sim, "ARMCK", ai, SimVector(200_ss, 0_ss, 100_ss), script);
+        auto frameId = addUnit(sim, "ARMLLT", ai, SimVector(250_ss, 0_ss, 100_ss), script);
+        sim.getUnitState(frameId).buildTimeCompleted = 50u;
+        sim.getUnitState(kbotId).orders.push_back(RepairOrder(frameId));
+        // Nothing on the commander's own menu, so the planner has nothing
+        // of its own to hand it.
+        auto tree = makeBuildTree();
+        tree.buildableBy["ARMCOM"] = {};
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+
+        SECTION("it goes to help")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, tree);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            auto repairs = ordersFor<RepairOrder>(commands, commanderId);
+            REQUIRE(!repairs.empty());
+            REQUIRE(repairs.front().target == frameId);
+        }
+
+        SECTION("switched off, it does not")
+        {
+            profile.commanderAssistRadius = 0_ss;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, tree);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(ordersFor<RepairOrder>(commands, commanderId).empty());
         }
     }
 
@@ -2536,6 +2726,162 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a lost tower is put back, fortified away from the base, and reinforced if it falls again", "[ai]")
+    {
+        // Driven directly, as the teeth-where-attacked test is: the losses
+        // are written into the blackboard by hand, the way EconomyManager
+        // writes them, and the planner is asked what it would do.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.unitDefinitions["ARMDRAG"] = makeDef(false, false, false, "", 10u);
+
+        const SimVector site(0_ss, 0_ss, 0_ss);
+        const SimVector east(1_ss, 0_ss, 0_ss);
+        auto profile = makeDefaultStandardProfile();
+        profile.fortifyTowers = false;
+        profile.fortifyWhereAttacked = false;
+
+        AiBlackboard bb{};
+        bb.sideUnits = resolveAiSideUnits(sim, "ARM");
+        bb.sideUnitsResolved = true;
+        bb.baseAnchor = SimVector(-300_ss, 0_ss, 0_ss);
+        REQUIRE(bb.sideUnits.antiAirTower == "ARMRL");
+
+        BuildManager planner;
+        std::minstd_rand rng(42u);
+        const auto delay = static_cast<unsigned int>(profile.rebuildDelaySeconds) * 30u;
+
+        bb.now = GameTime(300);
+        bb.recentLosses.push_back(LostBuilding{"ARMLLT", site, GameTime(300)});
+        planner.recordLostDefences(sim, profile, bb);
+        REQUIRE(planner.getLostDefenceSites().size() == 1);
+        REQUIRE(planner.getLostDefenceSites().front().timesLost == 1);
+
+        SECTION("not at once, not under a gun, and then where it stood")
+        {
+            bb.now = GameTime(300 + delay - 1);
+            REQUIRE_FALSE(planner.planDefenceRebuild(sim, ai, profile, bb).has_value());
+
+            bb.now = GameTime(300 + delay);
+            bb.knownEnemies[9999u] = KnownEnemy{UnitId(9999u), "ARMPW", site + SimVector(150_ss, 0_ss, 0_ss), bb.now, false, true, false};
+            REQUIRE_FALSE(planner.planDefenceRebuild(sim, ai, profile, bb).has_value());
+
+            bb.knownEnemies.clear();
+            auto plan = planner.planDefenceRebuild(sim, ai, profile, bb);
+            REQUIRE(plan.has_value());
+            REQUIRE(plan->unitType == "ARMLLT");
+            REQUIRE(plan->site.distanceSquared(site) < 1_ss);
+            REQUIRE_FALSE(plan->wreck.has_value());
+
+            // Reading the losses again counts nothing twice.
+            planner.recordLostDefences(sim, profile, bb);
+            REQUIRE(planner.getLostDefenceSites().front().timesLost == 1);
+        }
+
+        SECTION("put back: teeth on the side away from the base, then nothing more")
+        {
+            auto towerId = addUnit(sim, "ARMLLT", ai, site, script);
+            bb.standingBuildings[towerId.value] = StandingBuilding{"ARMLLT", site};
+            bb.now = GameTime(300 + delay);
+            REQUIRE_FALSE(planner.planDefenceRebuild(sim, ai, profile, bb).has_value());
+
+            for (int i = 0; i < profile.fortifyReactiveTeeth; ++i)
+            {
+                auto next = planner.planFortification(sim, ai, profile, bb, rng);
+                REQUIRE(next.has_value());
+                REQUIRE(next->unitType == "ARMDRAG");
+                REQUIRE((next->site - site).dot(east) > profile.fortifyTeethDistance - 30_ss);
+                addUnit(sim, "ARMDRAG", ai, next->site, script);
+            }
+            // Lost once: no missile tower yet.
+            REQUIRE_FALSE(planner.planFortification(sim, ai, profile, bb, rng).has_value());
+
+            SECTION("and lost again with its teeth in front: a missile tower behind it")
+            {
+                bb.now = GameTime(3000);
+                bb.recentLosses.insert(bb.recentLosses.begin(), LostBuilding{"ARMLLT", site, GameTime(3000)});
+                planner.recordLostDefences(sim, profile, bb);
+                REQUIRE(planner.getLostDefenceSites().front().timesLost == 2);
+
+                auto next = planner.planFortification(sim, ai, profile, bb, rng);
+                REQUIRE(next.has_value());
+                REQUIRE(next->unitType == "ARMRL");
+                REQUIRE((next->site - site).dot(east) <= 0_ss);
+                REQUIRE(flatDistanceBetween(next->site, site) <= profile.fortifyMissileCoverRadius);
+            }
+
+            SECTION("switched off, nothing")
+            {
+                profile.fortifyRebuiltDefences = false;
+                bb.recentLosses.insert(bb.recentLosses.begin(), LostBuilding{"ARMLLT", site, GameTime(3000)});
+                REQUIRE_FALSE(planner.planFortification(sim, ai, profile, bb, rng).has_value());
+            }
+        }
+
+        SECTION("a solar collector lost is nobody's to put back")
+        {
+            bb.now = GameTime(400);
+            bb.recentLosses.insert(bb.recentLosses.begin(), LostBuilding{"ARMSOLAR", SimVector(200_ss, 0_ss, 200_ss), GameTime(400)});
+            planner.recordLostDefences(sim, profile, bb);
+            REQUIRE(planner.getLostDefenceSites().size() == 1);
+        }
+
+        SECTION("switched off, nothing is remembered")
+        {
+            profile.rebuildLostDefences = false;
+            planner.recordLostDefences(sim, profile, bb);
+            REQUIRE(planner.getLostDefenceSites().empty());
+            (void)human;
+        }
+    }
+
+    TEST_CASE("solar collectors go up in rows behind the base", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        auto profile = makeDefaultStandardProfile();
+        AiBlackboard bb{};
+        bb.sideUnits = resolveAiSideUnits(sim, "ARM");
+        bb.sideUnitsResolved = true;
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+        // The enemy to the east, so behind is west.
+        bb.enemyBasePosition = SimVector(400_ss, 0_ss, 0_ss);
+
+        const auto& solarDef = sim.unitDefinitions.at("ARMSOLAR");
+        auto footprint = sim.getFootprintXZ(solarDef.movementCollisionInfo);
+        const auto spacing = SimScalar(static_cast<float>(std::max(footprint.first, footprint.second) + 2) * 16.0f);
+
+        BuildManager planner;
+        std::minstd_rand rng(42u);
+
+        SECTION("the first behind the base, on the nearest ring")
+        {
+            auto site = planner.chooseEnergyRowSite(sim, ai, profile, bb, "ARMSOLAR", *bb.baseAnchor, *bb.baseAnchor, rng, nullptr);
+            REQUIRE(site.has_value());
+            REQUIRE(site->x < 0_ss);
+            REQUIRE(rweAbs(site->x) <= spacing + 1_ss);
+            REQUIRE(rweAbs(site->z) <= spacing + 1_ss);
+        }
+
+        SECTION("the next beside it in a row, the side nearest the builder")
+        {
+            const SimVector first(-spacing, 0_ss, 0_ss);
+            addUnit(sim, "ARMSOLAR", ai, first, script);
+            const SimVector builder(-spacing, 0_ss, 200_ss);
+            auto site = planner.chooseEnergyRowSite(sim, ai, profile, bb, "ARMSOLAR", *bb.baseAnchor, builder, rng, nullptr);
+            REQUIRE(site.has_value());
+            REQUIRE(rweAbs(site->x - first.x) <= 1_ss);
+            REQUIRE(rweAbs(site->z - (first.z + spacing)) <= 1_ss);
+        }
+    }
+
     TEST_CASE("teeth go where a defence keeps being attacked from, and nowhere else", "[ai]")
     {
         // Driven directly rather than through a controller, so that when an
@@ -3204,6 +3550,85 @@ namespace rwe
             REQUIRE(site.has_value());
             REQUIRE(metalUnder(*site) == 200u);
         }
+
+        SECTION("a rule whose edge runs through a deposit still gets its heart")
+        {
+            // The commander's leash cut a Great Divide rock so that only its
+            // near column was inside, and the extractor went on that column,
+            // over four of the rock's nine cells. The ground rule is asked of
+            // the deposit now: one cell inside is enough.
+            paint(anchorHm.x + 6, anchorHm.y - 1, 3, 3);
+            const auto nearColumnEdge = sim.terrain.heightmapIndexToWorldCorner(anchorHm.x + 7, anchorHm.y).x;
+            BuildManager buildManager;
+            std::minstd_rand rng(1u);
+            auto site = buildManager.chooseMexSite(sim, "MEX", anchor, 1600_ss, rng, {}, [&](const SimVector& p) { return p.x < nearColumnEdge; });
+            REQUIRE(site.has_value());
+            REQUIRE(metalUnder(*site) == 9u * 200u);
+        }
+
+        SECTION("a deposit whose heart is refused waits, rather than taking the cell beside it")
+        {
+            // A dropped order is remembered as a site, and the next search
+            // used to take the site next to it on the same rock: 101 of the
+            // 173 extractors Great Divide put off-centre. With a second
+            // deposit further off, that one is taken instead.
+            paint(anchorHm.x + 6, anchorHm.y - 1, 3, 3);
+            const auto heart = sim.terrain.heightmapIndexToWorldCenter(anchorHm.x + 7, anchorHm.y);
+            auto notTheHeart = [&](const SimVector& p) { return p.distanceSquared(heart) > 4_ss; };
+            BuildManager buildManager;
+            std::minstd_rand rng(1u);
+            REQUIRE_FALSE(buildManager.chooseMexSite(sim, "MEX", anchor, 1600_ss, rng, notTheHeart).has_value());
+
+            // A fresh planner, since the patches are indexed once a game.
+            paint(anchorHm.x - 12, anchorHm.y - 1, 3, 3);
+            BuildManager later;
+            auto site = later.chooseMexSite(sim, "MEX", anchor, 1600_ss, rng, notTheHeart);
+            REQUIRE(site.has_value());
+            REQUIRE(site->x < anchor.x);
+            REQUIRE(metalUnder(*site) == 9u * 200u);
+        }
+
+        SECTION("a unit standing on its heart: it waits, and after a minute takes what is free")
+        {
+            // A 2x2 kbot over the deposit's corner cell and the ground
+            // beyond it: the centred extractor is refused, the placement one
+            // row up is not, and it covers six of the nine cells.
+            paint(anchorHm.x + 6, anchorHm.y - 1, 3, 3);
+            auto kbot = makeDef(false, false, true, "", 100u);
+            kbot.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+            sim.unitDefinitions["KBOT"] = kbot;
+            auto script = makeEmptyCobScript();
+            auto kbotId = addUnit(sim, "KBOT", PlayerId(0), sim.terrain.heightmapIndexToWorldCorner(anchorHm.x + 9, anchorHm.y + 2), script);
+            // The fixture's addUnit leaves the occupancy grid alone, so the
+            // kbot's cells are stamped by hand, as the simulation's own
+            // tryAddUnit stamps them.
+            auto kbotRect = sim.computeFootprintRegion(sim.getUnitState(kbotId).position, sim.unitDefinitions.at("KBOT").movementCollisionInfo);
+            sim.occupiedGrid.forEach(sim.occupiedGrid.clipRegion(kbotRect), [&](auto& cell) { cell.mobileUnitId = kbotId; });
+
+            BuildManager buildManager;
+            std::minstd_rand rng(1u);
+            REQUIRE_FALSE(buildManager.chooseMexSite(sim, "MEX", anchor, 1600_ss, rng, {}).has_value());
+
+            sim.gameTime = GameTime(sim.gameTime.value + (60u * 30u) - 1u);
+            REQUIRE_FALSE(buildManager.chooseMexSite(sim, "MEX", anchor, 1600_ss, rng, {}).has_value());
+
+            sim.gameTime = GameTime(sim.gameTime.value + 1u);
+            auto site = buildManager.chooseMexSite(sim, "MEX", anchor, 1600_ss, rng, {});
+            REQUIRE(site.has_value());
+            REQUIRE(metalUnder(*site) == 6u * 200u);
+        }
+
+        SECTION("nothing goes where the camera cannot see")
+        {
+            // The bottom eight rows of height tiles are past the camera's
+            // cut-off. A deposit there is out of a player's reach, and so out
+            // of the computer's.
+            const auto heights = sim.terrain.getHeightMap().getHeight();
+            paint(anchorHm.x - 1, heights - 6, 3, 3);
+            BuildManager buildManager;
+            std::minstd_rand rng(1u);
+            REQUIRE_FALSE(buildManager.chooseMexSite(sim, "MEX", anchor, 1600_ss, rng, {}).has_value());
+        }
     }
 
     TEST_CASE("with no free patch left, an extractor is reclaimed for a moho -- one, and only with the metal in hand", "[ai]")
@@ -3584,17 +4009,19 @@ namespace rwe
                 heights.set(x, y, static_cast<unsigned char>(90));
             }
         }
-        // The far island: tiles 94-105, i.e. world 608 to 800.
+        // The far island: tiles 2-13, i.e. world -864 to -672.
         //
         // A 6x6 building spaces its rings (6+2)*16 = 128 apart, so a 512
         // budget is four rings reaching 512 world units from the anchor at
         // world -16. Rings 1-4 put their whole footprint in open water; the
         // first candidate whose 6x6 lands entirely on this island is ring 6,
         // 768 out, about 1086 away -- past the budget and well inside the
-        // 2048 fallback.
-        for (int y = 94; y < 106; ++y)
+        // 2048 fallback. Up and to the left of the anchor, because the same
+        // island down and to the right sits past the camera's cut-off, where
+        // no site is offered (footprintInsideVisibleMap).
+        for (int y = 2; y < 14; ++y)
         {
-            for (int x = 94; x < 106; ++x)
+            for (int x = 2; x < 14; ++x)
             {
                 heights.set(x, y, static_cast<unsigned char>(90));
             }

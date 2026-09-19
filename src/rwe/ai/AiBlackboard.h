@@ -404,6 +404,13 @@ namespace rwe
         unsigned int commanderLastHitPoints{0};
         /** What is threatening it, if that is known: the nearest armed enemy seen lately. */
         std::optional<UnitId> commanderThreat;
+        /**
+         * What the commander was last sent to fight by the safety rule, so
+         * that rule can call off a chase it started -- and only one it
+         * started: the other rules that hand the commander an attack order
+         * own theirs.
+         */
+        std::optional<UnitId> commanderEngagedTarget;
 
         /**
          * Enemy units our radar can see and our eyes cannot, by unit id, with
