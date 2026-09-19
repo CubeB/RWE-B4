@@ -113,7 +113,28 @@ namespace rwe
             /** Set once it has finished building, so "started" and "finished" can be told apart. */
             unsigned int completedTick;
             bool completed;
+            /**
+             * Where it last stood, which for a dead unit is where it died.
+             * Kept every tick because a unit can leave the list without ever
+             * being seen dead, and by then there is no position to ask for.
+             */
+            float x;
+            float z;
+            /**
+             * What stood within deathScanRadius when it died: armed enemies
+             * and the nearest of them, its own side's mobile army, and its own
+             * side's armed buildings. There is no killer to record -- the
+             * simulation does not keep one -- and this answers the question
+             * the killer was wanted for: what was the thing up against, and
+             * was anybody there to help.
+             */
+            int enemiesNear;
+            std::string nearestEnemyType;
+            int friendlyArmyNear;
+            int friendlyTowersNear;
         };
+
+        static constexpr float deathScanRadius = 600.0f;
 
         unsigned int sampleIntervalTicks;
         std::vector<Row> rows;
@@ -121,5 +142,6 @@ namespace rwe
 
         void sample(const GameSimulation& sim);
         void trackUnits(const GameSimulation& sim);
+        void recordDeath(const GameSimulation& sim, unsigned int rawId, UnitRecord& record);
     };
 }

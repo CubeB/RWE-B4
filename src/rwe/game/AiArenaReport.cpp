@@ -87,10 +87,18 @@ namespace rwe
                 r.bornTick = now;
                 r.dead = false;
                 r.completed = false;
+                r.enemiesNear = 0;
+                r.friendlyArmyNear = 0;
+                r.friendlyTowersNear = 0;
                 it = units.emplace(unitId.value, std::move(r)).first;
             }
 
             auto& record = it->second;
+            if (!record.dead)
+            {
+                record.x = simScalarToFloat(unit.position.x);
+                record.z = simScalarToFloat(unit.position.z);
+            }
             if (!record.completed && !unit.isBeingBuilt(def))
             {
                 record.completed = true;
@@ -112,6 +120,7 @@ namespace rwe
                 record.diedTick = now;
                 LOG_DEBUG << "ARENA-DEATH tick=" << now << " player=" << record.player << " type=" << record.unitType
                           << " frame=" << (record.completed ? 0 : 1) << " born=" << record.bornTick;
+                recordDeath(sim, unitId.value, record);
             }
         }
 
@@ -129,6 +138,51 @@ namespace rwe
                 record.diedTick = now;
                 LOG_DEBUG << "ARENA-GONE tick=" << now << " player=" << record.player << " type=" << record.unitType
                          << " frame=" << (record.completed ? 0 : 1) << " born=" << record.bornTick;
+                recordDeath(sim, rawId, record);
+            }
+        }
+    }
+
+    void AiArenaReport::recordDeath(const GameSimulation& sim, unsigned int rawId, UnitRecord& record)
+    {
+        // A walk over every unit, but only once per death, and the arena is
+        // the only thing that runs this.
+        auto nearestDistanceSquared = deathScanRadius * deathScanRadius;
+        for (const auto& [otherId, other] : sim.units)
+        {
+            if (otherId.value == rawId || other.isDead())
+            {
+                continue;
+            }
+            const auto& otherDef = sim.unitDefinitions.at(other.unitType);
+            if (!otherDef.canAttack || other.isBeingBuilt(otherDef))
+            {
+                continue;
+            }
+            auto dx = simScalarToFloat(other.position.x) - record.x;
+            auto dz = simScalarToFloat(other.position.z) - record.z;
+            auto distanceSquared = (dx * dx) + (dz * dz);
+            if (distanceSquared > deathScanRadius * deathScanRadius)
+            {
+                continue;
+            }
+            if (static_cast<int>(other.owner.value) == record.player || sim.arePlayersAllied(other.owner, PlayerId(record.player)))
+            {
+                if (otherDef.isMobile)
+                {
+                    ++record.friendlyArmyNear;
+                }
+                else
+                {
+                    ++record.friendlyTowersNear;
+                }
+                continue;
+            }
+            ++record.enemiesNear;
+            if (distanceSquared <= nearestDistanceSquared)
+            {
+                nearestDistanceSquared = distanceSquared;
+                record.nearestEnemyType = other.unitType;
             }
         }
     }
@@ -276,7 +330,8 @@ namespace rwe
         if (events)
         {
             events << "player,unitType,category,isBuilding,startedTick,startedSeconds,"
-                      "completedTick,completedSeconds,diedTick,diedSeconds\n";
+                      "completedTick,completedSeconds,diedTick,diedSeconds,"
+                      "x,z,enemiesNear,nearestEnemyType,friendlyArmyNear,friendlyTowersNear\n";
             for (const auto& [rawId, r] : units)
             {
                 events << r.player << ',' << r.unitType << ',' << r.category << ',' << (r.isBuilding ? 1 : 0) << ','
@@ -291,11 +346,22 @@ namespace rwe
                 }
                 if (r.dead)
                 {
-                    events << r.diedTick << ',' << (r.diedTick / ticksPerSecond) << '\n';
+                    events << r.diedTick << ',' << (r.diedTick / ticksPerSecond) << ',';
                 }
                 else
                 {
-                    events << ",\n";
+                    events << ",,";
+                }
+                // The position is where it stands now if it still stands.
+                // The rest means something only for the dead.
+                events << static_cast<int>(r.x) << ',' << static_cast<int>(r.z) << ',';
+                if (r.dead)
+                {
+                    events << r.enemiesNear << ',' << r.nearestEnemyType << ',' << r.friendlyArmyNear << ',' << r.friendlyTowersNear << '\n';
+                }
+                else
+                {
+                    events << ",,,\n";
                 }
             }
         }
