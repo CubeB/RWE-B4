@@ -1199,6 +1199,78 @@ namespace rwe
          * finished, takes the fortification up as soon as the towers stand.
          */
         int fortifyExtraConstructors{1};
+
+        /**
+         * Teeth only where a defence has been shown to need them: a few in
+         * front of a defence of ours that has been attacked repeatedly from
+         * one side, on that side. Where fortifyTowers lays a line at every
+         * tower whether or not anything ever comes, this waits for the
+         * evidence -- a defence hit in fortifyRepeatAttacks separate attacks
+         * whose directions agree -- and the builder goes out between attacks,
+         * since a tooth site under an enemy gun is refused.
+         *
+         * The direction is worked out from what can be seen, not from what
+         * hit it, because the simulation keeps no record of that: the armed
+         * ground enemies within fortifyAttackerRadius of the defence at the
+         * moment it is seen to have lost hit points. An attack is hits no
+         * more than fortifyAttackGapSeconds apart; attacks older than
+         * fortifyAttackMemorySeconds are forgotten. See
+         * BuildManager::watchDefences.
+         *
+         * Measured neutral and left on, since it costs next to nothing: it
+         * lays teeth in about a third of games, and over eight Great Divide
+         * seeds each for ARM against ARM and for CORE it changed two and four
+         * of them, evenly both ways. ROADMAP, 2026-09-19.
+         */
+        bool fortifyWhereAttacked{true};
+        int fortifyRepeatAttacks{2};
+        int fortifyReactiveTeeth{3};
+        int fortifyAttackGapSeconds{20};
+        int fortifyAttackMemorySeconds{600};
+        SimScalar fortifyAttackerRadius{500_ss};
+
+        /**
+         * Builders mend before they build: a damaged defence first, then a
+         * damaged factory, the nearest of the more important kind within
+         * repairSearchRadius, with no more than repairersPerStructure on
+         * any one. Damaged means below repairStructuresBelowPercent of its
+         * hit points, in whole percent so the test stays in integers inside
+         * the simulation. Repair costs energy and builder time and no metal
+         * (one hit point and one energy a tick per repairer, TOTALA-EXE.md
+         * 94), so a tower mended is a tower not bought again. Measured
+         * neutral over sixteen ARM-against-ARM seeds (better in five, worse
+         * in five) and kept, being what a player does.
+         */
+        bool repairStructures{true};
+        int repairStructuresBelowPercent{90};
+        SimScalar repairSearchRadius{800_ss};
+        int repairersPerStructure{2};
+        /**
+         * Whether a builder is sent to a structure while an armed enemy is
+         * still within productionHarassRadius of it. Off, the mending waits
+         * for the attack to pass, as the tooth line does. Off is the better
+         * of the two over sixteen ARM-against-ARM seeds -- better in three,
+         * worse in one -- for the reason the tower fortification did not pay:
+         * a construction kbot walked into a raid is lost to it.
+         */
+        bool repairUnderFire{false};
+
+        /**
+         * A damaged commander comes before anything: construction units are
+         * taken off whatever they are doing -- up to commanderRepairers of
+         * them, the nearest within repairCommanderRadius -- to mend it. The
+         * commander is the game, and it cannot mend itself.
+         *
+         * Between computer players this almost never fires, and not for want
+         * of a builder in range: over 32 games the commander fell below the
+         * line 34 times, and 32 of those times its side had no construction
+         * unit left at all -- a commander is hurt once the base has fallen.
+         * It is there for the player who goes for the commander early.
+         */
+        bool repairCommander{true};
+        int repairCommanderBelowPercent{90};
+        SimScalar repairCommanderRadius{1200_ss};
+        int commanderRepairers{2};
         /**
          * Units built during an attack gather at the rally point for the
          * next wave instead of walking to the front one at a time. The

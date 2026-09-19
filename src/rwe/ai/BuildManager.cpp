@@ -1,6 +1,7 @@
 #include "BuildManager.h"
 #include <rwe/sim/SimRandom.h>
 #include <algorithm>
+#include <cmath>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/util/SimpleLogger.h>
 #include <rwe/sim/MapTerrain.h>
@@ -1309,6 +1310,325 @@ namespace rwe
         return plan;
     }
 
+    void BuildManager::watchDefences(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb)
+    {
+        if (!profile.fortifyWhereAttacked || bb.sideUnits.dragonsTeeth.empty())
+        {
+            defenceWatch.clear();
+            defenceTeethOwed = false;
+            return;
+        }
+        if (defenceWatchedAt && bb.now.value - defenceWatchedAt->value < DefenceWatchIntervalTicks)
+        {
+            return;
+        }
+        defenceWatchedAt = bb.now;
+
+        const auto gapTicks = static_cast<unsigned int>(std::max(0, profile.fortifyAttackGapSeconds)) * SimTicksPerSecond;
+        const auto memoryTicks = static_cast<unsigned int>(std::max(0, profile.fortifyAttackMemorySeconds)) * SimTicksPerSecond;
+        const auto attackerRadiusSquared = profile.fortifyAttackerRadius * profile.fortifyAttackerRadius;
+
+        for (const auto& [rawId, standing] : bb.standingBuildings)
+        {
+            auto defIt = sim.unitDefinitions.find(standing.unitType);
+            if (defIt == sim.unitDefinitions.end() || !defIt->second.canAttack)
+            {
+                continue;
+            }
+            auto unitRef = sim.tryGetUnitState(UnitId(rawId));
+            if (!unitRef)
+            {
+                continue;
+            }
+            const auto hitPoints = unitRef->get().hitPoints;
+            auto [it, fresh] = defenceWatch.try_emplace(rawId);
+            auto& watch = it->second;
+            watch.position = standing.position;
+            watch.seenAt = bb.now;
+            if (!fresh && hitPoints < watch.hitPoints)
+            {
+                // Hit since the last look. Nothing records by whom, so it is
+                // whoever armed we can see standing within reach of it --
+                // on the ground, because a tooth stops nothing that flies.
+                SimVector toward(0_ss, 0_ss, 0_ss);
+                bool seen = false;
+                for (const auto& [_, enemy] : bb.knownEnemies)
+                {
+                    if (!enemy.isArmed || enemy.isAir || enemy.isBuilding)
+                    {
+                        continue;
+                    }
+                    const SimVector offset(enemy.lastKnownPosition.x - standing.position.x, 0_ss, enemy.lastKnownPosition.z - standing.position.z);
+                    const auto distanceSquared = offset.lengthSquared();
+                    if (distanceSquared == 0_ss || distanceSquared > attackerRadiusSquared)
+                    {
+                        continue;
+                    }
+                    toward += offset.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
+                    seen = true;
+                }
+                if (seen)
+                {
+                    if (watch.episodes.empty() || bb.now.value - watch.episodes.back().lastHitAt.value > gapTicks)
+                    {
+                        watch.episodes.push_back(AttackEpisode{toward, bb.now});
+                        if (watch.episodes.size() > MaxAttackEpisodes)
+                        {
+                            watch.episodes.erase(watch.episodes.begin());
+                        }
+                    }
+                    else
+                    {
+                        watch.episodes.back().direction += toward;
+                        watch.episodes.back().lastHitAt = bb.now;
+                    }
+                }
+            }
+            watch.hitPoints = hitPoints;
+        }
+
+        // Forget what no longer stands and attacks too old to count, and
+        // for each defence decide whether its attacks agree on a side: the
+        // latest attack's direction, and every attack within 45 degrees of
+        // it, need to number fortifyRepeatAttacks.
+        const auto agreeing = SimScalar(0.7071f);
+        defenceTeethOwed = false;
+        for (auto it = defenceWatch.begin(); it != defenceWatch.end();)
+        {
+            auto& watch = it->second;
+            if (watch.seenAt.value != bb.now.value)
+            {
+                it = defenceWatch.erase(it);
+                continue;
+            }
+            watch.episodes.erase(
+                std::remove_if(watch.episodes.begin(), watch.episodes.end(), [&](const AttackEpisode& e) { return bb.now.value - e.lastHitAt.value > memoryTicks; }),
+                watch.episodes.end());
+            watch.teethToward.reset();
+            if (!watch.episodes.empty() && static_cast<int>(watch.episodes.size()) >= profile.fortifyRepeatAttacks)
+            {
+                const auto latest = watch.episodes.back().direction.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
+                SimVector sum(0_ss, 0_ss, 0_ss);
+                int agree = 0;
+                for (const auto& episode : watch.episodes)
+                {
+                    const auto direction = episode.direction.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
+                    if (direction.dot(latest) >= agreeing)
+                    {
+                        sum += direction;
+                        ++agree;
+                    }
+                }
+                if (agree >= profile.fortifyRepeatAttacks && !(sum.x == 0_ss && sum.z == 0_ss))
+                {
+                    watch.teethToward = sum.normalizedOr(latest);
+                    defenceTeethOwed = true;
+                }
+            }
+            ++it;
+        }
+    }
+
+    std::optional<UnitId> BuildManager::chooseRepairTarget(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        const SimVector& from,
+        const std::function<bool(const SimVector&)>& reachable) const
+    {
+        if (!profile.repairStructures)
+        {
+            return std::nullopt;
+        }
+        const auto radiusSquared = profile.repairSearchRadius * profile.repairSearchRadius;
+
+        struct Damaged
+        {
+            unsigned int id;
+            int rank;
+            SimScalar distanceSquared;
+        };
+        std::vector<Damaged> damaged;
+        for (const auto& [rawId, standing] : bb.standingBuildings)
+        {
+            auto defIt = sim.unitDefinitions.find(standing.unitType);
+            if (defIt == sim.unitDefinitions.end())
+            {
+                continue;
+            }
+            const auto& def = defIt->second;
+            // Defences, then factories. Nothing else is worth taking a
+            // builder off building for.
+            int rank;
+            if (def.canAttack)
+            {
+                rank = 0;
+            }
+            else if (isFactory(def))
+            {
+                rank = 1;
+            }
+            else
+            {
+                continue;
+            }
+            auto unitRef = sim.tryGetUnitState(UnitId(rawId));
+            if (!unitRef || unitRef->get().isDead())
+            {
+                continue;
+            }
+            const auto& unit = unitRef->get();
+            if (static_cast<long long>(unit.hitPoints) * 100 >= static_cast<long long>(def.maxHitPoints) * profile.repairStructuresBelowPercent)
+            {
+                continue;
+            }
+            const auto dx = unit.position.x - from.x;
+            const auto dz = unit.position.z - from.z;
+            const auto distanceSquared = (dx * dx) + (dz * dz);
+            if (distanceSquared > radiusSquared || (reachable && !reachable(unit.position)))
+            {
+                continue;
+            }
+            if (!profile.repairUnderFire && siteUnderEnemyGuns(profile, bb, unit.position))
+            {
+                continue;
+            }
+            damaged.push_back(Damaged{rawId, rank, distanceSquared});
+        }
+        if (damaged.empty())
+        {
+            return std::nullopt;
+        }
+
+        // Who of ours is on each already. Walked only when something is
+        // damaged, which is most of the time nothing.
+        std::map<unsigned int, int> repairers;
+        for (const auto& [unitId, unit] : sim.units)
+        {
+            if (unit.owner != aiOwner || !unit.isAlive() || unit.orders.empty())
+            {
+                continue;
+            }
+            if (auto repair = std::get_if<RepairOrder>(&unit.orders.front()); repair != nullptr)
+            {
+                ++repairers[repair->target.value];
+            }
+        }
+
+        const Damaged* best = nullptr;
+        for (const auto& candidate : damaged)
+        {
+            if (auto held = repairers.find(candidate.id); held != repairers.end() && held->second >= profile.repairersPerStructure)
+            {
+                continue;
+            }
+            if (!best || candidate.rank < best->rank || (candidate.rank == best->rank && candidate.distanceSquared < best->distanceSquared))
+            {
+                best = &candidate;
+            }
+        }
+        if (!best)
+        {
+            return std::nullopt;
+        }
+        return UnitId(best->id);
+    }
+
+    void BuildManager::sendRepairersToCommander(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        std::vector<PlayerCommand>& outCommands)
+    {
+        if (!profile.repairCommander || !bb.commanderUnitId)
+        {
+            return;
+        }
+        // Every half second is plenty, and it is longer than an order takes
+        // to land, so a unit sent last time is counted as on it this time
+        // rather than sent again.
+        if (commanderRepairCheckedAt && bb.now.value - commanderRepairCheckedAt->value < DefenceWatchIntervalTicks)
+        {
+            return;
+        }
+        commanderRepairCheckedAt = bb.now;
+
+        auto commanderRef = sim.tryGetUnitState(*bb.commanderUnitId);
+        if (!commanderRef || commanderRef->get().isDead())
+        {
+            return;
+        }
+        const auto& commander = commanderRef->get();
+        const auto& commanderDef = sim.unitDefinitions.at(commander.unitType);
+        if (static_cast<long long>(commander.hitPoints) * 100 >= static_cast<long long>(commanderDef.maxHitPoints) * profile.repairCommanderBelowPercent)
+        {
+            commanderHurtLogged = false;
+            return;
+        }
+
+        const auto radiusSquared = profile.repairCommanderRadius * profile.repairCommanderRadius;
+        int onIt = 0;
+        std::optional<UnitId> nearest;
+        SimScalar nearestDistanceSquared = 0_ss;
+        // The nearest wherever it is, for the log line alone: whether a
+        // commander goes unmended because no builder is near or because
+        // none is left is the question that line answers.
+        std::optional<SimScalar> anyDistanceSquared;
+        for (const auto& [unitId, unit] : sim.units)
+        {
+            if (unit.owner != aiOwner || !unit.isAlive() || unitId == *bb.commanderUnitId)
+            {
+                continue;
+            }
+            const auto& def = sim.unitDefinitions.at(unit.unitType);
+            if (!def.builder || !def.isMobile || !def.canReclamate || unit.isBeingBuilt(def))
+            {
+                continue;
+            }
+            if (!unit.orders.empty())
+            {
+                if (auto repair = std::get_if<RepairOrder>(&unit.orders.front()); repair != nullptr && repair->target == *bb.commanderUnitId)
+                {
+                    ++onIt;
+                    continue;
+                }
+            }
+            const auto dx = unit.position.x - commander.position.x;
+            const auto dz = unit.position.z - commander.position.z;
+            const auto distanceSquared = (dx * dx) + (dz * dz);
+            if (!anyDistanceSquared || distanceSquared < *anyDistanceSquared)
+            {
+                anyDistanceSquared = distanceSquared;
+            }
+            if (distanceSquared > radiusSquared)
+            {
+                continue;
+            }
+            if (!nearest || distanceSquared < nearestDistanceSquared)
+            {
+                nearest = unitId;
+                nearestDistanceSquared = distanceSquared;
+            }
+        }
+        if (!commanderHurtLogged)
+        {
+            commanderHurtLogged = true;
+            LOG_INFO << "AI build: the commander is hurt (" << commander.hitPoints << " of " << commanderDef.maxHitPoints
+                     << " hit points) at " << static_cast<int>(commander.position.x.value) << "," << static_cast<int>(commander.position.z.value) << ": "
+                     << onIt << " mending it, "
+                     << (anyDistanceSquared ? "the nearest builder " + std::to_string(static_cast<int>(std::sqrt(simScalarToFloat(*anyDistanceSquared)))) + " away" : std::string("no builder left"));
+        }
+        if (onIt >= profile.commanderRepairers || !nearest)
+        {
+            return;
+        }
+        LOG_INFO << "AI build: unit " << nearest->value << " leaves what it was doing to repair the commander ("
+                 << commander.hitPoints << " of " << commanderDef.maxHitPoints << " hit points)";
+        outCommands.emplace_back(PlayerUnitCommand(*nearest, PlayerUnitCommand::IssueOrder(RepairOrder(*bb.commanderUnitId), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+    }
+
     std::optional<BuildManager::FortificationPlan> BuildManager::planFortification(
         const GameSimulation& sim,
         PlayerId aiOwner,
@@ -1317,19 +1637,26 @@ namespace rwe
         std::minstd_rand& rng) const
     {
         const auto& s = bb.sideUnits;
-        if (!profile.fortifyTowers || !bb.baseAnchor || s.lightLaserTower.empty())
+        // Two ways in: every laser tower fortified as it stands
+        // (fortifyTowers, measured and left off), or teeth only where
+        // attacks have kept coming from (fortifyWhereAttacked, decided by
+        // watchDefences). The second is nearly always nothing to do, and
+        // says so here before anything is walked.
+        const bool everyTower = profile.fortifyTowers && !s.lightLaserTower.empty();
+        const bool whereAttacked = profile.fortifyWhereAttacked && defenceTeethOwed;
+        if ((!everyTower && !whereAttacked) || !bb.baseAnchor)
         {
             return std::nullopt;
         }
         const UnitDefinition* teethDef = nullptr;
-        if (profile.fortifyTeethPerTower > 0 && !s.dragonsTeeth.empty())
+        if (!s.dragonsTeeth.empty())
         {
             if (auto it = sim.unitDefinitions.find(s.dragonsTeeth); it != sim.unitDefinitions.end())
             {
                 teethDef = &it->second;
             }
         }
-        const bool wantMissiles = profile.fortifyMissileTower && !s.antiAirTower.empty() && sim.unitDefinitions.count(s.antiAirTower) != 0;
+        const bool wantMissiles = everyTower && profile.fortifyMissileTower && !s.antiAirTower.empty() && sim.unitDefinitions.count(s.antiAirTower) != 0;
         if (teethDef == nullptr && !wantMissiles)
         {
             return std::nullopt;
@@ -1349,7 +1676,7 @@ namespace rwe
             {
                 continue;
             }
-            if (unit.unitType == s.lightLaserTower && !unit.isBeingBuilt(sim.unitDefinitions.at(unit.unitType)))
+            if (everyTower && unit.unitType == s.lightLaserTower && !unit.isBeingBuilt(sim.unitDefinitions.at(unit.unitType)))
             {
                 towers.emplace_back(unitId, unit.position);
             }
@@ -1376,10 +1703,6 @@ namespace rwe
                 }
             }
         }
-        if (towers.empty())
-        {
-            return std::nullopt;
-        }
 
         SimScalar toothWidth = 32_ss;
         if (teethDef != nullptr)
@@ -1389,6 +1712,85 @@ namespace rwe
         }
         const auto toothTaken = toothWidth / 2_ss;
 
+        // The first free tooth of a line of `count` laid across `towards`,
+        // fortifyTeethDistance in front of `tower`, from the middle outward
+        // -- 0, +1, -1, +2, -2 -- so a line left half built still stands
+        // across the straight approach. A site the ground will not take is
+        // passed over rather than moved, because a line is only a line if
+        // its teeth touch.
+        auto firstFreeTooth = [&](const SimVector& tower, const SimVector& towards, int count) -> std::optional<SimVector> {
+            auto mc = sim.getAdHocMovementClass(teethDef->movementCollisionInfo);
+            const SimVector across(-towards.z, 0_ss, towards.x);
+            const auto centre = tower + (towards * profile.fortifyTeethDistance);
+            for (int i = 0; i < count; ++i)
+            {
+                const int step = ((i + 1) / 2) * ((i % 2) == 1 ? 1 : -1);
+                auto slot = centre + (across * (toothWidth * SimScalar(static_cast<float>(step))));
+                slot.y = sim.terrain.getHeightAt(slot.x, slot.z);
+                bool taken = false;
+                for (const auto& tooth : teeth)
+                {
+                    if (flatDistance(tooth, slot) < toothTaken)
+                    {
+                        taken = true;
+                        break;
+                    }
+                }
+                // Not under a gun either: a frame is born with no hit
+                // points, and a tooth put down under one is only a loss.
+                if (taken || siteFailedLately(sim, slot) || siteUnderEnemyGuns(profile, bb, slot))
+                {
+                    continue;
+                }
+                auto rect = sim.computeFootprintRegion(slot, teethDef->movementCollisionInfo);
+                if (rect.x < 0 || rect.y < 0
+                    || !sim.canBeBuiltAt(mc, teethDef->yardMap, teethDef->yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+                {
+                    continue;
+                }
+                return slot;
+            }
+            return std::nullopt;
+        };
+
+        // Where attacks keep coming from, first: that is ground already
+        // shown to need it. A defence whose side already has its few teeth
+        // -- counted as any of ours on that side of it and within reach of
+        // the line -- is left alone, so a direction that drifts a little
+        // between attacks does not start a second line.
+        if (whereAttacked && teethDef != nullptr && profile.fortifyReactiveTeeth > 0)
+        {
+            const auto reach = profile.fortifyTeethDistance + (toothWidth * 2_ss);
+            for (const auto& [rawId, watch] : defenceWatch)
+            {
+                if (!watch.teethToward)
+                {
+                    continue;
+                }
+                const auto& towards = *watch.teethToward;
+                int standing = 0;
+                for (const auto& tooth : teeth)
+                {
+                    if ((tooth - watch.position).dot(towards) > 0_ss && flatDistance(tooth, watch.position) <= reach)
+                    {
+                        ++standing;
+                    }
+                }
+                if (standing >= profile.fortifyReactiveTeeth)
+                {
+                    continue;
+                }
+                if (auto slot = firstFreeTooth(watch.position, towards, profile.fortifyReactiveTeeth))
+                {
+                    return FortificationPlan{s.dragonsTeeth, *slot, UnitId(rawId)};
+                }
+            }
+        }
+
+        if (!everyTower)
+        {
+            return std::nullopt;
+        }
         for (const auto& [towerId, tower] : towers)
         {
             // The approach is the way the enemy is, from this tower; before
@@ -1401,41 +1803,12 @@ namespace rwe
                 continue;
             }
             towards = towards.normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
-            const SimVector across(-towards.z, 0_ss, towards.x);
 
-            if (teethDef != nullptr)
+            if (teethDef != nullptr && profile.fortifyTeethPerTower > 0)
             {
-                auto mc = sim.getAdHocMovementClass(teethDef->movementCollisionInfo);
-                const auto centre = tower + (towards * profile.fortifyTeethDistance);
-                // From the middle outward -- 0, +1, -1, +2, -2 -- so a line
-                // left half built still stands across the straight approach.
-                for (int i = 0; i < profile.fortifyTeethPerTower; ++i)
+                if (auto slot = firstFreeTooth(tower, towards, profile.fortifyTeethPerTower))
                 {
-                    const int step = ((i + 1) / 2) * ((i % 2) == 1 ? 1 : -1);
-                    auto slot = centre + (across * (toothWidth * SimScalar(static_cast<float>(step))));
-                    slot.y = sim.terrain.getHeightAt(slot.x, slot.z);
-                    bool taken = false;
-                    for (const auto& tooth : teeth)
-                    {
-                        if (flatDistance(tooth, slot) < toothTaken)
-                        {
-                            taken = true;
-                            break;
-                        }
-                    }
-                    // Not under a gun either: a frame is born with no hit
-                    // points, and a tooth put down under one is only a loss.
-                    if (taken || siteFailedLately(sim, slot) || siteUnderEnemyGuns(profile, bb, slot))
-                    {
-                        continue;
-                    }
-                    auto rect = sim.computeFootprintRegion(slot, teethDef->movementCollisionInfo);
-                    if (rect.x < 0 || rect.y < 0
-                        || !sim.canBeBuiltAt(mc, teethDef->yardMap, teethDef->yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
-                    {
-                        continue;
-                    }
-                    return FortificationPlan{s.dragonsTeeth, slot, towerId};
+                    return FortificationPlan{s.dragonsTeeth, *slot, towerId};
                 }
             }
 
@@ -2622,6 +2995,12 @@ namespace rwe
 
         planFactories(sim, profile, bb, outCommands);
 
+        // Every pass, whether or not a builder is idle: the defences are
+        // watched for where attacks come from, and a damaged commander takes
+        // a construction unit off whatever it is doing.
+        watchDefences(sim, profile, bb);
+        sendRepairersToCommander(sim, aiOwner, profile, bb, outCommands);
+
         // One job per planning pass keeps counts honest: the next pass sees
         // the nanoframe in ownedTotalCounts and moves on to the next need.
         // Whose job it is rotates, rather than always falling to the front of
@@ -2815,6 +3194,24 @@ namespace rwe
             return t == sideUnits.metalExtractor || t == sideUnits.metalMaker
                 || (energyWanted && (t == sideUnits.solar || t == sideUnits.tidalGenerator));
         };
+
+        // Mending before building: a damaged defence first, then a damaged
+        // factory, nearest first within its kind. Repair costs energy and
+        // time but no metal, so a tower mended between attacks is a tower
+        // not bought again. Only a builder whose FBI lets it repair is
+        // asked; every shipped one does.
+        if (builderDef.canReclamate)
+        {
+            if (auto target = chooseRepairTarget(sim, aiOwner, profile, bb, builder.position, siteReachable))
+            {
+                const auto& damaged = sim.getUnitState(*target);
+                LOG_INFO << "AI build: unit " << builderId.value << " repairs " << damaged.unitType << " " << target->value << " ("
+                         << damaged.hitPoints << " of " << sim.unitDefinitions.at(damaged.unitType).maxHitPoints << " hit points)";
+                savingFor.clear();
+                outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(*target), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                return;
+            }
+        }
 
         // A frame left standing comes before anything new. Its metal is
         // already half paid, the plan wanted it, and it is rotting.
@@ -3089,7 +3486,7 @@ namespace rwe
         // teeth nor the missile tower, and walking the base for it would
         // be wasted.
         std::optional<FortificationPlan> fortify;
-        if (builderAtBase && profile.fortifyTowers
+        if (builderAtBase && (profile.fortifyTowers || (profile.fortifyWhereAttacked && defenceTeethOwed))
             && ((!sideUnits.dragonsTeeth.empty() && bb.buildTree.canBuild(builder.unitType, sideUnits.dragonsTeeth))
                 || (!sideUnits.antiAirTower.empty() && bb.buildTree.canBuild(builder.unitType, sideUnits.antiAirTower))))
         {

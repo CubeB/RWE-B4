@@ -2536,6 +2536,239 @@ namespace rwe
         }
     }
 
+    TEST_CASE("teeth go where a defence keeps being attacked from, and nowhere else", "[ai]")
+    {
+        // Driven directly rather than through a controller, so that when an
+        // attack happens and from where is set by hand: the watch is asked
+        // to look, the tower loses hit points with an armed enemy standing
+        // on one side of it, the enemy leaves, and the watch looks again.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.unitDefinitions["ARMDRAG"] = makeDef(false, false, false, "", 10u);
+
+        const SimVector tower(0_ss, 0_ss, 0_ss);
+        auto towerId = addUnit(sim, "ARMLLT", ai, tower, script);
+        sim.getUnitState(towerId).hitPoints = 100;
+
+        auto profile = makeDefaultStandardProfile();
+        profile.fortifyTowers = false;
+        profile.fortifyWhereAttacked = true;
+
+        AiBlackboard bb{};
+        bb.sideUnits = resolveAiSideUnits(sim, "ARM");
+        bb.sideUnitsResolved = true;
+        bb.baseAnchor = SimVector(-300_ss, 0_ss, 0_ss);
+        bb.standingBuildings[towerId.value] = StandingBuilding{"ARMLLT", tower};
+        REQUIRE(bb.sideUnits.dragonsTeeth == "ARMDRAG");
+
+        const auto gap = static_cast<unsigned int>(profile.fortifyAttackGapSeconds) * 30u;
+        const SimVector east(1_ss, 0_ss, 0_ss);
+        BuildManager planner;
+        std::minstd_rand rng(42u);
+        unsigned int now = 0;
+
+        auto look = [&] {
+            bb.now = GameTime(now);
+            planner.watchDefences(sim, profile, bb);
+        };
+        auto attackFrom = [&](const SimVector& from) {
+            bb.knownEnemies[9999u] = KnownEnemy{UnitId(9999u), "ARMPW", tower + from, GameTime(now), false, true, false};
+            now += 30;
+            sim.getUnitState(towerId).hitPoints -= 10;
+            look();
+            // And gone again, as raiders are, for longer than the gap
+            // that makes the next hit a separate attack.
+            bb.knownEnemies.clear();
+            now += gap + 30;
+            look();
+        };
+        look();
+
+        SECTION("twice from the east: a few teeth to the east, and then no more")
+        {
+            attackFrom(SimVector(300_ss, 0_ss, 0_ss));
+            REQUIRE_FALSE(planner.planFortification(sim, ai, profile, bb, rng).has_value());
+
+            attackFrom(SimVector(300_ss, 0_ss, 40_ss));
+            auto plan = planner.planFortification(sim, ai, profile, bb, rng);
+            REQUIRE(plan.has_value());
+            REQUIRE(plan->unitType == "ARMDRAG");
+            REQUIRE(plan->tower == towerId);
+            REQUIRE((plan->site - tower).dot(east) > profile.fortifyTeethDistance - 30_ss);
+
+            for (int i = 0; i < profile.fortifyReactiveTeeth; ++i)
+            {
+                auto next = planner.planFortification(sim, ai, profile, bb, rng);
+                REQUIRE(next.has_value());
+                REQUIRE((next->site - tower).dot(east) > 0_ss);
+                addUnit(sim, "ARMDRAG", ai, next->site, script);
+            }
+            REQUIRE_FALSE(planner.planFortification(sim, ai, profile, bb, rng).has_value());
+        }
+
+        SECTION("once from the east and once from the north: nothing")
+        {
+            attackFrom(SimVector(300_ss, 0_ss, 0_ss));
+            attackFrom(SimVector(0_ss, 0_ss, -300_ss));
+            REQUIRE_FALSE(planner.planFortification(sim, ai, profile, bb, rng).has_value());
+        }
+
+        SECTION("off: nothing, however often")
+        {
+            profile.fortifyWhereAttacked = false;
+            attackFrom(SimVector(300_ss, 0_ss, 0_ss));
+            attackFrom(SimVector(300_ss, 0_ss, 0_ss));
+            REQUIRE_FALSE(planner.planFortification(sim, ai, profile, bb, rng).has_value());
+        }
+    }
+
+    namespace
+    {
+        /**
+         * A base built out as far as its two towers, the commander walking
+         * off so the construction kbot is the builder the planner has, and
+         * every builder able to repair, as every shipped one is.
+         */
+        struct RepairBase
+        {
+            std::shared_ptr<CobScript> script = makeEmptyCobScript();
+            GameSimulation sim{makeFlatTerrain(), 0u, 0, 0};
+            PlayerId ai;
+            UnitId commanderId{0};
+            UnitId kbotId{0};
+            UnitId labId{0};
+            UnitId towerId{0};
+            UnitId solarId{0};
+
+            RepairBase()
+                : ai(addPlayer(sim, "ai", GamePlayerType::Computer, "ARM"))
+            {
+                defineWorld(sim);
+                sim.unitDefinitions["ARMCK"].canReclamate = true;
+                sim.unitDefinitions["ARMCOM"].canReclamate = true;
+                commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+                sim.getUnitState(commanderId).addOrder(MoveOrder(SimVector(-400_ss, 0_ss, 400_ss)));
+                kbotId = addUnit(sim, "ARMCK", ai, SimVector(-60_ss, 0_ss, 60_ss), script);
+                for (int i = 0; i < 4; ++i)
+                {
+                    auto id = addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(-200.0f + i * 40.0f), 0_ss, 150_ss), script);
+                    if (i == 0)
+                    {
+                        solarId = id;
+                    }
+                }
+                for (int i = 0; i < 3; ++i)
+                {
+                    addUnit(sim, "ARMMEX", ai, SimVector(-200_ss, 0_ss, SimScalar(-40.0f + i * 40.0f)), script);
+                }
+                labId = addUnit(sim, "ARMLAB", ai, SimVector(0_ss, 0_ss, 200_ss), script);
+                addUnit(sim, "ARMVP", ai, SimVector(-120_ss, 0_ss, 220_ss), script);
+                addUnit(sim, "ARMRAD", ai, SimVector(-100_ss, 0_ss, 100_ss), script);
+                towerId = addUnit(sim, "ARMLLT", ai, SimVector(100_ss, 0_ss, -100_ss), script);
+                addUnit(sim, "ARMLLT", ai, SimVector(-100_ss, 0_ss, -100_ss), script);
+                for (auto& [id, unit] : sim.units)
+                {
+                    unit.hitPoints = sim.unitDefinitions.at(unit.unitType).maxHitPoints;
+                }
+            }
+
+            /** What the kbot is first told to repair, over the second the planner needs. */
+            std::optional<UnitId> firstRepair(const AiTuningProfile& profile)
+            {
+                AiPlayerController controller(ai, profile, 42u, MapIntel{});
+                std::vector<PlayerCommand> commands;
+                runTicks(sim, controller, 31, commands);
+                auto repairs = ordersFor<RepairOrder>(commands, kbotId);
+                if (repairs.empty())
+                {
+                    return std::nullopt;
+                }
+                return repairs.front().target;
+            }
+        };
+    }
+
+    TEST_CASE("builders mend a damaged defence first, then a damaged factory", "[ai]")
+    {
+        RepairBase base;
+        auto profile = makeDefaultStandardProfile();
+
+        SECTION("the tower before the lab, though the lab is as badly hurt")
+        {
+            base.sim.getUnitState(base.towerId).hitPoints = 40;
+            base.sim.getUnitState(base.labId).hitPoints = 40;
+            REQUIRE(base.firstRepair(profile) == std::optional<UnitId>(base.towerId));
+        }
+
+        SECTION("the lab, once the towers are whole")
+        {
+            base.sim.getUnitState(base.labId).hitPoints = 40;
+            REQUIRE(base.firstRepair(profile) == std::optional<UnitId>(base.labId));
+        }
+
+        SECTION("a solar collector is not worth the trip")
+        {
+            base.sim.getUnitState(base.solarId).hitPoints = 40;
+            REQUIRE_FALSE(base.firstRepair(profile).has_value());
+        }
+
+        SECTION("off, nothing is mended")
+        {
+            profile.repairStructures = false;
+            base.sim.getUnitState(base.towerId).hitPoints = 40;
+            REQUIRE_FALSE(base.firstRepair(profile).has_value());
+        }
+
+        SECTION("with the raider still beside it, repairUnderFire decides")
+        {
+            auto human = addPlayer(base.sim, "human", GamePlayerType::Human, "ARM");
+            base.sim.getUnitState(base.towerId).hitPoints = 40;
+            addUnit(base.sim, "ARMPW", human, SimVector(250_ss, 0_ss, -100_ss), base.script);
+
+            SECTION("on: mended all the same")
+            {
+                profile.repairUnderFire = true;
+                REQUIRE(base.firstRepair(profile) == std::optional<UnitId>(base.towerId));
+            }
+
+            SECTION("off: left until it has gone")
+            {
+                profile.repairUnderFire = false;
+                REQUIRE_FALSE(base.firstRepair(profile).has_value());
+            }
+        }
+    }
+
+    TEST_CASE("a damaged commander takes a construction kbot off its job", "[ai]")
+    {
+        RepairBase base;
+        auto profile = makeDefaultStandardProfile();
+        // Busy: the planner would never offer it anything, so only the
+        // commander's call can move it.
+        base.sim.getUnitState(base.kbotId).addOrder(BuildOrder("ARMSOLAR", SimVector(-300_ss, 0_ss, -300_ss)));
+
+        SECTION("hurt: the kbot is sent to it")
+        {
+            base.sim.getUnitState(base.commanderId).hitPoints = 50;
+            REQUIRE(base.firstRepair(profile) == std::optional<UnitId>(base.commanderId));
+        }
+
+        SECTION("whole: it is left to its job")
+        {
+            REQUIRE_FALSE(base.firstRepair(profile).has_value());
+        }
+
+        SECTION("off: it is left to its job")
+        {
+            profile.repairCommander = false;
+            base.sim.getUnitState(base.commanderId).hitPoints = 50;
+            REQUIRE_FALSE(base.firstRepair(profile).has_value());
+        }
+    }
+
     TEST_CASE("a tower faces where losses actually came from, not the enemy's unseen base", "[ai]")
     {
         // threatDirection falls back to the world origin when no enemy base

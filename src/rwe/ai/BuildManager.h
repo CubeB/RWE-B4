@@ -197,6 +197,30 @@ namespace rwe
             std::minstd_rand& rng) const;
 
         /**
+         * Looks at our defences' hit points, at most every
+         * DefenceWatchIntervalTicks, and keeps each one's recent attacks and
+         * the side they came from (AiTuningProfile::fortifyWhereAttacked).
+         * Cheap by construction: a pass reads the hit points of the armed
+         * buildings and nothing else, and the enemies are walked only for a
+         * defence that has just been hit. Every walk is in id order.
+         */
+        void watchDefences(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb);
+
+        /**
+         * The damaged structure this builder should mend, if any: a defence
+         * before a factory, the nearest of the more important kind, within
+         * repairSearchRadius of `from`, accepted by `reachable` when that is
+         * set, and not already held by repairersPerStructure of ours.
+         */
+        std::optional<UnitId> chooseRepairTarget(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            const AiTuningProfile& profile,
+            const AiBlackboard& bb,
+            const SimVector& from,
+            const std::function<bool(const SimVector&)>& reachable) const;
+
+        /**
          * `accept`, when set, is asked about every candidate before the ring
          * walk counts it -- which is the whole point of passing it down
          * rather than filtering the result. nearestRingOnly stops at the
@@ -371,6 +395,56 @@ namespace rwe
          * the same on every peer.
          */
         std::map<std::pair<int, int>, GameTime> failedSites;
+
+        /** One attack on a defence of ours: hits no more than fortifyAttackGapSeconds apart. */
+        struct AttackEpisode
+        {
+            /** Unit vectors towards the attackers seen at each hit, summed. */
+            SimVector direction;
+            GameTime lastHitAt;
+        };
+
+        /** What watchDefences knows about one defence. */
+        struct DefenceWatch
+        {
+            SimVector position;
+            unsigned int hitPoints{0};
+            GameTime seenAt{0};
+            /** Oldest first, and never more than a handful. */
+            std::vector<AttackEpisode> episodes;
+            /** Set while the recent attacks agree on a side: the way the teeth should face. */
+            std::optional<SimVector> teethToward;
+        };
+
+        static constexpr unsigned int DefenceWatchIntervalTicks = 15;
+        static constexpr std::size_t MaxAttackEpisodes = 6;
+
+        /** Keyed by raw unit id, so it is walked in id order. */
+        std::map<unsigned int, DefenceWatch> defenceWatch;
+        std::optional<GameTime> defenceWatchedAt;
+        /** Whether any defence's attacks agree on a side, so planFortification can say no without walking anything. */
+        bool defenceTeethOwed{false};
+
+        /** When sendRepairersToCommander last looked. */
+        std::optional<GameTime> commanderRepairCheckedAt;
+        /**
+         * Whether the commander's current spell below the repair line has
+         * been logged. Written to the log and read by nothing else, so it
+         * cannot change an outcome.
+         */
+        bool commanderHurtLogged{false};
+
+        /**
+         * Takes the nearest construction unit, busy or not, off its job to
+         * mend a damaged commander, until commanderRepairers of them are on
+         * it (AiTuningProfile::repairCommander).
+         */
+        void sendRepairersToCommander(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            const AiTuningProfile& profile,
+            const AiBlackboard& bb,
+            std::vector<PlayerCommand>& outCommands);
 
         /** Whether an order to this site was dropped lately. */
         bool siteFailedLately(const GameSimulation& sim, const SimVector& site) const;
