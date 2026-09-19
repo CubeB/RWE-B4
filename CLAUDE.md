@@ -146,6 +146,54 @@ Two things that pass measurement teaches, both worth knowing before making any o
 
 GitHub Actions (`.github/workflows/build.yml`) runs Linux (gcc-14, clang-18 on ubuntu-24.04) and Windows (MSVC 2026, MinGW64) builds in both Debug and Release configurations.
 
+## Labels
+
+Every issue and pull request carries **two** labels, one from each axis: where
+the change lands, and why it exists. Each axis takes exactly one label, so the
+pair reads at a glance as "sim, conformance" or "client, maintenance" — apply
+them when you open the thing, to your own opening description or to one you are
+asked to triage, rather than tagging it afterwards: `gh issue edit <n>
+--add-label scope:sim --add-label purpose:conformance` for an existing one, or
+the same two `--label` flags on `gh issue create` and `gh pr create`.
+
+### Scope — where the change lands (exactly one)
+
+- `scope:sim` — Deterministic simulation: hashed state, unit, weapon and economy behaviour.
+- `scope:client` — Engine code outside the simulation: renderer, sound, UI, camera, effects.
+- `scope:demos` — Reading `.tad` recordings and mining them into fixtures: tools, decodes, episodes.
+- `scope:docs` — The registers and working notes: `TOTALA-EXE.md`, `TA-DEMOS.md`, `ROADMAP.md`.
+
+### Purpose — why it exists (exactly one)
+
+- `purpose:conformance` — Behaviour decoded from `TotalA.exe` that RWE should match. Evidence is a routine or a fixture.
+- `purpose:rwe-original` — Behaviour TA has no counterpart for: RWE's AI, UI and own design choices. Not a gap.
+- `purpose:divergence` — A knowing difference from the original, recorded in `TOTALA-EXE.md` §88.
+- `purpose:maintenance` — Neither conformance nor design: perf, refactors, build, packaging, CI.
+
+`conformance` and `rwe-original` are the pair to keep apart, because they look
+alike from the outside and say opposite things: the first means the decoded
+routine or the fixture is the standard and a mismatch is a bug, the second means
+TA has nothing to say here. A change that departs from a decoded behaviour on
+purpose is neither — it is `divergence`, and §88 has to say so before the label
+is honest.
+
+Colour follows the axis rather than the label: every `scope:*` blue, the four
+purposes distinct — so a glance at an issue list shows where the work lands and
+what kind of claim it is making. These eight commands are the definitions of
+record, and `--force` is deliberate: it re-applies a drifted description or
+colour, which is the only way an existing label gets corrected.
+
+```bash
+gh label create "scope:sim"           --color 1D76DB --description "Deterministic simulation: hashed state, unit, weapon and economy behaviour." --force
+gh label create "scope:client"        --color 1D76DB --description "Engine code outside the simulation: renderer, sound, UI, camera, effects." --force
+gh label create "scope:demos"         --color 1D76DB --description "Reading .tad recordings and mining them into fixtures: tools, decodes, episodes." --force
+gh label create "scope:docs"          --color 1D76DB --description "The registers and working notes: TOTALA-EXE.md, TA-DEMOS.md, ROADMAP.md." --force
+gh label create "purpose:conformance" --color 0E8A16 --description "Behaviour decoded from TotalA.exe that RWE should match. Evidence is a routine or a fixture." --force
+gh label create "purpose:rwe-original" --color 5319E7 --description "Behaviour TA has no counterpart for: RWE's AI, UI and own design choices. Not a gap." --force
+gh label create "purpose:divergence"  --color FBCA04 --description "A knowing difference from the original, recorded in TOTALA-EXE.md section 88." --force
+gh label create "purpose:maintenance" --color E6E6E6 --description "Neither conformance nor design: perf, refactors, build, packaging, CI." --force
+```
+
 ## Saved games
 
 Full-state save/load lives in `src/rwe/game/save_util.*` (simulation
