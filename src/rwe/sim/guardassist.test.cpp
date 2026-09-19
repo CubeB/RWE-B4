@@ -169,6 +169,62 @@ namespace rwe
         };
     }
 
+    TEST_CASE("a queue emptied after its frame was shot does not reach for the frame", "[guardassist]")
+    {
+        // The order of events at a factory under fire: the frame on the pad
+        // is shot, the dead are swept off the unit list at the end of that
+        // tick, and the order that empties the queue lands on the next. The
+        // plant still holds the frame's id, and clearBuild asked the
+        // simulation for it without asking whether it was still there, so
+        // getUnitState threw -- in the arena, on the tick the AI first
+        // cancelled a besieged factory's queue.
+        Yard yard;
+        yard.queue(1);
+
+        SECTION("while the plant is building the frame")
+        {
+            tick(yard.sim, 40);
+            REQUIRE(std::holds_alternative<FactoryBehaviorStateBuilding>(yard.sim.getUnitState(yard.factoryId).factoryState));
+            auto frame = findFrame(yard.sim, "TANK");
+            REQUIRE(frame.has_value());
+
+            yard.sim.quietlyKillUnit(*frame);
+            yard.sim.deleteDeadUnits();
+            REQUIRE_FALSE(yard.sim.tryGetUnitState(*frame).has_value());
+
+            yard.sim.getUnitState(yard.factoryId).buildQueue.clear();
+            REQUIRE_NOTHROW(tick(yard.sim, 2));
+            REQUIRE(std::holds_alternative<FactoryBehaviorStateIdle>(yard.sim.getUnitState(yard.factoryId).factoryState));
+        }
+
+        SECTION("on the tick the frame was created, before the plant has taken it up")
+        {
+            // Step until the pad has just produced the frame and the plant
+            // is still holding it as a creation, which it turns into
+            // building on its next update.
+            std::optional<UnitId> frame;
+            for (int i = 0; i < 40 && !frame; ++i)
+            {
+                tick(yard.sim, 1);
+                auto creating = std::get_if<FactoryBehaviorStateCreatingUnit>(&yard.sim.getUnitState(yard.factoryId).factoryState);
+                if (creating != nullptr)
+                {
+                    if (auto done = std::get_if<UnitCreationStatusDone>(&creating->status); done != nullptr)
+                    {
+                        frame = done->unitId;
+                    }
+                }
+            }
+            REQUIRE(frame.has_value());
+
+            yard.sim.quietlyKillUnit(*frame);
+            yard.sim.deleteDeadUnits();
+            yard.sim.getUnitState(yard.factoryId).buildQueue.clear();
+            REQUIRE_NOTHROW(tick(yard.sim, 2));
+            REQUIRE(std::holds_alternative<FactoryBehaviorStateIdle>(yard.sim.getUnitState(yard.factoryId).factoryState));
+        }
+    }
+
     TEST_CASE("a factory alone builds at its own worker time", "[guardassist]")
     {
         // The baseline the guard cases are measured against: the plant needs

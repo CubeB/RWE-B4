@@ -4804,6 +4804,21 @@ namespace rwe
 
     void UnitBehaviorService::clearBuild(UnitInfo unitInfo)
     {
+        // The frame may already be gone. One shot on the pad is swept off
+        // the unit list at the end of the tick it died in, and the order
+        // that empties the queue can land on the next, so the id the plant
+        // still holds names nothing -- and getUnitState throws on it. That
+        // is the ordinary case at a factory under fire, which is exactly
+        // when the AI cancels a queue (PR #82, found as a crash in the
+        // arena), and a player cancelling at the same moment met it too.
+        // A frame that is still there is removed as before.
+        auto removeFrameIfStanding = [&](UnitId frameId) {
+            if (sim->tryGetUnitState(frameId))
+            {
+                sim->removeUnfinishedUnit(frameId);
+            }
+        };
+
         match(
             unitInfo.state->factoryState,
             [&](const FactoryBehaviorStateIdle&) {
@@ -4813,7 +4828,7 @@ namespace rwe
                 match(
                     state.status,
                     [&](const UnitCreationStatusDone& d) {
-                        sim->removeUnfinishedUnit(d.unitId);
+                        removeFrameIfStanding(d.unitId);
                     },
                     [&](const auto&) {
                         // do nothing
@@ -4824,7 +4839,7 @@ namespace rwe
             [&](const FactoryBehaviorStateBuilding& state) {
                 if (state.targetUnit)
                 {
-                    sim->removeUnfinishedUnit(state.targetUnit->first);
+                    removeFrameIfStanding(state.targetUnit->first);
                     unitInfo.state->cobEnvironment->createThread("StopBuilding");
                 }
                 sim->deactivateUnit(unitInfo.id);
