@@ -46,10 +46,23 @@ namespace rwe
                 continue;
             }
             const auto& unit = unitRef->get();
-            if (unit.activated == makersOn)
+            if (unit.isDead() || unit.activated == makersOn)
             {
                 continue;
             }
+            // Not a frame: there is nothing in one to switch.
+            auto defIt = sim.unitDefinitions.find(unit.unitType);
+            if (defIt == sim.unitDefinitions.end() || unit.isBeingBuilt(defIt->second))
+            {
+                continue;
+            }
+            // And not again until the last telling has had time to land.
+            auto told = lastToldAt.find(unitId.value);
+            if (told != lastToldAt.end() && bb.now.value < told->second.value + SimTicksPerSecond)
+            {
+                continue;
+            }
+            lastToldAt[unitId.value] = bb.now;
             outCommands.emplace_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SetOnOff{makersOn}));
         }
     }

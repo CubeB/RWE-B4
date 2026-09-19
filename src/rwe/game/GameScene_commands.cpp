@@ -1365,6 +1365,9 @@ namespace rwe
                         case EmitParticleFromPieceEvent::SfxType::Thrust:
                             emitVtolFromPiece(e.unitId, e.pieceName, 7);
                             break;
+                        case EmitParticleFromPieceEvent::SfxType::SubBubbles:
+                            emitBubblesFromPiece(e.unitId, e.pieceName);
+                            break;
                         default:
                             throw std::logic_error("unknown particle type");
                     }
@@ -1743,6 +1746,45 @@ namespace rwe
         // at the moment it appears, which is where the original puts it.
         spawnWake(scattered(), velocity, duration, rampPeriod, simulation.gameTime);
         spawnWake(scattered() - velocity, velocity, duration, rampPeriod, simulation.gameTime + GameTime(1));
+    }
+
+    void GameScene::emitBubblesFromPiece(UnitId unitId, const std::string& pieceName)
+    {
+        const auto& unit = getUnit(unitId);
+        if (!positionIsVisibleToLocalPlayer(unit.position))
+        {
+            // As every emit-sfx: refused for a unit the local player cannot see (0x480EEA).
+            return;
+        }
+
+        const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
+        auto pieceTransform = toFloatMatrix(simulation.getUnitPieceTransform(unitId, pieceName));
+        const auto& pieceMesh = gameMediaDatabase.getUnitPieceMesh(unitDefinition.objectName, pieceName).value().get();
+
+        // The original has no bubble emitter. Type 259 (0x4810D4) builds the
+        // wake emitter's two points itself -- the piece's first vertex, and
+        // that same point with its height replaced by the sea level -- and
+        // hands them to the wake class (vtable 0x4FD5F8) with a ramp period
+        // of 8 and its one flag cleared. So a bubble is a dot of foam that
+        // leaves the piece and climbs straight for the surface at the wake's
+        // half a unit a tick, for the wake's six steps of eight ticks, with
+        // the blues run backwards. Forty-eight ticks is twenty-four units of
+        // climb: it fades out on the way up rather than at the surface.
+        auto firstVertex = pieceTransform * pieceMesh.firstVertexPosition;
+        auto surface = Vector3f(firstVertex.x, simScalarToFloat(simulation.terrain.getSeaLevel()), firstVertex.z);
+        auto emission = computeWakeEmission(firstVertex, surface, false, 8);
+
+        std::uniform_int_distribution<int> jitter(-3, 3);
+        auto scattered = [&]() {
+            return Vector3f(
+                emission.spawnPosition.x + static_cast<float>(jitter(effectsRng)),
+                emission.spawnPosition.y + static_cast<float>(jitter(effectsRng)),
+                emission.spawnPosition.z + static_cast<float>(jitter(effectsRng)));
+        };
+
+        // Two dots a call, the second a tick later, exactly as the wake.
+        spawnWake(scattered(), emission.velocity, emission.duration, 8, simulation.gameTime, true);
+        spawnWake(scattered() - emission.velocity, emission.velocity, emission.duration, 8, simulation.gameTime + GameTime(1), true);
     }
 
     void GameScene::modifyBuildQueue(UnitId unitId, const std::string& unitType, int count)
@@ -2720,6 +2762,20 @@ namespace rwe
 
     void GameScene::processUnitCommand(const PlayerUnitCommand& unitCommand)
     {
+        // A command is about half a second old by the time it lands -- it
+        // waits out the command buffer like everybody else's -- and the unit
+        // it names can have died in the meantime. Most of the handlers below
+        // looked it up with care; SetOnOff, SelfDestruct and the stockpile
+        // did not, and a lookup of a freed slot in the unit table throws
+        // "std::get: wrong index for variant", which ended the game. Found
+        // when the computer player switched off a metal maker that had just
+        // been shot. Asked once here, of the simulation's own state, so every
+        // peer drops the same command on the same tick.
+        if (!simulation.unitExists(unitCommand.unit))
+        {
+            return;
+        }
+
         match(
             unitCommand.command,
             [&](const PlayerUnitCommand::IssueOrder& c) {
@@ -2880,12 +2936,12 @@ namespace rwe
         }
     }
 
-    void GameScene::spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration, unsigned int rampPeriod, GameTime startTime)
+    void GameScene::spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration, unsigned int rampPeriod, GameTime startTime, bool reverseRamp)
     {
         Particle particle;
         particle.position = position;
         particle.velocity = velocity;
-        particle.renderType = ParticleRenderTypeWake{startTime + duration, rampPeriod};
+        particle.renderType = ParticleRenderTypeWake{startTime + duration, rampPeriod, reverseRamp};
         particle.startTime = startTime;
 
         particles.push_back(particle);

@@ -312,4 +312,38 @@ namespace rwe
             REQUIRE(unit.pieces[1].cached);
         }
     }
+
+    TEST_CASE("a killed thread's address is not handed to the next thread", "[cob]")
+    {
+        // A weapon keeps the address of its aim thread across ticks. When
+        // that thread was freed the moment a signal killed it, whether the
+        // next thread landed on the same address was the allocator's choice,
+        // and a stale handle that happened to match took another weapon's
+        // answer for its own: the same replay, two outcomes.
+        auto script = makeEmptyCobScript();
+        script->functions.push_back(CobFunctionInfo{"AimPrimary", 0});
+        CobEnvironment env(script.get());
+
+        const auto* first = env.createThread(0, {}, 2u);
+        REQUIRE(env.ownsThread(first));
+
+        env.sendSignal(2u);
+        REQUIRE(!env.ownsThread(first));
+        REQUIRE(!env.tryReapThread(first).has_value());
+
+        // Same size, same allocator, straight after the free that did not
+        // happen: this is the allocation that used to alias.
+        const auto* second = env.createThread(0, {}, 2u);
+        REQUIRE(second != first);
+        REQUIRE(env.ownsThread(second));
+        REQUIRE(!env.ownsThread(first));
+
+        // Still held through one sweep, so a holder that looks once a tick
+        // always gets to look; gone after the second.
+        env.sweepDeadThreads();
+        REQUIRE(env.deadThreadsFromLastSweep.size() == 1);
+        env.sweepDeadThreads();
+        REQUIRE(env.deadThreadsFromLastSweep.empty());
+        REQUIRE(env.isNotCorrupt());
+    }
 }

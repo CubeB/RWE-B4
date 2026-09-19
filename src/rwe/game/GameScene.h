@@ -906,6 +906,20 @@ namespace rwe
         float panelSlide{0.0f};
 
         /**
+         * How far the Space key's bottom strip has risen, 0 to
+         * StatsBarTravel. TOTALA-EXE.md S:108: a slide of its own
+         * (game+0x37e90, 0 to -31), driven by Space alone -- F4, which
+         * latches the side panel out, does not touch it -- and eased a third
+         * of what is left at a time, at least a pixel, every fifteen
+         * milliseconds.
+         */
+        static constexpr int StatsBarTravel = 31;
+        int statsBarSlide{0};
+        int statsBarMillisecondsOwed{0};
+        void updateStatsBarSlide(int millisecondsElapsed);
+        void renderSpaceTabs();
+
+        /**
          * F4's latch -- the original's display word bit 7 at game+0x37f06
          * (76). That bit has no registry name and only F4 touches it, so it
          * lasts the session and no longer, and this bool does the same.
@@ -1055,6 +1069,8 @@ namespace rwe
         void emitBlackSmokeFromPiece(UnitId unitId, const std::string& pieceName);
 
         void emitWakeFromPiece(UnitId unitId, const std::string& pieceName, bool reverse, unsigned int rampPeriod);
+        /** SFXTYPE_SUBBUBBLES: the wake emitter pointed at the surface. TOTALA-EXE.md S:4. */
+        void emitBubblesFromPiece(UnitId unitId, const std::string& pieceName);
 
         /** An aircraft's exhaust: small warm sparks dropped under a thruster piece, left behind as a trail. */
         void emitVtolFromPiece(UnitId unitId, const std::string& pieceName, unsigned int divisor);
@@ -1525,7 +1541,7 @@ namespace rwe
         /** This tick's steam from every thermal vent on the map. */
         void spawnGeoVentSteam();
 
-        void spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration, unsigned int rampPeriod, GameTime startTime);
+        void spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration, unsigned int rampPeriod, GameTime startTime, bool reverseRamp = false);
 
         /** Emits this tick's nanolathe spray for every builder the local player can see. */
         void spawnNanoParticles();

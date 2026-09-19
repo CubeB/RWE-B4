@@ -164,6 +164,14 @@ namespace rwe
                     auto centreX = x + static_cast<int>(NavalShipyardFootprintX) / 2;
                     auto centreY = y + static_cast<int>(NavalShipyardFootprintZ) / 2;
                     site.waterRegion = intel.waterRegions.get(centreX, centreY);
+                    {
+                        auto x0 = std::max(0, x - NavalShipyardSeaRoom);
+                        auto y0 = std::max(0, y - NavalShipyardSeaRoom);
+                        auto x1 = std::min(width, x + static_cast<int>(NavalShipyardFootprintX) + NavalShipyardSeaRoom);
+                        auto y1 = std::min(height, y + static_cast<int>(NavalShipyardFootprintZ) + NavalShipyardSeaRoom);
+                        site.open = isWaterDepthWithinBounds(heights, seaLevelUInt, static_cast<unsigned int>(x0), static_cast<unsigned int>(y0),
+                            static_cast<unsigned int>(x1 - x0), static_cast<unsigned int>(y1 - y0), NavalShipyardMinWaterDepth, 255u);
+                    }
                     intel.shipyardSites.push_back(site);
                 }
             }

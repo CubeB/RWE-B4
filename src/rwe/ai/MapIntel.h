@@ -52,7 +52,21 @@ namespace rwe
          * test that produced this site, but is checked rather than assumed.
          */
         int waterRegion;
+
+        /**
+         * Whether there is sea room round the site as well as under it: the
+         * footprint grown by NavalShipyardSeaRoom tiles each way, clipped to
+         * the map, is all deep enough for the yard itself. A yard built
+         * without it stands in a notch of the coast, and what it launches
+         * has to turn out of the notch past the yard that made it -- watched
+         * in a replay, hulls struggling to leave. Preferred, not required: a
+         * map whose only deep water is a notch still gets its shipyard.
+         */
+        bool open{false};
     };
+
+    /** Tiles of clear deep water wanted on every side of a shipyard. A destroyer is 4x4 and a battleship 6x6. */
+    constexpr int NavalShipyardSeaRoom = 6;
 
     /**
      * The 8x8 footprint and MinWaterDepth=30 both ARMSY and CORSY share --

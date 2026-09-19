@@ -429,7 +429,10 @@ namespace rwe
         for (auto& panel : gameMenuPanels)
         {
             uiFactory.replaceStagedButton(*panel, "VISUALRT", "SHADING", "SHADINGMODE", shadingModeLabels(), static_cast<unsigned int>(shadingMode));
-            addBuildingHaloButton(*panel);
+            if (BuildingHaloWired)
+            {
+                addBuildingHaloButton(*panel);
+            }
             addAntiAliasUnitsButton(*panel);
         }
     }
@@ -463,7 +466,17 @@ namespace rwe
         // It anchors to HALO, which addBuildingHaloButton added a moment ago,
         // with BSHADOWS above it: the same 44-pixel step one row further down,
         // landing at 240 with RESTORE still clear at 269.
-        uiFactory.addStagedButtonBelow(panel, "VISUALRT", "BSHADOWS", "AAUNITS", "HALO", "BSHADOWS", {"Units Sharp", "Units Smooth"}, antiAliasUnitsEnabled ? 1 : 0);
+        //
+        // With the fringe unwired there is no HALO to hang from, and this
+        // takes the row HALO would have had.
+        if (BuildingHaloWired)
+        {
+            uiFactory.addStagedButtonBelow(panel, "VISUALRT", "BSHADOWS", "AAUNITS", "HALO", "BSHADOWS", {"Units Sharp", "Units Smooth"}, antiAliasUnitsEnabled ? 1 : 0);
+        }
+        else
+        {
+            uiFactory.addStagedButtonBelow(panel, "VISUALRT", "BSHADOWS", "AAUNITS", "BSHADOWS", "ANTI", {"Units Sharp", "Units Smooth"}, antiAliasUnitsEnabled ? 1 : 0);
+        }
     }
 
     void GameScene::wireInGameOptionControls()
