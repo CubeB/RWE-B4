@@ -1,5 +1,7 @@
 #include "GameHash_util.h"
 
+#include <rwe/game/UnitStateFieldTable.h>
+
 namespace rwe
 {
     GameHash computeHashOf(GameHash hash)
@@ -81,74 +83,34 @@ namespace rwe
     }
 
     /**
-     * Every member named here has to be initialised by the time a unit
-     * exists, and UnitState's constructor names only three of its own -- the
-     * rest depend on having a default member initialiser. One without one
-     * holds whatever was in the memory the unit was built in, which is zero
-     * while the heap is young and rubbish once it is not, and that rubbish
-     * goes straight into the sync hash. `nanoPoint` was missing its
-     * initialiser and desynced a replay keyframe about one run in ten.
+     * The unit's page of the sync hash, walked from the field table in
+     * UnitStateFieldTable rather than from a hand-written list.
+     *
+     * Every member of the table's hash part has to be initialised by the
+     * time a unit exists, and UnitState's constructor names only three of
+     * its own -- the rest depend on having a default member initialiser. One
+     * without one holds whatever was in the memory the unit was built in,
+     * which is zero while the heap is young and rubbish once it is not, and
+     * that rubbish goes straight into the sync hash. `nanoPoint` was missing
+     * its initialiser and desynced a replay keyframe about one run in ten.
      * "a new unit hashes the same wherever in memory it was built", in this
      * file's test, is what stops the next one.
+     *
+     * The table's hash step is `computeHashOf` over the member, the same
+     * call the combineHashes list used to make; the combination itself is a
+     * plain addition, folded over the rows.
      */
     GameHash computeHashOf(const UnitState& u)
     {
-        return combineHashes(
-            u.unitType,
-            u.position,
-            u.owner,
-            u.rotation,
-            u.physics,
-            u.hitPoints,
-            u.lifeState,
-            u.navigationState,
-            u.behaviourState,
-            u.inBuildStance,
-            u.armStowDueTime,
-            u.nanoPointQueriedAt,
-            u.nanoPoint,
-            u.yardOpen,
-            u.inCollision,
-            u.orders,
-            u.fireOrders,
-            u.moveOrders,
-            u.cobBusy,
-            u.buggerOffActive,
-            u.armored,
-            u.kills,
-            u.sfxOccupyState,
-            u.buildTimeCompleted,
-            u.nanoframeDecayTime,
-            u.nanoframeWorkedOn,
-            u.nanoframeDecayRemainder,
-            u.reclaimProgress,
-            u.selfDestructTime,
-            u.paralyzedUntil,
-            u.moveRateBand,
-            u.carriedBy,
-            u.transportScriptTarget,
-            u.transportScriptStartedAt,
-            u.airWorkOrbit,
-            u.airLoiter,
-            u.slowFacePoint,
-            u.activated,
-            u.isSufficientlyPowered,
-            u.cloakRequested,
-            u.cloaked,
-            u.cloakSuppressedUntil,
-            u.energyProductionBuffer,
-            u.metalProductionBuffer,
-            u.previousEnergyProductionBuffer,
-            u.previousMetalProductionBuffer,
-            u.previousEnergyConsumptionBuffer,
-            u.previousMetalConsumptionBuffer,
-            u.energyConsumptionBuffer,
-            u.metalConsumptionBuffer,
-            u.weapons,
-            u.energyRequestBuffer,
-            u.metalRequestBuffer,
-            u.energyDebt,
-            u.metalDebt);
+        GameHash hash(0);
+        for (const auto& field : unitStateFieldTable())
+        {
+            if (field.hash)
+            {
+                hash += field.hash(u);
+            }
+        }
+        return hash;
     }
 
     GameHash computeHashOf(const AttackLeash& l)

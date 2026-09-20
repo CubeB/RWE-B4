@@ -357,6 +357,9 @@ set(SOURCE_FILES
     src/rwe/game/dump_util.h
     src/rwe/game/save_util.cpp
     src/rwe/game/save_util.h
+    src/rwe/game/SaveJson.h
+    src/rwe/game/UnitStateFieldTable.cpp
+    src/rwe/game/UnitStateFieldTable.h
     src/rwe/game/matrix_util.cpp
     src/rwe/game/matrix_util.h
     src/rwe/geometry/BoundingBox3f.h
