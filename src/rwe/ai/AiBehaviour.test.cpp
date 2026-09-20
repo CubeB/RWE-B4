@@ -6382,4 +6382,50 @@ namespace rwe
             CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare);
         }
     }
+    TEST_CASE("the D-gun shot goes to what is worth the charge", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.unitDefinitions["ARMCOM"].canDgun = true;
+        sim.unitDefinitions["ARMCOM"].weapon3 = "DGUN";
+        WeaponDefinition dgun{};
+        dgun.maxRange = 300_ss;
+        dgun.energyPerShot = Energy(400.0f);
+        sim.weaponDefinitions["DGUN"] = dgun;
+        sim.getPlayer(ai).energy = Energy(5000.0f);
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        // A cheap raider close in, and a costly one further out but in reach.
+        sim.unitDefinitions["ARMPW"].buildCostMetal = Metal(50.0f);
+        sim.unitDefinitions["ARMFLASH"] = sim.unitDefinitions["ARMPW"];
+        sim.unitDefinitions["ARMFLASH"].buildCostMetal = Metal(300.0f);
+        auto cheapId = addUnit(sim, "ARMPW", human, SimVector(120_ss, 0_ss, 0_ss), script);
+        auto dearId = addUnit(sim, "ARMFLASH", human, SimVector(0_ss, 0_ss, 250_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+
+        SECTION("the dearer of the two in reach")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            auto shots = ordersFor<DgunOrder>(commands, commanderId);
+            REQUIRE_FALSE(shots.empty());
+            CHECK(*std::get_if<UnitId>(&shots.front().target) == dearId);
+        }
+
+        SECTION("switched off, the nearest")
+        {
+            profile.dgunByValue = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            auto shots = ordersFor<DgunOrder>(commands, commanderId);
+            REQUIRE_FALSE(shots.empty());
+            CHECK(*std::get_if<UnitId>(&shots.front().target) == cheapId);
+        }
+    }
 }

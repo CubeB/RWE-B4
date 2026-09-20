@@ -208,6 +208,7 @@ namespace rwe
             || setInt("targetMetalExtractorCount", p.targetMetalExtractorCount)
             || setInt("targetConstructorCount", p.targetConstructorCount)
             || setInt("expansionConstructors", p.expansionConstructors)
+            || setBool("dgunByValue", p.dgunByValue)
             || setBool("counterEnemyComposition", p.counterEnemyComposition)
             || setInt("counterShareBonus", p.counterShareBonus)
             || setFloat("counterShareTrigger", p.counterShareTrigger)

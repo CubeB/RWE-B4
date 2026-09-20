@@ -419,6 +419,7 @@ namespace rwe
             std::optional<UnitId> best;
             SimVector bestPosition;
             SimScalar bestDistanceSquared = 0_ss;
+            float bestMetal = 0.0f;
             for (const auto& [_, enemy] : bb.knownEnemies)
             {
                 if (!enemy.isArmed || enemy.isAir || !inSightRecently(bb, profile, enemy))
@@ -442,11 +443,33 @@ namespace rwe
                 {
                     continue;
                 }
-                if (!best || distanceSquared < bestDistanceSquared)
+                // The most expensive thing in reach (dgunByValue), the
+                // nearest of two that cost the same; or simply the nearest
+                // with the knob off.
+                auto metal = 0.0f;
+                if (auto defIt = sim.unitDefinitions.find(enemy.unitType); defIt != sim.unitDefinitions.end())
+                {
+                    metal = defIt->second.buildCostMetal.value;
+                }
+                bool better;
+                if (!best)
+                {
+                    better = true;
+                }
+                else if (profile.dgunByValue && metal != bestMetal)
+                {
+                    better = metal > bestMetal;
+                }
+                else
+                {
+                    better = distanceSquared < bestDistanceSquared;
+                }
+                if (better)
                 {
                     best = enemy.unitId;
                     bestPosition = position;
                     bestDistanceSquared = distanceSquared;
+                    bestMetal = metal;
                 }
             }
             if (!best)

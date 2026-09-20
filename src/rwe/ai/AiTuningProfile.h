@@ -97,6 +97,15 @@ namespace rwe
          * rest); this only leans them, so a personality that sets them still
          * decides the ground.
          */
+        /**
+         * The D-gun shot goes to the most expensive armed enemy in reach
+         * rather than the nearest one. A shot kills whatever it hits, so what
+         * it hits should be the thing worth the energy: the nearest rule
+         * spent the charge on the cheap unit that happened to arrive first,
+         * with the thing behind it untouched.
+         */
+        bool dgunByValue{true};
+
         bool counterEnemyComposition{true};
         int counterShareBonus{2};
         float counterShareTrigger{0.3f};
