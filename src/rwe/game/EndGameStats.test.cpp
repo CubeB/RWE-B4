@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/game/EndGameStats.h>
 #include <rwe/grid/Grid.h>
+#include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
 
 namespace rwe

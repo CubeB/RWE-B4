@@ -15,7 +15,9 @@
 #include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/FeatureId.h>
 #include <rwe/sim/GameHash.h>
+#include <rwe/sim/GamePlayerInfo.h>
 #include <rwe/sim/GameTime.h>
+#include <rwe/sim/ImpactType.h>
 #include <rwe/sim/MapFeature.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/MovementClassCollisionService.h>
@@ -28,6 +30,7 @@
 #include <rwe/sim/SimAxis.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitId.h>
+#include <rwe/sim/UnitInfo.h>
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/UnitSpatialIndex.h>
 #include <rwe/sim/UnitState.h>
@@ -100,18 +103,6 @@ namespace rwe
      */
     ResourceSettlement settleResourcePool(float supply, float debt, float requested);
 
-    enum class GamePlayerStatus
-    {
-        Alive,
-        Dead
-    };
-
-    enum class GamePlayerType
-    {
-        Human,
-        Computer
-    };
-
     /**
      * Total worker-time needed to fully reclaim a feature, given how much of it
      * is still standing. Scales with both the feature's value and its remaining
@@ -122,92 +113,6 @@ namespace rwe
      * Never zero, so valueless features can still be cleared.
      */
     unsigned int computeFeatureReclaimWork(const FeatureDefinition& definition, unsigned int currentHitPoints);
-
-    struct GamePlayerInfo
-    {
-        std::optional<std::string> name;
-        GamePlayerType type;
-        PlayerColorIndex color;
-        GamePlayerStatus status;
-        std::string side;
-
-        Metal metal;
-        Energy energy;
-
-        Metal maxMetal;
-        Energy maxEnergy;
-
-        Metal startingMetal;
-        Energy startingEnergy;
-
-        /**
-         * Team from the lobby; players sharing one share sight and radar.
-         * Nothing means the player has no allies but itself. Last of the
-         * positional members so the existing aggregate initialisers, which
-         * stop at startingEnergy, keep working.
-         */
-        std::optional<int> teamId;
-
-        bool metalStalled{false};
-        bool energyStalled{false};
-
-        /** Enemy (or, with friendly fire, any) units this player's units have destroyed. */
-        unsigned int unitsKilled{0};
-        /** Units this player has lost, by any cause. */
-        unsigned int unitsLost{0};
-
-        /**
-         * Everything the player has ever earned, and everything it earned with
-         * nowhere to put it. The end-of-game chart's four middle columns --
-         * Energy Produced, Metal Produced, Excess Energy, Excess Metal -- are
-         * these four, read out of the player record at `player+0xAC`, `+0xB4`,
-         * `+0xCC` and `+0xD4` in the original (0x41DD86-0x41DDBB). Excess is
-         * measured where the original measures it: what the storage cap threw
-         * away at the end of a second, not what a full bar refused to take
-         * during one.
-         */
-        Metal metalProduced{0};
-        Energy energyProduced{0};
-        Metal metalExcess{0};
-        Energy energyExcess{0};
-
-        Metal desiredMetalConsumptionBuffer{0};
-        Energy desiredEnergyConsumptionBuffer{0};
-
-        Metal previousDesiredMetalConsumptionBuffer{0};
-        Energy previousDesiredEnergyConsumptionBuffer{0};
-
-        /** Everything the player's units and the player itself earned this second. */
-        Metal metalProductionBuffer{0};
-        Energy energyProductionBuffer{0};
-
-        Metal previousMetalProductionBuffer{0};
-        Energy previousEnergyProductionBuffer{0};
-
-        /**
-         * The player's own slice of the economy, for income and spending that
-         * belongs to nobody in particular rather than to one of its units. The
-         * original keeps an identical block hanging off the player at
-         * `player+0xEC` and folds it into the same totals as the per-unit ones.
-         */
-        Metal metalRequestBuffer{0};
-        Energy energyRequestBuffer{0};
-        Metal metalDebt{0};
-        Energy energyDebt{0};
-
-        /**
-         * Books a resource change against the player directly. Income is always
-         * taken. Spending is refused while the player-level block still owes for
-         * earlier work, on the same rule a unit follows; what is granted is only
-         * a claim on the second's income, settled at the end of it.
-         */
-        bool addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal);
-        void recordDesire(const Energy& energy);
-        void recordDesire(const Metal& metal);
-        void acceptResource(const Energy& energy);
-        void acceptResource(const Metal& metal);
-        bool inResourceDebt() const;
-    };
 
     /**
      * The direction a missile with this attitude is pointing. TA builds its
@@ -505,35 +410,6 @@ namespace rwe
         UnitRepairedEvent,
         UnitCannotComplyEvent>;
 
-
-    struct UnitInfo
-    {
-        const UnitId id;
-        UnitState* const state;
-        const UnitDefinition* const definition;
-
-        UnitInfo(UnitId id, UnitState* state, const UnitDefinition* definition)
-            : id(id), state(state), definition(definition) {}
-    };
-
-    struct ConstUnitInfo
-    {
-        const UnitId id;
-        const UnitState* const state;
-        const UnitDefinition* const definition;
-
-        ConstUnitInfo(UnitId id, const UnitState* state, const UnitDefinition* definition)
-            : id(id), state(state), definition(definition) {}
-
-        ConstUnitInfo(UnitInfo unitInfo)
-            : id(unitInfo.id), state(unitInfo.state), definition(unitInfo.definition) {}
-    };
-
-    enum class ImpactType
-    {
-        Normal,
-        Water
-    };
 
     /**
      * What the COB `Killed` script is told about how hard the unit was hit.

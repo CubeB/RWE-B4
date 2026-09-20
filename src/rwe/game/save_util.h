@@ -1,10 +1,13 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
-#include <rwe/sim/GameSimulation.h>
+#include <rwe/grid/Grid.h>
+#include <rwe/sim/PlayerVisibility.h>
 
 namespace rwe
 {
+    struct GameSimulation;
+
     /**
      * Serializes the mutable state of a simulation to json, and restores it
      * into a freshly built simulation for the same map.

@@ -2,12 +2,13 @@
 
 #include <optional>
 #include <rwe/pathfinding/PathFindingService.h>
-#include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/FeatureId.h>
 #include <rwe/sim/ProjectilePhysicsType.h>
 #include <rwe/sim/SimAngle.h>
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitId.h>
+#include <rwe/sim/UnitInfo.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/UnitWeapon.h>
@@ -16,6 +17,8 @@
 
 namespace rwe
 {
+    struct GameSimulation;
+
     class GameScene;
 
     class UnitBehaviorService

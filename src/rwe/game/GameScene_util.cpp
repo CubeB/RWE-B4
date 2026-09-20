@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <rwe/render/WireframeScan.h>
+#include <rwe/sim/GameSimulation.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/match.h>
 

@@ -1,6 +1,9 @@
 #include "EndGameStats.h"
 
 #include <algorithm>
+#include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/SimTicksPerSecond.h>
+#include <rwe/util/Index.h>
 
 namespace rwe
 {

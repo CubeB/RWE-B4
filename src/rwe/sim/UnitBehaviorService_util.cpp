@@ -1,6 +1,8 @@
 #include "UnitBehaviorService_util.h"
 #include <algorithm>
+#include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/SimTicksPerSecond.h>
+#include <rwe/util/match.h>
 
 #include <stdexcept>
 

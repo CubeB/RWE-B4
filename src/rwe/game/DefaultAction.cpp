@@ -1,4 +1,5 @@
 #include "DefaultAction.h"
+#include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
 
 namespace rwe

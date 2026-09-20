@@ -3,13 +3,14 @@
 #include <optional>
 #include <rwe/CursorService.h>
 #include <rwe/sim/FeatureId.h>
-#include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitId.h>
 #include <rwe/sim/UnitOrder.h>
 #include <variant>
 
 namespace rwe
 {
+    struct GameSimulation;
+
     /**
      * What a click with no order button armed does, and what the cursor says
      * about it before the click happens.

@@ -1,4 +1,5 @@
 #include "GameHash_util.h"
+#include <rwe/sim/GameSimulation.h>
 
 namespace rwe
 {
