@@ -11,3 +11,10 @@ crash.txt
 
 # Screenshots taken while testing; they belong in the scratchpad, not the repo.
 /*.png
+
+# Build trees; the repo keeps nothing in them and CI rebuilds from scratch.
+/build/
+/build-gdebug/
+
+# Sub-agent worktrees spawned during autonomous sessions.
+/.claude/worktrees/
