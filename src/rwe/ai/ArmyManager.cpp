@@ -1813,6 +1813,35 @@ namespace rwe
             }
             const auto& unit = sim.getUnitState(unitId);
 
+            // Hurt: home to be mended, and no fighting on the way
+            // (retreatDamagedUnits).
+            if (profile.retreatDamagedUnits && bb.baseAnchor)
+            {
+                const auto& def = sim.unitDefinitions.at(unit.unitType);
+                auto share = def.maxHitPoints > 0 ? (unit.hitPoints * 100) / def.maxHitPoints : 100u;
+                auto leaveBelow = unit.unitType == bb.sideUnits.raider ? profile.retreatRaiderBelowPercent : profile.retreatLineBelowPercent;
+                auto mending = bb.mendingUnits.count(unitId.value) != 0;
+                if (!mending && static_cast<int>(share) < leaveBelow)
+                {
+                    bb.mendingUnits.insert(unitId.value);
+                    mending = true;
+                }
+                else if (mending && static_cast<int>(share) >= profile.rejoinAbovePercent)
+                {
+                    bb.mendingUnits.erase(unitId.value);
+                    mending = false;
+                }
+                if (mending)
+                {
+                    if (unit.position.distanceSquared(*bb.baseAnchor) > (profile.mendHavenRadius * profile.mendHavenRadius)
+                        && !isMovingTo(unit, *bb.baseAnchor))
+                    {
+                        outCommands.push_back(moveCommand(unitId, *bb.baseAnchor));
+                    }
+                    continue;
+                }
+            }
+
             // Anything within reach gets shot at, whatever the phase.
             if (auto enemy = nearestKnownEnemy(sim, profile, bb, unit.position, profile.engageRadius))
             {

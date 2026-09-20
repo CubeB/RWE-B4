@@ -6145,4 +6145,185 @@ namespace rwe
             }
         }
     }
+    TEST_CASE("income that outruns what the jobs can draw is a surplus", "[ai]")
+    {
+        auto profile = makeDefaultStandardProfile();
+        AiBlackboard bb;
+        bb.metalIncome = Metal(20.0f);
+
+        SECTION("nothing running: the whole income is going spare")
+        {
+            bb.metalDemand = Metal(0.0f);
+            CHECK(BuildManager::incomeOutrunsSpending(profile, bb));
+        }
+
+        SECTION("jobs drawing nearly all of it: no surplus")
+        {
+            bb.metalDemand = Metal(18.0f);
+            CHECK_FALSE(BuildManager::incomeOutrunsSpending(profile, bb));
+        }
+
+        SECTION("drawing under four fifths of it: a surplus")
+        {
+            bb.metalDemand = Metal(15.0f);
+            CHECK(BuildManager::incomeOutrunsSpending(profile, bb));
+        }
+
+        SECTION("switched off")
+        {
+            bb.metalDemand = Metal(0.0f);
+            profile.spendSurplusOnCapacity = false;
+            CHECK_FALSE(BuildManager::incomeOutrunsSpending(profile, bb));
+        }
+    }
+
+    TEST_CASE("metal it cannot spend buys another factory and more builders", "[ai]")
+    {
+        // A base with its opening quotas long met and an income no single
+        // builder can keep up with.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.unitDefinitions["ARMMEX"].metalMake = Metal(10.0f);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        for (int i = 0; i < 10; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(100.0f + i * 40.0f), 0_ss, 0_ss), script);
+        }
+        for (int i = 0; i < 8; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(0_ss, 0_ss, SimScalar(100.0f + i * 40.0f)), script);
+        }
+        addUnit(sim, "ARMLAB", ai, SimVector(200_ss, 0_ss, 200_ss), script);
+        // The one construction unit targetConstructorCount asks for, so that
+        // anything further is the surplus rule's doing. (The free deposits
+        // rule cannot add any: this map's metal is all under the extractors
+        // above.)
+        addUnit(sim, "ARMCK", ai, SimVector(-100_ss, 0_ss, 50_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+
+        SECTION("the lab is told to make more construction units")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            // Past capacitySurplusSeconds of planning passes.
+            runTicks(sim, controller, 800, commands);
+            CHECK(countQueueCommands(commands, "ARMCK") >= 1);
+        }
+
+        SECTION("switched off, the target stands")
+        {
+            profile.spendSurplusOnCapacity = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 800, commands);
+            CHECK(countQueueCommands(commands, "ARMCK") == 0);
+        }
+    }
+    TEST_CASE("a hurt unit leaves the fight for the base until it is mended", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+        // Ours out at the front, with an enemy in reach of it.
+        auto kbotId = addUnit(sim, "ARMPW", ai, SimVector(600_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMPW", human, SimVector(700_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+
+        SECTION("hurt, it walks home instead of fighting")
+        {
+            sim.getUnitState(kbotId).hitPoints = 20;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            auto moves = ordersFor<MoveOrder>(commands, kbotId);
+            REQUIRE_FALSE(moves.empty());
+            CHECK(moves.front().destination.x < 600_ss);
+            CHECK(ordersFor<AttackOrder>(commands, kbotId).empty());
+            CHECK(controller.getBlackboard().mendingUnits.count(kbotId.value) == 1);
+        }
+
+        SECTION("whole, it fights")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            CHECK_FALSE(ordersFor<AttackOrder>(commands, kbotId).empty());
+        }
+
+        SECTION("switched off, it fights hurt")
+        {
+            sim.getUnitState(kbotId).hitPoints = 20;
+            profile.retreatDamagedUnits = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            CHECK_FALSE(ordersFor<AttackOrder>(commands, kbotId).empty());
+        }
+    }
+
+    TEST_CASE("a construction unit mends what came home hurt", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.unitDefinitions["ARMCK"].canReclamate = true;
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(200_ss, 0_ss, 200_ss), script);
+        for (int i = 0; i < 4; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(100.0f + i * 40.0f), 0_ss, 0_ss), script);
+        }
+        for (int i = 0; i < 3; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(0_ss, 0_ss, SimScalar(100.0f + i * 40.0f)), script);
+        }
+        auto builderId = addUnit(sim, "ARMCK", ai, SimVector(-100_ss, 0_ss, 50_ss), script);
+        auto hurtId = addUnit(sim, "ARMPW", ai, SimVector(60_ss, 0_ss, 60_ss), script);
+        sim.getUnitState(hurtId).hitPoints = 30;
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        // Nothing else for a builder to want, so the mend is what is left.
+        profile.targetMetalExtractorCount = 3;
+        profile.targetSolarCount = 4;
+        profile.targetDefenceCount = 0;
+        profile.baseAntiAirTowerCount = 0;
+        profile.targetRadarCount = 0;
+        profile.targetVehiclePlantCount = 0;
+        profile.targetAirPlantCount = 0;
+        profile.spendSurplusOnCapacity = false;
+        profile.expansionConstructors = 0;
+
+        SECTION("it is put on the most hurt of ours near the base")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 130, commands);
+            auto repairs = ordersFor<RepairOrder>(commands, builderId);
+            CHECK(std::any_of(repairs.begin(), repairs.end(), [&](const RepairOrder& o) { return o.target == hurtId; }));
+        }
+
+        SECTION("switched off, it is left hurt")
+        {
+            profile.mendDamagedUnits = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 130, commands);
+            auto repairs = ordersFor<RepairOrder>(commands, builderId);
+            CHECK(std::none_of(repairs.begin(), repairs.end(), [&](const RepairOrder& o) { return o.target == hurtId; }));
+        }
+    }
 }

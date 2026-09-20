@@ -1953,6 +1953,15 @@ namespace rwe
         return free;
     }
 
+    bool BuildManager::incomeOutrunsSpending(const AiTuningProfile& profile, const AiBlackboard& bb)
+    {
+        if (!profile.spendSurplusOnCapacity || profile.capacityIncomeRatio <= 0.0f)
+        {
+            return false;
+        }
+        return bb.metalDemand.value * profile.capacityIncomeRatio < bb.metalIncome.value;
+    }
+
     void BuildManager::keepBuildersOutOfFights(
         const GameSimulation& sim,
         PlayerId aiOwner,
@@ -2975,6 +2984,24 @@ namespace rwe
             want(s.vehiclePlant);
         }
 
+        // A factory beyond the targets while the income is going unspent
+        // (spendSurplusOnCapacity): the vehicle plant first, because it is
+        // the cheaper of the two on both sides, then a second lab. Below the
+        // extractors and the towers above on purpose -- another factory is
+        // what to do with metal there is nothing else to do with, not a
+        // reason to stop taking ground.
+        if (spendingCapacityShort && !metalShort && hasFactory)
+        {
+            if (!s.vehiclePlant.empty() && total(s.vehiclePlant) < profile.targetVehiclePlantCount + profile.surplusFactories)
+            {
+                want(s.vehiclePlant);
+            }
+            else if (total(s.lab) < 1 + profile.surplusFactories)
+            {
+                want(s.lab);
+            }
+        }
+
         // Naval: a shipyard, once the map's water is worth a fleet.
         // navalFleetTarget folds together the map-character gate -- mirroring
         // how airMatters gates the air plant above -- and the kill switch:
@@ -3612,6 +3639,12 @@ namespace rwe
                 // (fortifyExtraConstructors): counted from what stands and
                 // what is going up, which is all this needs to know.
                 auto constructorTarget = profile.targetConstructorCount;
+                // More while the income is going unspent
+                // (spendSurplusOnCapacity).
+                if (spendingCapacityShort)
+                {
+                    constructorTarget += profile.surplusConstructors;
+                }
                 // And more while metal lies unclaimed on our side
                 // (expansionConstructors).
                 if (profile.expansionConstructors > 0 && bb.baseAnchor)
@@ -3728,6 +3761,20 @@ namespace rwe
         indexMetalPatches(sim);
         indexGeothermalVents(sim);
         const auto& sideUnits = bb.sideUnits;
+
+        // Whether the income has outrun what there is to spend it with
+        // (spendSurplusOnCapacity). Demand is what the running jobs draw, so
+        // a base whose builders and factories are all busy reads near its
+        // income and nothing is added.
+        if (incomeOutrunsSpending(profile, bb))
+        {
+            capacityShortTicks += profile.buildPlannerTickInterval;
+        }
+        else
+        {
+            capacityShortTicks = 0;
+        }
+        spendingCapacityShort = capacityShortTicks >= static_cast<unsigned int>(std::max(0, profile.capacitySurplusSeconds)) * SimTicksPerSecond;
 
         planFactories(sim, profile, bb, outCommands);
 
@@ -4019,6 +4066,69 @@ namespace rwe
                          << " frame (" << unit.getBuildPercentLeft(frameDef) << "% left)";
                 savingFor.clear();
                 outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(UnitId(unitId)), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                return;
+            }
+        }
+
+        // Whatever of ours near the base is most hurt (mendDamagedUnits):
+        // nothing in TA mends itself, so a unit that came home hurt stays
+        // hurt until a builder is put on it.
+        if (profile.mendDamagedUnits && builderAtBase && builderDef.canReclamate)
+        {
+            // One at a time: the AI issues a repair order on a mobile unit
+            // nowhere else, so a builder of ours carrying one is this rule's.
+            bool someoneMending = false;
+            for (const auto& [otherId, other] : sim.units)
+            {
+                if (other.owner != aiOwner || !other.isAlive() || other.orders.empty() || UnitId(otherId) == builderId)
+                {
+                    continue;
+                }
+                auto repair = std::get_if<RepairOrder>(&other.orders.front());
+                if (repair == nullptr)
+                {
+                    continue;
+                }
+                auto target = sim.tryGetUnitState(repair->target);
+                if (target && sim.unitDefinitions.at(target->get().unitType).isMobile)
+                {
+                    someoneMending = true;
+                    break;
+                }
+            }
+            std::optional<UnitId> worst;
+            unsigned int worstShare = static_cast<unsigned int>(std::max(0, profile.mendBelowPercent));
+            const auto mendSquared = profile.mendRadius * profile.mendRadius;
+            for (const auto& [otherId, other] : sim.units)
+            {
+                if (other.owner != aiOwner || !other.isAlive() || UnitId(otherId) == builderId)
+                {
+                    continue;
+                }
+                auto otherDefIt = sim.unitDefinitions.find(other.unitType);
+                // Mobile only: a damaged building is repairStructures' to
+                // decide about, and it has its own rule about doing it while
+                // the gun that damaged it is still there.
+                if (otherDefIt == sim.unitDefinitions.end() || other.isBeingBuilt(otherDefIt->second)
+                    || otherDefIt->second.maxHitPoints == 0 || !otherDefIt->second.isMobile || otherDefIt->second.commander)
+                {
+                    continue;
+                }
+                if (other.position.distanceSquared(*bb.baseAnchor) > mendSquared)
+                {
+                    continue;
+                }
+                auto share = (other.hitPoints * 100) / otherDefIt->second.maxHitPoints;
+                if (share < worstShare)
+                {
+                    worstShare = share;
+                    worst = UnitId(otherId);
+                }
+            }
+            if (worst && !someoneMending)
+            {
+                LOG_INFO << "AI build: unit " << builderId.value << " mends unit " << worst->value << " (" << worstShare << "% of its hit points)";
+                outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(*worst), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
                 return;
             }
         }

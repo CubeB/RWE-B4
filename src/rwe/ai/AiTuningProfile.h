@@ -69,6 +69,26 @@ namespace rwe
          * busy with everything else on the list.
          */
         int expansionConstructors{2};
+        /**
+         * Spending capacity that follows the income. While what the AI can
+         * spend a second -- metalDemand, what its running jobs draw -- stays
+         * below its metal income divided by capacityIncomeRatio for
+         * capacitySurplusSeconds together, it is making metal it cannot use:
+         * surplusConstructors more construction units are allowed, and
+         * surplusFactories more factories beyond the targets above, the
+         * vehicle plant first and then another lab.
+         *
+         * Measured on Great Divide after the expansion work: the AI made 28%
+         * more metal than before and sat at the metal cap 13% of the time
+         * (27% on the games against CORE), and the extra income showed up in
+         * neither its army nor its final unit count. Income was no longer the
+         * limit; the number of things able to spend it was.
+         */
+        bool spendSurplusOnCapacity{true};
+        float capacityIncomeRatio{1.25f};
+        int capacitySurplusSeconds{20};
+        int surplusConstructors{2};
+        int surplusFactories{1};
         int freeDepositsPerExpansionConstructor{4};
         int targetDefenceCount{2};
         /**
@@ -245,6 +265,43 @@ namespace rwe
         bool commanderStandsItsGround{true};
         int commanderFightsUpToMetal{600};
         int commanderRetreatBelowPercent{50};
+
+        /**
+         * What the rest of the army does when it is hurt. A unit under its
+         * role's share of its hit points leaves the fight for the base and
+         * stands there until it is back above rejoinAbovePercent -- which it
+         * only gets to by being mended, see mendDamagedUnits. A raider is let
+         * go further down than a line unit: it is cheap, it is fast enough to
+         * get away, and the whole point of it is to be somewhere the army is
+         * not.
+         *
+         * The commander has had this since commanderRetreatBelowPercent; this
+         * is the same idea for everything else, and it is what keeps a wave's
+         * survivors alive to be in the next one.
+         */
+        bool retreatDamagedUnits{true};
+        int retreatRaiderBelowPercent{30};
+        int retreatLineBelowPercent{45};
+        int rejoinAbovePercent{60};
+        /** How near the base counts as home, so a unit standing there is not told to walk again. */
+        SimScalar mendHavenRadius{400_ss};
+
+        /**
+         * An idle construction unit mends whatever of ours near the base is
+         * most hurt, below mendBelowPercent of its hit points and within
+         * mendRadius of the base. Nothing in TA repairs itself, so without
+         * this a unit that retreats hurt is a unit that stays hurt.
+         */
+        bool mendDamagedUnits{true};
+        /**
+         * Badly hurt only, and one builder on the job at a time. At 90% and
+         * with every idle builder free to take it, this ran 135 times a game
+         * on Great Divide and the side doing it finished with 9.7 extractors
+         * against 15.5: the mending came out of the expansion, because this
+         * is asked before the build priorities are.
+         */
+        int mendBelowPercent{50};
+        SimScalar mendRadius{700_ss};
         /**
          * The D-gun, at the nearest armed enemy in its reach (240 on both
          * commanders), whenever the energy for a shot is in the bank. Not

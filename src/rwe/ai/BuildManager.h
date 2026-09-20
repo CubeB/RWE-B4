@@ -177,6 +177,13 @@ namespace rwe
          */
         int freeDepositsOnOurSide(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb) const;
 
+        /**
+         * Whether the metal coming in is more than the running jobs can draw:
+         * metalDemand * capacityIncomeRatio below metalIncome. update() counts
+         * how long that stays true before acting on it.
+         */
+        static bool incomeOutrunsSpending(const AiTuningProfile& profile, const AiBlackboard& bb);
+
         /** The next piece of a laser tower's fortification, and where it goes. */
         struct FortificationPlan
         {
@@ -585,6 +592,14 @@ namespace rwe
          */
         mutable std::vector<Point> metalPatches;
         mutable bool metalPatchesIndexed{false};
+        /**
+         * How long the AI has been unable to spend what it earns, in ticks,
+         * and whether that has gone on long enough to buy more capacity with.
+         * See AiTuningProfile::spendSurplusOnCapacity.
+         */
+        unsigned int capacityShortTicks{0};
+        bool spendingCapacityShort{false};
+
         /** The middle of each deposit, numbered as metalPatchDeposit numbers them. */
         mutable std::vector<SimVector> depositCentres;
 
