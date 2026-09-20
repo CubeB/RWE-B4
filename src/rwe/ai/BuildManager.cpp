@@ -715,7 +715,7 @@ namespace rwe
         // covered. The extractor search has said this about a metal patch
         // since the Crystal Maze measurement; see siteUnderEnemyGuns.
         auto acceptable = [&](const SimVector& p) {
-            return (!accept || accept(p)) && !siteUnderEnemyGuns(profile, bb, p);
+            return (!accept || accept(p)) && !siteUnderEnemyGuns(sim, profile, bb, p);
         };
         // Normal budget first; widen only if nothing fits at all, not even
         // a crowded site. A base with room never reaches the wide scan --
@@ -769,7 +769,7 @@ namespace rwe
             // As chooseBuildSite: nowhere a gun is already pointing. This
             // walk scores every ring rather than stopping at the first, so
             // refusing one site here simply leaves the rest to compete.
-            if (siteUnderEnemyGuns(profile, bb, site.position))
+            if (siteUnderEnemyGuns(sim, profile, bb, site.position))
             {
                 continue;
             }
@@ -1305,7 +1305,7 @@ namespace rwe
         return failedSites.count(std::make_pair(cell.x, cell.y)) != 0;
     }
 
-    bool BuildManager::siteUnderEnemyGuns(const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& site) const
+    bool BuildManager::siteUnderEnemyGuns(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& site) const
     {
         if (!profile.noticeProductionHarassment || profile.productionHarassRadius <= 0_ss)
         {
@@ -1314,6 +1314,26 @@ namespace rwe
         auto radiusSquared = profile.productionHarassRadius * profile.productionHarassRadius;
         for (const auto& [_, enemy] : bb.knownEnemies)
         {
+            // A gun that cannot move keeps us off exactly what it reaches
+            // (enemyGunRangeFromWeapon), which is what puts a defence of ours
+            // outside a bigger one of theirs.
+            if (profile.enemyGunRangeFromWeapon && enemy.isBuilding && enemy.isArmed && !enemy.isAir)
+            {
+                auto defIt = sim.unitDefinitions.find(enemy.unitType);
+                if (defIt != sim.unitDefinitions.end())
+                {
+                    auto reach = weaponRange(sim, defIt->second);
+                    if (reach > 0_ss)
+                    {
+                        reach += profile.enemyGunRangeMargin;
+                        if (enemy.lastKnownPosition.distanceSquared(site) <= reach * reach)
+                        {
+                            return true;
+                        }
+                        continue;
+                    }
+                }
+            }
             // Aircraft are excluded for the reason the extractor rule
             // excludes them: an aeroplane is over the site for a moment and
             // somewhere else by the time the builder arrives, so refusing
@@ -1703,7 +1723,7 @@ namespace rwe
             {
                 continue;
             }
-            if (!profile.repairUnderFire && siteUnderEnemyGuns(profile, bb, unit.position))
+            if (!profile.repairUnderFire && siteUnderEnemyGuns(sim, profile, bb, unit.position))
             {
                 continue;
             }
@@ -1945,7 +1965,7 @@ namespace rwe
                     break;
                 }
             }
-            if (!taken && !siteUnderEnemyGuns(profile, bb, centre))
+            if (!taken && !siteUnderEnemyGuns(sim, profile, bb, centre))
             {
                 ++free;
             }
@@ -2145,7 +2165,7 @@ namespace rwe
                     break;
                 }
             }
-            if (taken || siteUnderEnemyGuns(profile, bb, lost.position) || siteFailedLately(sim, lost.position))
+            if (taken || siteUnderEnemyGuns(sim, profile, bb, lost.position) || siteFailedLately(sim, lost.position))
             {
                 continue;
             }
@@ -2386,7 +2406,7 @@ namespace rwe
                     return std::nullopt;
                 }
             }
-            if (siteFailedLately(sim, slot) || siteUnderEnemyGuns(profile, bb, slot))
+            if (siteFailedLately(sim, slot) || siteUnderEnemyGuns(sim, profile, bb, slot))
             {
                 return std::nullopt;
             }
@@ -5112,7 +5132,7 @@ namespace rwe
                 LOG_DEBUG << "AI build: " << next << " would go where an order was just dropped; skipping it this pass";
                 site.reset();
             }
-            if (site && siteUnderEnemyGuns(profile, bb, *site))
+            if (site && siteUnderEnemyGuns(sim, profile, bb, *site))
             {
                 // Not under a gun. A frame is born with no hit points at
                 // all, so anything put down here dies before it is anything

@@ -177,6 +177,9 @@ namespace rwe
          */
         int freeDepositsOnOurSide(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb) const;
 
+        /** Whether a remembered enemy gun covers this ground. See AiTuningProfile::enemyGunRangeFromWeapon. */
+        bool siteUnderEnemyGuns(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& site) const;
+
         /**
          * Whether the metal coming in is more than the running jobs can draw:
          * metalDemand * capacityIncomeRatio below metalIncome. update() counts
@@ -574,7 +577,6 @@ namespace rwe
          * generators, which the extractor rule never covered. Gated by
          * noticeProductionHarassment and measured by productionHarassRadius.
          */
-        bool siteUnderEnemyGuns(const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& site) const;
 
         /**
          * Where extractors of ours were destroyed, by heightmap cell, with

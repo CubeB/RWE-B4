@@ -209,6 +209,8 @@ namespace rwe
             || setInt("targetConstructorCount", p.targetConstructorCount)
             || setInt("expansionConstructors", p.expansionConstructors)
             || setBool("dgunByValue", p.dgunByValue)
+            || setBool("enemyGunRangeFromWeapon", p.enemyGunRangeFromWeapon)
+            || setScalar("enemyGunRangeMargin", p.enemyGunRangeMargin)
             || setBool("counterEnemyComposition", p.counterEnemyComposition)
             || setInt("counterShareBonus", p.counterShareBonus)
             || setFloat("counterShareTrigger", p.counterShareTrigger)

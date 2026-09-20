@@ -6428,4 +6428,62 @@ namespace rwe
             CHECK(*std::get_if<UnitId>(&shots.front().target) == cheapId);
         }
     }
+    TEST_CASE("a gun of theirs that cannot move keeps us off exactly what it reaches", "[ai]")
+    {
+        // The test tower's laser reaches 200; a long gun of theirs reaches
+        // 600. The old rule refused a flat 400 around either.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        WeaponDefinition longGun{};
+        longGun.maxRange = 600_ss;
+        sim.weaponDefinitions["LONGGUN"] = longGun;
+        sim.unitDefinitions["ARMGUARD"] = sim.unitDefinitions["ARMLLT"];
+        sim.unitDefinitions["ARMGUARD"].weapon1 = "LONGGUN";
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.cheatModeOmniscient = true;
+        profile.scoutCount = 0;
+
+        auto refused = [&](const SimVector& site) {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 2, commands);
+            BuildManager planner;
+            return planner.siteUnderEnemyGuns(sim, profile, controller.getBlackboard(), site);
+        };
+
+        SECTION("a small tower of theirs refuses only what its own laser covers")
+        {
+            addUnit(sim, "ARMLLT", human, SimVector(800_ss, 0_ss, 0_ss), script);
+            CHECK(refused(SimVector(700_ss, 0_ss, 0_ss)));
+            // 300 away: inside the old flat 400, outside the laser's 200.
+            CHECK_FALSE(refused(SimVector(500_ss, 0_ss, 0_ss)));
+        }
+
+        SECTION("a long gun of theirs refuses ground far past the old radius")
+        {
+            addUnit(sim, "ARMGUARD", human, SimVector(800_ss, 0_ss, 0_ss), script);
+            CHECK(refused(SimVector(300_ss, 0_ss, 0_ss)));
+            CHECK_FALSE(refused(SimVector(100_ss, 0_ss, 0_ss)));
+        }
+
+        SECTION("switched off, one radius answers for both")
+        {
+            profile.enemyGunRangeFromWeapon = false;
+            addUnit(sim, "ARMGUARD", human, SimVector(800_ss, 0_ss, 0_ss), script);
+            CHECK_FALSE(refused(SimVector(300_ss, 0_ss, 0_ss)));
+            CHECK(refused(SimVector(500_ss, 0_ss, 0_ss)));
+        }
+
+        SECTION("what they can drive keeps the flat radius")
+        {
+            addUnit(sim, "ARMPW", human, SimVector(800_ss, 0_ss, 0_ss), script);
+            CHECK(refused(SimVector(500_ss, 0_ss, 0_ss)));
+        }
+    }
 }

@@ -106,6 +106,23 @@ namespace rwe
          */
         bool dgunByValue{true};
 
+        /**
+         * What a remembered enemy gun keeps us off is read from its own
+         * weapon rather than from one radius for everything. An armed
+         * BUILDING of theirs refuses ground out to the range its weapon
+         * table gives it, plus enemyGunRangeMargin; anything mobile keeps
+         * productionHarassRadius, because a unit is somewhere else by the
+         * time a builder walks there and its exact reach says nothing about
+         * where it will be.
+         *
+         * A flat 400 was both too much and too little: it refused ground a
+         * light laser tower cannot cover, and it offered ground a Guardian
+         * shells at three times that. Reading the weapon is what makes a
+         * defence of ours stand where theirs cannot reach it.
+         */
+        bool enemyGunRangeFromWeapon{true};
+        SimScalar enemyGunRangeMargin{32_ss};
+
         bool counterEnemyComposition{true};
         int counterShareBonus{2};
         float counterShareTrigger{0.3f};
