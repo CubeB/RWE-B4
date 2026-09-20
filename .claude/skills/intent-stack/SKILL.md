@@ -1,6 +1,7 @@
 ---
 name: intent-stack
 description: Generate an intent stack — a review aid that organizes a proposed code change into a forest of progressively more concrete intent, with provenance on every node and links from intent to the exact PR diff lines that implement it. Use when preparing a branch for review, or when asked to explain how a change was decided.
+disable-model-invocation: true
 ---
 
 # Intent Stack
