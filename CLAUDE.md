@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+See also `@CONTEXT.md` — the project's domain glossary and design-decision record. Keep it in step when introducing or renaming project terms; the `.claude/skills/domain-modeling` skill is the discipline that maintains it.
+
 ## Project Overview
 
 Robot War Engine (RWE) is an open-source real-time strategy game engine with high compatibility for Total Annihilation data files. It consists of a C++20 core engine and a TypeScript/Electron launcher application.
@@ -336,7 +338,7 @@ Two things that pass measurement teaches, both worth knowing before making any o
 - All C++ code is in the `rwe::` namespace
 - Formatting enforced by `.clang-format`: Allman brace style, 4-space indent, no column limit. (It still declares `Standard: c++17`; that governs only how clang-format parses. The project builds as C++20.)
 - Test files live alongside source: `src/rwe/[subsystem]/[Component].test.cpp`
-- Fixtures the simulation tests share live in `src/rwe/sim/sim_test_util.h` (`makeEmptyCobScript`, `addPlayer`, `addUnitOfType`, `tick`, `everFires`). Use those rather than writing another copy — there were fourteen copies of the first one before they were collected. A test that genuinely needs something different keeps its own, under a name that says what is different: `addPlayerWithNothing` in the reclaim tests, `addWellStockedPlayer` and `addUndamagedUnitOfType` in the repair tests.
+- Shared sim test helpers live in `src/rwe/sim/sim_test_util.h` (`makeEmptyCobScript`, `addPlayer`, `addUnitOfType`, `tick`, `everFires`). Use those rather than writing another copy — there were fourteen copies of the first one before they were collected. A test that genuinely needs something different keeps its own, under a name that says what is different: `addPlayerWithNothing` in the reclaim tests, `addWellStockedPlayer` and `addUndamagedUnitOfType` in the repair tests.
 - Strong typing via opaque ID types: `UnitId`, `PlayerId`, `ProjectileId` (see `OpaqueId`)
 - Variant-based state machines for unit behavior and navigation goals
 - Error handling uses `Result<T, E>` types rather than exceptions
@@ -538,3 +540,17 @@ real FBI. Test fixtures that invent plausible-looking numbers instead of using
 the shipped ones have hidden at least one bug outright: the bomber tests claimed
 to fly an ARM Thunder with an `acceleration` and `turnRate` it does not have,
 and the failure was immediate once the real values went in.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for CubeB/RWE-B4, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles map to same-named labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` at the repo root plus `docs/adr/`. See `docs/agents/domain.md`.

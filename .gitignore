@@ -11,7 +11,14 @@ crash.txt
 
 # Screenshots taken while testing; they belong in the scratchpad, not the repo.
 /*.png
-# Scratch build trees; the CI matrix and the documented build commands
-# make their own.
+
+# Build trees; the repo keeps nothing in them and CI rebuilds from scratch.
 /build/
-build/
+/build-gdebug/
+
+# Sub-agent worktrees spawned during autonomous sessions.
+/.claude/worktrees/
+
+# The intent log is a session artifact; it is rendered into the PR
+# description by the intent-stack skill, never checked in.
+/.intent-log.md
