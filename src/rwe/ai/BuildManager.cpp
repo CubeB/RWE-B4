@@ -1953,6 +1953,44 @@ namespace rwe
         return free;
     }
 
+    BuildManager::LabShares BuildManager::counterShares(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb)
+    {
+        LabShares shares{profile.labRaiderShare, profile.labRocketKbotShare, profile.labArtilleryKbotShare};
+        if (!profile.counterEnemyComposition)
+        {
+            return shares;
+        }
+        float staticMetal = 0.0f;
+        float mobileMetal = 0.0f;
+        for (const auto& [_, enemy] : bb.knownEnemies)
+        {
+            if (!enemy.isArmed || enemy.isAir)
+            {
+                continue;
+            }
+            auto defIt = sim.unitDefinitions.find(enemy.unitType);
+            if (defIt == sim.unitDefinitions.end())
+            {
+                continue;
+            }
+            (enemy.isBuilding ? staticMetal : mobileMetal) += defIt->second.buildCostMetal.value;
+        }
+        auto seen = staticMetal + mobileMetal;
+        if (seen <= 0.0f)
+        {
+            return shares;
+        }
+        if (staticMetal / seen >= profile.counterShareTrigger)
+        {
+            shares.artilleryKbot += profile.counterShareBonus;
+        }
+        if (mobileMetal / seen >= profile.counterShareTrigger)
+        {
+            shares.rocketKbot += profile.counterShareBonus;
+        }
+        return shares;
+    }
+
     bool BuildManager::incomeOutrunsSpending(const AiTuningProfile& profile, const AiBlackboard& bb)
     {
         if (!profile.spendSurplusOnCapacity || profile.capacityIncomeRatio <= 0.0f)
@@ -3697,7 +3735,8 @@ namespace rwe
                 {
                     // Two raiders for every rocket kbot, as shipped; the
                     // profile holds the ratio.
-                    next = pickByShare({{&s.raider, profile.labRaiderShare}, {&s.rocketKbot, profile.labRocketKbotShare}, {&s.artilleryKbot, profile.labArtilleryKbotShare}});
+                    auto shares = counterShares(sim, profile, bb);
+                    next = pickByShare({{&s.raider, shares.raider}, {&s.rocketKbot, shares.rocketKbot}, {&s.artilleryKbot, shares.artilleryKbot}});
                 }
             }
 

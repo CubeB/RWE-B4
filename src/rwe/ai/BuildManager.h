@@ -184,6 +184,15 @@ namespace rwe
          */
         static bool incomeOutrunsSpending(const AiTuningProfile& profile, const AiBlackboard& bb);
 
+        /** The kbot lab's shares, leaned towards what answers the enemy we have seen. See AiTuningProfile::counterEnemyComposition. */
+        struct LabShares
+        {
+            int raider;
+            int rocketKbot;
+            int artilleryKbot;
+        };
+        static LabShares counterShares(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb);
+
         /** The next piece of a laser tower's fortification, and where it goes. */
         struct FortificationPlan
         {

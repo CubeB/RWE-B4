@@ -84,6 +84,23 @@ namespace rwe
          * neither its army nor its final unit count. Income was no longer the
          * limit; the number of things able to spend it was.
          */
+        /**
+         * What the enemy is made of decides what answers it. Of the armed
+         * enemies the AI remembers, the metal standing in their static
+         * defences and the metal walking in their army are each measured
+         * against the total: a role holding at least counterShareTrigger of
+         * it adds counterShareBonus to the share of what beats it --
+         * artillery over a tower a raider only dies to, rocket kbots against
+         * an army of raiders, which they outrange.
+         *
+         * The shares themselves stay the faction's (labRaiderShare and the
+         * rest); this only leans them, so a personality that sets them still
+         * decides the ground.
+         */
+        bool counterEnemyComposition{true};
+        int counterShareBonus{2};
+        float counterShareTrigger{0.3f};
+
         bool spendSurplusOnCapacity{true};
         float capacityIncomeRatio{1.25f};
         int capacitySurplusSeconds{20};

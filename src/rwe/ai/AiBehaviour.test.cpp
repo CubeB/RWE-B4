@@ -6326,4 +6326,60 @@ namespace rwe
             CHECK(std::none_of(repairs.begin(), repairs.end(), [&](const RepairOrder& o) { return o.target == hurtId; }));
         }
     }
+    TEST_CASE("what the enemy is made of leans the lab's shares", "[ai]")
+    {
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        defineWorld(sim);
+        sim.unitDefinitions["ARMLLT"].buildCostMetal = Metal(100.0f);
+        sim.unitDefinitions["ARMPW"].buildCostMetal = Metal(100.0f);
+        auto profile = makeDefaultStandardProfile();
+        AiBlackboard bb;
+        auto remember = [&](unsigned int id, const std::string& type, bool building) {
+            bb.knownEnemies.emplace(id, KnownEnemy{UnitId(id), type, SimVector(0_ss, 0_ss, 0_ss), GameTime(0), building, true, false});
+        };
+
+        SECTION("towers of theirs buy artillery")
+        {
+            remember(1, "ARMLLT", true);
+            remember(2, "ARMLLT", true);
+            auto shares = BuildManager::counterShares(sim, profile, bb);
+            CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare + profile.counterShareBonus);
+            CHECK(shares.rocketKbot == profile.labRocketKbotShare);
+            CHECK(shares.raider == profile.labRaiderShare);
+        }
+
+        SECTION("an army of theirs buys rocket kbots")
+        {
+            remember(1, "ARMPW", false);
+            remember(2, "ARMPW", false);
+            auto shares = BuildManager::counterShares(sim, profile, bb);
+            CHECK(shares.rocketKbot == profile.labRocketKbotShare + profile.counterShareBonus);
+            CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare);
+        }
+
+        SECTION("both, when they have both")
+        {
+            remember(1, "ARMPW", false);
+            remember(2, "ARMLLT", true);
+            auto shares = BuildManager::counterShares(sim, profile, bb);
+            CHECK(shares.rocketKbot == profile.labRocketKbotShare + profile.counterShareBonus);
+            CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare + profile.counterShareBonus);
+        }
+
+        SECTION("nothing seen, nothing leaned")
+        {
+            auto shares = BuildManager::counterShares(sim, profile, bb);
+            CHECK(shares.raider == profile.labRaiderShare);
+            CHECK(shares.rocketKbot == profile.labRocketKbotShare);
+            CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare);
+        }
+
+        SECTION("switched off")
+        {
+            profile.counterEnemyComposition = false;
+            remember(1, "ARMLLT", true);
+            auto shares = BuildManager::counterShares(sim, profile, bb);
+            CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare);
+        }
+    }
 }
