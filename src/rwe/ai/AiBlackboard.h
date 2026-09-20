@@ -520,5 +520,13 @@ namespace rwe
          * reserve the same way once buildSiteGuardRequest is cleared.
          */
         std::set<unsigned int> guardGroup;
+
+        /**
+         * Units that left the fight hurt and are standing at the base until
+         * they are mended back above rejoinAbovePercent. Kept between passes
+         * so that a unit does not walk home, read as healthy enough at the
+         * gate and turn straight round. See AiTuningProfile::retreatDamagedUnits.
+         */
+        std::map<unsigned int, GameTime> mendingUnits;
     };
 }

@@ -1,5 +1,7 @@
 #include "dump_util.h"
 
+#include "UnitStateFieldTable.h"
+
 namespace rwe
 {
     nlohmann::json dumpJson(float f)
@@ -58,56 +60,24 @@ namespace rwe
             {"previousMetalProductionBuffer", dumpJson(p.previousMetalProductionBuffer)},
             {"previousEnergyProductionBuffer", dumpJson(p.previousEnergyProductionBuffer)}};
     }
+    /**
+     * The desync dump's page of the unit, walked from the field table
+     * rather than from a hand-written list. The dump's share of the table
+     * covers every row that carries a dump step -- a deliberately smaller
+     * set than the save's, keyed by the same names so the two files can be
+     * read against each other.
+     */
     nlohmann::json dumpJson(const UnitState& u)
     {
-        return nlohmann::json{
-            {"unitType", dumpJson(u.unitType)},
-            {"position", dumpJson(u.position)},
-            {"owner", dumpJson(u.owner)},
-            {"rotation", dumpJson(u.rotation)},
-            {"physics", dumpJson(u.physics)},
-            {"hitPoints", dumpJson(u.hitPoints)},
-            {"lifeState", dumpJson(u.lifeState)},
-            {"navigationState", dumpJson(u.navigationState)},
-            {"behaviourState", dumpJson(u.behaviourState)},
-            {"inBuildStance", dumpJson(u.inBuildStance)},
-            {"armStowDueTime", dumpJson(u.armStowDueTime)},
-            {"nanoPoint", dumpJson(u.nanoPoint)},
-            {"yardOpen", dumpJson(u.yardOpen)},
-            {"inCollision", dumpJson(u.inCollision)},
-            {"fireOrders", dumpJson(u.fireOrders)},
-            {"moveOrders", dumpJson(u.moveOrders)},
-            {"armored", dumpJson(u.armored)},
-            {"kills", dumpJson(u.kills)},
-            {"sfxOccupyState", dumpJson(u.sfxOccupyState)},
-            {"buildTimeCompleted", dumpJson(u.buildTimeCompleted)},
-            {"nanoframeDecayTime", dumpJson(u.nanoframeDecayTime)},
-            {"nanoframeWorkedOn", dumpJson(u.nanoframeWorkedOn)},
-            {"nanoframeDecayRemainder", dumpJson(u.nanoframeDecayRemainder)},
-            {"reclaimProgress", dumpJson(u.reclaimProgress)},
-            {"selfDestructTime", dumpJson(u.selfDestructTime)},
-            {"paralyzedUntil", dumpJson(u.paralyzedUntil)},
-            {"moveRateBand", dumpJson(u.moveRateBand)},
-            {"carriedBy", dumpJson(u.carriedBy)},
-            {"airLoiter", dumpJson(u.airLoiter)},
-            {"activated", dumpJson(u.activated)},
-            {"isSufficientlyPowered", dumpJson(u.isSufficientlyPowered)},
-            {"cloakRequested", dumpJson(u.cloakRequested)},
-            {"cloaked", dumpJson(u.cloaked)},
-            {"cloakSuppressedUntil", dumpJson(u.cloakSuppressedUntil)},
-            {"energyProductionBuffer", dumpJson(u.energyProductionBuffer)},
-            {"metalProductionBuffer", dumpJson(u.metalProductionBuffer)},
-            {"previousEnergyConsumptionBuffer", dumpJson(u.previousEnergyConsumptionBuffer)},
-            {"previousMetalConsumptionBuffer", dumpJson(u.previousMetalConsumptionBuffer)},
-            {"energyConsumptionBuffer", dumpJson(u.energyConsumptionBuffer)},
-            {"metalConsumptionBuffer", dumpJson(u.metalConsumptionBuffer)},
-            {"weapons", dumpJson(u.weapons)},
-            {"previousEnergyProductionBuffer", dumpJson(u.previousEnergyProductionBuffer)},
-            {"previousMetalProductionBuffer", dumpJson(u.previousMetalProductionBuffer)},
-            {"energyRequestBuffer", dumpJson(u.energyRequestBuffer)},
-            {"metalRequestBuffer", dumpJson(u.metalRequestBuffer)},
-            {"energyDebt", dumpJson(u.energyDebt)},
-            {"metalDebt", dumpJson(u.metalDebt)}};
+        nlohmann::json j = nlohmann::json::object();
+        for (const auto& field : unitStateFieldTable())
+        {
+            if (field.dump)
+            {
+                j[field.name] = field.dump(u);
+            }
+        }
+        return j;
     }
 
     nlohmann::json dumpJson(const UnitWeapon& w)

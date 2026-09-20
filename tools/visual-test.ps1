@@ -1,9 +1,26 @@
-# -extraArgs appends launch options, space separated, e.g.
+﻿# -extraArgs appends launch options, space separated, e.g.
 # "--shading-strength-units 25 --shading-strength-buildings 40".
-param([string]$phase = "build", [string]$outDir = "D:\RWE", [string]$tag = "", [string]$extraArgs = "")
+# -minimised keeps the game off the screen. The window is moved off the side
+# of the desktop as soon as it appears, every click is posted to it rather than
+# driven through the real mouse pointer, and every shot is taken by the game
+# itself: Ctrl+F9 is posted, and the PCX the engine writes is decoded here.
+# Nothing steals focus and nothing covers what you are doing. Use it whenever a
+# run is not about how the window itself behaves.
+#
+# Two things had to be measured rather than assumed. A genuinely minimised
+# window has a client rect of nothing, so its drawable is nothing, and the
+# frame reads back black -- which is why this moves the window instead of
+# minimising it; it is still in the task bar and still off the screen.
+# And PrintWindow does not work on this window at all: the client area is an
+# OpenGL surface, WM_PRINT does not reach it, and every frame it hands back is
+# blank. glReadPixels through the engine's own screenshot key is what does
+# work, off-screen and unfocused alike.
+param([string]$phase = "build", [string]$outDir = "D:\RWE", [string]$tag = "", [string]$extraArgs = "", [switch]$minimised)
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-Add-Type @"
+# System.Drawing is referenced explicitly: the PCX decoder below returns a
+# Bitmap, and Add-Type does not bring that assembly in by itself.
+Add-Type -ReferencedAssemblies System.Drawing @"
 using System;
 using System.Runtime.InteropServices;
 public struct RECT { public int Left, Top, Right, Bottom; }
@@ -14,10 +31,78 @@ public static class W {
   [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, UIntPtr e);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+  [DllImport("user32.dll")] public static extern IntPtr PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+
+  // The engine writes 24-bit run-length PCX (Screenshot.cpp). Decoded here
+  // rather than in PowerShell because a script loop over three planes of a
+  // 1080p frame takes tens of seconds and this takes none.
+  public static System.Drawing.Bitmap LoadPcx24(string path) {
+    byte[] d = System.IO.File.ReadAllBytes(path);
+    int w = BitConverter.ToUInt16(d, 8) - BitConverter.ToUInt16(d, 4) + 1;
+    int h = BitConverter.ToUInt16(d, 10) - BitConverter.ToUInt16(d, 6) + 1;
+    int planes = d[65];
+    int bpl = BitConverter.ToUInt16(d, 66);
+    var bmp = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+    var data = bmp.LockBits(new System.Drawing.Rectangle(0, 0, w, h),
+      System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+    byte[] row = new byte[planes * bpl];
+    byte[] line = new byte[data.Stride];
+    int i = 128;
+    for (int y = 0; y < h; y++) {
+      int o = 0;
+      while (o < row.Length) {
+        byte b = d[i++];
+        if (b >= 0xC0) { int n = b & 0x3F; byte v = d[i++]; for (int k = 0; k < n && o < row.Length; k++) row[o++] = v; }
+        else row[o++] = b;
+      }
+      // Planar, red first; the bitmap wants BGR triples.
+      for (int x = 0; x < w; x++) {
+        line[x * 3 + 2] = row[x];
+        line[x * 3 + 1] = row[bpl + x];
+        line[x * 3 + 0] = row[2 * bpl + x];
+      }
+      Marshal.Copy(line, 0, (IntPtr)(data.Scan0.ToInt64() + (long)y * data.Stride), data.Stride);
+    }
+    bmp.UnlockBits(data);
+    return bmp;
+  }
 }
 "@
 
+# SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE, and where off-screen is.
+$SWP_MOVEONLY = 0x1 -bor 0x4 -bor 0x10
+$OFFSCREEN_X = -4000
+$OFFSCREEN_Y = -4000
+# Where the engine puts its screenshots (util.cpp: APPDATA/RWE).
+$script:shotDir = Join-Path $env:APPDATA "RWE\screenshots"
+
 function Shot() {
+  if ($script:minimisedRun -and $script:windowHandle) {
+    # Ctrl+F9 posted to the window: the game reads its own back buffer with
+    # glReadPixels once the frame is drawn, which is the one capture that
+    # works on a window nobody can see. VK_CONTROL 0x11, VK_F9 0x78.
+    $h = $script:windowHandle
+    [W]::PostMessage($h, 0x0100, [IntPtr]0x11, [IntPtr]0x001D0001) | Out-Null
+    Start-Sleep -Milliseconds 120
+    [W]::PostMessage($h, 0x0100, [IntPtr]0x78, [IntPtr]0x00430001) | Out-Null
+    Start-Sleep -Milliseconds 120
+    [W]::PostMessage($h, 0x0101, [IntPtr]0x78, [IntPtr]0xC0430001) | Out-Null
+    [W]::PostMessage($h, 0x0101, [IntPtr]0x11, [IntPtr]0xC01D0001) | Out-Null
+    # The file appears a frame or two later, and is written in one go, so
+    # wait for its size to stop changing as well as for it to exist.
+    $file = $null
+    for ($t = 0; $t -lt 60 -and -not $file; $t++) {
+      Start-Sleep -Milliseconds 100
+      $file = Get-ChildItem (Join-Path $script:shotDir "SHOT*.pcx") -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notin $script:seenShots } | Select-Object -First 1
+    }
+    if (-not $file) { throw "the game did not answer Ctrl+F9" }
+    $size = -1
+    while ($file.Length -ne $size) { $size = $file.Length; Start-Sleep -Milliseconds 120; $file.Refresh() }
+    $script:seenShots += $file.Name
+    return [W]::LoadPcx24($file.FullName)
+  }
   $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
   $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
   $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -32,7 +117,79 @@ function Crop($bmp, $dst, $x, $y, $w, $h, $scale) {
   $g.DrawImage($bmp, (New-Object System.Drawing.Rectangle 0,0,($w*$scale),($h*$scale)), (New-Object System.Drawing.Rectangle $x,$y,$w,$h), [System.Drawing.GraphicsUnit]::Pixel)
   $o.Save($dst); $o.Dispose()
 }
+function Hover($x, $y) {
+  # Where the game thinks the pointer is. For an off-screen run that is a
+  # posted WM_MOUSEMOVE in client coordinates -- moving the real pointer
+  # would do nothing to a window nobody can see, and would take the user's
+  # own pointer with it.
+  if ($script:minimisedRun -and $script:windowHandle) {
+    $o = Origin
+    $l = [IntPtr]((([int]($y - $o.Y)) -shl 16) -bor (([int]($x - $o.X)) -band 0xFFFF))
+    [W]::PostMessage($script:windowHandle, 0x0200, [IntPtr]::Zero, $l) | Out-Null
+    Start-Sleep -Milliseconds 60
+    return
+  }
+  [W]::SetCursorPos($x, $y) | Out-Null
+}
+
+function Key($spec) {
+  # SendKeys goes to whatever has focus, which for an off-screen run is the
+  # user's own work. Posted to the window instead, a key at a time: the
+  # braced names SendKeys uses, "^a" for a control chord, anything else typed
+  # as characters.
+  if (-not ($script:minimisedRun -and $script:windowHandle)) {
+    [System.Windows.Forms.SendKeys]::SendWait($spec)
+    return
+  }
+  $h = $script:windowHandle
+  $vk = @{ "{F2}" = 0x71; "{F9}" = 0x78; "{F10}" = 0x79; "{F11}" = 0x7A; "{ENTER}" = 0x0D; "{ESC}" = 0x1B; "{BREAK}" = 0x13; "{TAB}" = 0x09 }
+  if ($vk.ContainsKey($spec)) {
+    [W]::PostMessage($h, 0x0100, [IntPtr]$vk[$spec], [IntPtr]1) | Out-Null
+    Start-Sleep -Milliseconds 80
+    [W]::PostMessage($h, 0x0101, [IntPtr]$vk[$spec], [IntPtr]1) | Out-Null
+    Start-Sleep -Milliseconds 120
+    return
+  }
+  if ($spec.StartsWith("^")) {
+    $c = [byte][char]([string]$spec.Substring(1)).ToUpper()
+    [W]::PostMessage($h, 0x0100, [IntPtr]0x11, [IntPtr]1) | Out-Null
+    Start-Sleep -Milliseconds 60
+    [W]::PostMessage($h, 0x0100, [IntPtr]$c, [IntPtr]1) | Out-Null
+    Start-Sleep -Milliseconds 60
+    [W]::PostMessage($h, 0x0101, [IntPtr]$c, [IntPtr]1) | Out-Null
+    [W]::PostMessage($h, 0x0101, [IntPtr]0x11, [IntPtr]1) | Out-Null
+    Start-Sleep -Milliseconds 120
+    return
+  }
+  # Plain text: the key down and up say which key, WM_CHAR is what a text
+  # field actually reads.
+  foreach ($ch in $spec.ToCharArray()) {
+    $c = [byte][char]([string]$ch).ToUpper()
+    [W]::PostMessage($h, 0x0100, [IntPtr]$c, [IntPtr]1) | Out-Null
+    [W]::PostMessage($h, 0x0102, [IntPtr][int][char]$ch, [IntPtr]1) | Out-Null
+    [W]::PostMessage($h, 0x0101, [IntPtr]$c, [IntPtr]1) | Out-Null
+    Start-Sleep -Milliseconds 40
+  }
+  Start-Sleep -Milliseconds 120
+}
+
 function Click($x, $y) {
+  if ($script:minimisedRun -and $script:windowHandle) {
+    # Posted to the window in client coordinates: WM_MOUSEMOVE first, because
+    # a click with no preceding move lands on whatever the game last thought
+    # the pointer was over.
+    $o = Origin
+    $cx = [int]($x - $o.X)
+    $cy = [int]($y - $o.Y)
+    $l = [IntPtr](($cy -shl 16) -bor ($cx -band 0xFFFF))
+    [W]::PostMessage($script:windowHandle, 0x0200, [IntPtr]::Zero, $l) | Out-Null
+    Start-Sleep -Milliseconds 120
+    [W]::PostMessage($script:windowHandle, 0x0201, [IntPtr]1, $l) | Out-Null
+    Start-Sleep -Milliseconds 80
+    [W]::PostMessage($script:windowHandle, 0x0202, [IntPtr]::Zero, $l) | Out-Null
+    Start-Sleep -Milliseconds 400
+    return
+  }
   [W]::SetCursorPos($x, $y) | Out-Null
   Start-Sleep -Milliseconds 250
   [W]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 80; [W]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
@@ -83,6 +240,10 @@ if ($phase -eq "mex") {
   # phase catches.
   $env:RWE_DEBUG_SPAWN = 'ARMMEX*1@0:6:0'
 }
+# The log is what says the scene is up, so last run's copy has to go first:
+# left in place, every run decides it has arrived the moment it starts and
+# photographs the loading screen instead of the game.
+Remove-Item 'D:\RWE\rwe-vt.log' -ErrorAction SilentlyContinue
 $p = Start-Process -FilePath "D:\RWE\build-release\rwe.exe" -WorkingDirectory "D:\RWE\build-release" -ArgumentList $launchArgs -PassThru
 # The window can take a while to appear when a build is running alongside, so
 # poll for it rather than trust a fixed wait, and then give the game time to
@@ -107,9 +268,25 @@ for ($w = 0; $w -lt 240 -and -not $inScene; $w++) {
 if (-not $inScene) { "never reached the scene"; Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; exit 1 }
 Start-Sleep -Seconds 2
 $h = $proc.MainWindowHandle
-[W]::SetForegroundWindow($h) | Out-Null
+$script:windowHandle = $h
+$script:minimisedRun = [bool]$minimised
+$script:seenShots = @()
+if ($minimised) {
+  # Its own screenshots, so the ones already there are not mistaken for this
+  # run's: the engine numbers from one past the highest it finds.
+  if (Test-Path $script:shotDir) {
+    $script:seenShots = @(Get-ChildItem (Join-Path $script:shotDir "SHOT*.pcx") | ForEach-Object { $_.Name })
+  }
+  [W]::SetWindowPos($h, [IntPtr]::Zero, $OFFSCREEN_X, $OFFSCREEN_Y, 0, 0, $SWP_MOVEONLY) | Out-Null
+  "window moved off the screen; the game takes its own shots"
+} else {
+  [W]::SetForegroundWindow($h) | Out-Null
+}
 Start-Sleep -Milliseconds 500
 function Origin() {
+  # For a minimised run the shot IS the client area, so its origin is 0,0 and
+  # every coordinate the phases use is already relative to it.
+  if ($script:minimisedRun) { return (New-Object POINT) }
   # Asked for afresh before each click and shot: the window has been seen
   # to move after it first appears, and a stale origin puts every crop and
   # click somewhere else.
@@ -126,7 +303,7 @@ if ($phase -eq "build") {
   Click ($o.X + 92) ($o.Y + 141)
   Click ($o.X + 32) ($o.Y + 189)
   Click ($o.X + 300) ($o.Y + 250)
-  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Hover ($o.X + 700) ($o.Y + 550)
   for ($i = 0; $i -lt 10; $i++) {
     Start-Sleep -Seconds 2
     $bmp = Shot
@@ -138,14 +315,14 @@ if ($phase -eq "build") {
 
 if ($phase -eq "air") {
   # Spawn an Atlas through the debug window, then order it across the map and watch it fly.
-  [System.Windows.Forms.SendKeys]::SendWait("{F10}")
+  Key "{F10}"
   Start-Sleep -Milliseconds 800
   Click ($o.X + 540) ($o.Y + 311)
-  [System.Windows.Forms.SendKeys]::SendWait("ARMATLAS")
+  Key "ARMATLAS"
   Start-Sleep -Milliseconds 300
-  [W]::SetCursorPos($o.X + 560, $o.Y + 330) | Out-Null
+  Hover ($o.X + 560) ($o.Y + 330)
   Start-Sleep -Milliseconds 300
-  [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+  Key "{ENTER}"
   Start-Sleep -Milliseconds 800
   # close the debug window with its X button (keys are swallowed while the text field has focus)
   Click ($o.X + 737) ($o.Y + 74)
@@ -167,23 +344,23 @@ if ($phase -eq "air") {
 
 if ($phase -eq "ship") {
   # A Hulk in the water and a Peewee on the shore: LOAD should swing the crane out.
-  [System.Windows.Forms.SendKeys]::SendWait("{F10}")
+  Key "{F10}"
   Start-Sleep -Milliseconds 800
   Click ($o.X + 540) ($o.Y + 311)
-  [System.Windows.Forms.SendKeys]::SendWait("^a")
-  [System.Windows.Forms.SendKeys]::SendWait("ARMTSHIP")
+  Key "^a"
+  Key "ARMTSHIP"
   Start-Sleep -Milliseconds 300
-  [W]::SetCursorPos($o.X + 150, $o.Y + 300) | Out-Null
+  Hover ($o.X + 150) ($o.Y + 300)
   Start-Sleep -Milliseconds 300
-  [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+  Key "{ENTER}"
   Start-Sleep -Milliseconds 600
   Click ($o.X + 540) ($o.Y + 311)
-  [System.Windows.Forms.SendKeys]::SendWait("^a")
-  [System.Windows.Forms.SendKeys]::SendWait("ARMPW")
+  Key "^a"
+  Key "ARMPW"
   Start-Sleep -Milliseconds 300
-  [W]::SetCursorPos($o.X + 270, $o.Y + 300) | Out-Null
+  Hover ($o.X + 270) ($o.Y + 300)
   Start-Sleep -Milliseconds 300
-  [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+  Key "{ENTER}"
   Start-Sleep -Milliseconds 600
   Click ($o.X + 737) ($o.Y + 74)
   Start-Sleep -Milliseconds 600
@@ -193,7 +370,7 @@ if ($phase -eq "ship") {
   $bmp = Shot; $bmp.Save("D:\RWE\vt-shipsel.png"); $bmp.Dispose()
   Click ($o.X + 90) ($o.Y + 459)
   Click ($o.X + 270) ($o.Y + 300)
-  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Hover ($o.X + 700) ($o.Y + 550)
   for ($i = 1; $i -le 8; $i++) {
     Start-Sleep -Seconds 1
     $bmp = Shot
@@ -205,7 +382,7 @@ if ($phase -eq "ship") {
   Click ($o.X + 90) ($o.Y + 314)
   $bmp = Shot; $bmp.Save("D:\RWE\vt-unloadfull.png"); $bmp.Dispose()
   Click ($o.X + 290) ($o.Y + 340)
-  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Hover ($o.X + 700) ($o.Y + 550)
   for ($i = 1; $i -le 10; $i++) {
     Start-Sleep -Seconds 1
     $bmp = Shot
@@ -236,9 +413,9 @@ if ($phase -eq "info") {
   # 1. Hover the commander, who starts at the centre of the world viewport
   #    (x 128..640, y 32..448 on this window). Give the Peewees time to
   #    arrive and die first.
-  [W]::SetCursorPos(($o.X + 390), ($o.Y + 158)) | Out-Null
+  Hover ($o.X + 390) ($o.Y + 158)
   Start-Sleep -Seconds 45
-  [W]::SetCursorPos(($o.X + 391), ($o.Y + 159)) | Out-Null
+  Hover ($o.X + 391) ($o.Y + 159)
   Start-Sleep -Seconds 2
   Footer "hover"
   Full "hoverfull"
@@ -260,39 +437,39 @@ if ($phase -eq "info") {
   #      around the site swept at leisure -- the footer is drawn from live
   #      state and the cursor still moves while the simulation is stopped.
   Start-Sleep -Seconds 7
-  [System.Windows.Forms.SendKeys]::SendWait("{BREAK}")
+  Key "{BREAK}"
   Start-Sleep -Milliseconds 800
   $k = 0
   foreach ($dy in @(-73, -60, -85, -45, -30, 0)) {
     foreach ($dx in @(10, 0, 25, -15, 45)) {
-      [W]::SetCursorPos(($o.X + 330 + $dx), ($o.Y + 300 + $dy)) | Out-Null
+      Hover ($o.X + 330 + $dx) ($o.Y + 300 + $dy)
       Start-Sleep -Milliseconds 250
       Footer ("builder$k")
       $k = $k + 1
     }
   }
-  [System.Windows.Forms.SendKeys]::SendWait("{BREAK}")
+  Key "{BREAK}"
   Start-Sleep -Milliseconds 500
 
   Panel "buildqueue"
   Full "buildingfull"
 
   # 3. Hover the finished collector.
-  [W]::SetCursorPos(($o.X + 330), ($o.Y + 300)) | Out-Null
+  Hover ($o.X + 330) ($o.Y + 300)
   Start-Sleep -Seconds 2
   Footer "nanoframe"
 
   # 4. An anti-nuke launcher, placed through the debug window, draws its
   #    coverage ring on the minimap while it is selected.
-  [System.Windows.Forms.SendKeys]::SendWait("{F10}")
+  Key "{F10}"
   Start-Sleep -Milliseconds 900
   Full "debugwindow"
 
   # 5. The save dialog: the text caret belongs to the focused control, and
   #    the selected list row is brightened.
-  [System.Windows.Forms.SendKeys]::SendWait("{F10}")
+  Key "{F10}"
   Start-Sleep -Milliseconds 600
-  [System.Windows.Forms.SendKeys]::SendWait("{F2}")
+  Key "{F2}"
   Start-Sleep -Milliseconds 900
   Full "menu"
   # SAVEGAME sits at (13,64) inside the menu page, which is at (0,128).
@@ -329,17 +506,17 @@ if ($phase -eq "solar") {
   # Select the collector, then show what the left panel offers for it, so the
   # on/off gadget can be found rather than guessed at. The collector lands
   # about 95 pixels east of the commander at this window size.
-  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Hover ($o.X + 700) ($o.Y + 550)
   Start-Sleep -Seconds 8
   $o = Origin
-  [W]::SetForegroundWindow($h) | Out-Null
+  if (-not $script:minimisedRun) { [W]::SetForegroundWindow($h) | Out-Null }
   Start-Sleep -Milliseconds 300
   Click ($o.X + 560) ($o.Y + 155)
   # The on/off gadget, which reads OFF for a spawned collector. Its row sits
   # at client y 228: the panel's own tabs are at y 141, which the build phase
   # above already clicks, and the rows below them step at about 27 pixels.
   Click ($o.X + 62) ($o.Y + 228)
-  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Hover ($o.X + 700) ($o.Y + 550)
   # The panels are an animation, not a state change, so give the script time
   # to run them open before the shutter.
   Start-Sleep -Seconds 4
@@ -352,7 +529,7 @@ if ($phase -eq "solar") {
   # drawn round the collector in the close-up. Selecting something else puts
   # it somewhere harmless.
   Click ($o.X + 465) ($o.Y + 155)
-  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Hover ($o.X + 700) ($o.Y + 550)
   Start-Sleep -Seconds 2
   $bmp = Shot
   Crop $bmp "$outDir\vt-solar$tag-full.png" $o.X $o.Y 800 600 1
@@ -364,7 +541,7 @@ if ($phase -eq "mex") {
   # Nothing to click: the extractor is spawned standing still, and the whole
   # question is what its edges look like. The mouse is parked out of the way
   # so no hover highlight lands on it.
-  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Hover ($o.X + 700) ($o.Y + 550)
   Start-Sleep -Seconds 8
   $o = Origin
   $bmp = Shot
@@ -392,10 +569,10 @@ if ($phase -eq "shade") {
   # the build under test so a before and an after can sit side by side. On
   # Coast To Coast at this window size the commander starts near (505,165)
   # of the client area and the collector lands about 110 pixels east.
-  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Hover ($o.X + 700) ($o.Y + 550)
   Start-Sleep -Seconds 10
   $o = Origin
-  [W]::SetForegroundWindow($h) | Out-Null
+  if (-not $script:minimisedRun) { [W]::SetForegroundWindow($h) | Out-Null }
   Start-Sleep -Milliseconds 300
   $bmp = Shot
   # The client area alone, never the whole screen: the desktop around the
@@ -418,10 +595,10 @@ if ($phase -eq "stall") {
   Click ($o.X + 505) ($o.Y + 165)
   Click ($o.X + 96) ($o.Y + 315)
   Click ($o.X + 505) ($o.Y + 330)
-  [W]::SetCursorPos($o.X + 700, $o.Y + 550) | Out-Null
+  Hover ($o.X + 700) ($o.Y + 550)
   Start-Sleep -Seconds 75
   $o = Origin
-  [W]::SetForegroundWindow($h) | Out-Null
+  if (-not $script:minimisedRun) { [W]::SetForegroundWindow($h) | Out-Null }
   Start-Sleep -Milliseconds 300
   for ($i = 0; $i -lt 4; $i++) {
     $bmp = Shot

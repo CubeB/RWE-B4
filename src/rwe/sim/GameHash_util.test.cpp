@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/sim/GameHash_util.h>
+#include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/util/OpaqueId_io.h>
 #include <cstddef>
@@ -157,6 +158,129 @@ namespace rwe
         REQUIRE(hashOfNewUnitBuiltInMemoryFilledWith(0xA5) == hashOfNewUnitBuiltInMemoryFilledWith(0x3C));
     }
 
+    namespace
+    {
+        /**
+         * Builds a unit with every member the sync hash reads carrying
+         * something, and nothing left at its default.
+         *
+         * The point of this unit is the pinned-hash test below: the field
+         * table that drives the hash, save and dump walks must produce the
+         * same bytes the hand-written hash did, and only a unit with
+         * everything populated exercises that claim.
+         */
+        UnitState makePopulatedUnitState()
+        {
+            static const auto script = makeEmptyCobScript();
+
+            std::vector<UnitMesh> pieces{UnitMesh()};
+            UnitState u(pieces, std::make_unique<CobEnvironment>(script.get()));
+
+            u.unitType = "ARMCK";
+            u.position = SimVector(1_ss, 2_ss, 3_ss);
+            u.owner = PlayerId(2);
+            u.rotation = SimAngle(100);
+            u.physics = UnitPhysicsInfoGround{
+                SteeringInfo{SimAngle(12), SimScalar(3_ss)},
+                SimScalar(4_ss)};
+            u.hitPoints = 90;
+            u.lifeState = UnitState::LifeStateDead{true, 2u};
+            u.orders.push_back(MoveOrder(SimVector(3_ss, 4_ss, 5_ss)));
+            u.orders.push_back(AttackOrder(UnitId(7), AttackLeash(SimVector(6_ss, 7_ss, 8_ss), SimScalar(2_ss))));
+            auto& attack = std::get<AttackOrder>(u.orders.back());
+            attack.lastSeenPosition = SimVector(9_ss, 9_ss, 0_ss);
+            u.orders.push_back(BuildOrder("ARMSOLAR", SimVector(10_ss, 0_ss, 11_ss)));
+            u.orders.push_back(CompleteBuildOrder(UnitId(13)));
+            u.orders.push_back(GuardOrder(UnitId(14)));
+            u.orders.push_back(ReclaimOrder(FeatureId(15)));
+            u.orders.push_back(RepairOrder(UnitId(16)));
+            u.orders.push_back(PatrolOrder(SimVector(17_ss, 0_ss, 18_ss)));
+            u.orders.push_back(LoadOrder(UnitId(19)));
+            u.orders.push_back(UnloadOrder(SimVector(20_ss, 0_ss, 21_ss)));
+            std::get<UnloadOrder>(u.orders.back()).parkedUntil = GameTime(123);
+            u.orders.push_back(DgunOrder(SimVector(22_ss, 0_ss, 23_ss)));
+            u.orders.push_back(LandOnAirBaseOrder(UnitId(24)));
+            u.orders.push_back(ResurrectOrder(FeatureId(25)));
+            u.orders.push_back(CaptureOrder(UnitId(26)));
+            std::get<CaptureOrder>(u.orders.back()).progress = 42u;
+            std::get<CaptureOrder>(u.orders.back()).totalWork = 900u;
+            u.orders.push_back(BuggerOffOrder(DiscreteRect(1, 2, 3, 4)));
+            u.behaviourState = UnitBehaviorStateBuilding{UnitId(11), SimVector(30_ss, 0_ss, 31_ss)};
+            u.navigationState = NavigationStateInfo{
+                NavigationGoal(SimVector(40_ss, 0_ss, 41_ss)),
+                UnitPositionCache{UnitId(5), SimVector(42_ss, 0_ss, 43_ss), GameTime(77)},
+                UnitPositionCache{UnitId(6), SimVector(44_ss, 0_ss, 45_ss), GameTime(88)},
+                NavigationStateMoving{
+                    MovingStateGoal(UnitId(9)),
+                    PathDestination(SimVector(46_ss, 0_ss, 47_ss)),
+                    std::nullopt,
+                    true,
+                    SimVector(48_ss, 0_ss, 49_ss)}};
+            u.buildOrderUnitId = UnitId(51);
+            u.inBuildStance = true;
+            u.armStowDueTime = GameTime(1200);
+            u.nanoPointQueriedAt = GameTime(52);
+            u.nanoPoint = SimVector(53_ss, 54_ss, 55_ss);
+            u.yardOpen = true;
+            u.inCollision = true;
+
+            UnitWeapon weapon;
+            weapon.weaponType = "CORVULC";
+            weapon.readyTime = GameTime(56);
+            weapon.ballisticZOffset = SimScalar(57_ss);
+            weapon.stockedRounds = 3;
+            weapon.queuedRounds = 2;
+            weapon.stockpileProgress = 9;
+            weapon.stockpileStepDelay = 4;
+            u.weapons[0] = weapon;
+            u.weapons[1] = weapon;
+
+            u.fireOrders = UnitFireOrders::ReturnFire;
+            u.moveOrders = UnitMovementOrders::Maneuver;
+            u.cobBusy = true;
+            u.buggerOffActive = true;
+            u.armored = true;
+            u.kills = 4;
+            u.sfxOccupyState = 3;
+            u.buildTimeCompleted = 234;
+            u.nanoframeDecayTime = GameTime(4321);
+            u.nanoframeWorkedOn = true;
+            u.nanoframeDecayRemainder = 7;
+            u.reclaimProgress = 12;
+            u.selfDestructTime = GameTime(555);
+            u.paralyzedUntil = GameTime(666);
+            u.moveRateBand = 3;
+            u.carriedBy = UnitId(9);
+            u.carriedUnits = {UnitId(12), UnitId(17)};
+            u.transportScriptTarget = UnitId(10);
+            u.transportScriptStartedAt = GameTime(11);
+            u.airWorkOrbit = UnitState::AirWorkOrbitState{SimVector(60_ss, 0_ss, 61_ss), SimAngle(62), true};
+            u.airLoiter = UnitState::AirLoiterState{UnitState::AirLoiterState::Reason::Guarding, SimVector(63_ss, 0_ss, 64_ss), SimAngle(65)};
+            u.slowFacePoint = SimVector(66_ss, 0_ss, 67_ss);
+            u.activated = true;
+            u.isSufficientlyPowered = true;
+            u.cloakRequested = true;
+            u.cloaked = true;
+            u.cloakSuppressedUntil = GameTime(50);
+            u.energyProductionBuffer = Energy{1.5f};
+            u.metalProductionBuffer = Metal{2.5f};
+            u.previousEnergyProductionBuffer = Energy{3.5f};
+            u.previousMetalProductionBuffer = Metal{4.5f};
+            u.previousEnergyConsumptionBuffer = Energy{5.5f};
+            u.previousMetalConsumptionBuffer = Metal{6.5f};
+            u.energyConsumptionBuffer = Energy{7.5f};
+            u.metalConsumptionBuffer = Metal{8.5f};
+            u.energyRequestBuffer = Energy{9.5f};
+            u.metalRequestBuffer = Metal{10.5f};
+            u.energyDebt = Energy{11.5f};
+            u.metalDebt = Metal{12.5f};
+            u.buildQueue.emplace_back("ARMSOLAR", 2);
+            u.buildQueue.emplace_back("ARMPNQ", 1);
+
+            return u;
+        }
+    }
+
     TEST_CASE("the order queue is hashed, and its order matters")
     {
         // Capture progress lives on CaptureOrder rather than on the unit,
@@ -201,4 +325,14 @@ namespace rwe
             REQUIRE(computeHashOf(a) != computeHashOf(c));
         }
     }
+
+    TEST_CASE("a fully-populated unit keeps its pinned hash value")
+    {
+        // The hash, save and dump walks are derived from one field table, so
+        // a slip in the table moves the bytes. This is the pin: the value is
+        // what the pre-table hand-written hash produced for this unit, and
+        // the walks must agree with it from now on.
+        REQUIRE(computeHashOf(makePopulatedUnitState()) == GameHash(469200823u));
+    }
+
 }

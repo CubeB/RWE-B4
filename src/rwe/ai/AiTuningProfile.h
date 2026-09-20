@@ -69,6 +69,102 @@ namespace rwe
          * busy with everything else on the list.
          */
         int expansionConstructors{2};
+        /**
+         * Spending capacity that follows the income. While what the AI can
+         * spend a second -- metalDemand, what its running jobs draw -- stays
+         * below its metal income divided by capacityIncomeRatio for
+         * capacitySurplusSeconds together, it is making metal it cannot use:
+         * surplusConstructors more construction units are allowed, and
+         * surplusFactories more factories beyond the targets above, the
+         * vehicle plant first and then another lab.
+         *
+         * Measured on Great Divide after the expansion work: the AI made 28%
+         * more metal than before and sat at the metal cap 13% of the time
+         * (27% on the games against CORE), and the extra income showed up in
+         * neither its army nor its final unit count. Income was no longer the
+         * limit; the number of things able to spend it was.
+         */
+        /**
+         * What the enemy is made of decides what answers it. Of the armed
+         * enemies the AI remembers, the metal standing in their static
+         * defences and the metal walking in their army are each measured
+         * against the total: a role holding at least counterShareTrigger of
+         * it adds counterShareBonus to the share of what beats it --
+         * artillery over a tower a raider only dies to, rocket kbots against
+         * an army of raiders, which they outrange.
+         *
+         * The shares themselves stay the faction's (labRaiderShare and the
+         * rest); this only leans them, so a personality that sets them still
+         * decides the ground.
+         */
+        /**
+         * The D-gun shot goes to the most expensive armed enemy in reach
+         * rather than the nearest one. A shot kills whatever it hits, so what
+         * it hits should be the thing worth the energy: the nearest rule
+         * spent the charge on the cheap unit that happened to arrive first,
+         * with the thing behind it untouched.
+         */
+        bool dgunByValue{true};
+
+        /**
+         * What a remembered enemy gun keeps us off is read from its own
+         * weapon rather than from one radius for everything. An armed
+         * BUILDING of theirs refuses ground out to the range its weapon
+         * table gives it, plus enemyGunRangeMargin; anything mobile keeps
+         * productionHarassRadius, because a unit is somewhere else by the
+         * time a builder walks there and its exact reach says nothing about
+         * where it will be.
+         *
+         * A flat 400 was both too much and too little: it refused ground a
+         * light laser tower cannot cover, and it offered ground a Guardian
+         * shells at three times that. Reading the weapon is what makes a
+         * defence of ours stand where theirs cannot reach it.
+         */
+        /**
+         * A unit that outranges what it is shooting at by kiteRangeMargin
+         * steps back to just outside the enemy's own reach rather than
+         * closing on it: a Hammer against a Peewee, a Slasher against a
+         * Flash. Only against something that can move -- backing away from a
+         * tower is walking away from the job -- and only while the enemy is
+         * near enough to shoot us, so a unit already standing off simply
+         * fires.
+         */
+        /**
+         * Stop shooting at what we are not hurting. If nothing anything of
+         * ours has fired at a target in stalledAttackSeconds has moved its
+         * hit points, the shots are not arriving -- the usual reason on land
+         * is elevation, a shell into the slope below something standing
+         * above us -- and the unit drops the target and ignores it for
+         * stalledAttackForgetSeconds. Reported from a replay: units
+         * "repeatedly shoot at a structure their projectiles cant reach for
+         * ages and get stuck in that loop until another unit is able to
+         * destroy it".
+         *
+         * Progress is measured per target and given up on per unit: one
+         * unit's shots being stopped by the ground says nothing about
+         * another's from somewhere else. The naval rule
+         * (navalStalledAttackSeconds) is the same idea and moves the ship
+         * round instead, which a land unit cannot generally do.
+         */
+        bool answerStalledAttacks{true};
+        int stalledAttackSeconds{15};
+        int stalledAttackForgetSeconds{60};
+
+        bool kiteWithLongerRange{true};
+        SimScalar kiteRangeMargin{40_ss};
+
+        bool enemyGunRangeFromWeapon{true};
+        SimScalar enemyGunRangeMargin{32_ss};
+
+        bool counterEnemyComposition{true};
+        int counterShareBonus{2};
+        float counterShareTrigger{0.3f};
+
+        bool spendSurplusOnCapacity{true};
+        float capacityIncomeRatio{1.25f};
+        int capacitySurplusSeconds{20};
+        int surplusConstructors{2};
+        int surplusFactories{1};
         int freeDepositsPerExpansionConstructor{4};
         int targetDefenceCount{2};
         /**
@@ -245,6 +341,65 @@ namespace rwe
         bool commanderStandsItsGround{true};
         int commanderFightsUpToMetal{600};
         int commanderRetreatBelowPercent{50};
+
+        /**
+         * What the rest of the army does when it is hurt. A unit under its
+         * role's share of its hit points leaves the fight for the base and
+         * stands there until it is back above rejoinAbovePercent -- which it
+         * only gets to by being mended, see mendDamagedUnits. A raider is let
+         * go further down than a line unit: it is cheap, it is fast enough to
+         * get away, and the whole point of it is to be somewhere the army is
+         * not.
+         *
+         * The commander has had this since commanderRetreatBelowPercent; this
+         * is the same idea for everything else, and it is what keeps a wave's
+         * survivors alive to be in the next one.
+         */
+        bool retreatDamagedUnits{true};
+        int retreatRaiderBelowPercent{30};
+        int retreatLineBelowPercent{45};
+        int rejoinAbovePercent{60};
+        /**
+         * How long a unit will wait at the base to be mended before going
+         * back to the fight hurt. Without this it waits for ever: there is
+         * one mender at a time and it may never reach this unit, and a
+         * replay showed exactly that -- damaged units standing about in the
+         * middle of the base doing nothing. Waiting is also off entirely
+         * while anything armed is inside the base: a hurt unit is worth more
+         * shooting at an intruder than queueing for repair.
+         */
+        int mendWaitSeconds{45};
+        /** Where each waiting unit stands, spaced around the anchor rather than piled on it. */
+        SimScalar mendStandRadius{160_ss};
+        /**
+         * How near another builder's pending build order a site has to be
+         * before it counts as taken. Without this two construction units
+         * plan the same metal patch in the same pass -- neither can see what
+         * the other was told to do, since nothing stands there yet -- and
+         * one of them walks across the map to find the ground occupied.
+         * Reported from a replay: "construction bots frequently try and
+         * build on the same metal spot".
+         */
+        SimScalar claimedSiteRadius{96_ss};
+        /** How near the base counts as home, so a unit standing there is not told to walk again. */
+        SimScalar mendHavenRadius{400_ss};
+
+        /**
+         * An idle construction unit mends whatever of ours near the base is
+         * most hurt, below mendBelowPercent of its hit points and within
+         * mendRadius of the base. Nothing in TA repairs itself, so without
+         * this a unit that retreats hurt is a unit that stays hurt.
+         */
+        bool mendDamagedUnits{true};
+        /**
+         * Badly hurt only, and one builder on the job at a time. At 90% and
+         * with every idle builder free to take it, this ran 135 times a game
+         * on Great Divide and the side doing it finished with 9.7 extractors
+         * against 15.5: the mending came out of the expansion, because this
+         * is asked before the build priorities are.
+         */
+        int mendBelowPercent{50};
+        SimScalar mendRadius{700_ss};
         /**
          * The D-gun, at the nearest armed enemy in its reach (240 on both
          * commanders), whenever the energy for a shot is in the bank. Not
@@ -304,6 +459,20 @@ namespace rwe
          * commander. They should avoid enemy units where possible unless they
          * have protection between them and the units attacking them."
          */
+        /**
+         * A builder that is nearly done is left to finish. builderSafety
+         * pulls an exposed builder out with an immediate move, and an
+         * immediate order throws away what it was doing: reported from a
+         * replay as a construction unit "about to finish building an llt"
+         * that "got redirected to sit in the middle of nowhere and do
+         * nothing". Above finishBuildAbovePercent of the way through, the
+         * job is worth more than the builder's safety margin; below it the
+         * builder still goes, but the frame it was on is queued behind the
+         * move so it comes back and finishes rather than abandoning it.
+         */
+        int finishBuildAbovePercent{70};
+        bool resumeAfterBackingOff{true};
+
         bool builderSafety{true};
         SimScalar builderSafetyMargin{150_ss};
         SimScalar builderSafetyCoverRadius{500_ss};
@@ -319,6 +488,27 @@ namespace rwe
          * switches it off.
          */
         SimScalar commanderAssistRadius{800_ss};
+
+        /**
+         * How far from the base the commander will take work at all. A
+         * replay review: "the commanders spend alot of time on the front
+         * lines". It is the base's whole build capacity and its best gun,
+         * and both are wanted at home; a job beyond this leash is left to
+         * the construction units, which is what they are for.
+         *
+         * commanderPrefersNearSites brings the mex search in to the same
+         * leash while another construction unit is alive to take the far
+         * rocks. With none, the commander expands as before, because
+         * otherwise a side that loses its builders stops expanding
+         * altogether.
+         *
+         * commanderMends keeps the commander out of the mending rota for
+         * the same reason: mendDamagedUnits is a job for a construction
+         * unit.
+         */
+        SimScalar commanderLeashRadius{1200_ss};
+        bool commanderPrefersNearSites{true};
+        bool commanderMends{false};
         /**
          * A tower for a raided outpost is a construction unit's job while
          * there is one: the commander walking out to the edge of the base to
@@ -1068,6 +1258,18 @@ namespace rwe
         bool navalScouting{true};
         SimScalar defenceDistanceFromBase{160_ss};
         /**
+         * The first perimeterDefenceCount towers go out on the edge of what
+         * the base has actually built -- the furthest building of ours from
+         * the anchor, plus perimeterDefenceMargin, bounded by defendRadius --
+         * rather than at defenceDistanceFromBase, which puts them among the
+         * solar collectors. A replay review: "first few defences should be
+         * built on the outer cusp of the base". Later towers go back to the
+         * ordinary rule, which fills in the gaps the ring leaves.
+         */
+        bool firstDefencesOnPerimeter{true};
+        int perimeterDefenceCount{3};
+        SimScalar perimeterDefenceMargin{160_ss};
+        /**
          * How far out from the base anchor the radar's post stands, towards
          * the enemy. A radar in the middle of the base sees what the
          * buildings already see; its worth is the ground beyond them, so it
@@ -1311,6 +1513,19 @@ namespace rwe
          * meant to stop. ROADMAP, 2026-09-19.
          */
         bool fortifyTowers{false};
+        /**
+         * And on, whatever fortifyTowers says, once an advanced lab stands.
+         * Fortifying measured as not paying at tier one because the teeth
+         * came out of the expansion at the moment the expansion decided the
+         * game -- 2.2 to 3.5 construction units lost before fifteen minutes
+         * against one without it. By tier two the income is several times
+         * what it was, the towers being fortified are heavy ones worth
+         * protecting, and a replay review asked for exactly this: "make sure
+         * when t2 comes defenses are upgraded and fortified". The upgrade
+         * half is heavyDefenceCount, which already wants heavy towers once
+         * the advanced lab is up.
+         */
+        bool fortifyAtTierTwo{true};
         /** How many teeth in a tower's line, laid from the middle outward. */
         int fortifyTeethPerTower{5};
         /** How far in front of the tower the line runs. */

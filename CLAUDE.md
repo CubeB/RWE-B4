@@ -352,14 +352,14 @@ GitHub Actions (`.github/workflows/build.yml`) runs Linux (gcc-14, clang-18 on u
 
 Every issue and pull request carries **two** labels, one from each axis: where
 the change lands, and why it exists. Purpose takes exactly one, scope one where
-one fits, so the pair reads as "sim, conformance" or "client, maintenance".
+one fits, so the pair reads as "sim, conformance" or "presentation, maintenance".
 Apply them as you open the thing: `gh issue edit <n> --add-label scope:sim
 --add-label purpose:conformance`, or the same two `--label` flags on create.
 
 ### Scope — where the change lands (one where one fits)
 
 - `scope:sim` — Deterministic simulation: hashed state, unit, weapon and economy behaviour.
-- `scope:client` — Engine code outside the simulation: renderer, sound, UI, camera, effects.
+- `scope:presentation` — Engine code outside the simulation: renderer, sound, UI, camera, effects. Previously `scope:client`, which collided with network-client usage in multiplayer contexts.
 - `scope:launcher` — The Electron launcher and lobby: its app, master server and game server.
 - `scope:demos` — Reading `.tad` recordings and mining them into fixtures: tools, decodes, episodes.
 - `scope:tests` — Test code and the harness it runs on: `*.test.cpp`, the shared fixtures, the `rwe_test` target.
@@ -390,7 +390,7 @@ is honest.
 
 Applied with the pair and never instead of it:
 
-- `renderer`, `ui`, `media` — the parts of `scope:client` that work is filed under.
+- `renderer`, `ui`, `media` — the parts of `scope:presentation` that work is filed under.
 - `ai`, `multiplayer`, `save-load`, `io`, `diagnostics` — subjects no scope names.
 - `compatibility` — community content and mods: map packs, Core Contingency and Battle Tactics, where `io` is the parsers themselves.
 - `performance`, `refactor` — the kind of change, so a refactor is `purpose:maintenance` *and* `refactor`, never `refactor` alone.

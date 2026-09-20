@@ -715,7 +715,7 @@ namespace rwe
         // covered. The extractor search has said this about a metal patch
         // since the Crystal Maze measurement; see siteUnderEnemyGuns.
         auto acceptable = [&](const SimVector& p) {
-            return (!accept || accept(p)) && !siteUnderEnemyGuns(profile, bb, p);
+            return (!accept || accept(p)) && !siteUnderEnemyGuns(sim, profile, bb, p);
         };
         // Normal budget first; widen only if nothing fits at all, not even
         // a crowded site. A base with room never reaches the wide scan --
@@ -769,7 +769,7 @@ namespace rwe
             // As chooseBuildSite: nowhere a gun is already pointing. This
             // walk scores every ring rather than stopping at the first, so
             // refusing one site here simply leaves the rest to compete.
-            if (siteUnderEnemyGuns(profile, bb, site.position))
+            if (siteUnderEnemyGuns(sim, profile, bb, site.position))
             {
                 continue;
             }
@@ -917,9 +917,36 @@ namespace rwe
         // still uses threatDirection: a radar's job is watching the enemy's
         // side of the map, which recentLosses says nothing about.
         auto towards = profile.defenceFacesRecentLosses ? defenceFacingDirection(bb) : threatDirection(bb);
-        auto post = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
+        // The first few go out on the edge of the built-up base rather than
+        // among it (firstDefencesOnPerimeter): a tower beside the solar
+        // collectors is already inside whatever it was meant to keep out.
+        auto postDistance = profile.defenceDistanceFromBase;
+        bool onPerimeter = profile.firstDefencesOnPerimeter && static_cast<int>(towers.size()) < profile.perimeterDefenceCount;
+        if (onPerimeter)
+        {
+            SimScalar edge = 0_ss;
+            for (const auto& [otherId, other] : sim.units)
+            {
+                if (other.owner != aiOwner || !other.isAlive())
+                {
+                    continue;
+                }
+                auto otherDefIt = sim.unitDefinitions.find(other.unitType);
+                if (otherDefIt == sim.unitDefinitions.end() || otherDefIt->second.isMobile)
+                {
+                    continue;
+                }
+                edge = rweMax(edge, flatDistance(other.position, *bb.baseAnchor));
+            }
+            postDistance = rweMax(postDistance, rweMin(edge + profile.perimeterDefenceMargin, profile.defendRadius));
+        }
+        auto post = *bb.baseAnchor + (towards * postDistance);
+        // Moving the post alone would not move the tower: "facing" stops
+        // counting at the post distance, and nearness to the anchor breaks
+        // the tie, so the scoring would hand back the site the old rule
+        // chose whatever post it was given. The clamp is what places it.
         return chooseScoredBuildSite(sim, profile, bb, unitType, post, rng, [&](const SimVector& site, int) {
-            auto forward = std::min((site - *bb.baseAnchor).dot(towards), profile.defenceDistanceFromBase);
+            auto forward = std::min((site - *bb.baseAnchor).dot(towards), postDistance);
             return SiteScore{spread(site), forward.value, -flatDistance(site, *bb.baseAnchor).value};
         },
             walkable);
@@ -1068,6 +1095,46 @@ namespace rwe
             return bestOpen;
         }
         return best[randomBelow(rng, static_cast<unsigned int>(best.size()))];
+    }
+
+    bool BuildManager::siteClaimedByAnother(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        UnitId builder,
+        const SimVector& site,
+        SimScalar radius) const
+    {
+        if (radius <= 0_ss)
+        {
+            return false;
+        }
+        const auto radiusSquared = radius * radius;
+        for (const auto& [otherId, other] : sim.units)
+        {
+            if (otherId == builder || other.owner != aiOwner || other.isDead())
+            {
+                continue;
+            }
+            for (const auto& order : other.orders)
+            {
+                if (auto build = std::get_if<BuildOrder>(&order); build != nullptr)
+                {
+                    if (build->position.distanceSquared(site) <= radiusSquared)
+                    {
+                        return true;
+                    }
+                }
+                else if (auto complete = std::get_if<CompleteBuildOrder>(&order); complete != nullptr)
+                {
+                    auto frameRef = sim.tryGetUnitState(complete->target);
+                    if (frameRef && frameRef->get().position.distanceSquared(site) <= radiusSquared)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     std::optional<SimVector> BuildManager::chooseMexSite(
@@ -1305,7 +1372,7 @@ namespace rwe
         return failedSites.count(std::make_pair(cell.x, cell.y)) != 0;
     }
 
-    bool BuildManager::siteUnderEnemyGuns(const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& site) const
+    bool BuildManager::siteUnderEnemyGuns(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& site) const
     {
         if (!profile.noticeProductionHarassment || profile.productionHarassRadius <= 0_ss)
         {
@@ -1314,6 +1381,26 @@ namespace rwe
         auto radiusSquared = profile.productionHarassRadius * profile.productionHarassRadius;
         for (const auto& [_, enemy] : bb.knownEnemies)
         {
+            // A gun that cannot move keeps us off exactly what it reaches
+            // (enemyGunRangeFromWeapon), which is what puts a defence of ours
+            // outside a bigger one of theirs.
+            if (profile.enemyGunRangeFromWeapon && enemy.isBuilding && enemy.isArmed && !enemy.isAir)
+            {
+                auto defIt = sim.unitDefinitions.find(enemy.unitType);
+                if (defIt != sim.unitDefinitions.end())
+                {
+                    auto reach = weaponRange(sim, defIt->second);
+                    if (reach > 0_ss)
+                    {
+                        reach += profile.enemyGunRangeMargin;
+                        if (enemy.lastKnownPosition.distanceSquared(site) <= reach * reach)
+                        {
+                            return true;
+                        }
+                        continue;
+                    }
+                }
+            }
             // Aircraft are excluded for the reason the extractor rule
             // excludes them: an aeroplane is over the site for a moment and
             // somewhere else by the time the builder arrives, so refusing
@@ -1703,7 +1790,7 @@ namespace rwe
             {
                 continue;
             }
-            if (!profile.repairUnderFire && siteUnderEnemyGuns(profile, bb, unit.position))
+            if (!profile.repairUnderFire && siteUnderEnemyGuns(sim, profile, bb, unit.position))
             {
                 continue;
             }
@@ -1945,12 +2032,59 @@ namespace rwe
                     break;
                 }
             }
-            if (!taken && !siteUnderEnemyGuns(profile, bb, centre))
+            if (!taken && !siteUnderEnemyGuns(sim, profile, bb, centre))
             {
                 ++free;
             }
         }
         return free;
+    }
+
+    BuildManager::LabShares BuildManager::counterShares(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb)
+    {
+        LabShares shares{profile.labRaiderShare, profile.labRocketKbotShare, profile.labArtilleryKbotShare};
+        if (!profile.counterEnemyComposition)
+        {
+            return shares;
+        }
+        float staticMetal = 0.0f;
+        float mobileMetal = 0.0f;
+        for (const auto& [_, enemy] : bb.knownEnemies)
+        {
+            if (!enemy.isArmed || enemy.isAir)
+            {
+                continue;
+            }
+            auto defIt = sim.unitDefinitions.find(enemy.unitType);
+            if (defIt == sim.unitDefinitions.end())
+            {
+                continue;
+            }
+            (enemy.isBuilding ? staticMetal : mobileMetal) += defIt->second.buildCostMetal.value;
+        }
+        auto seen = staticMetal + mobileMetal;
+        if (seen <= 0.0f)
+        {
+            return shares;
+        }
+        if (staticMetal / seen >= profile.counterShareTrigger)
+        {
+            shares.artilleryKbot += profile.counterShareBonus;
+        }
+        if (mobileMetal / seen >= profile.counterShareTrigger)
+        {
+            shares.rocketKbot += profile.counterShareBonus;
+        }
+        return shares;
+    }
+
+    bool BuildManager::incomeOutrunsSpending(const AiTuningProfile& profile, const AiBlackboard& bb)
+    {
+        if (!profile.spendSurplusOnCapacity || profile.capacityIncomeRatio <= 0.0f)
+        {
+            return false;
+        }
+        return bb.metalDemand.value * profile.capacityIncomeRatio < bb.metalIncome.value;
     }
 
     void BuildManager::keepBuildersOutOfFights(
@@ -1977,6 +2111,51 @@ namespace rwe
         for (const auto& retreat : planBuilderRetreats(sim, aiOwner, bb, builderSafetyParams(profile)))
         {
             const auto& unit = sim.getUnitState(retreat.builder);
+            // What it is in the middle of, and how far through. A frame
+            // nearly finished is worth more than the margin backing off
+            // buys: the builder stays on it (finishBuildAbovePercent).
+            std::optional<UnitOrder> resume;
+            if (!unit.orders.empty())
+            {
+                std::optional<UnitId> frameId;
+                if (auto build = std::get_if<BuildOrder>(&unit.orders.front()); build != nullptr)
+                {
+                    // The frame it has already placed, if it got that far.
+                    for (const auto& [otherId, other] : sim.units)
+                    {
+                        if (other.owner != aiOwner || other.isDead() || other.unitType != build->unitType)
+                        {
+                            continue;
+                        }
+                        const auto& otherDef = sim.unitDefinitions.at(other.unitType);
+                        if (other.isBeingBuilt(otherDef) && other.position.distanceSquared(build->position) <= (64_ss * 64_ss))
+                        {
+                            frameId = otherId;
+                            break;
+                        }
+                    }
+                    resume = frameId ? UnitOrder(CompleteBuildOrder(*frameId)) : UnitOrder(*build);
+                }
+                else if (auto complete = std::get_if<CompleteBuildOrder>(&unit.orders.front()); complete != nullptr)
+                {
+                    frameId = complete->target;
+                    resume = *complete;
+                }
+                if (frameId)
+                {
+                    auto frameRef = sim.tryGetUnitState(*frameId);
+                    if (frameRef)
+                    {
+                        const auto& frameDef = sim.unitDefinitions.at(frameRef->get().unitType);
+                        auto done = 100u - frameRef->get().getBuildPercentLeft(frameDef);
+                        if (static_cast<int>(done) >= profile.finishBuildAbovePercent)
+                        {
+                            continue;
+                        }
+                    }
+                }
+            }
+
             // Already on its way out: the destination moves with it, so a
             // fresh one each pass would only be the same order again.
             auto sheltered = builderShelteredUntil.find(retreat.builder.value);
@@ -1990,6 +2169,16 @@ namespace rwe
                      << " of cover, to " << static_cast<int>(retreat.destination.x.value) << "," << static_cast<int>(retreat.destination.z.value);
             builderShelteredUntil[retreat.builder.value] = GameTime(bb.now.value + shelterTicks);
             outCommands.emplace_back(PlayerUnitCommand(retreat.builder, PlayerUnitCommand::IssueOrder(MoveOrder(retreat.destination), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+            // And back to the job afterwards. An immediate order throws away
+            // what the builder was doing, so without this a tower two thirds
+            // of the way up is simply abandoned and the builder stands where
+            // it was sent -- which is what a replay showed. The frame it had
+            // started is queued behind the move as a CompleteBuildOrder; a
+            // BuildOrder would try to place a second one on the same ground.
+            if (profile.resumeAfterBackingOff && resume)
+            {
+                outCommands.emplace_back(PlayerUnitCommand(retreat.builder, PlayerUnitCommand::IssueOrder(*resume, PlayerUnitCommand::IssueOrder::IssueKind::Queued)));
+            }
         }
         // The dead are forgotten.
         for (auto it = builderShelteredUntil.begin(); it != builderShelteredUntil.end();)
@@ -2098,7 +2287,7 @@ namespace rwe
                     break;
                 }
             }
-            if (taken || siteUnderEnemyGuns(profile, bb, lost.position) || siteFailedLately(sim, lost.position))
+            if (taken || siteUnderEnemyGuns(sim, profile, bb, lost.position) || siteFailedLately(sim, lost.position))
             {
                 continue;
             }
@@ -2216,7 +2405,10 @@ namespace rwe
         // attacks have kept coming from (fortifyWhereAttacked, decided by
         // watchDefences). The second is nearly always nothing to do, and
         // says so here before anything is walked.
-        const bool everyTower = profile.fortifyTowers && !s.lightLaserTower.empty();
+        // Tier two turns it on by itself (fortifyAtTierTwo): heavy towers
+        // are worth teeth in front of them, and by then the metal is there.
+        const bool tierTwo = !s.advancedLab.empty() && countOf(bb.ownedTotalCounts, s.advancedLab) > 0;
+        const bool everyTower = (profile.fortifyTowers || (profile.fortifyAtTierTwo && tierTwo)) && !s.lightLaserTower.empty();
         const bool whereAttacked = profile.fortifyWhereAttacked && defenceTeethOwed;
         // And a third: a defence put back where one was destroyed
         // (fortifyRebuiltDefences).
@@ -2339,7 +2531,7 @@ namespace rwe
                     return std::nullopt;
                 }
             }
-            if (siteFailedLately(sim, slot) || siteUnderEnemyGuns(profile, bb, slot))
+            if (siteFailedLately(sim, slot) || siteUnderEnemyGuns(sim, profile, bb, slot))
             {
                 return std::nullopt;
             }
@@ -2973,6 +3165,24 @@ namespace rwe
         if (!metalShort && total(s.airPlant) >= profile.targetAirPlantCount && total(s.vehiclePlant) < profile.targetVehiclePlantCount)
         {
             want(s.vehiclePlant);
+        }
+
+        // A factory beyond the targets while the income is going unspent
+        // (spendSurplusOnCapacity): the vehicle plant first, because it is
+        // the cheaper of the two on both sides, then a second lab. Below the
+        // extractors and the towers above on purpose -- another factory is
+        // what to do with metal there is nothing else to do with, not a
+        // reason to stop taking ground.
+        if (spendingCapacityShort && !metalShort && hasFactory)
+        {
+            if (!s.vehiclePlant.empty() && total(s.vehiclePlant) < profile.targetVehiclePlantCount + profile.surplusFactories)
+            {
+                want(s.vehiclePlant);
+            }
+            else if (total(s.lab) < 1 + profile.surplusFactories)
+            {
+                want(s.lab);
+            }
         }
 
         // Naval: a shipyard, once the map's water is worth a fleet.
@@ -3612,6 +3822,12 @@ namespace rwe
                 // (fortifyExtraConstructors): counted from what stands and
                 // what is going up, which is all this needs to know.
                 auto constructorTarget = profile.targetConstructorCount;
+                // More while the income is going unspent
+                // (spendSurplusOnCapacity).
+                if (spendingCapacityShort)
+                {
+                    constructorTarget += profile.surplusConstructors;
+                }
                 // And more while metal lies unclaimed on our side
                 // (expansionConstructors).
                 if (profile.expansionConstructors > 0 && bb.baseAnchor)
@@ -3664,7 +3880,8 @@ namespace rwe
                 {
                     // Two raiders for every rocket kbot, as shipped; the
                     // profile holds the ratio.
-                    next = pickByShare({{&s.raider, profile.labRaiderShare}, {&s.rocketKbot, profile.labRocketKbotShare}, {&s.artilleryKbot, profile.labArtilleryKbotShare}});
+                    auto shares = counterShares(sim, profile, bb);
+                    next = pickByShare({{&s.raider, shares.raider}, {&s.rocketKbot, shares.rocketKbot}, {&s.artilleryKbot, shares.artilleryKbot}});
                 }
             }
 
@@ -3728,6 +3945,20 @@ namespace rwe
         indexMetalPatches(sim);
         indexGeothermalVents(sim);
         const auto& sideUnits = bb.sideUnits;
+
+        // Whether the income has outrun what there is to spend it with
+        // (spendSurplusOnCapacity). Demand is what the running jobs draw, so
+        // a base whose builders and factories are all busy reads near its
+        // income and nothing is added.
+        if (incomeOutrunsSpending(profile, bb))
+        {
+            capacityShortTicks += profile.buildPlannerTickInterval;
+        }
+        else
+        {
+            capacityShortTicks = 0;
+        }
+        spendingCapacityShort = capacityShortTicks >= static_cast<unsigned int>(std::max(0, profile.capacitySurplusSeconds)) * SimTicksPerSecond;
 
         planFactories(sim, profile, bb, outCommands);
 
@@ -4019,6 +4250,70 @@ namespace rwe
                          << " frame (" << unit.getBuildPercentLeft(frameDef) << "% left)";
                 savingFor.clear();
                 outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(UnitId(unitId)), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                return;
+            }
+        }
+
+        // Whatever of ours near the base is most hurt (mendDamagedUnits):
+        // nothing in TA mends itself, so a unit that came home hurt stays
+        // hurt until a builder is put on it.
+        if (profile.mendDamagedUnits && builderAtBase && builderDef.canReclamate
+            && (profile.commanderMends || !builderDef.commander))
+        {
+            // One at a time: the AI issues a repair order on a mobile unit
+            // nowhere else, so a builder of ours carrying one is this rule's.
+            bool someoneMending = false;
+            for (const auto& [otherId, other] : sim.units)
+            {
+                if (other.owner != aiOwner || !other.isAlive() || other.orders.empty() || UnitId(otherId) == builderId)
+                {
+                    continue;
+                }
+                auto repair = std::get_if<RepairOrder>(&other.orders.front());
+                if (repair == nullptr)
+                {
+                    continue;
+                }
+                auto target = sim.tryGetUnitState(repair->target);
+                if (target && sim.unitDefinitions.at(target->get().unitType).isMobile)
+                {
+                    someoneMending = true;
+                    break;
+                }
+            }
+            std::optional<UnitId> worst;
+            unsigned int worstShare = static_cast<unsigned int>(std::max(0, profile.mendBelowPercent));
+            const auto mendSquared = profile.mendRadius * profile.mendRadius;
+            for (const auto& [otherId, other] : sim.units)
+            {
+                if (other.owner != aiOwner || !other.isAlive() || UnitId(otherId) == builderId)
+                {
+                    continue;
+                }
+                auto otherDefIt = sim.unitDefinitions.find(other.unitType);
+                // Mobile only: a damaged building is repairStructures' to
+                // decide about, and it has its own rule about doing it while
+                // the gun that damaged it is still there.
+                if (otherDefIt == sim.unitDefinitions.end() || other.isBeingBuilt(otherDefIt->second)
+                    || otherDefIt->second.maxHitPoints == 0 || !otherDefIt->second.isMobile || otherDefIt->second.commander)
+                {
+                    continue;
+                }
+                if (other.position.distanceSquared(*bb.baseAnchor) > mendSquared)
+                {
+                    continue;
+                }
+                auto share = (other.hitPoints * 100) / otherDefIt->second.maxHitPoints;
+                if (share < worstShare)
+                {
+                    worstShare = share;
+                    worst = UnitId(otherId);
+                }
+            }
+            if (worst && !someoneMending)
+            {
+                LOG_INFO << "AI build: unit " << builderId.value << " mends unit " << worst->value << " (" << worstShare << "% of its hit points)";
+                outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(*worst), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
                 return;
             }
         }
@@ -4493,7 +4788,17 @@ namespace rwe
                 // could chain from there to the next patch and the next:
                 // measured, one was at the midfield building extractors 3900
                 // from its start when it was caught, and the game with it.
-                auto leashSquared = profile.commanderMexSearchRadius * profile.commanderMexSearchRadius;
+                auto commanderReach = profile.commanderMexSearchRadius;
+                // While somebody else can take the far rocks, the commander
+                // keeps to the near ones (commanderPrefersNearSites). With no
+                // construction unit alive it expands as before, because a
+                // side that has lost its builders must still expand.
+                if (profile.commanderPrefersNearSites && profile.commanderLeashRadius > 0_ss && !bb.sideUnits.constructor.empty()
+                    && countOf(bb.ownedTotalCounts, bb.sideUnits.constructor) > 0)
+                {
+                    commanderReach = rweMin(commanderReach, profile.commanderLeashRadius);
+                }
+                auto leashSquared = commanderReach * commanderReach;
                 // The ground rules, asked of a deposit (see chooseMexSite):
                 // a deposit the leash or a gun's reach cuts through is taken
                 // at its heart, not on whichever edge lies inside.
@@ -4509,6 +4814,12 @@ namespace rwe
                 auto siteFree = [&](const SimVector& p) {
                     // Kept for the moho that is about to stand there.
                     if (extractorUpgrade && extractorUpgrade->site.distanceSquared(p) < 64_ss * 64_ss)
+                    {
+                        return false;
+                    }
+                    // And for the patch another builder is already walking
+                    // to: nothing stands there yet, so only its order says so.
+                    if (siteClaimedByAnother(sim, aiOwner, builderId, p, profile.claimedSiteRadius))
                     {
                         return false;
                     }
@@ -4963,7 +5274,7 @@ namespace rwe
                 LOG_DEBUG << "AI build: " << next << " would go where an order was just dropped; skipping it this pass";
                 site.reset();
             }
-            if (site && siteUnderEnemyGuns(profile, bb, *site))
+            if (site && siteUnderEnemyGuns(sim, profile, bb, *site))
             {
                 // Not under a gun. A frame is born with no hit points at
                 // all, so anything put down here dies before it is anything
@@ -5076,6 +5387,9 @@ namespace rwe
         if (builderDef.commander && builderAtBase && !saving && profile.commanderAssistRadius > 0_ss)
         {
             const auto assistSquared = profile.commanderAssistRadius * profile.commanderAssistRadius;
+            // And within the leash of the base: a frame the commander can
+            // reach is not worth crossing the map for (commanderLeashRadius).
+            const auto leashSquared = profile.commanderLeashRadius * profile.commanderLeashRadius;
             std::optional<UnitId> nearestFrame;
             SimScalar nearestFrameDistance = 0_ss;
             for (const auto& [unitId, unit] : sim.units)
@@ -5090,7 +5404,8 @@ namespace rwe
                     continue;
                 }
                 auto distance = builder.position.distanceSquared(unit.position);
-                if (distance > assistSquared || (siteReachable && !siteReachable(unit.position)))
+                if (distance > assistSquared || (siteReachable && !siteReachable(unit.position))
+                    || (profile.commanderLeashRadius > 0_ss && bb.baseAnchor->distanceSquared(unit.position) > leashSquared))
                 {
                     continue;
                 }
