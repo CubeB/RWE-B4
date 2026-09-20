@@ -129,6 +129,27 @@ namespace rwe
          * near enough to shoot us, so a unit already standing off simply
          * fires.
          */
+        /**
+         * Stop shooting at what we are not hurting. If nothing anything of
+         * ours has fired at a target in stalledAttackSeconds has moved its
+         * hit points, the shots are not arriving -- the usual reason on land
+         * is elevation, a shell into the slope below something standing
+         * above us -- and the unit drops the target and ignores it for
+         * stalledAttackForgetSeconds. Reported from a replay: units
+         * "repeatedly shoot at a structure their projectiles cant reach for
+         * ages and get stuck in that loop until another unit is able to
+         * destroy it".
+         *
+         * Progress is measured per target and given up on per unit: one
+         * unit's shots being stopped by the ground says nothing about
+         * another's from somewhere else. The naval rule
+         * (navalStalledAttackSeconds) is the same idea and moves the ship
+         * round instead, which a land unit cannot generally do.
+         */
+        bool answerStalledAttacks{true};
+        int stalledAttackSeconds{15};
+        int stalledAttackForgetSeconds{60};
+
         bool kiteWithLongerRange{true};
         SimScalar kiteRangeMargin{40_ss};
 
@@ -350,6 +371,16 @@ namespace rwe
         int mendWaitSeconds{45};
         /** Where each waiting unit stands, spaced around the anchor rather than piled on it. */
         SimScalar mendStandRadius{160_ss};
+        /**
+         * How near another builder's pending build order a site has to be
+         * before it counts as taken. Without this two construction units
+         * plan the same metal patch in the same pass -- neither can see what
+         * the other was told to do, since nothing stands there yet -- and
+         * one of them walks across the map to find the ground occupied.
+         * Reported from a replay: "construction bots frequently try and
+         * build on the same metal spot".
+         */
+        SimScalar claimedSiteRadius{96_ss};
         /** How near the base counts as home, so a unit standing there is not told to walk again. */
         SimScalar mendHavenRadius{400_ss};
 
@@ -428,6 +459,20 @@ namespace rwe
          * commander. They should avoid enemy units where possible unless they
          * have protection between them and the units attacking them."
          */
+        /**
+         * A builder that is nearly done is left to finish. builderSafety
+         * pulls an exposed builder out with an immediate move, and an
+         * immediate order throws away what it was doing: reported from a
+         * replay as a construction unit "about to finish building an llt"
+         * that "got redirected to sit in the middle of nowhere and do
+         * nothing". Above finishBuildAbovePercent of the way through, the
+         * job is worth more than the builder's safety margin; below it the
+         * builder still goes, but the frame it was on is queued behind the
+         * move so it comes back and finishes rather than abandoning it.
+         */
+        int finishBuildAbovePercent{70};
+        bool resumeAfterBackingOff{true};
+
         bool builderSafety{true};
         SimScalar builderSafetyMargin{150_ss};
         SimScalar builderSafetyCoverRadius{500_ss};

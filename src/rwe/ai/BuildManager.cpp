@@ -1097,6 +1097,46 @@ namespace rwe
         return best[randomBelow(rng, static_cast<unsigned int>(best.size()))];
     }
 
+    bool BuildManager::siteClaimedByAnother(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        UnitId builder,
+        const SimVector& site,
+        SimScalar radius) const
+    {
+        if (radius <= 0_ss)
+        {
+            return false;
+        }
+        const auto radiusSquared = radius * radius;
+        for (const auto& [otherId, other] : sim.units)
+        {
+            if (otherId == builder || other.owner != aiOwner || other.isDead())
+            {
+                continue;
+            }
+            for (const auto& order : other.orders)
+            {
+                if (auto build = std::get_if<BuildOrder>(&order); build != nullptr)
+                {
+                    if (build->position.distanceSquared(site) <= radiusSquared)
+                    {
+                        return true;
+                    }
+                }
+                else if (auto complete = std::get_if<CompleteBuildOrder>(&order); complete != nullptr)
+                {
+                    auto frameRef = sim.tryGetUnitState(complete->target);
+                    if (frameRef && frameRef->get().position.distanceSquared(site) <= radiusSquared)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     std::optional<SimVector> BuildManager::chooseMexSite(
         const GameSimulation& sim,
         const std::string& unitType,
@@ -2071,6 +2111,51 @@ namespace rwe
         for (const auto& retreat : planBuilderRetreats(sim, aiOwner, bb, builderSafetyParams(profile)))
         {
             const auto& unit = sim.getUnitState(retreat.builder);
+            // What it is in the middle of, and how far through. A frame
+            // nearly finished is worth more than the margin backing off
+            // buys: the builder stays on it (finishBuildAbovePercent).
+            std::optional<UnitOrder> resume;
+            if (!unit.orders.empty())
+            {
+                std::optional<UnitId> frameId;
+                if (auto build = std::get_if<BuildOrder>(&unit.orders.front()); build != nullptr)
+                {
+                    // The frame it has already placed, if it got that far.
+                    for (const auto& [otherId, other] : sim.units)
+                    {
+                        if (other.owner != aiOwner || other.isDead() || other.unitType != build->unitType)
+                        {
+                            continue;
+                        }
+                        const auto& otherDef = sim.unitDefinitions.at(other.unitType);
+                        if (other.isBeingBuilt(otherDef) && other.position.distanceSquared(build->position) <= (64_ss * 64_ss))
+                        {
+                            frameId = otherId;
+                            break;
+                        }
+                    }
+                    resume = frameId ? UnitOrder(CompleteBuildOrder(*frameId)) : UnitOrder(*build);
+                }
+                else if (auto complete = std::get_if<CompleteBuildOrder>(&unit.orders.front()); complete != nullptr)
+                {
+                    frameId = complete->target;
+                    resume = *complete;
+                }
+                if (frameId)
+                {
+                    auto frameRef = sim.tryGetUnitState(*frameId);
+                    if (frameRef)
+                    {
+                        const auto& frameDef = sim.unitDefinitions.at(frameRef->get().unitType);
+                        auto done = 100u - frameRef->get().getBuildPercentLeft(frameDef);
+                        if (static_cast<int>(done) >= profile.finishBuildAbovePercent)
+                        {
+                            continue;
+                        }
+                    }
+                }
+            }
+
             // Already on its way out: the destination moves with it, so a
             // fresh one each pass would only be the same order again.
             auto sheltered = builderShelteredUntil.find(retreat.builder.value);
@@ -2084,6 +2169,16 @@ namespace rwe
                      << " of cover, to " << static_cast<int>(retreat.destination.x.value) << "," << static_cast<int>(retreat.destination.z.value);
             builderShelteredUntil[retreat.builder.value] = GameTime(bb.now.value + shelterTicks);
             outCommands.emplace_back(PlayerUnitCommand(retreat.builder, PlayerUnitCommand::IssueOrder(MoveOrder(retreat.destination), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+            // And back to the job afterwards. An immediate order throws away
+            // what the builder was doing, so without this a tower two thirds
+            // of the way up is simply abandoned and the builder stands where
+            // it was sent -- which is what a replay showed. The frame it had
+            // started is queued behind the move as a CompleteBuildOrder; a
+            // BuildOrder would try to place a second one on the same ground.
+            if (profile.resumeAfterBackingOff && resume)
+            {
+                outCommands.emplace_back(PlayerUnitCommand(retreat.builder, PlayerUnitCommand::IssueOrder(*resume, PlayerUnitCommand::IssueOrder::IssueKind::Queued)));
+            }
         }
         // The dead are forgotten.
         for (auto it = builderShelteredUntil.begin(); it != builderShelteredUntil.end();)
@@ -4719,6 +4814,12 @@ namespace rwe
                 auto siteFree = [&](const SimVector& p) {
                     // Kept for the moho that is about to stand there.
                     if (extractorUpgrade && extractorUpgrade->site.distanceSquared(p) < 64_ss * 64_ss)
+                    {
+                        return false;
+                    }
+                    // And for the patch another builder is already walking
+                    // to: nothing stands there yet, so only its order says so.
+                    if (siteClaimedByAnother(sim, aiOwner, builderId, p, profile.claimedSiteRadius))
                     {
                         return false;
                     }

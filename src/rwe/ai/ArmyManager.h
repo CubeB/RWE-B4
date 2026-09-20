@@ -5,6 +5,7 @@
 #include <rwe/ai/ThreatMap.h>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/sim/PlayerId.h>
+#include <functional>
 #include <vector>
 
 namespace rwe
@@ -27,6 +28,13 @@ namespace rwe
             const ThreatMap& threatMap,
             AiBlackboard& bb,
             std::vector<PlayerCommand>& outCommands);
+
+        /**
+         * Whether this unit has stopped shooting at that target because
+         * nothing it fired ever moved its hit points, and how long that
+         * lasts. See LandTargetProgress.
+         */
+        bool hasGivenUpOn(UnitId unit, UnitId target, GameTime now) const;
 
     private:
         int ticksSinceLastUpdate{0};
@@ -52,6 +60,35 @@ namespace rwe
         mutable std::map<std::pair<unsigned int, unsigned int>, int> navalAttemptAnswered;
         /** A ship on its way to a new firing position: where, and until when. */
         mutable std::map<unsigned int, std::pair<SimVector, GameTime>> navalRepositioning;
+
+        /**
+         * The same question asked on land, where the answer is usually
+         * ground rather than water: a shell fired at something standing
+         * above you hits the slope, and the unit firing it will go on
+         * firing for the rest of the game because the target is there,
+         * in range, and never gets any less alive. Reported from a replay
+         * as "a lot of units will all repeatedly shoot at a structure
+         * their projectiles cant reach for ages and get stuck in that loop
+         * until another unit is able to destroy it".
+         *
+         * Both halves are per unit and target. Measured: a clock that
+         * starts when the attack is ORDERED throws the game away -- eight
+         * seeds, 67.9 units against 92.9 with the rule off -- because a unit
+         * walking across the map to its target has not fired a shot when the
+         * window runs out, so it gives up on everything and mills about. The
+         * clock therefore only runs while the unit is within its own
+         * weapon's reach of the target, which is the nearest thing the AI
+         * has to "we are shooting at it and it is not working".
+         */
+        struct LandTargetProgress
+        {
+            unsigned int hitPoints{0};
+            GameTime since{0};
+        };
+        /** Unit, then target: one unit's own attempt on one target. */
+        mutable std::map<std::pair<unsigned int, unsigned int>, LandTargetProgress> landTargetProgress;
+        /** Unit, then target: when that unit may look at that target again. */
+        mutable std::map<std::pair<unsigned int, unsigned int>, GameTime> landTargetGivenUp;
 
         /**
          * The open water nearest a place the fleet is sailing towards, and
@@ -82,7 +119,7 @@ namespace rwe
             std::vector<PlayerCommand>& outCommands) const;
 
         void updateRallyPoint(const AiTuningProfile& profile, AiBlackboard& bb) const;
-        std::optional<UnitId> nearestKnownEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly = false) const;
+        std::optional<UnitId> nearestKnownEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly = false, const std::function<bool(UnitId)>& skip = nullptr) const;
 
         /**
          * As nearestKnownEnemy, but only an enemy MapIntel::sameWaterBody

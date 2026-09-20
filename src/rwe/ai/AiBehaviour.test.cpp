@@ -1548,8 +1548,158 @@ namespace rwe
             REQUIRE(ordersFor<MoveOrder>(commands, kbotId).empty());
         }
 
+        SECTION("a frame nearly finished is worth more than the margin: it stays on it")
+        {
+            // The tower it is two thirds of the way through, standing where
+            // it is building. Backing off would throw the order away -- an
+            // immediate move does -- and the replay this comes from showed
+            // exactly that: an LLT abandoned at the last moment and the
+            // builder standing in the open with nothing to do.
+            auto frameId = addUnit(sim, "ARMLLT", ai, SimVector(110_ss, 0_ss, 100_ss), script);
+            sim.getUnitState(frameId).buildTimeCompleted = (sim.unitDefinitions.at("ARMLLT").buildTime * 80u) / 100u;
+            sim.getUnitState(kbotId).orders.push_back(CompleteBuildOrder(frameId));
+
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(ordersFor<MoveOrder>(commands, kbotId).empty());
+        }
+
+        SECTION("a frame barely started is left, but it is queued to come back and finish")
+        {
+            auto frameId = addUnit(sim, "ARMLLT", ai, SimVector(110_ss, 0_ss, 100_ss), script);
+            sim.getUnitState(frameId).buildTimeCompleted = (sim.unitDefinitions.at("ARMLLT").buildTime * 10u) / 100u;
+            sim.getUnitState(kbotId).orders.push_back(CompleteBuildOrder(frameId));
+
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE_FALSE(ordersFor<MoveOrder>(commands, kbotId).empty());
+            auto resumed = ordersFor<CompleteBuildOrder>(commands, kbotId);
+            REQUIRE_FALSE(resumed.empty());
+            REQUIRE(resumed.front().target == frameId);
+        }
+
+        SECTION("switched off, the job is simply dropped")
+        {
+            profile.resumeAfterBackingOff = false;
+            auto frameId = addUnit(sim, "ARMLLT", ai, SimVector(110_ss, 0_ss, 100_ss), script);
+            sim.getUnitState(frameId).buildTimeCompleted = (sim.unitDefinitions.at("ARMLLT").buildTime * 10u) / 100u;
+            sim.getUnitState(kbotId).orders.push_back(CompleteBuildOrder(frameId));
+
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE_FALSE(ordersFor<MoveOrder>(commands, kbotId).empty());
+            REQUIRE(ordersFor<CompleteBuildOrder>(commands, kbotId).empty());
+        }
+
         (void)commanderId;
         (void)human;
+    }
+
+    TEST_CASE("a unit stops shooting at what it is not hurting", "[ai]")
+    {
+        // From a replay: "a lot of units will all repeatedly shoot at a
+        // structure their projectiles cant reach for ages and get stuck in
+        // that loop until another unit is able to destroy it". The target is
+        // there, in range, and never gets any less alive, so nothing in the
+        // ordinary rules ever moves the unit on.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(-600_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-550_ss, 0_ss, -100_ss), script);
+        // Far enough to see what it is shooting at: the simulation throws
+        // away an attack order whose target it cannot see, and the default
+        // sight in this world is exactly the distance below.
+        sim.unitDefinitions["ARMPW"].sightDistance = 400u;
+        auto kbotId = addUnit(sim, "ARMPW", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        // A tower of theirs it can see and is already firing at, whose hit
+        // points never move -- which is what standing below it looks like.
+        auto towerId = addUnit(sim, "ARMLLT", human, SimVector(200_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(kbotId).orders.push_back(AttackOrder(towerId));
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+
+        // A gun that goes off and does nothing, which is what a shell into
+        // the slope below the target amounts to: the unit fires, the target
+        // never loses a hit point, and the flat test terrain does not have
+        // to be given a hill to say so.
+        auto dud = [&]() {
+            auto w = sim.weaponDefinitions.at("LASER");
+            w.damage["DEFAULT"] = 0u;
+            sim.weaponDefinitions["DUD"] = w;
+            sim.unitDefinitions["ARMPW"].weapon1 = "DUD";
+        };
+        // The test harness never applies the AI's own commands, and the
+        // simulation drops an attack order it has finished with, so the
+        // order is put back each tick: in a real game the AI's attack
+        // command is applied and the unit stays on the target, which is the
+        // situation being tested.
+        auto runAttacking = [&](AiPlayerController& controller, std::vector<PlayerCommand>& commands, int ticks) {
+            for (int i = 0; i < ticks; ++i)
+            {
+                if (sim.getUnitState(kbotId).orders.empty())
+                {
+                    sim.getUnitState(kbotId).orders.push_back(AttackOrder(towerId));
+                }
+                runTicks(sim, controller, 1, commands);
+            }
+        };
+
+        SECTION("after stalledAttackSeconds it drops the target")
+        {
+            dud();
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runAttacking(controller, commands, (profile.stalledAttackSeconds + 2) * 30);
+
+            // Told to stop: a move to where it already stands is how the
+            // attack order comes off.
+            REQUIRE_FALSE(ordersFor<MoveOrder>(commands, kbotId).empty());
+        }
+
+        SECTION("while it is getting hurt, it stays on it")
+        {
+            dud();
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            // The same run, except that its hit points move every second,
+            // which is the whole question.
+            for (int i = 0; i < (profile.stalledAttackSeconds + 2) * 30; ++i)
+            {
+                if (i % 30 == 0 && sim.getUnitState(towerId).hitPoints > 10)
+                {
+                    sim.getUnitState(towerId).hitPoints -= 5;
+                }
+                if (sim.getUnitState(kbotId).orders.empty())
+                {
+                    sim.getUnitState(kbotId).orders.push_back(AttackOrder(towerId));
+                }
+                runTicks(sim, controller, 1, commands);
+            }
+
+            REQUIRE(ordersFor<MoveOrder>(commands, kbotId).empty());
+        }
+
+        SECTION("switched off, it never gives up")
+        {
+            dud();
+            profile.answerStalledAttacks = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runAttacking(controller, commands, (profile.stalledAttackSeconds + 2) * 30);
+
+            REQUIRE(ordersFor<MoveOrder>(commands, kbotId).empty());
+        }
     }
 
     TEST_CASE("nobody is sent to mend a commander hurt in a fight nothing covers", "[ai]")
@@ -5930,6 +6080,53 @@ namespace rwe
                 constructorId = addUnit(sim, "ARMCK", ai, SimVector(-100_ss, 0_ss, 50_ss), script);
             }
         };
+    }
+
+    TEST_CASE("two builders do not plan the same metal patch", "[ai]")
+    {
+        // A build order is invisible on the map until the frame goes down,
+        // so a second builder planned in the same pass sees free ground and
+        // walks across the map to find it taken. Reported from a replay:
+        // "construction bots frequently try and build on the same metal spot
+        // they dont know what the other construction bot was already ordered
+        // to do".
+        ExpansionWorld w;
+        auto profile = makeDefaultStandardProfile();
+        profile.cheatModeOmniscient = true;
+        BuildManager planner;
+        const auto taken = ExpansionWorld::depositCentre(0);
+        w.sim.getUnitState(w.constructorId).orders.push_back(BuildOrder("ARMMEX", taken));
+
+        SECTION("the patch one of them is already walking to is spoken for")
+        {
+            REQUIRE(planner.siteClaimedByAnother(w.sim, w.ai, w.commanderId, taken, profile.claimedSiteRadius));
+        }
+
+        SECTION("another patch is not")
+        {
+            // Deposit 3, not 1: neighbouring deposits on this map are 96
+            // apart, which is the claim radius itself.
+            REQUIRE_FALSE(planner.siteClaimedByAnother(w.sim, w.ai, w.commanderId, ExpansionWorld::depositCentre(3), profile.claimedSiteRadius));
+        }
+
+        SECTION("a builder does not count its own order against itself")
+        {
+            REQUIRE_FALSE(planner.siteClaimedByAnother(w.sim, w.ai, w.constructorId, taken, profile.claimedSiteRadius));
+        }
+
+        SECTION("a frame somebody was sent back to finish counts too")
+        {
+            auto frameId = addUnit(w.sim, "ARMMEX", w.ai, ExpansionWorld::depositCentre(3), w.script);
+            w.sim.getUnitState(frameId).buildTimeCompleted = 1u;
+            w.sim.getUnitState(w.constructorId).orders.clear();
+            w.sim.getUnitState(w.constructorId).orders.push_back(CompleteBuildOrder(frameId));
+            REQUIRE(planner.siteClaimedByAnother(w.sim, w.ai, w.commanderId, ExpansionWorld::depositCentre(3), profile.claimedSiteRadius));
+        }
+
+        SECTION("switched off, nothing is spoken for")
+        {
+            REQUIRE_FALSE(planner.siteClaimedByAnother(w.sim, w.ai, w.commanderId, taken, 0_ss));
+        }
     }
 
     TEST_CASE("deposits free on our side are counted: not ours, not theirs, not under a gun", "[ai]")

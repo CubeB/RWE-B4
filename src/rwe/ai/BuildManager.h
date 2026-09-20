@@ -429,6 +429,21 @@ namespace rwe
          * kept for a moho)? A deposit whose best placement is refused is
          * passed over, rather than settled with a lesser placement beside it.
          */
+        /**
+         * Whether one of our other builders has already been told to build
+         * within `radius` of this site. A build order is invisible on the
+         * map until the frame goes down, so without asking this two builders
+         * plan the same metal patch in the same pass and one of them makes
+         * the walk for nothing. Orders being walked to count, and so does a
+         * frame one of them has been sent back to finish.
+         */
+        bool siteClaimedByAnother(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            UnitId builder,
+            const SimVector& site,
+            SimScalar radius) const;
+
         std::optional<SimVector> chooseMexSite(
             const GameSimulation& sim,
             const std::string& unitType,

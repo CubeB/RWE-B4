@@ -258,13 +258,23 @@ namespace rwe
         bb.rallyPoint = *bb.baseAnchor + (towards * profile.rallyDistance);
     }
 
-    std::optional<UnitId> ArmyManager::nearestKnownEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly) const
+    bool ArmyManager::hasGivenUpOn(UnitId unit, UnitId target, GameTime now) const
+    {
+        auto it = landTargetGivenUp.find(std::make_pair(unit.value, target.value));
+        return it != landTargetGivenUp.end() && now.value < it->second.value;
+    }
+
+    std::optional<UnitId> ArmyManager::nearestKnownEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly, const std::function<bool(UnitId)>& skip) const
     {
         std::optional<UnitId> best;
         auto bestDistanceSquared = maxDistance * maxDistance;
         for (const auto& [_, enemy] : bb.knownEnemies)
         {
             if (airOnly && !enemy.isAir)
+            {
+                continue;
+            }
+            if (skip && skip(enemy.unitId))
             {
                 continue;
             }
@@ -1958,9 +1968,74 @@ namespace rwe
                 }
             }
 
+            // Is this one getting hurt? If nothing anything of ours has
+            // thrown at the target in stalledAttackSeconds has moved its hit
+            // points, the shots are not arriving -- it is up a slope, or
+            // behind something -- and standing here firing will not change
+            // that. The unit drops the target, ignores it for
+            // stalledAttackForgetSeconds and takes the next one; the ground
+            // it is standing on is what was wrong, so somebody else's shots
+            // from somewhere else are left alone.
+            //
+            // The order has to be taken off it as well as the target
+            // forgotten: with no other enemy in reach the rules below only
+            // move a unit whose queue is empty, and a unit still holding the
+            // attack would go on firing for the rest of the game. A move to
+            // where it already stands is the cheapest way to say stop.
             // Anything within reach gets shot at, whatever the phase.
-            if (auto enemy = nearestKnownEnemy(sim, profile, bb, unit.position, profile.engageRadius))
+            if (auto enemy = nearestKnownEnemy(sim, profile, bb, unit.position, profile.engageRadius, false, [&](UnitId candidate) { return hasGivenUpOn(unitId, candidate, bb.now); }))
             {
+                // Is it getting hurt? The question is asked of the target we
+                // are about to order this unit at rather than of the order it
+                // is holding, because the simulation throws an attack order
+                // away the moment the target goes out of sight and the AI
+                // hands it straight back -- so a unit stuck on something it
+                // cannot hurt often has an empty queue and a new order every
+                // pass, which is the loop itself rather than a way out of it.
+                if (profile.answerStalledAttacks && profile.stalledAttackSeconds > 0)
+                {
+                    auto targetRef = sim.tryGetUnitState(*enemy);
+                    // Only while it is close enough to be firing: a unit
+                    // still walking there is not being stopped by anything,
+                    // and a clock that runs during the walk gives up on
+                    // every target in the game.
+                    auto reach = longestWeaponRange(sim, sim.unitDefinitions.at(unit.unitType));
+                    auto key = std::make_pair(unitId.value, enemy->value);
+                    if (targetRef && targetRef->get().isAlive()
+                        && reach > 0_ss && flatDistance(unit.position, targetRef->get().position) <= reach)
+                    {
+                        auto& progress = landTargetProgress[key];
+                        if (progress.since.value == 0 || targetRef->get().hitPoints != progress.hitPoints)
+                        {
+                            progress.hitPoints = targetRef->get().hitPoints;
+                            progress.since = bb.now;
+                        }
+                        else if (bb.now.value - progress.since.value > static_cast<unsigned int>(profile.stalledAttackSeconds) * SimTicksPerSecond)
+                        {
+                            // Nothing of ours has moved its hit points in all
+                            // that time, so this unit stops trying and leaves
+                            // it alone for stalledAttackForgetSeconds. The
+                            // order has to come off as well as the target be
+                            // forgotten: the rules below only move a unit
+                            // whose queue is empty, so one still holding the
+                            // attack would go on firing. A move to where it
+                            // already stands is the cheapest way to say stop.
+                            landTargetGivenUp[key] =
+                                GameTime(bb.now.value + (static_cast<unsigned int>(std::max(0, profile.stalledAttackForgetSeconds)) * SimTicksPerSecond));
+                            landTargetProgress.erase(key);
+                            LOG_INFO << "AI army: unit " << unitId.value << " gives up on " << targetRef->get().unitType
+                                     << " " << enemy->value << ", nothing it fired from here moved its hit points";
+                            outCommands.push_back(moveCommand(unitId, unit.position));
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        // Out of reach: the attempt has not begun.
+                        landTargetProgress.erase(key);
+                    }
+                }
+
                 // Outranging it: stand back where it cannot answer, and
                 // shoot from there next pass (kiteWithLongerRange).
                 if (auto standOff = kiteBackFrom(sim, profile, unit, sim.unitDefinitions.at(unit.unitType), *enemy))
