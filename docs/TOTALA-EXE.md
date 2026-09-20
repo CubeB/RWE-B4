@@ -9719,8 +9719,9 @@ there is a regression test for it now.
   implemented; RWE always uses True.
 - RWE's explored grid is **per-player** rather than the original's one shared
   bitmask with a bit per LOS group. Equivalent until allied vision groups exist.
-- `hitDensity` is parsed (100 for solid things, 5–10 for foliage, 0 for smudges)
-  and does nothing. It was once guessed to be the pass-through chance for
+- `hitDensity` (100 for solid things, 5–10 for foliage, 0 for smudges) is no
+  longer parsed at all: **removed 2026-09-20** (#108), field and parse alike, so
+  the key reaches nothing. It was once guessed to be the pass-through chance for
   projectiles hitting features; that guess is **refuted** — the string does not
   occur in `TotalA.exe` at all, and the collision test at `0x49B2B3` is purely
   geometric. This entry survived here after the refutation was written up and

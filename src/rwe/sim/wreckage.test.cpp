@@ -34,7 +34,6 @@ namespace rwe
             d.reclaimable = true;
             d.autoreclaimable = true;
             d.metal = metal;
-            d.hitDensity = 100;
             d.damage = hitPoints;
             return d;
         }

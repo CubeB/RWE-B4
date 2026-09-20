@@ -31,7 +31,6 @@ namespace rwe
 
         bool geothermal;
 
-        unsigned int hitDensity;
 
         unsigned int reproduce;
         unsigned int reproduceArea;

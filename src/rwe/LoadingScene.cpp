@@ -901,7 +901,6 @@ namespace rwe
 
             f.geothermal = tdf.geothermal;
 
-            f.hitDensity = tdf.hitDensity;
 
             f.reproduce = tdf.reproduce;
             f.reproduceArea = tdf.reproduceArea;

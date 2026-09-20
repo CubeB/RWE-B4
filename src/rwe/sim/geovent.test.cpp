@@ -33,7 +33,6 @@ namespace rwe
             d.geothermal = true;
             d.indestructible = true;
             d.blocking = false;
-            d.hitDensity = 0;
             d.damage = 1;
             return d;
         }
@@ -49,7 +48,6 @@ namespace rwe
             d.geothermal = false;
             d.indestructible = true;
             d.blocking = false;
-            d.hitDensity = 0;
             d.damage = 1;
             return d;
         }

@@ -44,7 +44,6 @@ namespace rwe
 
         f.geothermal = tdf.extractBool("geothermal").value_or(false);
 
-        f.hitDensity = tdf.extractUint("hitdensity").value_or(0);
 
         f.reproduce = tdf.extractUint("reproduce").value_or(0);
         f.reproduceArea = tdf.extractUint("reproducearea").value_or(0);

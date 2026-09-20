@@ -155,7 +155,6 @@ namespace rwe
             d.height = 20_ss;
             d.blocking = true;
             d.reclaimable = true;
-            d.hitDensity = 100;
             d.metal = 96;
             d.damage = 300;
             auto id = sim.featureDefinitions.insert(d);
@@ -175,7 +174,6 @@ namespace rwe
             d.height = 4_ss;
             d.blocking = false;
             d.reclaimable = true;
-            d.hitDensity = 100;
             d.metal = 718;
             d.damage = 24000;
             auto id = sim.featureDefinitions.insert(d);

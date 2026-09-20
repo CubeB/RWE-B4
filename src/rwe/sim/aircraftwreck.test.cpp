@@ -143,7 +143,6 @@ namespace rwe
             d.reclaimable = true;
             d.autoreclaimable = true;
             d.metal = 100;
-            d.hitDensity = 100;
             d.damage = 1000;
             return d;
         }

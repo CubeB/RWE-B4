@@ -29,10 +29,9 @@ namespace rwe
         }
 
         /**
-         * A rock: two cells across, twenty units tall, and blocking. Everything
-         * about it is fixed except the hit density under test.
+         * A rock: two cells across, twenty units tall, and blocking.
          */
-        FeatureDefinition makeRock(const std::string& name, unsigned int hitDensity)
+        FeatureDefinition makeRock(const std::string& name)
         {
             FeatureDefinition d{};
             d.name = name;
@@ -40,7 +39,6 @@ namespace rwe
             d.footprintZ = 2;
             d.height = 20_ss;
             d.blocking = true;
-            d.hitDensity = hitDensity;
             d.damage = 2000;
             return d;
         }
@@ -85,30 +83,34 @@ namespace rwe
         }
     }
 
-    // Priority 17. `hitDensity` is set by 559 of the shipped features and read by
-    // nothing in RWE. The long-standing guess -- recorded as a guess -- was that it
-    // is the chance a shot passes through the feature rather than stopping on it.
-    // The string `hitdensity` does not occur anywhere in TotalA.exe, so the original
-    // never reads the key at all; its projectile-versus-feature test at 0x49B2B3 is
-    // purely geometric. These tests pin the geometry down so nobody implements the
-    // guess later.
+    // Priority 17. `hitDensity` is set by 559 of the shipped features. The
+    // long-standing guess -- recorded as a guess -- was that it is the chance a
+    // shot passes through the feature rather than stopping on it. The string
+    // `hitdensity` does not occur anywhere in TotalA.exe, so the original never
+    // reads the key at all; its projectile-versus-feature test at 0x49B2B3 is
+    // purely geometric.
+    //
+    // The key is no longer represented anywhere in RWE: it is not parsed into
+    // FeatureTdf and FeatureDefinition has no field for it (#108). That is a
+    // stronger guard than this file used to give -- the guess cannot be
+    // implemented without deliberately putting the value back -- so what is
+    // left here is the geometry the collision actually uses.
     TEST_CASE("hit density does not decide whether a shot stops on a feature", "[hitdensity]")
     {
-        SECTION("a shot stops on a rock in the way whatever its hit density")
+        SECTION("a shot stops on a rock in the way")
         {
-            // The four values that actually occur in the shipped feature files:
-            // 100 for solid things, 5 and 10 for foliage, 0 for smudges.
-            for (auto density : {0u, 5u, 10u, 100u})
-            {
-                GameSimulation sim(makeHitDensityTerrain(), 0u, 0, 0);
-                defineFlatShot(sim);
+            // This used to run once for each of the four values the shipped
+            // feature files use -- 100 for solid things, 5 and 10 for foliage,
+            // 0 for smudges. With no field to carry them the four runs were the
+            // same run, so what is pinned now is the stop itself.
+            GameSimulation sim(makeHitDensityTerrain(), 0u, 0, 0);
+            defineFlatShot(sim);
 
-                auto rockDef = sim.featureDefinitions.insert(makeRock("rock", density));
-                auto rockId = sim.addFeature(rockDef, 8, 8).value();
-                auto rock = sim.getFeature(rockId).position;
+            auto rockDef = sim.featureDefinitions.insert(makeRock("rock"));
+            auto rockId = sim.addFeature(rockDef, 8, 8).value();
+            auto rock = sim.getFeature(rockId).position;
 
-                REQUIRE_FALSE(shotGetsThrough(sim, rock, rock.y + 10_ss));
-            }
+            REQUIRE_FALSE(shotGetsThrough(sim, rock, rock.y + 10_ss));
         }
 
         SECTION("with nothing in the way the same shot crosses the map")
@@ -116,7 +118,7 @@ namespace rwe
             GameSimulation sim(makeHitDensityTerrain(), 0u, 0, 0);
             defineFlatShot(sim);
 
-            auto rockDef = sim.featureDefinitions.insert(makeRock("rock", 100u));
+            auto rockDef = sim.featureDefinitions.insert(makeRock("rock"));
             auto rockId = sim.addFeature(rockDef, 8, 8).value();
             auto rock = sim.getFeature(rockId).position;
             sim.deleteFeature(rockId);
@@ -133,7 +135,7 @@ namespace rwe
             GameSimulation sim(makeHitDensityTerrain(), 0u, 0, 0);
             defineFlatShot(sim);
 
-            auto rockDef = sim.featureDefinitions.insert(makeRock("rock", 100u));
+            auto rockDef = sim.featureDefinitions.insert(makeRock("rock"));
             auto rockId = sim.addFeature(rockDef, 8, 8).value();
             auto rock = sim.getFeature(rockId).position;
 
