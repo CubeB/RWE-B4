@@ -13,7 +13,7 @@ The artifact is descriptive, not prescriptive. Do not change the implementation 
 
 ## Output contract
 
-Return the intent forest as Markdown. Unless the user says otherwise, post it to the open PR for the current branch (`gh pr comment` — never clobber the PR description with `gh pr edit`); if no PR is open yet, return the forest in the conversation. Do not add:
+Return the intent forest as Markdown. If a PR is open for the branch, the forest lives in the **PR description**: render it there (`gh pr view --json body` to read the current body, then `gh pr edit` with the forest first and any existing content below it — preserve what was there). If no PR is open yet, return the forest in the conversation and say nothing beyond it. Never check the log or the forest in as repo files. Do not add:
 
 - an introduction
 - a summary

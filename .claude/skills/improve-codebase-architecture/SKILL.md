@@ -90,8 +90,10 @@ Rules:
 - Do not log routine consequences (every call-site import update for a rename). Log the decision, not its echo.
 - If the user is in the conversation and approves something specific mid-run, record it as `[USER_APPROVED]` at that moment — post-hoc approval is not this tag.
 
-The log file is a working artifact, not a deliverable: it is an input to the intent-stack skill, which renders it into the forest a reviewer actually reads. Commit it with the branch so provenance survives if the session is compacted or handed off. Delete it (or leave it — reviewer's choice) when the intent stack has been generated.
+The log file is a working artifact, never a deliverable. Keep it out of the repo: it is **not committed** (gitignore it if it would otherwise show in `git status`), because its only consumer is the intent-stack skill, which renders it into the forest a reviewer actually reads — and the forest's home is the **PR description**, a place reviewers already look. What survives review is the stack, not the log.
 
 ### 4. At review time
 
 Once a PR is open, call the Skill tool with "intent-stack". It reads `.intent-log.md`, the diff and the surviving context, and produces the forest a reviewer walks from broad intent down to exact diff lines — flagging anything `[UNEXPLAINED]`, which is the signal for "the log lost a decision; reconstruct and scrutinise".
+
+The intent stack lives in the **PR description**, not in the repo: render the forest and make it the PR body (leave any existing description intact below it, e.g. via `gh pr edit` against the current body) — it is the first thing a reviewing agent reads. The log itself is never checked in.
