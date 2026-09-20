@@ -584,6 +584,8 @@ set(SOURCE_FILES
     src/rwe/sim/Projectile.h
     src/rwe/sim/ProjectileId.h
     src/rwe/sim/ProjectilePhysicsType.h
+    src/rwe/sim/AirMovement.cpp
+    src/rwe/sim/AirMovement.h
     src/rwe/sim/SimAngle.cpp
     src/rwe/sim/SimAngle.h
     src/rwe/sim/SimAxis.h
