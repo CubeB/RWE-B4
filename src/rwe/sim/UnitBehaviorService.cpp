@@ -11,6 +11,7 @@
 #include <rwe/sim/sim_prof.h>
 #include <rwe/cob/cob_util.h>
 #include <rwe/sim/cob.h>
+#include <rwe/sim/ProjectileSpawn.h>
 #include <rwe/sim/movement.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/match.h>
@@ -1334,7 +1335,18 @@ namespace rwe
         auto targetUnitOption = targetUnit == nullptr ? std::optional<UnitId>() : std::make_optional(*targetUnit);
         auto targetProjectile = std::get_if<ProjectileId>(&attackInfo->target);
         auto targetProjectileOption = targetProjectile == nullptr ? std::optional<ProjectileId>() : std::make_optional(*targetProjectile);
-        sim->spawnProjectile(unit.owner, *weapon, firingPoint, direction, (fireInfo->targetPosition - firingPoint).length(), targetUnitOption, id, inheritedVelocity, fireInfo->targetPosition, targetProjectileOption);
+        sim->spawnProjectile(ProjectileSpawn{
+            .owner = unit.owner,
+            .weapon = &*weapon,
+            .position = firingPoint,
+            .direction = direction,
+            .distanceToTarget = (fireInfo->targetPosition - firingPoint).length(),
+            .targetUnit = targetUnitOption,
+            .attacker = id,
+            .inheritedVelocity = inheritedVelocity,
+            .targetPosition = fireInfo->targetPosition,
+            .targetProjectile = targetProjectileOption,
+        });
 
         sim->events.push_back(FireWeaponEvent{weapon->weaponType, fireInfo->burstsFired, firingPoint});
 
@@ -4491,6 +4503,17 @@ namespace rwe
         // captureExistingUnit and reclaimTarget for the same change.
         if (!withinBuildReach(unitInfo, targetUnit))
         {
+            // The thing being mended can walk away -- a damaged unit ordered
+            // home, an aircraft taking off. The arm was left deployed when
+            // that happened, because this branch navigates and returns
+            // without touching the state, and the nanolathe is drawn from
+            // the building state: from the camera it sprays across whatever
+            // distance has opened up. Put the arm away and then walk.
+            if (auto building = std::get_if<UnitBehaviorStateBuilding>(&unitInfo.state->behaviourState);
+                building != nullptr && building->targetUnit == targetUnitId)
+            {
+                changeState(*unitInfo.state, UnitBehaviorStateIdle());
+            }
             navigateTo(unitInfo, targetUnitId);
             return false;
         }

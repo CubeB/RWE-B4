@@ -175,7 +175,16 @@ namespace rwe
         /** A missile in the air, aimed somewhere, put there without a launcher. */
         ProjectileId putMissileInAir(GameSimulation& sim, const std::string& weaponType, PlayerId owner, const SimVector& position, const SimVector& aimedAt)
         {
-            auto projectile = sim.createProjectileFromWeapon(owner, weaponType, position, SimVector(0_ss, 1_ss, 0_ss), 1000_ss, std::nullopt, std::nullopt, std::nullopt, aimedAt);
+            auto projectile = sim.createProjectileFromWeapon(ProjectileSpawn{
+                .owner = owner,
+                .weaponType = weaponType,
+                .position = position,
+                .direction = SimVector(0_ss, 1_ss, 0_ss),
+                .distanceToTarget = 1000_ss,
+                .targetUnit = std::nullopt,
+                .attacker = std::nullopt,
+                .inheritedVelocity = std::nullopt,
+                .targetPosition = aimedAt});
             // Left standing still: these tests are about who shoots at what,
             // not about the flight, which the missile tests already cover.
             projectile.velocity = SimVector(0_ss, 0_ss, 0_ss);
@@ -296,7 +305,17 @@ namespace rwe
             REQUIRE(sim.findInterceptTarget(amdId, 0) == nukeId);
 
             // Somebody else's round, already in the air after it.
-            auto chaser = sim.createProjectileFromWeapon(us, "amd_rocket", SimVector(500_ss, 100_ss, 500_ss), SimVector(0_ss, 1_ss, 0_ss), 100_ss, std::nullopt, std::nullopt, std::nullopt, std::nullopt, nukeId);
+            auto chaser = sim.createProjectileFromWeapon(ProjectileSpawn{
+                .owner = us,
+                .weaponType = "amd_rocket",
+                .position = SimVector(500_ss, 100_ss, 500_ss),
+                .direction = SimVector(0_ss, 1_ss, 0_ss),
+                .distanceToTarget = 100_ss,
+                .targetUnit = std::nullopt,
+                .attacker = std::nullopt,
+                .inheritedVelocity = std::nullopt,
+                .targetPosition = std::nullopt,
+                .targetProjectile = nukeId});
             sim.projectiles.emplace(std::move(chaser));
 
             REQUIRE_FALSE(sim.findInterceptTarget(amdId, 0).has_value());
@@ -359,7 +378,17 @@ namespace rwe
 
         SECTION("inside the blast radius, both die")
         {
-            auto chaser = sim.createProjectileFromWeapon(us, "amd_rocket", SimVector(1050_ss, 400_ss, 1000_ss), SimVector(0_ss, 1_ss, 0_ss), 100_ss, std::nullopt, std::nullopt, std::nullopt, std::nullopt, nukeId);
+            auto chaser = sim.createProjectileFromWeapon(ProjectileSpawn{
+                .owner = us,
+                .weaponType = "amd_rocket",
+                .position = SimVector(1050_ss, 400_ss, 1000_ss),
+                .direction = SimVector(0_ss, 1_ss, 0_ss),
+                .distanceToTarget = 100_ss,
+                .targetUnit = std::nullopt,
+                .attacker = std::nullopt,
+                .inheritedVelocity = std::nullopt,
+                .targetPosition = std::nullopt,
+                .targetProjectile = nukeId});
             chaser.velocity = SimVector(0_ss, 0_ss, 0_ss);
             chaser.speed = 0_ss;
             auto chaserId = sim.projectiles.emplace(std::move(chaser));
@@ -372,7 +401,17 @@ namespace rwe
 
         SECTION("outside it, the round keeps flying")
         {
-            auto chaser = sim.createProjectileFromWeapon(us, "amd_rocket", SimVector(1200_ss, 400_ss, 1000_ss), SimVector(0_ss, 1_ss, 0_ss), 100_ss, std::nullopt, std::nullopt, std::nullopt, std::nullopt, nukeId);
+            auto chaser = sim.createProjectileFromWeapon(ProjectileSpawn{
+                .owner = us,
+                .weaponType = "amd_rocket",
+                .position = SimVector(1200_ss, 400_ss, 1000_ss),
+                .direction = SimVector(0_ss, 1_ss, 0_ss),
+                .distanceToTarget = 100_ss,
+                .targetUnit = std::nullopt,
+                .attacker = std::nullopt,
+                .inheritedVelocity = std::nullopt,
+                .targetPosition = std::nullopt,
+                .targetProjectile = nukeId});
             chaser.velocity = SimVector(0_ss, 0_ss, 0_ss);
             chaser.speed = 0_ss;
             auto chaserId = sim.projectiles.emplace(std::move(chaser));
@@ -411,7 +450,17 @@ namespace rwe
         // Even one of our own, since the blast does not ask whose it is.
         auto ours = putMissileInAir(sim, "nuke", us, blastAt + SimVector(0_ss, 0_ss, 20_ss), SimVector(600_ss, 0_ss, 600_ss));
 
-        auto chaser = sim.createProjectileFromWeapon(us, "amd_rocket", blastAt, SimVector(0_ss, 1_ss, 0_ss), 100_ss, std::nullopt, std::nullopt, std::nullopt, std::nullopt, chased);
+        auto chaser = sim.createProjectileFromWeapon(ProjectileSpawn{
+            .owner = us,
+            .weaponType = "amd_rocket",
+            .position = blastAt,
+            .direction = SimVector(0_ss, 1_ss, 0_ss),
+            .distanceToTarget = 100_ss,
+            .targetUnit = std::nullopt,
+            .attacker = std::nullopt,
+            .inheritedVelocity = std::nullopt,
+            .targetPosition = std::nullopt,
+            .targetProjectile = chased});
         auto chaserId = sim.projectiles.emplace(std::move(chaser));
 
         sim.doProjectileImpact(sim.projectiles.tryGet(chaserId)->get(), ImpactType::Normal, chaserId);
@@ -438,7 +487,13 @@ namespace rwe
         auto blastAt = SimVector(1000_ss, 400_ss, 1000_ss);
         auto nearby = putMissileInAir(sim, "nuke", them, blastAt + SimVector(10_ss, 0_ss, 0_ss), SimVector(600_ss, 0_ss, 600_ss));
 
-        auto other = sim.createProjectileFromWeapon(them, "nuke", blastAt, SimVector(0_ss, 1_ss, 0_ss), 100_ss, std::nullopt);
+        auto other = sim.createProjectileFromWeapon(ProjectileSpawn{
+            .owner = them,
+            .weaponType = "nuke",
+            .position = blastAt,
+            .direction = SimVector(0_ss, 1_ss, 0_ss),
+            .distanceToTarget = 100_ss,
+            .targetUnit = std::nullopt});
         auto otherId = sim.projectiles.emplace(std::move(other));
 
         sim.doProjectileImpact(sim.projectiles.tryGet(otherId)->get(), ImpactType::Normal, otherId);

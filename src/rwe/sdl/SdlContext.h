@@ -86,6 +86,12 @@ namespace rwe
             return SDL_GetMouseState(x, y);
         }
 
+        /** The window the pointer is over, or null when it is over none of ours. */
+        SDL_Window* getMouseFocus()
+        {
+            return SDL_GetMouseFocus();
+        }
+
         void showCursor()
         {
             SDL_ShowCursor();
