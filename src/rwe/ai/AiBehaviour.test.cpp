@@ -6619,4 +6619,97 @@ namespace rwe
             CHECK(apart);
         }
     }
+    TEST_CASE("the first towers go out on the edge of the base, not among it", "[ai]")
+    {
+        // From a replay review: "first few defences should be built on the
+        // outer cusp of the base".
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+        // A base built out to 400 in the direction the enemy lies.
+        for (int i = 1; i <= 4; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(i * 100.0f), 0_ss, 60_ss), script);
+        }
+        addUnit(sim, "ARMSOLAR", human, SimVector(2000_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+
+        auto siteDistance = [&](AiTuningProfile& p) {
+            AiPlayerController controller(ai, p, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 4, commands);
+            BuildManager planner;
+            ReachabilityMap reachability;
+            std::minstd_rand rng(7u);
+            auto site = planner.chooseDefenceSite(sim, ai, p, controller.getBlackboard(), reachability, "ARMLLT", rng);
+            REQUIRE(site.has_value());
+            return rweSqrt((site->x * site->x) + (site->z * site->z));
+        };
+
+        SECTION("out past the buildings")
+        {
+            CHECK(siteDistance(profile) > profile.defenceDistanceFromBase);
+        }
+
+        SECTION("switched off, at the old distance from the anchor")
+        {
+            auto off = profile;
+            off.firstDefencesOnPerimeter = false;
+            auto nearBase = siteDistance(off);
+            auto onEdge = siteDistance(profile);
+            CHECK(onEdge > nearBase);
+        }
+    }
+
+    TEST_CASE("tier two fortifies the towers even with the tier-one switch off", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLLT", ai, SimVector(200_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.fortifyTowers = false;
+        profile.fortifyWhereAttacked = false;
+        profile.rebuildLostDefences = false;
+
+        auto planned = [&](const AiTuningProfile& p) {
+            AiPlayerController controller(ai, p, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 4, commands);
+            BuildManager planner;
+            std::minstd_rand rng(7u);
+            return planner.planFortification(sim, ai, p, controller.getBlackboard(), rng).has_value();
+        };
+
+        SECTION("tier one: nothing")
+        {
+            CHECK_FALSE(planned(profile));
+        }
+
+        SECTION("with an advanced lab standing: teeth")
+        {
+            addUnit(sim, "ARMALAB", ai, SimVector(-200_ss, 0_ss, 0_ss), script);
+            CHECK(planned(profile));
+        }
+
+        SECTION("switched off, tier two changes nothing")
+        {
+            addUnit(sim, "ARMALAB", ai, SimVector(-200_ss, 0_ss, 0_ss), script);
+            auto off = profile;
+            off.fortifyAtTierTwo = false;
+            CHECK_FALSE(planned(off));
+        }
+    }
 }

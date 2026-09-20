@@ -917,9 +917,36 @@ namespace rwe
         // still uses threatDirection: a radar's job is watching the enemy's
         // side of the map, which recentLosses says nothing about.
         auto towards = profile.defenceFacesRecentLosses ? defenceFacingDirection(bb) : threatDirection(bb);
-        auto post = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
+        // The first few go out on the edge of the built-up base rather than
+        // among it (firstDefencesOnPerimeter): a tower beside the solar
+        // collectors is already inside whatever it was meant to keep out.
+        auto postDistance = profile.defenceDistanceFromBase;
+        bool onPerimeter = profile.firstDefencesOnPerimeter && static_cast<int>(towers.size()) < profile.perimeterDefenceCount;
+        if (onPerimeter)
+        {
+            SimScalar edge = 0_ss;
+            for (const auto& [otherId, other] : sim.units)
+            {
+                if (other.owner != aiOwner || !other.isAlive())
+                {
+                    continue;
+                }
+                auto otherDefIt = sim.unitDefinitions.find(other.unitType);
+                if (otherDefIt == sim.unitDefinitions.end() || otherDefIt->second.isMobile)
+                {
+                    continue;
+                }
+                edge = rweMax(edge, flatDistance(other.position, *bb.baseAnchor));
+            }
+            postDistance = rweMax(postDistance, rweMin(edge + profile.perimeterDefenceMargin, profile.defendRadius));
+        }
+        auto post = *bb.baseAnchor + (towards * postDistance);
+        // Moving the post alone would not move the tower: "facing" stops
+        // counting at the post distance, and nearness to the anchor breaks
+        // the tie, so the scoring would hand back the site the old rule
+        // chose whatever post it was given. The clamp is what places it.
         return chooseScoredBuildSite(sim, profile, bb, unitType, post, rng, [&](const SimVector& site, int) {
-            auto forward = std::min((site - *bb.baseAnchor).dot(towards), profile.defenceDistanceFromBase);
+            auto forward = std::min((site - *bb.baseAnchor).dot(towards), postDistance);
             return SiteScore{spread(site), forward.value, -flatDistance(site, *bb.baseAnchor).value};
         },
             walkable);
@@ -2283,7 +2310,10 @@ namespace rwe
         // attacks have kept coming from (fortifyWhereAttacked, decided by
         // watchDefences). The second is nearly always nothing to do, and
         // says so here before anything is walked.
-        const bool everyTower = profile.fortifyTowers && !s.lightLaserTower.empty();
+        // Tier two turns it on by itself (fortifyAtTierTwo): heavy towers
+        // are worth teeth in front of them, and by then the metal is there.
+        const bool tierTwo = !s.advancedLab.empty() && countOf(bb.ownedTotalCounts, s.advancedLab) > 0;
+        const bool everyTower = (profile.fortifyTowers || (profile.fortifyAtTierTwo && tierTwo)) && !s.lightLaserTower.empty();
         const bool whereAttacked = profile.fortifyWhereAttacked && defenceTeethOwed;
         // And a third: a defence put back where one was destroyed
         // (fortifyRebuiltDefences).
@@ -4132,7 +4162,8 @@ namespace rwe
         // Whatever of ours near the base is most hurt (mendDamagedUnits):
         // nothing in TA mends itself, so a unit that came home hurt stays
         // hurt until a builder is put on it.
-        if (profile.mendDamagedUnits && builderAtBase && builderDef.canReclamate)
+        if (profile.mendDamagedUnits && builderAtBase && builderDef.canReclamate
+            && (profile.commanderMends || !builderDef.commander))
         {
             // One at a time: the AI issues a repair order on a mobile unit
             // nowhere else, so a builder of ours carrying one is this rule's.
@@ -4662,7 +4693,17 @@ namespace rwe
                 // could chain from there to the next patch and the next:
                 // measured, one was at the midfield building extractors 3900
                 // from its start when it was caught, and the game with it.
-                auto leashSquared = profile.commanderMexSearchRadius * profile.commanderMexSearchRadius;
+                auto commanderReach = profile.commanderMexSearchRadius;
+                // While somebody else can take the far rocks, the commander
+                // keeps to the near ones (commanderPrefersNearSites). With no
+                // construction unit alive it expands as before, because a
+                // side that has lost its builders must still expand.
+                if (profile.commanderPrefersNearSites && profile.commanderLeashRadius > 0_ss && !bb.sideUnits.constructor.empty()
+                    && countOf(bb.ownedTotalCounts, bb.sideUnits.constructor) > 0)
+                {
+                    commanderReach = rweMin(commanderReach, profile.commanderLeashRadius);
+                }
+                auto leashSquared = commanderReach * commanderReach;
                 // The ground rules, asked of a deposit (see chooseMexSite):
                 // a deposit the leash or a gun's reach cuts through is taken
                 // at its heart, not on whichever edge lies inside.
@@ -5245,6 +5286,9 @@ namespace rwe
         if (builderDef.commander && builderAtBase && !saving && profile.commanderAssistRadius > 0_ss)
         {
             const auto assistSquared = profile.commanderAssistRadius * profile.commanderAssistRadius;
+            // And within the leash of the base: a frame the commander can
+            // reach is not worth crossing the map for (commanderLeashRadius).
+            const auto leashSquared = profile.commanderLeashRadius * profile.commanderLeashRadius;
             std::optional<UnitId> nearestFrame;
             SimScalar nearestFrameDistance = 0_ss;
             for (const auto& [unitId, unit] : sim.units)
@@ -5259,7 +5303,8 @@ namespace rwe
                     continue;
                 }
                 auto distance = builder.position.distanceSquared(unit.position);
-                if (distance > assistSquared || (siteReachable && !siteReachable(unit.position)))
+                if (distance > assistSquared || (siteReachable && !siteReachable(unit.position))
+                    || (profile.commanderLeashRadius > 0_ss && bb.baseAnchor->distanceSquared(unit.position) > leashSquared))
                 {
                     continue;
                 }

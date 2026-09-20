@@ -443,6 +443,27 @@ namespace rwe
          * switches it off.
          */
         SimScalar commanderAssistRadius{800_ss};
+
+        /**
+         * How far from the base the commander will take work at all. A
+         * replay review: "the commanders spend alot of time on the front
+         * lines". It is the base's whole build capacity and its best gun,
+         * and both are wanted at home; a job beyond this leash is left to
+         * the construction units, which is what they are for.
+         *
+         * commanderPrefersNearSites brings the mex search in to the same
+         * leash while another construction unit is alive to take the far
+         * rocks. With none, the commander expands as before, because
+         * otherwise a side that loses its builders stops expanding
+         * altogether.
+         *
+         * commanderMends keeps the commander out of the mending rota for
+         * the same reason: mendDamagedUnits is a job for a construction
+         * unit.
+         */
+        SimScalar commanderLeashRadius{1200_ss};
+        bool commanderPrefersNearSites{true};
+        bool commanderMends{false};
         /**
          * A tower for a raided outpost is a construction unit's job while
          * there is one: the commander walking out to the edge of the base to
@@ -1192,6 +1213,18 @@ namespace rwe
         bool navalScouting{true};
         SimScalar defenceDistanceFromBase{160_ss};
         /**
+         * The first perimeterDefenceCount towers go out on the edge of what
+         * the base has actually built -- the furthest building of ours from
+         * the anchor, plus perimeterDefenceMargin, bounded by defendRadius --
+         * rather than at defenceDistanceFromBase, which puts them among the
+         * solar collectors. A replay review: "first few defences should be
+         * built on the outer cusp of the base". Later towers go back to the
+         * ordinary rule, which fills in the gaps the ring leaves.
+         */
+        bool firstDefencesOnPerimeter{true};
+        int perimeterDefenceCount{3};
+        SimScalar perimeterDefenceMargin{160_ss};
+        /**
          * How far out from the base anchor the radar's post stands, towards
          * the enemy. A radar in the middle of the base sees what the
          * buildings already see; its worth is the ground beyond them, so it
@@ -1435,6 +1468,19 @@ namespace rwe
          * meant to stop. ROADMAP, 2026-09-19.
          */
         bool fortifyTowers{false};
+        /**
+         * And on, whatever fortifyTowers says, once an advanced lab stands.
+         * Fortifying measured as not paying at tier one because the teeth
+         * came out of the expansion at the moment the expansion decided the
+         * game -- 2.2 to 3.5 construction units lost before fifteen minutes
+         * against one without it. By tier two the income is several times
+         * what it was, the towers being fortified are heavy ones worth
+         * protecting, and a replay review asked for exactly this: "make sure
+         * when t2 comes defenses are upgraded and fortified". The upgrade
+         * half is heavyDefenceCount, which already wants heavy towers once
+         * the advanced lab is up.
+         */
+        bool fortifyAtTierTwo{true};
         /** How many teeth in a tower's line, laid from the middle outward. */
         int fortifyTeethPerTower{5};
         /** How far in front of the tower the line runs. */
