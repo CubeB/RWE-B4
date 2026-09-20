@@ -27,6 +27,7 @@
 #include <rwe/sim/PlayerId.h>
 #include <rwe/sim/Projectile.h>
 #include <rwe/sim/ProjectileId.h>
+#include <rwe/sim/ProjectileSpawn.h>
 #include <rwe/sim/SimAxis.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitId.h>
@@ -1116,11 +1117,9 @@ namespace rwe
 
         void requestPath(UnitId unitId);
 
-        Projectile createProjectileFromWeapon(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker = std::nullopt, std::optional<SimVector> inheritedVelocity = std::nullopt, std::optional<SimVector> targetPosition = std::nullopt, std::optional<ProjectileId> targetProjectile = std::nullopt);
+        Projectile createProjectileFromWeapon(const ProjectileSpawn& spawn);
 
-        Projectile createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker = std::nullopt, std::optional<SimVector> inheritedVelocity = std::nullopt, std::optional<SimVector> targetPosition = std::nullopt, std::optional<ProjectileId> targetProjectile = std::nullopt);
-
-        void spawnProjectile(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker = std::nullopt, std::optional<SimVector> inheritedVelocity = std::nullopt, std::optional<SimVector> targetPosition = std::nullopt, std::optional<ProjectileId> targetProjectile = std::nullopt);
+        void spawnProjectile(const ProjectileSpawn& spawn);
 
         WinStatus computeWinStatus() const;
 

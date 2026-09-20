@@ -1548,8 +1548,158 @@ namespace rwe
             REQUIRE(ordersFor<MoveOrder>(commands, kbotId).empty());
         }
 
+        SECTION("a frame nearly finished is worth more than the margin: it stays on it")
+        {
+            // The tower it is two thirds of the way through, standing where
+            // it is building. Backing off would throw the order away -- an
+            // immediate move does -- and the replay this comes from showed
+            // exactly that: an LLT abandoned at the last moment and the
+            // builder standing in the open with nothing to do.
+            auto frameId = addUnit(sim, "ARMLLT", ai, SimVector(110_ss, 0_ss, 100_ss), script);
+            sim.getUnitState(frameId).buildTimeCompleted = (sim.unitDefinitions.at("ARMLLT").buildTime * 80u) / 100u;
+            sim.getUnitState(kbotId).orders.push_back(CompleteBuildOrder(frameId));
+
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(ordersFor<MoveOrder>(commands, kbotId).empty());
+        }
+
+        SECTION("a frame barely started is left, but it is queued to come back and finish")
+        {
+            auto frameId = addUnit(sim, "ARMLLT", ai, SimVector(110_ss, 0_ss, 100_ss), script);
+            sim.getUnitState(frameId).buildTimeCompleted = (sim.unitDefinitions.at("ARMLLT").buildTime * 10u) / 100u;
+            sim.getUnitState(kbotId).orders.push_back(CompleteBuildOrder(frameId));
+
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE_FALSE(ordersFor<MoveOrder>(commands, kbotId).empty());
+            auto resumed = ordersFor<CompleteBuildOrder>(commands, kbotId);
+            REQUIRE_FALSE(resumed.empty());
+            REQUIRE(resumed.front().target == frameId);
+        }
+
+        SECTION("switched off, the job is simply dropped")
+        {
+            profile.resumeAfterBackingOff = false;
+            auto frameId = addUnit(sim, "ARMLLT", ai, SimVector(110_ss, 0_ss, 100_ss), script);
+            sim.getUnitState(frameId).buildTimeCompleted = (sim.unitDefinitions.at("ARMLLT").buildTime * 10u) / 100u;
+            sim.getUnitState(kbotId).orders.push_back(CompleteBuildOrder(frameId));
+
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE_FALSE(ordersFor<MoveOrder>(commands, kbotId).empty());
+            REQUIRE(ordersFor<CompleteBuildOrder>(commands, kbotId).empty());
+        }
+
         (void)commanderId;
         (void)human;
+    }
+
+    TEST_CASE("a unit stops shooting at what it is not hurting", "[ai]")
+    {
+        // From a replay: "a lot of units will all repeatedly shoot at a
+        // structure their projectiles cant reach for ages and get stuck in
+        // that loop until another unit is able to destroy it". The target is
+        // there, in range, and never gets any less alive, so nothing in the
+        // ordinary rules ever moves the unit on.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(-600_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-550_ss, 0_ss, -100_ss), script);
+        // Far enough to see what it is shooting at: the simulation throws
+        // away an attack order whose target it cannot see, and the default
+        // sight in this world is exactly the distance below.
+        sim.unitDefinitions["ARMPW"].sightDistance = 400u;
+        auto kbotId = addUnit(sim, "ARMPW", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        // A tower of theirs it can see and is already firing at, whose hit
+        // points never move -- which is what standing below it looks like.
+        auto towerId = addUnit(sim, "ARMLLT", human, SimVector(200_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(kbotId).orders.push_back(AttackOrder(towerId));
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+
+        // A gun that goes off and does nothing, which is what a shell into
+        // the slope below the target amounts to: the unit fires, the target
+        // never loses a hit point, and the flat test terrain does not have
+        // to be given a hill to say so.
+        auto dud = [&]() {
+            auto w = sim.weaponDefinitions.at("LASER");
+            w.damage["DEFAULT"] = 0u;
+            sim.weaponDefinitions["DUD"] = w;
+            sim.unitDefinitions["ARMPW"].weapon1 = "DUD";
+        };
+        // The test harness never applies the AI's own commands, and the
+        // simulation drops an attack order it has finished with, so the
+        // order is put back each tick: in a real game the AI's attack
+        // command is applied and the unit stays on the target, which is the
+        // situation being tested.
+        auto runAttacking = [&](AiPlayerController& controller, std::vector<PlayerCommand>& commands, int ticks) {
+            for (int i = 0; i < ticks; ++i)
+            {
+                if (sim.getUnitState(kbotId).orders.empty())
+                {
+                    sim.getUnitState(kbotId).orders.push_back(AttackOrder(towerId));
+                }
+                runTicks(sim, controller, 1, commands);
+            }
+        };
+
+        SECTION("after stalledAttackSeconds it drops the target")
+        {
+            dud();
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runAttacking(controller, commands, (profile.stalledAttackSeconds + 2) * 30);
+
+            // Told to stop: a move to where it already stands is how the
+            // attack order comes off.
+            REQUIRE_FALSE(ordersFor<MoveOrder>(commands, kbotId).empty());
+        }
+
+        SECTION("while it is getting hurt, it stays on it")
+        {
+            dud();
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            // The same run, except that its hit points move every second,
+            // which is the whole question.
+            for (int i = 0; i < (profile.stalledAttackSeconds + 2) * 30; ++i)
+            {
+                if (i % 30 == 0 && sim.getUnitState(towerId).hitPoints > 10)
+                {
+                    sim.getUnitState(towerId).hitPoints -= 5;
+                }
+                if (sim.getUnitState(kbotId).orders.empty())
+                {
+                    sim.getUnitState(kbotId).orders.push_back(AttackOrder(towerId));
+                }
+                runTicks(sim, controller, 1, commands);
+            }
+
+            REQUIRE(ordersFor<MoveOrder>(commands, kbotId).empty());
+        }
+
+        SECTION("switched off, it never gives up")
+        {
+            dud();
+            profile.answerStalledAttacks = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runAttacking(controller, commands, (profile.stalledAttackSeconds + 2) * 30);
+
+            REQUIRE(ordersFor<MoveOrder>(commands, kbotId).empty());
+        }
     }
 
     TEST_CASE("nobody is sent to mend a commander hurt in a fight nothing covers", "[ai]")
@@ -5932,6 +6082,53 @@ namespace rwe
         };
     }
 
+    TEST_CASE("two builders do not plan the same metal patch", "[ai]")
+    {
+        // A build order is invisible on the map until the frame goes down,
+        // so a second builder planned in the same pass sees free ground and
+        // walks across the map to find it taken. Reported from a replay:
+        // "construction bots frequently try and build on the same metal spot
+        // they dont know what the other construction bot was already ordered
+        // to do".
+        ExpansionWorld w;
+        auto profile = makeDefaultStandardProfile();
+        profile.cheatModeOmniscient = true;
+        BuildManager planner;
+        const auto taken = ExpansionWorld::depositCentre(0);
+        w.sim.getUnitState(w.constructorId).orders.push_back(BuildOrder("ARMMEX", taken));
+
+        SECTION("the patch one of them is already walking to is spoken for")
+        {
+            REQUIRE(planner.siteClaimedByAnother(w.sim, w.ai, w.commanderId, taken, profile.claimedSiteRadius));
+        }
+
+        SECTION("another patch is not")
+        {
+            // Deposit 3, not 1: neighbouring deposits on this map are 96
+            // apart, which is the claim radius itself.
+            REQUIRE_FALSE(planner.siteClaimedByAnother(w.sim, w.ai, w.commanderId, ExpansionWorld::depositCentre(3), profile.claimedSiteRadius));
+        }
+
+        SECTION("a builder does not count its own order against itself")
+        {
+            REQUIRE_FALSE(planner.siteClaimedByAnother(w.sim, w.ai, w.constructorId, taken, profile.claimedSiteRadius));
+        }
+
+        SECTION("a frame somebody was sent back to finish counts too")
+        {
+            auto frameId = addUnit(w.sim, "ARMMEX", w.ai, ExpansionWorld::depositCentre(3), w.script);
+            w.sim.getUnitState(frameId).buildTimeCompleted = 1u;
+            w.sim.getUnitState(w.constructorId).orders.clear();
+            w.sim.getUnitState(w.constructorId).orders.push_back(CompleteBuildOrder(frameId));
+            REQUIRE(planner.siteClaimedByAnother(w.sim, w.ai, w.commanderId, ExpansionWorld::depositCentre(3), profile.claimedSiteRadius));
+        }
+
+        SECTION("switched off, nothing is spoken for")
+        {
+            REQUIRE_FALSE(planner.siteClaimedByAnother(w.sim, w.ai, w.commanderId, taken, 0_ss));
+        }
+    }
+
     TEST_CASE("deposits free on our side are counted: not ours, not theirs, not under a gun", "[ai]")
     {
         ExpansionWorld w;
@@ -6143,6 +6340,573 @@ namespace rwe
             {
                 REQUIRE(ordersFor<AttackOrder>(commands, id).empty());
             }
+        }
+    }
+    TEST_CASE("income that outruns what the jobs can draw is a surplus", "[ai]")
+    {
+        auto profile = makeDefaultStandardProfile();
+        AiBlackboard bb;
+        bb.metalIncome = Metal(20.0f);
+
+        SECTION("nothing running: the whole income is going spare")
+        {
+            bb.metalDemand = Metal(0.0f);
+            CHECK(BuildManager::incomeOutrunsSpending(profile, bb));
+        }
+
+        SECTION("jobs drawing nearly all of it: no surplus")
+        {
+            bb.metalDemand = Metal(18.0f);
+            CHECK_FALSE(BuildManager::incomeOutrunsSpending(profile, bb));
+        }
+
+        SECTION("drawing under four fifths of it: a surplus")
+        {
+            bb.metalDemand = Metal(15.0f);
+            CHECK(BuildManager::incomeOutrunsSpending(profile, bb));
+        }
+
+        SECTION("switched off")
+        {
+            bb.metalDemand = Metal(0.0f);
+            profile.spendSurplusOnCapacity = false;
+            CHECK_FALSE(BuildManager::incomeOutrunsSpending(profile, bb));
+        }
+    }
+
+    TEST_CASE("metal it cannot spend buys another factory and more builders", "[ai]")
+    {
+        // A base with its opening quotas long met and an income no single
+        // builder can keep up with.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.unitDefinitions["ARMMEX"].metalMake = Metal(10.0f);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        for (int i = 0; i < 10; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(100.0f + i * 40.0f), 0_ss, 0_ss), script);
+        }
+        for (int i = 0; i < 8; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(0_ss, 0_ss, SimScalar(100.0f + i * 40.0f)), script);
+        }
+        addUnit(sim, "ARMLAB", ai, SimVector(200_ss, 0_ss, 200_ss), script);
+        // The one construction unit targetConstructorCount asks for, so that
+        // anything further is the surplus rule's doing. (The free deposits
+        // rule cannot add any: this map's metal is all under the extractors
+        // above.)
+        addUnit(sim, "ARMCK", ai, SimVector(-100_ss, 0_ss, 50_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+
+        SECTION("the lab is told to make more construction units")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            // Past capacitySurplusSeconds of planning passes.
+            runTicks(sim, controller, 800, commands);
+            CHECK(countQueueCommands(commands, "ARMCK") >= 1);
+        }
+
+        SECTION("switched off, the target stands")
+        {
+            profile.spendSurplusOnCapacity = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 800, commands);
+            CHECK(countQueueCommands(commands, "ARMCK") == 0);
+        }
+    }
+    TEST_CASE("a hurt unit leaves the fight for the base until it is mended", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+        // Ours out at the front, with an enemy in reach of it, and the pair
+        // of them well outside the base's own radius -- inside it the base
+        // being attacked is what decides, and that is a separate rule.
+        auto kbotId = addUnit(sim, "ARMPW", ai, SimVector(1400_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMPW", human, SimVector(1500_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+
+        SECTION("hurt, it walks home instead of fighting")
+        {
+            sim.getUnitState(kbotId).hitPoints = 20;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            auto moves = ordersFor<MoveOrder>(commands, kbotId);
+            REQUIRE_FALSE(moves.empty());
+            CHECK(moves.front().destination.x < 1400_ss);
+            CHECK(ordersFor<AttackOrder>(commands, kbotId).empty());
+            CHECK(controller.getBlackboard().mendingUnits.count(kbotId.value) == 1);
+        }
+
+        SECTION("whole, it fights")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            CHECK_FALSE(ordersFor<AttackOrder>(commands, kbotId).empty());
+        }
+
+        SECTION("switched off, it fights hurt")
+        {
+            sim.getUnitState(kbotId).hitPoints = 20;
+            profile.retreatDamagedUnits = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            CHECK_FALSE(ordersFor<AttackOrder>(commands, kbotId).empty());
+        }
+    }
+
+    TEST_CASE("a construction unit mends what came home hurt", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.unitDefinitions["ARMCK"].canReclamate = true;
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(200_ss, 0_ss, 200_ss), script);
+        for (int i = 0; i < 4; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(100.0f + i * 40.0f), 0_ss, 0_ss), script);
+        }
+        for (int i = 0; i < 3; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(0_ss, 0_ss, SimScalar(100.0f + i * 40.0f)), script);
+        }
+        auto builderId = addUnit(sim, "ARMCK", ai, SimVector(-100_ss, 0_ss, 50_ss), script);
+        auto hurtId = addUnit(sim, "ARMPW", ai, SimVector(60_ss, 0_ss, 60_ss), script);
+        sim.getUnitState(hurtId).hitPoints = 30;
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        // Nothing else for a builder to want, so the mend is what is left.
+        profile.targetMetalExtractorCount = 3;
+        profile.targetSolarCount = 4;
+        profile.targetDefenceCount = 0;
+        profile.baseAntiAirTowerCount = 0;
+        profile.targetRadarCount = 0;
+        profile.targetVehiclePlantCount = 0;
+        profile.targetAirPlantCount = 0;
+        profile.spendSurplusOnCapacity = false;
+        profile.expansionConstructors = 0;
+
+        SECTION("it is put on the most hurt of ours near the base")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 130, commands);
+            auto repairs = ordersFor<RepairOrder>(commands, builderId);
+            CHECK(std::any_of(repairs.begin(), repairs.end(), [&](const RepairOrder& o) { return o.target == hurtId; }));
+        }
+
+        SECTION("switched off, it is left hurt")
+        {
+            profile.mendDamagedUnits = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 130, commands);
+            auto repairs = ordersFor<RepairOrder>(commands, builderId);
+            CHECK(std::none_of(repairs.begin(), repairs.end(), [&](const RepairOrder& o) { return o.target == hurtId; }));
+        }
+    }
+    TEST_CASE("what the enemy is made of leans the lab's shares", "[ai]")
+    {
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        defineWorld(sim);
+        sim.unitDefinitions["ARMLLT"].buildCostMetal = Metal(100.0f);
+        sim.unitDefinitions["ARMPW"].buildCostMetal = Metal(100.0f);
+        auto profile = makeDefaultStandardProfile();
+        AiBlackboard bb;
+        auto remember = [&](unsigned int id, const std::string& type, bool building) {
+            bb.knownEnemies.emplace(id, KnownEnemy{UnitId(id), type, SimVector(0_ss, 0_ss, 0_ss), GameTime(0), building, true, false});
+        };
+
+        SECTION("towers of theirs buy artillery")
+        {
+            remember(1, "ARMLLT", true);
+            remember(2, "ARMLLT", true);
+            auto shares = BuildManager::counterShares(sim, profile, bb);
+            CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare + profile.counterShareBonus);
+            CHECK(shares.rocketKbot == profile.labRocketKbotShare);
+            CHECK(shares.raider == profile.labRaiderShare);
+        }
+
+        SECTION("an army of theirs buys rocket kbots")
+        {
+            remember(1, "ARMPW", false);
+            remember(2, "ARMPW", false);
+            auto shares = BuildManager::counterShares(sim, profile, bb);
+            CHECK(shares.rocketKbot == profile.labRocketKbotShare + profile.counterShareBonus);
+            CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare);
+        }
+
+        SECTION("both, when they have both")
+        {
+            remember(1, "ARMPW", false);
+            remember(2, "ARMLLT", true);
+            auto shares = BuildManager::counterShares(sim, profile, bb);
+            CHECK(shares.rocketKbot == profile.labRocketKbotShare + profile.counterShareBonus);
+            CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare + profile.counterShareBonus);
+        }
+
+        SECTION("nothing seen, nothing leaned")
+        {
+            auto shares = BuildManager::counterShares(sim, profile, bb);
+            CHECK(shares.raider == profile.labRaiderShare);
+            CHECK(shares.rocketKbot == profile.labRocketKbotShare);
+            CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare);
+        }
+
+        SECTION("switched off")
+        {
+            profile.counterEnemyComposition = false;
+            remember(1, "ARMLLT", true);
+            auto shares = BuildManager::counterShares(sim, profile, bb);
+            CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare);
+        }
+    }
+    TEST_CASE("the D-gun shot goes to what is worth the charge", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.unitDefinitions["ARMCOM"].canDgun = true;
+        sim.unitDefinitions["ARMCOM"].weapon3 = "DGUN";
+        WeaponDefinition dgun{};
+        dgun.maxRange = 300_ss;
+        dgun.energyPerShot = Energy(400.0f);
+        sim.weaponDefinitions["DGUN"] = dgun;
+        sim.getPlayer(ai).energy = Energy(5000.0f);
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        // A cheap raider close in, and a costly one further out but in reach.
+        sim.unitDefinitions["ARMPW"].buildCostMetal = Metal(50.0f);
+        sim.unitDefinitions["ARMFLASH"] = sim.unitDefinitions["ARMPW"];
+        sim.unitDefinitions["ARMFLASH"].buildCostMetal = Metal(300.0f);
+        auto cheapId = addUnit(sim, "ARMPW", human, SimVector(120_ss, 0_ss, 0_ss), script);
+        auto dearId = addUnit(sim, "ARMFLASH", human, SimVector(0_ss, 0_ss, 250_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+
+        SECTION("the dearer of the two in reach")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            auto shots = ordersFor<DgunOrder>(commands, commanderId);
+            REQUIRE_FALSE(shots.empty());
+            CHECK(*std::get_if<UnitId>(&shots.front().target) == dearId);
+        }
+
+        SECTION("switched off, the nearest")
+        {
+            profile.dgunByValue = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            auto shots = ordersFor<DgunOrder>(commands, commanderId);
+            REQUIRE_FALSE(shots.empty());
+            CHECK(*std::get_if<UnitId>(&shots.front().target) == cheapId);
+        }
+    }
+    TEST_CASE("a gun of theirs that cannot move keeps us off exactly what it reaches", "[ai]")
+    {
+        // The test tower's laser reaches 200; a long gun of theirs reaches
+        // 600. The old rule refused a flat 400 around either.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        WeaponDefinition longGun{};
+        longGun.maxRange = 600_ss;
+        sim.weaponDefinitions["LONGGUN"] = longGun;
+        sim.unitDefinitions["ARMGUARD"] = sim.unitDefinitions["ARMLLT"];
+        sim.unitDefinitions["ARMGUARD"].weapon1 = "LONGGUN";
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.cheatModeOmniscient = true;
+        profile.scoutCount = 0;
+
+        auto refused = [&](const SimVector& site) {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 2, commands);
+            BuildManager planner;
+            return planner.siteUnderEnemyGuns(sim, profile, controller.getBlackboard(), site);
+        };
+
+        SECTION("a small tower of theirs refuses only what its own laser covers")
+        {
+            addUnit(sim, "ARMLLT", human, SimVector(800_ss, 0_ss, 0_ss), script);
+            CHECK(refused(SimVector(700_ss, 0_ss, 0_ss)));
+            // 300 away: inside the old flat 400, outside the laser's 200.
+            CHECK_FALSE(refused(SimVector(500_ss, 0_ss, 0_ss)));
+        }
+
+        SECTION("a long gun of theirs refuses ground far past the old radius")
+        {
+            addUnit(sim, "ARMGUARD", human, SimVector(800_ss, 0_ss, 0_ss), script);
+            CHECK(refused(SimVector(300_ss, 0_ss, 0_ss)));
+            CHECK_FALSE(refused(SimVector(100_ss, 0_ss, 0_ss)));
+        }
+
+        SECTION("switched off, one radius answers for both")
+        {
+            profile.enemyGunRangeFromWeapon = false;
+            addUnit(sim, "ARMGUARD", human, SimVector(800_ss, 0_ss, 0_ss), script);
+            CHECK_FALSE(refused(SimVector(300_ss, 0_ss, 0_ss)));
+            CHECK(refused(SimVector(500_ss, 0_ss, 0_ss)));
+        }
+
+        SECTION("what they can drive keeps the flat radius")
+        {
+            addUnit(sim, "ARMPW", human, SimVector(800_ss, 0_ss, 0_ss), script);
+            CHECK(refused(SimVector(500_ss, 0_ss, 0_ss)));
+        }
+    }
+    TEST_CASE("a unit that outranges what it faces stands where it cannot be answered", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        // Ours reaches 400, theirs the test laser's 200.
+        WeaponDefinition longRocket{};
+        longRocket.maxRange = 400_ss;
+        sim.weaponDefinitions["ROCKET"] = longRocket;
+        sim.unitDefinitions["ARMROCK"] = sim.unitDefinitions["ARMPW"];
+        sim.unitDefinitions["ARMROCK"].weapon1 = "ROCKET";
+        addUnit(sim, "ARMCOM", ai, SimVector(-400_ss, 0_ss, -400_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-300_ss, 0_ss, -300_ss), script);
+        auto oursId = addUnit(sim, "ARMROCK", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+
+        SECTION("inside their reach, it backs off instead of closing")
+        {
+            addUnit(sim, "ARMPW", human, SimVector(0_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            auto moves = ordersFor<MoveOrder>(commands, oursId);
+            REQUIRE_FALSE(moves.empty());
+            CHECK(moves.front().destination.x >= 240_ss);
+            CHECK(ordersFor<AttackOrder>(commands, oursId).empty());
+        }
+
+        SECTION("already standing off, it shoots")
+        {
+            addUnit(sim, "ARMPW", human, SimVector(-200_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            CHECK_FALSE(ordersFor<AttackOrder>(commands, oursId).empty());
+        }
+
+        SECTION("a tower of theirs is not backed away from")
+        {
+            addUnit(sim, "ARMLLT", human, SimVector(0_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            CHECK(ordersFor<MoveOrder>(commands, oursId).empty());
+            CHECK_FALSE(ordersFor<AttackOrder>(commands, oursId).empty());
+        }
+
+        SECTION("switched off, it closes as before")
+        {
+            profile.kiteWithLongerRange = false;
+            addUnit(sim, "ARMPW", human, SimVector(0_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            CHECK(ordersFor<MoveOrder>(commands, oursId).empty());
+            CHECK_FALSE(ordersFor<AttackOrder>(commands, oursId).empty());
+        }
+    }
+    TEST_CASE("a unit waiting to be mended does not stand about for ever", "[ai]")
+    {
+        // From a replay: damaged units gathered in the middle of the base and
+        // did nothing, the base being attacked included.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+        auto hurtId = addUnit(sim, "ARMPW", ai, SimVector(60_ss, 0_ss, 60_ss), script);
+        sim.getUnitState(hurtId).hitPoints = 20;
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+        profile.mendDamagedUnits = false;
+
+        SECTION("an enemy in the base is answered hurt")
+        {
+            auto raiderId = addUnit(sim, "ARMPW", human, SimVector(150_ss, 0_ss, 150_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            auto attacks = ordersFor<AttackOrder>(commands, hurtId);
+            REQUIRE_FALSE(attacks.empty());
+            CHECK(*std::get_if<UnitId>(&attacks.front().target) == raiderId);
+        }
+
+        SECTION("after the wait it goes back to the fight whether mended or not")
+        {
+            // Well outside the base, so it is the wait that decides and not
+            // the base being attacked.
+            addUnit(sim, "ARMPW", human, SimVector(1500_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            REQUIRE(controller.getBlackboard().mendingUnits.count(hurtId.value) == 1);
+            CHECK(ordersFor<MoveOrder>(commands, hurtId).empty());
+
+            // Past the wait: it is offered the ordinary behaviour again,
+            // which here is the wave forming, so it is no longer held at the
+            // base doing nothing.
+            commands.clear();
+            runTicks(sim, controller, profile.mendWaitSeconds * 30 + 60, commands);
+            bool told = !ordersFor<MoveOrder>(commands, hurtId).empty() || !ordersFor<AttackOrder>(commands, hurtId).empty();
+            CHECK(told);
+        }
+
+        SECTION("two of them stand in different places")
+        {
+            auto secondId = addUnit(sim, "ARMPW", ai, SimVector(-60_ss, 0_ss, -60_ss), script);
+            sim.getUnitState(secondId).hitPoints = 20;
+            sim.getUnitState(hurtId).position = SimVector(600_ss, 0_ss, 600_ss);
+            sim.getUnitState(secondId).position = SimVector(-600_ss, 0_ss, -600_ss);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            auto first = ordersFor<MoveOrder>(commands, hurtId);
+            auto second = ordersFor<MoveOrder>(commands, secondId);
+            REQUIRE_FALSE(first.empty());
+            REQUIRE_FALSE(second.empty());
+            bool apart = first.front().destination.x != second.front().destination.x
+                || first.front().destination.z != second.front().destination.z;
+            CHECK(apart);
+        }
+    }
+    TEST_CASE("the first towers go out on the edge of the base, not among it", "[ai]")
+    {
+        // From a replay review: "first few defences should be built on the
+        // outer cusp of the base".
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+        // A base built out to 400 in the direction the enemy lies.
+        for (int i = 1; i <= 4; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(i * 100.0f), 0_ss, 60_ss), script);
+        }
+        addUnit(sim, "ARMSOLAR", human, SimVector(2000_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+
+        auto siteDistance = [&](AiTuningProfile& p) {
+            AiPlayerController controller(ai, p, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 4, commands);
+            BuildManager planner;
+            ReachabilityMap reachability;
+            std::minstd_rand rng(7u);
+            auto site = planner.chooseDefenceSite(sim, ai, p, controller.getBlackboard(), reachability, "ARMLLT", rng);
+            REQUIRE(site.has_value());
+            return rweSqrt((site->x * site->x) + (site->z * site->z));
+        };
+
+        SECTION("out past the buildings")
+        {
+            CHECK(siteDistance(profile) > profile.defenceDistanceFromBase);
+        }
+
+        SECTION("switched off, at the old distance from the anchor")
+        {
+            auto off = profile;
+            off.firstDefencesOnPerimeter = false;
+            auto nearBase = siteDistance(off);
+            auto onEdge = siteDistance(profile);
+            CHECK(onEdge > nearBase);
+        }
+    }
+
+    TEST_CASE("tier two fortifies the towers even with the tier-one switch off", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLLT", ai, SimVector(200_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.fortifyTowers = false;
+        profile.fortifyWhereAttacked = false;
+        profile.rebuildLostDefences = false;
+
+        auto planned = [&](const AiTuningProfile& p) {
+            AiPlayerController controller(ai, p, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 4, commands);
+            BuildManager planner;
+            std::minstd_rand rng(7u);
+            return planner.planFortification(sim, ai, p, controller.getBlackboard(), rng).has_value();
+        };
+
+        SECTION("tier one: nothing")
+        {
+            CHECK_FALSE(planned(profile));
+        }
+
+        SECTION("with an advanced lab standing: teeth")
+        {
+            addUnit(sim, "ARMALAB", ai, SimVector(-200_ss, 0_ss, 0_ss), script);
+            CHECK(planned(profile));
+        }
+
+        SECTION("switched off, tier two changes nothing")
+        {
+            addUnit(sim, "ARMALAB", ai, SimVector(-200_ss, 0_ss, 0_ss), script);
+            auto off = profile;
+            off.fortifyAtTierTwo = false;
+            CHECK_FALSE(planned(off));
         }
     }
 }

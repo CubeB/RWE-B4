@@ -502,6 +502,16 @@ namespace rwe
         }
 
         // update camera position from edge scroll
+        //
+        // Only while the pointer is actually over this window. SDL keeps
+        // reporting the last position it saw once the pointer has left, and
+        // that position is usually against an edge -- so a game left running
+        // behind another window scrolls itself into the corner of the map
+        // and sits there. It is also what stopped the off-screen visual
+        // tests working: nothing the harness posts can put the pointer back
+        // inside a window the pointer is not in, and every run photographed
+        // an unexplored corner.
+        if (sceneContext.sdl->getMouseFocus() != nullptr)
         {
             auto mousePosition = getMousePosition();
             auto directionX = mousePosition.x == sceneContext.viewport->left()

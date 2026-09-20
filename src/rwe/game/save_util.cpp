@@ -1,12 +1,14 @@
 #include "save_util.h"
 
+#include "SaveJson.h"
+#include "UnitStateFieldTable.h"
+
 #include <algorithm>
 #include <cstring>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/util/match.h>
 #include <sstream>
 #include <stdexcept>
-#include <unordered_map>
 #include <vector>
 
 namespace rwe
@@ -15,130 +17,8 @@ namespace rwe
     {
         using nlohmann::json;
 
-        // ---- primitives -------------------------------------------------
-        //
-        // Floats are stored as their IEEE bit pattern, not as json numbers:
-        // a decimal round-trip is allowed to land on a neighbouring value,
-        // and a neighbouring value is a different game.
-
-        json saveFloat(float f)
-        {
-            uint32_t bits;
-            std::memcpy(&bits, &f, sizeof(bits));
-            return bits;
-        }
-
-        float loadFloat(const json& j)
-        {
-            auto bits = j.get<uint32_t>();
-            float f;
-            std::memcpy(&f, &bits, sizeof(f));
-            return f;
-        }
-
-        json saveSimScalar(SimScalar s)
-        {
-            return saveFloat(s.value);
-        }
-
-        SimScalar loadSimScalar(const json& j)
-        {
-            return SimScalar(loadFloat(j));
-        }
-
-        json saveEnergy(Energy e)
-        {
-            return saveFloat(e.value);
-        }
-
-        Energy loadEnergy(const json& j)
-        {
-            return Energy(loadFloat(j));
-        }
-
-        json saveMetal(Metal m)
-        {
-            return saveFloat(m.value);
-        }
-
-        Metal loadMetal(const json& j)
-        {
-            return Metal(loadFloat(j));
-        }
-
-        json saveSimVector(const SimVector& v)
-        {
-            return json::array({saveFloat(v.x.value), saveFloat(v.y.value), saveFloat(v.z.value)});
-        }
-
-        SimVector loadSimVector(const json& j)
-        {
-            return SimVector(SimScalar(loadFloat(j.at(0))), SimScalar(loadFloat(j.at(1))), SimScalar(loadFloat(j.at(2))));
-        }
-
-        json saveSimAngle(SimAngle a)
-        {
-            return a.value;
-        }
-
-        SimAngle loadSimAngle(const json& j)
-        {
-            return SimAngle(j.get<uint16_t>());
-        }
-
-        json saveGameTime(GameTime t)
-        {
-            return t.value;
-        }
-
-        GameTime loadGameTime(const json& j)
-        {
-            return GameTime(j.get<unsigned int>());
-        }
-
-        template <typename T, typename F>
-        json saveOptional(const std::optional<T>& o, F f)
-        {
-            return o ? json(f(*o)) : json();
-        }
-
-        template <typename F>
-        auto loadOptional(const json& j, F f) -> std::optional<decltype(f(j))>
-        {
-            if (j.is_null())
-            {
-                return std::nullopt;
-            }
-            return f(j);
-        }
-
-        template <typename E>
-        json saveEnum(E e)
-        {
-            return static_cast<std::underlying_type_t<E>>(e);
-        }
-
-        template <typename E>
-        E loadEnum(const json& j)
-        {
-            return static_cast<E>(j.get<std::underlying_type_t<E>>());
-        }
-
-        // ---- id remapping -----------------------------------------------
-        //
-        // VectorMap ids carry slot and generation, and a freshly built sim
-        // hands them out densely in insertion order, so a saved id is
-        // meaningless on its own. The save rewrites every reference as the
-        // dense index of its target in the saved array; the load records the
-        // real id the fresh sim hands out for each index and resolves
-        // references through that table.
-        //
-        // A reference whose target no longer existed at save time is written
-        // as "stale" and restored as an id whose generation can never be in
-        // use, so lookups fail on it just as they failed on the original.
-
-        constexpr const char* StaleRef = "stale";
-        constexpr unsigned int StaleIdValue = 0xFFu;
+        // The json primitives and the id-remapping tables live in
+        // SaveJson.h, where the unit field table can reach them too.
 
         // ---- id table layout --------------------------------------------
         //
@@ -187,87 +67,6 @@ namespace rwe
                 }
             }
             return slots;
-        }
-
-        struct SaveContext
-        {
-            std::unordered_map<UnitId, uint32_t> units;
-            std::unordered_map<FeatureId, uint32_t> features;
-            std::unordered_map<ProjectileId, uint32_t> projectiles;
-        };
-
-        struct LoadContext
-        {
-            std::vector<UnitId> units;
-            std::vector<FeatureId> features;
-            std::vector<ProjectileId> projectiles;
-        };
-
-        template <typename Id>
-        json saveIdRef(Id id, const std::unordered_map<Id, uint32_t>& table)
-        {
-            auto it = table.find(id);
-            if (it == table.end())
-            {
-                return StaleRef;
-            }
-            return it->second;
-        }
-
-        template <typename Id>
-        Id loadIdRef(const json& j, const std::vector<Id>& table)
-        {
-            if (j.is_string())
-            {
-                return Id(StaleIdValue);
-            }
-            return table.at(j.get<uint32_t>());
-        }
-
-        json saveUnitIdRef(UnitId id, const SaveContext& ctx)
-        {
-            return saveIdRef(id, ctx.units);
-        }
-
-        UnitId loadUnitIdRef(const json& j, const LoadContext& ctx)
-        {
-            return loadIdRef(j, ctx.units);
-        }
-
-        json saveFeatureIdRef(FeatureId id, const SaveContext& ctx)
-        {
-            return saveIdRef(id, ctx.features);
-        }
-
-        FeatureId loadFeatureIdRef(const json& j, const LoadContext& ctx)
-        {
-            return loadIdRef(j, ctx.features);
-        }
-
-        json saveProjectileIdRef(ProjectileId id, const SaveContext& ctx)
-        {
-            return saveIdRef(id, ctx.projectiles);
-        }
-
-        ProjectileId loadProjectileIdRef(const json& j, const LoadContext& ctx)
-        {
-            return loadIdRef(j, ctx.projectiles);
-        }
-
-        // ---- small shared structs ---------------------------------------
-
-        json saveDiscreteRect(const DiscreteRect& r)
-        {
-            return json{
-                {"x", r.x},
-                {"y", r.y},
-                {"width", r.width},
-                {"height", r.height}};
-        }
-
-        DiscreteRect loadDiscreteRect(const json& j)
-        {
-            return DiscreteRect(j.at("x").get<int>(), j.at("y").get<int>(), j.at("width").get<int>(), j.at("height").get<int>());
         }
 
         json saveWinStatus(const WinStatus& s)
@@ -393,1438 +192,1295 @@ namespace rwe
                 {"burningUntil", saveOptional(f.burningUntil, [](GameTime t) { return saveGameTime(t); })},
                 {"nextSpark", saveGameTime(f.nextSpark)}};
         }
+    }
 
-        // ---- unit pieces ------------------------------------------------
+    /**
+     * The unit state's per-type save and load helpers below sit outside
+     * the anonymous namespace: the field table that drives the hash, save
+     * and dump walks holds pointers to them, and it is shared by
+     * GameHash_util and dump_util.
+     */
 
-        json saveMoveOperation(const UnitMesh::MoveOperation& op)
+    // ---- unit pieces ------------------------------------------------
+
+    json saveMoveOperation(const UnitMesh::MoveOperation& op)
+    {
+        return json{
+            {"targetPosition", saveSimScalar(op.targetPosition)},
+            {"speed", saveSimScalar(op.speed)}};
+    }
+
+    UnitMesh::MoveOperation loadMoveOperation(const json& j)
+    {
+        return UnitMesh::MoveOperation(loadSimScalar(j.at("targetPosition")), loadSimScalar(j.at("speed")));
+    }
+
+    json saveTurnOperationUnion(const UnitMesh::TurnOperationUnion& op)
+    {
+        return match(
+            op,
+            [](const UnitMesh::TurnOperation& t) {
+                return json{
+                    {"kind", "turn"},
+                    {"targetAngle", saveSimAngle(t.targetAngle)},
+                    {"speed", saveSimScalar(t.speed)}};
+            },
+            [](const UnitMesh::SpinOperation& s) {
+                return json{
+                    {"kind", "spin"},
+                    {"currentSpeed", saveSimScalar(s.currentSpeed)},
+                    {"targetSpeed", saveSimScalar(s.targetSpeed)},
+                    {"acceleration", saveSimScalar(s.acceleration)}};
+            },
+            [](const UnitMesh::StopSpinOperation& s) {
+                return json{
+                    {"kind", "stopSpin"},
+                    {"currentSpeed", saveSimScalar(s.currentSpeed)},
+                    {"deceleration", saveSimScalar(s.deceleration)}};
+            });
+    }
+
+    UnitMesh::TurnOperationUnion loadTurnOperationUnion(const json& j)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "turn")
         {
-            return json{
-                {"targetPosition", saveSimScalar(op.targetPosition)},
-                {"speed", saveSimScalar(op.speed)}};
+            return UnitMesh::TurnOperation(loadSimAngle(j.at("targetAngle")), loadSimScalar(j.at("speed")));
+        }
+        if (kind == "spin")
+        {
+            return UnitMesh::SpinOperation(loadSimScalar(j.at("currentSpeed")), loadSimScalar(j.at("targetSpeed")), loadSimScalar(j.at("acceleration")));
+        }
+        if (kind == "stopSpin")
+        {
+            return UnitMesh::StopSpinOperation(loadSimScalar(j.at("currentSpeed")), loadSimScalar(j.at("deceleration")));
+        }
+        throw std::runtime_error("bad TurnOperationUnion kind: " + kind);
+    }
+
+    json saveUnitMesh(const UnitMesh& m)
+    {
+        return json{
+            {"name", m.name},
+            {"visible", m.visible},
+            {"shaded", m.shaded},
+            {"cached", m.cached},
+            {"offset", saveSimVector(m.offset)},
+            {"previousOffset", saveSimVector(m.previousOffset)},
+            {"previousRotationX", saveSimAngle(m.previousRotationX)},
+            {"previousRotationY", saveSimAngle(m.previousRotationY)},
+            {"previousRotationZ", saveSimAngle(m.previousRotationZ)},
+            {"rotationX", saveSimAngle(m.rotationX)},
+            {"rotationY", saveSimAngle(m.rotationY)},
+            {"rotationZ", saveSimAngle(m.rotationZ)},
+            {"xMoveOperation", saveOptional(m.xMoveOperation, saveMoveOperation)},
+            {"yMoveOperation", saveOptional(m.yMoveOperation, saveMoveOperation)},
+            {"zMoveOperation", saveOptional(m.zMoveOperation, saveMoveOperation)},
+            {"xTurnOperation", saveOptional(m.xTurnOperation, saveTurnOperationUnion)},
+            {"yTurnOperation", saveOptional(m.yTurnOperation, saveTurnOperationUnion)},
+            {"zTurnOperation", saveOptional(m.zTurnOperation, saveTurnOperationUnion)}};
+    }
+
+    UnitMesh loadUnitMesh(const json& j)
+    {
+        UnitMesh m;
+        m.name = j.at("name").get<std::string>();
+        m.visible = j.at("visible").get<bool>();
+        m.shaded = j.at("shaded").get<bool>();
+        // Saves written before the flag existed carry no key; every piece
+        // starts cached, which is the original's default too.
+        m.cached = j.value("cached", true);
+        m.offset = loadSimVector(j.at("offset"));
+        m.previousOffset = loadSimVector(j.at("previousOffset"));
+        m.previousRotationX = loadSimAngle(j.at("previousRotationX"));
+        m.previousRotationY = loadSimAngle(j.at("previousRotationY"));
+        m.previousRotationZ = loadSimAngle(j.at("previousRotationZ"));
+        m.rotationX = loadSimAngle(j.at("rotationX"));
+        m.rotationY = loadSimAngle(j.at("rotationY"));
+        m.rotationZ = loadSimAngle(j.at("rotationZ"));
+        m.xMoveOperation = loadOptional(j.at("xMoveOperation"), loadMoveOperation);
+        m.yMoveOperation = loadOptional(j.at("yMoveOperation"), loadMoveOperation);
+        m.zMoveOperation = loadOptional(j.at("zMoveOperation"), loadMoveOperation);
+        m.xTurnOperation = loadOptional(j.at("xTurnOperation"), loadTurnOperationUnion);
+        m.yTurnOperation = loadOptional(j.at("yTurnOperation"), loadTurnOperationUnion);
+        m.zTurnOperation = loadOptional(j.at("zTurnOperation"), loadTurnOperationUnion);
+        return m;
+    }
+
+    // ---- the COB virtual machine ------------------------------------
+
+    template <typename T>
+    std::vector<T> stackToVector(const std::stack<T>& s)
+    {
+        // std::stack exposes only the top, so drain a copy and flip it:
+        // the result runs bottom first, ready to be pushed back in order.
+        std::vector<T> result;
+        auto copy = s;
+        while (!copy.empty())
+        {
+            result.push_back(copy.top());
+            copy.pop();
+        }
+        std::reverse(result.begin(), result.end());
+        return result;
+    }
+
+    json saveCobFunction(const CobFunction& f)
+    {
+        return json{
+            {"instructionIndex", f.instructionIndex},
+            {"locals", f.locals},
+            {"localCount", f.localCount}};
+    }
+
+    CobFunction loadCobFunction(const json& j)
+    {
+        CobFunction f(j.at("instructionIndex").get<unsigned int>());
+        f.locals = j.at("locals").get<std::vector<int>>();
+        f.localCount = j.at("localCount").get<unsigned int>();
+        return f;
+    }
+
+    json saveCobThread(const CobThread& t)
+    {
+        json callStack = json::array();
+        for (const auto& f : stackToVector(t.callStack))
+        {
+            callStack.push_back(saveCobFunction(f));
+        }
+        return json{
+            {"name", t.name},
+            {"stack", stackToVector(t.stack)},
+            {"signalMask", t.signalMask},
+            {"callStack", callStack},
+            {"returnValue", t.returnValue},
+            {"returnLocals", t.returnLocals}};
+    }
+
+    std::unique_ptr<CobThread> loadCobThread(const json& j)
+    {
+        auto t = std::make_unique<CobThread>(j.at("name").get<std::string>(), j.at("signalMask").get<unsigned int>());
+        for (const auto& v : j.at("stack").get<std::vector<int>>())
+        {
+            t->stack.push(v);
+        }
+        for (const auto& fj : j.at("callStack"))
+        {
+            t->callStack.push(loadCobFunction(fj));
+        }
+        t->returnValue = j.at("returnValue").get<int>();
+        t->returnLocals = j.at("returnLocals").get<std::vector<int>>();
+        return t;
+    }
+
+    json saveBlockedCondition(const CobEnvironment::BlockedStatus::Condition& c)
+    {
+        return match(
+            c,
+            [](const CobEnvironment::BlockedStatus::Move& m) {
+                return json{{"kind", "move"}, {"object", m.object}, {"axis", saveEnum(m.axis)}};
+            },
+            [](const CobEnvironment::BlockedStatus::Turn& t) {
+                return json{{"kind", "turn"}, {"object", t.object}, {"axis", saveEnum(t.axis)}};
+            });
+    }
+
+    CobEnvironment::BlockedStatus::Condition loadBlockedCondition(const json& j)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        auto object = j.at("object").get<unsigned int>();
+        auto axis = loadEnum<CobAxis>(j.at("axis"));
+        if (kind == "move")
+        {
+            return CobEnvironment::BlockedStatus::Move(object, axis);
+        }
+        if (kind == "turn")
+        {
+            return CobEnvironment::BlockedStatus::Turn(object, axis);
+        }
+        throw std::runtime_error("bad BlockedStatus kind: " + kind);
+    }
+
+    /**
+     * The index of a thread in the environment's threads vector, or null
+     * for a pointer that no longer names a live thread. The scheduler
+     * queues and a weapon's aim state both hold raw CobThread pointers,
+     * which is why the whole VM serializes through these indices.
+     */
+    json saveCobThreadRef(const CobEnvironment& env, const CobThread* thread)
+    {
+        for (std::size_t i = 0; i < env.threads.size(); ++i)
+        {
+            if (env.threads[i].get() == thread)
+            {
+                return i;
+            }
+        }
+        return json();
+    }
+
+    const CobThread* loadCobThreadRef(const json& j, const CobEnvironment& env)
+    {
+        if (j.is_null())
+        {
+            return nullptr;
+        }
+        return env.threads.at(j.get<std::size_t>()).get();
+    }
+
+    json saveCobEnvironment(const CobEnvironment& env)
+    {
+        json threads = json::array();
+        for (const auto& t : env.threads)
+        {
+            threads.push_back(saveCobThread(*t));
         }
 
-        UnitMesh::MoveOperation loadMoveOperation(const json& j)
+        json readyQueue = json::array();
+        for (const auto* t : env.readyQueue)
         {
-            return UnitMesh::MoveOperation(loadSimScalar(j.at("targetPosition")), loadSimScalar(j.at("speed")));
+            readyQueue.push_back(saveCobThreadRef(env, t));
         }
 
-        json saveTurnOperationUnion(const UnitMesh::TurnOperationUnion& op)
+        json blockedQueue = json::array();
+        for (const auto& [status, t] : env.blockedQueue)
+        {
+            blockedQueue.push_back(json{
+                {"condition", saveBlockedCondition(status.condition)},
+                {"thread", saveCobThreadRef(env, t)}});
+        }
+
+        json sleepingQueue = json::array();
+        for (const auto& [wakeTime, t] : env.sleepingQueue)
+        {
+            sleepingQueue.push_back(json{
+                {"wakeTime", wakeTime.value},
+                {"thread", saveCobThreadRef(env, t)}});
+        }
+
+        json finishedQueue = json::array();
+        for (const auto* t : env.finishedQueue)
+        {
+            finishedQueue.push_back(saveCobThreadRef(env, t));
+        }
+
+        return json{
+            {"statics", env._statics},
+            {"threads", threads},
+            {"readyQueue", readyQueue},
+            {"blockedQueue", blockedQueue},
+            {"sleepingQueue", sleepingQueue},
+            {"finishedQueue", finishedQueue}};
+    }
+
+    void loadCobEnvironmentInto(const json& j, CobEnvironment& env)
+    {
+        env._statics = j.at("statics").get<std::vector<int>>();
+
+        env.threads.clear();
+        env.readyQueue.clear();
+        env.blockedQueue.clear();
+        env.sleepingQueue.clear();
+        env.finishedQueue.clear();
+
+        for (const auto& tj : j.at("threads"))
+        {
+            env.threads.push_back(loadCobThread(tj));
+        }
+
+        for (const auto& r : j.at("readyQueue"))
+        {
+            env.readyQueue.push_back(const_cast<CobThread*>(loadCobThreadRef(r, env)));
+        }
+        for (const auto& b : j.at("blockedQueue"))
+        {
+            env.blockedQueue.emplace_back(
+                CobEnvironment::BlockedStatus(loadBlockedCondition(b.at("condition"))),
+                const_cast<CobThread*>(loadCobThreadRef(b.at("thread"), env)));
+        }
+        for (const auto& s : j.at("sleepingQueue"))
+        {
+            env.sleepingQueue.emplace_back(
+                CobTime(s.at("wakeTime").get<int>()),
+                const_cast<CobThread*>(loadCobThreadRef(s.at("thread"), env)));
+        }
+        for (const auto& f : j.at("finishedQueue"))
+        {
+            env.finishedQueue.push_back(const_cast<CobThread*>(loadCobThreadRef(f, env)));
+        }
+    }
+
+    // ---- weapons ----------------------------------------------------
+
+    json saveUnitWeaponAttackTarget(const UnitWeaponAttackTarget& t, const SaveContext& ctx)
+    {
+        return match(
+            t,
+            [&](const UnitId& id) { return json{{"kind", "unit"}, {"target", saveUnitIdRef(id, ctx)}}; },
+            [&](const SimVector& v) { return json{{"kind", "position"}, {"target", saveSimVector(v)}}; },
+            [&](const ProjectileId& id) { return json{{"kind", "projectile"}, {"target", saveProjectileIdRef(id, ctx)}}; });
+    }
+
+    UnitWeaponAttackTarget loadUnitWeaponAttackTarget(const json& j, const LoadContext& ctx)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "unit")
+        {
+            return loadUnitIdRef(j.at("target"), ctx);
+        }
+        if (kind == "position")
+        {
+            return loadSimVector(j.at("target"));
+        }
+        if (kind == "projectile")
+        {
+            return loadProjectileIdRef(j.at("target"), ctx);
+        }
+        throw std::runtime_error("bad UnitWeaponAttackTarget kind: " + kind);
+    }
+
+    json saveUnitWeaponState(const UnitWeaponState& s, const SaveContext& ctx, const CobEnvironment& env)
+    {
+        return match(
+            s,
+            [](const UnitWeaponStateIdle&) { return json{{"kind", "idle"}}; },
+            [&](const UnitWeaponStateAttacking& a) {
+                auto attackInfo = match(
+                    a.attackInfo,
+                    [](const UnitWeaponStateAttacking::IdleInfo&) { return json{{"kind", "idle"}}; },
+                    [&](const UnitWeaponStateAttacking::AimInfo& i) {
+                        return json{
+                            {"kind", "aim"},
+                            {"thread", saveCobThreadRef(env, i.thread)},
+                            {"lastHeading", saveSimAngle(i.lastHeading)},
+                            {"lastPitch", saveSimAngle(i.lastPitch)}};
+                    },
+                    [](const UnitWeaponStateAttacking::AimedInfo& i) {
+                        return json{
+                            {"kind", "aimed"},
+                            {"lastHeading", saveSimAngle(i.lastHeading)},
+                            {"lastPitch", saveSimAngle(i.lastPitch)}};
+                    },
+                    [](const UnitWeaponStateAttacking::FireInfo& i) {
+                        return json{
+                            {"kind", "fire"},
+                            {"heading", saveSimAngle(i.heading)},
+                            {"pitch", saveSimAngle(i.pitch)},
+                            {"targetPosition", saveSimVector(i.targetPosition)},
+                            {"firingPiece", saveOptional(i.firingPiece, [](int p) { return json(p); })},
+                            {"burstsFired", i.burstsFired},
+                            {"readyTime", saveGameTime(i.readyTime)}};
+                    });
+                return json{
+                    {"kind", "attacking"},
+                    {"target", saveUnitWeaponAttackTarget(a.target, ctx)},
+                    {"attackInfo", attackInfo}};
+            });
+    }
+
+    UnitWeaponState loadUnitWeaponState(const json& j, const LoadContext& ctx, const CobEnvironment& env)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "idle")
+        {
+            return UnitWeaponStateIdle();
+        }
+        if (kind == "attacking")
+        {
+            UnitWeaponStateAttacking a(loadUnitWeaponAttackTarget(j.at("target"), ctx));
+            const auto& ij = j.at("attackInfo");
+            const auto& infoKind = ij.at("kind").get_ref<const std::string&>();
+            if (infoKind == "idle")
+            {
+                a.attackInfo = UnitWeaponStateAttacking::IdleInfo();
+            }
+            else if (infoKind == "aim")
+            {
+                a.attackInfo = UnitWeaponStateAttacking::AimInfo{
+                    loadCobThreadRef(ij.at("thread"), env),
+                    loadSimAngle(ij.at("lastHeading")),
+                    loadSimAngle(ij.at("lastPitch"))};
+            }
+            else if (infoKind == "aimed")
+            {
+                a.attackInfo = UnitWeaponStateAttacking::AimedInfo{
+                    loadSimAngle(ij.at("lastHeading")),
+                    loadSimAngle(ij.at("lastPitch"))};
+            }
+            else if (infoKind == "fire")
+            {
+                a.attackInfo = UnitWeaponStateAttacking::FireInfo{
+                    loadSimAngle(ij.at("heading")),
+                    loadSimAngle(ij.at("pitch")),
+                    loadSimVector(ij.at("targetPosition")),
+                    loadOptional(ij.at("firingPiece"), [](const json& v) { return v.get<int>(); }),
+                    ij.at("burstsFired").get<int>(),
+                    loadGameTime(ij.at("readyTime"))};
+            }
+            else
+            {
+                throw std::runtime_error("bad AttackInfo kind: " + infoKind);
+            }
+            return a;
+        }
+        throw std::runtime_error("bad UnitWeaponState kind: " + kind);
+    }
+
+    json saveUnitWeapon(const UnitWeapon& w, const SaveContext& ctx, const CobEnvironment& env)
+    {
+        return json{
+            {"weaponType", w.weaponType},
+            {"readyTime", saveGameTime(w.readyTime)},
+            {"ballisticZOffset", saveSimScalar(w.ballisticZOffset)},
+            {"stockedRounds", w.stockedRounds},
+            {"queuedRounds", w.queuedRounds},
+            {"stockpileProgress", w.stockpileProgress},
+            {"stockpileStepDelay", w.stockpileStepDelay},
+            {"state", saveUnitWeaponState(w.state, ctx, env)}};
+    }
+
+    UnitWeapon loadUnitWeapon(const json& j, const LoadContext& ctx, const CobEnvironment& env)
+    {
+        UnitWeapon w;
+        w.weaponType = j.at("weaponType").get<std::string>();
+        w.readyTime = loadGameTime(j.at("readyTime"));
+        w.ballisticZOffset = loadSimScalar(j.at("ballisticZOffset"));
+        w.stockedRounds = j.at("stockedRounds").get<int>();
+        w.queuedRounds = j.at("queuedRounds").get<int>();
+        w.stockpileProgress = j.at("stockpileProgress").get<int>();
+        w.stockpileStepDelay = j.at("stockpileStepDelay").get<int>();
+        w.state = loadUnitWeaponState(j.at("state"), ctx, env);
+        return w;
+    }
+
+    // ---- orders -----------------------------------------------------
+
+    json saveAttackTarget(const AttackTarget& t, const SaveContext& ctx)
+    {
+        return match(
+            t,
+            [&](const UnitId& id) { return json{{"kind", "unit"}, {"target", saveUnitIdRef(id, ctx)}}; },
+            [&](const SimVector& v) { return json{{"kind", "position"}, {"target", saveSimVector(v)}}; });
+    }
+
+    AttackTarget loadAttackTarget(const json& j, const LoadContext& ctx)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "unit")
+        {
+            return loadUnitIdRef(j.at("target"), ctx);
+        }
+        if (kind == "position")
+        {
+            return loadSimVector(j.at("target"));
+        }
+        throw std::runtime_error("bad AttackTarget kind: " + kind);
+    }
+
+    json saveReclaimTarget(const std::variant<UnitId, FeatureId>& t, const SaveContext& ctx)
+    {
+        return match(
+            t,
+            [&](const UnitId& id) { return json{{"kind", "unit"}, {"target", saveUnitIdRef(id, ctx)}}; },
+            [&](const FeatureId& id) { return json{{"kind", "feature"}, {"target", saveFeatureIdRef(id, ctx)}}; });
+    }
+
+    std::variant<UnitId, FeatureId> loadReclaimTarget(const json& j, const LoadContext& ctx)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "unit")
+        {
+            return loadUnitIdRef(j.at("target"), ctx);
+        }
+        if (kind == "feature")
+        {
+            return loadFeatureIdRef(j.at("target"), ctx);
+        }
+        throw std::runtime_error("bad reclaim target kind: " + kind);
+    }
+
+    json saveUnitOrder(const UnitOrder& o, const SaveContext& ctx)
+    {
+        return match(
+            o,
+            [](const MoveOrder& m) { return json{{"kind", "move"}, {"destination", saveSimVector(m.destination)}}; },
+            [&](const AttackOrder& a) {
+                auto j = json{{"kind", "attack"}, {"target", saveAttackTarget(a.target, ctx)}};
+                if (a.leash)
+                {
+                    j["leashAnchor"] = saveSimVector(a.leash->anchor);
+                    j["leashDistance"] = saveSimScalar(a.leash->distance);
+                }
+                if (a.lastSeenPosition)
+                {
+                    j["lastSeenPosition"] = saveSimVector(*a.lastSeenPosition);
+                }
+                return j;
+            },
+            [](const BuildOrder& b) { return json{{"kind", "build"}, {"unitType", b.unitType}, {"position", saveSimVector(b.position)}}; },
+            [](const BuggerOffOrder& b) { return json{{"kind", "buggerOff"}, {"rect", saveDiscreteRect(b.rect)}}; },
+            [&](const CompleteBuildOrder& c) { return json{{"kind", "completeBuild"}, {"target", saveUnitIdRef(c.target, ctx)}}; },
+            [&](const GuardOrder& g) { return json{{"kind", "guard"}, {"target", saveUnitIdRef(g.target, ctx)}}; },
+            [&](const ReclaimOrder& r) { return json{{"kind", "reclaim"}, {"target", saveReclaimTarget(r.target, ctx)}}; },
+            [&](const RepairOrder& r) { return json{{"kind", "repair"}, {"target", saveUnitIdRef(r.target, ctx)}}; },
+            [](const PatrolOrder& p) { return json{{"kind", "patrol"}, {"destination", saveSimVector(p.destination)}}; },
+            [&](const ResurrectOrder& r) {
+                // The countdown rides on the order, as capture's progress
+                // does -- see TOTALA-EXE.md S:96 and S:98.
+                auto j = json{{"kind", "resurrect"}, {"target", saveFeatureIdRef(r.target, ctx)}};
+                if (r.remainingTicks)
+                {
+                    j["remainingTicks"] = *r.remainingTicks;
+                }
+                return j;
+            },
+            [&](const CaptureOrder& c) {
+                // Capture progress rides on the order, not on the
+                // target -- see CaptureOrder -- so it is saved here.
+                auto j = json{{"kind", "capture"}, {"target", saveUnitIdRef(c.target, ctx)}, {"progress", c.progress}};
+                if (c.totalWork)
+                {
+                    j["totalWork"] = *c.totalWork;
+                }
+                return j;
+            },
+            [&](const LoadOrder& l) { return json{{"kind", "load"}, {"target", saveUnitIdRef(l.target, ctx)}}; },
+            [](const UnloadOrder& u) { return json{{"kind", "unload"}, {"destination", saveSimVector(u.destination)}, {"parkedUntil", saveGameTime(u.parkedUntil)}}; },
+            [&](const DgunOrder& d) { return json{{"kind", "dgun"}, {"target", saveAttackTarget(d.target, ctx)}}; },
+            [&](const LandOnAirBaseOrder& l) { return json{{"kind", "landOnAirBase"}, {"target", saveUnitIdRef(l.target, ctx)}}; });
+    }
+
+    UnitOrder loadUnitOrder(const json& j, const LoadContext& ctx)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "move")
+        {
+            return MoveOrder(loadSimVector(j.at("destination")));
+        }
+        if (kind == "attack")
+        {
+            auto order = match(
+                loadAttackTarget(j.at("target"), ctx),
+                [](const UnitId& id) { return AttackOrder(id); },
+                [](const SimVector& v) { return AttackOrder(v); });
+            if (j.contains("leashAnchor"))
+            {
+                order.leash = AttackLeash(loadSimVector(j.at("leashAnchor")), loadSimScalar(j.at("leashDistance")));
+            }
+            if (j.contains("lastSeenPosition"))
+            {
+                order.lastSeenPosition = loadSimVector(j.at("lastSeenPosition"));
+            }
+            return order;
+        }
+        if (kind == "build")
+        {
+            return BuildOrder(j.at("unitType").get<std::string>(), loadSimVector(j.at("position")));
+        }
+        if (kind == "buggerOff")
+        {
+            return BuggerOffOrder(loadDiscreteRect(j.at("rect")));
+        }
+        if (kind == "completeBuild")
+        {
+            return CompleteBuildOrder(loadUnitIdRef(j.at("target"), ctx));
+        }
+        if (kind == "guard")
+        {
+            return GuardOrder(loadUnitIdRef(j.at("target"), ctx));
+        }
+        if (kind == "resurrect")
+        {
+            auto order = ResurrectOrder(loadFeatureIdRef(j.at("target"), ctx));
+            if (j.contains("remainingTicks"))
+            {
+                order.remainingTicks = j.at("remainingTicks").get<unsigned int>();
+            }
+            return order;
+        }
+        if (kind == "reclaim")
         {
             return match(
-                op,
-                [](const UnitMesh::TurnOperation& t) {
-                    return json{
-                        {"kind", "turn"},
-                        {"targetAngle", saveSimAngle(t.targetAngle)},
-                        {"speed", saveSimScalar(t.speed)}};
-                },
-                [](const UnitMesh::SpinOperation& s) {
-                    return json{
-                        {"kind", "spin"},
-                        {"currentSpeed", saveSimScalar(s.currentSpeed)},
-                        {"targetSpeed", saveSimScalar(s.targetSpeed)},
-                        {"acceleration", saveSimScalar(s.acceleration)}};
-                },
-                [](const UnitMesh::StopSpinOperation& s) {
-                    return json{
-                        {"kind", "stopSpin"},
-                        {"currentSpeed", saveSimScalar(s.currentSpeed)},
-                        {"deceleration", saveSimScalar(s.deceleration)}};
-                });
+                loadReclaimTarget(j.at("target"), ctx),
+                [](const UnitId& id) { return ReclaimOrder(id); },
+                [](const FeatureId& id) { return ReclaimOrder(id); });
         }
-
-        UnitMesh::TurnOperationUnion loadTurnOperationUnion(const json& j)
+        if (kind == "repair")
         {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "turn")
+            return RepairOrder(loadUnitIdRef(j.at("target"), ctx));
+        }
+        if (kind == "patrol")
+        {
+            return PatrolOrder(loadSimVector(j.at("destination")));
+        }
+        if (kind == "dgun")
+        {
+            return match(
+                loadAttackTarget(j.at("target"), ctx),
+                [](const UnitId& id) { return DgunOrder(id); },
+                [](const SimVector& v) { return DgunOrder(v); });
+        }
+        if (kind == "capture")
+        {
+            auto order = CaptureOrder(loadUnitIdRef(j.at("target"), ctx));
+            order.progress = j.value("progress", 0u);
+            if (j.contains("totalWork"))
             {
-                return UnitMesh::TurnOperation(loadSimAngle(j.at("targetAngle")), loadSimScalar(j.at("speed")));
+                order.totalWork = j.at("totalWork").get<unsigned int>();
             }
-            if (kind == "spin")
+            return order;
+        }
+        if (kind == "load")
+        {
+            return LoadOrder(loadUnitIdRef(j.at("target"), ctx));
+        }
+        if (kind == "unload")
+        {
+            auto order = UnloadOrder(loadSimVector(j.at("destination")));
+            if (j.contains("parkedUntil"))
             {
-                return UnitMesh::SpinOperation(loadSimScalar(j.at("currentSpeed")), loadSimScalar(j.at("targetSpeed")), loadSimScalar(j.at("acceleration")));
+                order.parkedUntil = loadGameTime(j.at("parkedUntil"));
             }
-            if (kind == "stopSpin")
-            {
-                return UnitMesh::StopSpinOperation(loadSimScalar(j.at("currentSpeed")), loadSimScalar(j.at("deceleration")));
-            }
-            throw std::runtime_error("bad TurnOperationUnion kind: " + kind);
+            return order;
         }
-
-        json saveUnitMesh(const UnitMesh& m)
+        if (kind == "landOnAirBase")
         {
-            return json{
-                {"name", m.name},
-                {"visible", m.visible},
-                {"shaded", m.shaded},
-                {"cached", m.cached},
-                {"offset", saveSimVector(m.offset)},
-                {"previousOffset", saveSimVector(m.previousOffset)},
-                {"previousRotationX", saveSimAngle(m.previousRotationX)},
-                {"previousRotationY", saveSimAngle(m.previousRotationY)},
-                {"previousRotationZ", saveSimAngle(m.previousRotationZ)},
-                {"rotationX", saveSimAngle(m.rotationX)},
-                {"rotationY", saveSimAngle(m.rotationY)},
-                {"rotationZ", saveSimAngle(m.rotationZ)},
-                {"xMoveOperation", saveOptional(m.xMoveOperation, saveMoveOperation)},
-                {"yMoveOperation", saveOptional(m.yMoveOperation, saveMoveOperation)},
-                {"zMoveOperation", saveOptional(m.zMoveOperation, saveMoveOperation)},
-                {"xTurnOperation", saveOptional(m.xTurnOperation, saveTurnOperationUnion)},
-                {"yTurnOperation", saveOptional(m.yTurnOperation, saveTurnOperationUnion)},
-                {"zTurnOperation", saveOptional(m.zTurnOperation, saveTurnOperationUnion)}};
+            return LandOnAirBaseOrder(loadUnitIdRef(j.at("target"), ctx));
         }
+        throw std::runtime_error("bad UnitOrder kind: " + kind);
+    }
 
-        UnitMesh loadUnitMesh(const json& j)
+    // ---- behaviour and factory state --------------------------------
+
+    json saveUnitCreationStatus(const UnitCreationStatus& s, const SaveContext& ctx)
+    {
+        return match(
+            s,
+            [](const UnitCreationStatusPending& p) { return json{{"kind", "pending"}, {"attempts", p.attempts}, {"nextAttempt", saveGameTime(p.nextAttempt)}}; },
+            [](const UnitCreationStatusFailed&) { return json{{"kind", "failed"}}; },
+            [&](const UnitCreationStatusDone& d) { return json{{"kind", "done"}, {"unitId", saveUnitIdRef(d.unitId, ctx)}}; });
+    }
+
+    UnitCreationStatus loadUnitCreationStatus(const json& j, const LoadContext& ctx)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "pending")
         {
-            UnitMesh m;
-            m.name = j.at("name").get<std::string>();
-            m.visible = j.at("visible").get<bool>();
-            m.shaded = j.at("shaded").get<bool>();
-            // Saves written before the flag existed carry no key; every piece
-            // starts cached, which is the original's default too.
-            m.cached = j.value("cached", true);
-            m.offset = loadSimVector(j.at("offset"));
-            m.previousOffset = loadSimVector(j.at("previousOffset"));
-            m.previousRotationX = loadSimAngle(j.at("previousRotationX"));
-            m.previousRotationY = loadSimAngle(j.at("previousRotationY"));
-            m.previousRotationZ = loadSimAngle(j.at("previousRotationZ"));
-            m.rotationX = loadSimAngle(j.at("rotationX"));
-            m.rotationY = loadSimAngle(j.at("rotationY"));
-            m.rotationZ = loadSimAngle(j.at("rotationZ"));
-            m.xMoveOperation = loadOptional(j.at("xMoveOperation"), loadMoveOperation);
-            m.yMoveOperation = loadOptional(j.at("yMoveOperation"), loadMoveOperation);
-            m.zMoveOperation = loadOptional(j.at("zMoveOperation"), loadMoveOperation);
-            m.xTurnOperation = loadOptional(j.at("xTurnOperation"), loadTurnOperationUnion);
-            m.yTurnOperation = loadOptional(j.at("yTurnOperation"), loadTurnOperationUnion);
-            m.zTurnOperation = loadOptional(j.at("zTurnOperation"), loadTurnOperationUnion);
-            return m;
+            return UnitCreationStatusPending{j.at("attempts").get<unsigned int>(), loadGameTime(j.at("nextAttempt"))};
         }
-
-        // ---- the COB virtual machine ------------------------------------
-
-        template <typename T>
-        std::vector<T> stackToVector(const std::stack<T>& s)
+        if (kind == "failed")
         {
-            // std::stack exposes only the top, so drain a copy and flip it:
-            // the result runs bottom first, ready to be pushed back in order.
-            std::vector<T> result;
-            auto copy = s;
-            while (!copy.empty())
-            {
-                result.push_back(copy.top());
-                copy.pop();
-            }
-            std::reverse(result.begin(), result.end());
-            return result;
+            return UnitCreationStatusFailed();
         }
-
-        json saveCobFunction(const CobFunction& f)
+        if (kind == "done")
         {
-            return json{
-                {"instructionIndex", f.instructionIndex},
-                {"locals", f.locals},
-                {"localCount", f.localCount}};
+            return UnitCreationStatusDone{loadUnitIdRef(j.at("unitId"), ctx)};
         }
+        throw std::runtime_error("bad UnitCreationStatus kind: " + kind);
+    }
 
-        CobFunction loadCobFunction(const json& j)
+    json saveUnitBehaviorState(const UnitBehaviorState& s, const SaveContext& ctx)
+    {
+        return match(
+            s,
+            [](const UnitBehaviorStateIdle&) { return json{{"kind", "idle"}}; },
+            [&](const UnitBehaviorStateCreatingUnit& c) {
+                return json{
+                    {"kind", "creatingUnit"},
+                    {"unitType", c.unitType},
+                    {"owner", c.owner.value},
+                    {"position", saveSimVector(c.position)},
+                    {"status", saveUnitCreationStatus(c.status, ctx)}};
+            },
+            [&](const UnitBehaviorStateBuilding& b) {
+                return json{
+                    {"kind", "building"},
+                    {"targetUnit", saveUnitIdRef(b.targetUnit, ctx)},
+                    {"nanoParticleOrigin", saveOptional(b.nanoParticleOrigin, saveSimVector)}};
+            },
+            [&](const UnitBehaviorStateReclaiming& r) {
+                return json{
+                    {"kind", "reclaiming"},
+                    {"target", saveReclaimTarget(r.target, ctx)},
+                    {"nanoParticleOrigin", saveOptional(r.nanoParticleOrigin, saveSimVector)}};
+            },
+            [&](const UnitBehaviorStateResurrecting& r) {
+                return json{
+                    {"kind", "resurrecting"},
+                    {"target", saveFeatureIdRef(r.target, ctx)},
+                    {"nanoParticleOrigin", saveOptional(r.nanoParticleOrigin, saveSimVector)}};
+            });
+    }
+
+    UnitBehaviorState loadUnitBehaviorState(const json& j, const LoadContext& ctx)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "idle")
         {
-            CobFunction f(j.at("instructionIndex").get<unsigned int>());
-            f.locals = j.at("locals").get<std::vector<int>>();
-            f.localCount = j.at("localCount").get<unsigned int>();
-            return f;
+            return UnitBehaviorStateIdle();
         }
-
-        json saveCobThread(const CobThread& t)
+        if (kind == "creatingUnit")
         {
-            json callStack = json::array();
-            for (const auto& f : stackToVector(t.callStack))
-            {
-                callStack.push_back(saveCobFunction(f));
-            }
-            return json{
-                {"name", t.name},
-                {"stack", stackToVector(t.stack)},
-                {"signalMask", t.signalMask},
-                {"callStack", callStack},
-                {"returnValue", t.returnValue},
-                {"returnLocals", t.returnLocals}};
+            return UnitBehaviorStateCreatingUnit{
+                j.at("unitType").get<std::string>(),
+                PlayerId(j.at("owner").get<unsigned int>()),
+                loadSimVector(j.at("position")),
+                loadUnitCreationStatus(j.at("status"), ctx)};
         }
-
-        std::unique_ptr<CobThread> loadCobThread(const json& j)
+        if (kind == "building")
         {
-            auto t = std::make_unique<CobThread>(j.at("name").get<std::string>(), j.at("signalMask").get<unsigned int>());
-            for (const auto& v : j.at("stack").get<std::vector<int>>())
-            {
-                t->stack.push(v);
-            }
-            for (const auto& fj : j.at("callStack"))
-            {
-                t->callStack.push(loadCobFunction(fj));
-            }
-            t->returnValue = j.at("returnValue").get<int>();
-            t->returnLocals = j.at("returnLocals").get<std::vector<int>>();
+            return UnitBehaviorStateBuilding{
+                loadUnitIdRef(j.at("targetUnit"), ctx),
+                loadOptional(j.at("nanoParticleOrigin"), loadSimVector)};
+        }
+        if (kind == "reclaiming")
+        {
+            return UnitBehaviorStateReclaiming{
+                loadReclaimTarget(j.at("target"), ctx),
+                loadOptional(j.at("nanoParticleOrigin"), loadSimVector)};
+        }
+        if (kind == "resurrecting")
+        {
+            return UnitBehaviorStateResurrecting{
+                loadFeatureIdRef(j.at("target"), ctx),
+                loadOptional(j.at("nanoParticleOrigin"), loadSimVector)};
+        }
+        throw std::runtime_error("bad UnitBehaviorState kind: " + kind);
+    }
+
+    json saveFactoryBehaviorState(const FactoryBehaviorState& s, const SaveContext& ctx)
+    {
+        return match(
+            s,
+            [](const FactoryBehaviorStateIdle&) { return json{{"kind", "idle"}}; },
+            [&](const FactoryBehaviorStateCreatingUnit& c) {
+                return json{
+                    {"kind", "creatingUnit"},
+                    {"unitType", c.unitType},
+                    {"owner", c.owner.value},
+                    {"position", saveSimVector(c.position)},
+                    {"rotation", saveSimAngle(c.rotation)},
+                    {"status", saveUnitCreationStatus(c.status, ctx)}};
+            },
+            [&](const FactoryBehaviorStateBuilding& b) {
+                return json{
+                    {"kind", "building"},
+                    {"targetUnit", saveOptional(b.targetUnit, [&](const std::pair<UnitId, std::optional<SimVector>>& p) {
+                         return json{
+                             {"unit", saveUnitIdRef(p.first, ctx)},
+                             {"nanoParticleOrigin", saveOptional(p.second, saveSimVector)}};
+                     })}};
+            });
+    }
+
+    FactoryBehaviorState loadFactoryBehaviorState(const json& j, const LoadContext& ctx)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "idle")
+        {
+            return FactoryBehaviorStateIdle();
+        }
+        if (kind == "creatingUnit")
+        {
+            return FactoryBehaviorStateCreatingUnit{
+                j.at("unitType").get<std::string>(),
+                PlayerId(j.at("owner").get<unsigned int>()),
+                loadSimVector(j.at("position")),
+                loadSimAngle(j.at("rotation")),
+                loadUnitCreationStatus(j.at("status"), ctx)};
+        }
+        if (kind == "building")
+        {
+            return FactoryBehaviorStateBuilding{
+                loadOptional(j.at("targetUnit"), [&](const json& p) {
+                    return std::make_pair(
+                        loadUnitIdRef(p.at("unit"), ctx),
+                        loadOptional(p.at("nanoParticleOrigin"), loadSimVector));
+                })};
+        }
+        throw std::runtime_error("bad FactoryBehaviorState kind: " + kind);
+    }
+
+    // ---- navigation -------------------------------------------------
+
+    json saveNavigationGoal(const NavigationGoal& g, const SaveContext& ctx)
+    {
+        return match(
+            g,
+            [&](const UnitId& id) { return json{{"kind", "unit"}, {"goal", saveUnitIdRef(id, ctx)}}; },
+            [&](const FeatureId& id) { return json{{"kind", "feature"}, {"goal", saveFeatureIdRef(id, ctx)}}; },
+            [](const SimVector& v) { return json{{"kind", "position"}, {"goal", saveSimVector(v)}}; },
+            [](const DiscreteRect& r) { return json{{"kind", "rect"}, {"goal", saveDiscreteRect(r)}}; },
+            [](const NavigationGoalLandingLocation&) { return json{{"kind", "landingLocation"}}; });
+    }
+
+    NavigationGoal loadNavigationGoal(const json& j, const LoadContext& ctx)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "unit")
+        {
+            return loadUnitIdRef(j.at("goal"), ctx);
+        }
+        if (kind == "feature")
+        {
+            return loadFeatureIdRef(j.at("goal"), ctx);
+        }
+        if (kind == "position")
+        {
+            return loadSimVector(j.at("goal"));
+        }
+        if (kind == "rect")
+        {
+            return loadDiscreteRect(j.at("goal"));
+        }
+        if (kind == "landingLocation")
+        {
+            return NavigationGoalLandingLocation();
+        }
+        throw std::runtime_error("bad NavigationGoal kind: " + kind);
+    }
+
+    json saveMovingStateGoal(const MovingStateGoal& g, const SaveContext& ctx)
+    {
+        return match(
+            g,
+            [&](const UnitId& id) { return json{{"kind", "unit"}, {"goal", saveUnitIdRef(id, ctx)}}; },
+            [](const SimVector& v) { return json{{"kind", "position"}, {"goal", saveSimVector(v)}}; },
+            [](const DiscreteRect& r) { return json{{"kind", "rect"}, {"goal", saveDiscreteRect(r)}}; });
+    }
+
+    MovingStateGoal loadMovingStateGoal(const json& j, const LoadContext& ctx)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "unit")
+        {
+            return loadUnitIdRef(j.at("goal"), ctx);
+        }
+        if (kind == "position")
+        {
+            return loadSimVector(j.at("goal"));
+        }
+        if (kind == "rect")
+        {
+            return loadDiscreteRect(j.at("goal"));
+        }
+        throw std::runtime_error("bad MovingStateGoal kind: " + kind);
+    }
+
+    json savePathDestination(const PathDestination& d)
+    {
+        return match(
+            d,
+            [](const SimVector& v) { return json{{"kind", "position"}, {"destination", saveSimVector(v)}}; },
+            [](const DiscreteRect& r) { return json{{"kind", "rect"}, {"destination", saveDiscreteRect(r)}}; });
+    }
+
+    PathDestination loadPathDestination(const json& j)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "position")
+        {
+            return loadSimVector(j.at("destination"));
+        }
+        if (kind == "rect")
+        {
+            return loadDiscreteRect(j.at("destination"));
+        }
+        throw std::runtime_error("bad PathDestination kind: " + kind);
+    }
+
+    json savePathFollowingInfo(const PathFollowingInfo& p)
+    {
+        json waypoints = json::array();
+        for (const auto& w : p.path.waypoints)
+        {
+            waypoints.push_back(saveSimVector(w));
+        }
+        return json{
+            {"waypoints", waypoints},
+            {"destinationUnreachable", p.path.destinationUnreachable},
+            {"pathCreationTime", saveGameTime(p.pathCreationTime)},
+            // Stored as an index; the iterator itself is meaningless
+            // outside the vector it points into.
+            {"currentWaypoint", static_cast<std::size_t>(p.currentWaypoint - p.path.waypoints.begin())}};
+    }
+
+    PathFollowingInfo loadPathFollowingInfo(const json& j)
+    {
+        UnitPath path;
+        for (const auto& w : j.at("waypoints"))
+        {
+            path.waypoints.push_back(loadSimVector(w));
+        }
+        path.destinationUnreachable = j.at("destinationUnreachable").get<bool>();
+        PathFollowingInfo info(std::move(path), loadGameTime(j.at("pathCreationTime")));
+        info.currentWaypoint = info.path.waypoints.begin() + j.at("currentWaypoint").get<std::size_t>();
+        return info;
+    }
+
+    json saveNavigationState(const NavigationState& s, const SaveContext& ctx)
+    {
+        return match(
+            s,
+            [](const NavigationStateIdle&) { return json{{"kind", "idle"}}; },
+            [&](const NavigationStateMoving& m) {
+                return json{
+                    {"kind", "moving"},
+                    {"movementGoal", saveMovingStateGoal(m.movementGoal, ctx)},
+                    {"pathDestination", savePathDestination(m.pathDestination)},
+                    {"path", saveOptional(m.path, savePathFollowingInfo)},
+                    {"pathRequested", m.pathRequested},
+                    {"reachableDestination", saveOptional(m.reachableDestination, saveSimVector)}};
+            },
+            [](const NavigationStateMovingToLandingSpot& m) {
+                return json{
+                    {"kind", "movingToLandingSpot"},
+                    {"landingLocation", saveSimVector(m.landingLocation)}};
+            });
+    }
+
+    NavigationState loadNavigationState(const json& j, const LoadContext& ctx)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "idle")
+        {
+            return NavigationStateIdle();
+        }
+        if (kind == "moving")
+        {
+            return NavigationStateMoving{
+                loadMovingStateGoal(j.at("movementGoal"), ctx),
+                loadPathDestination(j.at("pathDestination")),
+                loadOptional(j.at("path"), loadPathFollowingInfo),
+                j.at("pathRequested").get<bool>(),
+                loadOptional(j.at("reachableDestination"), loadSimVector)};
+        }
+        if (kind == "movingToLandingSpot")
+        {
+            return NavigationStateMovingToLandingSpot{loadSimVector(j.at("landingLocation"))};
+        }
+        throw std::runtime_error("bad NavigationState kind: " + kind);
+    }
+
+    json saveNavigationStateInfo(const NavigationStateInfo& i, const SaveContext& ctx)
+    {
+        return json{
+            {"desiredDestination", saveOptional(i.desiredDestination, [&](const NavigationGoal& g) { return saveNavigationGoal(g, ctx); })},
+            {"unitPositionCache", saveOptional(i.unitPositionCache, [&](const UnitPositionCache& c) {
+                 return json{
+                     {"unitId", saveUnitIdRef(c.unitId, ctx)},
+                     {"position", saveSimVector(c.position)},
+                     {"cachedAtTime", saveGameTime(c.cachedAtTime)}};
+             })},
+            {"attackApproachCache", saveOptional(i.attackApproachCache, [&](const UnitPositionCache& c) {
+                 return json{
+                     {"unitId", saveUnitIdRef(c.unitId, ctx)},
+                     {"position", saveSimVector(c.position)},
+                     {"cachedAtTime", saveGameTime(c.cachedAtTime)}};
+             })},
+            {"state", saveNavigationState(i.state, ctx)}};
+    }
+
+    NavigationStateInfo loadNavigationStateInfo(const json& j, const LoadContext& ctx)
+    {
+        return NavigationStateInfo{
+            loadOptional(j.at("desiredDestination"), [&](const json& g) { return loadNavigationGoal(g, ctx); }),
+            loadOptional(j.at("unitPositionCache"), [&](const json& c) {
+                return UnitPositionCache{
+                    loadUnitIdRef(c.at("unitId"), ctx),
+                    loadSimVector(c.at("position")),
+                    loadGameTime(c.at("cachedAtTime"))};
+            }),
+            loadOptional(j.at("attackApproachCache"), [&](const json& c) {
+                return UnitPositionCache{
+                    loadUnitIdRef(c.at("unitId"), ctx),
+                    loadSimVector(c.at("position")),
+                    loadGameTime(c.at("cachedAtTime"))};
+            }),
+            loadNavigationState(j.at("state"), ctx)};
+    }
+
+    // ---- physics ----------------------------------------------------
+
+    json saveSteeringInfo(const SteeringInfo& s)
+    {
+        return json{
+            {"targetAngle", saveSimAngle(s.targetAngle)},
+            {"targetSpeed", saveSimScalar(s.targetSpeed)},
+            {"shouldTakeOff", s.shouldTakeOff}};
+    }
+
+    SteeringInfo loadSteeringInfo(const json& j)
+    {
+        return SteeringInfo{
+            loadSimAngle(j.at("targetAngle")),
+            loadSimScalar(j.at("targetSpeed")),
+            j.at("shouldTakeOff").get<bool>()};
+    }
+
+    json saveAirMovementState(const AirMovementState& s, const SaveContext& ctx)
+    {
+        return match(
+            s,
+            [](const AirMovementStateTakingOff& t) {
+                return json{
+                    {"kind", "takingOff"},
+                    {"targetPosition", saveOptional(t.targetPosition, saveSimVector)},
+                    {"currentVelocity", saveSimVector(t.currentVelocity)}};
+            },
+            [](const AirMovementStateFlying& f) {
+                return json{
+                    {"kind", "flying"},
+                    {"targetPosition", saveOptional(f.targetPosition, saveSimVector)},
+                    {"shouldLand", f.shouldLand},
+                    {"currentVelocity", saveSimVector(f.currentVelocity)}};
+            },
+            [](const AirMovementStateLanding& l) {
+                return json{
+                    {"kind", "landing"},
+                    {"landingFailed", l.landingFailed},
+                    {"shouldAbort", l.shouldAbort}};
+            },
+            [&](const AirMovementStateAttackRun& a) {
+                return json{
+                    {"kind", "attackRun"},
+                    {"target", saveAttackTarget(a.target, ctx)},
+                    {"lastKnownTargetPos", saveSimVector(a.lastKnownTargetPos)},
+                    {"runOutDirection", saveSimVector(a.runOutDirection)},
+                    {"runOutDistance", saveSimScalar(a.runOutDistance)},
+                    {"phase", saveEnum(a.phase)},
+                    {"bombsDroppedThisPass", a.bombsDroppedThisPass},
+                    {"strafingPass", a.strafingPass},
+                    {"breakWaypoint", saveSimVector(a.breakWaypoint)},
+                    {"currentVelocity", saveSimVector(a.currentVelocity)}};
+            },
+            [&](const AirMovementStateHoverAttack& h) {
+                return json{
+                    {"kind", "hoverAttack"},
+                    {"target", saveAttackTarget(h.target, ctx)},
+                    {"station", saveSimVector(h.station)},
+                    {"targetPosition", saveSimVector(h.targetPosition)},
+                    {"swingPositive", h.swingPositive},
+                    {"outOfRangeArrivals", h.outOfRangeArrivals},
+                    {"phase", saveEnum(h.phase)},
+                    {"currentVelocity", saveSimVector(h.currentVelocity)}};
+            },
+            [&](const AirMovementStateDogfight& d) {
+                return json{
+                    {"kind", "dogfight"},
+                    {"target", saveAttackTarget(d.target, ctx)},
+                    {"phase", saveEnum(d.phase)},
+                    {"goalPosition", saveSimVector(d.goalPosition)},
+                    {"goalVelocity", saveSimVector(d.goalVelocity)},
+                    {"nextDecision", d.nextDecision.value},
+                    {"offNoseCounter", d.offNoseCounter},
+                    {"breakLeft", d.breakLeft},
+                    {"breakWaypoint", saveSimVector(d.breakWaypoint)},
+                    {"currentVelocity", saveSimVector(d.currentVelocity)}};
+            });
+    }
+
+    AirMovementState loadAirMovementState(const json& j, const LoadContext& ctx)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "takingOff")
+        {
+            AirMovementStateTakingOff t;
+            t.targetPosition = loadOptional(j.at("targetPosition"), loadSimVector);
+            t.currentVelocity = loadSimVector(j.at("currentVelocity"));
             return t;
         }
-
-        json saveBlockedCondition(const CobEnvironment::BlockedStatus::Condition& c)
+        if (kind == "flying")
         {
-            return match(
-                c,
-                [](const CobEnvironment::BlockedStatus::Move& m) {
-                    return json{{"kind", "move"}, {"object", m.object}, {"axis", saveEnum(m.axis)}};
-                },
-                [](const CobEnvironment::BlockedStatus::Turn& t) {
-                    return json{{"kind", "turn"}, {"object", t.object}, {"axis", saveEnum(t.axis)}};
-                });
+            AirMovementStateFlying f;
+            f.targetPosition = loadOptional(j.at("targetPosition"), loadSimVector);
+            f.shouldLand = j.at("shouldLand").get<bool>();
+            f.currentVelocity = loadSimVector(j.at("currentVelocity"));
+            return f;
         }
-
-        CobEnvironment::BlockedStatus::Condition loadBlockedCondition(const json& j)
+        if (kind == "landing")
         {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            auto object = j.at("object").get<unsigned int>();
-            auto axis = loadEnum<CobAxis>(j.at("axis"));
-            if (kind == "move")
-            {
-                return CobEnvironment::BlockedStatus::Move(object, axis);
-            }
-            if (kind == "turn")
-            {
-                return CobEnvironment::BlockedStatus::Turn(object, axis);
-            }
-            throw std::runtime_error("bad BlockedStatus kind: " + kind);
+            AirMovementStateLanding l;
+            l.landingFailed = j.at("landingFailed").get<bool>();
+            l.shouldAbort = j.at("shouldAbort").get<bool>();
+            return l;
         }
+        if (kind == "attackRun")
+        {
+            AirMovementStateAttackRun a(loadAttackTarget(j.at("target"), ctx));
+            a.lastKnownTargetPos = loadSimVector(j.at("lastKnownTargetPos"));
+            a.runOutDirection = loadSimVector(j.at("runOutDirection"));
+            a.runOutDistance = loadSimScalar(j.at("runOutDistance"));
+            a.phase = loadEnum<AirMovementStateAttackRun::Phase>(j.at("phase"));
+            a.bombsDroppedThisPass = j.at("bombsDroppedThisPass").get<unsigned int>();
+            a.strafingPass = j.at("strafingPass").get<bool>();
+            a.breakWaypoint = loadSimVector(j.at("breakWaypoint"));
+            a.currentVelocity = loadSimVector(j.at("currentVelocity"));
+            return a;
+        }
+        if (kind == "hoverAttack")
+        {
+            AirMovementStateHoverAttack h(loadAttackTarget(j.at("target"), ctx));
+            h.station = loadSimVector(j.at("station"));
+            h.targetPosition = loadSimVector(j.at("targetPosition"));
+            h.swingPositive = j.at("swingPositive").get<bool>();
+            h.outOfRangeArrivals = j.at("outOfRangeArrivals").get<unsigned int>();
+            h.phase = loadEnum<AirMovementStateHoverAttack::Phase>(j.at("phase"));
+            h.currentVelocity = loadSimVector(j.at("currentVelocity"));
+            return h;
+        }
+        if (kind == "dogfight")
+        {
+            AirMovementStateDogfight d(loadAttackTarget(j.at("target"), ctx));
+            d.phase = loadEnum<AirMovementStateDogfight::Phase>(j.at("phase"));
+            d.goalPosition = loadSimVector(j.at("goalPosition"));
+            d.goalVelocity = loadSimVector(j.at("goalVelocity"));
+            d.nextDecision = GameTime(j.at("nextDecision").get<unsigned int>());
+            d.offNoseCounter = j.at("offNoseCounter").get<unsigned int>();
+            d.breakLeft = j.at("breakLeft").get<bool>();
+            d.breakWaypoint = loadSimVector(j.at("breakWaypoint"));
+            d.currentVelocity = loadSimVector(j.at("currentVelocity"));
+            return d;
+        }
+        throw std::runtime_error("bad AirMovementState kind: " + kind);
+    }
+
+    json saveUnitPhysicsInfo(const UnitPhysicsInfo& p, const SaveContext& ctx)
+    {
+        return match(
+            p,
+            [](const UnitPhysicsInfoGround& g) {
+                return json{
+                    {"kind", "ground"},
+                    {"steeringInfo", saveSteeringInfo(g.steeringInfo)},
+                    {"currentSpeed", saveSimScalar(g.currentSpeed)}};
+            },
+            [&](const UnitPhysicsInfoAir& a) {
+                return json{
+                    {"kind", "air"},
+                    {"movementState", saveAirMovementState(a.movementState, ctx)},
+                    {"roll", saveSimScalar(a.roll)},
+                    {"previousRoll", saveSimScalar(a.previousRoll)},
+                    {"bankAccum", saveSimVector(a.bankAccum)}};
+            });
+    }
+
+    UnitPhysicsInfo loadUnitPhysicsInfo(const json& j, const LoadContext& ctx)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "ground")
+        {
+            UnitPhysicsInfoGround g;
+            g.steeringInfo = loadSteeringInfo(j.at("steeringInfo"));
+            g.currentSpeed = loadSimScalar(j.at("currentSpeed"));
+            return g;
+        }
+        if (kind == "air")
+        {
+            UnitPhysicsInfoAir a;
+            a.movementState = loadAirMovementState(j.at("movementState"), ctx);
+            a.roll = loadSimScalar(j.at("roll"));
+            a.previousRoll = loadSimScalar(j.at("previousRoll"));
+            a.bankAccum = loadSimVector(j.at("bankAccum"));
+            return a;
+        }
+        throw std::runtime_error("bad UnitPhysicsInfo kind: " + kind);
+    }
+
+    // ---- unit state -------------------------------------------------
+
+    json saveLifeState(const UnitState::LifeState& s)
+    {
+        return match(
+            s,
+            [](const UnitState::LifeStateAlive&) { return json{{"kind", "alive"}}; },
+            [](const UnitState::LifeStateDead& d) { return json{{"kind", "dead"}, {"leaveCorpse", d.leaveCorpse}, {"corpseLevel", d.corpseLevel}}; });
+    }
+
+    UnitState::LifeState loadLifeState(const json& j)
+    {
+        const auto& kind = j.at("kind").get_ref<const std::string&>();
+        if (kind == "alive")
+        {
+            return UnitState::LifeStateAlive();
+        }
+        if (kind == "dead")
+        {
+            return UnitState::LifeStateDead{j.at("leaveCorpse").get<bool>(), j.value("corpseLevel", 1u)};
+        }
+        throw std::runtime_error("bad LifeState kind: " + kind);
+    }
+
+    json saveAirWorkOrbitState(const UnitState::AirWorkOrbitState& s)
+    {
+        return json{
+            {"workPosition", saveSimVector(s.workPosition)},
+            {"bearing", saveSimAngle(s.bearing)},
+            {"started", s.started}};
+    }
+
+    UnitState::AirWorkOrbitState loadAirWorkOrbitState(const json& j)
+    {
+        return UnitState::AirWorkOrbitState{
+            loadSimVector(j.at("workPosition")),
+            loadSimAngle(j.at("bearing")),
+            j.at("started").get<bool>()};
+    }
+
+    json saveAirLoiterState(const UnitState::AirLoiterState& s)
+    {
+        return json{
+            {"reason", saveEnum(s.reason)},
+            {"anchor", saveSimVector(s.anchor)},
+            {"bearing", saveSimAngle(s.bearing)}};
+    }
+
+    UnitState::AirLoiterState loadAirLoiterState(const json& j)
+    {
+        return UnitState::AirLoiterState{
+            loadEnum<UnitState::AirLoiterState::Reason>(j.at("reason")),
+            loadSimVector(j.at("anchor")),
+            loadSimAngle(j.at("bearing"))};
+    }
+
+    namespace
+    {
+        using nlohmann::json;
 
         /**
-         * The index of a thread in the environment's threads vector, or null
-         * for a pointer that no longer names a live thread. The scheduler
-         * queues and a weapon's aim state both hold raw CobThread pointers,
-         * which is why the whole VM serializes through these indices.
+         * The save walk: one lookup into the field table instead of a
+         * hand-written member list. The table is the single declaration, so
+         * a new field is written once there and in no other file.
          */
-        json saveCobThreadRef(const CobEnvironment& env, const CobThread* thread)
-        {
-            for (std::size_t i = 0; i < env.threads.size(); ++i)
-            {
-                if (env.threads[i].get() == thread)
-                {
-                    return i;
-                }
-            }
-            return json();
-        }
-
-        const CobThread* loadCobThreadRef(const json& j, const CobEnvironment& env)
-        {
-            if (j.is_null())
-            {
-                return nullptr;
-            }
-            return env.threads.at(j.get<std::size_t>()).get();
-        }
-
-        json saveCobEnvironment(const CobEnvironment& env)
-        {
-            json threads = json::array();
-            for (const auto& t : env.threads)
-            {
-                threads.push_back(saveCobThread(*t));
-            }
-
-            json readyQueue = json::array();
-            for (const auto* t : env.readyQueue)
-            {
-                readyQueue.push_back(saveCobThreadRef(env, t));
-            }
-
-            json blockedQueue = json::array();
-            for (const auto& [status, t] : env.blockedQueue)
-            {
-                blockedQueue.push_back(json{
-                    {"condition", saveBlockedCondition(status.condition)},
-                    {"thread", saveCobThreadRef(env, t)}});
-            }
-
-            json sleepingQueue = json::array();
-            for (const auto& [wakeTime, t] : env.sleepingQueue)
-            {
-                sleepingQueue.push_back(json{
-                    {"wakeTime", wakeTime.value},
-                    {"thread", saveCobThreadRef(env, t)}});
-            }
-
-            json finishedQueue = json::array();
-            for (const auto* t : env.finishedQueue)
-            {
-                finishedQueue.push_back(saveCobThreadRef(env, t));
-            }
-
-            return json{
-                {"statics", env._statics},
-                {"threads", threads},
-                {"readyQueue", readyQueue},
-                {"blockedQueue", blockedQueue},
-                {"sleepingQueue", sleepingQueue},
-                {"finishedQueue", finishedQueue}};
-        }
-
-        void loadCobEnvironmentInto(const json& j, CobEnvironment& env)
-        {
-            env._statics = j.at("statics").get<std::vector<int>>();
-
-            env.threads.clear();
-            env.readyQueue.clear();
-            env.blockedQueue.clear();
-            env.sleepingQueue.clear();
-            env.finishedQueue.clear();
-
-            for (const auto& tj : j.at("threads"))
-            {
-                env.threads.push_back(loadCobThread(tj));
-            }
-
-            for (const auto& r : j.at("readyQueue"))
-            {
-                env.readyQueue.push_back(const_cast<CobThread*>(loadCobThreadRef(r, env)));
-            }
-            for (const auto& b : j.at("blockedQueue"))
-            {
-                env.blockedQueue.emplace_back(
-                    CobEnvironment::BlockedStatus(loadBlockedCondition(b.at("condition"))),
-                    const_cast<CobThread*>(loadCobThreadRef(b.at("thread"), env)));
-            }
-            for (const auto& s : j.at("sleepingQueue"))
-            {
-                env.sleepingQueue.emplace_back(
-                    CobTime(s.at("wakeTime").get<int>()),
-                    const_cast<CobThread*>(loadCobThreadRef(s.at("thread"), env)));
-            }
-            for (const auto& f : j.at("finishedQueue"))
-            {
-                env.finishedQueue.push_back(const_cast<CobThread*>(loadCobThreadRef(f, env)));
-            }
-        }
-
-        // ---- weapons ----------------------------------------------------
-
-        json saveUnitWeaponAttackTarget(const UnitWeaponAttackTarget& t, const SaveContext& ctx)
-        {
-            return match(
-                t,
-                [&](const UnitId& id) { return json{{"kind", "unit"}, {"target", saveUnitIdRef(id, ctx)}}; },
-                [&](const SimVector& v) { return json{{"kind", "position"}, {"target", saveSimVector(v)}}; },
-                [&](const ProjectileId& id) { return json{{"kind", "projectile"}, {"target", saveProjectileIdRef(id, ctx)}}; });
-        }
-
-        UnitWeaponAttackTarget loadUnitWeaponAttackTarget(const json& j, const LoadContext& ctx)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "unit")
-            {
-                return loadUnitIdRef(j.at("target"), ctx);
-            }
-            if (kind == "position")
-            {
-                return loadSimVector(j.at("target"));
-            }
-            if (kind == "projectile")
-            {
-                return loadProjectileIdRef(j.at("target"), ctx);
-            }
-            throw std::runtime_error("bad UnitWeaponAttackTarget kind: " + kind);
-        }
-
-        json saveUnitWeaponState(const UnitWeaponState& s, const SaveContext& ctx, const CobEnvironment& env)
-        {
-            return match(
-                s,
-                [](const UnitWeaponStateIdle&) { return json{{"kind", "idle"}}; },
-                [&](const UnitWeaponStateAttacking& a) {
-                    auto attackInfo = match(
-                        a.attackInfo,
-                        [](const UnitWeaponStateAttacking::IdleInfo&) { return json{{"kind", "idle"}}; },
-                        [&](const UnitWeaponStateAttacking::AimInfo& i) {
-                            return json{
-                                {"kind", "aim"},
-                                {"thread", saveCobThreadRef(env, i.thread)},
-                                {"lastHeading", saveSimAngle(i.lastHeading)},
-                                {"lastPitch", saveSimAngle(i.lastPitch)}};
-                        },
-                        [](const UnitWeaponStateAttacking::AimedInfo& i) {
-                            return json{
-                                {"kind", "aimed"},
-                                {"lastHeading", saveSimAngle(i.lastHeading)},
-                                {"lastPitch", saveSimAngle(i.lastPitch)}};
-                        },
-                        [](const UnitWeaponStateAttacking::FireInfo& i) {
-                            return json{
-                                {"kind", "fire"},
-                                {"heading", saveSimAngle(i.heading)},
-                                {"pitch", saveSimAngle(i.pitch)},
-                                {"targetPosition", saveSimVector(i.targetPosition)},
-                                {"firingPiece", saveOptional(i.firingPiece, [](int p) { return json(p); })},
-                                {"burstsFired", i.burstsFired},
-                                {"readyTime", saveGameTime(i.readyTime)}};
-                        });
-                    return json{
-                        {"kind", "attacking"},
-                        {"target", saveUnitWeaponAttackTarget(a.target, ctx)},
-                        {"attackInfo", attackInfo}};
-                });
-        }
-
-        UnitWeaponState loadUnitWeaponState(const json& j, const LoadContext& ctx, const CobEnvironment& env)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "idle")
-            {
-                return UnitWeaponStateIdle();
-            }
-            if (kind == "attacking")
-            {
-                UnitWeaponStateAttacking a(loadUnitWeaponAttackTarget(j.at("target"), ctx));
-                const auto& ij = j.at("attackInfo");
-                const auto& infoKind = ij.at("kind").get_ref<const std::string&>();
-                if (infoKind == "idle")
-                {
-                    a.attackInfo = UnitWeaponStateAttacking::IdleInfo();
-                }
-                else if (infoKind == "aim")
-                {
-                    a.attackInfo = UnitWeaponStateAttacking::AimInfo{
-                        loadCobThreadRef(ij.at("thread"), env),
-                        loadSimAngle(ij.at("lastHeading")),
-                        loadSimAngle(ij.at("lastPitch"))};
-                }
-                else if (infoKind == "aimed")
-                {
-                    a.attackInfo = UnitWeaponStateAttacking::AimedInfo{
-                        loadSimAngle(ij.at("lastHeading")),
-                        loadSimAngle(ij.at("lastPitch"))};
-                }
-                else if (infoKind == "fire")
-                {
-                    a.attackInfo = UnitWeaponStateAttacking::FireInfo{
-                        loadSimAngle(ij.at("heading")),
-                        loadSimAngle(ij.at("pitch")),
-                        loadSimVector(ij.at("targetPosition")),
-                        loadOptional(ij.at("firingPiece"), [](const json& v) { return v.get<int>(); }),
-                        ij.at("burstsFired").get<int>(),
-                        loadGameTime(ij.at("readyTime"))};
-                }
-                else
-                {
-                    throw std::runtime_error("bad AttackInfo kind: " + infoKind);
-                }
-                return a;
-            }
-            throw std::runtime_error("bad UnitWeaponState kind: " + kind);
-        }
-
-        json saveUnitWeapon(const UnitWeapon& w, const SaveContext& ctx, const CobEnvironment& env)
-        {
-            return json{
-                {"weaponType", w.weaponType},
-                {"readyTime", saveGameTime(w.readyTime)},
-                {"ballisticZOffset", saveSimScalar(w.ballisticZOffset)},
-                {"stockedRounds", w.stockedRounds},
-                {"queuedRounds", w.queuedRounds},
-                {"stockpileProgress", w.stockpileProgress},
-                {"stockpileStepDelay", w.stockpileStepDelay},
-                {"state", saveUnitWeaponState(w.state, ctx, env)}};
-        }
-
-        UnitWeapon loadUnitWeapon(const json& j, const LoadContext& ctx, const CobEnvironment& env)
-        {
-            UnitWeapon w;
-            w.weaponType = j.at("weaponType").get<std::string>();
-            w.readyTime = loadGameTime(j.at("readyTime"));
-            w.ballisticZOffset = loadSimScalar(j.at("ballisticZOffset"));
-            w.stockedRounds = j.at("stockedRounds").get<int>();
-            w.queuedRounds = j.at("queuedRounds").get<int>();
-            w.stockpileProgress = j.at("stockpileProgress").get<int>();
-            w.stockpileStepDelay = j.at("stockpileStepDelay").get<int>();
-            w.state = loadUnitWeaponState(j.at("state"), ctx, env);
-            return w;
-        }
-
-        // ---- orders -----------------------------------------------------
-
-        json saveAttackTarget(const AttackTarget& t, const SaveContext& ctx)
-        {
-            return match(
-                t,
-                [&](const UnitId& id) { return json{{"kind", "unit"}, {"target", saveUnitIdRef(id, ctx)}}; },
-                [&](const SimVector& v) { return json{{"kind", "position"}, {"target", saveSimVector(v)}}; });
-        }
-
-        AttackTarget loadAttackTarget(const json& j, const LoadContext& ctx)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "unit")
-            {
-                return loadUnitIdRef(j.at("target"), ctx);
-            }
-            if (kind == "position")
-            {
-                return loadSimVector(j.at("target"));
-            }
-            throw std::runtime_error("bad AttackTarget kind: " + kind);
-        }
-
-        json saveReclaimTarget(const std::variant<UnitId, FeatureId>& t, const SaveContext& ctx)
-        {
-            return match(
-                t,
-                [&](const UnitId& id) { return json{{"kind", "unit"}, {"target", saveUnitIdRef(id, ctx)}}; },
-                [&](const FeatureId& id) { return json{{"kind", "feature"}, {"target", saveFeatureIdRef(id, ctx)}}; });
-        }
-
-        std::variant<UnitId, FeatureId> loadReclaimTarget(const json& j, const LoadContext& ctx)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "unit")
-            {
-                return loadUnitIdRef(j.at("target"), ctx);
-            }
-            if (kind == "feature")
-            {
-                return loadFeatureIdRef(j.at("target"), ctx);
-            }
-            throw std::runtime_error("bad reclaim target kind: " + kind);
-        }
-
-        json saveUnitOrder(const UnitOrder& o, const SaveContext& ctx)
-        {
-            return match(
-                o,
-                [](const MoveOrder& m) { return json{{"kind", "move"}, {"destination", saveSimVector(m.destination)}}; },
-                [&](const AttackOrder& a) {
-                    auto j = json{{"kind", "attack"}, {"target", saveAttackTarget(a.target, ctx)}};
-                    if (a.leash)
-                    {
-                        j["leashAnchor"] = saveSimVector(a.leash->anchor);
-                        j["leashDistance"] = saveSimScalar(a.leash->distance);
-                    }
-                    if (a.lastSeenPosition)
-                    {
-                        j["lastSeenPosition"] = saveSimVector(*a.lastSeenPosition);
-                    }
-                    return j;
-                },
-                [](const BuildOrder& b) { return json{{"kind", "build"}, {"unitType", b.unitType}, {"position", saveSimVector(b.position)}}; },
-                [](const BuggerOffOrder& b) { return json{{"kind", "buggerOff"}, {"rect", saveDiscreteRect(b.rect)}}; },
-                [&](const CompleteBuildOrder& c) { return json{{"kind", "completeBuild"}, {"target", saveUnitIdRef(c.target, ctx)}}; },
-                [&](const GuardOrder& g) { return json{{"kind", "guard"}, {"target", saveUnitIdRef(g.target, ctx)}}; },
-                [&](const ReclaimOrder& r) { return json{{"kind", "reclaim"}, {"target", saveReclaimTarget(r.target, ctx)}}; },
-                [&](const RepairOrder& r) { return json{{"kind", "repair"}, {"target", saveUnitIdRef(r.target, ctx)}}; },
-                [](const PatrolOrder& p) { return json{{"kind", "patrol"}, {"destination", saveSimVector(p.destination)}}; },
-                [&](const ResurrectOrder& r) {
-                    // The countdown rides on the order, as capture's progress
-                    // does -- see TOTALA-EXE.md S:96 and S:98.
-                    auto j = json{{"kind", "resurrect"}, {"target", saveFeatureIdRef(r.target, ctx)}};
-                    if (r.remainingTicks)
-                    {
-                        j["remainingTicks"] = *r.remainingTicks;
-                    }
-                    return j;
-                },
-                [&](const CaptureOrder& c) {
-                    // Capture progress rides on the order, not on the
-                    // target -- see CaptureOrder -- so it is saved here.
-                    auto j = json{{"kind", "capture"}, {"target", saveUnitIdRef(c.target, ctx)}, {"progress", c.progress}};
-                    if (c.totalWork)
-                    {
-                        j["totalWork"] = *c.totalWork;
-                    }
-                    return j;
-                },
-                [&](const LoadOrder& l) { return json{{"kind", "load"}, {"target", saveUnitIdRef(l.target, ctx)}}; },
-                [](const UnloadOrder& u) { return json{{"kind", "unload"}, {"destination", saveSimVector(u.destination)}, {"parkedUntil", saveGameTime(u.parkedUntil)}}; },
-                [&](const DgunOrder& d) { return json{{"kind", "dgun"}, {"target", saveAttackTarget(d.target, ctx)}}; },
-                [&](const LandOnAirBaseOrder& l) { return json{{"kind", "landOnAirBase"}, {"target", saveUnitIdRef(l.target, ctx)}}; });
-        }
-
-        UnitOrder loadUnitOrder(const json& j, const LoadContext& ctx)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "move")
-            {
-                return MoveOrder(loadSimVector(j.at("destination")));
-            }
-            if (kind == "attack")
-            {
-                auto order = match(
-                    loadAttackTarget(j.at("target"), ctx),
-                    [](const UnitId& id) { return AttackOrder(id); },
-                    [](const SimVector& v) { return AttackOrder(v); });
-                if (j.contains("leashAnchor"))
-                {
-                    order.leash = AttackLeash(loadSimVector(j.at("leashAnchor")), loadSimScalar(j.at("leashDistance")));
-                }
-                if (j.contains("lastSeenPosition"))
-                {
-                    order.lastSeenPosition = loadSimVector(j.at("lastSeenPosition"));
-                }
-                return order;
-            }
-            if (kind == "build")
-            {
-                return BuildOrder(j.at("unitType").get<std::string>(), loadSimVector(j.at("position")));
-            }
-            if (kind == "buggerOff")
-            {
-                return BuggerOffOrder(loadDiscreteRect(j.at("rect")));
-            }
-            if (kind == "completeBuild")
-            {
-                return CompleteBuildOrder(loadUnitIdRef(j.at("target"), ctx));
-            }
-            if (kind == "guard")
-            {
-                return GuardOrder(loadUnitIdRef(j.at("target"), ctx));
-            }
-            if (kind == "resurrect")
-            {
-                auto order = ResurrectOrder(loadFeatureIdRef(j.at("target"), ctx));
-                if (j.contains("remainingTicks"))
-                {
-                    order.remainingTicks = j.at("remainingTicks").get<unsigned int>();
-                }
-                return order;
-            }
-            if (kind == "reclaim")
-            {
-                return match(
-                    loadReclaimTarget(j.at("target"), ctx),
-                    [](const UnitId& id) { return ReclaimOrder(id); },
-                    [](const FeatureId& id) { return ReclaimOrder(id); });
-            }
-            if (kind == "repair")
-            {
-                return RepairOrder(loadUnitIdRef(j.at("target"), ctx));
-            }
-            if (kind == "patrol")
-            {
-                return PatrolOrder(loadSimVector(j.at("destination")));
-            }
-            if (kind == "dgun")
-            {
-                return match(
-                    loadAttackTarget(j.at("target"), ctx),
-                    [](const UnitId& id) { return DgunOrder(id); },
-                    [](const SimVector& v) { return DgunOrder(v); });
-            }
-            if (kind == "capture")
-            {
-                auto order = CaptureOrder(loadUnitIdRef(j.at("target"), ctx));
-                order.progress = j.value("progress", 0u);
-                if (j.contains("totalWork"))
-                {
-                    order.totalWork = j.at("totalWork").get<unsigned int>();
-                }
-                return order;
-            }
-            if (kind == "load")
-            {
-                return LoadOrder(loadUnitIdRef(j.at("target"), ctx));
-            }
-            if (kind == "unload")
-            {
-                auto order = UnloadOrder(loadSimVector(j.at("destination")));
-                if (j.contains("parkedUntil"))
-                {
-                    order.parkedUntil = loadGameTime(j.at("parkedUntil"));
-                }
-                return order;
-            }
-            if (kind == "landOnAirBase")
-            {
-                return LandOnAirBaseOrder(loadUnitIdRef(j.at("target"), ctx));
-            }
-            throw std::runtime_error("bad UnitOrder kind: " + kind);
-        }
-
-        // ---- behaviour and factory state --------------------------------
-
-        json saveUnitCreationStatus(const UnitCreationStatus& s, const SaveContext& ctx)
-        {
-            return match(
-                s,
-                [](const UnitCreationStatusPending& p) { return json{{"kind", "pending"}, {"attempts", p.attempts}, {"nextAttempt", saveGameTime(p.nextAttempt)}}; },
-                [](const UnitCreationStatusFailed&) { return json{{"kind", "failed"}}; },
-                [&](const UnitCreationStatusDone& d) { return json{{"kind", "done"}, {"unitId", saveUnitIdRef(d.unitId, ctx)}}; });
-        }
-
-        UnitCreationStatus loadUnitCreationStatus(const json& j, const LoadContext& ctx)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "pending")
-            {
-                return UnitCreationStatusPending{j.at("attempts").get<unsigned int>(), loadGameTime(j.at("nextAttempt"))};
-            }
-            if (kind == "failed")
-            {
-                return UnitCreationStatusFailed();
-            }
-            if (kind == "done")
-            {
-                return UnitCreationStatusDone{loadUnitIdRef(j.at("unitId"), ctx)};
-            }
-            throw std::runtime_error("bad UnitCreationStatus kind: " + kind);
-        }
-
-        json saveUnitBehaviorState(const UnitBehaviorState& s, const SaveContext& ctx)
-        {
-            return match(
-                s,
-                [](const UnitBehaviorStateIdle&) { return json{{"kind", "idle"}}; },
-                [&](const UnitBehaviorStateCreatingUnit& c) {
-                    return json{
-                        {"kind", "creatingUnit"},
-                        {"unitType", c.unitType},
-                        {"owner", c.owner.value},
-                        {"position", saveSimVector(c.position)},
-                        {"status", saveUnitCreationStatus(c.status, ctx)}};
-                },
-                [&](const UnitBehaviorStateBuilding& b) {
-                    return json{
-                        {"kind", "building"},
-                        {"targetUnit", saveUnitIdRef(b.targetUnit, ctx)},
-                        {"nanoParticleOrigin", saveOptional(b.nanoParticleOrigin, saveSimVector)}};
-                },
-                [&](const UnitBehaviorStateReclaiming& r) {
-                    return json{
-                        {"kind", "reclaiming"},
-                        {"target", saveReclaimTarget(r.target, ctx)},
-                        {"nanoParticleOrigin", saveOptional(r.nanoParticleOrigin, saveSimVector)}};
-                },
-                [&](const UnitBehaviorStateResurrecting& r) {
-                    return json{
-                        {"kind", "resurrecting"},
-                        {"target", saveFeatureIdRef(r.target, ctx)},
-                        {"nanoParticleOrigin", saveOptional(r.nanoParticleOrigin, saveSimVector)}};
-                });
-        }
-
-        UnitBehaviorState loadUnitBehaviorState(const json& j, const LoadContext& ctx)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "idle")
-            {
-                return UnitBehaviorStateIdle();
-            }
-            if (kind == "creatingUnit")
-            {
-                return UnitBehaviorStateCreatingUnit{
-                    j.at("unitType").get<std::string>(),
-                    PlayerId(j.at("owner").get<unsigned int>()),
-                    loadSimVector(j.at("position")),
-                    loadUnitCreationStatus(j.at("status"), ctx)};
-            }
-            if (kind == "building")
-            {
-                return UnitBehaviorStateBuilding{
-                    loadUnitIdRef(j.at("targetUnit"), ctx),
-                    loadOptional(j.at("nanoParticleOrigin"), loadSimVector)};
-            }
-            if (kind == "reclaiming")
-            {
-                return UnitBehaviorStateReclaiming{
-                    loadReclaimTarget(j.at("target"), ctx),
-                    loadOptional(j.at("nanoParticleOrigin"), loadSimVector)};
-            }
-            if (kind == "resurrecting")
-            {
-                return UnitBehaviorStateResurrecting{
-                    loadFeatureIdRef(j.at("target"), ctx),
-                    loadOptional(j.at("nanoParticleOrigin"), loadSimVector)};
-            }
-            throw std::runtime_error("bad UnitBehaviorState kind: " + kind);
-        }
-
-        json saveFactoryBehaviorState(const FactoryBehaviorState& s, const SaveContext& ctx)
-        {
-            return match(
-                s,
-                [](const FactoryBehaviorStateIdle&) { return json{{"kind", "idle"}}; },
-                [&](const FactoryBehaviorStateCreatingUnit& c) {
-                    return json{
-                        {"kind", "creatingUnit"},
-                        {"unitType", c.unitType},
-                        {"owner", c.owner.value},
-                        {"position", saveSimVector(c.position)},
-                        {"rotation", saveSimAngle(c.rotation)},
-                        {"status", saveUnitCreationStatus(c.status, ctx)}};
-                },
-                [&](const FactoryBehaviorStateBuilding& b) {
-                    return json{
-                        {"kind", "building"},
-                        {"targetUnit", saveOptional(b.targetUnit, [&](const std::pair<UnitId, std::optional<SimVector>>& p) {
-                             return json{
-                                 {"unit", saveUnitIdRef(p.first, ctx)},
-                                 {"nanoParticleOrigin", saveOptional(p.second, saveSimVector)}};
-                         })}};
-                });
-        }
-
-        FactoryBehaviorState loadFactoryBehaviorState(const json& j, const LoadContext& ctx)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "idle")
-            {
-                return FactoryBehaviorStateIdle();
-            }
-            if (kind == "creatingUnit")
-            {
-                return FactoryBehaviorStateCreatingUnit{
-                    j.at("unitType").get<std::string>(),
-                    PlayerId(j.at("owner").get<unsigned int>()),
-                    loadSimVector(j.at("position")),
-                    loadSimAngle(j.at("rotation")),
-                    loadUnitCreationStatus(j.at("status"), ctx)};
-            }
-            if (kind == "building")
-            {
-                return FactoryBehaviorStateBuilding{
-                    loadOptional(j.at("targetUnit"), [&](const json& p) {
-                        return std::make_pair(
-                            loadUnitIdRef(p.at("unit"), ctx),
-                            loadOptional(p.at("nanoParticleOrigin"), loadSimVector));
-                    })};
-            }
-            throw std::runtime_error("bad FactoryBehaviorState kind: " + kind);
-        }
-
-        // ---- navigation -------------------------------------------------
-
-        json saveNavigationGoal(const NavigationGoal& g, const SaveContext& ctx)
-        {
-            return match(
-                g,
-                [&](const UnitId& id) { return json{{"kind", "unit"}, {"goal", saveUnitIdRef(id, ctx)}}; },
-                [&](const FeatureId& id) { return json{{"kind", "feature"}, {"goal", saveFeatureIdRef(id, ctx)}}; },
-                [](const SimVector& v) { return json{{"kind", "position"}, {"goal", saveSimVector(v)}}; },
-                [](const DiscreteRect& r) { return json{{"kind", "rect"}, {"goal", saveDiscreteRect(r)}}; },
-                [](const NavigationGoalLandingLocation&) { return json{{"kind", "landingLocation"}}; });
-        }
-
-        NavigationGoal loadNavigationGoal(const json& j, const LoadContext& ctx)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "unit")
-            {
-                return loadUnitIdRef(j.at("goal"), ctx);
-            }
-            if (kind == "feature")
-            {
-                return loadFeatureIdRef(j.at("goal"), ctx);
-            }
-            if (kind == "position")
-            {
-                return loadSimVector(j.at("goal"));
-            }
-            if (kind == "rect")
-            {
-                return loadDiscreteRect(j.at("goal"));
-            }
-            if (kind == "landingLocation")
-            {
-                return NavigationGoalLandingLocation();
-            }
-            throw std::runtime_error("bad NavigationGoal kind: " + kind);
-        }
-
-        json saveMovingStateGoal(const MovingStateGoal& g, const SaveContext& ctx)
-        {
-            return match(
-                g,
-                [&](const UnitId& id) { return json{{"kind", "unit"}, {"goal", saveUnitIdRef(id, ctx)}}; },
-                [](const SimVector& v) { return json{{"kind", "position"}, {"goal", saveSimVector(v)}}; },
-                [](const DiscreteRect& r) { return json{{"kind", "rect"}, {"goal", saveDiscreteRect(r)}}; });
-        }
-
-        MovingStateGoal loadMovingStateGoal(const json& j, const LoadContext& ctx)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "unit")
-            {
-                return loadUnitIdRef(j.at("goal"), ctx);
-            }
-            if (kind == "position")
-            {
-                return loadSimVector(j.at("goal"));
-            }
-            if (kind == "rect")
-            {
-                return loadDiscreteRect(j.at("goal"));
-            }
-            throw std::runtime_error("bad MovingStateGoal kind: " + kind);
-        }
-
-        json savePathDestination(const PathDestination& d)
-        {
-            return match(
-                d,
-                [](const SimVector& v) { return json{{"kind", "position"}, {"destination", saveSimVector(v)}}; },
-                [](const DiscreteRect& r) { return json{{"kind", "rect"}, {"destination", saveDiscreteRect(r)}}; });
-        }
-
-        PathDestination loadPathDestination(const json& j)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "position")
-            {
-                return loadSimVector(j.at("destination"));
-            }
-            if (kind == "rect")
-            {
-                return loadDiscreteRect(j.at("destination"));
-            }
-            throw std::runtime_error("bad PathDestination kind: " + kind);
-        }
-
-        json savePathFollowingInfo(const PathFollowingInfo& p)
-        {
-            json waypoints = json::array();
-            for (const auto& w : p.path.waypoints)
-            {
-                waypoints.push_back(saveSimVector(w));
-            }
-            return json{
-                {"waypoints", waypoints},
-                {"destinationUnreachable", p.path.destinationUnreachable},
-                {"pathCreationTime", saveGameTime(p.pathCreationTime)},
-                // Stored as an index; the iterator itself is meaningless
-                // outside the vector it points into.
-                {"currentWaypoint", static_cast<std::size_t>(p.currentWaypoint - p.path.waypoints.begin())}};
-        }
-
-        PathFollowingInfo loadPathFollowingInfo(const json& j)
-        {
-            UnitPath path;
-            for (const auto& w : j.at("waypoints"))
-            {
-                path.waypoints.push_back(loadSimVector(w));
-            }
-            path.destinationUnreachable = j.at("destinationUnreachable").get<bool>();
-            PathFollowingInfo info(std::move(path), loadGameTime(j.at("pathCreationTime")));
-            info.currentWaypoint = info.path.waypoints.begin() + j.at("currentWaypoint").get<std::size_t>();
-            return info;
-        }
-
-        json saveNavigationState(const NavigationState& s, const SaveContext& ctx)
-        {
-            return match(
-                s,
-                [](const NavigationStateIdle&) { return json{{"kind", "idle"}}; },
-                [&](const NavigationStateMoving& m) {
-                    return json{
-                        {"kind", "moving"},
-                        {"movementGoal", saveMovingStateGoal(m.movementGoal, ctx)},
-                        {"pathDestination", savePathDestination(m.pathDestination)},
-                        {"path", saveOptional(m.path, savePathFollowingInfo)},
-                        {"pathRequested", m.pathRequested},
-                        {"reachableDestination", saveOptional(m.reachableDestination, saveSimVector)}};
-                },
-                [](const NavigationStateMovingToLandingSpot& m) {
-                    return json{
-                        {"kind", "movingToLandingSpot"},
-                        {"landingLocation", saveSimVector(m.landingLocation)}};
-                });
-        }
-
-        NavigationState loadNavigationState(const json& j, const LoadContext& ctx)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "idle")
-            {
-                return NavigationStateIdle();
-            }
-            if (kind == "moving")
-            {
-                return NavigationStateMoving{
-                    loadMovingStateGoal(j.at("movementGoal"), ctx),
-                    loadPathDestination(j.at("pathDestination")),
-                    loadOptional(j.at("path"), loadPathFollowingInfo),
-                    j.at("pathRequested").get<bool>(),
-                    loadOptional(j.at("reachableDestination"), loadSimVector)};
-            }
-            if (kind == "movingToLandingSpot")
-            {
-                return NavigationStateMovingToLandingSpot{loadSimVector(j.at("landingLocation"))};
-            }
-            throw std::runtime_error("bad NavigationState kind: " + kind);
-        }
-
-        json saveNavigationStateInfo(const NavigationStateInfo& i, const SaveContext& ctx)
-        {
-            return json{
-                {"desiredDestination", saveOptional(i.desiredDestination, [&](const NavigationGoal& g) { return saveNavigationGoal(g, ctx); })},
-                {"unitPositionCache", saveOptional(i.unitPositionCache, [&](const UnitPositionCache& c) {
-                     return json{
-                         {"unitId", saveUnitIdRef(c.unitId, ctx)},
-                         {"position", saveSimVector(c.position)},
-                         {"cachedAtTime", saveGameTime(c.cachedAtTime)}};
-                 })},
-                {"attackApproachCache", saveOptional(i.attackApproachCache, [&](const UnitPositionCache& c) {
-                     return json{
-                         {"unitId", saveUnitIdRef(c.unitId, ctx)},
-                         {"position", saveSimVector(c.position)},
-                         {"cachedAtTime", saveGameTime(c.cachedAtTime)}};
-                 })},
-                {"state", saveNavigationState(i.state, ctx)}};
-        }
-
-        NavigationStateInfo loadNavigationStateInfo(const json& j, const LoadContext& ctx)
-        {
-            return NavigationStateInfo{
-                loadOptional(j.at("desiredDestination"), [&](const json& g) { return loadNavigationGoal(g, ctx); }),
-                loadOptional(j.at("unitPositionCache"), [&](const json& c) {
-                    return UnitPositionCache{
-                        loadUnitIdRef(c.at("unitId"), ctx),
-                        loadSimVector(c.at("position")),
-                        loadGameTime(c.at("cachedAtTime"))};
-                }),
-                loadOptional(j.at("attackApproachCache"), [&](const json& c) {
-                    return UnitPositionCache{
-                        loadUnitIdRef(c.at("unitId"), ctx),
-                        loadSimVector(c.at("position")),
-                        loadGameTime(c.at("cachedAtTime"))};
-                }),
-                loadNavigationState(j.at("state"), ctx)};
-        }
-
-        // ---- physics ----------------------------------------------------
-
-        json saveSteeringInfo(const SteeringInfo& s)
-        {
-            return json{
-                {"targetAngle", saveSimAngle(s.targetAngle)},
-                {"targetSpeed", saveSimScalar(s.targetSpeed)},
-                {"shouldTakeOff", s.shouldTakeOff}};
-        }
-
-        SteeringInfo loadSteeringInfo(const json& j)
-        {
-            return SteeringInfo{
-                loadSimAngle(j.at("targetAngle")),
-                loadSimScalar(j.at("targetSpeed")),
-                j.at("shouldTakeOff").get<bool>()};
-        }
-
-        json saveAirMovementState(const AirMovementState& s, const SaveContext& ctx)
-        {
-            return match(
-                s,
-                [](const AirMovementStateTakingOff& t) {
-                    return json{
-                        {"kind", "takingOff"},
-                        {"targetPosition", saveOptional(t.targetPosition, saveSimVector)},
-                        {"currentVelocity", saveSimVector(t.currentVelocity)}};
-                },
-                [](const AirMovementStateFlying& f) {
-                    return json{
-                        {"kind", "flying"},
-                        {"targetPosition", saveOptional(f.targetPosition, saveSimVector)},
-                        {"shouldLand", f.shouldLand},
-                        {"currentVelocity", saveSimVector(f.currentVelocity)}};
-                },
-                [](const AirMovementStateLanding& l) {
-                    return json{
-                        {"kind", "landing"},
-                        {"landingFailed", l.landingFailed},
-                        {"shouldAbort", l.shouldAbort}};
-                },
-                [&](const AirMovementStateAttackRun& a) {
-                    return json{
-                        {"kind", "attackRun"},
-                        {"target", saveAttackTarget(a.target, ctx)},
-                        {"lastKnownTargetPos", saveSimVector(a.lastKnownTargetPos)},
-                        {"runOutDirection", saveSimVector(a.runOutDirection)},
-                        {"runOutDistance", saveSimScalar(a.runOutDistance)},
-                        {"phase", saveEnum(a.phase)},
-                        {"bombsDroppedThisPass", a.bombsDroppedThisPass},
-                        {"strafingPass", a.strafingPass},
-                        {"breakWaypoint", saveSimVector(a.breakWaypoint)},
-                        {"currentVelocity", saveSimVector(a.currentVelocity)}};
-                },
-                [&](const AirMovementStateHoverAttack& h) {
-                    return json{
-                        {"kind", "hoverAttack"},
-                        {"target", saveAttackTarget(h.target, ctx)},
-                        {"station", saveSimVector(h.station)},
-                        {"targetPosition", saveSimVector(h.targetPosition)},
-                        {"swingPositive", h.swingPositive},
-                        {"outOfRangeArrivals", h.outOfRangeArrivals},
-                        {"phase", saveEnum(h.phase)},
-                        {"currentVelocity", saveSimVector(h.currentVelocity)}};
-                },
-                [&](const AirMovementStateDogfight& d) {
-                    return json{
-                        {"kind", "dogfight"},
-                        {"target", saveAttackTarget(d.target, ctx)},
-                        {"phase", saveEnum(d.phase)},
-                        {"goalPosition", saveSimVector(d.goalPosition)},
-                        {"goalVelocity", saveSimVector(d.goalVelocity)},
-                        {"nextDecision", d.nextDecision.value},
-                        {"offNoseCounter", d.offNoseCounter},
-                        {"breakLeft", d.breakLeft},
-                        {"breakWaypoint", saveSimVector(d.breakWaypoint)},
-                        {"currentVelocity", saveSimVector(d.currentVelocity)}};
-                });
-        }
-
-        AirMovementState loadAirMovementState(const json& j, const LoadContext& ctx)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "takingOff")
-            {
-                AirMovementStateTakingOff t;
-                t.targetPosition = loadOptional(j.at("targetPosition"), loadSimVector);
-                t.currentVelocity = loadSimVector(j.at("currentVelocity"));
-                return t;
-            }
-            if (kind == "flying")
-            {
-                AirMovementStateFlying f;
-                f.targetPosition = loadOptional(j.at("targetPosition"), loadSimVector);
-                f.shouldLand = j.at("shouldLand").get<bool>();
-                f.currentVelocity = loadSimVector(j.at("currentVelocity"));
-                return f;
-            }
-            if (kind == "landing")
-            {
-                AirMovementStateLanding l;
-                l.landingFailed = j.at("landingFailed").get<bool>();
-                l.shouldAbort = j.at("shouldAbort").get<bool>();
-                return l;
-            }
-            if (kind == "attackRun")
-            {
-                AirMovementStateAttackRun a(loadAttackTarget(j.at("target"), ctx));
-                a.lastKnownTargetPos = loadSimVector(j.at("lastKnownTargetPos"));
-                a.runOutDirection = loadSimVector(j.at("runOutDirection"));
-                a.runOutDistance = loadSimScalar(j.at("runOutDistance"));
-                a.phase = loadEnum<AirMovementStateAttackRun::Phase>(j.at("phase"));
-                a.bombsDroppedThisPass = j.at("bombsDroppedThisPass").get<unsigned int>();
-                a.strafingPass = j.at("strafingPass").get<bool>();
-                a.breakWaypoint = loadSimVector(j.at("breakWaypoint"));
-                a.currentVelocity = loadSimVector(j.at("currentVelocity"));
-                return a;
-            }
-            if (kind == "hoverAttack")
-            {
-                AirMovementStateHoverAttack h(loadAttackTarget(j.at("target"), ctx));
-                h.station = loadSimVector(j.at("station"));
-                h.targetPosition = loadSimVector(j.at("targetPosition"));
-                h.swingPositive = j.at("swingPositive").get<bool>();
-                h.outOfRangeArrivals = j.at("outOfRangeArrivals").get<unsigned int>();
-                h.phase = loadEnum<AirMovementStateHoverAttack::Phase>(j.at("phase"));
-                h.currentVelocity = loadSimVector(j.at("currentVelocity"));
-                return h;
-            }
-            if (kind == "dogfight")
-            {
-                AirMovementStateDogfight d(loadAttackTarget(j.at("target"), ctx));
-                d.phase = loadEnum<AirMovementStateDogfight::Phase>(j.at("phase"));
-                d.goalPosition = loadSimVector(j.at("goalPosition"));
-                d.goalVelocity = loadSimVector(j.at("goalVelocity"));
-                d.nextDecision = GameTime(j.at("nextDecision").get<unsigned int>());
-                d.offNoseCounter = j.at("offNoseCounter").get<unsigned int>();
-                d.breakLeft = j.at("breakLeft").get<bool>();
-                d.breakWaypoint = loadSimVector(j.at("breakWaypoint"));
-                d.currentVelocity = loadSimVector(j.at("currentVelocity"));
-                return d;
-            }
-            throw std::runtime_error("bad AirMovementState kind: " + kind);
-        }
-
-        json saveUnitPhysicsInfo(const UnitPhysicsInfo& p, const SaveContext& ctx)
-        {
-            return match(
-                p,
-                [](const UnitPhysicsInfoGround& g) {
-                    return json{
-                        {"kind", "ground"},
-                        {"steeringInfo", saveSteeringInfo(g.steeringInfo)},
-                        {"currentSpeed", saveSimScalar(g.currentSpeed)}};
-                },
-                [&](const UnitPhysicsInfoAir& a) {
-                    return json{
-                        {"kind", "air"},
-                        {"movementState", saveAirMovementState(a.movementState, ctx)},
-                        {"roll", saveSimScalar(a.roll)},
-                        {"previousRoll", saveSimScalar(a.previousRoll)},
-                        {"bankAccum", saveSimVector(a.bankAccum)}};
-                });
-        }
-
-        UnitPhysicsInfo loadUnitPhysicsInfo(const json& j, const LoadContext& ctx)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "ground")
-            {
-                UnitPhysicsInfoGround g;
-                g.steeringInfo = loadSteeringInfo(j.at("steeringInfo"));
-                g.currentSpeed = loadSimScalar(j.at("currentSpeed"));
-                return g;
-            }
-            if (kind == "air")
-            {
-                UnitPhysicsInfoAir a;
-                a.movementState = loadAirMovementState(j.at("movementState"), ctx);
-                a.roll = loadSimScalar(j.at("roll"));
-                a.previousRoll = loadSimScalar(j.at("previousRoll"));
-                a.bankAccum = loadSimVector(j.at("bankAccum"));
-                return a;
-            }
-            throw std::runtime_error("bad UnitPhysicsInfo kind: " + kind);
-        }
-
-        // ---- unit state -------------------------------------------------
-
-        json saveLifeState(const UnitState::LifeState& s)
-        {
-            return match(
-                s,
-                [](const UnitState::LifeStateAlive&) { return json{{"kind", "alive"}}; },
-                [](const UnitState::LifeStateDead& d) { return json{{"kind", "dead"}, {"leaveCorpse", d.leaveCorpse}, {"corpseLevel", d.corpseLevel}}; });
-        }
-
-        UnitState::LifeState loadLifeState(const json& j)
-        {
-            const auto& kind = j.at("kind").get_ref<const std::string&>();
-            if (kind == "alive")
-            {
-                return UnitState::LifeStateAlive();
-            }
-            if (kind == "dead")
-            {
-                return UnitState::LifeStateDead{j.at("leaveCorpse").get<bool>(), j.value("corpseLevel", 1u)};
-            }
-            throw std::runtime_error("bad LifeState kind: " + kind);
-        }
-
-        json saveAirWorkOrbitState(const UnitState::AirWorkOrbitState& s)
-        {
-            return json{
-                {"workPosition", saveSimVector(s.workPosition)},
-                {"bearing", saveSimAngle(s.bearing)},
-                {"started", s.started}};
-        }
-
-        UnitState::AirWorkOrbitState loadAirWorkOrbitState(const json& j)
-        {
-            return UnitState::AirWorkOrbitState{
-                loadSimVector(j.at("workPosition")),
-                loadSimAngle(j.at("bearing")),
-                j.at("started").get<bool>()};
-        }
-
-        json saveAirLoiterState(const UnitState::AirLoiterState& s)
-        {
-            return json{
-                {"reason", saveEnum(s.reason)},
-                {"anchor", saveSimVector(s.anchor)},
-                {"bearing", saveSimAngle(s.bearing)}};
-        }
-
-        UnitState::AirLoiterState loadAirLoiterState(const json& j)
-        {
-            return UnitState::AirLoiterState{
-                loadEnum<UnitState::AirLoiterState::Reason>(j.at("reason")),
-                loadSimVector(j.at("anchor")),
-                loadSimAngle(j.at("bearing"))};
-        }
-
         json saveUnitState(const UnitState& u, const SaveContext& ctx)
         {
-            json pieces = json::array();
-            for (const auto& p : u.pieces)
+            json j = json::object();
+            for (const auto& field : unitStateFieldTable())
             {
-                pieces.push_back(saveUnitMesh(p));
+                if (field.save)
+                {
+                    j[field.name] = field.save(u, ctx);
+                }
             }
-
-            json orders = json::array();
-            for (const auto& o : u.orders)
-            {
-                orders.push_back(saveUnitOrder(o, ctx));
-            }
-
-            json weapons = json::array();
-            for (const auto& w : u.weapons)
-            {
-                weapons.push_back(saveOptional(w, [&](const UnitWeapon& weapon) { return saveUnitWeapon(weapon, ctx, *u.cobEnvironment); }));
-            }
-
-            json carriedUnits = json::array();
-            for (const auto& id : u.carriedUnits)
-            {
-                carriedUnits.push_back(saveUnitIdRef(id, ctx));
-            }
-
-            json buildQueue = json::array();
-            for (const auto& [unitType, count] : u.buildQueue)
-            {
-                buildQueue.push_back(json{{"unitType", unitType}, {"count", count}});
-            }
-
-            return json{
-                {"unitType", u.unitType},
-                {"pieces", pieces},
-                {"position", saveSimVector(u.position)},
-                {"previousPosition", saveSimVector(u.previousPosition)},
-                {"cobEnvironment", saveCobEnvironment(*u.cobEnvironment)},
-                {"owner", u.owner.value},
-                {"rotation", saveSimAngle(u.rotation)},
-                {"previousRotation", saveSimAngle(u.previousRotation)},
-                {"physics", saveUnitPhysicsInfo(u.physics, ctx)},
-                {"hitPoints", u.hitPoints},
-                {"lifeState", saveLifeState(u.lifeState)},
-                {"orders", orders},
-                {"behaviourState", saveUnitBehaviorState(u.behaviourState, ctx)},
-                {"navigationState", saveNavigationStateInfo(u.navigationState, ctx)},
-                {"buildOrderUnitId", saveOptional(u.buildOrderUnitId, [&](UnitId id) { return saveUnitIdRef(id, ctx); })},
-                {"inBuildStance", u.inBuildStance},
-                {"armStowDueTime", saveOptional(u.armStowDueTime, [](GameTime t) { return saveGameTime(t); })},
-                {"nanoPointQueriedAt", saveOptional(u.nanoPointQueriedAt, [](GameTime t) { return saveGameTime(t); })},
-                {"nanoPoint", saveSimVector(u.nanoPoint)},
-                {"commandFireShotFired", u.commandFireShotFired},
-                {"yardOpen", u.yardOpen},
-                {"inCollision", u.inCollision},
-                {"weapons", weapons},
-                {"fireOrders", saveEnum(u.fireOrders)},
-                {"moveOrders", saveEnum(u.moveOrders)},
-                {"cobBusy", u.cobBusy},
-                {"buggerOffActive", u.buggerOffActive},
-                {"armored", u.armored},
-                {"kills", u.kills},
-                {"sfxOccupyState", u.sfxOccupyState},
-                {"buildTimeCompleted", u.buildTimeCompleted},
-                {"nanoframeDecayTime", saveOptional(u.nanoframeDecayTime, [](GameTime t) { return saveGameTime(t); })},
-                {"nanoframeWorkedOn", u.nanoframeWorkedOn},
-                {"nanoframeDecayRemainder", u.nanoframeDecayRemainder},
-                {"reclaimProgress", u.reclaimProgress},
-                {"selfDestructTime", saveOptional(u.selfDestructTime, [](GameTime t) { return saveGameTime(t); })},
-                {"paralyzedUntil", saveOptional(u.paralyzedUntil, [](GameTime t) { return saveGameTime(t); })},
-                {"moveRateBand", u.moveRateBand},
-                {"carriedBy", saveOptional(u.carriedBy, [&](UnitId id) { return saveUnitIdRef(id, ctx); })},
-                {"carriedPiece", u.carriedPiece},
-                {"carriedUnits", carriedUnits},
-                {"transportScriptTarget", saveOptional(u.transportScriptTarget, [&](UnitId id) { return saveUnitIdRef(id, ctx); })},
-                {"transportScriptStartedAt", saveGameTime(u.transportScriptStartedAt)},
-                {"airWorkOrbit", saveOptional(u.airWorkOrbit, saveAirWorkOrbitState)},
-                {"airLoiter", saveOptional(u.airLoiter, saveAirLoiterState)},
-                {"slowFacePoint", saveOptional(u.slowFacePoint, saveSimVector)},
-                {"activated", u.activated},
-                {"isSufficientlyPowered", u.isSufficientlyPowered},
-                {"cloakRequested", u.cloakRequested},
-                {"cloaked", u.cloaked},
-                {"cloakSuppressedUntil", saveGameTime(u.cloakSuppressedUntil)},
-                {"energyProductionBuffer", saveEnergy(u.energyProductionBuffer)},
-                {"metalProductionBuffer", saveMetal(u.metalProductionBuffer)},
-                {"previousEnergyProductionBuffer", saveEnergy(u.previousEnergyProductionBuffer)},
-                {"previousMetalProductionBuffer", saveMetal(u.previousMetalProductionBuffer)},
-                {"previousEnergyConsumptionBuffer", saveEnergy(u.previousEnergyConsumptionBuffer)},
-                {"previousMetalConsumptionBuffer", saveMetal(u.previousMetalConsumptionBuffer)},
-                {"energyConsumptionBuffer", saveEnergy(u.energyConsumptionBuffer)},
-                {"metalConsumptionBuffer", saveMetal(u.metalConsumptionBuffer)},
-                {"energyRequestBuffer", saveEnergy(u.energyRequestBuffer)},
-                {"metalRequestBuffer", saveMetal(u.metalRequestBuffer)},
-                {"energyDebt", saveEnergy(u.energyDebt)},
-                {"metalDebt", saveMetal(u.metalDebt)},
-                {"buildQueue", buildQueue},
-                {"factoryState", saveFactoryBehaviorState(u.factoryState, ctx)}};
+            return j;
         }
 
         /**
          * Fills a unit that was emplaced with its pieces and a fresh
-         * CobEnvironment. The environment is overwritten first so weapon aim
-         * state can resolve its thread reference against the restored
-         * threads.
+         * CobEnvironment. The load walk reads the field table in declared
+         * order, and the COB environment's row sits before the weapons row,
+         * which is what weapon aim state needs when it resolves its thread
+         * reference against the restored threads.
          */
         void loadUnitStateInto(const json& j, UnitState& u, const LoadContext& ctx)
         {
-            loadCobEnvironmentInto(j.at("cobEnvironment"), *u.cobEnvironment);
-
-            u.unitType = j.at("unitType").get<std::string>();
-            u.position = loadSimVector(j.at("position"));
-            u.previousPosition = loadSimVector(j.at("previousPosition"));
-            u.owner = PlayerId(j.at("owner").get<unsigned int>());
-            u.rotation = loadSimAngle(j.at("rotation"));
-            u.previousRotation = loadSimAngle(j.at("previousRotation"));
-            u.physics = loadUnitPhysicsInfo(j.at("physics"), ctx);
-            u.hitPoints = j.at("hitPoints").get<unsigned int>();
-            u.lifeState = loadLifeState(j.at("lifeState"));
-            u.orders.clear();
-            for (const auto& oj : j.at("orders"))
+            for (const auto& field : unitStateFieldTable())
             {
-                u.orders.push_back(loadUnitOrder(oj, ctx));
+                if (field.load)
+                {
+                    field.load(j.at(field.name), u, ctx);
+                }
             }
-            u.behaviourState = loadUnitBehaviorState(j.at("behaviourState"), ctx);
-            u.navigationState = loadNavigationStateInfo(j.at("navigationState"), ctx);
-            u.buildOrderUnitId = loadOptional(j.at("buildOrderUnitId"), [&](const json& v) { return loadUnitIdRef(v, ctx); });
-            u.inBuildStance = j.at("inBuildStance").get<bool>();
-            u.armStowDueTime = loadOptional(j.at("armStowDueTime"), [](const json& v) { return loadGameTime(v); });
-            u.nanoPointQueriedAt = loadOptional(j.at("nanoPointQueriedAt"), [](const json& v) { return loadGameTime(v); });
-            u.nanoPoint = loadSimVector(j.at("nanoPoint"));
-            u.commandFireShotFired = j.value("commandFireShotFired", false);
-            u.yardOpen = j.at("yardOpen").get<bool>();
-            u.inCollision = j.at("inCollision").get<bool>();
-            const auto& weaponsJson = j.at("weapons");
-            for (std::size_t i = 0; i < u.weapons.size(); ++i)
-            {
-                u.weapons[i] = loadOptional(weaponsJson.at(i), [&](const json& wj) { return loadUnitWeapon(wj, ctx, *u.cobEnvironment); });
-            }
-            u.fireOrders = loadEnum<UnitFireOrders>(j.at("fireOrders"));
-            u.moveOrders = loadEnum<UnitMovementOrders>(j.at("moveOrders"));
-            u.cobBusy = j.at("cobBusy").get<bool>();
-            u.buggerOffActive = j.at("buggerOffActive").get<bool>();
-            u.armored = j.at("armored").get<bool>();
-            u.kills = j.at("kills").get<unsigned int>();
-            u.sfxOccupyState = j.at("sfxOccupyState").get<int>();
-            u.buildTimeCompleted = j.at("buildTimeCompleted").get<unsigned int>();
-            u.nanoframeDecayTime = loadOptional(j.at("nanoframeDecayTime"), loadGameTime);
-            u.nanoframeWorkedOn = j.at("nanoframeWorkedOn").get<bool>();
-            u.nanoframeDecayRemainder = j.at("nanoframeDecayRemainder").get<unsigned int>();
-            u.reclaimProgress = j.at("reclaimProgress").get<unsigned int>();
-            u.selfDestructTime = loadOptional(j.at("selfDestructTime"), loadGameTime);
-            u.paralyzedUntil = loadOptional(j.at("paralyzedUntil"), loadGameTime);
-            u.moveRateBand = j.at("moveRateBand").get<unsigned int>();
-            u.carriedBy = loadOptional(j.at("carriedBy"), [&](const json& v) { return loadUnitIdRef(v, ctx); });
-            u.carriedPiece = j.at("carriedPiece").get<std::string>();
-            u.carriedUnits.clear();
-            for (const auto& cj : j.at("carriedUnits"))
-            {
-                u.carriedUnits.push_back(loadUnitIdRef(cj, ctx));
-            }
-            u.transportScriptTarget = loadOptional(j.at("transportScriptTarget"), [&](const json& v) { return loadUnitIdRef(v, ctx); });
-            u.transportScriptStartedAt = loadGameTime(j.at("transportScriptStartedAt"));
-            u.airWorkOrbit = loadOptional(j.at("airWorkOrbit"), loadAirWorkOrbitState);
-            u.airLoiter = loadOptional(j.at("airLoiter"), loadAirLoiterState);
-            u.slowFacePoint = loadOptional(j.at("slowFacePoint"), loadSimVector);
-            u.activated = j.at("activated").get<bool>();
-            u.isSufficientlyPowered = j.at("isSufficientlyPowered").get<bool>();
-            u.cloakRequested = j.at("cloakRequested").get<bool>();
-            u.cloaked = j.at("cloaked").get<bool>();
-            u.cloakSuppressedUntil = loadGameTime(j.at("cloakSuppressedUntil"));
-            u.energyProductionBuffer = loadEnergy(j.at("energyProductionBuffer"));
-            u.metalProductionBuffer = loadMetal(j.at("metalProductionBuffer"));
-            u.previousEnergyProductionBuffer = loadEnergy(j.at("previousEnergyProductionBuffer"));
-            u.previousMetalProductionBuffer = loadMetal(j.at("previousMetalProductionBuffer"));
-            u.previousEnergyConsumptionBuffer = loadEnergy(j.at("previousEnergyConsumptionBuffer"));
-            u.previousMetalConsumptionBuffer = loadMetal(j.at("previousMetalConsumptionBuffer"));
-            u.energyConsumptionBuffer = loadEnergy(j.at("energyConsumptionBuffer"));
-            u.metalConsumptionBuffer = loadMetal(j.at("metalConsumptionBuffer"));
-            u.energyRequestBuffer = loadEnergy(j.at("energyRequestBuffer"));
-            u.metalRequestBuffer = loadMetal(j.at("metalRequestBuffer"));
-            u.energyDebt = loadEnergy(j.at("energyDebt"));
-            u.metalDebt = loadMetal(j.at("metalDebt"));
-            u.buildQueue.clear();
-            for (const auto& bj : j.at("buildQueue"))
-            {
-                u.buildQueue.emplace_back(bj.at("unitType").get<std::string>(), bj.at("count").get<int>());
-            }
-            u.factoryState = loadFactoryBehaviorState(j.at("factoryState"), ctx);
         }
 
         // ---- projectiles ------------------------------------------------

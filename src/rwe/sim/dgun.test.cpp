@@ -442,7 +442,14 @@ namespace rwe
         weapon.weaponType = "disintegrator";
 
         auto lifeOfShotAt = [&](SimScalar distanceToTarget) {
-            sim.spawnProjectile(us, weapon, SimVector(0_ss, 100_ss, 0_ss), SimVector(0_ss, 0_ss, 1_ss), distanceToTarget, std::nullopt, std::nullopt);
+            sim.spawnProjectile(ProjectileSpawn{
+                .owner = us,
+                .weapon = &weapon,
+                .position = SimVector(0_ss, 100_ss, 0_ss),
+                .direction = SimVector(0_ss, 0_ss, 1_ss),
+                .distanceToTarget = distanceToTarget,
+                .targetUnit = std::nullopt,
+                .attacker = std::nullopt});
             GameTime life(0);
             for (const auto& p : sim.projectiles)
             {

@@ -357,6 +357,9 @@ set(SOURCE_FILES
     src/rwe/game/dump_util.h
     src/rwe/game/save_util.cpp
     src/rwe/game/save_util.h
+    src/rwe/game/SaveJson.h
+    src/rwe/game/UnitStateFieldTable.cpp
+    src/rwe/game/UnitStateFieldTable.h
     src/rwe/game/matrix_util.cpp
     src/rwe/game/matrix_util.h
     src/rwe/geometry/BoundingBox3f.h
@@ -583,6 +586,7 @@ set(SOURCE_FILES
     src/rwe/sim/Projectile.cpp
     src/rwe/sim/Projectile.h
     src/rwe/sim/ProjectileId.h
+    src/rwe/sim/ProjectileSpawn.h
     src/rwe/sim/ProjectilePhysicsType.h
     src/rwe/sim/SimAngle.cpp
     src/rwe/sim/SimAngle.h
@@ -965,6 +969,7 @@ set(TEST_FILES
     src/rwe/sim/waterbuilding.test.cpp
     src/rwe/sim/weaponflight.test.cpp
     src/rwe/sim/weaponfiretick.test.cpp
+    src/rwe/sim/ProjectileSpawn.test.cpp
     src/rwe/setup/TaInstall.test.cpp
     src/rwe/sim/wreckcollision.test.cpp
     src/rwe/sim/wreckage.test.cpp

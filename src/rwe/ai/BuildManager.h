@@ -177,6 +177,25 @@ namespace rwe
          */
         int freeDepositsOnOurSide(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb) const;
 
+        /** Whether a remembered enemy gun covers this ground. See AiTuningProfile::enemyGunRangeFromWeapon. */
+        bool siteUnderEnemyGuns(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& site) const;
+
+        /**
+         * Whether the metal coming in is more than the running jobs can draw:
+         * metalDemand * capacityIncomeRatio below metalIncome. update() counts
+         * how long that stays true before acting on it.
+         */
+        static bool incomeOutrunsSpending(const AiTuningProfile& profile, const AiBlackboard& bb);
+
+        /** The kbot lab's shares, leaned towards what answers the enemy we have seen. See AiTuningProfile::counterEnemyComposition. */
+        struct LabShares
+        {
+            int raider;
+            int rocketKbot;
+            int artilleryKbot;
+        };
+        static LabShares counterShares(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb);
+
         /** The next piece of a laser tower's fortification, and where it goes. */
         struct FortificationPlan
         {
@@ -410,6 +429,21 @@ namespace rwe
          * kept for a moho)? A deposit whose best placement is refused is
          * passed over, rather than settled with a lesser placement beside it.
          */
+        /**
+         * Whether one of our other builders has already been told to build
+         * within `radius` of this site. A build order is invisible on the
+         * map until the frame goes down, so without asking this two builders
+         * plan the same metal patch in the same pass and one of them makes
+         * the walk for nothing. Orders being walked to count, and so does a
+         * frame one of them has been sent back to finish.
+         */
+        bool siteClaimedByAnother(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            UnitId builder,
+            const SimVector& site,
+            SimScalar radius) const;
+
         std::optional<SimVector> chooseMexSite(
             const GameSimulation& sim,
             const std::string& unitType,
@@ -558,7 +592,6 @@ namespace rwe
          * generators, which the extractor rule never covered. Gated by
          * noticeProductionHarassment and measured by productionHarassRadius.
          */
-        bool siteUnderEnemyGuns(const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& site) const;
 
         /**
          * Where extractors of ours were destroyed, by heightmap cell, with
@@ -585,6 +618,14 @@ namespace rwe
          */
         mutable std::vector<Point> metalPatches;
         mutable bool metalPatchesIndexed{false};
+        /**
+         * How long the AI has been unable to spend what it earns, in ticks,
+         * and whether that has gone on long enough to buy more capacity with.
+         * See AiTuningProfile::spendSurplusOnCapacity.
+         */
+        unsigned int capacityShortTicks{0};
+        bool spendingCapacityShort{false};
+
         /** The middle of each deposit, numbered as metalPatchDeposit numbers them. */
         mutable std::vector<SimVector> depositCentres;
 

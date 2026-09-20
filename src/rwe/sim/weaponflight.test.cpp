@@ -280,8 +280,16 @@ namespace rwe
 
             UnitWeapon weapon;
             weapon.weaponType = "corpus";
-            sim.spawnProjectile(
-                shooter, weapon, from, direction, distance, std::nullopt, std::nullopt, std::nullopt, at);
+            sim.spawnProjectile(ProjectileSpawn{
+                .owner = shooter,
+                .weapon = &weapon,
+                .position = from,
+                .direction = direction,
+                .distanceToTarget = distance,
+                .targetUnit = std::nullopt,
+                .attacker = std::nullopt,
+                .inheritedVelocity = std::nullopt,
+                .targetPosition = at});
 
             for (unsigned int ticks = 1; ticks <= 4000u; ++ticks)
             {

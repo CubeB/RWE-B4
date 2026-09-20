@@ -358,4 +358,35 @@ namespace rwe
 
         REQUIRE(sim.getUnitState(solarId).hitPoints == 10u);
     }
+    TEST_CASE("a repairer stops mending a unit that has moved out of its reach", "[repair]")
+    {
+        // Reported from a replay: nanolathe spraying across the map. Reach is
+        // tested before the arm goes up and was never tested again, so a
+        // target that walked away was mended from wherever it had got to.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto player = addWellStockedPlayer(sim);
+        sim.unitDefinitions["solar"] = makeSolarDef();
+
+        auto solarPosition = SimVector(200_ss, 0_ss, 200_ss);
+        auto solarId = addUndamagedUnitOfType(sim, "solar", player, solarPosition, script);
+        sim.getUnitState(solarId).hitPoints = 10;
+
+        auto builderId = addBuilderUnit(sim, player, solarPosition + SimVector(40_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(builderId).orders.push_back(RepairOrder(solarId));
+
+        sim.tick();
+        sim.tick();
+        REQUIRE(sim.getUnitState(solarId).hitPoints == 11u);
+
+        // Out of reach, as a damaged unit ordered home would be.
+        sim.getUnitState(solarId).position = solarPosition + SimVector(1200_ss, 0_ss, 0_ss);
+        auto before = sim.getUnitState(solarId).hitPoints;
+        for (int i = 0; i < 20; ++i)
+        {
+            sim.tick();
+        }
+        CHECK(sim.getUnitState(solarId).hitPoints == before);
+        CHECK_FALSE(std::holds_alternative<UnitBehaviorStateBuilding>(sim.getUnitState(builderId).behaviourState));
+    }
 }

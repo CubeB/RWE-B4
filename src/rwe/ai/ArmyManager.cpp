@@ -4,6 +4,7 @@
 #include <rwe/ai/AiMapBounds.h>
 #include <rwe/ai/BuilderSafety.h>
 #include <rwe/sim/GameSimulation.h>
+#include <array>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -257,13 +258,23 @@ namespace rwe
         bb.rallyPoint = *bb.baseAnchor + (towards * profile.rallyDistance);
     }
 
-    std::optional<UnitId> ArmyManager::nearestKnownEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly) const
+    bool ArmyManager::hasGivenUpOn(UnitId unit, UnitId target, GameTime now) const
+    {
+        auto it = landTargetGivenUp.find(std::make_pair(unit.value, target.value));
+        return it != landTargetGivenUp.end() && now.value < it->second.value;
+    }
+
+    std::optional<UnitId> ArmyManager::nearestKnownEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly, const std::function<bool(UnitId)>& skip) const
     {
         std::optional<UnitId> best;
         auto bestDistanceSquared = maxDistance * maxDistance;
         for (const auto& [_, enemy] : bb.knownEnemies)
         {
             if (airOnly && !enemy.isAir)
+            {
+                continue;
+            }
+            if (skip && skip(enemy.unitId))
             {
                 continue;
             }
@@ -392,6 +403,67 @@ namespace rwe
          * fire. The weapon is slot 2 -- Weapon3 -- because that is the slot
          * DgunOrder fires (UnitBehaviorService::handleDgunOrder).
          */
+        /** The longest reach of any weapon the definition names; zero for an unarmed one. */
+        SimScalar longestWeaponRange(const GameSimulation& sim, const UnitDefinition& def)
+        {
+            SimScalar best = 0_ss;
+            for (const auto& weaponName : {def.weapon1, def.weapon2, def.weapon3})
+            {
+                auto it = weaponName.empty() ? sim.weaponDefinitions.end() : sim.weaponDefinitions.find(weaponName);
+                if (it != sim.weaponDefinitions.end())
+                {
+                    best = rweMax(best, it->second.maxRange);
+                }
+            }
+            return best;
+        }
+
+        /**
+         * Where a unit that outranges its target should stand: just outside
+         * the target's own reach, straight back from it. Nothing when it is
+         * already there, when the target outranges us, or when the target
+         * cannot move (kiteWithLongerRange).
+         */
+        std::optional<SimVector> kiteBackFrom(
+            const GameSimulation& sim,
+            const AiTuningProfile& profile,
+            const UnitState& unit,
+            const UnitDefinition& def,
+            UnitId targetId)
+        {
+            if (!profile.kiteWithLongerRange)
+            {
+                return std::nullopt;
+            }
+            auto targetRef = sim.tryGetUnitState(targetId);
+            if (!targetRef)
+            {
+                return std::nullopt;
+            }
+            const auto& target = targetRef->get();
+            auto targetDefIt = sim.unitDefinitions.find(target.unitType);
+            if (targetDefIt == sim.unitDefinitions.end() || !targetDefIt->second.isMobile)
+            {
+                return std::nullopt;
+            }
+            auto ours = longestWeaponRange(sim, def);
+            auto theirs = longestWeaponRange(sim, targetDefIt->second);
+            if (ours <= theirs + profile.kiteRangeMargin)
+            {
+                return std::nullopt;
+            }
+            auto offset = unit.position - target.position;
+            offset.y = 0_ss;
+            auto distance = rweSqrt(offset.lengthSquared());
+            auto standOff = theirs + profile.kiteRangeMargin;
+            if (distance >= standOff)
+            {
+                return std::nullopt;
+            }
+            auto away = offset.normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+            return clampInsideVisibleMap(sim.terrain, target.position + (away * standOff), 64_ss);
+        }
+
         std::optional<UnitId> chooseDgunTarget(
             const GameSimulation& sim,
             PlayerId aiOwner,
@@ -419,6 +491,7 @@ namespace rwe
             std::optional<UnitId> best;
             SimVector bestPosition;
             SimScalar bestDistanceSquared = 0_ss;
+            float bestMetal = 0.0f;
             for (const auto& [_, enemy] : bb.knownEnemies)
             {
                 if (!enemy.isArmed || enemy.isAir || !inSightRecently(bb, profile, enemy))
@@ -442,11 +515,33 @@ namespace rwe
                 {
                     continue;
                 }
-                if (!best || distanceSquared < bestDistanceSquared)
+                // The most expensive thing in reach (dgunByValue), the
+                // nearest of two that cost the same; or simply the nearest
+                // with the knob off.
+                auto metal = 0.0f;
+                if (auto defIt = sim.unitDefinitions.find(enemy.unitType); defIt != sim.unitDefinitions.end())
+                {
+                    metal = defIt->second.buildCostMetal.value;
+                }
+                bool better;
+                if (!best)
+                {
+                    better = true;
+                }
+                else if (profile.dgunByValue && metal != bestMetal)
+                {
+                    better = metal > bestMetal;
+                }
+                else
+                {
+                    better = distanceSquared < bestDistanceSquared;
+                }
+                if (better)
                 {
                     best = enemy.unitId;
                     bestPosition = position;
                     bestDistanceSquared = distanceSquared;
+                    bestMetal = metal;
                 }
             }
             if (!best)
@@ -1813,9 +1908,144 @@ namespace rwe
             }
             const auto& unit = sim.getUnitState(unitId);
 
-            // Anything within reach gets shot at, whatever the phase.
-            if (auto enemy = nearestKnownEnemy(sim, profile, bb, unit.position, profile.engageRadius))
+            // Hurt: home to be mended, and no fighting on the way
+            // (retreatDamagedUnits). Three things stop this becoming a
+            // crowd of units standing in the base doing nothing, which is
+            // what a replay showed the first version doing: the base being
+            // attacked cancels it outright, a unit waits only
+            // mendWaitSeconds for a mender that may never come, and those
+            // waiting stand spaced around the anchor rather than on it.
+            if (profile.retreatDamagedUnits && bb.baseAnchor)
             {
+                const auto& def = sim.unitDefinitions.at(unit.unitType);
+                auto share = def.maxHitPoints > 0 ? (unit.hitPoints * 100) / def.maxHitPoints : 100u;
+                auto leaveBelow = unit.unitType == bb.sideUnits.raider ? profile.retreatRaiderBelowPercent : profile.retreatLineBelowPercent;
+                auto waiting = bb.mendingUnits.find(unitId.value);
+                auto mending = waiting != bb.mendingUnits.end();
+                if (!mending && static_cast<int>(share) < leaveBelow)
+                {
+                    waiting = bb.mendingUnits.emplace(unitId.value, bb.now).first;
+                    mending = true;
+                }
+                else if (mending && static_cast<int>(share) >= profile.rejoinAbovePercent)
+                {
+                    bb.mendingUnits.erase(waiting);
+                    mending = false;
+                }
+                if (mending)
+                {
+                    // Waited long enough with nobody able to mend it: back to
+                    // the fight. It stays in the table, which is what stops
+                    // it being sent home again on the very next pass -- the
+                    // entry is cleared when it is healed, above.
+                    auto waitTicks = static_cast<unsigned int>(std::max(0, profile.mendWaitSeconds)) * SimTicksPerSecond;
+                    if (bb.now.value > waiting->second.value + waitTicks)
+                    {
+                        mending = false;
+                    }
+                }
+                // The base comes first: an intruder is answered by whatever
+                // is standing there, hurt or not.
+                const bool baseAttacked = intruder.has_value() || !bb.enemiesNearBase.empty();
+                if (mending && !baseAttacked)
+                {
+                    // One of eight standing places around the anchor, by id,
+                    // so a dozen hurt units do not pile onto one spot.
+                    static const std::array<std::pair<float, float>, 8> Spots{{{1.0f, 0.0f}, {0.7f, 0.7f}, {0.0f, 1.0f}, {-0.7f, 0.7f}, {-1.0f, 0.0f}, {-0.7f, -0.7f}, {0.0f, -1.0f}, {0.7f, -0.7f}}};
+                    // Unit ids are handed out in steps, so id % 8 would put
+                    // every unit on the same spot; spread them by a hash of
+                    // the id instead.
+                    const auto& spot = Spots[((unitId.value * 2654435761u) >> 29) % Spots.size()];
+                    auto stand = clampInsideVisibleMap(
+                        sim.terrain,
+                        *bb.baseAnchor + SimVector(profile.mendStandRadius * SimScalar(spot.first), 0_ss, profile.mendStandRadius * SimScalar(spot.second)),
+                        64_ss);
+                    if (unit.position.distanceSquared(stand) > (profile.mendHavenRadius * profile.mendHavenRadius) && !isMovingTo(unit, stand))
+                    {
+                        outCommands.push_back(moveCommand(unitId, stand));
+                    }
+                    continue;
+                }
+            }
+
+            // Is this one getting hurt? If nothing anything of ours has
+            // thrown at the target in stalledAttackSeconds has moved its hit
+            // points, the shots are not arriving -- it is up a slope, or
+            // behind something -- and standing here firing will not change
+            // that. The unit drops the target, ignores it for
+            // stalledAttackForgetSeconds and takes the next one; the ground
+            // it is standing on is what was wrong, so somebody else's shots
+            // from somewhere else are left alone.
+            //
+            // The order has to be taken off it as well as the target
+            // forgotten: with no other enemy in reach the rules below only
+            // move a unit whose queue is empty, and a unit still holding the
+            // attack would go on firing for the rest of the game. A move to
+            // where it already stands is the cheapest way to say stop.
+            // Anything within reach gets shot at, whatever the phase.
+            if (auto enemy = nearestKnownEnemy(sim, profile, bb, unit.position, profile.engageRadius, false, [&](UnitId candidate) { return hasGivenUpOn(unitId, candidate, bb.now); }))
+            {
+                // Is it getting hurt? The question is asked of the target we
+                // are about to order this unit at rather than of the order it
+                // is holding, because the simulation throws an attack order
+                // away the moment the target goes out of sight and the AI
+                // hands it straight back -- so a unit stuck on something it
+                // cannot hurt often has an empty queue and a new order every
+                // pass, which is the loop itself rather than a way out of it.
+                if (profile.answerStalledAttacks && profile.stalledAttackSeconds > 0)
+                {
+                    auto targetRef = sim.tryGetUnitState(*enemy);
+                    // Only while it is close enough to be firing: a unit
+                    // still walking there is not being stopped by anything,
+                    // and a clock that runs during the walk gives up on
+                    // every target in the game.
+                    auto reach = longestWeaponRange(sim, sim.unitDefinitions.at(unit.unitType));
+                    auto key = std::make_pair(unitId.value, enemy->value);
+                    if (targetRef && targetRef->get().isAlive()
+                        && reach > 0_ss && flatDistance(unit.position, targetRef->get().position) <= reach)
+                    {
+                        auto& progress = landTargetProgress[key];
+                        if (progress.since.value == 0 || targetRef->get().hitPoints != progress.hitPoints)
+                        {
+                            progress.hitPoints = targetRef->get().hitPoints;
+                            progress.since = bb.now;
+                        }
+                        else if (bb.now.value - progress.since.value > static_cast<unsigned int>(profile.stalledAttackSeconds) * SimTicksPerSecond)
+                        {
+                            // Nothing of ours has moved its hit points in all
+                            // that time, so this unit stops trying and leaves
+                            // it alone for stalledAttackForgetSeconds. The
+                            // order has to come off as well as the target be
+                            // forgotten: the rules below only move a unit
+                            // whose queue is empty, so one still holding the
+                            // attack would go on firing. A move to where it
+                            // already stands is the cheapest way to say stop.
+                            landTargetGivenUp[key] =
+                                GameTime(bb.now.value + (static_cast<unsigned int>(std::max(0, profile.stalledAttackForgetSeconds)) * SimTicksPerSecond));
+                            landTargetProgress.erase(key);
+                            LOG_INFO << "AI army: unit " << unitId.value << " gives up on " << targetRef->get().unitType
+                                     << " " << enemy->value << ", nothing it fired from here moved its hit points";
+                            outCommands.push_back(moveCommand(unitId, unit.position));
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        // Out of reach: the attempt has not begun.
+                        landTargetProgress.erase(key);
+                    }
+                }
+
+                // Outranging it: stand back where it cannot answer, and
+                // shoot from there next pass (kiteWithLongerRange).
+                if (auto standOff = kiteBackFrom(sim, profile, unit, sim.unitDefinitions.at(unit.unitType), *enemy))
+                {
+                    if (!isMovingTo(unit, *standOff))
+                    {
+                        outCommands.push_back(moveCommand(unitId, *standOff));
+                    }
+                    continue;
+                }
                 if (!isAttackingUnit(unit, *enemy))
                 {
                     outCommands.push_back(attackCommand(unitId, *enemy));
