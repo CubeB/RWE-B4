@@ -11,3 +11,7 @@ crash.txt
 
 # Screenshots taken while testing; they belong in the scratchpad, not the repo.
 /*.png
+# Scratch build trees; the CI matrix and the documented build commands
+# make their own.
+/build/
+build/

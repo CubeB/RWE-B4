@@ -1,10 +1,55 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
+#include <rwe/game/SaveJson.h>
 #include <rwe/sim/GameSimulation.h>
 
 namespace rwe
 {
+    /**
+     * Per-type save and load helpers for UnitState's members.
+     *
+     * The field table (UnitStateFieldTable) drives the unit's hash, save and
+     * dump walks and needs to reach into these from three translation units,
+     * so they are declared here rather than kept file-private; their
+     * definitions are in save_util.cpp, just below the anonymous namespace.
+     *
+     * The simpler members need no helper of their own: the table generates
+     * their steps straight from the member pointer.
+     */
+    nlohmann::json saveUnitMesh(const UnitMesh& m);
+
+    nlohmann::json saveCobEnvironment(const CobEnvironment& env);
+    void loadCobEnvironmentInto(const nlohmann::json& j, CobEnvironment& env);
+
+    nlohmann::json saveUnitWeapon(const UnitWeapon& w, const SaveContext& ctx, const CobEnvironment& env);
+    UnitWeapon loadUnitWeapon(const nlohmann::json& j, const LoadContext& ctx, const CobEnvironment& env);
+
+    nlohmann::json saveUnitOrder(const UnitOrder& o, const SaveContext& ctx);
+    UnitOrder loadUnitOrder(const nlohmann::json& j, const LoadContext& ctx);
+
+    nlohmann::json saveUnitBehaviorState(const UnitBehaviorState& s, const SaveContext& ctx);
+    UnitBehaviorState loadUnitBehaviorState(const nlohmann::json& j, const LoadContext& ctx);
+
+    nlohmann::json saveFactoryBehaviorState(const FactoryBehaviorState& s, const SaveContext& ctx);
+    FactoryBehaviorState loadFactoryBehaviorState(const nlohmann::json& j, const LoadContext& ctx);
+
+    nlohmann::json saveNavigationStateInfo(const NavigationStateInfo& i, const SaveContext& ctx);
+    NavigationStateInfo loadNavigationStateInfo(const nlohmann::json& j, const LoadContext& ctx);
+
+    nlohmann::json saveUnitPhysicsInfo(const UnitPhysicsInfo& p, const SaveContext& ctx);
+    UnitPhysicsInfo loadUnitPhysicsInfo(const nlohmann::json& j, const LoadContext& ctx);
+
+    nlohmann::json saveLifeState(const UnitState::LifeState& s);
+    UnitState::LifeState loadLifeState(const nlohmann::json& j);
+
+    nlohmann::json saveAirWorkOrbitState(const UnitState::AirWorkOrbitState& s);
+    UnitState::AirWorkOrbitState loadAirWorkOrbitState(const nlohmann::json& j);
+
+    nlohmann::json saveAirLoiterState(const UnitState::AirLoiterState& s);
+    UnitState::AirLoiterState loadAirLoiterState(const nlohmann::json& j);
+
+
     /**
      * Serializes the mutable state of a simulation to json, and restores it
      * into a freshly built simulation for the same map.
