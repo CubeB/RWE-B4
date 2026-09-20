@@ -653,12 +653,13 @@ namespace rwe
         }
     }
 
-    bool UnitState::addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal)
+    bool UnitState::addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal, ResourceDebtGate gate)
     {
         addEnergyDelta(apparentEnergy);
         addMetalDelta(apparentMetal);
 
-        if (inResourceDebt())
+        auto refused = gate == ResourceDebtGate::EnergyOnly ? inEnergyDebt() : inResourceDebt();
+        if (refused)
         {
             return false;
         }
@@ -677,6 +678,11 @@ namespace rwe
     bool UnitState::inResourceDebt() const
     {
         return energyDebt > Energy(0) || metalDebt > Metal(0);
+    }
+
+    bool UnitState::inEnergyDebt() const
+    {
+        return energyDebt > Energy(0);
     }
 
     void UnitState::settleResources(float energyRequestFraction, float energyDebtFraction, float metalRequestFraction, float metalDebtFraction)

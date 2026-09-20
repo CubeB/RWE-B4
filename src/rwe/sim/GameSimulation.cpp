@@ -3127,12 +3127,12 @@ namespace rwe
         return WinStatusDraw();
     }
 
-    bool GameSimulation::addResourceDelta(const UnitId& unitId, const Energy& energy, const Metal& metal)
+    bool GameSimulation::addResourceDelta(const UnitId& unitId, const Energy& energy, const Metal& metal, ResourceDebtGate gate)
     {
-        return addResourceDelta(unitId, energy, metal, energy, metal);
+        return addResourceDelta(unitId, energy, metal, energy, metal, gate);
     }
 
-    bool GameSimulation::addResourceDelta(const UnitId& unitId, const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal)
+    bool GameSimulation::addResourceDelta(const UnitId& unitId, const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal, ResourceDebtGate gate)
     {
         auto& unit = getUnitState(unitId);
         auto& player = getPlayer(unit.owner);
@@ -3156,7 +3156,7 @@ namespace rwe
             player.metalProductionBuffer += apparentMetal;
         }
 
-        return unit.addResourceDelta(apparentEnergy, apparentMetal, actualEnergy, actualMetal);
+        return unit.addResourceDelta(apparentEnergy, apparentMetal, actualEnergy, actualMetal, gate);
     }
 
     bool GameSimulation::addEnergyRequest(const UnitId& unitId, const Energy& amount)
@@ -4661,7 +4661,12 @@ namespace rwe
 
                 if (unit.activated)
                 {
-                    unit.isSufficientlyPowered = addResourceDelta(unitId, -unitDefinition.energyUse, -unitDefinition.metalUse);
+                    // The settle sweep's gate reads the unit's energy owed and
+                    // never its metal (0x4013F9, 0x40164F), unlike the request
+                    // routine a builder goes through (0x4011C0), which tests
+                    // both. So a unit that owes metal but has the energy stays
+                    // powered. TOTALA-EXE.md section 111.
+                    unit.isSufficientlyPowered = addResourceDelta(unitId, -unitDefinition.energyUse, -unitDefinition.metalUse, ResourceDebtGate::EnergyOnly);
 
                     if (unit.isSufficientlyPowered)
                     {

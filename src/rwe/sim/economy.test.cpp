@@ -280,6 +280,30 @@ namespace rwe
             REQUIRE(sim.getPlayer(player).energy.value == Catch::Approx(20.0f));
         }
 
+        SECTION("a unit that owes metal but has the energy stays powered")
+        {
+            // The settle sweep's EnergyUse gate reads the unit's energy owed
+            // and never its metal (0x4013F9, 0x40164F); only the request
+            // routine a builder goes through tests both. TOTALA-EXE.md
+            // section 111.
+            auto def = makeInertDef();
+            def.energyUse = Energy(10.0f);
+            sim.unitDefinitions["drawer"] = def;
+            auto unitId = addUnitOfType(sim, "drawer", player, SimVector(100_ss, 0_ss, 100_ss), script);
+            sim.getUnitState(unitId).activated = true;
+
+            // Plenty of energy to cover the draw, and a metal bill nothing can
+            // pay, so the unit carries metal debt and no energy debt.
+            sim.getPlayer(player).energy = Energy(1000.0f);
+            REQUIRE(sim.addResourceDelta(unitId, Energy(0), Metal(-50.0f)));
+            tickOneSecond(sim);
+            REQUIRE(sim.getUnitState(unitId).metalDebt.value == Catch::Approx(50.0f));
+            REQUIRE(sim.getUnitState(unitId).energyDebt.value == Catch::Approx(0.0f));
+
+            tickOneSecond(sim);
+            REQUIRE(sim.getUnitState(unitId).isSufficientlyPowered);
+        }
+
         SECTION("a metal maker makes nothing on the second its energy is refused")
         {
             auto def = makeInertDef();

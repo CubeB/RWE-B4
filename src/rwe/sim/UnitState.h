@@ -481,6 +481,27 @@ namespace rwe
 
     bool isFlying(const UnitPhysicsInfo& physics);
 
+    /**
+     * Which debt turns a request away. The original has two gates and they do
+     * not agree, so the difference is named here rather than left to a bool at
+     * the call site.
+     */
+    enum class ResourceDebtGate
+    {
+        /**
+         * The request routine a builder goes through (0x4011C0): refused while
+         * the unit owes for either resource.
+         */
+        EnergyOrMetal,
+
+        /**
+         * The settle sweep's own gate for EnergyUse (0x4013F9, 0x40164F),
+         * which reads the unit's energy owed (+0xC8) and never its metal. A
+         * unit that owes metal but has the energy stays powered.
+         */
+        EnergyOnly,
+    };
+
     class UnitState
     {
     public:
@@ -941,10 +962,13 @@ namespace rwe
          * The apparent amounts are what the resource display should show; the
          * actual amounts are what is charged.
          */
-        bool addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal);
+        bool addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal, ResourceDebtGate gate = ResourceDebtGate::EnergyOrMetal);
 
         /** True while this unit owes for work already done, and so may not start more. */
         bool inResourceDebt() const;
+
+        /** True while this unit owes energy, whatever it owes in metal. */
+        bool inEnergyDebt() const;
 
         /**
          * Pays down this second's requests and the older debt at the fractions

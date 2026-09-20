@@ -1247,8 +1247,8 @@ namespace rwe
 
         WinStatus computeWinStatus() const;
 
-        bool addResourceDelta(const UnitId& unitId, const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal);
-        bool addResourceDelta(const UnitId& unitId, const Energy& energy, const Metal& metal);
+        bool addResourceDelta(const UnitId& unitId, const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal, ResourceDebtGate gate = ResourceDebtGate::EnergyOrMetal);
+        bool addResourceDelta(const UnitId& unitId, const Energy& energy, const Metal& metal, ResourceDebtGate gate = ResourceDebtGate::EnergyOrMetal);
 
         /**
          * The single-resource request, `0x401180`. A repair asks through this
