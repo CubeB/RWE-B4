@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+See also `@CONTEXT.md` — the project's domain glossary and design-decision record. Keep it in step when introducing or renaming project terms; the `.claude/skills/domain-modeling` skill is the discipline that maintains it.
+
 ## Project Overview
 
 Robot War Engine (RWE) is an open-source real-time strategy game engine with high compatibility for Total Annihilation data files. It consists of a C++20 core engine and a TypeScript/Electron launcher application.
