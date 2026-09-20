@@ -120,6 +120,18 @@ namespace rwe
          * shells at three times that. Reading the weapon is what makes a
          * defence of ours stand where theirs cannot reach it.
          */
+        /**
+         * A unit that outranges what it is shooting at by kiteRangeMargin
+         * steps back to just outside the enemy's own reach rather than
+         * closing on it: a Hammer against a Peewee, a Slasher against a
+         * Flash. Only against something that can move -- backing away from a
+         * tower is walking away from the job -- and only while the enemy is
+         * near enough to shoot us, so a unit already standing off simply
+         * fires.
+         */
+        bool kiteWithLongerRange{true};
+        SimScalar kiteRangeMargin{40_ss};
+
         bool enemyGunRangeFromWeapon{true};
         SimScalar enemyGunRangeMargin{32_ss};
 

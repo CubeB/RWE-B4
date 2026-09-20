@@ -6486,4 +6486,67 @@ namespace rwe
             CHECK(refused(SimVector(500_ss, 0_ss, 0_ss)));
         }
     }
+    TEST_CASE("a unit that outranges what it faces stands where it cannot be answered", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        // Ours reaches 400, theirs the test laser's 200.
+        WeaponDefinition longRocket{};
+        longRocket.maxRange = 400_ss;
+        sim.weaponDefinitions["ROCKET"] = longRocket;
+        sim.unitDefinitions["ARMROCK"] = sim.unitDefinitions["ARMPW"];
+        sim.unitDefinitions["ARMROCK"].weapon1 = "ROCKET";
+        addUnit(sim, "ARMCOM", ai, SimVector(-400_ss, 0_ss, -400_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-300_ss, 0_ss, -300_ss), script);
+        auto oursId = addUnit(sim, "ARMROCK", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+
+        SECTION("inside their reach, it backs off instead of closing")
+        {
+            addUnit(sim, "ARMPW", human, SimVector(0_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            auto moves = ordersFor<MoveOrder>(commands, oursId);
+            REQUIRE_FALSE(moves.empty());
+            CHECK(moves.front().destination.x >= 240_ss);
+            CHECK(ordersFor<AttackOrder>(commands, oursId).empty());
+        }
+
+        SECTION("already standing off, it shoots")
+        {
+            addUnit(sim, "ARMPW", human, SimVector(-200_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            CHECK_FALSE(ordersFor<AttackOrder>(commands, oursId).empty());
+        }
+
+        SECTION("a tower of theirs is not backed away from")
+        {
+            addUnit(sim, "ARMLLT", human, SimVector(0_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            CHECK(ordersFor<MoveOrder>(commands, oursId).empty());
+            CHECK_FALSE(ordersFor<AttackOrder>(commands, oursId).empty());
+        }
+
+        SECTION("switched off, it closes as before")
+        {
+            profile.kiteWithLongerRange = false;
+            addUnit(sim, "ARMPW", human, SimVector(0_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            CHECK(ordersFor<MoveOrder>(commands, oursId).empty());
+            CHECK_FALSE(ordersFor<AttackOrder>(commands, oursId).empty());
+        }
+    }
 }

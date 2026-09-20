@@ -392,6 +392,67 @@ namespace rwe
          * fire. The weapon is slot 2 -- Weapon3 -- because that is the slot
          * DgunOrder fires (UnitBehaviorService::handleDgunOrder).
          */
+        /** The longest reach of any weapon the definition names; zero for an unarmed one. */
+        SimScalar longestWeaponRange(const GameSimulation& sim, const UnitDefinition& def)
+        {
+            SimScalar best = 0_ss;
+            for (const auto& weaponName : {def.weapon1, def.weapon2, def.weapon3})
+            {
+                auto it = weaponName.empty() ? sim.weaponDefinitions.end() : sim.weaponDefinitions.find(weaponName);
+                if (it != sim.weaponDefinitions.end())
+                {
+                    best = rweMax(best, it->second.maxRange);
+                }
+            }
+            return best;
+        }
+
+        /**
+         * Where a unit that outranges its target should stand: just outside
+         * the target's own reach, straight back from it. Nothing when it is
+         * already there, when the target outranges us, or when the target
+         * cannot move (kiteWithLongerRange).
+         */
+        std::optional<SimVector> kiteBackFrom(
+            const GameSimulation& sim,
+            const AiTuningProfile& profile,
+            const UnitState& unit,
+            const UnitDefinition& def,
+            UnitId targetId)
+        {
+            if (!profile.kiteWithLongerRange)
+            {
+                return std::nullopt;
+            }
+            auto targetRef = sim.tryGetUnitState(targetId);
+            if (!targetRef)
+            {
+                return std::nullopt;
+            }
+            const auto& target = targetRef->get();
+            auto targetDefIt = sim.unitDefinitions.find(target.unitType);
+            if (targetDefIt == sim.unitDefinitions.end() || !targetDefIt->second.isMobile)
+            {
+                return std::nullopt;
+            }
+            auto ours = longestWeaponRange(sim, def);
+            auto theirs = longestWeaponRange(sim, targetDefIt->second);
+            if (ours <= theirs + profile.kiteRangeMargin)
+            {
+                return std::nullopt;
+            }
+            auto offset = unit.position - target.position;
+            offset.y = 0_ss;
+            auto distance = rweSqrt(offset.lengthSquared());
+            auto standOff = theirs + profile.kiteRangeMargin;
+            if (distance >= standOff)
+            {
+                return std::nullopt;
+            }
+            auto away = offset.normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+            return clampInsideVisibleMap(sim.terrain, target.position + (away * standOff), 64_ss);
+        }
+
         std::optional<UnitId> chooseDgunTarget(
             const GameSimulation& sim,
             PlayerId aiOwner,
@@ -1868,6 +1929,16 @@ namespace rwe
             // Anything within reach gets shot at, whatever the phase.
             if (auto enemy = nearestKnownEnemy(sim, profile, bb, unit.position, profile.engageRadius))
             {
+                // Outranging it: stand back where it cannot answer, and
+                // shoot from there next pass (kiteWithLongerRange).
+                if (auto standOff = kiteBackFrom(sim, profile, unit, sim.unitDefinitions.at(unit.unitType), *enemy))
+                {
+                    if (!isMovingTo(unit, *standOff))
+                    {
+                        outCommands.push_back(moveCommand(unitId, *standOff));
+                    }
+                    continue;
+                }
                 if (!isAttackingUnit(unit, *enemy))
                 {
                     outCommands.push_back(attackCommand(unitId, *enemy));
