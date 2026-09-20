@@ -25,6 +25,7 @@
 #include <rwe/sim/PlayerId.h>
 #include <rwe/sim/Projectile.h>
 #include <rwe/sim/ProjectileId.h>
+#include <rwe/sim/ResourceSettler.h>
 #include <rwe/sim/SimAxis.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitId.h>
@@ -73,32 +74,6 @@ namespace rwe
      * differs between implementations, which would desync a network game.
      */
     std::vector<int> dealStartPositions(const std::vector<int>& startPositions, StartLocationMode mode, std::minstd_rand& rng);
-
-    /** What one second's settle decided for one resource. */
-    struct ResourceSettlement
-    {
-        /** The share of this second's requests that could be paid, 0 to 1. */
-        float requestFraction;
-        /** The share of the debt carried in from earlier seconds that could be paid, 0 to 1. */
-        float debtFraction;
-        /** What is left in the stockpile once both have been paid. */
-        float remaining;
-        /** True when either share fell short of the whole. */
-        bool stalled;
-    };
-
-    /**
-     * Divides a second's supply between what is already owed and what has been
-     * asked for since. Debt is paid first and in preference: if it cannot be
-     * paid in full then nothing new gets anything at all this second. Whatever
-     * fraction comes back is the same for every consumer of that resource, so a
-     * player who can afford two thirds of its outgoings has every builder,
-     * every metal maker and every cloak working at two thirds rather than a
-     * lucky two thirds of them working and the rest stopped.
-     *
-     * This is TotalA.exe 0x401A4D, run once for energy and once for metal.
-     */
-    ResourceSettlement settleResourcePool(float supply, float debt, float requested);
 
     enum class GamePlayerStatus
     {

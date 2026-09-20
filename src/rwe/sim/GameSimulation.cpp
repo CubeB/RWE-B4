@@ -74,46 +74,6 @@ namespace rwe
         }
     }
 
-    ResourceSettlement settleResourcePool(float supply, float debt, float requested)
-    {
-        // The original never reaches here with a negative supply, because the
-        // stockpile it feeds in is the previous second's remainder and that is
-        // floored at zero. Say so explicitly rather than divide by a debt of
-        // nothing on the way to finding out.
-        if (supply < 0.0f)
-        {
-            supply = 0.0f;
-        }
-
-        ResourceSettlement result{};
-
-        float afterDebt;
-        if (debt <= supply)
-        {
-            result.debtFraction = 1.0f;
-            afterDebt = supply - debt;
-        }
-        else
-        {
-            result.debtFraction = supply / debt;
-            afterDebt = 0.0f;
-        }
-
-        if (requested <= afterDebt)
-        {
-            result.requestFraction = 1.0f;
-            result.remaining = afterDebt - requested;
-        }
-        else
-        {
-            result.requestFraction = afterDebt / requested;
-            result.remaining = 0.0f;
-        }
-
-        result.stalled = result.debtFraction < 1.0f || result.requestFraction < 1.0f;
-        return result;
-    }
-
     bool GamePlayerInfo::addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal)
     {
         recordDesire(apparentEnergy);
@@ -4727,6 +4687,10 @@ namespace rwe
                 // Brutal computer players get a little extra for every unit of income.
                 auto bonus = resourceBonusFor(PlayerId(i));
 
+                // Pool the player's own block with every unit it owns, in that
+                // order, which is the order the original adds them up in. The
+                // sum sizes the fractions; each unit rolls its own debt against
+                // them afterwards.
                 auto metalDebt = player.metalDebt;
                 auto energyDebt = player.energyDebt;
                 auto metalRequested = player.metalRequestBuffer;
@@ -4744,40 +4708,44 @@ namespace rwe
                     energyRequested += unit.energyRequestBuffer;
                 }
 
-                player.metalProductionBuffer = Metal(player.metalProductionBuffer.value * bonus);
-                player.energyProductionBuffer = Energy(player.energyProductionBuffer.value * bonus);
+                ResourceAccount metalAccount{
+                    player.metal.value,
+                    player.metalProductionBuffer.value,
+                    player.metalProduced.value,
+                    player.metalExcess.value,
+                    player.maxMetal.value,
+                    player.metalDebt.value,
+                    player.metalRequestBuffer.value,
+                    metalDebt.value,
+                    metalRequested.value,
+                };
+                ResourceAccount energyAccount{
+                    player.energy.value,
+                    player.energyProductionBuffer.value,
+                    player.energyProduced.value,
+                    player.energyExcess.value,
+                    player.maxEnergy.value,
+                    player.energyDebt.value,
+                    player.energyRequestBuffer.value,
+                    energyDebt.value,
+                    energyRequested.value,
+                };
 
-                // The chart's "produced" columns are the income itself, counted
-                // once a second as it arrives and after the difficulty bonus,
-                // which is the figure the player has actually had to spend.
-                player.metalProduced += player.metalProductionBuffer;
-                player.energyProduced += player.energyProductionBuffer;
+                auto metalSettlement = settleResourceAccount(metalAccount, bonus);
+                auto energySettlement = settleResourceAccount(energyAccount, bonus);
 
-                auto metalSupply = player.metal + player.metalProductionBuffer;
-                auto energySupply = player.energy + player.energyProductionBuffer;
-
-                auto metalSettlement = settleResourcePool(metalSupply.value, metalDebt.value, metalRequested.value);
-                auto energySettlement = settleResourcePool(energySupply.value, energyDebt.value, energyRequested.value);
-
-                player.metal = Metal(metalSettlement.remaining);
-                player.energy = Energy(energySettlement.remaining);
+                player.metal = Metal(metalSettlement.stockpile);
+                player.energy = Energy(energySettlement.stockpile);
                 player.metalStalled = metalSettlement.stalled;
                 player.energyStalled = energySettlement.stalled;
 
-                // And "excess" is what the cap takes off the top here. A player
-                // whose storage is full is throwing its whole income away, and
-                // the chart is where that shows.
-                if (player.metal > player.maxMetal)
-                {
-                    player.metalExcess += player.metal - player.maxMetal;
-                    player.metal = player.maxMetal;
-                }
-
-                if (player.energy > player.maxEnergy)
-                {
-                    player.energyExcess += player.energy - player.maxEnergy;
-                    player.energy = player.maxEnergy;
-                }
+                // The chart's "produced" and "excess" columns: income counted
+                // as it arrives and after the difficulty bonus, and what the
+                // cap threw away at the end of the second.
+                player.metalProduced = Metal(metalSettlement.lifetimeProduced);
+                player.energyProduced = Energy(energySettlement.lifetimeProduced);
+                player.metalExcess = Metal(metalSettlement.lifetimeExcess);
+                player.energyExcess = Energy(energySettlement.lifetimeExcess);
 
                 for (auto& entry : units)
                 {
@@ -4793,13 +4761,15 @@ namespace rwe
                         metalSettlement.debtFraction);
                 }
 
-                player.metalDebt = Metal(player.metalRequestBuffer.value * (1.0f - metalSettlement.requestFraction) + player.metalDebt.value * (1.0f - metalSettlement.debtFraction));
-                player.energyDebt = Energy(player.energyRequestBuffer.value * (1.0f - energySettlement.requestFraction) + player.energyDebt.value * (1.0f - energySettlement.debtFraction));
+                player.metalDebt = Metal(metalSettlement.debt);
+                player.energyDebt = Energy(energySettlement.debt);
                 player.metalRequestBuffer = Metal(0);
                 player.energyRequestBuffer = Energy(0);
 
-                player.previousMetalProductionBuffer = player.metalProductionBuffer;
-                player.previousEnergyProductionBuffer = player.energyProductionBuffer;
+                // The display copies are this second's income after the
+                // handicap, which is the figure the chart was given.
+                player.previousMetalProductionBuffer = Metal(metalSettlement.produced);
+                player.previousEnergyProductionBuffer = Energy(energySettlement.produced);
                 player.metalProductionBuffer = Metal(0);
                 player.energyProductionBuffer = Energy(0);
 
