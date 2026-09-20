@@ -583,6 +583,7 @@ set(SOURCE_FILES
     src/rwe/sim/Projectile.cpp
     src/rwe/sim/Projectile.h
     src/rwe/sim/ProjectileId.h
+    src/rwe/sim/ProjectileSpawn.h
     src/rwe/sim/ProjectilePhysicsType.h
     src/rwe/sim/SimAngle.cpp
     src/rwe/sim/SimAngle.h
@@ -965,6 +966,7 @@ set(TEST_FILES
     src/rwe/sim/waterbuilding.test.cpp
     src/rwe/sim/weaponflight.test.cpp
     src/rwe/sim/weaponfiretick.test.cpp
+    src/rwe/sim/ProjectileSpawn.test.cpp
     src/rwe/setup/TaInstall.test.cpp
     src/rwe/sim/wreckcollision.test.cpp
     src/rwe/sim/wreckage.test.cpp

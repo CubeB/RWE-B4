@@ -166,7 +166,16 @@ namespace rwe
             UnitWeapon weapon;
             weapon.weaponType = weaponType;
             auto toTarget = at - from;
-            sim.spawnProjectile(PlayerId(0), weapon, from, toTarget.normalized(), toTarget.length(), std::nullopt, std::nullopt, std::nullopt, at);
+            sim.spawnProjectile(ProjectileSpawn{
+                .owner = PlayerId(0),
+                .weapon = &weapon,
+                .position = from,
+                .direction = toTarget.normalized(),
+                .distanceToTarget = toTarget.length(),
+                .targetUnit = std::nullopt,
+                .attacker = std::nullopt,
+                .inheritedVelocity = std::nullopt,
+                .targetPosition = at});
 
             Flight f;
             f.peakHeight = from.y;
@@ -336,7 +345,16 @@ namespace rwe
         auto from = SimVector(0_ss, 0_ss, 0_ss);
         auto at = SimVector(6000_ss, 0_ss, 0_ss);
         auto toTarget = at - from;
-        sim.spawnProjectile(PlayerId(0), weapon, from, toTarget.normalized(), toTarget.length(), std::nullopt, std::nullopt, std::nullopt, at);
+        sim.spawnProjectile(ProjectileSpawn{
+            .owner = PlayerId(0),
+            .weapon = &weapon,
+            .position = from,
+            .direction = toTarget.normalized(),
+            .distanceToTarget = toTarget.length(),
+            .targetUnit = std::nullopt,
+            .attacker = std::nullopt,
+            .inheritedVelocity = std::nullopt,
+            .targetPosition = at});
 
         std::vector<SimVector> velocities;
         for (int t = 0; t < 400; ++t)

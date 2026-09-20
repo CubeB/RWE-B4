@@ -10,6 +10,7 @@
 #include <rwe/sim/sim_prof.h>
 #include <rwe/cob/cob_util.h>
 #include <rwe/sim/cob.h>
+#include <rwe/sim/ProjectileSpawn.h>
 #include <rwe/sim/movement.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/match.h>
@@ -1411,7 +1412,18 @@ namespace rwe
         auto targetUnitOption = targetUnit == nullptr ? std::optional<UnitId>() : std::make_optional(*targetUnit);
         auto targetProjectile = std::get_if<ProjectileId>(&attackInfo->target);
         auto targetProjectileOption = targetProjectile == nullptr ? std::optional<ProjectileId>() : std::make_optional(*targetProjectile);
-        sim->spawnProjectile(unit.owner, *weapon, firingPoint, direction, (fireInfo->targetPosition - firingPoint).length(), targetUnitOption, id, inheritedVelocity, fireInfo->targetPosition, targetProjectileOption);
+        sim->spawnProjectile(ProjectileSpawn{
+            .owner = unit.owner,
+            .weapon = &*weapon,
+            .position = firingPoint,
+            .direction = direction,
+            .distanceToTarget = (fireInfo->targetPosition - firingPoint).length(),
+            .targetUnit = targetUnitOption,
+            .attacker = id,
+            .inheritedVelocity = inheritedVelocity,
+            .targetPosition = fireInfo->targetPosition,
+            .targetProjectile = targetProjectileOption,
+        });
 
         sim->events.push_back(FireWeaponEvent{weapon->weaponType, fireInfo->burstsFired, firingPoint});
 
