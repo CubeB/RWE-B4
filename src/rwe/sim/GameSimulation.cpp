@@ -1167,7 +1167,15 @@ namespace rwe
         if (!explosion.empty())
         {
             auto impactType = unit.position.y < terrain.getSeaLevel() ? ImpactType::Water : ImpactType::Normal;
-            auto projectile = createProjectileFromWeapon(unit.owner, explosion, unit.position, SimVector(0_ss, -1_ss, 0_ss), 0_ss, std::nullopt, std::nullopt);
+            auto projectile = createProjectileFromWeapon(ProjectileSpawn{
+                .owner = unit.owner,
+                .weaponType = explosion,
+                .position = unit.position,
+                .direction = SimVector(0_ss, -1_ss, 0_ss),
+                .distanceToTarget = 0_ss,
+                .targetUnit = std::nullopt,
+                .attacker = std::nullopt,
+            });
             doProjectileImpact(projectile, impactType);
         }
     }
@@ -2890,15 +2898,18 @@ namespace rwe
      */
     static const SimAngle BurnBlowAbortAngle = SimAngle(27000);
 
-    Projectile GameSimulation::createProjectileFromWeapon(
-        PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition, std::optional<ProjectileId> targetProjectile)
+    Projectile GameSimulation::createProjectileFromWeapon(const ProjectileSpawn& spawn)
     {
-        return createProjectileFromWeapon(owner, weapon.weaponType, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity, targetPosition, targetProjectile);
-    }
-
-    Projectile GameSimulation::createProjectileFromWeapon(PlayerId owner, const std::string& weaponType, const SimVector& position, const SimVector& direction, [[maybe_unused]] SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition, std::optional<ProjectileId> targetProjectile)
-    {
+        const auto& weaponType = spawn.weapon ? spawn.weapon->weaponType : spawn.weaponType;
         const auto& weaponDefinition = weaponDefinitions.at(weaponType);
+        const auto& owner = spawn.owner;
+        const auto& position = spawn.position;
+        const auto& direction = spawn.direction;
+        const auto& targetUnit = spawn.targetUnit;
+        const auto& attacker = spawn.attacker;
+        const auto& inheritedVelocity = spawn.inheritedVelocity;
+        const auto& targetPosition = spawn.targetPosition;
+        const auto& targetProjectile = spawn.targetProjectile;
 
         Projectile projectile;
         projectile.weaponType = weaponType;
@@ -3018,9 +3029,9 @@ namespace rwe
         return projectile;
     }
 
-    void GameSimulation::spawnProjectile(PlayerId owner, const UnitWeapon& weapon, const SimVector& position, const SimVector& direction, SimScalar distanceToTarget, std::optional<UnitId> targetUnit, std::optional<UnitId> attacker, std::optional<SimVector> inheritedVelocity, std::optional<SimVector> targetPosition, std::optional<ProjectileId> targetProjectile)
+    void GameSimulation::spawnProjectile(const ProjectileSpawn& spawn)
     {
-        projectiles.emplace(createProjectileFromWeapon(owner, weapon, position, direction, distanceToTarget, targetUnit, attacker, inheritedVelocity, targetPosition, targetProjectile));
+        projectiles.emplace(createProjectileFromWeapon(spawn));
     }
 
     std::vector<int> dealStartPositions(const std::vector<int>& startPositions, StartLocationMode mode, std::minstd_rand& rng)
@@ -3797,7 +3808,15 @@ namespace rwe
             auto impactType = unit.position.y < terrain.getSeaLevel() ? ImpactType::Water : ImpactType::Normal;
             // The explodeAs projectile is environmental: deaths it causes
             // are not credited to anyone (the original unit is already dead).
-            auto projectile = createProjectileFromWeapon(unit.owner, unitDefinition.explodeAs, unit.position, SimVector(0_ss, -1_ss, 0_ss), 0_ss, std::nullopt, std::nullopt);
+            auto projectile = createProjectileFromWeapon(ProjectileSpawn{
+                .owner = unit.owner,
+                .weaponType = unitDefinition.explodeAs,
+                .position = unit.position,
+                .direction = SimVector(0_ss, -1_ss, 0_ss),
+                .distanceToTarget = 0_ss,
+                .targetUnit = std::nullopt,
+                .attacker = std::nullopt,
+            });
             doProjectileImpact(projectile, impactType);
         }
     }
