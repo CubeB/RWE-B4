@@ -4659,6 +4659,17 @@ namespace rwe
         // captureExistingUnit and reclaimTarget for the same change.
         if (!withinBuildReach(unitInfo, targetUnit))
         {
+            // The thing being mended can walk away -- a damaged unit ordered
+            // home, an aircraft taking off. The arm was left deployed when
+            // that happened, because this branch navigates and returns
+            // without touching the state, and the nanolathe is drawn from
+            // the building state: from the camera it sprays across whatever
+            // distance has opened up. Put the arm away and then walk.
+            if (auto building = std::get_if<UnitBehaviorStateBuilding>(&unitInfo.state->behaviourState);
+                building != nullptr && building->targetUnit == targetUnitId)
+            {
+                changeState(*unitInfo.state, UnitBehaviorStateIdle());
+            }
             navigateTo(unitInfo, targetUnitId);
             return false;
         }
