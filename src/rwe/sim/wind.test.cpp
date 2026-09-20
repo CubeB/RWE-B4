@@ -206,14 +206,14 @@ namespace rwe
 
             UnitWeapon weapon;
             weapon.weaponType = "gun";
-            sim.spawnProjectile(
-                us,
-                weapon,
-                SimVector(0_ss, SimScalar(StartHeight), 0_ss),
-                SimVector(1_ss, 0_ss, 0_ss),
-                500_ss,
-                std::nullopt,
-                std::nullopt);
+            sim.spawnProjectile(ProjectileSpawn{
+                .owner = us,
+                .weapon = &weapon,
+                .position = SimVector(0_ss, SimScalar(StartHeight), 0_ss),
+                .direction = SimVector(1_ss, 0_ss, 0_ss),
+                .distanceToTarget = 500_ss,
+                .targetUnit = std::nullopt,
+                .attacker = std::nullopt});
 
             tick(sim, Ticks);
 
