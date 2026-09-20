@@ -338,6 +338,18 @@ namespace rwe
         int retreatRaiderBelowPercent{30};
         int retreatLineBelowPercent{45};
         int rejoinAbovePercent{60};
+        /**
+         * How long a unit will wait at the base to be mended before going
+         * back to the fight hurt. Without this it waits for ever: there is
+         * one mender at a time and it may never reach this unit, and a
+         * replay showed exactly that -- damaged units standing about in the
+         * middle of the base doing nothing. Waiting is also off entirely
+         * while anything armed is inside the base: a hurt unit is worth more
+         * shooting at an intruder than queueing for repair.
+         */
+        int mendWaitSeconds{45};
+        /** Where each waiting unit stands, spaced around the anchor rather than piled on it. */
+        SimScalar mendStandRadius{160_ss};
         /** How near the base counts as home, so a unit standing there is not told to walk again. */
         SimScalar mendHavenRadius{400_ss};
 

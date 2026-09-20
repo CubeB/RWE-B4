@@ -6233,9 +6233,11 @@ namespace rwe
         defineWorld(sim);
         addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
         addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
-        // Ours out at the front, with an enemy in reach of it.
-        auto kbotId = addUnit(sim, "ARMPW", ai, SimVector(600_ss, 0_ss, 0_ss), script);
-        addUnit(sim, "ARMPW", human, SimVector(700_ss, 0_ss, 0_ss), script);
+        // Ours out at the front, with an enemy in reach of it, and the pair
+        // of them well outside the base's own radius -- inside it the base
+        // being attacked is what decides, and that is a separate rule.
+        auto kbotId = addUnit(sim, "ARMPW", ai, SimVector(1400_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMPW", human, SimVector(1500_ss, 0_ss, 0_ss), script);
 
         auto profile = makeDefaultStandardProfile();
         profile.scoutCount = 0;
@@ -6249,7 +6251,7 @@ namespace rwe
             runTicks(sim, controller, 20, commands);
             auto moves = ordersFor<MoveOrder>(commands, kbotId);
             REQUIRE_FALSE(moves.empty());
-            CHECK(moves.front().destination.x < 600_ss);
+            CHECK(moves.front().destination.x < 1400_ss);
             CHECK(ordersFor<AttackOrder>(commands, kbotId).empty());
             CHECK(controller.getBlackboard().mendingUnits.count(kbotId.value) == 1);
         }
@@ -6547,6 +6549,74 @@ namespace rwe
             runTicks(sim, controller, 20, commands);
             CHECK(ordersFor<MoveOrder>(commands, oursId).empty());
             CHECK_FALSE(ordersFor<AttackOrder>(commands, oursId).empty());
+        }
+    }
+    TEST_CASE("a unit waiting to be mended does not stand about for ever", "[ai]")
+    {
+        // From a replay: damaged units gathered in the middle of the base and
+        // did nothing, the base being attacked included.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+        auto hurtId = addUnit(sim, "ARMPW", ai, SimVector(60_ss, 0_ss, 60_ss), script);
+        sim.getUnitState(hurtId).hitPoints = 20;
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+        profile.mendDamagedUnits = false;
+
+        SECTION("an enemy in the base is answered hurt")
+        {
+            auto raiderId = addUnit(sim, "ARMPW", human, SimVector(150_ss, 0_ss, 150_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            auto attacks = ordersFor<AttackOrder>(commands, hurtId);
+            REQUIRE_FALSE(attacks.empty());
+            CHECK(*std::get_if<UnitId>(&attacks.front().target) == raiderId);
+        }
+
+        SECTION("after the wait it goes back to the fight whether mended or not")
+        {
+            // Well outside the base, so it is the wait that decides and not
+            // the base being attacked.
+            addUnit(sim, "ARMPW", human, SimVector(1500_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            REQUIRE(controller.getBlackboard().mendingUnits.count(hurtId.value) == 1);
+            CHECK(ordersFor<MoveOrder>(commands, hurtId).empty());
+
+            // Past the wait: it is offered the ordinary behaviour again,
+            // which here is the wave forming, so it is no longer held at the
+            // base doing nothing.
+            commands.clear();
+            runTicks(sim, controller, profile.mendWaitSeconds * 30 + 60, commands);
+            bool told = !ordersFor<MoveOrder>(commands, hurtId).empty() || !ordersFor<AttackOrder>(commands, hurtId).empty();
+            CHECK(told);
+        }
+
+        SECTION("two of them stand in different places")
+        {
+            auto secondId = addUnit(sim, "ARMPW", ai, SimVector(-60_ss, 0_ss, -60_ss), script);
+            sim.getUnitState(secondId).hitPoints = 20;
+            sim.getUnitState(hurtId).position = SimVector(600_ss, 0_ss, 600_ss);
+            sim.getUnitState(secondId).position = SimVector(-600_ss, 0_ss, -600_ss);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            auto first = ordersFor<MoveOrder>(commands, hurtId);
+            auto second = ordersFor<MoveOrder>(commands, secondId);
+            REQUIRE_FALSE(first.empty());
+            REQUIRE_FALSE(second.empty());
+            bool apart = first.front().destination.x != second.front().destination.x
+                || first.front().destination.z != second.front().destination.z;
+            CHECK(apart);
         }
     }
 }

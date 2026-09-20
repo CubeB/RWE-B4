@@ -527,6 +527,6 @@ namespace rwe
          * so that a unit does not walk home, read as healthy enough at the
          * gate and turn straight round. See AiTuningProfile::retreatDamagedUnits.
          */
-        std::set<unsigned int> mendingUnits;
+        std::map<unsigned int, GameTime> mendingUnits;
     };
 }

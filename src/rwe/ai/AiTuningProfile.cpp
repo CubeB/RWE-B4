@@ -336,6 +336,8 @@ namespace rwe
             || setInt("retreatRaiderBelowPercent", p.retreatRaiderBelowPercent)
             || setInt("retreatLineBelowPercent", p.retreatLineBelowPercent)
             || setInt("rejoinAbovePercent", p.rejoinAbovePercent)
+            || setInt("mendWaitSeconds", p.mendWaitSeconds)
+            || setScalar("mendStandRadius", p.mendStandRadius)
             || setScalar("mendHavenRadius", p.mendHavenRadius)
             || setBool("mendDamagedUnits", p.mendDamagedUnits)
             || setInt("mendBelowPercent", p.mendBelowPercent)

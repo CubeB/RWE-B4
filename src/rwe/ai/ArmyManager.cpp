@@ -4,6 +4,7 @@
 #include <rwe/ai/AiMapBounds.h>
 #include <rwe/ai/BuilderSafety.h>
 #include <rwe/sim/GameSimulation.h>
+#include <array>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -1898,29 +1899,60 @@ namespace rwe
             const auto& unit = sim.getUnitState(unitId);
 
             // Hurt: home to be mended, and no fighting on the way
-            // (retreatDamagedUnits).
+            // (retreatDamagedUnits). Three things stop this becoming a
+            // crowd of units standing in the base doing nothing, which is
+            // what a replay showed the first version doing: the base being
+            // attacked cancels it outright, a unit waits only
+            // mendWaitSeconds for a mender that may never come, and those
+            // waiting stand spaced around the anchor rather than on it.
             if (profile.retreatDamagedUnits && bb.baseAnchor)
             {
                 const auto& def = sim.unitDefinitions.at(unit.unitType);
                 auto share = def.maxHitPoints > 0 ? (unit.hitPoints * 100) / def.maxHitPoints : 100u;
                 auto leaveBelow = unit.unitType == bb.sideUnits.raider ? profile.retreatRaiderBelowPercent : profile.retreatLineBelowPercent;
-                auto mending = bb.mendingUnits.count(unitId.value) != 0;
+                auto waiting = bb.mendingUnits.find(unitId.value);
+                auto mending = waiting != bb.mendingUnits.end();
                 if (!mending && static_cast<int>(share) < leaveBelow)
                 {
-                    bb.mendingUnits.insert(unitId.value);
+                    waiting = bb.mendingUnits.emplace(unitId.value, bb.now).first;
                     mending = true;
                 }
                 else if (mending && static_cast<int>(share) >= profile.rejoinAbovePercent)
                 {
-                    bb.mendingUnits.erase(unitId.value);
+                    bb.mendingUnits.erase(waiting);
                     mending = false;
                 }
                 if (mending)
                 {
-                    if (unit.position.distanceSquared(*bb.baseAnchor) > (profile.mendHavenRadius * profile.mendHavenRadius)
-                        && !isMovingTo(unit, *bb.baseAnchor))
+                    // Waited long enough with nobody able to mend it: back to
+                    // the fight. It stays in the table, which is what stops
+                    // it being sent home again on the very next pass -- the
+                    // entry is cleared when it is healed, above.
+                    auto waitTicks = static_cast<unsigned int>(std::max(0, profile.mendWaitSeconds)) * SimTicksPerSecond;
+                    if (bb.now.value > waiting->second.value + waitTicks)
                     {
-                        outCommands.push_back(moveCommand(unitId, *bb.baseAnchor));
+                        mending = false;
+                    }
+                }
+                // The base comes first: an intruder is answered by whatever
+                // is standing there, hurt or not.
+                const bool baseAttacked = intruder.has_value() || !bb.enemiesNearBase.empty();
+                if (mending && !baseAttacked)
+                {
+                    // One of eight standing places around the anchor, by id,
+                    // so a dozen hurt units do not pile onto one spot.
+                    static const std::array<std::pair<float, float>, 8> Spots{{{1.0f, 0.0f}, {0.7f, 0.7f}, {0.0f, 1.0f}, {-0.7f, 0.7f}, {-1.0f, 0.0f}, {-0.7f, -0.7f}, {0.0f, -1.0f}, {0.7f, -0.7f}}};
+                    // Unit ids are handed out in steps, so id % 8 would put
+                    // every unit on the same spot; spread them by a hash of
+                    // the id instead.
+                    const auto& spot = Spots[((unitId.value * 2654435761u) >> 29) % Spots.size()];
+                    auto stand = clampInsideVisibleMap(
+                        sim.terrain,
+                        *bb.baseAnchor + SimVector(profile.mendStandRadius * SimScalar(spot.first), 0_ss, profile.mendStandRadius * SimScalar(spot.second)),
+                        64_ss);
+                    if (unit.position.distanceSquared(stand) > (profile.mendHavenRadius * profile.mendHavenRadius) && !isMovingTo(unit, stand))
+                    {
+                        outCommands.push_back(moveCommand(unitId, stand));
                     }
                     continue;
                 }
