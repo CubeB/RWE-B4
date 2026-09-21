@@ -2862,9 +2862,9 @@ namespace rwe
                 setFireOrders(unitCommand.unit, c.orders);
             },
             [&](const PlayerUnitCommand::SetMovementOrders& c) {
-                if (auto unit = tryGetUnit(unitCommand.unit))
+                if (tryGetUnit(unitCommand.unit))
                 {
-                    unit->get().moveOrders = c.orders;
+                    simulation.setMoveOrders(unitCommand.unit, c.orders);
                 }
             },
             [&](const PlayerUnitCommand::SetOnOff& c) {
@@ -2881,9 +2881,9 @@ namespace rwe
                 // This only records what the unit is asking for. Whether it
                 // actually cloaks is settled a second at a time by the energy
                 // and by how close the nearest enemy is standing.
-                if (auto unit = tryGetUnit(unitCommand.unit); unit)
+                if (tryGetUnit(unitCommand.unit))
                 {
-                    unit->get().cloakRequested = c.cloaked;
+                    simulation.setCloakRequested(unitCommand.unit, c.cloaked);
                 }
             },
             [&](const PlayerUnitCommand::CancelBuildOrder& c) {

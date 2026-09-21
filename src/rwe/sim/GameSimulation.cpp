@@ -2669,6 +2669,16 @@ namespace rwe
         return unit.getTransform() * pieceTransform * SimVector(0_ss, 0_ss, 0_ss);
     }
 
+    void GameSimulation::setMoveOrders(UnitId unitId, UnitMovementOrders orders)
+    {
+        getUnitState(unitId).moveOrders = orders;
+    }
+
+    void GameSimulation::setCloakRequested(UnitId unitId, bool value)
+    {
+        getUnitState(unitId).cloakRequested = value;
+    }
+
     void GameSimulation::setBuildStance(UnitId unitId, bool value)
     {
         getUnitState(unitId).inBuildStance = value;

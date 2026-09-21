@@ -1194,6 +1194,24 @@ namespace rwe
 
         SimVector getUnitPiecePosition(UnitId unitId, const std::string& pieceName) const;
 
+        /**
+         * Two a scene used to reach in and write for itself.
+         *
+         * Presentation may read the simulation and never write it, which is
+         * the lockstep rule CONTEXT.md states, and these were the places that
+         * did anyway -- straight onto the field, with no step the sim owns.
+         * Both are hashed, so each was a `nanoPoint` waiting to happen: a
+         * write the hash walk knows nothing about, invisible to every test.
+         *
+         * Two more remain in GameScene_debug.cpp (fireOrders and hitPoints,
+         * from the debug spawner). They cannot come through here until
+         * spawnCompletedUnit hands back a UnitId rather than a reference;
+         * issue #116 has the measurement.
+         */
+        void setMoveOrders(UnitId unitId, UnitMovementOrders orders);
+
+        void setCloakRequested(UnitId unitId, bool value);
+
         void setBuildStance(UnitId unitId, bool value);
 
         void setYardOpen(UnitId unitId, bool value);
