@@ -156,10 +156,19 @@ that the original never arrives with one. The oracle never saw it fire, which
 is evidence and not proof. If a negative supply turns out to be reachable,
 that clamp is a divergence and wants a line in `TOTALA-EXE.md` section 88.
 
-- [x] **`BuildManager::update`** 2026-09-21. The 477-line site-search chain
-      inside its priorities loop is `choosePrioritySite` now; `update()` goes
-      1,613 -> 1,164 lines. The file is 28 lines *longer*, which is the honest
-      shape of an extraction. Hash-identical, 17,999 ticks x 4.
+- [x] **`BuildManager::update`** 2026-09-21, two cuts. The 477-line
+      site-search chain inside its priorities loop is `choosePrioritySite`,
+      and the battlefield-reclaim rule is `tryBattlefieldReclaim`.
+      **`update()` goes 1,613 -> 975 lines, down 40%.** The file is 51 lines
+      *longer*, which is the honest shape of an extraction: a struct, two
+      signatures and two call sites are not free. Both hash-identical,
+      17,999 ticks x 4.
+
+      What made each cut safe was measuring the block's free variables first
+      rather than starting and finding out. The site search read twenty outer
+      names and needed a context struct; the reclaim rule read eight and
+      needed nothing. The two blocks are similar sizes and that number is
+      what decided how much work each was.
 - [x] **#116, the half that is a leak** 2026-09-21. `setMoveOrders` and
       `setCloakRequested` join `setBuildStance`. See the correction below.
 - [ ] **#119** -- a perception interface for the AI read side. The largest
