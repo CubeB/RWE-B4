@@ -74,8 +74,8 @@ two short of the last number. The two to read before changing anything are
 50. [The interface colour table: found, and it was never a table of constants](#50-the-interface-colour-table-found-and-it-was-never-a-table-of-constants)
 51. [Which line is darker: the inner - but only where there are two colours](#51-which-line-is-darker-the-inner---but-only-where-there-are-two-colours)
 52. [The unit model draw path](#52-the-unit-model-draw-path)
-53. [There is no lighting. None.](#53-there-is-no-lighting-none)
-54. [The palette tables — real, loaded, and not for models](#54-the-palette-tables--real-loaded-and-not-for-models)
+53. [There is no lighting. None.](#53-there-is-no-lighting-none) — **superseded**
+54. [The palette tables — real, loaded, and not for models](#54-the-palette-tables--real-loaded-and-not-for-models) — **partly superseded**
 55. [Texture lookup and frame selection](#55-texture-lookup-and-frame-selection)
 56. [The quad mapping — decoded from `0x4C7580`](#56-the-quad-mapping--decoded-from-0x4c7580)
 57. [Why ARMSOLAR looks wrong in RWE](#57-why-armsolar-looks-wrong-in-rwe)
@@ -7809,6 +7809,15 @@ TOTALA-EXE.md.
 
 ## 53. There is no lighting. None.
 
+> **Superseded by [TOTALA-EXE-SHADING.md](TOTALA-EXE-SHADING.md).** A second,
+> independent read of `0x459C70` found that this pass had followed the
+> `SHADING=off` path. The original *does* light its models: it computes a
+> shade level **once per vertex** from a smoothed, deliberately un-normalised
+> normal against an un-normalised light vector, then Gouraud-interpolates the
+> integer row across the polygon and indexes `PALETTE.SHD[row * 256 + texel]`.
+> What is below is kept because it records what was checked and how the
+> `SHADING=off` path reads, which is a real path. **Do not implement from it.**
+
 What was checked, so this negative is worth something:
 
 - `0x4584D0` computes screen x,y per vertex and nothing else. No normal is
@@ -7844,6 +7853,12 @@ same texture come out unequal in RWE and equal in TA.
 ---
 
 ## 54. The palette tables — real, loaded, and not for models
+
+> **Partly superseded by [TOTALA-EXE-SHADING.md](TOTALA-EXE-SHADING.md).**
+> The tables are real and loaded, as below. "Not for models" is the part
+> that is wrong: the span filler indexes `PALETTE.SHD[row * 256 + texel]`
+> for every shaded unit polygon. `shdgen.py` in `tools/exe/shading/`
+> regenerates that file byte for byte, which is what pins its layout.
 
 The engine does have palette shading machinery; it just never touches the
 3DO path. Loaded at `0x429340` from `palettes\` via the VFS, allocated per
@@ -7974,7 +7989,7 @@ across the face in the original.
 | # | RWE today | The exe | Verdict |
 |---|---|---|---|
 | 1 | textured quads split into two affine triangles | scanline quad interpolation, seamless | **the ARMSOLAR bug — fix** |
-| 2 | shades buildings with `0.72 + 0.36*(0.5+0.5*dot(N,L))`, `L = norm(-1.3, 1.0, 0.3)` | no lighting whatsoever | fix (or record as deliberate) |
+| 2 | shades buildings with `0.72 + 0.36*(0.5+0.5*dot(N,L))`, `L = norm(-1.3, 1.0, 0.3)` | ~~no lighting whatsoever~~ **wrong, see [TOTALA-EXE-SHADING.md](TOTALA-EXE-SHADING.md)**: a per-vertex level off an un-normalised smoothed normal, Gouraud-interpolated, through `PALETTE.SHD` | fix, to the shading document's model |
 | 3 | draws every primitive including the selection plate | skips primitive 0 whenever a selection primitive is declared | fix — but skip `prims[selprim]`, see above |
 | 4 | textured triangle / n-gon falls through to the flat-colour path with a garbage colour | never drawn at all | fix (stock data has zero of these; mods will) |
 | 5 | `isColored` = whole `+0x1C` dword truthy | bit 0 only | align while touching the parser; agrees on all 3,287 stock faces |

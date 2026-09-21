@@ -19,6 +19,12 @@ face normal, normalises both the normal and the light, and models the table as
 a straight `0.06875 * k`. Section 15 lists the corrections one by one, with the
 numbers each produces on ARMSOLAR.
 
+> **`FINDINGS-VISUALOPTIONS.md` is not in this repository** and never has
+> been; it is cited here and again in section 16.1. Its shade-table
+> arithmetic is restated in full below, so nothing in this document depends
+> on finding it. The nearest checked-in equivalents are `TOTALA-EXE.md`
+> §50-§59 — §53 and §54 of which this document supersedes.
+
 ---
 
 ## 01. Method, and what is VERIFIED versus INFERRED
