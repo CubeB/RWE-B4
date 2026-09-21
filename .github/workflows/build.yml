@@ -388,9 +388,17 @@ jobs:
         run: |
           mkdir build
           pushd build
-          cmake -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
+          cmake -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DRWE_WERROR=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
           make -j 4
           popd
+        shell: msys2 {0}
+      # Debug only, and only here: the section ceiling is a COFF limit and it
+      # is Debug that pays it -- Release folds the template instantiations away
+      # and comes nowhere near. This is also the job whose linker actually
+      # broke over it, so this is the job that guards it.
+      - name: section budget
+        if: matrix.configuration == 'Debug'
+        run: ./tools/section-budget.sh build 75
         shell: msys2 {0}
       - name: test rwe
         working-directory: build

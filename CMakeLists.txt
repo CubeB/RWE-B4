@@ -690,6 +690,21 @@ if(MSVC)
 else()
     target_compile_options(librwe PUBLIC "-Wall" "-Wextra")
 endif()
+
+# Warnings are errors only where the tree has been shown to be clean. It
+# reached zero on MinGW64 gcc 16.2 on 2026-09-21, down from 284; gcc-14,
+# clang-18 and MSVC each warn about their own things and have not had the same
+# pass, so CI turns this on per job rather than the build turning it on for
+# everyone. A compiler upgrade must never break somebody's local build, which
+# is what an unconditional -Werror eventually does.
+option(RWE_WERROR "Treat compiler warnings as errors" OFF)
+if(RWE_WERROR)
+    if(MSVC)
+        target_compile_options(librwe PUBLIC "/WX")
+    else()
+        target_compile_options(librwe PUBLIC "-Werror")
+    endif()
+endif()
 target_include_directories(librwe PUBLIC "src")
 configure_file("src/rwe/config.h.in" "config/rwe/config.h" @ONLY)
 target_include_directories(librwe PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/config")
