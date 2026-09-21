@@ -4,7 +4,18 @@
 #include <rwe/sim/UnitState.h>
 
 namespace rwe
-{
+{
+    std::optional<std::reference_wrapper<const UnitState>>
+        contactStillStanding(const GameSimulation& sim, const KnownEnemy& enemy)
+    {
+        auto unitRef = sim.tryGetUnitState(enemy.unitId);
+        if (!unitRef || unitRef->get().isDead())
+        {
+            return std::nullopt;
+        }
+        return unitRef;
+    }
+
     void PerceptionManager::refresh(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, AiBlackboard& bb) const
     {
         // Forget an enemy only where a player would have seen it go.

@@ -1,4 +1,5 @@
 #include "AirManager.h"
+#include <rwe/ai/PerceptionManager.h>
 #include <algorithm>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitOrder.h>
@@ -122,8 +123,8 @@ namespace rwe
                 {
                     continue;
                 }
-                auto enemyRef = sim.tryGetUnitState(enemy.unitId);
-                if (!enemyRef || enemyRef->get().isDead())
+                auto enemyRef = contactStillStanding(sim, enemy);
+                if (!enemyRef)
                 {
                     continue;
                 }
@@ -153,8 +154,8 @@ namespace rwe
                     {
                         continue;
                     }
-                    auto unitRef = sim.tryGetUnitState(enemy.unitId);
-                    if (!unitRef || unitRef->get().isDead())
+                    auto unitRef = contactStillStanding(sim, enemy);
+                    if (!unitRef)
                     {
                         continue;
                     }
@@ -196,8 +197,8 @@ namespace rwe
                     {
                         continue;
                     }
-                    auto unitRef = sim.tryGetUnitState(enemy.unitId);
-                    if (!unitRef || unitRef->get().isDead())
+                    auto unitRef = contactStillStanding(sim, enemy);
+                    if (!unitRef)
                     {
                         continue;
                     }
@@ -279,8 +280,8 @@ namespace rwe
                     {
                         continue;
                     }
-                    auto enemyRef = sim.tryGetUnitState(enemy.unitId);
-                    if (!enemyRef || enemyRef->get().isDead())
+                    auto enemyRef = contactStillStanding(sim, enemy);
+                    if (!enemyRef)
                     {
                         continue;
                     }
@@ -337,8 +338,8 @@ namespace rwe
                 {
                     continue;
                 }
-                auto enemyRef = sim.tryGetUnitState(enemy.unitId);
-                if (!enemyRef || enemyRef->get().isDead())
+                auto enemyRef = contactStillStanding(sim, enemy);
+                if (!enemyRef)
                 {
                     continue;
                 }

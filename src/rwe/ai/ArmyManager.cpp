@@ -1,4 +1,5 @@
 #include "ArmyManager.h"
+#include <rwe/ai/PerceptionManager.h>
 #include <algorithm>
 #include <set>
 #include <rwe/ai/AiMapBounds.h>
@@ -282,8 +283,8 @@ namespace rwe
             {
                 continue;
             }
-            auto unitRef = sim.tryGetUnitState(enemy.unitId);
-            if (!unitRef || unitRef->get().isDead())
+            auto unitRef = contactStillStanding(sim, enemy);
+            if (!unitRef)
             {
                 continue;
             }
@@ -375,8 +376,8 @@ namespace rwe
             {
                 continue;
             }
-            auto unitRef = sim.tryGetUnitState(enemy.unitId);
-            if (!unitRef || unitRef->get().isDead())
+            auto unitRef = contactStillStanding(sim, enemy);
+            if (!unitRef)
             {
                 continue;
             }
@@ -498,8 +499,8 @@ namespace rwe
                 {
                     continue;
                 }
-                auto enemyRef = sim.tryGetUnitState(enemy.unitId);
-                if (!enemyRef || enemyRef->get().isDead() || isNanoframe(sim, enemyRef->get()))
+                auto enemyRef = contactStillStanding(sim, enemy);
+                if (!enemyRef || isNanoframe(sim, enemyRef->get()))
                 {
                     continue;
                 }
@@ -736,8 +737,8 @@ namespace rwe
             {
                 continue;
             }
-            auto enemyRef = sim.tryGetUnitState(enemy.unitId);
-            if (!enemyRef || enemyRef->get().isDead() || isNanoframe(sim, enemyRef->get()))
+            auto enemyRef = contactStillStanding(sim, enemy);
+            if (!enemyRef || isNanoframe(sim, enemyRef->get()))
             {
                 continue;
             }
@@ -1417,8 +1418,8 @@ namespace rwe
             {
                 continue;
             }
-            auto unitRef = sim.tryGetUnitState(enemy.unitId);
-            if (!unitRef || unitRef->get().isDead())
+            auto unitRef = contactStillStanding(sim, enemy);
+            if (!unitRef)
             {
                 continue;
             }
@@ -1743,8 +1744,8 @@ namespace rwe
                     }
                     if (enemy.lastKnownPosition.distanceSquared(standing.position) <= raidSquared)
                     {
-                        auto enemyRef = sim.tryGetUnitState(enemy.unitId);
-                        if (enemyRef && !enemyRef->get().isDead())
+                        auto enemyRef = contactStillStanding(sim, enemy);
+                        if (enemyRef)
                         {
                             site = standing.position;
                             outpostRaider = enemy.unitId;
@@ -1847,8 +1848,8 @@ namespace rwe
                 {
                     continue;
                 }
-                auto enemyRef = sim.tryGetUnitState(enemy.unitId);
-                if (!enemyRef || enemyRef->get().isDead())
+                auto enemyRef = contactStillStanding(sim, enemy);
+                if (!enemyRef)
                 {
                     continue;
                 }
