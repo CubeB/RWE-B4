@@ -211,7 +211,13 @@ that clamp is a divergence and wants a line in `TOTALA-EXE.md` section 88.
 - [x] **#116, the half that is a leak** 2026-09-21. `setMoveOrders` and
       `setCloakRequested` join `setBuildStance`. See the correction below.
 - [ ] **#119** -- a perception interface for the AI read side. The largest
-      remaining item, and the one aimed at the actual churn hot spot.
+      remaining item, and the one aimed at the actual churn hot spot. Its own
+      figures are a little over: measured 2026-09-21, **91 call sites across
+      11 files** in production (196 across 23 with tests; the issue's 167/15
+      sits between the two) and **38 declarations** taking
+      `const GameSimulation&`, not ~50. The three fog-of-war checks appear
+      only 9 times, which makes centralising them the cheap half. None of that
+      changes the ordering: the AI is where the churn is.
 - [ ] **#117 PieceController** -- measured smaller than it claims; see below.
 
 ### Corrections both issues need before anyone starts them
@@ -230,12 +236,19 @@ all -- issuing an order is what a scene does when the player clicks -- but
 should own that path, which is what the issue actually asks for.
 
 **#117 claims ~30 COB methods can move behind a `PieceController`.** `cob.cpp`
-does reach 31 distinct `GameSimulation` members, but **15 of them have
-consumers outside `cob.cpp`** -- `getUnitState` in 76 other files,
-`unitDefinitions` in 92, `units` in 42, `terrain` in 31. Those are general sim
-access the VM needs and everything else uses too. Only **16 are COB-exclusive**
-and can actually move. `getUnitPieceTransform`, which the issue lists as COB
-plumbing, is called from `GameScene_commands.cpp`.
+does reach 31 distinct `GameSimulation` members, but **18 of them have
+consumers outside `src/rwe/sim/cob.cpp`** -- `unitDefinitions` in 28 other
+files, `units` in 20, `terrain` in 19, `gameTime` in 18, `getUnitState` in 15,
+`tryGetUnitState` in 14. Those are general sim access the VM needs and
+everything else uses too. Only **13 are COB-exclusive** and can actually move.
+`moveObject`, `turnObject`, `spinObject` and `getUnitPiecePosition` read like
+COB plumbing and are not.
+
+(Re-measured 2026-09-21 before posting the correction. An earlier pass of this
+plan said 15 shared and 16 movable, and quoted consumer counts -- 76, 92, 42 --
+that do not reproduce; they were whole-tree greps including tests. The
+conclusion is unchanged and slightly stronger: about **13** methods can move,
+not the ~30 advertised.)
 
 So the achievable interface reduction is about half what is advertised, against
 a seam the issue itself calls hypothetical, and it moves no rebuild cost: taking
@@ -373,10 +386,25 @@ Both heap-dependent desyncs of 2026-09-18 were in it.
 
 ## Phase 6 -- tracker hygiene
 
-- [ ] 34 issues open. Eleven lack `purpose:`, twelve lack `scope:`; #55, #58 and
-      #75 carry neither. Apply the pairs.
-- [ ] Put Phase 2 on a milestone, so the order lives on GitHub and not in a chat
-      log.
+- [x] **Every open issue carries a purpose.** Done 2026-09-21. The figures
+      above were wrong: counted on the day, of 34 open issues **20 lacked a
+      scope, 13 lacked a purpose and 12 lacked both** -- not 12, 11 and 3.
+      With the ten opened for this batch, 44 are open and all 44 now have
+      exactly one `purpose:`.
+
+      **Three deliberately have no scope**, because none of the nine fits:
+      #75 (Security Audit, spans everything), #44 (multiplayer reconnect --
+      engine networking) and #8 (map-pack robustness -- the file parsers).
+      CLAUDE.md already allows this: purpose takes exactly one, scope "one
+      where one fits". Those last two point at a real gap in the axis, which
+      names no scope for the network layer or for `io/`, though `io` exists as
+      a plain label. Worth adding `scope:io` and something for networking if a
+      third case turns up.
+- [x] **Phase 2 is a milestone**, "Maintainability: Phase 2, the churn hot
+      spots", carrying #116, #117, #118 and #119. Done 2026-09-21.
+- [x] **The corrections are posted** on #116, #117 and #119, each re-measured
+      against the tree first. Two of the three figures this plan recorded did
+      not survive that check; see below.
 
 ## What is deliberately partial
 
