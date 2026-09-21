@@ -175,6 +175,116 @@ namespace rwe
         };
     }
 
+    nlohmann::json dumpJson(const UnitState::AirWorkOrbitState& s)
+    {
+        return nlohmann::json{
+            {"workPosition", dumpJson(s.workPosition)},
+            {"bearing", dumpJson(s.bearing)},
+            {"started", dumpJson(s.started)},
+        };
+    }
+
+    nlohmann::json dumpJson(const AttackLeash& l)
+    {
+        return nlohmann::json{
+            {"anchor", dumpJson(l.anchor)},
+            {"distance", dumpJson(l.distance)},
+        };
+    }
+
+    nlohmann::json dumpJson(const MoveOrder& o)
+    {
+        return nlohmann::json{{"destination", dumpJson(o.destination)}};
+    }
+
+    nlohmann::json dumpJson(const AttackOrder& o)
+    {
+        return nlohmann::json{
+            {"target", dumpJson(o.target)},
+            {"leash", dumpJson(o.leash)},
+            {"lastSeenPosition", dumpJson(o.lastSeenPosition)},
+        };
+    }
+
+    nlohmann::json dumpJson(const BuildOrder& o)
+    {
+        return nlohmann::json{
+            {"unitType", dumpJson(o.unitType)},
+            {"position", dumpJson(o.position)},
+        };
+    }
+
+    nlohmann::json dumpJson(const BuggerOffOrder& o)
+    {
+        return nlohmann::json{{"rect", dumpJson(o.rect)}};
+    }
+
+    nlohmann::json dumpJson(const CompleteBuildOrder& o)
+    {
+        return nlohmann::json{{"target", dumpJson(o.target)}};
+    }
+
+    nlohmann::json dumpJson(const GuardOrder& o)
+    {
+        return nlohmann::json{{"target", dumpJson(o.target)}};
+    }
+
+    nlohmann::json dumpJson(const ReclaimOrder& o)
+    {
+        return nlohmann::json{{"target", dumpJson(o.target)}};
+    }
+
+    nlohmann::json dumpJson(const RepairOrder& o)
+    {
+        return nlohmann::json{{"target", dumpJson(o.target)}};
+    }
+
+    nlohmann::json dumpJson(const PatrolOrder& o)
+    {
+        return nlohmann::json{{"destination", dumpJson(o.destination)}};
+    }
+
+    nlohmann::json dumpJson(const CaptureOrder& o)
+    {
+        // progress and totalWork are why this order carries state at all:
+        // the original keeps a capture's progress on the order (section 96),
+        // so leaving them out here is precisely the desync a dump cannot
+        // explain.
+        return nlohmann::json{
+            {"target", dumpJson(o.target)},
+            {"progress", dumpJson(o.progress)},
+            {"totalWork", dumpJson(o.totalWork)},
+        };
+    }
+
+    nlohmann::json dumpJson(const LoadOrder& o)
+    {
+        return nlohmann::json{{"target", dumpJson(o.target)}};
+    }
+
+    nlohmann::json dumpJson(const UnloadOrder& o)
+    {
+        return nlohmann::json{
+            {"destination", dumpJson(o.destination)},
+            {"parkedUntil", dumpJson(o.parkedUntil)},
+        };
+    }
+
+    nlohmann::json dumpJson(const DgunOrder& o)
+    {
+        return nlohmann::json{{"target", dumpJson(o.target)}};
+    }
+
+    nlohmann::json dumpJson(const LandOnAirBaseOrder& o)
+    {
+        return nlohmann::json{{"target", dumpJson(o.target)}};
+    }
+
+    nlohmann::json dumpJson(const ResurrectOrder& o)
+    {
+        return nlohmann::json{{"target", dumpJson(o.target)}};
+    }
+
     nlohmann::json dumpJson(const UnitState::AirLoiterState& s)
     {
         const char* reasonName = "AttackEnded";

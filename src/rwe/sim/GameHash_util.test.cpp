@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <rwe/game/dump_util.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/UnitState.h>
@@ -324,6 +325,31 @@ namespace rwe
             c.totalWork = 900;
             REQUIRE(computeHashOf(a) != computeHashOf(c));
         }
+    }
+
+    TEST_CASE("a capture's progress reaches the desync dump")
+    {
+        // Hunting a desync is RWE_HASH_LOG to find the tick and then
+        // RWE_STATE_DUMP to bisect to the field, so the second step can only
+        // show what the dump walks. Capture progress is hashed and lives on
+        // the order rather than on the unit (section 96), so while the order
+        // queue went undumped this was a divergence the hunt could not
+        // explain. Issue #115.
+        auto dumped = dumpJson(makePopulatedUnitState());
+        REQUIRE(dumped.contains("orders"));
+
+        auto captures = 0;
+        for (const auto& order : dumped["orders"])
+        {
+            if (!order["data"].contains("progress"))
+            {
+                continue;
+            }
+            ++captures;
+            REQUIRE(order["data"]["progress"] == 42u);
+            REQUIRE(order["data"]["totalWork"] == 900u);
+        }
+        REQUIRE(captures == 1);
     }
 
     TEST_CASE("a fully-populated unit keeps its pinned hash value")

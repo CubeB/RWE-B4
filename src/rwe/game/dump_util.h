@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <nlohmann/json.hpp>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/util/OpaqueId.h>
@@ -37,6 +38,34 @@ namespace rwe
     nlohmann::json dumpJson(const AirMovementStateHoverAttack& p);
 
     nlohmann::json dumpJson(const AirMovementStateDogfight& p);
+
+    nlohmann::json dumpJson(const UnitState::AirWorkOrbitState& s);
+
+    /**
+     * The order queue, and the orders in it.
+     *
+     * Each of these covers exactly what this order's `computeHashOf` covers
+     * and nothing else. That is the dump's standing rule -- a field the hash
+     * reads and the dump does not is a desync you cannot bisect -- and the
+     * order queue is where it matters most, because capture progress lives on
+     * a CaptureOrder rather than on the unit (section 96).
+     */
+    nlohmann::json dumpJson(const AttackLeash& l);
+    nlohmann::json dumpJson(const MoveOrder& o);
+    nlohmann::json dumpJson(const AttackOrder& o);
+    nlohmann::json dumpJson(const BuildOrder& o);
+    nlohmann::json dumpJson(const BuggerOffOrder& o);
+    nlohmann::json dumpJson(const CompleteBuildOrder& o);
+    nlohmann::json dumpJson(const GuardOrder& o);
+    nlohmann::json dumpJson(const ReclaimOrder& o);
+    nlohmann::json dumpJson(const RepairOrder& o);
+    nlohmann::json dumpJson(const PatrolOrder& o);
+    nlohmann::json dumpJson(const CaptureOrder& o);
+    nlohmann::json dumpJson(const LoadOrder& o);
+    nlohmann::json dumpJson(const UnloadOrder& o);
+    nlohmann::json dumpJson(const DgunOrder& o);
+    nlohmann::json dumpJson(const LandOnAirBaseOrder& o);
+    nlohmann::json dumpJson(const ResurrectOrder& o);
 
     nlohmann::json dumpJson(const UnitState::AirLoiterState& s);
 
@@ -100,6 +129,17 @@ namespace rwe
 
     template <typename T>
     nlohmann::json dumpJson(const std::vector<T>& v)
+    {
+        nlohmann::json j;
+        for (const auto& e : v)
+        {
+            j.push_back(dumpJson(e));
+        }
+        return j;
+    }
+
+    template <typename T>
+    nlohmann::json dumpJson(const std::deque<T>& v)
     {
         nlohmann::json j;
         for (const auto& e : v)

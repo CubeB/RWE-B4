@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <rwe/game/UnitStateFieldTable.h>
 #include <rwe/game/dump_util.h>
 
 namespace rwe
@@ -74,4 +75,30 @@ namespace rwe
             REQUIRE(dumpJson(TestVariant(1.0f)) == R"({ "variant": 2, "data": 1 })"_json);
         }
     }
+
+    /**
+     * The rule the field table exists to keep: a field the sync hash reads
+     * and the dump does not is a desync nobody can bisect. The documented
+     * hunt is RWE_HASH_LOG to find the tick, then RWE_STATE_DUMP to find the
+     * field -- and the second step can only show what the dump walks.
+     *
+     * This is issue #115's "nowhere left to hide", as far as a test can carry
+     * it. A null dump step beside a hash step is legal to the compiler, so
+     * nothing but this case will notice one.
+     */
+    TEST_CASE("every field the hash reads is one the dump writes", "[dump]")
+    {
+        std::vector<std::string> hashedButNotDumped;
+        for (const auto& field : unitStateFieldTable())
+        {
+            if (field.hash != nullptr && field.dump == nullptr)
+            {
+                hashedButNotDumped.emplace_back(field.name);
+            }
+        }
+
+        CAPTURE(hashedButNotDumped);
+        REQUIRE(hashedButNotDumped.empty());
+    }
+
 }
