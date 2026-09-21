@@ -38,24 +38,6 @@ namespace rwe
     namespace
     {
         /** Never short of anything, so a builder is only ever limited by its worker time. */
-        PlayerId addWellStockedPlayer(GameSimulation& sim)
-        {
-            GamePlayerInfo p{
-                std::optional<std::string>("builder"),
-                GamePlayerType::Human,
-                PlayerColorIndex(0),
-                GamePlayerStatus::Alive,
-                std::string("CORE"),
-                Metal(10000.0f),
-                Energy(10000.0f),
-                Metal(10000.0f),
-                Energy(10000.0f),
-                Metal(10000.0f),
-                Energy(10000.0f),
-            };
-            return sim.addPlayer(p);
-        }
-
         /**
          * Runs a scrap of FBI through the real parser and the real definition
          * mapping, so WorkerTime reaches workerTimePerTick by the path the game
@@ -254,7 +236,7 @@ namespace rwe
         defineUnit(sim, "CORCA", CorCaKeys, *script);
         defineUnit(sim, "CORDRAG", CorDragKeys, *script);
         defineUnit(sim, "CORCOM", CorComKeys, *script);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "CORE");
         addBuilder(sim, "CORCOM", player, SimVector(200_ss, 0_ss, 200_ss), script);
 
         auto site = SimVector(600_ss, 0_ss, 600_ss);
@@ -294,7 +276,7 @@ namespace rwe
         defineUnit(sim, "CORCA", CorCaKeys, *script);
         defineUnit(sim, "CORRAD", CorRadKeys, *script);
         defineUnit(sim, "CORCOM", CorComKeys, *script);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "CORE");
         addBuilder(sim, "CORCOM", player, SimVector(200_ss, 0_ss, 200_ss), script);
 
         auto site = SimVector(600_ss, 0_ss, 600_ss);
@@ -351,7 +333,7 @@ namespace rwe
         defineUnit(sim, "CORLAB", CorLabKeys, *script);
         defineUnit(sim, "CORDRAG", CorDragKeys, *script);
         defineUnit(sim, "CORCOM", CorComKeys, *script);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "CORE");
         addBuilder(sim, "CORCOM", player, SimVector(200_ss, 0_ss, 200_ss), script);
 
         auto factoryId = addBuilder(sim, "CORLAB", player, SimVector(600_ss, 0_ss, 600_ss), script);

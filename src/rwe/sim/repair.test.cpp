@@ -18,24 +18,6 @@ namespace rwe
          * per-second pass rebuilds `maxEnergy` from what is standing and then
          * clamps the stockpile to it -- so the builder below carries it.
          */
-        PlayerId addWellStockedPlayer(GameSimulation& sim)
-        {
-            GamePlayerInfo p{
-                std::optional<std::string>("repairer"),
-                GamePlayerType::Human,
-                PlayerColorIndex(0),
-                GamePlayerStatus::Alive,
-                std::string("ARM"),
-                Metal(10000.0f),
-                Energy(10000.0f),
-                Metal(10000.0f),
-                Energy(10000.0f),
-                Metal(10000.0f),
-                Energy(10000.0f),
-            };
-            return sim.addPlayer(p);
-        }
-
         UnitDefinition makeBuilderDef(unsigned int workerTimePerTick)
         {
             UnitDefinition d{};
@@ -107,7 +89,7 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
         sim.unitDefinitions["solar"] = makeSolarDef();
 
         auto solarPosition = SimVector(200_ss, 0_ss, 200_ss);
@@ -150,7 +132,7 @@ namespace rwe
         // their WorkerTime.
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
 
         auto wallDef = makeSolarDef();
         wallDef.maxHitPoints = 3500u;
@@ -185,7 +167,7 @@ namespace rwe
         // resource bars.
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
         sim.unitDefinitions["solar"] = makeSolarDef();
 
         auto solarPosition = SimVector(200_ss, 0_ss, 200_ss);
@@ -216,7 +198,7 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
         sim.unitDefinitions["solar"] = makeSolarDef();
 
         auto solarPosition = SimVector(200_ss, 0_ss, 200_ss);
@@ -238,7 +220,7 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
         sim.unitDefinitions["solar"] = makeSolarDef();
 
         auto solarId = addUndamagedUnitOfType(sim, "solar", player, SimVector(200_ss, 0_ss, 200_ss), script);
@@ -255,7 +237,7 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
         auto builderId = addBuilderUnit(sim, player, SimVector(100_ss, 0_ss, 100_ss), script);
         sim.getUnitState(builderId).hitPoints = 5;
         sim.getUnitState(builderId).orders.push_back(RepairOrder(builderId));
@@ -274,7 +256,7 @@ namespace rwe
         // worker time only so that it can build.
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
 
         sim.unitDefinitions["solar"] = makeSolarDef();
         auto solarId = addUndamagedUnitOfType(sim, "solar", player, SimVector(200_ss, 0_ss, 200_ss), script);
@@ -303,7 +285,7 @@ namespace rwe
         // 7 points a step, 26.25 a second.
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
 
         auto commanderDef = makeSolarDef();
         commanderDef.healTime = 27u;
@@ -337,7 +319,7 @@ namespace rwe
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
 
         sim.unitDefinitions["solar"] = makeSolarDef();
         auto solarId = addUndamagedUnitOfType(sim, "solar", player, SimVector(200_ss, 0_ss, 200_ss), script);
@@ -357,7 +339,7 @@ namespace rwe
         // target that walked away was mended from wherever it had got to.
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
         sim.unitDefinitions["solar"] = makeSolarDef();
 
         auto solarPosition = SimVector(200_ss, 0_ss, 200_ss);

@@ -75,6 +75,32 @@ namespace rwe
         return sim.addPlayer(p);
     }
 
+    /**
+     * Ten thousand of each resource, with the room to hold it.
+     *
+     * The side is an argument because the simulation reads it -- the AI's
+     * EconomyManager resolves its build tree through it -- and because the
+     * three copies this replaced did not agree on it. The player's name was
+     * not worth keeping: nothing outside a log ever reads one.
+     */
+    inline PlayerId addWellStockedPlayer(GameSimulation& sim, const std::string& side)
+    {
+        GamePlayerInfo p{
+            std::optional<std::string>("player"),
+            GamePlayerType::Human,
+            PlayerColorIndex(0),
+            GamePlayerStatus::Alive,
+            side,
+            Metal(10000.0f),
+            Energy(10000.0f),
+            Metal(10000.0f),
+            Energy(10000.0f),
+            Metal(10000.0f),
+            Energy(10000.0f),
+        };
+        return sim.addPlayer(p);
+    }
+
     /** A finished unit of the given type, put straight into the world. */
     inline UnitId addUnitOfType(GameSimulation& sim, const std::string& unitType, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
     {

@@ -30,24 +30,6 @@ namespace rwe
     namespace
     {
         /** Never short of anything, so a builder is only ever limited by its worker time. */
-        PlayerId addWellStockedPlayer(GameSimulation& sim)
-        {
-            GamePlayerInfo p{
-                std::optional<std::string>("builder"),
-                GamePlayerType::Human,
-                PlayerColorIndex(0),
-                GamePlayerStatus::Alive,
-                std::string("ARM"),
-                Metal(10000.0f),
-                Energy(10000.0f),
-                Metal(10000.0f),
-                Energy(10000.0f),
-                Metal(10000.0f),
-                Energy(10000.0f),
-            };
-            return sim.addPlayer(p);
-        }
-
         /** Nothing stored and nothing coming in, so every request stalls. */
         PlayerId addBrokePlayer(GameSimulation& sim)
         {
@@ -232,7 +214,7 @@ namespace rwe
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
 
         auto frameId = placeNanoframe(sim, "ARMSOLAR", player, SimVector(100_ss, 0_ss, 100_ss), 2000u);
 
@@ -280,7 +262,7 @@ namespace rwe
             GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
             registerTestModel(sim);
             defineUnit(sim, row.name, row.keys, *script);
-            auto player = addWellStockedPlayer(sim);
+            auto player = addWellStockedPlayer(sim, "ARM");
 
             // As close to finished as a frame can get without being finished.
             auto frameId = placeNanoframe(sim, row.name, player, SimVector(100_ss, 0_ss, 100_ss), row.buildTime - 1u);
@@ -308,7 +290,7 @@ namespace rwe
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "ARMFUS", ArmFusKeys, *script);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
 
         auto frameId = placeNanoframe(sim, "ARMFUS", player, SimVector(100_ss, 0_ss, 100_ss), 93767u);
 
@@ -329,7 +311,7 @@ namespace rwe
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
 
         auto frameId = placeNanoframe(sim, "ARMSOLAR", player, SimVector(100_ss, 0_ss, 100_ss), 2000u);
         REQUIRE(sim.getUnitState(frameId).hitPoints == (2000u * 326u) / 2495u);
@@ -352,7 +334,7 @@ namespace rwe
         registerTestModel(sim);
         defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
         defineUnit(sim, "ARMCK", ArmCkKeys, *script);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
 
         auto framePosition = SimVector(100_ss, 0_ss, 100_ss);
         auto frameId = placeNanoframe(sim, "ARMSOLAR", player, framePosition, 100u);
@@ -410,7 +392,7 @@ namespace rwe
         registerTestModel(sim);
         defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
         defineUnit(sim, "ARMCK", ArmCkKeys, *script);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
 
         auto framePosition = SimVector(100_ss, 0_ss, 100_ss);
         auto frameId = placeNanoframe(sim, "ARMSOLAR", player, framePosition, 100u);
@@ -444,7 +426,7 @@ namespace rwe
         defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
         auto wreck = sim.featureDefinitions.insert(makeWreckDef("armsolar_dead"));
         sim.featureNameIndex.insert_or_assign("ARMSOLAR_DEAD", wreck);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
 
         // One decay step's worth of work, so the frame is gone the first time
         // the timer comes round to nobody.
@@ -471,7 +453,7 @@ namespace rwe
         defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
         auto wreck = sim.featureDefinitions.insert(makeWreckDef("armsolar_dead"));
         sim.featureNameIndex.insert_or_assign("ARMSOLAR_DEAD", wreck);
-        auto player = addWellStockedPlayer(sim);
+        auto player = addWellStockedPlayer(sim, "ARM");
 
         SECTION("a half-built one leaves nothing")
         {
