@@ -92,11 +92,32 @@ transitive grip"), which moves `GamePlayerInfo`, `UnitInfo`/`ConstUnitInfo` and
 transitive parsers down from 137 to 120. It is **CONFLICTING against `revival`**
 and needs a rebase before it can land.
 
-- [ ] **Land #124**, rebased. Carry the Phase 0 default member initializers
-      across with `GamePlayerInfo` when it moves to its own header, or the
-      warnings come back -- and CI now fails on them.
-- [ ] **Time the baseline.** `touch src/rwe/sim/GameSimulation.h`, rebuild,
-      record it here. Without it #124's benefit is an argument, not a number.
+- [x] **#124 landed** 2026-09-21. Two conflicts, both against the same day's
+      work: `save_util.h`, where the PR had independently made the same
+      narrowing, and `GameSimulation.h`, where its side wins because the type
+      moves out wholesale. The `teamId{}` initialiser had to be carried by
+      hand into the new `sim/GamePlayerInfo.h`; without it forty warnings come
+      back and CI now fails on them. **A header move is where that class of
+      regression hides**, and the Phase 0 switch is what catches it.
+- [x] **Baseline timed.** Touching `src/rwe/sim/GameSimulation.h` and
+      rebuilding `rwe` and `rwe_test`, ccache disabled:
+
+      | | objects | seconds |
+      |---|---|---|
+      | before #124 | 139 | 195 |
+      | after #124 | 123 | 186 |
+
+      Sixteen fewer translation units, 11.5%, corroborating the PR's own
+      137-to-120 figure. **Read the object count, not the seconds**: a third
+      run of the same command came back at 324 s, so wall clock on this
+      machine is noise at this scale. Direct includers are unchanged at 108;
+      what went away is transitive, which is what forward-declaring in eleven
+      headers should do.
+
+      The honest reading is that #124 is worth having and is not a
+      breakthrough. Eleven percent of a 195-second rebuild is twenty seconds.
+      The 108 direct includers are untouched and are where the rest of the
+      cost is.
 - [ ] **`UnitState.h`** -- 36 commits, 88 includers, 3,168 recompiles a month,
       and no PR touches it. The best remaining target once #124 lands.
 - [ ] **`UnitDefinition.h`** -- 22 commits, 88 includers. Same treatment.
