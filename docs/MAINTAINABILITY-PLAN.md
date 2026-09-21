@@ -156,11 +156,44 @@ that the original never arrives with one. The oracle never saw it fire, which
 is evidence and not proof. If a negative supply turns out to be reachable,
 that clamp is a divergence and wants a line in `TOTALA-EXE.md` section 88.
 
-- [ ] **`BuildManager::update` by phase** -- 1,612 lines in one function,
-      following the pattern #121 set for the walks. No PR.
-- [ ] **#117 PieceController** -- ~30 methods off `GameSimulation`'s interface.
-- [ ] **#119** -- a perception interface for the AI read side.
-- [ ] **#116** -- close the non-const escape hatch into `UnitState`.
+- [x] **`BuildManager::update`** 2026-09-21. The 477-line site-search chain
+      inside its priorities loop is `choosePrioritySite` now; `update()` goes
+      1,613 -> 1,164 lines. The file is 28 lines *longer*, which is the honest
+      shape of an extraction. Hash-identical, 17,999 ticks x 4.
+- [x] **#116, the half that is a leak** 2026-09-21. `setMoveOrders` and
+      `setCloakRequested` join `setBuildStance`. See the correction below.
+- [ ] **#119** -- a perception interface for the AI read side. The largest
+      remaining item, and the one aimed at the actual churn hot spot.
+- [ ] **#117 PieceController** -- measured smaller than it claims; see below.
+
+### Corrections both issues need before anyone starts them
+
+**#116 says "two direct writes" and "a two-line change".** Counted, presentation
+mutates simulation state in **twelve** places: the two named, **two more raw
+field writes in `GameScene_debug.cpp`** (`fireOrders` and `hitPoints`, both from
+the debug spawner, and `hitPoints` is hashed), and eight through `UnitState`'s
+own methods (`addOrder`, `clearOrders`, `setFireOrders`, `modifyBuildQueue`).
+
+The two named are fixed. The debug pair cannot route through the simulation
+until `spawnCompletedUnit` returns a `UnitId` rather than a reference, because
+`UnitState` carries no id of its own. The eight method calls are not a leak at
+all -- issuing an order is what a scene does when the player clicks -- but
+`getUnit` cannot become const until someone decides whether `GameSimulation`
+should own that path, which is what the issue actually asks for.
+
+**#117 claims ~30 COB methods can move behind a `PieceController`.** `cob.cpp`
+does reach 31 distinct `GameSimulation` members, but **15 of them have
+consumers outside `cob.cpp`** -- `getUnitState` in 76 other files,
+`unitDefinitions` in 92, `units` in 42, `terrain` in 31. Those are general sim
+access the VM needs and everything else uses too. Only **16 are COB-exclusive**
+and can actually move. `getUnitPieceTransform`, which the issue lists as COB
+plumbing, is called from `GameScene_commands.cpp`.
+
+So the achievable interface reduction is about half what is advertised, against
+a seam the issue itself calls hypothetical, and it moves no rebuild cost: taking
+method *declarations* out of `GameSimulation.h` does not change how many files
+include it. On this plan's own rule -- do the work whose value survives
+measurement -- #119 should go first.
 
 Each is one pull request, behaviour unchanged, proved by diffing a fixed
 replay's `RWE_HASH_LOG` before and after.
