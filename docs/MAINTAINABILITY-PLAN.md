@@ -210,14 +210,39 @@ that clamp is a divergence and wants a line in `TOTALA-EXE.md` section 88.
       what decided how much work each was.
 - [x] **#116, the half that is a leak** 2026-09-21. `setMoveOrders` and
       `setCloakRequested` join `setBuildStance`. See the correction below.
-- [ ] **#119** -- a perception interface for the AI read side. The largest
-      remaining item, and the one aimed at the actual churn hot spot. Its own
-      figures are a little over: measured 2026-09-21, **91 call sites across
-      11 files** in production (196 across 23 with tests; the issue's 167/15
-      sits between the two) and **38 declarations** taking
-      `const GameSimulation&`, not ~50. The three fog-of-war checks appear
-      only 9 times, which makes centralising them the cheap half. None of that
-      changes the ordering: the AI is where the churn is.
+- [x] **#119, as far as it survives measurement.** Done 2026-09-21, and most
+      of what the issue asks for turned out to exist already.
+
+      **The projection is built.** The issue proposes "a per-tick projection
+      of the world as this owner sees it ... with the fog-of-war decision in
+      one place". That is `KnownEnemy` plus `PerceptionManager::refresh`:
+      seven fields, rebuilt each tick with the fog decision applied once, read
+      by eight managers across 85 sites. `lastKnownPosition`, `isAir`,
+      `isArmed`, `isBuilding` and `lastSeen` are among the most-read things in
+      the AI and none of them is a `UnitState` field.
+
+      **The rebuild-cost premise is already satisfied**, by #124 in Phase 1.
+      Of 21 headers under `src/rwe/ai/`, **one** includes `GameSimulation.h`
+      and it is the test fixture header added the same day; thirteen
+      forward-declare `struct GameSimulation`. Manager headers have 1 to 12
+      includers. There is no transitive grip left to break.
+
+      **What was real** is the thing the issue calls fog rules leaking across
+      managers, and it is worse than a style problem. Twelve sites in
+      `ArmyManager` and `AirManager` asked the *live* simulation whether a
+      remembered enemy was dead -- the exact test `PerceptionManager` computes
+      and then deliberately refuses to act on, because a player does not learn
+      about a death he cannot see. Those twelve now go through one
+      `contactStillStanding`, hash-identical over four arena scenarios at
+      17,999 ticks each. The leak itself is **#142**: stating it once is what
+      makes closing it one edit, and closing it changes AI behaviour, so it
+      wants a play-test rather than a hash check.
+
+      Also checked and left alone: all nine `isExploredBy`/`canSeeUnit`/
+      `isOnRadarOf` calls are correctly guarded against
+      `cheatModeOmniscient`, three of them by an enclosing condition rather
+      than at the call. And `BuilderSafety.cpp:65` looks like a thirteenth
+      copy and is not -- it omits the `isDead` test.
 - [ ] **#117 PieceController** -- measured smaller than it claims; see below.
 
 ### Corrections both issues need before anyone starts them
