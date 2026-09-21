@@ -694,11 +694,26 @@ get their own late pass, so the aircraft is blitted over its own exhaust a few
 instructions later. Had it been on the ground, the exhaust would have landed on
 top of it.
 
-RWE reaches the same result by a different route, depth-testing against world Y,
-which is what its camera uses for depth. The two agree for an airborne aircraft
-and differ only in that RWE will also let a tall ground unit in front occlude the
-plume, which TA would not. Judged the better behaviour for a renderer that has a
-real depth buffer, so kept.
+**RWE matches this, and the sentence that used to stand here was wrong.** It
+claimed RWE "reaches the same result by a different route, depth-testing against
+world Y", and that it would "also let a tall ground unit in front occlude the
+plume, which TA would not". It does neither. `Particle.h` carries an `inWorld`
+flag that would put a sprite particle in the depth-tested pass, but **nothing
+anywhere sets it**, so every sprite particle -- explosions, smoke, exhaust alike
+-- is drawn over the finished frame with the depth test off. Features are drawn
+with depth *writes* disabled as well, so a feature could not occlude a particle
+even if the flag were set.
+
+Confirmed against the original 2026-09-21, after scenery on Crystal Maze was
+reported as being drawn under the smoke: effects are not obscured at all. So the
+blanket "over everything" that RWE actually does is the faithful behaviour here,
+and the depth-testing the old text described would have been the divergence. The
+`inWorld` branch is unused and should stay that way unless something is found
+that the original really does draw an effect behind.
+
+The Atlas exhaust above remains the one case of an effect going under something,
+and it is explicit layering rather than depth: the airborne pass runs after layer
+7, so the aircraft is blitted over its own plume.
 
 ---
 

@@ -30,9 +30,17 @@ namespace rwe
 
         /**
          * Draw this one inside the world, tested against the depth buffer,
-         * rather than over the finished frame. Explosions and smoke want to
-         * be seen whatever is in front of them; an aircraft's exhaust wants
-         * the aircraft to hide it, since it comes out underneath.
+         * rather than over the finished frame.
+         *
+         * **Nothing sets this, and that is correct.** Checked against the
+         * original on 2026-09-21: its effects are not obscured at all, which
+         * is what drawing every sprite particle over the finished frame gives
+         * (section 5). Features are drawn with depth writes off in any case,
+         * so setting it would not let scenery hide a particle -- it would only
+         * let units and projectiles do so, which is the divergence, not the
+         * fix. The branch is kept for an effect that is one day found to go
+         * behind something in the original; the Atlas exhaust, which the
+         * aircraft covers, does it by draw order rather than by depth.
          */
         bool inWorld{false};
 
