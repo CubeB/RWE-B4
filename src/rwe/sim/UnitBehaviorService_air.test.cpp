@@ -1,4 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#include <rwe/grid/Grid.h>
+#include <rwe/sim/AirMovement.h>
+#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
@@ -502,5 +505,168 @@ namespace rwe
             REQUIRE(std::holds_alternative<AirMovementStateFlying>(air.movementState));
             REQUIRE_FALSE(std::holds_alternative<AirMovementStateAttackRun>(air.movementState));
         }
+    }
+
+    TEST_CASE("AirMovement::step flies level flight toward the command", "[aircraft]")
+    {
+        UnitState unit({}, std::unique_ptr<CobEnvironment>{});
+        auto def = makeBomberDefinition();
+        unit.position = SimVector(0_ss, 50_ss, 0_ss);
+        unit.rotation = SimAngle(0);
+
+        AirMovementStateFlying flying;
+        flying.targetPosition = unit.position;
+        flying.currentVelocity = SimVector(0_ss, 0_ss, 0_ss);
+
+        SECTION("the command's target is written into the new state")
+        {
+            AirFrameCommand command;
+            command.targetPosition = SimVector(100_ss, 50_ss, 0_ss);
+            auto next = AirMovement::step(flying, command, unit, def);
+            auto& nextFlying = std::get<AirMovementStateFlying>(next);
+            REQUIRE(nextFlying.targetPosition);
+            REQUIRE(nextFlying.targetPosition->x == 100_ss);
+        }
+
+        SECTION("from rest the aircraft moves off at one tick of acceleration")
+        {
+            AirFrameCommand command;
+            command.targetPosition = SimVector(100_ss, 50_ss, 0_ss);
+            auto next = AirMovement::step(flying, command, unit, def);
+            auto& nextFlying = std::get<AirMovementStateFlying>(next);
+            REQUIRE(nextFlying.currentVelocity.x > 0_ss);
+            REQUIRE(nextFlying.currentVelocity.x <= def.acceleration);
+        }
+
+        SECTION("with no command it keeps the target the state already had")
+        {
+            AirFrameCommand command;
+            auto next = AirMovement::step(flying, command, unit, def);
+            auto& nextFlying = std::get<AirMovementStateFlying>(next);
+            REQUIRE(nextFlying.targetPosition);
+            REQUIRE(nextFlying.targetPosition->x == 0_ss);
+            REQUIRE(nextFlying.currentVelocity.x == 0_ss);
+        }
+    }
+
+    TEST_CASE("AirMovement::stepAttackRun drives the phase machine", "[aircraft]")
+    {
+        UnitState unit({}, std::unique_ptr<CobEnvironment>{});
+        auto def = makeBomberDefinition();
+        unit.position = SimVector(0_ss, 50_ss, 0_ss);
+        unit.rotation = SimAngle(0);
+
+        auto run = AirMovement::beginAttackRun(
+            SimVector(50_ss, 0_ss, 0_ss),
+            SimVector(50_ss, 50_ss, 0_ss),
+            SimAngle(0),
+            SimVector(4_ss, 0_ss, 0_ss),
+            false,
+            200_ss);
+
+        SECTION("a run starts Approaching, pointing where the unit already faces")
+        {
+            REQUIRE(run.phase == AirMovementStateAttackRun::Phase::Approaching);
+            REQUIRE(run.runOutDistance == 200_ss);
+            REQUIRE(run.lastKnownTargetPos.x == 50_ss);
+        }
+
+        SECTION("stepping into weapon range commits and reports weapons hot")
+        {
+            auto terrain = MapTerrain(Grid<unsigned char>(1, 1), 0_ss);
+            auto step = AirMovement::stepAttackRun(
+                run,
+                unit,
+                def,
+                terrain,
+                SimVector(50_ss, 50_ss, 0_ss),
+                SimVector(50_ss, 0_ss, 0_ss),
+                100_ss);
+            REQUIRE(step.previousPhase == AirMovementStateAttackRun::Phase::Approaching);
+            REQUIRE(run.phase == AirMovementStateAttackRun::Phase::Engaging);
+            REQUIRE(step.weaponsHot);
+        }
+
+        SECTION("capturing the run-out direction happens only on the commit tick")
+        {
+            run.runOutDirection = SimVector(0_ss, 0_ss, 1_ss);
+            AirMovement::captureRunOutDirection(
+                run,
+                AirMovementStateAttackRun::Phase::Approaching,
+                unit.position,
+                SimVector(50_ss, 0_ss, 0_ss),
+                unit.rotation);
+            REQUIRE(run.phase == AirMovementStateAttackRun::Phase::Approaching);
+            REQUIRE(run.runOutDirection.z == 1_ss);
+
+            run.phase = AirMovementStateAttackRun::Phase::Engaging;
+            AirMovement::captureRunOutDirection(
+                run,
+                AirMovementStateAttackRun::Phase::Approaching,
+                unit.position,
+                SimVector(50_ss, 0_ss, 0_ss),
+                unit.rotation);
+            REQUIRE(run.runOutDirection.x == 1_ss);
+            REQUIRE(run.runOutDirection.z == 0_ss);
+        }
+    }
+
+    TEST_CASE("AirMovement loiter circuits", "[aircraft]")
+    {
+        SECTION("the ring is weapon range plus standoff, or the unarmed radius")
+        {
+            REQUIRE(AirMovement::loiterRadius(false, 0_ss) == 320_ss);
+            REQUIRE(AirMovement::loiterRadius(true, 370_ss) == 530_ss);
+        }
+
+        SECTION("the entry bearing is the draw itself")
+        {
+            REQUIRE(AirMovement::loiterEntryBearing(0x1234u).value == 0x1234u);
+        }
+
+        SECTION("the next bearing steps back by the base and the drawn jitter")
+        {
+            REQUIRE(AirMovement::nextLoiterBearing(SimAngle(1000), SimAngle(100), 50u).value == 850u);
+        }
+
+        SECTION("arrival is measured flat, with the original's 128-unit tolerance")
+        {
+            auto station = AirMovement::loiterStation(SimVector(0_ss, 0_ss, 0_ss), SimAngle(0), 100_ss);
+            REQUIRE(AirMovement::loiterArrived(station, station));
+            REQUIRE_FALSE(AirMovement::loiterArrived(SimVector(station.x + 200_ss, station.y, station.z), station));
+        }
+    }
+
+    TEST_CASE("AirMovement::canDivertForRepair is the seven-handler gate", "[aircraft]")
+    {
+        REQUIRE(AirMovement::canDivertForRepair(true, true, false, true, true));
+
+        // A fighter locked onto another aircraft fights on however hurt it is.
+        REQUIRE_FALSE(AirMovement::canDivertForRepair(true, true, true, true, true));
+
+        // VTOL_Move and VTOL_Standby are not among the seven.
+        REQUIRE_FALSE(AirMovement::canDivertForRepair(true, true, false, false, true));
+
+        // A plane that is not hurt enough stays on the job.
+        REQUIRE_FALSE(AirMovement::canDivertForRepair(true, true, false, true, false));
+
+        // Not an aircraft, or not airborne yet.
+        REQUIRE_FALSE(AirMovement::canDivertForRepair(false, true, false, true, true));
+        REQUIRE_FALSE(AirMovement::canDivertForRepair(true, false, false, true, true));
+    }
+
+    TEST_CASE("AirMovement takeoff transition", "[aircraft]")
+    {
+        AirMovementStateTakingOff takingOff;
+        takingOff.targetPosition = SimVector(100_ss, 50_ss, 0_ss);
+        takingOff.currentVelocity = SimVector(2_ss, 0_ss, 0_ss);
+
+        REQUIRE_FALSE(AirMovement::takeoffReachedCruise(takingOff, 40_ss, 50_ss));
+        REQUIRE(AirMovement::takeoffReachedCruise(takingOff, 50_ss, 50_ss));
+
+        auto flying = AirMovement::finishTakeoff(takingOff);
+        REQUIRE(flying.targetPosition);
+        REQUIRE(flying.targetPosition->x == 100_ss);
+        REQUIRE(flying.currentVelocity.x == 2_ss);
     }
 }

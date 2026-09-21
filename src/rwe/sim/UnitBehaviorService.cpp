@@ -1,4 +1,5 @@
 #include "UnitBehaviorService.h"
+#include <rwe/sim/AirMovement.h>
 #include <rwe/sim/SimRandom.h>
 #include <algorithm>
 #include <limits>
@@ -71,83 +72,9 @@ namespace rwe
          */
         const SimScalar AttackApproachDriftTolerance = 8_ss;
 
-        // The original's idle circuits, read out of VTOL_SeekAttack (0x4103E0,
-        // where an aircraft goes when its target dies) and VTOL_Follow
-        // (0x40FBE0, the guard mission). Both build the same thing: a goal on
-        // a ring around a point, and a bearing that steps back by a fixed
-        // amount plus a random eighth of a turn every time the goal is met.
-
-        // The goal's arrival tolerance, 0x80 at 0x4106C4 and 0x410211.
-        const SimScalar AirLoiterArrivalTolerance = 128_ss;
-
-        // The ring is weapon range plus this, 0xA0 at 0x41064B and 0x410175.
-        const SimScalar AirLoiterStandoff = 160_ss;
-
-        // What a unit with no weapon at all uses instead: 0x1400000, i.e. 320
-        // world units, at 0x4101B0. The branch is on unit+0x110 bit 31, which
-        // is copied out of the definition bit meaning "names a Weapon1, 2 or
-        // 3" (0x485AAD), and it has to be there: the armed side reads weapon
-        // slot zero's definition, which an unarmed unit does not have. So a
-        // construction aircraft guarding a factory works a ring twenty tiles
-        // across around it, which is the milling about that was reported.
-        const SimScalar AirLoiterUnarmedRadius = 320_ss;
-
-        // 0x5555, a third of a turn, at 0x410634. The search circuit's step.
-        const SimAngle AirLoiterSeekStep = SimAngle(0x5555);
-
-        // 0x4000, a quarter turn, at 0x410151. The guard circuit's step.
-        const SimAngle AirLoiterGuardStep = SimAngle(0x4000);
-
-        // rand(0x2000) on top of either, at 0x410625 and 0x410142. Both are
-        // subtracted, so a circuit always works round the same way.
-        const SimAngle AirLoiterStepJitter = SimAngle(0x2000);
-
         SimVector airVelocity(const AirMovementState& state)
         {
-            return match(
-                state,
-                [](const AirMovementStateFlying& m) { return m.currentVelocity; },
-                [](const AirMovementStateTakingOff& m) { return m.currentVelocity; },
-                [](const AirMovementStateAttackRun& m) { return m.currentVelocity; },
-                [](const AirMovementStateHoverAttack& m) { return m.currentVelocity; },
-                [](const AirMovementStateDogfight& m) { return m.currentVelocity; },
-                [](const AirMovementStateLanding&) { return SimVector(0_ss, 0_ss, 0_ss); });
-        }
-
-        /**
-         * The bank an aircraft is holding, which in the original is honest
-         * aerodynamics rather than an animation: tan(roll) = BankScale times
-         * the sideways acceleration over gravity.
-         *
-         * The acceleration is passed through a one-pole lag, and the constants
-         * are chosen so the lag's gain cancels out of the division — which is
-         * what gives the ramp on entering a turn and the wash-out on leaving
-         * it, with no rate limit or clamp needed anywhere.
-         */
-        SimScalar computeNewBankAngle(const UnitState& unit, const UnitDefinition& unitDefinition, UnitPhysicsInfoAir& physics, const SimVector& deltaVelocity)
-        {
-            // 62259/65536 in the original's fixed point.
-            const SimScalar lag(0.9499817f);
-            physics.bankAccum = (physics.bankAccum * lag) + deltaVelocity;
-
-            // Sideways is the component along the aircraft's right hand.
-            auto heading = unit.rotation;
-            auto lateral = (physics.bankAccum.x * cos(heading)) - (physics.bankAccum.z * sin(heading));
-
-            // Gravity is 112 world units per second squared on nearly every
-            // map the game ships, which is 112/900 per tick squared; dividing
-            // by (1 - lag) undoes the lag's gain.
-            const SimScalar gravityOverLagGain((112.0f / 900.0f) / (1.0f - 0.9499817f));
-
-            // Accelerating to the right drops the right wing, so the model
-            // rolls the other way about its nose.
-            auto angle = atan2(-unitDefinition.bankScale * lateral, gravityOverLagGain);
-            auto radians = toRadians(angle).value;
-            if (radians > Pif)
-            {
-                radians -= 2.0f * Pif;
-            }
-            return SimScalar(radians);
+            return AirMovement::airVelocity(state);
         }
 
     }
@@ -429,7 +356,7 @@ namespace rwe
                     // keeps flying over what it just flattened, which is what
                     // the original looks like and what RWE was missing.
                     auto anchor = unitInfo.state->airLoiter->anchor;
-                    flyAirLoiterCircuit(unitInfo, UnitState::AirLoiterState::Reason::AttackEnded, anchor, AirLoiterSeekStep);
+                    flyAirLoiterCircuit(unitInfo, UnitState::AirLoiterState::Reason::AttackEnded, anchor, AirMovement::LoiterSeekStep);
                 }
                 else
                 {
@@ -551,13 +478,9 @@ namespace rwe
                         p.movementState,
                         [&](const AirMovementStateTakingOff& m) {
                             auto targetHeight = getTargetAltitude(sim->terrain, unitInfo.state->position.x, unitInfo.state->position.z, *unitInfo.definition);
-                            if (unitInfo.state->position.y == targetHeight)
+                            if (AirMovement::takeoffReachedCruise(m, unitInfo.state->position.y, targetHeight))
                             {
-                                // Keep the heading and speed built up during the climb.
-                                AirMovementStateFlying flying;
-                                flying.targetPosition = m.targetPosition;
-                                flying.currentVelocity = m.currentVelocity;
-                                p.movementState = flying;
+                                p.movementState = AirMovement::finishTakeoff(m);
                             }
                         },
                         [&](AirMovementStateLanding& m) {
@@ -1628,53 +1551,7 @@ namespace rwe
                 p.currentSpeed = computeNewGroundUnitSpeed(sim->terrain, *unitInfo.state, *unitInfo.definition, p, sim->getAdHocMovementClass(unitInfo.definition->movementCollisionInfo).maxSlope);
             },
             [&](UnitPhysicsInfoAir& p) {
-                p.previousRoll = p.roll;
-                auto velocityBefore = airVelocity(p.movementState);
-
-                match(
-                    p.movementState,
-                    [&](AirMovementStateFlying& m) {
-                        m.currentVelocity = computeNewAirUnitVelocity(*unitInfo.state, *unitInfo.definition, m);
-                    },
-                    [&](AirMovementStateTakingOff& m) {
-                        // Gather speed towards the destination on the way up, at
-                        // most half pace until it reaches cruise height.
-                        AirMovementStateFlying asFlying;
-                        asFlying.targetPosition = m.targetPosition;
-                        asFlying.currentVelocity = m.currentVelocity;
-                        auto velocity = computeNewAirUnitVelocity(*unitInfo.state, *unitInfo.definition, asFlying);
-                        velocity.y = 0_ss;
-                        auto limit = unitInfo.definition->maxVelocity / 2_ss;
-                        if (velocity.lengthSquared() > limit * limit)
-                        {
-                            velocity = velocity.normalized() * limit;
-                        }
-                        m.currentVelocity = velocity;
-                    },
-                    [&](const AirMovementStateLanding&) {
-                        // do nothing
-                    },
-                    [&](AirMovementStateAttackRun& m) {
-                        m.currentVelocity = computeNewAttackRunVelocity(*unitInfo.state, *unitInfo.definition, m);
-                    },
-                    [&](AirMovementStateHoverAttack& m) {
-                        m.currentVelocity = computeNewHoverAttackVelocity(*unitInfo.state, *unitInfo.definition, m);
-                    },
-                    [&](AirMovementStateDogfight& m) {
-                        // The goal runs away from the fighter by its own
-                        // velocity every tick, in x and z only -- the
-                        // original's goal object integrates itself when it is
-                        // resolved (0x44EA60) and never touches the height.
-                        // It is what makes the extend uncatchable and the
-                        // chase lead the bandit rather than trail him.
-                        m.goalPosition = SimVector(
-                            m.goalPosition.x + m.goalVelocity.x,
-                            m.goalPosition.y,
-                            m.goalPosition.z + m.goalVelocity.z);
-                        m.currentVelocity = computeNewDogfightVelocity(*unitInfo.state, *unitInfo.definition, m);
-                    });
-
-                p.roll = computeNewBankAngle(*unitInfo.state, *unitInfo.definition, p, airVelocity(p.movementState) - velocityBefore);
+                AirMovement::updateVelocity(p, *unitInfo.state, *unitInfo.definition);
             });
     }
 
@@ -1959,31 +1836,23 @@ namespace rwe
         // VTOL_Standby are not among them, so a plane merely sent somewhere,
         // or one standing idle, never goes off to be mended; patrol, guard
         // and every attack mission but one are, so a plane in a fight does.
-        if (!unitInfo.definition->canFly || unitInfo.state->orders.empty())
-        {
-            return;
-        }
-
-        if (!orderBreaksOffForRepair(unitInfo.state->orders.front()))
-        {
-            return;
-        }
-
         auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
-        if (airPhysics == nullptr)
-        {
-            return;
-        }
 
         // AirToAir (0x412D40) is the one attack handler with no health gate
         // in it: a fighter already locked onto another aircraft fights on
         // however badly hurt it is. Its three sibling handlers all break off.
-        if (std::holds_alternative<AirMovementStateDogfight>(airPhysics->movementState))
-        {
-            return;
-        }
+        auto inDogfight = airPhysics != nullptr
+            && std::holds_alternative<AirMovementStateDogfight>(airPhysics->movementState);
 
-        if (!aircraftWantsRepair(*unitInfo.state, *unitInfo.definition))
+        auto frontOrderBreaksOff = !unitInfo.state->orders.empty()
+            && orderBreaksOffForRepair(unitInfo.state->orders.front());
+
+        if (!AirMovement::canDivertForRepair(
+                unitInfo.definition->canFly,
+                airPhysics != nullptr,
+                inDogfight,
+                frontOrderBreaksOff,
+                aircraftWantsRepair(*unitInfo.state, *unitInfo.definition)))
         {
             return;
         }
@@ -2225,9 +2094,9 @@ namespace rwe
         const auto& weapon = unitInfo.state->weapons[0];
         if (!weapon)
         {
-            return AirLoiterUnarmedRadius;
+            return AirMovement::loiterRadius(false, 0_ss);
         }
-        return sim->weaponDefinitions.at(weapon->weaponType).maxRange + AirLoiterStandoff;
+        return AirMovement::loiterRadius(true, sim->weaponDefinitions.at(weapon->weaponType).maxRange);
     }
 
     void UnitBehaviorService::beginAirLoiter(UnitInfo unitInfo, UnitState::AirLoiterState::Reason reason, const SimVector& anchor)
@@ -2241,7 +2110,7 @@ namespace rwe
         // these up (0x410774 for the search, 0x410310 for the guard), so a
         // flight coming off the same target does not all end up on one side
         // of it.
-        unitInfo.state->airLoiter = UnitState::AirLoiterState{reason, anchor, SimAngle(sim->rng() % 0x10000u)};
+        unitInfo.state->airLoiter = UnitState::AirLoiterState{reason, anchor, AirMovement::loiterEntryBearing(sim->rng())};
     }
 
     void UnitBehaviorService::flyAirLoiterCircuit(UnitInfo unitInfo, UnitState::AirLoiterState::Reason reason, const SimVector& anchor, SimAngle stepBase)
@@ -2293,18 +2162,17 @@ namespace rwe
         loiter.anchor = anchor;
 
         auto radius = airLoiterRadius(unitInfo);
-        auto station = loiter.anchor + (UnitState::toDirection(loiter.bearing) * radius);
+        auto station = AirMovement::loiterStation(loiter.anchor, loiter.bearing, radius);
 
-        SimVector toStation(station.x - unitInfo.state->position.x, 0_ss, station.z - unitInfo.state->position.z);
-        if (toStation.lengthSquared() <= AirLoiterArrivalTolerance * AirLoiterArrivalTolerance)
+        if (AirMovement::loiterArrived(unitInfo.state->position, station))
         {
             // On station. Work the bearing round for the next one. The step is
             // more than a quarter turn and less than half of one, so successive
             // stations are joined by chords that pass close to the middle:
             // this is why a bomber keeps coming back over what it killed
             // rather than settling into a tidy orbit.
-            loiter.bearing = loiter.bearing - stepBase - SimAngle(sim->rng() % (AirLoiterStepJitter.value + 1u));
-            station = loiter.anchor + (UnitState::toDirection(loiter.bearing) * radius);
+            loiter.bearing = AirMovement::nextLoiterBearing(loiter.bearing, stepBase, sim->rng());
+            station = AirMovement::loiterStation(loiter.anchor, loiter.bearing, radius);
         }
 
         station.y = getTargetAltitude(sim->terrain, station.x, station.z, *unitInfo.definition);
@@ -3452,12 +3320,6 @@ namespace rwe
         // If we're currently in plain Flying, kick off an attack run.
         if (auto flying = std::get_if<AirMovementStateFlying>(&airPhysics->movementState))
         {
-            AirMovementStateAttackRun runState(target);
-            // Cache target position at cruise altitude so steering doesn't dive.
-            auto altitude = getTargetAltitude(sim->terrain, targetPosition->x, targetPosition->z, *unitInfo.definition);
-            runState.lastKnownTargetPos = SimVector(targetPosition->x, altitude, targetPosition->z);
-            runState.runOutDirection = UnitState::toDirection(unitInfo.state->rotation);
-
             // A gun-armed aircraft flies the original's strafing pass
             // (`AirToGround`, 0x412710) rather than the bomber's run: it
             // overshoots to three weapon ranges past the target and breaks
@@ -3466,15 +3328,20 @@ namespace rwe
             // the aircraft clean off the map.
             // An air target never reaches here any more -- it is sent to
             // the dogfight above -- so this is the ground case only.
-            runState.strafingPass = !std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType);
-            runState.runOutDistance = runState.strafingPass
+            auto strafingPass = !std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType);
+            auto runOutDistance = strafingPass
                 ? weaponDefinition.maxRange * 3_ss
                 : defaultAttackRunOutDistance(*unitInfo.definition, weaponDefinition.maxRange);
-            runState.phase = AirMovementStateAttackRun::Phase::Approaching;
-            // Carry the speed it already had: an aircraft that turns to attack
-            // does not come to a halt first.
-            runState.currentVelocity = flying->currentVelocity;
-            airPhysics->movementState = runState;
+
+            // Cache target position at cruise altitude so steering doesn't dive.
+            auto altitude = getTargetAltitude(sim->terrain, targetPosition->x, targetPosition->z, *unitInfo.definition);
+            airPhysics->movementState = AirMovement::beginAttackRun(
+                target,
+                SimVector(targetPosition->x, altitude, targetPosition->z),
+                unitInfo.state->rotation,
+                flying->currentVelocity,
+                strafingPass,
+                runOutDistance);
         }
 
         auto attackRun = std::get_if<AirMovementStateAttackRun>(&airPhysics->movementState);
@@ -3484,41 +3351,19 @@ namespace rwe
             return false;
         }
 
-        // Refresh cached target position (target may move).
-        auto altitude = getTargetAltitude(sim->terrain, targetPosition->x, targetPosition->z, *unitInfo.definition);
-        attackRun->lastKnownTargetPos = SimVector(targetPosition->x, altitude, targetPosition->z);
         attackRun->target = target;
 
-        auto previousPhase = attackRun->phase;
-
-        // If we just transitioned into Engaging, capture the run-out direction
-        // before stepping. Approaching's phase change to Engaging happens in
-        // stepAttackRunPhase.
-        auto geometry = computeAttackRunGeometry(*unitInfo.definition, weaponDefinition.maxRange);
-        SimVector heading = attackRun->currentVelocity;
-        heading.y = 0_ss;
-        if (heading.lengthSquared() == 0_ss)
-        {
-            heading = UnitState::toDirection(unitInfo.state->rotation);
-        }
-        bool weaponsHot = stepAttackRunPhase(unitInfo.state->position, heading, *targetPosition, geometry, *attackRun);
-
-        // Never run out past the edge of the map: turn back early instead.
-        if (attackRun->phase == AirMovementStateAttackRun::Phase::Departing)
-        {
-            const auto& heights = sim->terrain.getHeightMap();
-            auto corner = sim->terrain.heightmapIndexToWorldCorner(0, 0);
-            auto margin = 64_ss;
-            auto minX = corner.x + margin;
-            auto minZ = corner.z + margin;
-            auto maxX = corner.x + (SimScalar(static_cast<float>(heights.getWidth())) * MapTerrain::HeightTileWidthInWorldUnits) - margin;
-            auto maxZ = corner.z + (SimScalar(static_cast<float>(heights.getHeight())) * MapTerrain::HeightTileHeightInWorldUnits) - margin;
-            const auto& p = unitInfo.state->position;
-            if (p.x < minX || p.x > maxX || p.z < minZ || p.z > maxZ)
-            {
-                attackRun->phase = AirMovementStateAttackRun::Phase::Approaching;
-            }
-        }
+        // Refresh the cached target position (target may move), step the phase
+        // machine, and turn back early rather than run off the edge of the map.
+        auto altitude = getTargetAltitude(sim->terrain, targetPosition->x, targetPosition->z, *unitInfo.definition);
+        auto step = AirMovement::stepAttackRun(
+            *attackRun,
+            *unitInfo.state,
+            *unitInfo.definition,
+            sim->terrain,
+            SimVector(targetPosition->x, altitude, targetPosition->z),
+            *targetPosition,
+            weaponDefinition.maxRange);
 
         // The strafing pass's ninety-degree break. The phase machine has no
         // dice of its own, so the side is drawn here: the original takes
@@ -3526,43 +3371,30 @@ namespace rwe
         // flies one weapon range. Drawn straight off the simulation's rng so
         // every peer breaks the same way.
         if (attackRun->strafingPass
-            && previousPhase == AirMovementStateAttackRun::Phase::Departing
+            && step.previousPhase == AirMovementStateAttackRun::Phase::Departing
             && attackRun->phase == AirMovementStateAttackRun::Phase::Approaching)
         {
-            SimVector breakHeading = attackRun->currentVelocity;
-            breakHeading.y = 0_ss;
-            if (breakHeading.lengthSquared() == 0_ss)
-            {
-                breakHeading = UnitState::toDirection(unitInfo.state->rotation);
-            }
-            auto quarterTurn = SimAngle(16384);
-            auto heading = UnitState::toRotation(breakHeading);
             auto side = (sim->rng() % 2u) == 0u;
-            auto breakDirection = UnitState::toDirection(side ? heading + quarterTurn : heading - quarterTurn);
-            auto reach = rweMax(weaponDefinition.maxRange, 1_ss);
-            attackRun->breakWaypoint = SimVector(
-                unitInfo.state->position.x + (breakDirection.x * reach),
-                unitInfo.state->position.y,
-                unitInfo.state->position.z + (breakDirection.z * reach));
+            attackRun->breakWaypoint = AirMovement::strafeBreakWaypoint(
+                unitInfo.state->position,
+                attackRun->currentVelocity,
+                unitInfo.state->rotation,
+                weaponDefinition.maxRange,
+                side);
             attackRun->phase = AirMovementStateAttackRun::Phase::Breaking;
         }
 
-        if (previousPhase == AirMovementStateAttackRun::Phase::Approaching
-            && attackRun->phase == AirMovementStateAttackRun::Phase::Engaging)
-        {
-            // Capture the engagement heading: prefer the direction we're
-            // already moving in so the line-up stays smooth. If we're
-            // not moving yet, fall back to the line through the target.
-            SimVector heading = attackRun->currentVelocity;
-            heading.y = 0_ss;
-            if (heading.lengthSquared() == 0_ss)
-            {
-                heading = SimVector(targetPosition->x - unitInfo.state->position.x, 0_ss, targetPosition->z - unitInfo.state->position.z);
-            }
-            attackRun->runOutDirection = heading.normalizedOr(UnitState::toDirection(unitInfo.state->rotation));
-        }
+        // If we just transitioned into Engaging, capture the run-out direction
+        // after stepping. Approaching's phase change to Engaging happens in
+        // stepAttackRunPhase.
+        AirMovement::captureRunOutDirection(
+            *attackRun,
+            step.previousPhase,
+            unitInfo.state->position,
+            *targetPosition,
+            unitInfo.state->rotation);
 
-        if (weaponsHot)
+        if (step.weaponsHot)
         {
             // Weapons hot: have all weapons fire on the target.
             for (unsigned int i = 0; i < 2; ++i)
@@ -4007,7 +3839,7 @@ namespace rwe
                 return false;
             }
 
-            flyAirLoiterCircuit(unitInfo, UnitState::AirLoiterState::Reason::Guarding, targetUnit.position, AirLoiterGuardStep);
+            flyAirLoiterCircuit(unitInfo, UnitState::AirLoiterState::Reason::Guarding, targetUnit.position, AirMovement::LoiterGuardStep);
             return false;
         }
 
