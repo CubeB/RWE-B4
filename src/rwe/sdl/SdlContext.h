@@ -92,6 +92,17 @@ namespace rwe
             return SDL_GetMouseFocus();
         }
 
+        /**
+         * The window taking input, or null when the user is working somewhere
+         * else entirely. Unlike mouse focus this survives the pointer leaving
+         * the window, which is what edge scrolling needs: shoving the pointer
+         * at an edge usually pushes it clean out of a windowed game.
+         */
+        SDL_Window* getKeyboardFocus()
+        {
+            return SDL_GetKeyboardFocus();
+        }
+
         void showCursor()
         {
             SDL_ShowCursor();

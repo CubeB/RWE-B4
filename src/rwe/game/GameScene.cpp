@@ -503,25 +503,36 @@ namespace rwe
 
         // update camera position from edge scroll
         //
-        // Only while the pointer is actually over this window. SDL keeps
-        // reporting the last position it saw once the pointer has left, and
-        // that position is usually against an edge -- so a game left running
-        // behind another window scrolls itself into the corner of the map
-        // and sits there. It is also what stopped the off-screen visual
-        // tests working: nothing the harness posts can put the pointer back
-        // inside a window the pointer is not in, and every run photographed
-        // an unexplored corner.
-        if (sceneContext.sdl->getMouseFocus() != nullptr)
+        // Only while this window is the one taking input. SDL keeps reporting
+        // the last position it saw once the pointer has left, and that
+        // position is usually against an edge -- so a game left running
+        // behind another window scrolls itself into the corner of the map and
+        // sits there. It is also what stopped the off-screen visual tests
+        // working: every run photographed an unexplored corner.
+        //
+        // The gate is input focus rather than the pointer being inside the
+        // window, which is what it used to be and was wrong in the ordinary
+        // case: shoving the pointer at an edge pushes it clean out of a
+        // windowed game, whereupon mouse focus goes and the scroll stops
+        // exactly when it is wanted. A window nobody is working in has no
+        // input focus either way, so the background case stays fixed.
+        //
+        // The position is clamped into the viewport for the same reason: once
+        // the pointer is outside, its coordinates are past the edge rather
+        // than on it, and the tests below want the edge itself.
+        if (sceneContext.sdl->getKeyboardFocus() != nullptr)
         {
             auto mousePosition = getMousePosition();
-            auto directionX = mousePosition.x == sceneContext.viewport->left()
+            auto clampedX = std::clamp(mousePosition.x, sceneContext.viewport->left(), sceneContext.viewport->right() - 1);
+            auto clampedY = std::clamp(mousePosition.y, sceneContext.viewport->top(), sceneContext.viewport->bottom() - 1);
+            auto directionX = clampedX == sceneContext.viewport->left()
                 ? -1
-                : mousePosition.x == sceneContext.viewport->right() - 1
+                : clampedX == sceneContext.viewport->right() - 1
                 ? 1
                 : 0;
-            auto directionZ = mousePosition.y == sceneContext.viewport->top()
+            auto directionZ = clampedY == sceneContext.viewport->top()
                 ? -1
-                : mousePosition.y == sceneContext.viewport->bottom() - 1
+                : clampedY == sceneContext.viewport->bottom() - 1
                 ? 1
                 : 0;
 
