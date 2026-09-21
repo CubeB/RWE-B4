@@ -16,9 +16,12 @@
 #include <rwe/math/Matrix4x.h>
 #include <rwe/pathfinding/AStarPathFinder.h>
 #include <rwe/pathfinding/PathCost.h>
-#include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/FeatureDefinition.h>
+#include <rwe/sim/GameTime.h>
+#include <rwe/sim/ImpactType.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/OccupiedGrid.h>
+#include <rwe/sim/PlayerVisibility.h>
 #include <rwe/sim/Projectile.h>
 #include <rwe/sim/ProjectileId.h>
 #include <rwe/sim/SimScalar.h>
@@ -31,6 +34,8 @@
 
 namespace rwe
 {
+    struct GameSimulation;
+
     /**
      * Whether a model standing at a world position could reach the view.
      *

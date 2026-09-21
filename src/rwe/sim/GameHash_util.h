@@ -1,12 +1,21 @@
 #pragma once
 
 #include <cstdint>
+#include <rwe/collections/VectorMap.h>
+#include <rwe/grid/Grid.h>
 #include <rwe/sim/GameHash.h>
-#include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/GamePlayerInfo.h>
+#include <rwe/sim/MapFeature.h>
+#include <rwe/sim/PlayerVisibility.h>
+#include <rwe/sim/Projectile.h>
+#include <rwe/sim/UnitState.h>
+#include <rwe/util/OpaqueId.h>
 #include <rwe/util/match.h>
 
 namespace rwe
 {
+    struct GameSimulation;
+
     GameHash computeHashOf(GameHash hash);
 
     GameHash computeHashOf(float f);

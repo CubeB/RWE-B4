@@ -1,13 +1,15 @@
 #pragma once
 
 #include <array>
-#include <rwe/sim/GameSimulation.h>
+#include <rwe/game/PlayerColorIndex.h>
 #include <rwe/sim/PlayerId.h>
 #include <string>
 #include <vector>
 
 namespace rwe
 {
+    struct GameSimulation;
+
     /**
      * The seven numbered columns of the original's end-of-game chart, in the
      * order it lays them out and fills them: left to right across

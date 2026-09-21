@@ -151,9 +151,9 @@ namespace rwe
         AStarScratch scratch;
 
         /**
-         * The search in progress, if there is one. Opaque here: it holds a
-         * pathfinder, and every pathfinder header reaches GameSimulation,
-         * which reaches this one.
+         * The search in progress, if there is one. Opaque here: the concrete
+         * finder it holds is named only in the .cpp, so this header does not
+         * have to reach the simulation the finder is built from.
          */
         struct ActiveSearch;
         std::unique_ptr<ActiveSearch> activeSearch;

@@ -3,13 +3,21 @@
 #include <cstdint>
 #include <deque>
 #include <nlohmann/json.hpp>
-#include <rwe/sim/GameSimulation.h>
+#include <rwe/collections/VectorMap.h>
+#include <rwe/grid/Grid.h>
+#include <rwe/sim/GamePlayerInfo.h>
+#include <rwe/sim/PlayerVisibility.h>
+#include <rwe/sim/Projectile.h>
+#include <rwe/sim/UnitState.h>
 #include <rwe/util/OpaqueId.h>
+#include <rwe/util/match.h>
 #include <string>
 #include <utility>
 
 namespace rwe
 {
+    struct GameSimulation;
+
     nlohmann::json dumpJson(float f);
 
     nlohmann::json dumpJson(bool b);

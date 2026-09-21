@@ -1,4 +1,5 @@
 #include "AbstractUnitPathFinder.h"
+#include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/movement.h>
 
 namespace rwe

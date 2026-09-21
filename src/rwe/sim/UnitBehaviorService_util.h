@@ -1,17 +1,19 @@
 #pragma once
 
 #include <rwe/math/Vector2x.h>
-#include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/SimAngle.h>
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/UnitInfo.h>
 #include <rwe/sim/UnitState.h>
 #include <string>
 
 namespace rwe
 {
+    struct GameSimulation;
+
     SimAngle angleTo(const Vector2x<SimScalar>& lhs, const Vector2x<SimScalar>& rhs);
 
     SimVector toDirection(SimAngle heading, SimAngle pitch);

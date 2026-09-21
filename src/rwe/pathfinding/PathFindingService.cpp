@@ -1,6 +1,7 @@
 #include "PathFindingService.h"
 #include <rwe/pathfinding/BugWalk.h>
 #include <rwe/pathfinding/UnitPathFinder.h>
+#include <rwe/sim/GameSimulation.h>
 #include <rwe/pathfinding/UnitPerimeterPathFinder.h>
 #include <rwe/pathfinding/pathfinding_utils.h>
 #include <rwe/util/Index.h>

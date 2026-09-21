@@ -8,6 +8,8 @@
 #include <rwe/sim/GameSimulation.h>
 
 #include <algorithm>
+#include <cstring>
+#include <rwe/sim/GameSimulation.h>
 #include <rwe/util/match.h>
 #include <sstream>
 #include <stdexcept>

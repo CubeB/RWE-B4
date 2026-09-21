@@ -3,12 +3,13 @@
 #include <rwe/grid/Point.h>
 #include <rwe/pathfinding/AbstractUnitPathFinder.h>
 #include <rwe/pathfinding/PathCost.h>
-#include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MovementClassCollisionService.h>
 #include <rwe/sim/UnitId.h>
 
 namespace rwe
 {
+    struct GameSimulation;
+
     /**
      * Standard unit pathfinder.
      */

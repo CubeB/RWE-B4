@@ -1,7 +1,9 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
+#include <rwe/cob/CobEnvironment.h>
 #include <rwe/game/SaveJson.h>
+#include <rwe/grid/Grid.h>
 #include <rwe/sim/PlayerVisibility.h>
 #include <rwe/sim/UnitState.h>
 

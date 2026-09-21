@@ -1,4 +1,5 @@
 #include "dump_util.h"
+#include <rwe/sim/GameSimulation.h>
 
 #include "UnitStateFieldTable.h"
 
