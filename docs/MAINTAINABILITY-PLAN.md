@@ -150,9 +150,22 @@ measured below.
       **Nothing short of changing what `UnitState` is will move that 143.**
       Recorded as a negative result rather than left as a standing
       recommendation, which is what it was until it was measured.
-- [ ] **`UnitDefinition.h`** -- 22 commits, 88 includers. Almost certainly the
-      same shape as `UnitState.h` above and probably not worth doing either;
-      measure the 125-of-143 equivalent first, before any work.
+- [x] **`UnitDefinition.h` -- measured, and worse.** 146 objects depend on it
+      and only **3** reach it without also carrying `UnitState.h`,
+      `GameSimulation.h`, `GameScene.h` or `UnitStateFieldTable.h`: a **2%**
+      ceiling against `UnitState.h`'s 12%. Not worth doing.
+
+### What the two dead ends say together
+
+Header fan-in in this tree is not an accident to be tidied away. A unit is the
+thing the simulation is about; `GameSimulation` holds a map of units,
+`GameScene` holds a `GameSimulation`, and four fifths of the tree reaches one
+of those. Phase 1's remaining candidates are all downstream of that, so the
+phase is finished -- #124 took the transitive slack out and there is no more
+to take without changing what a unit *is*.
+
+**Stop looking for rebuild-cost wins in headers.** The next real work is
+Phase 3, which is about a class of bug rather than a class of cost.
 
 ### Corrected: `AiTuningProfile.h` is not a target
 
