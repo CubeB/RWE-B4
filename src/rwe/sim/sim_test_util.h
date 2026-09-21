@@ -14,13 +14,18 @@
  * Fixtures the simulation tests share.
  *
  * Each of these was copied into a test file as it was written -- fourteen
- * copies of makeEmptyCobScript by the end -- so a change to how a unit gets
- * into the world had to be made in every one of them.
+ * copies of makeEmptyCobScript by the end, and forty of makeFlatTerrain -- so
+ * a change to how a unit gets into the world had to be made in every one of
+ * them.
  *
- * A test that needs a unit built differently still writes its own: patrol
- * keeps its own addUnitOfType because it wants a named base piece and fire
- * orders set, and putting that here would only push the difference out of
- * sight.
+ * A test that needs one built differently still writes its own, under a name
+ * that says what is different: patrol's addFiringUnitOfType wants a named
+ * base piece and fire orders set, and TransportManager's makeDryTerrain is
+ * the all-dry control for its channel map rather than flat ground. Putting
+ * either here under the shared name would only push the difference out of
+ * sight -- and, because an anonymous namespace inside namespace rwe joins
+ * this overload set rather than shadowing it, would make the call ambiguous
+ * rather than overriding it.
  */
 namespace rwe
 {

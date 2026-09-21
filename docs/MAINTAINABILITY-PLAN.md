@@ -297,6 +297,17 @@ Both heap-dependent desyncs of 2026-09-18 were in it.
       files, fixed by renaming their `addPlayer` and dropping two helpers
       identical to the shared ones. 255 insertions against 543 deletions
       across 41 files; 810 tests and 111,701 assertions before and after.
+- [ ] **`addWellStockedPlayer` is three copies, and the name is taken.**
+      Found while updating the docs for the `makeFlatTerrain` collection, and
+      measured: `aircraftbuild`, `nanoframedecay` and `repair` define bodies
+      that are identical apart from the player's name and side string (CORE
+      in the first, ARM in the other two). One shared
+      `addWellStockedPlayer(sim, name, side)` collapses them. Small, and the
+      same shape as the work just finished. Note the name had also drifted --
+      `saveload`'s helper of that name was the shared `addPlayer` with ten
+      times the storage and only the shared 1,000 of each resource, so it is
+      `addPlayerWithLargeStores` now; renaming it was the fix, not sharing it.
+
 - [ ] **`tad_episodes.cpp`** -- 6,533 lines. One file per mode over a shared
       reader. Low urgency: the tool is stable. Do it if it is touched again.
 

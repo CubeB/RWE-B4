@@ -20,7 +20,7 @@ namespace rwe
     namespace
     {
         /** sim_test_util.h's addPlayer with ten times the storage, so nothing here caps. */
-        PlayerId addWellStockedPlayer(GameSimulation& sim, const std::string& name)
+        PlayerId addPlayerWithLargeStores(GameSimulation& sim, const std::string& name)
         {
             GamePlayerInfo p{
                 std::optional<std::string>(name),
@@ -242,8 +242,8 @@ namespace rwe
          */
         void buildScenario(GameSimulation& sim)
         {
-            auto us = addWellStockedPlayer(sim, "us");
-            auto them = addWellStockedPlayer(sim, "them");
+            auto us = addPlayerWithLargeStores(sim, "us");
+            auto them = addPlayerWithLargeStores(sim, "them");
 
             auto launcherId = spawnUnit(sim, "LAUNCHER", us, SimVector(0_ss, 0_ss, 0_ss));
             UnitWeapon missile;
