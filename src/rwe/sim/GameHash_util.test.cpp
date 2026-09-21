@@ -399,6 +399,24 @@ namespace rwe
         REQUIRE(entry["hitPoints"] == 55);
     }
 
+    TEST_CASE("every field a projectile's hash reads is one the dump writes")
+    {
+        // The same fault as the features one, a field at a time rather than a
+        // whole type: edgeEffectiveness went into the sync hash and not into
+        // the dump, so a round that disagreed about its falloff showed up as
+        // a mismatch the dump could not account for. Issue #115.
+        //
+        // The list is what computeHashOf(const Projectile&) reads, in its
+        // order. Adding to one means adding to the other.
+        Projectile p{};
+        auto dumped = dumpJson(p);
+        for (const auto& key : {"owner", "attacker", "position", "origin", "velocity", "damageRadius", "edgeEffectiveness", "heading", "pitch", "speed", "secondPhase", "targetProjectile", "motorOut"})
+        {
+            CAPTURE(key);
+            REQUIRE(dumped.contains(key));
+        }
+    }
+
     TEST_CASE("a capture's progress reaches the desync dump")
     {
         // Hunting a desync is RWE_HASH_LOG to find the tick and then

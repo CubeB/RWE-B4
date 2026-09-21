@@ -344,6 +344,7 @@ namespace rwe
             {"origin", dumpJson(projectile.origin)},
             {"velocity", dumpJson(projectile.velocity)},
             {"damageRadius", dumpJson(projectile.damageRadius)},
+            {"edgeEffectiveness", dumpJson(projectile.edgeEffectiveness)},
             {"heading", dumpJson(projectile.heading)},
             {"pitch", dumpJson(projectile.pitch)},
             {"speed", dumpJson(projectile.speed)},
