@@ -196,13 +196,16 @@ Much of the current work is matching the original's behaviour down to the
 arithmetic. Where a behaviour is meant to match TA, it has usually been read out
 of `TotalA.exe` instead of guessed at.
 
-- `docs/TOTALA-EXE.md` — the findings: 109 of them, numbered to 111 (§83 and
-  §84 do not exist). The flight model, fog of war, the damage pipeline, target
-  selection, the economy, the nanolathe, effects and render order, the
-  interface, transports, music, the pathfinder, and the FBI and weapon field
-  offsets. **It opens with a numbered index**; use that rather than searching
-  14,000 lines. The two to read before changing anything are **§88**, where
-  RWE deliberately differs, and **§91**, what is decoded but not ported.
+- `docs/TOTALA-EXE.md` — **the index to the findings**, and the two sections
+  everyone is told to read first: §88, where RWE deliberately differs, and
+  §91, what is decoded but not ported. 109 findings numbered to 111 (§83 and
+  §84 do not exist). **The numbers never move**, so a §n written anywhere in
+  the tree names the same finding for ever; the index says which file holds
+  it. The subjects are `-MOVEMENT`, `-VISION`, `-ECONOMY`, `-WEAPONS`,
+  `-RENDER`, `-INTERFACE`, `-KEYBOARD`, `-TRANSPORTS`, `-MUSIC` and `-DATA`,
+  plus the older `-SHADING`, `-WRECKS` and `-MISSIONS`. Start at the index
+  rather than grepping: §53 and §54 are marked there as superseded by
+  `-SHADING`, and reading either without that marker gets unit lighting wrong.
 - `docs/TOTALA-EXE-SHADING.md` — the shaded unit rasterizer in full, in two
   halves. Part one is the geometry: the 16-byte vertex record, the per-vertex
   shade level and its `& 0x1F`, the averaged (and deliberately unnormalised)

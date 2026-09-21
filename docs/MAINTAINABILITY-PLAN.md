@@ -379,11 +379,23 @@ Both heap-dependent desyncs of 2026-09-18 were in it.
       Bytes are what gets loaded into a session, and bytes are down 39%.
       Cutting to 200 lines from here would mean deleting hazards, which is the
       opposite of the point.
-- [ ] **Split `TOTALA-EXE.md` by subject** (#140), keeping the section numbers stable.
-      14,057 lines cannot be read whole. **The numbered index half is done**
-      (2026-09-21): the file opens with all 109 findings linked by number,
-      generated from its own headings, which also confirmed the count -- 109
-      numbered to 111, with no §83 and no §84. The split itself is still open.
+- [x] **`TOTALA-EXE.md` is split by subject** (#140). Done 2026-09-21.
+      14,174 lines into ten subject files of 432 to 2,396 lines, with the
+      parent keeping the full index, §88 and §91. **The section numbers did
+      not move** -- 109 findings numbered to 111, no §83, no §84 -- so every
+      `§n` in the tree, the commit log and the other documents still names the
+      same finding; the index says which file holds it. 216 links checked,
+      none broken; the section bodies are 13,914 lines before and after.
+
+      **It was justified on churn, which is the rule the AiBehaviour split
+      left behind.** `TOTALA-EXE.md` takes **153 commits in thirty days**, the
+      most of any file in this tree -- ahead of `CLAUDE.md` at 98 and
+      `BuildManager.cpp` at 62. Size alone would not have been a reason.
+
+      The measuring turned up something worth more than the split: **§53, §54
+      and §58 carried a finding that `TOTALA-EXE-SHADING.md` had overturned,
+      and said nothing about it.** All three are marked now, and the two worst
+      are flagged in the index.
 
 ## Phase 6 -- tracker hygiene
 
