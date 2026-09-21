@@ -75,6 +75,13 @@ green at 795 cases.
       140% of the ceiling long after it stopped mattering.
 - [x] **`tools/fan-in-report.sh`** -- reports, never fails. Produced the table
       above.
+- [x] **`tools/hash-oracle.sh`** -- records the per-tick sync hash of four
+      fixed headless arena games and compares a later build's against them.
+      This is the proof every Phase 2 item is supposed to carry, made into one
+      command. It is a stronger check than the suite for a change meant to
+      move code without changing behaviour: an extraction can keep 800 tests
+      green and still reorder a random draw or a float addition, and the hash
+      catches both on the tick they happen.
 - [x] **`tools/syntax-check.sh`** -- compiles one translation unit for
       diagnostics only, out of `compile_commands.json`, writing nothing. It
       exists because `make` is not safe to run while anything is editing
@@ -132,12 +139,23 @@ where they belong. Its fan-in is 21, the lowest of the four. Left alone.
 
 ## Phase 2 -- give new code somewhere else to land
 
-Two of these are already open and **both merge cleanly**:
+- [x] **PR #123 landed** 2026-09-21 -- an `AirMovement` module around the
+      aircraft state machine, out of `UnitBehaviorService.cpp`, which comes
+      down from 5,958 lines to 5,790. This is issue #118.
+- [x] **PR #122 landed** 2026-09-21 -- the resource settle becomes a
+      `ResourceSettler` module; `GameSimulation.cpp` 4,684 to 4,654.
 
-- [ ] **PR #123** -- draws an `AirMovement` module around the aircraft state
-      machine, out of `UnitBehaviorService.cpp`. This is issue #118. Clean.
-- [ ] **PR #122** -- carves the resource settle into a `ResourceSettler`
-      module, out of `GameSimulation`. Clean.
+Both were held to the sync hash rather than to a reading: **17,999 ticks x 4
+scenarios, every hash identical**, against baselines taken before any of the
+three merges. So #124, #123 and #122 together changed nothing the simulation
+can observe. Tests went 795 -> 807 cases as the two PRs brought their own.
+
+One thing to watch in #122: `settleResourcePool` opens by clamping a negative
+supply to zero where the original divides straight through, on the argument
+that the original never arrives with one. The oracle never saw it fire, which
+is evidence and not proof. If a negative supply turns out to be reachable,
+that clamp is a divergence and wants a line in `TOTALA-EXE.md` section 88.
+
 - [ ] **`BuildManager::update` by phase** -- 1,612 lines in one function,
       following the pattern #121 set for the walks. No PR.
 - [ ] **#117 PieceController** -- ~30 methods off `GameSimulation`'s interface.
