@@ -18,6 +18,7 @@ namespace rwe
      * their steps straight from the member pointer.
      */
     nlohmann::json saveUnitMesh(const UnitMesh& m);
+    UnitMesh loadUnitMesh(const nlohmann::json& j);
 
     nlohmann::json saveCobEnvironment(const CobEnvironment& env);
     void loadCobEnvironmentInto(const nlohmann::json& j, CobEnvironment& env);

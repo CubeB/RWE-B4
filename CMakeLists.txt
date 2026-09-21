@@ -356,6 +356,8 @@ set(SOURCE_FILES
     src/rwe/game/dump_util.cpp
     src/rwe/game/dump_util.h
     src/rwe/game/save_util.cpp
+    src/rwe/game/save_util_orders.cpp
+    src/rwe/game/save_util_unit.cpp
     src/rwe/game/save_util.h
     src/rwe/game/SaveJson.h
     src/rwe/game/UnitStateFieldTable.cpp
