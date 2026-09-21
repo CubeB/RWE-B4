@@ -351,7 +351,7 @@ Both heap-dependent desyncs of 2026-09-18 were in it.
       resource and differed only in storage, so it is
       `addPlayerWithLargeStores` now; renaming it was the fix, not sharing it.
 
-- [ ] **`tad_episodes.cpp`** -- 6,533 lines. One file per mode over a shared
+- [ ] **`tad_episodes.cpp`** (#139) -- 6,533 lines. One file per mode over a shared
       reader. Low urgency: the tool is stable. Do it if it is touched again --
       and weigh it on its commit rate, not its section count, for the reason
       the entry above measures.
@@ -379,7 +379,7 @@ Both heap-dependent desyncs of 2026-09-18 were in it.
       Bytes are what gets loaded into a session, and bytes are down 39%.
       Cutting to 200 lines from here would mean deleting hazards, which is the
       opposite of the point.
-- [ ] **Split `TOTALA-EXE.md` by subject**, keeping the section numbers stable.
+- [ ] **Split `TOTALA-EXE.md` by subject** (#140), keeping the section numbers stable.
       14,057 lines cannot be read whole. **The numbered index half is done**
       (2026-09-21): the file opens with all 109 findings linked by number,
       generated from its own headings, which also confirmed the count -- 109
@@ -406,6 +406,26 @@ Both heap-dependent desyncs of 2026-09-18 were in it.
 - [x] **The corrections are posted** on #116, #117 and #119, each re-measured
       against the tree first. Two of the three figures this plan recorded did
       not survive that check; see below.
+
+## Found along the way, now tracked
+
+None of these were on the roadmap; each turned up while doing something else
+on it, was measured, and is now an issue rather than a note in this file.
+
+- **#135** `GameSimulation.h` is the only file of 733 in `src/` stored CRLF in
+  the index. It has already cost one 3,006-line phantom diff on a four-line
+  change. Wants a `.gitattributes`.
+- **#136** `makeChannelTerrain` is two copies with different channel widths,
+  and the comment explaining the duplication describes a constraint that no
+  longer holds. May well want to stay two, under names that say what differs.
+- **#137** `docs/adr/` is named by `CLAUDE.md` and five times by
+  `docs/agents/domain.md`, and does not exist. It was the only path in
+  `CLAUDE.md` that did not resolve.
+- **#138** The scope axis names nothing for `src/rwe/io/` or the network layer,
+  which is why #8 and #44 carry no scope. Two is not yet a pattern; filed so
+  the third has somewhere to land.
+
+The ten issues for the work in this batch are #125 to #134.
 
 ## What is deliberately partial
 
