@@ -86,11 +86,10 @@ inventory had miscounted and nobody had looked at.
 
 ## Phase 1 -- stop the rebuild storms
 
-**Most of this is already in flight as PR #124** ("Break GameSimulation.h's
-transitive grip"), which moves `GamePlayerInfo`, `UnitInfo`/`ConstUnitInfo` and
-`ImpactType` to leaf headers and forward-declares the rest. It reports
-transitive parsers down from 137 to 120. It is **CONFLICTING against `revival`**
-and needs a rebase before it can land.
+Most of this arrived as PR #124 ("Break GameSimulation.h's transitive grip"),
+which moves `GamePlayerInfo`, `UnitInfo`/`ConstUnitInfo` and `ImpactType` to
+leaf headers and forward-declares the rest. It is merged; what it bought is
+measured below.
 
 - [x] **#124 landed** 2026-09-21. Two conflicts, both against the same day's
       work: `save_util.h`, where the PR had independently made the same
@@ -119,7 +118,7 @@ and needs a rebase before it can land.
       The 108 direct includers are untouched and are where the rest of the
       cost is.
 - [ ] **`UnitState.h`** -- 36 commits, 88 includers, 3,168 recompiles a month,
-      and no PR touches it. The best remaining target once #124 lands.
+      and no PR touches it. The best remaining target now that #124 has landed.
 - [ ] **`UnitDefinition.h`** -- 22 commits, 88 includers. Same treatment.
 
 ### Corrected: `AiTuningProfile.h` is not a target
