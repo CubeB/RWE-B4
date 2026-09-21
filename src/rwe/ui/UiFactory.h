@@ -65,6 +65,20 @@ namespace rwe
 
         std::unique_ptr<UiStagedButton> createBasicButton(int x, int y, int width, int height, const std::string& guiName, const std::string& name, const std::string& label);
 
+        /**
+         * A button with no gadget of its own in the gui file, drawn on one of
+         * BUTTONS0's plain faces at the size asked for.
+         *
+         * createBasicButton draws a named graphic at the sprite's own size and
+         * uses width and height only for the hitbox, which is right for a
+         * gadget the gui file describes and wrong for one RWE adds: borrowing
+         * another control's art gives you that control's width wherever you
+         * put it. BUTTONS0 carries faces at 80, 96, 112 and 120 by 20 and the
+         * nearest of the same height is chosen, so ask for a width near one of
+         * those.
+         */
+        std::unique_ptr<UiStagedButton> createSizedButton(int x, int y, int width, int height, const std::string& guiName, const std::string& label);
+
         std::unique_ptr<UiStagedButton> createStagedButton(int x, int y, int width, int height, const std::string& guiName, const std::string& name, const std::vector<std::string>& labels, unsigned int stages);
 
         /**

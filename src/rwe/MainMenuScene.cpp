@@ -1953,16 +1953,23 @@ namespace rwe
         if (model.players[i].type.getValue() == MainMenuModel::PlayerSettings::Type::Computer)
         {
             // The AI personality. TA has no such thing, so SKIRMISH.GUI has
-            // no gadget for it: it borrows the name button's graphic and sits
-            // in the gap between the energy column, which ends at 383, and
-            // the options, which start at 476. Left click steps forward,
-            // right click back, as the colour and the resources do, and
-            // hovering it puts the personality's description on the help
-            // line the options use.
-            unsigned int width = 84;
+            // no gadget for it: it sits in the gap between the energy column,
+            // which ends at 383, and the options, which start at 476. Left
+            // click steps forward, right click back, as the colour and the
+            // resources do, and hovering it puts the personality's
+            // description on the help line the options use.
+            //
+            // It draws on one of BUTTONS0's own faces rather than borrowing
+            // the name button's "skirmname" graphic. A named graphic is drawn
+            // at the sprite's size whatever width the gadget asks for, and
+            // skirmname is the 112-wide face the name column uses, so it
+            // reached x=501 and covered the first 25 pixels of the options
+            // column beside it. The gap is 93 wide and BUTTONS0's nearest
+            // face is 80, which leaves a margin either side.
+            unsigned int width = 80;
             unsigned int height = 20;
 
-            auto b = uiFactory.createBasicButton(389, rowStart, width, height, guiName, "skirmname", "");
+            auto b = uiFactory.createSizedButton(389, rowStart, width, height, guiName, "");
             b->setName("PLAYER" + std::to_string(i) + "_personality");
             b->setTextAlign(UiStagedButton::TextAlign::Center);
 

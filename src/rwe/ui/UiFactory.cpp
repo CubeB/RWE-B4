@@ -323,6 +323,25 @@ namespace rwe
         return button;
     }
 
+    std::unique_ptr<UiStagedButton>
+    UiFactory::createSizedButton(int x, int y, int width, int height, const std::string& guiName, const std::string& label)
+    {
+        // Always three sprites: the face, the pressed face and the disabled
+        // one, in that order, whether they came off BUTTONS0 or out of the
+        // blank fallback.
+        auto sprites = getDefaultButtonGraphics(guiName, width, height);
+
+        std::vector<UiStagedButton::StageInfo> stages;
+        stages.emplace_back(sprites->sprites.at(0), label);
+
+        auto font = textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+
+        auto button = std::make_unique<UiStagedButton>(x, y, width, height, stages, sprites->sprites.at(1), font);
+        button->setDisabledSprite(sprites->sprites.at(2));
+
+        return button;
+    }
+
     void UiFactory::replaceStagedButton(UiPanel& panel, const std::string& guiName, const std::string& name, const std::string& artName, const std::vector<std::string>& labels, unsigned int stage)
     {
         auto existing = panel.find<UiStagedButton>(name);
