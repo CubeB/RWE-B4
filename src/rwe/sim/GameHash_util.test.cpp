@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/game/dump_util.h>
+#include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/UnitState.h>
@@ -325,6 +326,77 @@ namespace rwe
             c.totalWork = 900;
             REQUIRE(computeHashOf(a) != computeHashOf(c));
         }
+    }
+
+    TEST_CASE("every field a feature's hash reads is one the dump writes")
+    {
+        // The simulation's hash walks the feature list, so a burning tree
+        // whose clock has drifted, or a wreck one peer has reclaimed further
+        // than another, desyncs the game. Until dumpJson(const MapFeature&)
+        // existed the dump wrote players, units and projectiles and nothing
+        // about features at all, so that entire class of mismatch arrived
+        // with an empty diff and the hunt stopped there. Issue #115.
+        MapFeature f;
+        f.featureName = FeatureDefinitionId(7);
+        f.position = SimVector(1_ss, 2_ss, 3_ss);
+        f.rotation = SimAngle(1234);
+        f.velocity = SimVector(4_ss, 5_ss, 6_ss);
+        f.reclaimProgress = 42;
+        f.hitPoints = 99;
+        f.burningUntil = GameTime(900);
+        f.nextSpark = GameTime(30);
+
+        auto dumped = dumpJson(f);
+        for (const auto& key : {"featureName", "position", "rotation", "velocity", "reclaimProgress", "hitPoints", "burningUntil", "nextSpark"})
+        {
+            CAPTURE(key);
+            REQUIRE(dumped.contains(key));
+        }
+        REQUIRE(dumped["reclaimProgress"] == 42);
+        REQUIRE(dumped["hitPoints"] == 99);
+        REQUIRE(!dumped["burningUntil"].is_null());
+    }
+
+    namespace
+    {
+        // The fortieth copy of this in the test tree. sim_test_util.h is
+        // where it belongs and every one of those files would clash with it
+        // there, so collecting them is its own change; see the plan.
+        MapTerrain makeFlatTerrain(int width = 32, int height = 32)
+        {
+            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
+            return MapTerrain(std::move(heights), 0_ss);
+        }
+    }
+
+    TEST_CASE("the simulation dump carries the features its hash reads")
+    {
+        // The guard above only says a feature can be dumped. This one says
+        // the simulation actually dumps them, which is the half that was
+        // missing: dumpJson(const GameSimulation&) wrote players, units and
+        // projectiles while computeHashOf read those three and the features.
+        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+
+        FeatureDefinition def{};
+        def.name = "rock";
+        def.footprintX = 1;
+        def.footprintZ = 1;
+        def.height = 1_ss;
+        def.damage = 55u;
+        auto defId = sim.featureDefinitions.insert(def);
+        REQUIRE(sim.addFeature(defId, 4, 4).has_value());
+
+        auto dumped = dumpJson(sim);
+        REQUIRE(dumped.contains("features"));
+        REQUIRE(dumped["features"].size() == 1);
+        // A VectorMap dumps as id/value pairs, the same shape units and
+        // projectiles come out in, so the feature is under "second".
+        const auto& entry = dumped["features"][0]["second"];
+        REQUIRE(entry.contains("burningUntil"));
+        REQUIRE(entry.contains("reclaimProgress"));
+        // addFeature seeds a feature's hit points from its definition's
+        // damage, so this is the one field whose value the test can name.
+        REQUIRE(entry["hitPoints"] == 55);
     }
 
     TEST_CASE("a capture's progress reaches the desync dump")

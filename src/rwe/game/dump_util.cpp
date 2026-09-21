@@ -317,6 +317,24 @@ namespace rwe
             {"z", v.z},
         };
     }
+    nlohmann::json dumpJson(const MapFeature& f)
+    {
+        // Mirrors computeHashOf(const MapFeature&) field for field and in its
+        // order. If one of them grows a field the other must, which is the
+        // whole point of the pairing; GameHash_util.test.cpp holds them
+        // together.
+        return nlohmann::json{
+            {"featureName", dumpJson(f.featureName)},
+            {"position", dumpJson(f.position)},
+            {"rotation", dumpJson(f.rotation)},
+            {"velocity", dumpJson(f.velocity)},
+            {"reclaimProgress", f.reclaimProgress},
+            {"hitPoints", f.hitPoints},
+            {"burningUntil", dumpJson(f.burningUntil)},
+            {"nextSpark", dumpJson(f.nextSpark)},
+        };
+    }
+
     nlohmann::json dumpJson(const Projectile& projectile)
     {
         nlohmann::json j{
@@ -448,6 +466,7 @@ namespace rwe
             {"players", dumpJson(simulation.players)},
             {"units", dumpJson(simulation.units)},
             {"projectiles", dumpJson(simulation.projectiles)},
+            {"features", dumpJson(simulation.features)},
             {"currentWindVector", dumpJson(simulation.currentWindVector)},
             {"featureRegrowthCursor", simulation.featureRegrowthCursor},
             {"explored", dumpJson(simulation.explored)},

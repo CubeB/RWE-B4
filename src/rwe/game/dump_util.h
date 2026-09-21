@@ -6,6 +6,7 @@
 #include <rwe/collections/VectorMap.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/sim/GamePlayerInfo.h>
+#include <rwe/sim/MapFeature.h>
 #include <rwe/sim/PlayerVisibility.h>
 #include <rwe/sim/Projectile.h>
 #include <rwe/sim/UnitState.h>
@@ -90,6 +91,18 @@ namespace rwe
             {"z", dumpJson(v.z)},
         };
     }
+
+    /**
+     * Every field computeHashOf(const MapFeature&) reads, and in its order.
+     *
+     * The simulation's hash walks the feature list, so a burning tree whose
+     * clock has drifted, or a wreck one peer has reclaimed further than
+     * another, desyncs the game. Until this existed the dump had nothing to
+     * say about any of it: it wrote players, units and projectiles, and the
+     * features it was hashing were simply absent, so that whole class of
+     * mismatch came with an empty diff.
+     */
+    nlohmann::json dumpJson(const MapFeature& f);
 
     nlohmann::json dumpJson(const Projectile& projectile);
 
