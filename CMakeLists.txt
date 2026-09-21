@@ -593,6 +593,8 @@ set(SOURCE_FILES
     src/rwe/sim/ProjectilePhysicsType.h
     src/rwe/sim/AirMovement.cpp
     src/rwe/sim/AirMovement.h
+    src/rwe/sim/ResourceSettler.cpp
+    src/rwe/sim/ResourceSettler.h
     src/rwe/sim/SimAngle.cpp
     src/rwe/sim/SimAngle.h
     src/rwe/sim/SimAxis.h
@@ -1030,6 +1032,7 @@ set(TEST_FILES
     src/rwe/pathfinding/BugWalk.test.cpp
     src/rwe/pathfinding/walkwhilewaiting.test.cpp
     src/rwe/sim/economy.test.cpp
+    src/rwe/sim/ResourceSettler.test.cpp
     src/rwe/sim/visibility.test.cpp
     src/rwe/sim/alliance.test.cpp
     src/rwe/sim/concealment.test.cpp
