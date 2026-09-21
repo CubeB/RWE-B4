@@ -4392,6 +4392,218 @@ namespace rwe
         return result;
     }
 
+    /**
+     * Whether this builder was sent to work the battlefield reclaim field,
+     * in which case it has its job and the planner is done with it this
+     * tick. The rules, and what happens without them, are below.
+     */
+    bool BuildManager::tryBattlefieldReclaim(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        AiBlackboard& bb,
+        UnitId builderId,
+        const UnitDefinition& builderDef,
+        bool builderAtBase,
+        std::vector<PlayerCommand>& outCommands)
+    {
+        // A corpse blocks movement and absorbs every shot fired at whatever
+        // stands behind it, so an army that reaches one stops at it and fires
+        // into it -- and so does the army on the other side. Neither can
+        // advance, the wall thickens with every wave, and both sides spend
+        // the rest of the game shooting rubbish while their factories fill
+        // the rally points behind them. That is the original's behaviour and
+        // not something to correct in the simulation: projectiles collide
+        // with blocking features and there is no line-of-fire test anywhere,
+        // deliberately. Wrecks can be shot away -- GameSimulation gates blast
+        // damage on the weapon's damagesFeatures and a feature's `damage` key
+        // is its hit points -- but LoadingScene_util clears that flag for
+        // render types 0, 5 and 7, which is every laser, and the early armies
+        // on both sides are almost entirely laser-armed. So their shots stop
+        // on the wall and cannot mark it. What a player does is reclaim the
+        // field, which takes the wall down and pays for the next wave twice
+        // over.
+        //
+        // This has to sit above the build priorities rather than below them,
+        // where it was first put. Below, it is reached only by a builder with
+        // nothing to build, and there is always another extractor to want:
+        // measured over six games the AI logged "idle builders 0" in every
+        // status line and the fallback never once ran.
+        //
+        // Three gates keep the dose right. A wave has to be out and standing
+        // there, which is what makes the walk survivable; there has to be a
+        // wall rather than a single corpse; and no other builder of ours may
+        // already be at it, so this takes one builder off the economy and not
+        // all of them. A fourth rule brings that builder back, which matters
+        // more here than it looks: the order it is given never completes.
+
+        // Who, if anyone, is already working the field. The AI issues a
+        // patrol nowhere else, so a builder of ours carrying one is this
+        // rule's and no other's.
+        std::optional<UnitId> fieldPatroller;
+        for (const auto& [otherId, other] : sim.units)
+        {
+            if (other.owner != aiOwner || !other.isAlive() || other.orders.empty())
+            {
+                continue;
+            }
+            auto otherDefIt = sim.unitDefinitions.find(other.unitType);
+            if (otherDefIt == sim.unitDefinitions.end() || !otherDefIt->second.builder)
+            {
+                continue;
+            }
+            if (std::get_if<ReclaimOrder>(&other.orders.front()) != nullptr)
+            {
+                fieldPatroller = UnitId(otherId);
+                break;
+            }
+        }
+
+        // Where the wave is standing, and how much rubbish is standing with
+        // it. Both are wanted whether or not anyone is about to be sent: the
+        // same two numbers decide when to send a builder and when to call one
+        // home.
+        std::optional<SimVector> waveCentre;
+        int wreckCount = 0;
+        if (!bb.attackGroup.empty())
+        {
+            float sumX = 0.0f;
+            float sumZ = 0.0f;
+            int counted = 0;
+            for (auto id : bb.combatUnits)
+            {
+                if (bb.attackGroup.count(id.value) == 0)
+                {
+                    continue;
+                }
+                const auto& p = sim.getUnitState(id).position;
+                sumX += p.x.value;
+                sumZ += p.z.value;
+                ++counted;
+            }
+            if (counted >= profile.battlefieldReclaimEscortCount)
+            {
+                auto divisor = static_cast<float>(counted);
+                waveCentre = SimVector(SimScalar(sumX / divisor), 0_ss, SimScalar(sumZ / divisor));
+                auto radiusSquared = profile.battlefieldReclaimRadius * profile.battlefieldReclaimRadius;
+                for (const auto& [featureId, feature] : sim.features)
+                {
+                    const auto& featureDefinition = sim.getFeatureDefinition(feature.featureName);
+                    if (!featureDefinition.reclaimable || !(featureDefinition.metal > 0))
+                    {
+                        continue;
+                    }
+                    if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, feature.position))
+                    {
+                        continue;
+                    }
+                    if (waveCentre->distanceSquared(feature.position) < radiusSquared)
+                    {
+                        ++wreckCount;
+                    }
+                }
+            }
+        }
+
+        // A wall, not a corpse. Four is the smallest number that cannot be
+        // walked around by accident.
+        //
+        // Two thresholds and not one, which is what stops the builder being
+        // sent and recalled in the same breath. The count is taken around the
+        // wave's centre, and the wave moves: with a single threshold, a wave
+        // drifting a few hundred units takes the count across four and the
+        // builder is recalled the second after it was dispatched. Measured
+        // over four recorded games, eleven of twenty-seven dispatches were
+        // reversed inside a second. Going out wants a wall; coming back wants
+        // the field to be genuinely finished.
+        auto fieldWorthStarting = waveCentre.has_value() && wreckCount >= 4;
+        auto fieldWorthFinishing = waveCentre.has_value() && wreckCount >= 2;
+
+        // The exit condition, which the first version of this rule did not
+        // have. A patrol never ends by itself, so a builder left on one is a
+        // builder gone from the economy for good -- exactly how the factory
+        // guard order swallowed every builder that ever ran out of work in
+        // S:16.1. When the wave has moved on or the field is clear, it comes
+        // home, and an empty order queue puts it back in the pool.
+        if (fieldPatroller && !fieldWorthFinishing)
+        {
+            if (bb.baseAnchor)
+            {
+                LOG_INFO << "AI build: unit " << fieldPatroller->value << " comes off the battlefield";
+                outCommands.emplace_back(PlayerUnitCommand(*fieldPatroller, PlayerUnitCommand::IssueOrder(MoveOrder(*bb.baseAnchor), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+            }
+        }
+        else if (!fieldPatroller && fieldWorthStarting && bb.baseAnchor && builderAtBase && !builderDef.commander && profile.battlefieldReclaimEscortCount > 0)
+        {
+            // A queue of reclaim orders, one per wreck, and deliberately not a
+            // patrol.
+            //
+            // The patrol was tried first, on the reasoning that a builder on
+            // patrol reclaims what it passes and that this is the original's
+            // only automatic reclaim. Both halves of that are true and the
+            // conclusion still did not hold, because of the gate at the top of
+            // findFeatureToAutoReclaim: the scan does not run at all unless one
+            // of the player's two stores is under a fifth of its capacity
+            // (0x405B18-0x405B54). That is faithful and stays -- but it is an
+            // economy heuristic, and a builder sent to take down a wall is not
+            // there for the metal. With healthy stores the patrol walked back
+            // and forth over the wreckage and reclaimed none of it: measured
+            // across one game, successive dispatches found 7, then 17, then
+            // 43, then 95 reclaimable wrecks inside the same radius. The field
+            // grew the whole time.
+            //
+            // A ReclaimOrder names a feature and is obeyed whatever the stores
+            // say, which is what a player does when the wall is the problem
+            // rather than the economy. Naming several at once answers the
+            // objection that cost the patrol its place -- that one order clears
+            // one corpse and the planner only comes back once a pass. The queue
+            // also ends by itself, which the patrol never did: when the last
+            // one is done the builder is idle and back in the pool, so the
+            // recall above is a safety net rather than the only way out.
+            std::vector<std::pair<SimScalar, FeatureId>> spoil;
+            auto radiusSquared = profile.battlefieldReclaimRadius * profile.battlefieldReclaimRadius;
+            for (const auto& [featureId, feature] : sim.features)
+            {
+                const auto& featureDefinition = sim.getFeatureDefinition(feature.featureName);
+                if (!featureDefinition.reclaimable || !(featureDefinition.metal > 0))
+                {
+                    continue;
+                }
+                if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, feature.position))
+                {
+                    continue;
+                }
+                auto d = waveCentre->distanceSquared(feature.position);
+                if (d < radiusSquared)
+                {
+                    spoil.emplace_back(d, featureId);
+                }
+            }
+            // Nearest the wave first, and ties by feature id, so every peer
+            // builds the same queue.
+            std::sort(spoil.begin(), spoil.end(), [](const auto& a, const auto& b) {
+                return std::tie(a.first, a.second) < std::tie(b.first, b.second);
+            });
+
+            auto taken = std::min(spoil.size(), static_cast<std::size_t>(profile.battlefieldReclaimBatch));
+            if (taken > 0)
+            {
+                LOG_INFO << "AI build: unit " << builderId.value << " works the battlefield at "
+                         << static_cast<int>(waveCentre->x.value) << "," << static_cast<int>(waveCentre->z.value)
+                         << " (" << taken << " of " << wreckCount << " reclaimable within " << profile.battlefieldReclaimRadius.value << ")";
+                savingFor.clear();
+                for (std::size_t i = 0; i < taken; ++i)
+                {
+                    auto kind = i == 0 ? PlayerUnitCommand::IssueOrder::IssueKind::Immediate : PlayerUnitCommand::IssueOrder::IssueKind::Queued;
+                    outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(ReclaimOrder(spoil[i].second), kind)));
+                }
+        return true;
+            }
+        }
+
+        return false;
+    }
+
     void BuildManager::update(
         const GameSimulation& sim,
         PlayerId aiOwner,
@@ -4797,198 +5009,9 @@ namespace rwe
 
         // The wall of wrecks the last few waves left behind.
         //
-        // A corpse blocks movement and absorbs every shot fired at whatever
-        // stands behind it, so an army that reaches one stops at it and fires
-        // into it -- and so does the army on the other side. Neither can
-        // advance, the wall thickens with every wave, and both sides spend
-        // the rest of the game shooting rubbish while their factories fill
-        // the rally points behind them. That is the original's behaviour and
-        // not something to correct in the simulation: projectiles collide
-        // with blocking features and there is no line-of-fire test anywhere,
-        // deliberately. Wrecks can be shot away -- GameSimulation gates blast
-        // damage on the weapon's damagesFeatures and a feature's `damage` key
-        // is its hit points -- but LoadingScene_util clears that flag for
-        // render types 0, 5 and 7, which is every laser, and the early armies
-        // on both sides are almost entirely laser-armed. So their shots stop
-        // on the wall and cannot mark it. What a player does is reclaim the
-        // field, which takes the wall down and pays for the next wave twice
-        // over.
-        //
-        // This has to sit above the build priorities rather than below them,
-        // where it was first put. Below, it is reached only by a builder with
-        // nothing to build, and there is always another extractor to want:
-        // measured over six games the AI logged "idle builders 0" in every
-        // status line and the fallback never once ran.
-        //
-        // Three gates keep the dose right. A wave has to be out and standing
-        // there, which is what makes the walk survivable; there has to be a
-        // wall rather than a single corpse; and no other builder of ours may
-        // already be at it, so this takes one builder off the economy and not
-        // all of them. A fourth rule brings that builder back, which matters
-        // more here than it looks: the order it is given never completes.
-
-        // Who, if anyone, is already working the field. The AI issues a
-        // patrol nowhere else, so a builder of ours carrying one is this
-        // rule's and no other's.
-        std::optional<UnitId> fieldPatroller;
-        for (const auto& [otherId, other] : sim.units)
+        if (tryBattlefieldReclaim(sim, aiOwner, profile, bb, builderId, builderDef, builderAtBase, outCommands))
         {
-            if (other.owner != aiOwner || !other.isAlive() || other.orders.empty())
-            {
-                continue;
-            }
-            auto otherDefIt = sim.unitDefinitions.find(other.unitType);
-            if (otherDefIt == sim.unitDefinitions.end() || !otherDefIt->second.builder)
-            {
-                continue;
-            }
-            if (std::get_if<ReclaimOrder>(&other.orders.front()) != nullptr)
-            {
-                fieldPatroller = UnitId(otherId);
-                break;
-            }
-        }
-
-        // Where the wave is standing, and how much rubbish is standing with
-        // it. Both are wanted whether or not anyone is about to be sent: the
-        // same two numbers decide when to send a builder and when to call one
-        // home.
-        std::optional<SimVector> waveCentre;
-        int wreckCount = 0;
-        if (!bb.attackGroup.empty())
-        {
-            float sumX = 0.0f;
-            float sumZ = 0.0f;
-            int counted = 0;
-            for (auto id : bb.combatUnits)
-            {
-                if (bb.attackGroup.count(id.value) == 0)
-                {
-                    continue;
-                }
-                const auto& p = sim.getUnitState(id).position;
-                sumX += p.x.value;
-                sumZ += p.z.value;
-                ++counted;
-            }
-            if (counted >= profile.battlefieldReclaimEscortCount)
-            {
-                auto divisor = static_cast<float>(counted);
-                waveCentre = SimVector(SimScalar(sumX / divisor), 0_ss, SimScalar(sumZ / divisor));
-                auto radiusSquared = profile.battlefieldReclaimRadius * profile.battlefieldReclaimRadius;
-                for (const auto& [featureId, feature] : sim.features)
-                {
-                    const auto& featureDefinition = sim.getFeatureDefinition(feature.featureName);
-                    if (!featureDefinition.reclaimable || !(featureDefinition.metal > 0))
-                    {
-                        continue;
-                    }
-                    if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, feature.position))
-                    {
-                        continue;
-                    }
-                    if (waveCentre->distanceSquared(feature.position) < radiusSquared)
-                    {
-                        ++wreckCount;
-                    }
-                }
-            }
-        }
-
-        // A wall, not a corpse. Four is the smallest number that cannot be
-        // walked around by accident.
-        //
-        // Two thresholds and not one, which is what stops the builder being
-        // sent and recalled in the same breath. The count is taken around the
-        // wave's centre, and the wave moves: with a single threshold, a wave
-        // drifting a few hundred units takes the count across four and the
-        // builder is recalled the second after it was dispatched. Measured
-        // over four recorded games, eleven of twenty-seven dispatches were
-        // reversed inside a second. Going out wants a wall; coming back wants
-        // the field to be genuinely finished.
-        auto fieldWorthStarting = waveCentre.has_value() && wreckCount >= 4;
-        auto fieldWorthFinishing = waveCentre.has_value() && wreckCount >= 2;
-
-        // The exit condition, which the first version of this rule did not
-        // have. A patrol never ends by itself, so a builder left on one is a
-        // builder gone from the economy for good -- exactly how the factory
-        // guard order swallowed every builder that ever ran out of work in
-        // S:16.1. When the wave has moved on or the field is clear, it comes
-        // home, and an empty order queue puts it back in the pool.
-        if (fieldPatroller && !fieldWorthFinishing)
-        {
-            if (bb.baseAnchor)
-            {
-                LOG_INFO << "AI build: unit " << fieldPatroller->value << " comes off the battlefield";
-                outCommands.emplace_back(PlayerUnitCommand(*fieldPatroller, PlayerUnitCommand::IssueOrder(MoveOrder(*bb.baseAnchor), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
-            }
-        }
-        else if (!fieldPatroller && fieldWorthStarting && bb.baseAnchor && builderAtBase && !builderDef.commander && profile.battlefieldReclaimEscortCount > 0)
-        {
-            // A queue of reclaim orders, one per wreck, and deliberately not a
-            // patrol.
-            //
-            // The patrol was tried first, on the reasoning that a builder on
-            // patrol reclaims what it passes and that this is the original's
-            // only automatic reclaim. Both halves of that are true and the
-            // conclusion still did not hold, because of the gate at the top of
-            // findFeatureToAutoReclaim: the scan does not run at all unless one
-            // of the player's two stores is under a fifth of its capacity
-            // (0x405B18-0x405B54). That is faithful and stays -- but it is an
-            // economy heuristic, and a builder sent to take down a wall is not
-            // there for the metal. With healthy stores the patrol walked back
-            // and forth over the wreckage and reclaimed none of it: measured
-            // across one game, successive dispatches found 7, then 17, then
-            // 43, then 95 reclaimable wrecks inside the same radius. The field
-            // grew the whole time.
-            //
-            // A ReclaimOrder names a feature and is obeyed whatever the stores
-            // say, which is what a player does when the wall is the problem
-            // rather than the economy. Naming several at once answers the
-            // objection that cost the patrol its place -- that one order clears
-            // one corpse and the planner only comes back once a pass. The queue
-            // also ends by itself, which the patrol never did: when the last
-            // one is done the builder is idle and back in the pool, so the
-            // recall above is a safety net rather than the only way out.
-            std::vector<std::pair<SimScalar, FeatureId>> spoil;
-            auto radiusSquared = profile.battlefieldReclaimRadius * profile.battlefieldReclaimRadius;
-            for (const auto& [featureId, feature] : sim.features)
-            {
-                const auto& featureDefinition = sim.getFeatureDefinition(feature.featureName);
-                if (!featureDefinition.reclaimable || !(featureDefinition.metal > 0))
-                {
-                    continue;
-                }
-                if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, feature.position))
-                {
-                    continue;
-                }
-                auto d = waveCentre->distanceSquared(feature.position);
-                if (d < radiusSquared)
-                {
-                    spoil.emplace_back(d, featureId);
-                }
-            }
-            // Nearest the wave first, and ties by feature id, so every peer
-            // builds the same queue.
-            std::sort(spoil.begin(), spoil.end(), [](const auto& a, const auto& b) {
-                return std::tie(a.first, a.second) < std::tie(b.first, b.second);
-            });
-
-            auto taken = std::min(spoil.size(), static_cast<std::size_t>(profile.battlefieldReclaimBatch));
-            if (taken > 0)
-            {
-                LOG_INFO << "AI build: unit " << builderId.value << " works the battlefield at "
-                         << static_cast<int>(waveCentre->x.value) << "," << static_cast<int>(waveCentre->z.value)
-                         << " (" << taken << " of " << wreckCount << " reclaimable within " << profile.battlefieldReclaimRadius.value << ")";
-                savingFor.clear();
-                for (std::size_t i = 0; i < taken; ++i)
-                {
-                    auto kind = i == 0 ? PlayerUnitCommand::IssueOrder::IssueKind::Immediate : PlayerUnitCommand::IssueOrder::IssueKind::Queued;
-                    outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(ReclaimOrder(spoil[i].second), kind)));
-                }
-                return;
-            }
+            return;
         }
 
         // Set when the builder is holding off for the stockpile to catch up

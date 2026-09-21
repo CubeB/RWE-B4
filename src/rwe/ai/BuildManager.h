@@ -503,6 +503,16 @@ namespace rwe
             bool stop{false};
         };
 
+        bool tryBattlefieldReclaim(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            const AiTuningProfile& profile,
+            AiBlackboard& bb,
+            UnitId builderId,
+            const UnitDefinition& builderDef,
+            bool builderAtBase,
+            std::vector<PlayerCommand>& outCommands);
+
         PrioritySite choosePrioritySite(
             const GameSimulation& sim,
             PlayerId aiOwner,
