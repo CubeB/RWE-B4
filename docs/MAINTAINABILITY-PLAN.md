@@ -283,8 +283,37 @@ Both heap-dependent desyncs of 2026-09-18 were in it.
 
 ## Phase 4 -- the single-file tests and tools
 
-- [ ] **`AiBehaviour.test.cpp`** -- 6,912 lines, 53 commits, 18,541 sections
-      (56% of the ceiling). Split per manager.
+- [x] **`AiBehaviour.test.cpp`** -- was 6,906 lines, 58 commits, 18,565
+      sections. Done 2026-09-21, split seven ways by subject: economy stayed
+      in the base file, and army, commander, defences, naval, perception and
+      siting went beside it, 367 to 1,442 lines each. The four anonymous
+      namespaces it carried are one `ai_test_util.h`; 17 of their 20 helpers
+      were used by two or more subjects, and the three that were not stayed
+      with their one user.
+
+      **The section argument for this split was wrong, and that is the useful
+      result.** Measured either side:
+
+      | | before | after |
+      |---|---|---|
+      | longest file | 6,906 lines | 1,442 |
+      | sections, worst object | 18,565 (56%) | 14,324 (44%) |
+      | sections, all of them | 18,565 | **91,514** |
+      | compile, serial | 13.8 s | **54.7 s** |
+      | compile, critical path at `-j8` | 13.8 s | 8.5 s |
+
+      An AI test translation unit has a floor of about 11,000 sections and
+      6.5 s whatever is in it -- `perception`, eleven cases and 367 lines,
+      costs 11,188 and 6.5 s -- so seven files pay that floor seven times.
+      Sections went up **4.9x** and compiler time **4x** to take the peak down
+      twelve points on a file that was never within reach of the ceiling. The
+      whole-build budget did not move at all: it reports the worst object, and
+      that is `GameSimulation.cpp` at 71%, untouched by any of this.
+
+      What is actually bought is the 58 commits: one 6,906-line file that
+      everything AI-shaped had to be edited into, now seven that can be edited
+      independently, and editing one subject costs 8 s rather than 14. Take
+      that as the reason next time, and do not quote sections at a test file.
 - [x] **`makeFlatTerrain` was defined separately in 40 test files.** Done
       2026-09-21. Nine distinct bodies behind one name, and a bare
       `makeFlatTerrain()` meant six different map sizes -- 16, 32, 64, 128,
@@ -309,7 +338,9 @@ Both heap-dependent desyncs of 2026-09-18 were in it.
       `addPlayerWithLargeStores` now; renaming it was the fix, not sharing it.
 
 - [ ] **`tad_episodes.cpp`** -- 6,533 lines. One file per mode over a shared
-      reader. Low urgency: the tool is stable. Do it if it is touched again.
+      reader. Low urgency: the tool is stable. Do it if it is touched again --
+      and weigh it on its commit rate, not its section count, for the reason
+      the entry above measures.
 
 ## Phase 5 -- what the documentation costs
 

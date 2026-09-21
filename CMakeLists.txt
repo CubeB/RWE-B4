@@ -887,6 +887,12 @@ endif()
 set(TEST_FILES
     src/rwe/ai/AiPlayerController.test.cpp
     src/rwe/ai/AiBehaviour.test.cpp
+    src/rwe/ai/AiBehaviour_army.test.cpp
+    src/rwe/ai/AiBehaviour_commander.test.cpp
+    src/rwe/ai/AiBehaviour_defences.test.cpp
+    src/rwe/ai/AiBehaviour_naval.test.cpp
+    src/rwe/ai/AiBehaviour_perception.test.cpp
+    src/rwe/ai/AiBehaviour_siting.test.cpp
     src/rwe/ai/BuilderSafety.test.cpp
     src/rwe/ai/AiPersonality.test.cpp
     src/rwe/ai/MapIntel.test.cpp
