@@ -124,9 +124,35 @@ measured below.
       breakthrough. Eleven percent of a 195-second rebuild is twenty seconds.
       The 108 direct includers are untouched and are where the rest of the
       cost is.
-- [ ] **`UnitState.h`** -- 36 commits, 88 includers, 3,168 recompiles a month,
-      and no PR touches it. The best remaining target now that #124 has landed.
-- [ ] **`UnitDefinition.h`** -- 22 commits, 88 includers. Same treatment.
+- [x] **`UnitState.h` -- measured, and not worth doing.** It looked like the
+      best remaining target in the tree: 36 commits a month against 88
+      includers. It is not, and the reason is structural rather than
+      accidental.
+
+      Touching it rebuilds **143 objects in 209 s**. Of those 143, **125 also
+      pull `GameSimulation.h`, `GameScene.h` or `UnitStateFieldTable.h`**, and
+      all three need the complete type because they *contain* units --
+      `GameSimulation` holds a map of them and `GameScene` holds a
+      `GameSimulation`. Forward-declaring in every leaf header that could take
+      one leaves a ceiling of **18 objects, 12%**, and most of those genuinely
+      use `UnitState` too.
+
+      The second idea failed for a better reason. 52% of the header's edits
+      land in the air-movement state machine, which is 23% of its lines, so
+      moving that block to its own header should have taken half the churn off
+      the other 143. It would not: `UnitState` holds `UnitPhysicsInfo physics`
+      **by value**, and that variant contains `UnitPhysicsInfoAir`, so
+      `UnitState.h` must include wherever the air states live and everything
+      that knows a unit's size still knows its air state. Making it indirect
+      means a hashed member behind a pointer, which is the determinism
+      discipline and a redesign of the sim's central type, not a refactor.
+
+      **Nothing short of changing what `UnitState` is will move that 143.**
+      Recorded as a negative result rather than left as a standing
+      recommendation, which is what it was until it was measured.
+- [ ] **`UnitDefinition.h`** -- 22 commits, 88 includers. Almost certainly the
+      same shape as `UnitState.h` above and probably not worth doing either;
+      measure the 125-of-143 equivalent first, before any work.
 
 ### Corrected: `AiTuningProfile.h` is not a target
 
