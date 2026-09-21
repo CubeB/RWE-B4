@@ -2,10 +2,21 @@
 
 #include <nlohmann/json.hpp>
 #include <rwe/game/SaveJson.h>
-#include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/PlayerVisibility.h>
+#include <rwe/sim/UnitState.h>
 
 namespace rwe
 {
+    /**
+     * Only ever a reference here, so the whole simulation's header does
+     * not have to come with it. This file used to include
+     * GameSimulation.h, which reaches 107 translation units on its own,
+     * and every consumer of the save helpers paid for it -- including
+     * save_util_unit.cpp and save_util_orders.cpp, which need the unit's
+     * types and nothing else.
+     */
+    struct GameSimulation;
+
     /**
      * Per-type save and load helpers for UnitState's members.
      *

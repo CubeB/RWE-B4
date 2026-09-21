@@ -3,6 +3,10 @@
 #include "SaveJson.h"
 #include "UnitStateFieldTable.h"
 
+// This one uses GameSimulation itself rather than only naming it, and
+// save_util.h no longer drags the header in, so it says so here.
+#include <rwe/sim/GameSimulation.h>
+
 #include <algorithm>
 #include <rwe/util/match.h>
 #include <sstream>
