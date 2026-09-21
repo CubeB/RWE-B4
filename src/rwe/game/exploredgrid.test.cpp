@@ -123,9 +123,9 @@ namespace rwe
             // different mask -- to prove correctness rather than compression.
             Grid<ExploredMask> grid(37, 53, static_cast<ExploredMask>(0));
             std::uint32_t state = 1234u;
-            for (unsigned int y = 0; y < grid.getHeight(); ++y)
+            for (unsigned int y = 0; y < static_cast<unsigned int>(grid.getHeight()); ++y)
             {
-                for (unsigned int x = 0; x < grid.getWidth(); ++x)
+                for (unsigned int x = 0; x < static_cast<unsigned int>(grid.getWidth()); ++x)
                 {
                     state = (state * 1664525u) + 1013904223u;
                     grid.set(x, y, static_cast<ExploredMask>(state & 0x3u));

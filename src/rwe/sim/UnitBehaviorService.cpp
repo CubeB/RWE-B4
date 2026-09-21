@@ -5106,7 +5106,7 @@ namespace rwe
                 p.steeringInfo.shouldTakeOff = true;
                 return false;
             },
-            [&](const UnitPhysicsInfoAir& p) {
+            [&](const UnitPhysicsInfoAir& /*p*/) {
                 return flyTowardsGoal(unitInfo, goal);
             });
     }

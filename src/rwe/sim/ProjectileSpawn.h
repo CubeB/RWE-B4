@@ -29,16 +29,16 @@ namespace rwe
     {
         PlayerId owner;
         /** Weapon resolved off the unit that fires; its `weaponType` is the one used. */
-        const UnitWeapon* weapon;
+        const UnitWeapon* weapon{};
         /** Weapon type to look up directly, when no unit weapon is at hand. */
-        std::string weaponType;
+        std::string weaponType{};
         SimVector position;
         SimVector direction;
         SimScalar distanceToTarget;
-        std::optional<UnitId> targetUnit;
-        std::optional<UnitId> attacker;
-        std::optional<SimVector> inheritedVelocity;
-        std::optional<SimVector> targetPosition;
-        std::optional<ProjectileId> targetProjectile;
+        std::optional<UnitId> targetUnit{};
+        std::optional<UnitId> attacker{};
+        std::optional<SimVector> inheritedVelocity{};
+        std::optional<SimVector> targetPosition{};
+        std::optional<ProjectileId> targetProjectile{};
     };
 }

@@ -77,13 +77,13 @@ namespace rwe
             {
                 CobAxis axis;
                 CobPosition position;
-                std::optional<CobSpeed> speed;
+                std::optional<CobSpeed> speed{};
             };
             struct Turn
             {
                 CobAxis axis;
                 CobAngle angle;
-                std::optional<CobAngularSpeed> speed;
+                std::optional<CobAngularSpeed> speed{};
             };
             struct Spin
             {

@@ -893,7 +893,7 @@ namespace rwe
         }
     }
 
-    void GameScene::renderMinimapCoverageRings(const UnitState& unit, const UnitDefinition& unitDefinition, const Vector3f& centre, float worldUnitsToMinimapPixels)
+    void GameScene::renderMinimapCoverageRings(const UnitState& unit, const UnitDefinition& /*unitDefinition*/, const Vector3f& centre, float worldUnitsToMinimapPixels)
     {
         // 0x46707C: one ring per weapon slot whose weapon carries the
         // interceptor flag, radius coverage - 512, in interface colour 0x0F

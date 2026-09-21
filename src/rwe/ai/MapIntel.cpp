@@ -78,9 +78,9 @@ namespace rwe
 
         std::size_t total = 0;
         std::size_t below = 0;
-        for (std::size_t y = 0; y < heights.getHeight(); ++y)
+        for (std::size_t y = 0; y < static_cast<std::size_t>(heights.getHeight()); ++y)
         {
-            for (std::size_t x = 0; x < heights.getWidth(); ++x)
+            for (std::size_t x = 0; x < static_cast<std::size_t>(heights.getWidth()); ++x)
             {
                 ++total;
                 if (SimScalar(static_cast<float>(heights.get(x, y))) < seaLevel)

@@ -9,7 +9,7 @@ namespace rwe
     class Scene
     {
     public:
-        virtual void update(int millisecondsElapsed) {}
+        virtual void update(int /*millisecondsElapsed*/) {}
 
         virtual void init() {}
 

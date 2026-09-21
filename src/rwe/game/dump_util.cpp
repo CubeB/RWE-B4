@@ -105,17 +105,17 @@ namespace rwe
         };
     }
 
-    nlohmann::json dumpJson(const AirMovementStateTakingOff& p)
+    nlohmann::json dumpJson(const AirMovementStateTakingOff& /*p*/)
     {
         return nlohmann::json{};
     }
 
-    nlohmann::json dumpJson(const AirMovementStateLanding& p)
+    nlohmann::json dumpJson(const AirMovementStateLanding& /*p*/)
     {
         return nlohmann::json{};
     }
 
-    nlohmann::json dumpJson(const AirMovementStateFlying& p)
+    nlohmann::json dumpJson(const AirMovementStateFlying& /*p*/)
     {
         return nlohmann::json{};
     }
@@ -396,7 +396,7 @@ namespace rwe
         return nlohmann::json();
     }
 
-    nlohmann::json dumpJson(const NavigationStateIdle& m)
+    nlohmann::json dumpJson(const NavigationStateIdle& /*m*/)
     {
         return nlohmann::json();
     }

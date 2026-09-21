@@ -308,7 +308,7 @@ namespace rwe
         auto plainId = addUnitOfType(sim, "PLAINBUILDING", enemy, plainPos, script);
 
         auto bomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(0_ss, 0_ss, 0_ss), script);
-        auto secondBomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(20_ss, 0_ss, 0_ss), script);
+        [[maybe_unused]] auto secondBomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(20_ss, 0_ss, 0_ss), script);
 
         auto profile = makeDefaultStandardProfile();
         profile.tacticalTickInterval = 1;
@@ -365,7 +365,7 @@ namespace rwe
         auto plainId = addUnitOfType(sim, "PLAINBUILDING", enemy, plainPos, script);
 
         auto bomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(0_ss, 0_ss, 0_ss), script);
-        auto secondBomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(20_ss, 0_ss, 0_ss), script);
+        [[maybe_unused]] auto secondBomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(20_ss, 0_ss, 0_ss), script);
 
         auto profile = makeDefaultStandardProfile();
         profile.tacticalTickInterval = 1;

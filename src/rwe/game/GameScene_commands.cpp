@@ -1772,7 +1772,7 @@ namespace rwe
 
         const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
         auto pieceTransform = toFloatMatrix(simulation.getUnitPieceTransform(unitId, pieceName));
-        const auto& pieceMesh = gameMediaDatabase.getUnitPieceMesh(unitDefinition.objectName, pieceName).value().get();
+        const auto pieceMesh = gameMediaDatabase.getUnitPieceMesh(unitDefinition.objectName, pieceName).value().get();
 
         // All four wake types are one routine. The only thing that separates
         // Wake from ReverseWake is which of the emitting piece's two vertices
@@ -1819,7 +1819,7 @@ namespace rwe
 
         const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
         auto pieceTransform = toFloatMatrix(simulation.getUnitPieceTransform(unitId, pieceName));
-        const auto& pieceMesh = gameMediaDatabase.getUnitPieceMesh(unitDefinition.objectName, pieceName).value().get();
+        const auto pieceMesh = gameMediaDatabase.getUnitPieceMesh(unitDefinition.objectName, pieceName).value().get();
 
         // The original has no bubble emitter. Type 259 (0x4810D4) builds the
         // wake emitter's two points itself -- the piece's first vertex, and
@@ -3158,7 +3158,7 @@ namespace rwe
         }
         const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
         auto pieceTransform = toFloatMatrix(simulation.getUnitPieceTransform(unitId, pieceName));
-        const auto& pieceMesh = gameMediaDatabase.getUnitPieceMesh(unitDefinition.objectName, pieceName).value().get();
+        const auto pieceMesh = gameMediaDatabase.getUnitPieceMesh(unitDefinition.objectName, pieceName).value().get();
 
         // A thruster piece is a bare two-vertex segment running from hull
         // level down to a few units below it, and the exhaust comes out of

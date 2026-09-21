@@ -81,7 +81,7 @@ namespace rwe
         {
             sim.toggleSelfDestruct(solarId);
 
-            for (int i = 0; i < GameSimulation::SelfDestructCountdownTicks - 1; ++i)
+            for (int i = 0; static_cast<unsigned int>(i) < GameSimulation::SelfDestructCountdownTicks - 1; ++i)
             {
                 sim.tick();
             }

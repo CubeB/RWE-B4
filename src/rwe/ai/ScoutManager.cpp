@@ -273,7 +273,7 @@ namespace rwe
                     continue;
                 }
                 auto cell = threatMap.cellAt(start);
-                if (cell.x < 0 || cell.y < 0 || static_cast<std::size_t>(cell.x) >= staleness.getWidth() || static_cast<std::size_t>(cell.y) >= staleness.getHeight())
+                if (cell.x < 0 || cell.y < 0 || static_cast<std::size_t>(cell.x) >= static_cast<std::size_t>(staleness.getWidth()) || static_cast<std::size_t>(cell.y) >= static_cast<std::size_t>(staleness.getHeight()))
                 {
                     continue;
                 }

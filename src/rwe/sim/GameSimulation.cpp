@@ -1459,7 +1459,7 @@ namespace rwe
                 }
                 auto ux = static_cast<unsigned int>(x);
                 auto uy = static_cast<unsigned int>(y);
-                if (ux + 1 >= heights.getWidth() || uy + 1 >= heights.getHeight())
+                if (ux + 1 >= static_cast<unsigned int>(heights.getWidth()) || uy + 1 >= static_cast<unsigned int>(heights.getHeight()))
                 {
                     continue;
                 }
@@ -1470,7 +1470,7 @@ namespace rwe
                 {
                     auto ux2 = static_cast<unsigned int>(dx);
                     auto uy2 = static_cast<unsigned int>(dy);
-                    if (ux2 >= unitDefinition.yardMap->getWidth() || uy2 >= unitDefinition.yardMap->getHeight())
+                    if (ux2 >= static_cast<unsigned int>(unitDefinition.yardMap->getWidth()) || uy2 >= static_cast<unsigned int>(unitDefinition.yardMap->getHeight()))
                     {
                         continue;
                     }
@@ -3498,7 +3498,7 @@ namespace rwe
         }
     }
 
-    void GameSimulation::doProjectileImpact(const Projectile& projectile, ImpactType impactType, std::optional<ProjectileId> projectileId)
+    void GameSimulation::doProjectileImpact(const Projectile& projectile, ImpactType /*impactType*/, std::optional<ProjectileId> projectileId)
     {
         applyDamageInRadius(projectile.position, projectile.damageRadius, projectile);
 

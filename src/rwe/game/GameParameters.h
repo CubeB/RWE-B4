@@ -65,7 +65,7 @@ namespace rwe
          * The lobby's team letter, or nothing for a player who fights alone.
          * Players sharing a team share sight and radar.
          */
-        std::optional<int> teamId;
+        std::optional<int> teamId{};
 
         /**
          * The AI personality a computer player plays, by name (see
@@ -74,7 +74,7 @@ namespace rwe
          * loads, so a peer whose folder differs would play it differently:
          * the launcher does not send one, and a network game has none.
          */
-        std::optional<std::string> aiPersonality;
+        std::optional<std::string> aiPersonality{};
     };
 
     /** SKIRMISH.GUI's Line of Sight button. */

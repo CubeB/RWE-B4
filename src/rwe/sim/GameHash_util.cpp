@@ -165,12 +165,12 @@ namespace rwe
         return combineHashes(p.currentVelocity, p.targetPosition.value_or(SimVector(0_ss, 0_ss, 0_ss)));
     }
 
-    GameHash computeHashOf(const AirMovementStateLanding& p)
+    GameHash computeHashOf(const AirMovementStateLanding& /*p*/)
     {
         return GameHash(0);
     }
 
-    GameHash computeHashOf(const AirMovementStateFlying& p)
+    GameHash computeHashOf(const AirMovementStateFlying& /*p*/)
     {
         return GameHash(0);
     }

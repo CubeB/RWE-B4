@@ -263,7 +263,7 @@ namespace rwe
         // Steep (but passable) ground is slow to cross, so prefer routes around it.
         auto x = static_cast<unsigned int>(p.x);
         auto y = static_cast<unsigned int>(p.y);
-        if (x + footprintX >= heights->getWidth() || y + footprintZ >= heights->getHeight())
+        if (x + footprintX >= static_cast<unsigned int>(heights->getWidth()) || y + footprintZ >= static_cast<unsigned int>(heights->getHeight()))
         {
             return false;
         }

@@ -204,7 +204,7 @@ namespace rwe
 
         auto message = createProtoMessage(packetId, localPlayerId, currentSceneTime, endpoint.nextCommandToSend, endpoint.nextCommandToReceive, endpoint.nextHashToSend, endpoint.nextHashToReceive, delay, endpoint.sendBuffer, endpoint.hashSendBuffer);
         auto messageSize = message.ByteSizeLong();
-        if (messageSize > getSize(sendBuffer) - 4)
+        if (messageSize > static_cast<unsigned long long>(getSize(sendBuffer) - 4))
         {
             throw std::runtime_error("Message to be sent was bigger than buffer size");
         }

@@ -1201,7 +1201,7 @@ namespace rwe
         pushTriangle(batch.triangles, topLeft, bottomRight, topRight, color);
     }
 
-    void drawWakeParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, ColoredMeshBatch& batch)
+    void drawWakeParticle(const GameMediaDatabase& /*gameMediaDatabase*/, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, ColoredMeshBatch& batch)
     {
         auto wakeRenderInfo = std::get_if<ParticleRenderTypeWake>(&particle.renderType);
         if (wakeRenderInfo == nullptr)

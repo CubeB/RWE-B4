@@ -89,7 +89,7 @@ namespace rwe
 
     using InterruptedReason = std::variant<CobEnvironment::PieceCommandStatus, CobEnvironment::QueryStatus, CobEnvironment::SetQueryStatus>;
 
-    std::optional<InterruptedReason> executeThreads(CobEnvironment& env, UnitId unitId, GameTime gameTime)
+    std::optional<InterruptedReason> executeThreads(CobEnvironment& env, UnitId /*unitId*/, GameTime gameTime)
     {
         while (!env.readyQueue.empty())
         {
@@ -455,7 +455,7 @@ namespace rwe
             });
     }
 
-    void handleSetQuery(GameSimulation& sim, const CobEnvironment& env, UnitId unitId, const CobEnvironment::SetQueryStatus& result)
+    void handleSetQuery(GameSimulation& sim, const CobEnvironment& /*env*/, UnitId unitId, const CobEnvironment::SetQueryStatus& result)
     {
         match(
             result.query,

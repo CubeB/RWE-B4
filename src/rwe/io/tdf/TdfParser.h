@@ -376,7 +376,7 @@ namespace rwe
         {
             // operator+ isn't implemented...
             auto localIt = _it;
-            if (*_it != pTwoChars[0] || *(++localIt) != pTwoChars[1])
+            if (*_it != static_cast<TdfCodePoint>(static_cast<unsigned char>(pTwoChars[0])) || *(++localIt) != static_cast<TdfCodePoint>(static_cast<unsigned char>(pTwoChars[1])))
             {
                 return false;
             }

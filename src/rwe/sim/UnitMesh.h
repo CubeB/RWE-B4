@@ -79,13 +79,13 @@ namespace rwe
         SimAngle rotationY{0};
         SimAngle rotationZ{0};
 
-        std::optional<MoveOperation> xMoveOperation;
-        std::optional<MoveOperation> yMoveOperation;
-        std::optional<MoveOperation> zMoveOperation;
+        std::optional<MoveOperation> xMoveOperation{};
+        std::optional<MoveOperation> yMoveOperation{};
+        std::optional<MoveOperation> zMoveOperation{};
 
-        std::optional<TurnOperationUnion> xTurnOperation;
-        std::optional<TurnOperationUnion> yTurnOperation;
-        std::optional<TurnOperationUnion> zTurnOperation;
+        std::optional<TurnOperationUnion> xTurnOperation{};
+        std::optional<TurnOperationUnion> yTurnOperation{};
+        std::optional<TurnOperationUnion> zTurnOperation{};
 
         void update(SimScalar dt);
     };

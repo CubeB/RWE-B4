@@ -52,7 +52,7 @@ namespace rwe
          * because the original neither holds every frame for the same time nor
          * plays the sequence to the end; see makeSmokePuffFrameSchedule.
          */
-        std::vector<GameTime> frameStartTimes;
+        std::vector<GameTime> frameStartTimes{};
     };
 
     /**

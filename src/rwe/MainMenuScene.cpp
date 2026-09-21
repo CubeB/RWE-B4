@@ -28,8 +28,8 @@ namespace rwe
     MainMenuScene::MainMenuScene(
         const SceneContext& sceneContext,
         TdfBlock* audioLookup,
-        float width,
-        float height)
+        float /*width*/,
+        float /*height*/)
         : sceneContext(sceneContext),
           soundLookup(audioLookup),
           scaledUiRenderService(sceneContext.graphics, sceneContext.shaders, &MainMenuViewport, sceneContext.viewport),

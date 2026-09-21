@@ -160,7 +160,7 @@ namespace rwe
         }
 
         auto messageSize = outerMessage.ByteSizeLong();
-        if (messageSize > getSize(sendBuffer) - 4)
+        if (messageSize > static_cast<unsigned long long>(getSize(sendBuffer) - 4))
         {
             throw std::runtime_error("Message to be sent was bigger than buffer size");
         }

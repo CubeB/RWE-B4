@@ -147,7 +147,7 @@ namespace rwe
          * positional members so the existing aggregate initialisers, which
          * stop at startingEnergy, keep working.
          */
-        std::optional<int> teamId;
+        std::optional<int> teamId{};
 
         bool metalStalled{false};
         bool energyStalled{false};
@@ -309,8 +309,8 @@ namespace rwe
         DeathType deathType;
 
         /** Who lost the unit and who killed it, where the sim knows. Scene-facing; not hashed. */
-        std::optional<PlayerId> owner;
-        std::optional<PlayerId> killerOwner;
+        std::optional<PlayerId> owner{};
+        std::optional<PlayerId> killerOwner{};
     };
 
     /**
@@ -432,7 +432,7 @@ namespace rwe
             WaterImpact,
             EndOfLife,
         };
-        DeathType deathType;
+        DeathType deathType{};
     };
 
     /**

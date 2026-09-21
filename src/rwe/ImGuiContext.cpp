@@ -62,7 +62,7 @@ namespace rwe
         ImGui_ImplOpenGL3_Init("#version 150");
     }
 
-    void ImGuiContext::newFrame(SDL_Window* window)
+    void ImGuiContext::newFrame(SDL_Window* /*window*/)
     {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
