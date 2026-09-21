@@ -339,15 +339,16 @@ Both heap-dependent desyncs of 2026-09-18 were in it.
       files, fixed by renaming their `addPlayer` and dropping two helpers
       identical to the shared ones. 255 insertions against 543 deletions
       across 41 files; 810 tests and 111,701 assertions before and after.
-- [ ] **`addWellStockedPlayer` is three copies, and the name is taken.**
-      Found while updating the docs for the `makeFlatTerrain` collection, and
-      measured: `aircraftbuild`, `nanoframedecay` and `repair` define bodies
-      that are identical apart from the player's name and side string (CORE
-      in the first, ARM in the other two). One shared
-      `addWellStockedPlayer(sim, name, side)` collapses them. Small, and the
-      same shape as the work just finished. Note the name had also drifted --
-      `saveload`'s helper of that name was the shared `addPlayer` with ten
-      times the storage and only the shared 1,000 of each resource, so it is
+- [x] **`addWellStockedPlayer` was three copies, and the name was taken.**
+      Done 2026-09-21. `aircraftbuild`, `nanoframedecay` and `repair` defined
+      bodies identical apart from the player's name and side string (CORE in
+      the first, ARM in the other two); one shared definition in
+      `sim_test_util.h` and 21 call sites. The side is an argument rather than
+      a default, because the three disagreed on it and the simulation reads it
+      -- the AI's `EconomyManager` resolves its build tree through
+      `player.side`. The name did not survive: nothing outside a log reads
+      one. `saveload`'s helper of the same name held the shared 1,000 of each
+      resource and differed only in storage, so it is
       `addPlayerWithLargeStores` now; renaming it was the fix, not sharing it.
 
 - [ ] **`tad_episodes.cpp`** -- 6,533 lines. One file per mode over a shared
