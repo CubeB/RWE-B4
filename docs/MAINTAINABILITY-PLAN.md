@@ -344,12 +344,32 @@ Both heap-dependent desyncs of 2026-09-18 were in it.
 
 ## Phase 5 -- what the documentation costs
 
-- [ ] **`CLAUDE.md` to ~200 lines.** It is 556 now and is loaded into every
-      session and every agent brief. It should be rules, hazards and an index.
-      The `tad_episodes` mode reference is a third of it and belongs in
-      `docs/TA-DEMOS.md`, which already paraphrases it.
-- [ ] **Split `TOTALA-EXE.md` by subject**, keeping the section numbers stable
-      and adding a numbered index. 14,057 lines cannot be read whole.
+- [x] **`CLAUDE.md` cut down.** Done 2026-09-21: 558 lines and 52,645 bytes
+      to 287 and 32,082, a **39% cut by size**. What moved, and where:
+
+      | out of CLAUDE.md | to | was |
+      |---|---|---|
+      | `tad_episodes` and the three `tad-*.py` scorers | `docs/TA-DEMOS.md`, "The tools, mode by mode" | 180 lines |
+      | the annotated `TOTALA-EXE.md` section list | `docs/TOTALA-EXE.md`, as a real index | 58 lines |
+      | the scope/purpose/other label lists | `docs/agents/labels.md` | 40 lines |
+      | the two profiler references | `docs/PROFILING.md` | 3 paragraphs |
+
+      Everything moved, nothing was deleted, and each left a pointer behind.
+      What stayed is what the plan asked for: rules, hazards and an index --
+      determinism, the COFF ceiling, the subscription traps, the conventions,
+      and one line per tool.
+
+      **The ~200-line target was the wrong measure and is not met.** This file
+      has no column limit, so a "line" is a whole paragraph: the 133-line
+      Matching-TA section was 12 KB and the 40-line label taxonomy 2.6 KB.
+      Bytes are what gets loaded into a session, and bytes are down 39%.
+      Cutting to 200 lines from here would mean deleting hazards, which is the
+      opposite of the point.
+- [ ] **Split `TOTALA-EXE.md` by subject**, keeping the section numbers stable.
+      14,057 lines cannot be read whole. **The numbered index half is done**
+      (2026-09-21): the file opens with all 109 findings linked by number,
+      generated from its own headings, which also confirmed the count -- 109
+      numbered to 111, with no §83 and no §84. The split itself is still open.
 
 ## Phase 6 -- tracker hygiene
 
