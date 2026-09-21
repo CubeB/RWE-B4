@@ -564,6 +564,7 @@ set(SOURCE_FILES
     src/rwe/sim/GameHash_util.cpp
     src/rwe/sim/GameHash_util.h
     src/rwe/sim/GameSimulation.cpp
+    src/rwe/sim/GameSimulation_visibility.cpp
     src/rwe/sim/GameSimulation.h
     src/rwe/sim/GameTime.cpp
     src/rwe/sim/GameTime.h
