@@ -248,10 +248,35 @@ replay's `RWE_HASH_LOG` before and after.
 
 ## Phase 3 -- finish the single source of truth
 
-- [ ] **#115, the compile-time half.** `UnitStateFieldTable` covers
-      `UnitState`. Extend the same one-row-per-field treatment to `MapFeature`,
-      `GamePlayerInfo`, projectiles and simulation-level state, so the dump
-      guard test added 2026-09-21 covers all four rather than one.
+- [x] **Audited all four types, and found two real faults** 2026-09-21.
+      The audit was the work; the fixes were four lines.
+
+      | type | hash | save | dump |
+      |---|---|---|---|
+      | `MapFeature` | 8/8 | 8/8 | **0/8 -- no `dumpJson` existed** |
+      | `Projectile` | 14 fields | 24/24 | **13 -- `edgeEffectiveness` missing** |
+      | `GamePlayerInfo` | 28/32 | 32/32 | 28/32, the same 28 |
+      | simulation-level | 8 members | -- | **7 -- `features` missing** |
+
+      Hunting a desync is `RWE_HASH_LOG` for the tick then `RWE_STATE_DUMP`
+      for the field, so the second step can only show what the dump walks.
+      Feature state -- a burning tree's clock, a wreck one peer has reclaimed
+      further, a corpse that sank on one side -- was hashed, saved, and
+      entirely absent from the dump, so that whole class of desync arrived
+      with an empty diff. `GamePlayerInfo` is clean: its hash and dump agree
+      field for field and the four they both skip are deliberately saved
+      rather than hashed.
+
+      Three guards added, each checked by undoing the fix and watching it
+      fail, because a guard that cannot fail is worth nothing. Tests 807 ->
+      810.
+- [ ] **#115's larger half is still open, and is now worth less.** The issue
+      asks for one field list per type with the three walks derived from it,
+      the way `UnitStateFieldTable` does for `UnitState`. What exists now is
+      tests asserting the lists agree, not a structure making disagreement
+      impossible. They would have caught both of today's faults, which no
+      check did. Worth doing when a fifth hashed type appears; not worth it
+      for the four that are now covered and guarded.
 
 This is the class of bug that has cost the most debugging time in this project.
 Both heap-dependent desyncs of 2026-09-18 were in it.
@@ -260,6 +285,11 @@ Both heap-dependent desyncs of 2026-09-18 were in it.
 
 - [ ] **`AiBehaviour.test.cpp`** -- 6,912 lines, 53 commits, 18,541 sections
       (56% of the ceiling). Split per manager.
+- [ ] **`makeFlatTerrain` is defined separately in 40 test files.** CLAUDE.md
+      records collecting fourteen copies of an earlier helper into
+      `sim_test_util.h`; this one is worse. It cannot simply be added there --
+      every one of those files would clash with it -- so it is a 40-file
+      change and its own piece of work.
 - [ ] **`tad_episodes.cpp`** -- 6,533 lines. One file per mode over a shared
       reader. Low urgency: the tool is stable. Do it if it is touched again.
 
