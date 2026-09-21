@@ -357,17 +357,6 @@ namespace rwe
         REQUIRE(!dumped["burningUntil"].is_null());
     }
 
-    namespace
-    {
-        // The fortieth copy of this in the test tree. sim_test_util.h is
-        // where it belongs and every one of those files would clash with it
-        // there, so collecting them is its own change; see the plan.
-        MapTerrain makeFlatTerrain(int width = 32, int height = 32)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-    }
 
     TEST_CASE("the simulation dump carries the features its hash reads")
     {
@@ -375,7 +364,7 @@ namespace rwe
         // the simulation actually dumps them, which is the half that was
         // missing: dumpJson(const GameSimulation&) wrote players, units and
         // projectiles while computeHashOf read those three and the features.
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
 
         FeatureDefinition def{};
         def.name = "rock";

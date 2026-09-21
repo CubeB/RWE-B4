@@ -2,10 +2,8 @@
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/cob/CobEnvironment.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
 #include <memory>
@@ -16,21 +14,6 @@ namespace rwe
 {
     namespace
     {
-        // Build a tiny zero-height heightmap big enough to host one
-        // commander and a couple of mexes within the AI's search radius.
-        // 32x32 cells is 512 world units per axis. That used to be exactly
-        // maxMexSearchRadius; it is not any more, the default having been
-        // raised to 2048 once it turned out that a 512 ring could not fit a
-        // 6x6 lab on an island start. Nothing here depends on the two
-        // matching -- the map only has to be big enough for a commander and
-        // a couple of extractors -- so the size stays as it is, and this
-        // note replaces the coincidence it used to claim.
-        MapTerrain makeFlatTerrain(int width = 32, int height = 32)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         // Add a barebones UnitDefinition for `unitType`. Only the fields
         // the AI actually reads in Phase 1 are populated.
         UnitDefinition makeUnitDef(
@@ -117,8 +100,14 @@ namespace rwe
         // Two simulations seeded identically should produce identical
         // AI command streams. This guards against any future inadvertent
         // float comparison or unordered_map iteration leak.
-        GameSimulation simA(makeFlatTerrain(), /*surfaceMetal*/ 5u, 0, 0);
-        GameSimulation simB(makeFlatTerrain(), /*surfaceMetal*/ 5u, 0, 0);
+        // 32x32 cells is 512 world units per axis, which is a map big
+        // enough to host one commander and a couple of mexes inside the AI's
+        // search radius. That used to be exactly maxMexSearchRadius; it is
+        // not any more, the default having been raised to 2048 once it
+        // turned out that a 512 ring could not fit a 6x6 lab on an island
+        // start. Nothing here depends on the two matching.
+        GameSimulation simA(makeFlatTerrain(32, 32), /*surfaceMetal*/ 5u, 0, 0);
+        GameSimulation simB(makeFlatTerrain(32, 32), /*surfaceMetal*/ 5u, 0, 0);
 
         // Sub-seed the AI from a fixed value so the test is fully
         // reproducible without dragging in seedFromGameParameters.
@@ -201,7 +190,7 @@ namespace rwe
     TEST_CASE("AiPlayerController respects build planner cadence", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 5u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), /*surfaceMetal*/ 5u, 0, 0);
 
         GamePlayerInfo computer{
             std::optional<std::string>("ai"),
@@ -252,7 +241,7 @@ namespace rwe
         // that, and past every later planning interval, or it is not idle --
         // it is just slow.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 5u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), /*surfaceMetal*/ 5u, 0, 0);
 
         GamePlayerInfo computer{
             std::optional<std::string>("ai"),
@@ -297,7 +286,7 @@ namespace rwe
 
     TEST_CASE("AiPlayerController emits no commands when no commander exists", "[ai]")
     {
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 5u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), /*surfaceMetal*/ 5u, 0, 0);
 
         GamePlayerInfo computer{
             std::optional<std::string>("ai"),

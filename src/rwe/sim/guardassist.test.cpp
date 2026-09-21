@@ -3,7 +3,6 @@
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -22,12 +21,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 64, int height = 64)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         void registerModel(GameSimulation& sim)
         {
             std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
@@ -124,7 +117,7 @@ namespace rwe
 
             Yard()
                 : script(makeEmptyCobScript({"base"})),
-                  sim(makeFlatTerrain(), 0u, 0, 0),
+                  sim(makeFlatTerrain(64, 64), 0u, 0, 0),
                   player(addPlayer(sim)),
                   factoryId(UnitId(0))
             {
@@ -371,7 +364,7 @@ namespace rwe
     TEST_CASE("a short-armed builder reaches a frame in the middle of a full-sized plant", "[guardassist]")
     {
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim);
         registerModel(sim);
 

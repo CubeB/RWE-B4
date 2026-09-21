@@ -16,12 +16,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 64, int height = 64)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         void registerModel(GameSimulation& sim, const std::string& objectName)
         {
             std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
@@ -152,7 +146,7 @@ namespace rwe
     TEST_CASE("transports load, carry and unload units", "[transport]")
     {
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim, "hauler");
         sim.unitDefinitions["transport"] = makeTransportDef();
         sim.unitDefinitions["kbot"] = makeMobileDef(2u);
@@ -288,7 +282,7 @@ namespace rwe
         // sim already has, so nobody adds a passenger-side path later
         // thinking it is TA.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim, "hauler");
         sim.unitDefinitions["transport"] = makeTransportDef();
         sim.unitDefinitions["kbot"] = makeMobileDef(2u);
@@ -307,7 +301,7 @@ namespace rwe
         // bug this guards against had the unit setting off in the opposite
         // direction, then further away again each time it arrived.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim, "hauler");
         auto shipDef = makeTransportDef();
         shipDef.floater = true;
@@ -337,7 +331,7 @@ namespace rwe
     TEST_CASE("one unload order sets down one unit", "[transport]")
     {
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim, "hauler");
         auto transportDef = makeTransportDef();
         transportDef.transportCapacity = 4;
@@ -461,7 +455,7 @@ namespace rwe
         // height(u), the altitude that leaves the lowered hook on the unit.
         // RWE used to descend first, attach, and animate afterwards.
         auto script = makeAirTransportScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim, "hauler");
 
         auto airDef = makeTransportDef();

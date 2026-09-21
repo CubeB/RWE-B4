@@ -17,12 +17,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 64, int height = 64)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /** Dry land to the west, open sea to the east, split down the middle. */
         MapTerrain makeCoastTerrain()
         {
@@ -155,7 +149,7 @@ namespace rwe
     TEST_CASE("aircraft finish their orders instead of circling the spot", "[aircraft]")
     {
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim);
         sim.unitDefinitions["plane"] = makePlaneDef();
         registerModel(sim);
@@ -199,7 +193,7 @@ namespace rwe
         // It used to hover there for good, because the order it was given
         // could never be satisfied to within a ground unit's tolerance.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim);
         sim.unitDefinitions["plane"] = makePlaneDef();
         registerModel(sim);
@@ -229,7 +223,7 @@ namespace rwe
     TEST_CASE("a building goes up inside the arc its FBI names", "[aircraft][construction]")
     {
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim);
         sim.unitDefinitions["builder"] = makeBuilderDef();
         sim.unitDefinitions["STRUCTURE"] = makeStructureDef(false);
@@ -287,7 +281,7 @@ namespace rwe
     TEST_CASE("a construction aircraft works the ring pattern", "[aircraft][construction]")
     {
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim);
         auto airBuilder = makeBuilderDef();
         airBuilder.canFly = true;
@@ -395,7 +389,7 @@ namespace rwe
     TEST_CASE("an aircraft's bank comes from the acceleration it is making", "[aircraft]")
     {
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim);
         // Real aircraft accelerate gently; the test default of one unit per
         // tick squared would saturate the bank on every course correction.

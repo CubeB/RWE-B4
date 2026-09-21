@@ -7,17 +7,12 @@
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/MovementClassDefinition.h>
 #include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 32, int height = 32)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /**
          * A thermal vent, as every one of them is written in the shipped
          * feature TDFs: a one by one animating sprite that is worth nothing,
@@ -80,7 +75,7 @@ namespace rwe
 
     TEST_CASE("a thermal vent is a feature that declares geothermal", "[geovent]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto ventDef = sim.featureDefinitions.insert(makeVentDef("geovent"));
         auto shrubDef = sim.featureDefinitions.insert(makeShrubDef("shrub"));
 
@@ -151,7 +146,7 @@ namespace rwe
         // the geothermal bit. At the end, a unit that wanted one and did not
         // find one is refused.
 
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto ventDef = sim.featureDefinitions.insert(makeVentDef("geovent"));
         auto shrubDef = sim.featureDefinitions.insert(makeShrubDef("shrub"));
 

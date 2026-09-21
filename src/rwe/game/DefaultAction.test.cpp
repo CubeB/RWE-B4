@@ -1,7 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/game/DefaultAction.h>
-#include <rwe/grid/Grid.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/sim_test_util.h>
 #include <memory>
 
@@ -9,6 +7,12 @@ namespace rwe
 {
     namespace
     {
+        void registerModel(GameSimulation& sim)
+        {
+            std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+            sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
+        }
+
         /**
          * The definitions here carry only the flags S:103's two ladders name,
          * under the names of the shipped units whose behaviour they stand for.
@@ -17,18 +21,6 @@ namespace rwe
          * attack, not a builder", which is the part of ARMPW.FBI the ladder
          * ever looks at.
          */
-        MapTerrain makeFlatTerrain()
-        {
-            Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
-        void registerModel(GameSimulation& sim)
-        {
-            std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
-            sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
-        }
-
         UnitDefinition makeMobileDef(unsigned int footprint = 2u)
         {
             UnitDefinition d{};
@@ -139,7 +131,7 @@ namespace rwe
             PlayerId enemy;
             std::shared_ptr<CobScript> script;
 
-            Fixture() : sim(makeFlatTerrain(), 0u, 0, 0),
+            Fixture() : sim(makeFlatTerrain(64, 64), 0u, 0, 0),
                         player(addPlayer(sim, "me")),
                         enemy(addPlayer(sim, "them")),
                         script(makeEmptyCobScript({"base"}))

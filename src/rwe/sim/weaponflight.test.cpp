@@ -1,9 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitModelDefinition.h>
@@ -81,12 +79,6 @@ namespace rwe
          * is not reproducible here and is not what is being measured.
          */
         constexpr int MapSquares = 1024;
-
-        MapTerrain makeFlatTerrain()
-        {
-            Grid<unsigned char> heights(MapSquares, MapSquares, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
 
         /**
          * Where a demo coordinate is in RWE's world. TA measures from the map's
@@ -245,7 +237,7 @@ namespace rwe
          */
         unsigned int ticksToHit(const TadWeaponEpisode& episode)
         {
-            GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+            GameSimulation sim(makeFlatTerrain(MapSquares, MapSquares), 0u, 0, 0);
             auto shooter = addPlayer(sim, "shooter");
             auto target = addPlayer(sim, "target");
             defineWeapon(sim, episode);

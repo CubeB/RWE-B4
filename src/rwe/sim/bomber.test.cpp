@@ -1,9 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -20,12 +18,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width, int height)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         void registerModel(GameSimulation& sim, const std::string& objectName)
         {
             std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};

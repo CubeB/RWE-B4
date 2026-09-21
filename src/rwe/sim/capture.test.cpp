@@ -14,12 +14,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 32, int height = 32)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /**
          * ARMCOM.FBI. The commander is one of only two units in the shipped
          * data that name `CanCapture`, so it is the only honest captor to
@@ -88,7 +82,7 @@ namespace rwe
     TEST_CASE("GameSimulation::computeCaptureTime", "[capture]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto enemy = addPlayer(sim, "enemy");
         sim.unitDefinitions["solar"] = makeSolarDef();
         auto solarId = addUnitOfType(sim, "solar", enemy, SimVector(100_ss, 0_ss, 100_ss), script);
@@ -146,7 +140,7 @@ namespace rwe
     TEST_CASE("GameSimulation::captureUnit", "[capture]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim, "captor");
         auto enemy = addPlayer(sim, "enemy");
         sim.unitDefinitions["solar"] = makeSolarDef();
@@ -180,7 +174,7 @@ namespace rwe
     TEST_CASE("a capturing unit with a capture order takes over an enemy unit over successive ticks", "[capture]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim, "captor");
         auto enemy = addPlayer(sim, "enemy");
         sim.unitDefinitions["solar"] = makeSolarDef();
@@ -204,7 +198,7 @@ namespace rwe
     TEST_CASE("capture takes the time the target's build cost says, not the captor's worker time", "[capture]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim, "captor");
         auto enemy = addPlayer(sim, "enemy");
         sim.unitDefinitions["solar"] = makeSolarDef();
@@ -230,7 +224,7 @@ namespace rwe
     TEST_CASE("capture progress goes with the captor, not the target", "[capture]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim, "captor");
         auto enemy = addPlayer(sim, "enemy");
         sim.unitDefinitions["solar"] = makeSolarDef();
@@ -287,7 +281,7 @@ namespace rwe
     TEST_CASE("two captors on one target do not pool their work", "[capture]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim, "captor");
         auto enemy = addPlayer(sim, "enemy");
         sim.unitDefinitions["solar"] = makeSolarDef();
@@ -318,7 +312,7 @@ namespace rwe
         // exactly zero, and refuses otherwise with "That unit is a cloud of
         // vapor and cannot be captured" (0x5015E0).
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim, "captor");
         auto enemy = addPlayer(sim, "enemy");
         sim.unitDefinitions["solar"] = makeSolarDef();
@@ -338,7 +332,7 @@ namespace rwe
     TEST_CASE("a unit that cannot capture drops capture orders", "[capture]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim, "captor");
         auto enemy = addPlayer(sim, "enemy");
         sim.unitDefinitions["solar"] = makeSolarDef();

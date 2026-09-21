@@ -1,11 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/cob/CobOpCode.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -25,12 +23,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 64, int height = 64)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /** `armsolar_dead` from `features/Corpses/arm_corpses.tdf`. */
         FeatureDefinition makeWreckDef()
         {
@@ -209,7 +201,7 @@ namespace rwe
     TEST_CASE("a construction unit on patrol clears wreckage it can reach", "[reclaim][autoreclaim]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayerHolding(sim, 0.0f, 0.0f);
         addStorageBuildings(sim, player, script);
 
@@ -233,7 +225,7 @@ namespace rwe
     TEST_CASE("autoreclaimable=0 keeps a feature out of the automatic sweep", "[reclaim][autoreclaim]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayerHolding(sim, 0.0f, 0.0f);
         addStorageBuildings(sim, player, script);
 
@@ -276,7 +268,7 @@ namespace rwe
         // 0x405B74 reads def+0x202 -- SightDistance -- and hands it to the
         // scan as the radius.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayerHolding(sim, 0.0f, 0.0f);
         addStorageBuildings(sim, player, script);
 
@@ -314,7 +306,7 @@ namespace rwe
 
         SECTION("full stores mean the wreck field is left alone")
         {
-            GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+            GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
             auto player = addPlayerHolding(sim, MetalCapacity, EnergyCapacity);
             addStorageBuildings(sim, player, script);
             auto wreckDef = sim.featureDefinitions.insert(makeWreckDef());
@@ -332,7 +324,7 @@ namespace rwe
 
         SECTION("a builder short of energy goes for the energy, not the metal")
         {
-            GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+            GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
             auto player = addPlayerHolding(sim, MetalCapacity, 0.0f);
             addStorageBuildings(sim, player, script);
 
@@ -386,7 +378,7 @@ namespace rwe
         // the very wreck being reclaimed -- at which point the metal
         // candidate gives way to the energy one.
         auto script = makeStowCountingScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
 
         // A fifth of 1050 is 210. Starting at 150 with the wreck worth 116,
         // the store crosses the line about half way through the job.

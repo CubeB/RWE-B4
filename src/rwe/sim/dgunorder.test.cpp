@@ -1,9 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -16,12 +14,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain()
-        {
-            Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         void registerModel(GameSimulation& sim)
         {
             // Twenty units up, because the piece doubles as the muzzle: a
@@ -150,7 +142,7 @@ namespace rwe
         // path by design (0x408A88), and an order is the only thing that can
         // ever point it at anything.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto us = addRichPlayer(sim, "us");
         auto them = addRichPlayer(sim, "them");
         sim.unitDefinitions["commander"] = makeCommanderDef();

@@ -33,11 +33,6 @@ namespace rwe
             return MapTerrain(std::move(heights), 0_ss);
         }
 
-        MapTerrain makeFlatTerrain(int width = 16, int height = 16)
-        {
-            return makeTerrain(width, height, [](int, int) { return 0; });
-        }
-
         UnitDefinition makeTankDef(unsigned int maxSlope)
         {
             UnitDefinition d{};
@@ -112,7 +107,7 @@ namespace rwe
     TEST_CASE("the pathfinder does not squeeze diagonally between touching obstacle corners", "[pathing]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
         auto player = addPlayer(sim);
         auto wall = addWallDef(sim);
         auto tankId = addTank(sim, player, 2, 2, script);
@@ -348,7 +343,7 @@ namespace rwe
     TEST_CASE("a move order to an unreachable point completes at the closest reachable point", "[pathing]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
         auto player = addPlayer(sim);
         auto wall = addWallDef(sim);
         auto tankId = addTank(sim, player, 2, 8, script);
@@ -409,7 +404,7 @@ namespace rwe
     TEST_CASE("a build order for a site the builder cannot reach is dropped", "[pathing]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
         auto player = addPlayer(sim);
         auto wall = addWallDef(sim);
 

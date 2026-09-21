@@ -3,7 +3,6 @@
 #include <rwe/game/save_util.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/UnitOrder.h>
@@ -16,12 +15,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain()
-        {
-            Grid<unsigned char> heights(128, 128, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         UnitDefinition makeTankDef()
         {
             UnitDefinition d{};
@@ -64,7 +57,7 @@ namespace rwe
          */
         GameSimulation makeBaseSim(const std::shared_ptr<CobScript>& script)
         {
-            GameSimulation sim(makeFlatTerrain(), 0u, 100, 3000);
+            GameSimulation sim(makeFlatTerrain(128, 128), 0u, 100, 3000);
             std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 20_ss, 0_ss), std::nullopt}};
             sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
             sim.unitDefinitions["TANK"] = makeTankDef();

@@ -22,12 +22,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 64, int height = 64)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         PlayerId addPlayer(GameSimulation& sim, const std::string& name, GamePlayerType type, const std::string& side)
         {
             GamePlayerInfo p{
@@ -394,7 +388,7 @@ namespace rwe
         // the next one while the store is four-fifths full and income is
         // ahead of demand; the metal goes to whatever is wanted next.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -477,7 +471,7 @@ namespace rwe
     TEST_CASE("the AI opens with power, metal and a factory, then produces constructors", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -525,7 +519,7 @@ namespace rwe
     TEST_CASE("the AI does not start what it cannot pay for", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -642,7 +636,7 @@ namespace rwe
     TEST_CASE("a frame nobody is working on is finished before anything new is started", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -683,7 +677,7 @@ namespace rwe
     TEST_CASE("a builder is only asked for what it has a button for", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -740,7 +734,7 @@ namespace rwe
     TEST_CASE("a rich base techs to level two, and the advanced lab makes its constructor first", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -854,7 +848,7 @@ namespace rwe
     TEST_CASE("the factories are held while the first moho and reactor are paid for", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -914,7 +908,7 @@ namespace rwe
     TEST_CASE("fighters are built to match the raid, and go for the bombers first", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -981,7 +975,7 @@ namespace rwe
         // and over -- and one of those copies arriving after the maker had
         // been shot is what ended a game with a bad variant access.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -1019,7 +1013,7 @@ namespace rwe
     TEST_CASE("the AI only knows what it can see, unless it cheats", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -1064,7 +1058,7 @@ namespace rwe
     TEST_CASE("the army defends, gathers and attacks", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -1118,7 +1112,7 @@ namespace rwe
     TEST_CASE("the commander answers a lone raider when there is nothing else to send", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -1195,7 +1189,7 @@ namespace rwe
     TEST_CASE("a commander in danger is got out of it, and what is near goes to it", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -1276,7 +1270,7 @@ namespace rwe
         // camera's cut-off -- which on Great Divide is where one commander
         // ran to and died.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -1302,7 +1296,7 @@ namespace rwe
     TEST_CASE("the commander takes on a small party, and the D-gun goes first", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -1414,7 +1408,7 @@ namespace rwe
     TEST_CASE("the commander does not walk off a young frame when the army can take the fight", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -1498,7 +1492,7 @@ namespace rwe
     TEST_CASE("construction units keep out of fights nothing of ours covers", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -1609,7 +1603,7 @@ namespace rwe
         // there, in range, and never gets any less alive, so nothing in the
         // ordinary rules ever moves the unit on.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -1705,7 +1699,7 @@ namespace rwe
     TEST_CASE("nobody is sent to mend a commander hurt in a fight nothing covers", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -1744,7 +1738,7 @@ namespace rwe
     TEST_CASE("an idle commander helps finish a frame before it goes looking for rocks", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -1785,7 +1779,7 @@ namespace rwe
     TEST_CASE("contacts closing on the base put the army in a line across their path", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -1925,7 +1919,7 @@ namespace rwe
     TEST_CASE("the army attacks in waves and holds when outnumbered", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -2067,7 +2061,7 @@ namespace rwe
     TEST_CASE("scouts explore the ground the AI has not seen", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -2212,7 +2206,7 @@ namespace rwe
         // base is built from nothing, and whatever the raid actually took out
         // is replaced whenever the generic list happens to reach it.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 5u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 5u, 0, 0);
         defineWorld(sim);
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
 
@@ -2241,7 +2235,7 @@ namespace rwe
     TEST_CASE("A building that is still standing is not reported lost", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 5u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 5u, 0, 0);
         defineWorld(sim);
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
 
@@ -2261,7 +2255,7 @@ namespace rwe
         // chosen for it and nothing it owned was held back for it, so a single
         // bomber could work through a base unopposed.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -2322,7 +2316,7 @@ namespace rwe
     TEST_CASE("mobile anti-air covers the base instead of joining the army", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
 
@@ -2364,7 +2358,7 @@ namespace rwe
         // counts said there was no radar, so it built one too. Both stood
         // to the end of the game, 128 units apart.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
 
@@ -2471,7 +2465,7 @@ namespace rwe
         // the middle of the base, where it sees what the buildings already
         // see.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -2639,7 +2633,7 @@ namespace rwe
         // at (-440, -440) in world units (cells 52,52 and 4,4 of the
         // 64-wide map, which is centred on the middle).
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -2811,7 +2805,7 @@ namespace rwe
         // outpost tower. The map is only 1024 across, so the base's own
         // defence radius is brought in to 200 to leave room for an outpost.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
         auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
@@ -2943,7 +2937,7 @@ namespace rwe
         // approach has a direction. The shipped geometry is what the
         // profile holds; the test world's numbers only have to leave room.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -3082,7 +3076,7 @@ namespace rwe
         // are written into the blackboard by hand, the way EconomyManager
         // writes them, and the planner is asked what it would do.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -3194,7 +3188,7 @@ namespace rwe
     TEST_CASE("solar collectors go up in rows behind the base", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -3242,7 +3236,7 @@ namespace rwe
         // to look, the tower loses hit points with an armed enemy standing
         // on one side of it, the enemy leaves, and the watch looks again.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -3353,7 +3347,7 @@ namespace rwe
         struct RepairBase
         {
             std::shared_ptr<CobScript> script = makeEmptyCobScript();
-            GameSimulation sim{makeFlatTerrain(), 0u, 0, 0};
+            GameSimulation sim{makeFlatTerrain(64, 64), 0u, 0, 0};
             PlayerId ai;
             UnitId commanderId{0};
             UnitId kbotId{0};
@@ -3505,7 +3499,7 @@ namespace rwe
         // targetDefenceCount asks for), so the reorder is a no-op here and
         // the test is actually isolating the facing logic.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
         const SimVector anchor(0_ss, 0_ss, 0_ss);
@@ -3599,7 +3593,7 @@ namespace rwe
     TEST_CASE("a guard is sent to a builder placed away from the base, and released once it is done", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
         const SimVector anchor(-300_ss, 0_ss, 0_ss);
@@ -3736,7 +3730,7 @@ namespace rwe
         // game. It should still be offered to the planner, just behind the
         // genuinely idle ones, and it should not be double-counted as idle.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -3760,7 +3754,7 @@ namespace rwe
         // more than one idle builder, only the first was ever served and the
         // rest sat unplanned for no matter how long the game went on.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -3814,7 +3808,7 @@ namespace rwe
         // Peewees instead -- the moment teching was switched off, even with
         // the lab already paid for.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -4009,7 +4003,7 @@ namespace rwe
         // (TOTALA-EXE.md, 0x47D547), so an upgrade is a reclaim and then a
         // build, and the patch earns nothing in between.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -4103,7 +4097,7 @@ namespace rwe
     TEST_CASE("a geothermal plant goes on a vent, and is not asked for where there is none", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -4827,13 +4821,13 @@ namespace rwe
     TEST_CASE("naval: no shipyard is ever wanted on a land map", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
         addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
 
-        auto mapIntel = analyseMap(makeFlatTerrain(), {});
+        auto mapIntel = analyseMap(makeFlatTerrain(64, 64), {});
         REQUIRE(mapIntel.character == MapCharacter::Land);
 
         auto profile = makeDefaultStandardProfile();
@@ -6036,7 +6030,7 @@ namespace rwe
          */
         struct ExpansionWorld
         {
-            GameSimulation sim{makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0};
+            GameSimulation sim{makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0};
             std::shared_ptr<CobScript> script = makeEmptyCobScript();
             PlayerId human;
             PlayerId ai;
@@ -6228,7 +6222,7 @@ namespace rwe
         // Two clusters of two extractors out beyond a base brought in to 200,
         // one of them already under a tower, and a cap of one.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
         addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
@@ -6275,7 +6269,7 @@ namespace rwe
     TEST_CASE("raiders at an extractor out on the map are answered by the reserve near enough to go", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), /*surfaceMetal*/ 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -6379,7 +6373,7 @@ namespace rwe
         // A base with its opening quotas long met and an income no single
         // builder can keep up with.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -6424,7 +6418,7 @@ namespace rwe
     TEST_CASE("a hurt unit leaves the fight for the base until it is mended", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -6475,7 +6469,7 @@ namespace rwe
     TEST_CASE("a construction unit mends what came home hurt", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
         sim.unitDefinitions["ARMCK"].canReclamate = true;
@@ -6527,7 +6521,7 @@ namespace rwe
     }
     TEST_CASE("what the enemy is made of leans the lab's shares", "[ai]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         defineWorld(sim);
         sim.unitDefinitions["ARMLLT"].buildCostMetal = Metal(100.0f);
         sim.unitDefinitions["ARMPW"].buildCostMetal = Metal(100.0f);
@@ -6584,7 +6578,7 @@ namespace rwe
     TEST_CASE("the D-gun shot goes to what is worth the charge", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -6632,7 +6626,7 @@ namespace rwe
         // The test tower's laser reaches 200; a long gun of theirs reaches
         // 600. The old rule refused a flat 400 around either.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -6688,7 +6682,7 @@ namespace rwe
     TEST_CASE("a unit that outranges what it faces stands where it cannot be answered", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -6753,7 +6747,7 @@ namespace rwe
         // From a replay: damaged units gathered in the middle of the base and
         // did nothing, the base being attacked included.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -6821,7 +6815,7 @@ namespace rwe
         // From a replay review: "first few defences should be built on the
         // outer cusp of the base".
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
@@ -6868,7 +6862,7 @@ namespace rwe
     TEST_CASE("tier two fortifies the towers even with the tier-one switch off", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineWorld(sim);
         addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);

@@ -1,9 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
 #include <memory>
@@ -13,12 +11,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 32, int height = 32)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         UnitId addSolar(GameSimulation& sim, PlayerId owner, const std::shared_ptr<CobScript>& script)
         {
             UnitDefinition d{};
@@ -57,7 +49,7 @@ namespace rwe
     TEST_CASE("self-destruct countdown", "[selfdestruct]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim);
         auto solarId = addSolar(sim, player, script);
 
@@ -105,7 +97,7 @@ namespace rwe
     TEST_CASE("kills and losses are tallied per player", "[selfdestruct]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim);
         auto enemy = addPlayer(sim);
         auto attackerId = addSolar(sim, player, script);
@@ -140,7 +132,7 @@ namespace rwe
         // The scene relies on UnitDiedEvent to drop dead units from its
         // selection and hover state; a quiet death must not skip it.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim);
         auto solarId = addSolar(sim, player, script);
         sim.unitDefinitions["solar"].buildTime = 100u;

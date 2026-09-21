@@ -1,12 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/LoadingScene_util.h>
 #include <rwe/cob/CobEnvironment.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/io/fbi/io.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/MovementClassDatabase.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
@@ -39,12 +37,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 128, int height = 128)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /** Never short of anything, so a builder is only ever limited by its worker time. */
         PlayerId addWellStockedPlayer(GameSimulation& sim)
         {
@@ -257,7 +249,7 @@ namespace rwe
         // never set: if the aircraft were gated on it, as every RWE builder
         // used to be, nothing would ever happen. The original never gates one.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "CORCA", CorCaKeys, *script);
         defineUnit(sim, "CORDRAG", CorDragKeys, *script);
@@ -297,7 +289,7 @@ namespace rwe
         // what section 110 explains, and 567 is what the demo corpus shows for
         // this exact pair over 19 builds.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "CORCA", CorCaKeys, *script);
         defineUnit(sim, "CORRAD", CorRadKeys, *script);
@@ -354,7 +346,7 @@ namespace rwe
         // so its lathe state never calls the wait, and nothing can run it
         // twice in a tick.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "CORLAB", CorLabKeys, *script);
         defineUnit(sim, "CORDRAG", CorDragKeys, *script);

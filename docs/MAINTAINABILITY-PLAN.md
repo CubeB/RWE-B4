@@ -285,11 +285,18 @@ Both heap-dependent desyncs of 2026-09-18 were in it.
 
 - [ ] **`AiBehaviour.test.cpp`** -- 6,912 lines, 53 commits, 18,541 sections
       (56% of the ceiling). Split per manager.
-- [ ] **`makeFlatTerrain` is defined separately in 40 test files.** CLAUDE.md
-      records collecting fourteen copies of an earlier helper into
-      `sim_test_util.h`; this one is worse. It cannot simply be added there --
-      every one of those files would clash with it -- so it is a 40-file
-      change and its own piece of work.
+- [x] **`makeFlatTerrain` was defined separately in 40 test files.** Done
+      2026-09-21. Nine distinct bodies behind one name, and a bare
+      `makeFlatTerrain()` meant six different map sizes -- 16, 32, 64, 128,
+      256 and 1024 -- depending on the file. One `inline` definition in
+      `sim_test_util.h`, without default arguments so the size cannot go
+      back into hiding; 191 bare calls now name their map. Two helpers stayed
+      local under names that say what is different (`makeDryTerrain` in
+      TransportManager, the control for its channel map; `addFiringUnitOfType`
+      in patrol), and the clash predicted above was real but small: three
+      files, fixed by renaming their `addPlayer` and dropping two helpers
+      identical to the shared ones. 255 insertions against 543 deletions
+      across 41 files; 810 tests and 111,701 assertions before and after.
 - [ ] **`tad_episodes.cpp`** -- 6,533 lines. One file per mode over a shared
       reader. Low urgency: the tool is stable. Do it if it is touched again.
 

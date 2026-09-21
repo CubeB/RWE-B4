@@ -8,17 +8,12 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/Projectile.h>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 32, int height = 32)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /**
          * A solid, blocking feature in the shape of a TA rock or unit wreck:
          * worth something to reclaim, and with hit points of its own.
@@ -38,7 +33,8 @@ namespace rwe
             return d;
         }
 
-        PlayerId addPlayer(GameSimulation& sim)
+        /** Empty stores with room to fill them, so a reclaim's yield is what the total reads. */
+        PlayerId addPlayerWithEmptyStores(GameSimulation& sim)
         {
             GamePlayerInfo p{
                 std::optional<std::string>("salvager"),
@@ -159,7 +155,7 @@ namespace rwe
 
     TEST_CASE("feature hit points", "[wreckage]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
 
         // Modelled on TA's greenworld [Rock]: metal=100, damage=2000,
         // featuredead=Rock1a (a more battered rock worth the same metal).
@@ -354,8 +350,8 @@ namespace rwe
 
     TEST_CASE("a feature yields its full metal when reclaimed", "[wreckage]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
-        auto player = addPlayer(sim);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+        auto player = addPlayerWithEmptyStores(sim);
         auto rockDef = sim.featureDefinitions.insert(makeWreckDef("rock", 100u, 2000u));
         auto rockId = sim.addFeature(rockDef, 8, 8).value();
 

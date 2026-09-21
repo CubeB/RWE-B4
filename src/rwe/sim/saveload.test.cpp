@@ -13,18 +13,14 @@
 #include <rwe/util/OpaqueId_io.h>
 #include <memory>
 #include <vector>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 128, int height = 128)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
-        PlayerId addPlayer(GameSimulation& sim, const std::string& name)
+        /** sim_test_util.h's addPlayer with ten times the storage, so nothing here caps. */
+        PlayerId addWellStockedPlayer(GameSimulation& sim, const std::string& name)
         {
             GamePlayerInfo p{
                 std::optional<std::string>(name),
@@ -192,7 +188,7 @@ namespace rwe
          */
         GameSimulation makeBaseSim()
         {
-            GameSimulation sim(makeFlatTerrain(), 0u, 100, 3000);
+            GameSimulation sim(makeFlatTerrain(128, 128), 0u, 100, 3000);
 
             registerModel(sim);
             sim.unitDefinitions["LAUNCHER"] = makeLauncherDef();
@@ -246,8 +242,8 @@ namespace rwe
          */
         void buildScenario(GameSimulation& sim)
         {
-            auto us = addPlayer(sim, "us");
-            auto them = addPlayer(sim, "them");
+            auto us = addWellStockedPlayer(sim, "us");
+            auto them = addWellStockedPlayer(sim, "them");
 
             auto launcherId = spawnUnit(sim, "LAUNCHER", us, SimVector(0_ss, 0_ss, 0_ss));
             UnitWeapon missile;

@@ -1,10 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -30,12 +28,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 64, int height = 64)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         FeatureDefinition makeWreckDef()
         {
             FeatureDefinition d{};
@@ -132,7 +124,7 @@ namespace rwe
     TEST_CASE("a builder announces a feature reclaim exactly once, on the tick the work starts", "[reclaim][worksound]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim, "builder");
 
         auto wreckDef = sim.featureDefinitions.insert(makeWreckDef());
@@ -165,7 +157,7 @@ namespace rwe
         // Reclaim and ReclaimUnit are separate handlers in the original and
         // both play the same slot, so both are worth pinning.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim, "builder");
         auto enemy = addPlayer(sim, "enemy");
 
@@ -187,7 +179,7 @@ namespace rwe
     TEST_CASE("the announcement waits for the work, not for the order", "[reclaim][worksound]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim, "builder");
 
         auto wreckDef = sim.featureDefinitions.insert(makeWreckDef());
@@ -218,7 +210,7 @@ namespace rwe
     TEST_CASE("each new job is announced again", "[reclaim][worksound]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim, "builder");
 
         auto wreckDef = sim.featureDefinitions.insert(makeWreckDef());
@@ -244,7 +236,7 @@ namespace rwe
     TEST_CASE("a capture is announced once at the start and once when it lands", "[capture][worksound]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim, "captor");
         auto enemy = addPlayer(sim, "enemy");
 
@@ -278,7 +270,7 @@ namespace rwe
         // Slot 16 is the captor's sound, so the scene needs the captor and
         // not just the player it now belongs to.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim, "captor");
         auto enemy = addPlayer(sim, "enemy");
 
@@ -315,7 +307,7 @@ namespace rwe
         // captureUnit is callable without one, and then there is nobody to
         // play slot 16.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim, "captor");
         auto enemy = addPlayer(sim, "enemy");
         sim.unitDefinitions["solar"] = makeSolarDef();

@@ -1,11 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/game/save_util.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -19,12 +17,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain()
-        {
-            Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /**
          * ARMPW, rev31 `units/ARMPW.fbi`: MaxVelocity=1.8, Acceleration=0.1,
          * BrakeRate=0.19, TurnRate=1120, FootprintX/Z=2, MaxSlope=17,
@@ -83,7 +75,7 @@ namespace rwe
          */
         GameSimulation makeRouteSim()
         {
-            GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+            GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
 
             std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
             sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));

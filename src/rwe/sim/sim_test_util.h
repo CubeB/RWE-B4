@@ -2,8 +2,10 @@
 
 #include <memory>
 #include <rwe/cob/CobEnvironment.h>
+#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitMesh.h>
 #include <string>
 #include <vector>
@@ -22,6 +24,21 @@
  */
 namespace rwe
 {
+    /**
+     * A map of the given size, flat at height zero with the sea at zero too.
+     *
+     * Deliberately without default arguments. There were forty copies of this
+     * function, and a bare makeFlatTerrain() meant six different map sizes --
+     * 16, 32, 64, 128, 256 and 1024 -- depending on which file it was read
+     * in, some of them baked into the body and some of them defaults. A test
+     * whose map size matters now has to say what it is.
+     */
+    inline MapTerrain makeFlatTerrain(int width, int height)
+    {
+        Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
+        return MapTerrain(std::move(heights), 0_ss);
+    }
+
     /** A script with nothing in it, for a unit whose COB is beside the point. */
     inline std::shared_ptr<CobScript> makeEmptyCobScript(const std::vector<std::string>& pieces = {})
     {

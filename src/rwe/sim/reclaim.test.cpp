@@ -1,11 +1,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -16,12 +14,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 32, int height = 32)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         FeatureDefinition makeFeatureDef(const std::string& name, unsigned int metal, unsigned int energy, bool reclaimable)
         {
             FeatureDefinition d{};
@@ -97,7 +89,7 @@ namespace rwe
     TEST_CASE("GameSimulation::reclaimUnit", "[reclaim]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayerWithNothing(sim);
         sim.unitDefinitions["solar"] = makeSolarDef();
         auto solarId = addUnitOfType(sim, "solar", player, SimVector(100_ss, 0_ss, 100_ss), script);
@@ -166,7 +158,7 @@ namespace rwe
         // table at all. A unit shot to pieces while it was still a frame is a
         // different cause -- 1, an ordinary weapon death -- and does count.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayerWithNothing(sim);
         sim.unitDefinitions["solar"] = makeSolarDef();
         const auto& info = sim.getPlayer(player);
@@ -183,7 +175,7 @@ namespace rwe
     TEST_CASE("a builder with a reclaim order reclaims an enemy unit over successive ticks", "[reclaim]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayerWithNothing(sim);
         auto enemy = addPlayerWithNothing(sim);
 
@@ -211,7 +203,7 @@ namespace rwe
     TEST_CASE("a unit ignores an order to reclaim itself", "[reclaim]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayerWithNothing(sim);
         auto builderId = addBuilderUnit(sim, player, SimVector(100_ss, 0_ss, 100_ss), script);
         sim.getUnitState(builderId).orders.push_back(ReclaimOrder(builderId));
@@ -244,7 +236,7 @@ namespace rwe
 
     TEST_CASE("GameSimulation::reclaimFeature", "[reclaim]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayerWithNothing(sim);
         auto rockDef = sim.featureDefinitions.insert(makeFeatureDef("rock", 100u, 50u, true));
         auto rockId = sim.addFeature(rockDef, 4, 4).value();
@@ -324,7 +316,7 @@ namespace rwe
         // position: every factory, both air repair pads, both carriers and
         // CORSOLAR.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayerWithNothing(sim);
 
         auto rockDef = sim.featureDefinitions.insert(makeFeatureDef("rock", 100u, 50u, true));
@@ -355,7 +347,7 @@ namespace rwe
         // the two Commanders set CanCapture. So the observable rule is that
         // a Commander is the one unit you may not recycle.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayerWithNothing(sim);
 
         auto commanderDef = makeBuilderDef(30u);
@@ -379,7 +371,7 @@ namespace rwe
     TEST_CASE("a builder with a reclaim order reclaims the feature over successive ticks", "[reclaim]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayerWithNothing(sim);
 
         auto rockDef = sim.featureDefinitions.insert(makeFeatureDef("rock", 100u, 50u, true));

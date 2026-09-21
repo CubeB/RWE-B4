@@ -1,13 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/LoadingScene_util.h>
 #include <rwe/cob/CobEnvironment.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/io/fbi/io.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/MovementClassDatabase.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
@@ -31,12 +29,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 64, int height = 64)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /** Never short of anything, so a builder is only ever limited by its worker time. */
         PlayerId addWellStockedPlayer(GameSimulation& sim)
         {
@@ -237,7 +229,7 @@ namespace rwe
         // its second, neither of which tests anything, so the earliest a frame
         // can lose anything is eleven seconds after it is placed.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
         auto player = addWellStockedPlayer(sim);
@@ -285,7 +277,7 @@ namespace rwe
         {
             INFO(row.name);
 
-            GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+            GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
             registerTestModel(sim);
             defineUnit(sim, row.name, row.keys, *script);
             auto player = addWellStockedPlayer(sim);
@@ -313,7 +305,7 @@ namespace rwe
         // mark a fusion plant, and a rule that treated every frame the same
         // would have eaten it long before here.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "ARMFUS", ArmFusKeys, *script);
         auto player = addWellStockedPlayer(sim);
@@ -334,7 +326,7 @@ namespace rwe
         // `trunc(fraction * maxdamage)` and applies the difference. So the
         // health bar tracks the frame exactly, backwards.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
         auto player = addWellStockedPlayer(sim);
@@ -356,7 +348,7 @@ namespace rwe
     TEST_CASE("a builder on the job holds the decay off indefinitely", "[nanoframe]")
     {
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
         defineUnit(sim, "ARMCK", ArmCkKeys, *script);
@@ -382,7 +374,7 @@ namespace rwe
         // before it asks the economy for anything, so a builder standing there
         // with nothing to spend is still enough to stop the frame rotting.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
         defineUnit(sim, "ARMCK", ArmCkKeys, *script);
@@ -414,7 +406,7 @@ namespace rwe
         // rather than every 11, so the first thing an abandoned frame loses is
         // one second after the nanolathe stops -- not eleven.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
         defineUnit(sim, "ARMCK", ArmCkKeys, *script);
@@ -447,7 +439,7 @@ namespace rwe
         // explosion. An ARMSOLAR names a corpse, and it is registered here, so
         // a wreck is what would appear if the rule were wrong.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
         auto wreck = sim.featureDefinitions.insert(makeWreckDef("armsolar_dead"));
@@ -474,7 +466,7 @@ namespace rwe
         // all while the remaining build fraction is non-zero. Shoot a
         // half-built factory and there is nothing to reclaim.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         registerTestModel(sim);
         defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
         auto wreck = sim.featureDefinitions.insert(makeWreckDef("armsolar_dead"));

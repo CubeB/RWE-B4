@@ -1,9 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -15,12 +13,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain()
-        {
-            Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         UnitDefinition makeWalkerDef()
         {
             UnitDefinition d{};
@@ -66,7 +58,7 @@ namespace rwe
         // tick, that was seconds of an army not moving, and it is most of what
         // looked like a pathfinding budget problem.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim);
         sim.unitDefinitions["walker"] = makeWalkerDef();
         std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
@@ -105,7 +97,7 @@ namespace rwe
         // it. A walk that failed spuriously would show up here as a unit
         // parked short of its destination with its order still in hand.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim);
         sim.unitDefinitions["walker"] = makeWalkerDef();
         std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};

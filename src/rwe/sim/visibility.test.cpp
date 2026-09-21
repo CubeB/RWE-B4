@@ -16,12 +16,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 64, int height = 64)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /**
          * A 64x64 heightmap made of bands running along z, given as
          * (firstColumn, lastColumn, height). Because a band's height is
@@ -115,7 +109,7 @@ namespace rwe
     TEST_CASE("line of sight", "[visibility]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
         auto them = addPlayer(sim, "them");
         defineUnit(sim, "scout", /*sight*/ 100u, /*radar*/ 0u, false);
@@ -163,7 +157,7 @@ namespace rwe
         // it; here the two players simply own the same bit, so ground one of
         // them has walked is explored for the other without a copy.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto us = addTeamPlayer(sim, "us", 1);
         auto ally = addTeamPlayer(sim, "ally", 1);
         auto them = addPlayer(sim, "them"); // no team, so a group of its own
@@ -259,7 +253,7 @@ namespace rwe
 
         // 64x64 tiles of 16 world units, centred on the origin, so the map
         // runs from -512 to +512 and anything past that is off it.
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
         defineUnit(sim, "scout", /*sight*/ 200u, /*radar*/ 0u, false);
 
@@ -302,7 +296,7 @@ namespace rwe
     TEST_CASE("sight radius is capped at eight cells", "[visibility]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
         // A sight distance far beyond anything in the game data.
         defineUnit(sim, "seer", /*sight*/ 10000u, /*radar*/ 0u, false);
@@ -551,7 +545,7 @@ namespace rwe
     TEST_CASE("visibility counts the units that can see a cell", "[visibility]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
         defineUnit(sim, "scout", /*sight*/ 200u, /*radar*/ 0u, false);
 
@@ -607,7 +601,7 @@ namespace rwe
     TEST_CASE("radar", "[visibility]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
         auto them = addPlayer(sim, "them");
         defineUnit(sim, "radar", /*sight*/ 32u, /*radar*/ 300u, /*onOffable*/ true);
@@ -665,7 +659,7 @@ namespace rwe
 
         SECTION("altitude does not extend radar range past its own ring")
         {
-            GameSimulation air(makeFlatTerrain(), 0u, 0, 0);
+            GameSimulation air(makeFlatTerrain(64, 64), 0u, 0, 0);
             auto a = addPlayer(air, "us");
             auto b = addPlayer(air, "them");
             defineUnit(air, "plane", 32u, 100u, false);
@@ -698,7 +692,7 @@ namespace rwe
 
         SECTION("sonar detects at its own flat range")
         {
-            GameSimulation sea(makeFlatTerrain(), 0u, 0, 0);
+            GameSimulation sea(makeFlatTerrain(64, 64), 0u, 0, 0);
             auto a = addPlayer(sea, "us");
             auto b = addPlayer(sea, "them");
             defineUnit(sea, "sonar", 32u, /*radar*/ 0u, false, /*modelHeight*/ 0, /*sonar*/ 300u);
@@ -731,7 +725,7 @@ namespace rwe
         // and nowhere else. These are the two predicates RWE draws from:
         // canSeeUnit gates the world, canDetectUnit gates the minimap dot.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
         auto them = addPlayer(sim, "them");
         defineUnit(sim, "radar", /*sight*/ 32u, /*radar*/ 300u, /*onOffable*/ true);

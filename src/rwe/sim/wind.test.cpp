@@ -18,12 +18,6 @@ namespace rwe
 
     namespace
     {
-        MapTerrain makeFlatTerrain()
-        {
-            Grid<unsigned char> heights(16, 16, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /**
          * 512 cells of 16 world units, so the map spans 8192 and -- since
          * worldToHeightmapSpace offsets by half the width -- the world origin
@@ -148,7 +142,7 @@ namespace rwe
         // so currentWindVector is the only surviving form of the wind. This is
         // the wiring test: the formula above can be right while nothing ever
         // calls it.
-        GameSimulation sim(makeFlatTerrain(), 0u, BrainCoralWindSpeed, BrainCoralWindSpeed);
+        GameSimulation sim(makeFlatTerrain(16, 16), 0u, BrainCoralWindSpeed, BrainCoralWindSpeed);
 
         SECTION("a fresh simulation starts becalmed rather than uninitialised")
         {

@@ -4,10 +4,8 @@
 #include <memory>
 #include <optional>
 #include <rwe/cob/CobEnvironment.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitMesh.h>
 #include <rwe/sim/UnitState.h>
@@ -22,12 +20,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 32, int height = 32)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /** The economy tests set their own starting stores; that is what they measure. */
         PlayerId addPlayerWithResources(GameSimulation& sim, float metal = 0.0f, float energy = 0.0f, float storage = 10000.0f)
         {
@@ -118,7 +110,7 @@ namespace rwe
     TEST_CASE("a consumer is refused while it owes for earlier work", "[economy]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayerWithResources(sim, 10.0f, 10.0f);
         sim.unitDefinitions["inert"] = makeInertDef();
         auto unitId = addUnitOfType(sim, "inert", player, SimVector(100_ss, 0_ss, 100_ss), script);
@@ -147,7 +139,7 @@ namespace rwe
     TEST_CASE("a unit that owes for earlier work still earns", "[economy]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayerWithResources(sim);
         auto def = makeInertDef();
         def.energyMake = Energy(100.0f);
@@ -171,7 +163,7 @@ namespace rwe
     TEST_CASE("a shortfall slows every consumer by the same fraction", "[economy]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayerWithResources(sim, 30.0f, 30.0f);
         sim.unitDefinitions["inert"] = makeInertDef();
 
@@ -194,7 +186,7 @@ namespace rwe
     TEST_CASE("income above the storage cap is thrown away", "[economy]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayerWithResources(sim);
         sim.unitDefinitions["inert"] = makeInertDef(100.0f);
         auto unitId = addUnitOfType(sim, "inert", player, SimVector(100_ss, 0_ss, 100_ss), script);
@@ -215,7 +207,7 @@ namespace rwe
     TEST_CASE("what a player earned is totted up for the end of the game", "[economy]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayerWithResources(sim);
         sim.unitDefinitions["inert"] = makeInertDef();
         auto unitId = addUnitOfType(sim, "inert", player, SimVector(100_ss, 0_ss, 100_ss), script);
@@ -237,7 +229,7 @@ namespace rwe
     TEST_CASE("generators and consumers over a second", "[economy]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         sim.tidalStrength = 20;
         auto player = addPlayerWithResources(sim);
 
@@ -513,7 +505,7 @@ namespace rwe
     {
         // A map whose wind range sits above what a generator can use still
         // gives exactly the generator's rating, not more.
-        GameSimulation sim(makeFlatTerrain(), 0u, MaxUtilizableWindSpeed * 3, MaxUtilizableWindSpeed * 4);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, MaxUtilizableWindSpeed * 3, MaxUtilizableWindSpeed * 4);
         sim.tick();
         REQUIRE(sim.currentWindGenerationFactor.value == Catch::Approx(1.0f));
     }

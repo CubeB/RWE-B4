@@ -10,10 +10,8 @@
 #include <rwe/ai/StrategicManager.h>
 #include <rwe/ai/ThreatMap.h>
 #include <rwe/game/PlayerCommand.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/GameTime.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/sim_test_util.h>
@@ -22,12 +20,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 64, int height = 64)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /** A stationary building, standing wherever it is put. */
         KnownEnemy makeKnownBuilding(UnitId id, const SimVector& position)
         {
@@ -73,7 +65,7 @@ namespace rwe
 
     TEST_CASE("reinforcements join a wave that is still out", "[ai]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto ai = addPlayer(sim, "ai");
         sim.unitDefinitions["UNIT"] = UnitDefinition{};
         auto script = makeEmptyCobScript();
@@ -120,7 +112,7 @@ namespace rwe
 
     TEST_CASE("a raid goes at the enemy's undefended expansion", "[ai]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto ai = addPlayer(sim, "ai");
         auto enemy = addPlayer(sim, "enemy");
         sim.unitDefinitions["UNIT"] = UnitDefinition{};
@@ -198,7 +190,7 @@ namespace rwe
 
     TEST_CASE("a unit that has outrun the wave waits for it", "[ai]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto ai = addPlayer(sim, "ai");
         UnitDefinition kbotDef{};
         kbotDef.isMobile = true;
@@ -256,7 +248,7 @@ namespace rwe
 
     TEST_CASE("the wave turns on an army it meets instead of walking on", "[ai]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto ai = addPlayer(sim, "ai");
         auto enemy = addPlayer(sim, "enemy");
         UnitDefinition kbotDef{};
@@ -341,7 +333,7 @@ namespace rwe
         // blackboard: it keeps a contact until the AI is standing where it
         // last saw it, so an army went on firing at a unit its side had lost
         // entirely.
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto ai = addPlayer(sim, "ai");
         auto them = addPlayer(sim, "them");
         sim.unitDefinitions["UNIT"] = UnitDefinition{};

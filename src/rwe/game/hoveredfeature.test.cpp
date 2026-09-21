@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/game/GameScene_util.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
+#include <rwe/sim/sim_test_util.h>
 
 /**
  * The feature under the cursor outlives the feature.
@@ -18,12 +18,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 64, int height = 64)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /** A tree: the thing you hover over and a builder reclaims. */
         FeatureDefinition makeTreeDef()
         {
@@ -54,7 +48,7 @@ namespace rwe
 
     TEST_CASE("tryGetHoveredFeature", "[hoveredfeature]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto treeDef = sim.featureDefinitions.insert(makeTreeDef());
         auto treeId = sim.addFeature(treeDef, 20, 20).value();
 
@@ -81,7 +75,7 @@ namespace rwe
 
     TEST_CASE("featureCanBeReclaimed", "[hoveredfeature]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
 
         SECTION("a reclaimable feature can be")
         {

@@ -3,7 +3,6 @@
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/UnitModelDefinition.h>
@@ -26,12 +25,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 32, int height = 32)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         UnitDefinition makeBuilderDef(unsigned int workerTimePerTick)
         {
             UnitDefinition d{};
@@ -92,7 +85,7 @@ namespace rwe
         // weapon hit from your own side still warns, a paralyser from your
         // own side does not. The scene decides; the event carries the fact.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim);
         sim.unitDefinitions["solar"] = makeSolarDef();
         auto solarId = addUnitOfType(sim, "solar", player, SimVector(100_ss, 0_ss, 100_ss), script);
@@ -110,7 +103,7 @@ namespace rwe
     TEST_CASE("a repairer says so once when the job is done", "[unitnotifications]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim);
         sim.unitDefinitions["solar"] = makeSolarDef();
         sim.unitDefinitions["builder"] = makeBuilderDef(30u);
@@ -145,7 +138,7 @@ namespace rwe
     {
         // 0x40432E, with 0x5015E0.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim, "captor");
         auto enemy = addPlayer(sim, "enemy");
         sim.unitDefinitions["solar"] = makeSolarDef();
@@ -171,7 +164,7 @@ namespace rwe
     {
         // 0x4047A6, with 0x50164C.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim);
         auto commanderDef = makeBuilderDef(30u);
         commanderDef.canCapture = true;
@@ -195,7 +188,7 @@ namespace rwe
     {
         // The order goes with the message, so ticking on is silent.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim, "captor");
         auto enemy = addPlayer(sim, "enemy");
         sim.unitDefinitions["solar"] = makeSolarDef();

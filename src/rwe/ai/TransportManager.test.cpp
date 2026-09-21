@@ -99,8 +99,8 @@ namespace rwe
             return MapTerrain(std::move(heights), 30_ss);
         }
 
-        /** All dry: a control map with no navigable water at all. */
-        MapTerrain makeFlatTerrain()
+        /** All dry: the control for makeChannelTerrain, with no navigable water at all. */
+        MapTerrain makeDryTerrain()
         {
             Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(60));
             return MapTerrain(std::move(heights), 30_ss);
@@ -236,7 +236,7 @@ namespace rwe
 
         SECTION("a map with no navigable water never floods the naval layer")
         {
-            GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+            GameSimulation sim(makeDryTerrain(), 0u, 0, 0);
             addPlayer(sim, "human", GamePlayerType::Human, "ARM");
             auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
             defineLandUnits(sim);

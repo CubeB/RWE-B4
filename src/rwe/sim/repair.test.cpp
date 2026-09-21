@@ -1,9 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -14,12 +12,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 32, int height = 32)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /**
          * Never short of anything, so a repair can only be limited by the
          * rules under test. The storage has to come from a *unit* -- the
@@ -114,7 +106,7 @@ namespace rwe
     TEST_CASE("a builder with a repair order restores a damaged unit to full health", "[repair]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addWellStockedPlayer(sim);
         sim.unitDefinitions["solar"] = makeSolarDef();
 
@@ -157,7 +149,7 @@ namespace rwe
         // points a tick. Repair scales with the number of repairers, not with
         // their WorkerTime.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addWellStockedPlayer(sim);
 
         auto wallDef = makeSolarDef();
@@ -192,7 +184,7 @@ namespace rwe
         // nothing. The request is still booked, which is what puts it in the
         // resource bars.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addWellStockedPlayer(sim);
         sim.unitDefinitions["solar"] = makeSolarDef();
 
@@ -223,7 +215,7 @@ namespace rwe
     TEST_CASE("a repair order on an unfinished unit completes its construction", "[repair]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addWellStockedPlayer(sim);
         sim.unitDefinitions["solar"] = makeSolarDef();
 
@@ -245,7 +237,7 @@ namespace rwe
     TEST_CASE("a repair order on a healthy unit completes immediately", "[repair]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addWellStockedPlayer(sim);
         sim.unitDefinitions["solar"] = makeSolarDef();
 
@@ -262,7 +254,7 @@ namespace rwe
     TEST_CASE("a unit ignores an order to repair itself", "[repair]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addWellStockedPlayer(sim);
         auto builderId = addBuilderUnit(sim, player, SimVector(100_ss, 0_ss, 100_ss), script);
         sim.getUnitState(builderId).hitPoints = 5;
@@ -281,7 +273,7 @@ namespace rwe
         // so a unit that may not reclaim may not repair. A factory has a
         // worker time only so that it can build.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addWellStockedPlayer(sim);
 
         sim.unitDefinitions["solar"] = makeSolarDef();
@@ -310,7 +302,7 @@ namespace rwe
         // adds healtime * 8 / 30, truncated. The commanders' shipped 27 gives
         // 7 points a step, 26.25 a second.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addWellStockedPlayer(sim);
 
         auto commanderDef = makeSolarDef();
@@ -344,7 +336,7 @@ namespace rwe
     TEST_CASE("a unit without a healtime never mends itself", "[repair]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addWellStockedPlayer(sim);
 
         sim.unitDefinitions["solar"] = makeSolarDef();

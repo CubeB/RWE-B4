@@ -10,10 +10,8 @@
 #include <rwe/ai/AirManager.h>
 #include <rwe/ai/ThreatMap.h>
 #include <rwe/game/PlayerCommand.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/GameTime.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/WeaponDefinition.h>
@@ -23,12 +21,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 64, int height = 64)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /** A stationary enemy building, standing wherever it is put. */
         KnownEnemy makeKnownBuilding(UnitId id, const SimVector& position, const std::string& unitType = "UNIT")
         {
@@ -113,7 +105,7 @@ namespace rwe
 
     TEST_CASE("bombers go at the dearest thing the enemy has built", "[ai]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto ai = addPlayer(sim, "ai");
         auto enemy = addPlayer(sim, "enemy");
         auto script = makeEmptyCobScript();
@@ -170,7 +162,7 @@ namespace rwe
         // enemy owns the moment it leaves the pad -- which is the thing
         // deepest inside their anti-air -- and is traded for a fraction of a
         // building. The same trickle the army's wave rule exists to stop.
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto ai = addPlayer(sim, "ai");
         auto enemy = addPlayer(sim, "enemy");
         auto script = makeEmptyCobScript();
@@ -205,7 +197,7 @@ namespace rwe
 
     TEST_CASE("fighters take what flies and nothing else", "[ai]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto ai = addPlayer(sim, "ai");
         auto enemy = addPlayer(sim, "enemy");
         auto script = makeEmptyCobScript();

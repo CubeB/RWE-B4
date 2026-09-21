@@ -1,20 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rwe/grid/Grid.h>
 #include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/SimTicksPerSecond.h>
+#include <rwe/sim/sim_test_util.h>
 
 namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain(int width = 32, int height = 32)
-        {
-            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         FeatureDefinition makeTreeDef(const std::string& name, bool flammable)
         {
             FeatureDefinition d{};
@@ -42,7 +35,7 @@ namespace rwe
 
     TEST_CASE("burning features", "[burning]")
     {
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
 
         auto crispDef = sim.featureDefinitions.insert(makeTreeDef("crisp", false));
         auto treeDef = sim.featureDefinitions.insert(makeTreeDef("tree", true));

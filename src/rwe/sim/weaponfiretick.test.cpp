@@ -1,8 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <optional>
-#include <rwe/grid/Grid.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/WeaponDefinition.h>
@@ -73,12 +71,6 @@ namespace rwe
          * can be done in whole squares.
          */
         constexpr int MapSquares = 1024;
-
-        MapTerrain makeFlatTerrain()
-        {
-            Grid<unsigned char> heights(MapSquares, MapSquares, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
 
         /**
          * The barrel, twenty units up. Both units are stood at this height so
@@ -179,7 +171,7 @@ namespace rwe
          */
         Result fireAt(int distance)
         {
-            GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+            GameSimulation sim(makeFlatTerrain(MapSquares, MapSquares), 0u, 0, 0);
 
             // Circular sight, which is one of the original's own two modes and
             // the one whose reach does not depend on line-of-sight tables a

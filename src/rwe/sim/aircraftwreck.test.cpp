@@ -4,10 +4,8 @@
 #include <optional>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/cob/CobOpCode.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/sim_test_util.h>
@@ -18,12 +16,6 @@ namespace rwe
 {
     namespace
     {
-        MapTerrain makeFlatTerrain()
-        {
-            Grid<unsigned char> heights(32, 32, static_cast<unsigned char>(0));
-            return MapTerrain(std::move(heights), 0_ss);
-        }
-
         /**
          * A `Killed(severity, corpsetype)` ladder: a run of `severity <= N`
          * rungs, each writing a corpse level into the second parameter, and
@@ -220,7 +212,7 @@ namespace rwe
         // wreck" behaviour -- there is no rule about aircraft anywhere, the
         // data simply names no corpse and 0x4863AC finds a sentinel.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim);
         std::vector<UnitPieceDefinition> modelPieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
         sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(modelPieces));
@@ -291,7 +283,7 @@ namespace rwe
         // chain runs out (0x4863AC). RWE ran the ladder and discarded the
         // answer, so every wreck in the game was the level-one wreck.
         auto script = makeEmptyCobScript({"base"});
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim);
         std::vector<UnitPieceDefinition> modelPieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
         sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(modelPieces));
@@ -353,7 +345,7 @@ namespace rwe
         // corpus shows inside the 1-25 band is a difference between units'
         // own scripts, not the engine, so it is the script below that decides
         // it here -- which is exactly the point of running a real one.
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim);
         std::vector<UnitPieceDefinition> modelPieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
         sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(modelPieces));
@@ -483,7 +475,7 @@ namespace rwe
         // Killed ladder asked for. In the shipped data that is the dragon's
         // teeth and the forts: scenery that happens to be built.
         auto script = makeKilledLevelScript({"base"}, 2);
-        GameSimulation sim(makeFlatTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addPlayer(sim);
         std::vector<UnitPieceDefinition> modelPieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
         sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(modelPieces));
