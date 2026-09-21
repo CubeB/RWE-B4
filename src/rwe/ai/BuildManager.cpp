@@ -3915,6 +3915,483 @@ namespace rwe
         }
     }
 
+    BuildManager::PrioritySite BuildManager::choosePrioritySite(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        AiBlackboard& bb,
+        const ReachabilityMap& reachability,
+        std::minstd_rand& rng,
+        const std::string& next,
+        const UnitDefinition& nextDef,
+        const BuilderContext& ctx,
+        std::vector<PlayerCommand>& outCommands)
+    {
+        PrioritySite result;
+        // A moho extractor stands on a metal patch exactly as the
+        // level-one one does, and must go through the same search: the
+        // ordinary site chooser deliberately refuses a patch, so a moho
+        // routed through it would either find nowhere or stand somewhere
+        // it produces nothing.
+        if (next == ctx.sideUnits.metalExtractor
+            || (!ctx.sideUnits.mohoExtractor.empty() && next == ctx.sideUnits.mohoExtractor)
+            || (!ctx.sideUnits.underwaterMetalExtractor.empty() && next == ctx.sideUnits.underwaterMetalExtractor))
+        {
+            // The underwater extractor comes through here for the same
+            // reason the moho does -- it has to stand on a patch, and the
+            // ordinary site chooser deliberately refuses those -- but it
+            // needs one thing they do not, below: no reachability test,
+            // because a patch under twenty feet of water is not ground
+            // anybody walks to. canBeBuiltAt still holds it to its own
+            // MinWaterDepth, so it cannot land anywhere shallow.
+            auto submerged = !ctx.sideUnits.underwaterMetalExtractor.empty() && next == ctx.sideUnits.underwaterMetalExtractor;
+            // Nearby patches first; further afield if there are none.
+            // Only patches the builder can walk to: islands are for the transport.
+            // A builder that flies is not held to the ground's shape.
+            // Applied to an air constructor this test is exactly
+            // backwards: it would confine the one builder that can cross
+            // water to the patches everything else can already walk to,
+            // and leave the island patch -- the one nobody is contesting,
+            // and the reason to own an air constructor at all -- refused.
+            // siteReachable, hoisted above: the same test, and it is the
+            // reasoning in this comment that it carries.
+            // Not under the enemy's guns. The nearest free patch stays
+            // the nearest free patch after the frame on it is shot, so
+            // without this the builder puts the same frame down again:
+            // measured, a commander ordered one site 232 times in five
+            // hundred seconds, each frame living a second or two.
+            auto gunsSquared = profile.mexAvoidsEnemyGunsRadius * profile.mexAvoidsEnemyGunsRadius;
+            auto underGuns = [&](const SimVector& p) {
+                if (profile.mexAvoidsEnemyGunsRadius <= 0_ss)
+                {
+                    return false;
+                }
+                for (const auto& [_, enemy] : bb.knownEnemies)
+                {
+                    if (enemy.isArmed && !enemy.isAir && enemy.lastKnownPosition.distanceSquared(p) <= gunsSquared)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            // The commander stays within reach of home in both searches.
+            // The near search is from wherever the builder stands, so a
+            // commander that had just built at the edge of the base
+            // could chain from there to the next patch and the next:
+            // measured, one was at the midfield building extractors 3900
+            // from its start when it was caught, and the game with it.
+            auto commanderReach = profile.commanderMexSearchRadius;
+            // While somebody else can take the far rocks, the commander
+            // keeps to the near ones (commanderPrefersNearSites). With no
+            // construction unit alive it expands as before, because a
+            // side that has lost its builders must still expand.
+            if (profile.commanderPrefersNearSites && profile.commanderLeashRadius > 0_ss && !bb.sideUnits.constructor.empty()
+                && countOf(bb.ownedTotalCounts, bb.sideUnits.constructor) > 0)
+            {
+                commanderReach = rweMin(commanderReach, profile.commanderLeashRadius);
+            }
+            auto leashSquared = commanderReach * commanderReach;
+            // The ground rules, asked of a deposit (see chooseMexSite):
+            // a deposit the leash or a gun's reach cuts through is taken
+            // at its heart, not on whichever edge lies inside.
+            auto walkable = [&](const SimVector& p) {
+                if (ctx.builderDef.commander && ctx.builderAtBase && bb.baseAnchor->distanceSquared(p) > leashSquared)
+                {
+                    return false;
+                }
+                return !underGuns(p) && (submerged || !ctx.siteReachable || ctx.siteReachable(p));
+            };
+            // And the site rules, asked of the one placement a deposit
+            // would be given.
+            auto siteFree = [&](const SimVector& p) {
+                // Kept for the moho that is about to stand there.
+                if (extractorUpgrade && extractorUpgrade->site.distanceSquared(p) < 64_ss * 64_ss)
+                {
+                    return false;
+                }
+                // And for the patch another builder is already walking
+                // to: nothing stands there yet, so only its order says so.
+                if (siteClaimedByAnother(sim, aiOwner, ctx.builderId, p, profile.claimedSiteRadius))
+                {
+                    return false;
+                }
+                return !siteFailedLately(sim, p);
+            };
+            result.site = chooseMexSite(sim, next, ctx.builder.position, profile.nearMexSearchRadius, rng, siteFree, walkable);
+            if (!result.site && ctx.builderAtBase)
+            {
+                // Expanding, as opposed to filling in around the base:
+                // the nearest free patch to the base, so the base grows
+                // outward, out to the builder's radius. The commander
+                // has a shorter one -- it is the game, and it is planned
+                // first -- so the far patches fall to the constructors.
+                //
+                // Measured before this, the extractor count sat at eight
+                // to ten for the middle third of every game: the ring of
+                // patches past 2048 was out of reach, and the ring
+                // inside it was gated on ground the AI had explored, which
+                // with no scout until the eighth extractor meant nothing
+                // until the plane flew over. Both are knobs now, and the
+                // exploration gate is off: a player is shown every metal
+                // spot on the map from the start.
+                auto radius = ctx.builderDef.commander ? profile.commanderMexSearchRadius : profile.expansionMexSearchRadius;
+
+                // Ours to take: nearer our base than the enemy's, once
+                // the enemy has been found. Not, before that, nearer
+                // than any other start position the map declares --
+                // that was tried, and Crystal Maze declares ten of them,
+                // so it threw out 405 of the 468 patch cells in reach
+                // and the AI sat on twelve extractors while the other
+                // side took fifty. A player in a two-player game takes
+                // the empty starts' metal; so does this.
+                auto onOurSide = [&](const SimVector& p) {
+                    if (!profile.expansionStaysOnOurSide || !bb.enemyBasePosition)
+                    {
+                        return true;
+                    }
+                    return bb.baseAnchor->distanceSquared(p) <= bb.enemyBasePosition->distanceSquared(p);
+                };
+                // Ground we have looked at, when the knob asks for it:
+                // explored, or under a radar of ours, which is how a
+                // player would know a patch was still free.
+                auto known = [&](const SimVector& p) {
+                    if (!profile.expansionNeedsExploredGround || profile.cheatModeOmniscient)
+                    {
+                        return true;
+                    }
+                    return sim.isExploredBy(aiOwner, p) || sim.isOnRadarOf(aiOwner, p);
+                };
+                auto acceptable = [&](const SimVector& p) {
+                    return onOurSide(p) && known(p) && walkable(p);
+                };
+                result.site = chooseMexSite(sim, next, *bb.baseAnchor, radius, rng, siteFree, acceptable);
+
+                if (!result.site)
+                {
+                    // Why not, for the log: which test threw out the
+                    // patches within reach. This is what showed the
+                    // plateau was the radius and the exploration gate
+                    // rather than a shortage of patches.
+                    indexMetalPatches(sim);
+                    int inRange = 0, offSide = 0, unknown = 0, guarded = 0, unwalkable = 0;
+                    auto radiusSquared = radius * radius;
+                    for (const auto& patch : metalPatches)
+                    {
+                        auto p = sim.terrain.heightmapIndexToWorldCenter(patch.x, patch.y);
+                        if (bb.baseAnchor->distanceSquared(p) > radiusSquared)
+                        {
+                            continue;
+                        }
+                        ++inRange;
+                        if (!onOurSide(p))
+                        {
+                            ++offSide;
+                        }
+                        else if (!known(p))
+                        {
+                            ++unknown;
+                        }
+                        else if (underGuns(p))
+                        {
+                            ++guarded;
+                        }
+                        else if (!walkable(p) || !siteFree(p))
+                        {
+                            ++unwalkable;
+                        }
+                    }
+                    LOG_DEBUG << "AI build: expansion found no patch for unit " << ctx.builderId.value << " within " << radius.value
+                              << ": " << inRange << " patch cells in range, " << offSide << " on the enemy's side, " << unknown << " unexplored, "
+                              << guarded << " under enemy guns, " << unwalkable << " unreachable or beyond the commander's leash, the rest taken or unbuildable";
+                }
+            }
+
+            // The nearer patch, wet or dry. The dry extractor is listed
+            // first and the planner takes the first entry with a site, so
+            // a commander standing in the shallows beside a submerged
+            // patch walked past it -- and past the next -- to a dry one
+            // inland; watched in a replay. When the builder has both
+            // buttons and the wet patch is closer, this entry stands
+            // aside and the submerged extractor's own, next on the list,
+            // takes it.
+            if (result.site && next == ctx.sideUnits.metalExtractor && !ctx.sideUnits.underwaterMetalExtractor.empty() && submergedMetalPatches > 0
+                && bb.buildTree.canBuild(ctx.builder.unitType, ctx.sideUnits.underwaterMetalExtractor))
+            {
+                auto wetAcceptable = [&](const SimVector& p) {
+                    if (ctx.builderDef.commander && ctx.builderAtBase && bb.baseAnchor->distanceSquared(p) > leashSquared)
+                    {
+                        return false;
+                    }
+                    return !underGuns(p);
+                };
+                auto wet = chooseMexSite(sim, ctx.sideUnits.underwaterMetalExtractor, ctx.builder.position, profile.nearMexSearchRadius, rng, siteFree, wetAcceptable);
+                if (wet && ctx.builder.position.distanceSquared(*wet) < ctx.builder.position.distanceSquared(*result.site))
+                {
+                    result.site.reset();
+                }
+            }
+
+            // No free patch for a moho: replace an extractor instead. One
+            // at a time, never while another moho is still a frame, and
+            // only with enough of its price in hand that the moho follows
+            // the reclaim at once -- the patch earns nothing in between.
+            // Not with the lights out either: a moho draws far more
+            // energy than the extractor it replaces.
+            bool isMoho = !ctx.sideUnits.mohoExtractor.empty() && next == ctx.sideUnits.mohoExtractor;
+            if (!result.site && isMoho && ctx.builderAtBase && profile.extractorUpgrades && !extractorUpgrade && !bb.energyStalled
+                && bb.currentMetal.value >= nextDef.buildCostMetal.value * profile.extractorUpgradeMinMetalFraction)
+            {
+                bool mohoUnderWay = false;
+                for (const auto& [unitId, unit] : sim.units)
+                {
+                    if (unit.owner == aiOwner && unit.isAlive() && unit.unitType == next && unit.isBeingBuilt(nextDef))
+                    {
+                        mohoUnderWay = true;
+                        break;
+                    }
+                }
+
+                // The nearest standing extractor the builder can walk to,
+                // with room round it: a moho is 5x5 where the extractor
+                // is 3x3, and what the larger footprint would hit cannot
+                // be tested while the smaller one is still in the way.
+                std::optional<UnitId> chosen;
+                SimScalar chosenDistance = 0_ss;
+                if (!mohoUnderWay)
+                {
+                    for (const auto& [unitId, unit] : sim.units)
+                    {
+                        if (unit.owner != aiOwner || !unit.isAlive() || unit.unitType != ctx.sideUnits.metalExtractor)
+                        {
+                            continue;
+                        }
+                        auto extractorDefIt = sim.unitDefinitions.find(unit.unitType);
+                        if (extractorDefIt == sim.unitDefinitions.end() || unit.isBeingBuilt(extractorDefIt->second))
+                        {
+                            continue;
+                        }
+                        if (underGuns(unit.position) || (ctx.siteReachable && !ctx.siteReachable(unit.position)))
+                        {
+                            continue;
+                        }
+                        bool crowded = false;
+                        for (const auto& [otherId, other] : sim.units)
+                        {
+                            if (otherId == unitId || !other.isAlive())
+                            {
+                                continue;
+                            }
+                            auto otherDefIt = sim.unitDefinitions.find(other.unitType);
+                            if (otherDefIt != sim.unitDefinitions.end() && !otherDefIt->second.isMobile
+                                && other.position.distanceSquared(unit.position) < 72_ss * 72_ss)
+                            {
+                                crowded = true;
+                                break;
+                            }
+                        }
+                        if (crowded)
+                        {
+                            continue;
+                        }
+                        auto distance = ctx.builder.position.distanceSquared(unit.position);
+                        if (!chosen || distance < chosenDistance)
+                        {
+                            chosen = unitId;
+                            chosenDistance = distance;
+                        }
+                    }
+                }
+                if (chosen)
+                {
+                    const auto& old = sim.getUnitState(*chosen);
+                    extractorUpgrade = ExtractorUpgrade{ctx.builderId, *chosen, old.position, bb.now};
+                    bb.ownReclaimTarget = *chosen;
+                    LOG_INFO << "AI build: unit " << ctx.builderId.value << " reclaims its extractor at " << static_cast<int>(old.position.x.value) << ","
+                             << static_cast<int>(old.position.z.value) << " to put a " << next << " there; " << bb.currentMetal.value << " metal in hand";
+                    savingFor.clear();
+                    outCommands.emplace_back(PlayerUnitCommand(ctx.builderId, PlayerUnitCommand::IssueOrder(ReclaimOrder(*chosen), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+                    result.stop = true;
+                    return result;
+                }
+            }
+        }
+        else if (ctx.rebuild && next == ctx.rebuild->unitType)
+        {
+            result.site = ctx.rebuild->site;
+            result.isRebuild = true;
+            result.clearFirst = ctx.rebuild->wreck;
+            LOG_INFO << "AI build: unit " << ctx.builderId.value << " puts back the " << next << " lost at "
+                     << static_cast<int>(result.site->x.value) << "," << static_cast<int>(result.site->z.value)
+                     << (result.clearFirst ? ", clearing its wreck first" : "");
+        }
+        else if (ctx.fortify && next == ctx.fortify->unitType)
+        {
+            result.site = ctx.fortify->site;
+            result.isFortification = true;
+            LOG_INFO << "AI build: unit " << ctx.builderId.value << " fortifies tower " << ctx.fortify->tower.value << " with " << next << " at "
+                     << static_cast<int>(result.site->x.value) << "," << static_cast<int>(result.site->z.value);
+        }
+        else if (next == ctx.sideUnits.lightLaserTower && ctx.outpost && (ctx.outpost->raided || countOf(bb.ownedTotalCounts, next) >= profile.targetDefenceCount))
+        {
+            // The outpost tower, at the cluster it is to cover. The
+            // base's own towers come first unless the cluster has just
+            // been raided; the count includes the outpost towers, so a
+            // base rule that is still short of its target is the
+            // tie-break in the base's favour.
+            result.site = chooseBuildSite(sim, profile, bb, next, ctx.outpost->anchor, rng, ctx.siteReachable);
+            result.isOutpostTower = true;
+            if (result.site)
+            {
+                LOG_INFO << "AI build: unit " << ctx.builderId.value << " defends " << ctx.outpost->extractors << " extractor(s) at "
+                         << static_cast<int>(ctx.outpost->anchor.x.value) << "," << static_cast<int>(ctx.outpost->anchor.z.value)
+                         << (ctx.outpost->raided ? " after a raid" : "");
+            }
+        }
+        else if (profile.spreadDefences && ctx.builderAtBase && (next == ctx.sideUnits.lightLaserTower || next == ctx.sideUnits.antiAirTower))
+        {
+            result.site = chooseDefenceSite(sim, aiOwner, profile, bb, reachability, next, rng);
+        }
+        else if (profile.spreadDefences && ctx.builderAtBase && next == ctx.sideUnits.radar)
+        {
+            result.site = chooseRadarSite(sim, profile, bb, reachability, next, rng);
+        }
+        else if (next == ctx.sideUnits.lightLaserTower && bb.enemyBasePosition)
+        {
+            // Defences go on the side of the base that faces the enemy.
+            auto towards = (*bb.enemyBasePosition - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+            auto towerAnchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
+            result.site = chooseBuildSite(sim, profile, bb, next, towerAnchor, rng, ctx.siteReachable);
+        }
+        else if (!ctx.sideUnits.geothermal.empty() && next == ctx.sideUnits.geothermal)
+        {
+            // On a vent, and only there: the nearest one to the builder
+            // that it can walk to, has looked at, and can still be built
+            // on -- which is what says whether somebody has taken it.
+            auto mc = sim.getAdHocMovementClass(nextDef.movementCollisionInfo);
+            std::optional<SimScalar> nearest;
+            for (const auto& vent : geothermalVents)
+            {
+                if (siteFailedLately(sim, vent) || (ctx.siteReachable && !ctx.siteReachable(vent)))
+                {
+                    continue;
+                }
+                if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, vent))
+                {
+                    continue;
+                }
+                auto rect = sim.computeFootprintRegion(vent, nextDef.movementCollisionInfo);
+                if (rect.x < 0 || rect.y < 0 || !footprintInsideVisibleMap(sim.terrain, rect)
+                    || !sim.canBeBuiltAt(mc, nextDef.yardMap, nextDef.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+                {
+                    continue;
+                }
+                auto distance = ctx.builder.position.distanceSquared(vent);
+                if (!nearest || distance < *nearest)
+                {
+                    nearest = distance;
+                    result.site = vent;
+                }
+            }
+        }
+        else if (!ctx.sideUnits.torpedoLauncher.empty() && next == ctx.sideUnits.torpedoLauncher && !bb.factories.empty())
+        {
+            // Beside the yard, on the side the enemy comes from. It was
+            // laid out round the builder like a tidal generator, and the
+            // builder is the commander, on the beach: so the one defence
+            // bought against a hull shelling the shipyard stood somewhere
+            // along the shore, out of reach of both. A launcher reaches
+            // about 500; two hundred off the yard covers the yard and the
+            // water its hulls are launched into.
+            std::optional<SimVector> yard;
+            for (auto factoryId : bb.factories)
+            {
+                auto factoryRef = sim.tryGetUnitState(factoryId);
+                if (factoryRef && (factoryRef->get().unitType == ctx.sideUnits.shipyard
+                        || (!ctx.sideUnits.advancedShipyard.empty() && factoryRef->get().unitType == ctx.sideUnits.advancedShipyard)))
+                {
+                    // The yard with the fewest launchers near it, so a
+                    // second launcher covers a second yard.
+                    if (!yard)
+                    {
+                        yard = factoryRef->get().position;
+                    }
+                    bool covered = false;
+                    for (const auto& [_, unit] : sim.units)
+                    {
+                        if (unit.owner == aiOwner && unit.isAlive() && unit.unitType == next
+                            && unit.position.distanceSquared(factoryRef->get().position) < 400_ss * 400_ss)
+                        {
+                            covered = true;
+                            break;
+                        }
+                    }
+                    if (!covered)
+                    {
+                        yard = factoryRef->get().position;
+                        break;
+                    }
+                }
+            }
+            if (yard)
+            {
+                std::optional<SimVector> threat;
+                auto nearestThreat = 0_ss;
+                for (const auto& [_, enemy] : bb.knownEnemies)
+                {
+                    if (!enemy.isArmed || enemy.isAir || enemy.isBuilding)
+                    {
+                        continue;
+                    }
+                    auto d = yard->distanceSquared(enemy.lastKnownPosition);
+                    if (!threat || d < nearestThreat)
+                    {
+                        nearestThreat = d;
+                        threat = enemy.lastKnownPosition;
+                    }
+                }
+                if (!threat)
+                {
+                    threat = bb.enemyBasePosition;
+                }
+                auto towards = threat ? (*threat - *yard).normalizedOr(SimVector(1_ss, 0_ss, 0_ss))
+                                      : (*yard - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+                result.site = chooseBuildSite(sim, profile, bb, next, *yard + (towards * 200_ss), rng);
+            }
+            if (!result.site)
+            {
+                result.site = chooseBuildSite(sim, profile, bb, next, ctx.anchor, rng);
+            }
+        }
+        else if (ctx.isWaterStructure(next))
+        {
+            // Deliberately without siteReachable -- see where it is
+            // defined. These stand in the water, so every site they have
+            // is ground the builder cannot walk to, and the gate that
+            // stops the commander crossing to another island would
+            // otherwise refuse the lot of them.
+            result.site = chooseBuildSite(sim, profile, bb, next, ctx.anchor, rng);
+        }
+        else if ((!ctx.sideUnits.shipyard.empty() && next == ctx.sideUnits.shipyard)
+            || (!ctx.sideUnits.advancedShipyard.empty() && next == ctx.sideUnits.advancedShipyard)
+            || (!ctx.sideUnits.seaplanePlatform.empty() && next == ctx.sideUnits.seaplanePlatform))
+        {
+            // Not a ring search: an 8x8 footprint needing
+            // MinWaterDepth=30 would refuse every candidate a walk out
+            // from the (dry) anchor ever offered. See chooseShipyardSite.
+            result.site = chooseShipyardSite(sim, profile, bb, next, rng);
+        }
+        else if (profile.energyInRows && ctx.builderAtBase && !ctx.sideUnits.solar.empty() && next == ctx.sideUnits.solar)
+        {
+            result.site = chooseEnergyRowSite(sim, aiOwner, profile, bb, next, ctx.anchor, ctx.builder.position, rng, ctx.siteReachable);
+        }
+        else
+        {
+            result.site = chooseBuildSite(sim, profile, bb, next, ctx.anchor, rng, ctx.siteReachable);
+        }
+        return result;
+    }
+
     void BuildManager::update(
         const GameSimulation& sim,
         PlayerId aiOwner,
@@ -4117,7 +4594,7 @@ namespace rwe
         // canBeBuiltAt already enforces each one's own MinWaterDepth through
         // isWaterDepthWithinBounds -- the ring walk can only ever land them
         // on water that suits them.
-        auto isWaterStructure = [&](const std::string& t) {
+        std::function<bool(const std::string&)> isWaterStructure = [&](const std::string& t) {
             return !t.empty()
                 && ((!sideUnits.tidalGenerator.empty() && t == sideUnits.tidalGenerator)
                     || (!sideUnits.sonar.empty() && t == sideUnits.sonar)
@@ -4641,6 +5118,18 @@ namespace rwe
                 priorities.insert(priorities.begin(), sideUnits.metalExtractor);
             }
         }
+        const BuilderContext builderContext{
+            builder,
+            builderId,
+            builderDef,
+            builderAtBase,
+            anchor,
+            sideUnits,
+            outpost,
+            fortify,
+            rebuild,
+            isWaterStructure,
+            siteReachable};
         for (const auto& next : priorities)
         {
             auto nextDefIt = sim.unitDefinitions.find(next);
@@ -4724,477 +5213,16 @@ namespace rwe
                 }
             }
 
-            std::optional<SimVector> site;
-            // Set below when this pass's site is the outpost plan's anchor,
-            // so the value gate after the site search knows how many
-            // extractors it is being asked to justify a tower for.
-            bool isOutpostTower = false;
-            // And when it is a laser tower's fortification, which that gate
-            // does not ask about: it is part of a tower already judged worth it.
-            bool isFortification = false;
-            bool isRebuild = false;
-            // A wreck to clear off the site before the build; see planDefenceRebuild.
-            std::optional<FeatureId> clearFirst;
-            // A moho extractor stands on a metal patch exactly as the
-            // level-one one does, and must go through the same search: the
-            // ordinary site chooser deliberately refuses a patch, so a moho
-            // routed through it would either find nowhere or stand somewhere
-            // it produces nothing.
-            if (next == sideUnits.metalExtractor
-                || (!sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor)
-                || (!sideUnits.underwaterMetalExtractor.empty() && next == sideUnits.underwaterMetalExtractor))
+            auto chosen = choosePrioritySite(sim, aiOwner, profile, bb, reachability, rng, next, nextDefIt->second, builderContext, outCommands);
+            if (chosen.stop)
             {
-                // The underwater extractor comes through here for the same
-                // reason the moho does -- it has to stand on a patch, and the
-                // ordinary site chooser deliberately refuses those -- but it
-                // needs one thing they do not, below: no reachability test,
-                // because a patch under twenty feet of water is not ground
-                // anybody walks to. canBeBuiltAt still holds it to its own
-                // MinWaterDepth, so it cannot land anywhere shallow.
-                auto submerged = !sideUnits.underwaterMetalExtractor.empty() && next == sideUnits.underwaterMetalExtractor;
-                // Nearby patches first; further afield if there are none.
-                // Only patches the builder can walk to: islands are for the transport.
-                // A builder that flies is not held to the ground's shape.
-                // Applied to an air constructor this test is exactly
-                // backwards: it would confine the one builder that can cross
-                // water to the patches everything else can already walk to,
-                // and leave the island patch -- the one nobody is contesting,
-                // and the reason to own an air constructor at all -- refused.
-                // siteReachable, hoisted above: the same test, and it is the
-                // reasoning in this comment that it carries.
-                // Not under the enemy's guns. The nearest free patch stays
-                // the nearest free patch after the frame on it is shot, so
-                // without this the builder puts the same frame down again:
-                // measured, a commander ordered one site 232 times in five
-                // hundred seconds, each frame living a second or two.
-                auto gunsSquared = profile.mexAvoidsEnemyGunsRadius * profile.mexAvoidsEnemyGunsRadius;
-                auto underGuns = [&](const SimVector& p) {
-                    if (profile.mexAvoidsEnemyGunsRadius <= 0_ss)
-                    {
-                        return false;
-                    }
-                    for (const auto& [_, enemy] : bb.knownEnemies)
-                    {
-                        if (enemy.isArmed && !enemy.isAir && enemy.lastKnownPosition.distanceSquared(p) <= gunsSquared)
-                        {
-                            return true;
-                        }
-                    }
-                    return false;
-                };
-                // The commander stays within reach of home in both searches.
-                // The near search is from wherever the builder stands, so a
-                // commander that had just built at the edge of the base
-                // could chain from there to the next patch and the next:
-                // measured, one was at the midfield building extractors 3900
-                // from its start when it was caught, and the game with it.
-                auto commanderReach = profile.commanderMexSearchRadius;
-                // While somebody else can take the far rocks, the commander
-                // keeps to the near ones (commanderPrefersNearSites). With no
-                // construction unit alive it expands as before, because a
-                // side that has lost its builders must still expand.
-                if (profile.commanderPrefersNearSites && profile.commanderLeashRadius > 0_ss && !bb.sideUnits.constructor.empty()
-                    && countOf(bb.ownedTotalCounts, bb.sideUnits.constructor) > 0)
-                {
-                    commanderReach = rweMin(commanderReach, profile.commanderLeashRadius);
-                }
-                auto leashSquared = commanderReach * commanderReach;
-                // The ground rules, asked of a deposit (see chooseMexSite):
-                // a deposit the leash or a gun's reach cuts through is taken
-                // at its heart, not on whichever edge lies inside.
-                auto walkable = [&](const SimVector& p) {
-                    if (builderDef.commander && builderAtBase && bb.baseAnchor->distanceSquared(p) > leashSquared)
-                    {
-                        return false;
-                    }
-                    return !underGuns(p) && (submerged || !siteReachable || siteReachable(p));
-                };
-                // And the site rules, asked of the one placement a deposit
-                // would be given.
-                auto siteFree = [&](const SimVector& p) {
-                    // Kept for the moho that is about to stand there.
-                    if (extractorUpgrade && extractorUpgrade->site.distanceSquared(p) < 64_ss * 64_ss)
-                    {
-                        return false;
-                    }
-                    // And for the patch another builder is already walking
-                    // to: nothing stands there yet, so only its order says so.
-                    if (siteClaimedByAnother(sim, aiOwner, builderId, p, profile.claimedSiteRadius))
-                    {
-                        return false;
-                    }
-                    return !siteFailedLately(sim, p);
-                };
-                site = chooseMexSite(sim, next, builder.position, profile.nearMexSearchRadius, rng, siteFree, walkable);
-                if (!site && builderAtBase)
-                {
-                    // Expanding, as opposed to filling in around the base:
-                    // the nearest free patch to the base, so the base grows
-                    // outward, out to the builder's radius. The commander
-                    // has a shorter one -- it is the game, and it is planned
-                    // first -- so the far patches fall to the constructors.
-                    //
-                    // Measured before this, the extractor count sat at eight
-                    // to ten for the middle third of every game: the ring of
-                    // patches past 2048 was out of reach, and the ring
-                    // inside it was gated on ground the AI had explored, which
-                    // with no scout until the eighth extractor meant nothing
-                    // until the plane flew over. Both are knobs now, and the
-                    // exploration gate is off: a player is shown every metal
-                    // spot on the map from the start.
-                    auto radius = builderDef.commander ? profile.commanderMexSearchRadius : profile.expansionMexSearchRadius;
-
-                    // Ours to take: nearer our base than the enemy's, once
-                    // the enemy has been found. Not, before that, nearer
-                    // than any other start position the map declares --
-                    // that was tried, and Crystal Maze declares ten of them,
-                    // so it threw out 405 of the 468 patch cells in reach
-                    // and the AI sat on twelve extractors while the other
-                    // side took fifty. A player in a two-player game takes
-                    // the empty starts' metal; so does this.
-                    auto onOurSide = [&](const SimVector& p) {
-                        if (!profile.expansionStaysOnOurSide || !bb.enemyBasePosition)
-                        {
-                            return true;
-                        }
-                        return bb.baseAnchor->distanceSquared(p) <= bb.enemyBasePosition->distanceSquared(p);
-                    };
-                    // Ground we have looked at, when the knob asks for it:
-                    // explored, or under a radar of ours, which is how a
-                    // player would know a patch was still free.
-                    auto known = [&](const SimVector& p) {
-                        if (!profile.expansionNeedsExploredGround || profile.cheatModeOmniscient)
-                        {
-                            return true;
-                        }
-                        return sim.isExploredBy(aiOwner, p) || sim.isOnRadarOf(aiOwner, p);
-                    };
-                    auto acceptable = [&](const SimVector& p) {
-                        return onOurSide(p) && known(p) && walkable(p);
-                    };
-                    site = chooseMexSite(sim, next, *bb.baseAnchor, radius, rng, siteFree, acceptable);
-
-                    if (!site)
-                    {
-                        // Why not, for the log: which test threw out the
-                        // patches within reach. This is what showed the
-                        // plateau was the radius and the exploration gate
-                        // rather than a shortage of patches.
-                        indexMetalPatches(sim);
-                        int inRange = 0, offSide = 0, unknown = 0, guarded = 0, unwalkable = 0;
-                        auto radiusSquared = radius * radius;
-                        for (const auto& patch : metalPatches)
-                        {
-                            auto p = sim.terrain.heightmapIndexToWorldCenter(patch.x, patch.y);
-                            if (bb.baseAnchor->distanceSquared(p) > radiusSquared)
-                            {
-                                continue;
-                            }
-                            ++inRange;
-                            if (!onOurSide(p))
-                            {
-                                ++offSide;
-                            }
-                            else if (!known(p))
-                            {
-                                ++unknown;
-                            }
-                            else if (underGuns(p))
-                            {
-                                ++guarded;
-                            }
-                            else if (!walkable(p) || !siteFree(p))
-                            {
-                                ++unwalkable;
-                            }
-                        }
-                        LOG_DEBUG << "AI build: expansion found no patch for unit " << builderId.value << " within " << radius.value
-                                  << ": " << inRange << " patch cells in range, " << offSide << " on the enemy's side, " << unknown << " unexplored, "
-                                  << guarded << " under enemy guns, " << unwalkable << " unreachable or beyond the commander's leash, the rest taken or unbuildable";
-                    }
-                }
-
-                // The nearer patch, wet or dry. The dry extractor is listed
-                // first and the planner takes the first entry with a site, so
-                // a commander standing in the shallows beside a submerged
-                // patch walked past it -- and past the next -- to a dry one
-                // inland; watched in a replay. When the builder has both
-                // buttons and the wet patch is closer, this entry stands
-                // aside and the submerged extractor's own, next on the list,
-                // takes it.
-                if (site && next == sideUnits.metalExtractor && !sideUnits.underwaterMetalExtractor.empty() && submergedMetalPatches > 0
-                    && bb.buildTree.canBuild(builder.unitType, sideUnits.underwaterMetalExtractor))
-                {
-                    auto wetAcceptable = [&](const SimVector& p) {
-                        if (builderDef.commander && builderAtBase && bb.baseAnchor->distanceSquared(p) > leashSquared)
-                        {
-                            return false;
-                        }
-                        return !underGuns(p);
-                    };
-                    auto wet = chooseMexSite(sim, sideUnits.underwaterMetalExtractor, builder.position, profile.nearMexSearchRadius, rng, siteFree, wetAcceptable);
-                    if (wet && builder.position.distanceSquared(*wet) < builder.position.distanceSquared(*site))
-                    {
-                        site.reset();
-                    }
-                }
-
-                // No free patch for a moho: replace an extractor instead. One
-                // at a time, never while another moho is still a frame, and
-                // only with enough of its price in hand that the moho follows
-                // the reclaim at once -- the patch earns nothing in between.
-                // Not with the lights out either: a moho draws far more
-                // energy than the extractor it replaces.
-                bool isMoho = !sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor;
-                if (!site && isMoho && builderAtBase && profile.extractorUpgrades && !extractorUpgrade && !bb.energyStalled
-                    && bb.currentMetal.value >= nextDefIt->second.buildCostMetal.value * profile.extractorUpgradeMinMetalFraction)
-                {
-                    bool mohoUnderWay = false;
-                    for (const auto& [unitId, unit] : sim.units)
-                    {
-                        if (unit.owner == aiOwner && unit.isAlive() && unit.unitType == next && unit.isBeingBuilt(nextDefIt->second))
-                        {
-                            mohoUnderWay = true;
-                            break;
-                        }
-                    }
-
-                    // The nearest standing extractor the builder can walk to,
-                    // with room round it: a moho is 5x5 where the extractor
-                    // is 3x3, and what the larger footprint would hit cannot
-                    // be tested while the smaller one is still in the way.
-                    std::optional<UnitId> chosen;
-                    SimScalar chosenDistance = 0_ss;
-                    if (!mohoUnderWay)
-                    {
-                        for (const auto& [unitId, unit] : sim.units)
-                        {
-                            if (unit.owner != aiOwner || !unit.isAlive() || unit.unitType != sideUnits.metalExtractor)
-                            {
-                                continue;
-                            }
-                            auto extractorDefIt = sim.unitDefinitions.find(unit.unitType);
-                            if (extractorDefIt == sim.unitDefinitions.end() || unit.isBeingBuilt(extractorDefIt->second))
-                            {
-                                continue;
-                            }
-                            if (underGuns(unit.position) || (siteReachable && !siteReachable(unit.position)))
-                            {
-                                continue;
-                            }
-                            bool crowded = false;
-                            for (const auto& [otherId, other] : sim.units)
-                            {
-                                if (otherId == unitId || !other.isAlive())
-                                {
-                                    continue;
-                                }
-                                auto otherDefIt = sim.unitDefinitions.find(other.unitType);
-                                if (otherDefIt != sim.unitDefinitions.end() && !otherDefIt->second.isMobile
-                                    && other.position.distanceSquared(unit.position) < 72_ss * 72_ss)
-                                {
-                                    crowded = true;
-                                    break;
-                                }
-                            }
-                            if (crowded)
-                            {
-                                continue;
-                            }
-                            auto distance = builder.position.distanceSquared(unit.position);
-                            if (!chosen || distance < chosenDistance)
-                            {
-                                chosen = unitId;
-                                chosenDistance = distance;
-                            }
-                        }
-                    }
-                    if (chosen)
-                    {
-                        const auto& old = sim.getUnitState(*chosen);
-                        extractorUpgrade = ExtractorUpgrade{builderId, *chosen, old.position, bb.now};
-                        bb.ownReclaimTarget = *chosen;
-                        LOG_INFO << "AI build: unit " << builderId.value << " reclaims its extractor at " << static_cast<int>(old.position.x.value) << ","
-                                 << static_cast<int>(old.position.z.value) << " to put a " << next << " there; " << bb.currentMetal.value << " metal in hand";
-                        savingFor.clear();
-                        outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(ReclaimOrder(*chosen), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
-                        return;
-                    }
-                }
+                return;
             }
-            else if (rebuild && next == rebuild->unitType)
-            {
-                site = rebuild->site;
-                isRebuild = true;
-                clearFirst = rebuild->wreck;
-                LOG_INFO << "AI build: unit " << builderId.value << " puts back the " << next << " lost at "
-                         << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value)
-                         << (clearFirst ? ", clearing its wreck first" : "");
-            }
-            else if (fortify && next == fortify->unitType)
-            {
-                site = fortify->site;
-                isFortification = true;
-                LOG_INFO << "AI build: unit " << builderId.value << " fortifies tower " << fortify->tower.value << " with " << next << " at "
-                         << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value);
-            }
-            else if (next == sideUnits.lightLaserTower && outpost && (outpost->raided || countOf(bb.ownedTotalCounts, next) >= profile.targetDefenceCount))
-            {
-                // The outpost tower, at the cluster it is to cover. The
-                // base's own towers come first unless the cluster has just
-                // been raided; the count includes the outpost towers, so a
-                // base rule that is still short of its target is the
-                // tie-break in the base's favour.
-                site = chooseBuildSite(sim, profile, bb, next, outpost->anchor, rng, siteReachable);
-                isOutpostTower = true;
-                if (site)
-                {
-                    LOG_INFO << "AI build: unit " << builderId.value << " defends " << outpost->extractors << " extractor(s) at "
-                             << static_cast<int>(outpost->anchor.x.value) << "," << static_cast<int>(outpost->anchor.z.value)
-                             << (outpost->raided ? " after a raid" : "");
-                }
-            }
-            else if (profile.spreadDefences && builderAtBase && (next == sideUnits.lightLaserTower || next == sideUnits.antiAirTower))
-            {
-                site = chooseDefenceSite(sim, aiOwner, profile, bb, reachability, next, rng);
-            }
-            else if (profile.spreadDefences && builderAtBase && next == sideUnits.radar)
-            {
-                site = chooseRadarSite(sim, profile, bb, reachability, next, rng);
-            }
-            else if (next == sideUnits.lightLaserTower && bb.enemyBasePosition)
-            {
-                // Defences go on the side of the base that faces the enemy.
-                auto towards = (*bb.enemyBasePosition - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
-                auto towerAnchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
-                site = chooseBuildSite(sim, profile, bb, next, towerAnchor, rng, siteReachable);
-            }
-            else if (!sideUnits.geothermal.empty() && next == sideUnits.geothermal)
-            {
-                // On a vent, and only there: the nearest one to the builder
-                // that it can walk to, has looked at, and can still be built
-                // on -- which is what says whether somebody has taken it.
-                auto mc = sim.getAdHocMovementClass(nextDefIt->second.movementCollisionInfo);
-                std::optional<SimScalar> nearest;
-                for (const auto& vent : geothermalVents)
-                {
-                    if (siteFailedLately(sim, vent) || (siteReachable && !siteReachable(vent)))
-                    {
-                        continue;
-                    }
-                    if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, vent))
-                    {
-                        continue;
-                    }
-                    auto rect = sim.computeFootprintRegion(vent, nextDefIt->second.movementCollisionInfo);
-                    if (rect.x < 0 || rect.y < 0 || !footprintInsideVisibleMap(sim.terrain, rect)
-                        || !sim.canBeBuiltAt(mc, nextDefIt->second.yardMap, nextDefIt->second.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
-                    {
-                        continue;
-                    }
-                    auto distance = builder.position.distanceSquared(vent);
-                    if (!nearest || distance < *nearest)
-                    {
-                        nearest = distance;
-                        site = vent;
-                    }
-                }
-            }
-            else if (!sideUnits.torpedoLauncher.empty() && next == sideUnits.torpedoLauncher && !bb.factories.empty())
-            {
-                // Beside the yard, on the side the enemy comes from. It was
-                // laid out round the builder like a tidal generator, and the
-                // builder is the commander, on the beach: so the one defence
-                // bought against a hull shelling the shipyard stood somewhere
-                // along the shore, out of reach of both. A launcher reaches
-                // about 500; two hundred off the yard covers the yard and the
-                // water its hulls are launched into.
-                std::optional<SimVector> yard;
-                for (auto factoryId : bb.factories)
-                {
-                    auto factoryRef = sim.tryGetUnitState(factoryId);
-                    if (factoryRef && (factoryRef->get().unitType == sideUnits.shipyard
-                            || (!sideUnits.advancedShipyard.empty() && factoryRef->get().unitType == sideUnits.advancedShipyard)))
-                    {
-                        // The yard with the fewest launchers near it, so a
-                        // second launcher covers a second yard.
-                        if (!yard)
-                        {
-                            yard = factoryRef->get().position;
-                        }
-                        bool covered = false;
-                        for (const auto& [_, unit] : sim.units)
-                        {
-                            if (unit.owner == aiOwner && unit.isAlive() && unit.unitType == next
-                                && unit.position.distanceSquared(factoryRef->get().position) < 400_ss * 400_ss)
-                            {
-                                covered = true;
-                                break;
-                            }
-                        }
-                        if (!covered)
-                        {
-                            yard = factoryRef->get().position;
-                            break;
-                        }
-                    }
-                }
-                if (yard)
-                {
-                    std::optional<SimVector> threat;
-                    auto nearestThreat = 0_ss;
-                    for (const auto& [_, enemy] : bb.knownEnemies)
-                    {
-                        if (!enemy.isArmed || enemy.isAir || enemy.isBuilding)
-                        {
-                            continue;
-                        }
-                        auto d = yard->distanceSquared(enemy.lastKnownPosition);
-                        if (!threat || d < nearestThreat)
-                        {
-                            nearestThreat = d;
-                            threat = enemy.lastKnownPosition;
-                        }
-                    }
-                    if (!threat)
-                    {
-                        threat = bb.enemyBasePosition;
-                    }
-                    auto towards = threat ? (*threat - *yard).normalizedOr(SimVector(1_ss, 0_ss, 0_ss))
-                                          : (*yard - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
-                    site = chooseBuildSite(sim, profile, bb, next, *yard + (towards * 200_ss), rng);
-                }
-                if (!site)
-                {
-                    site = chooseBuildSite(sim, profile, bb, next, anchor, rng);
-                }
-            }
-            else if (isWaterStructure(next))
-            {
-                // Deliberately without siteReachable -- see where it is
-                // defined. These stand in the water, so every site they have
-                // is ground the builder cannot walk to, and the gate that
-                // stops the commander crossing to another island would
-                // otherwise refuse the lot of them.
-                site = chooseBuildSite(sim, profile, bb, next, anchor, rng);
-            }
-            else if ((!sideUnits.shipyard.empty() && next == sideUnits.shipyard)
-                || (!sideUnits.advancedShipyard.empty() && next == sideUnits.advancedShipyard)
-                || (!sideUnits.seaplanePlatform.empty() && next == sideUnits.seaplanePlatform))
-            {
-                // Not a ring search: an 8x8 footprint needing
-                // MinWaterDepth=30 would refuse every candidate a walk out
-                // from the (dry) anchor ever offered. See chooseShipyardSite.
-                site = chooseShipyardSite(sim, profile, bb, next, rng);
-            }
-            else if (profile.energyInRows && builderAtBase && !sideUnits.solar.empty() && next == sideUnits.solar)
-            {
-                site = chooseEnergyRowSite(sim, aiOwner, profile, bb, next, anchor, builder.position, rng, siteReachable);
-            }
-            else
-            {
-                site = chooseBuildSite(sim, profile, bb, next, anchor, rng, siteReachable);
-            }
+            std::optional<SimVector> site = std::move(chosen.site);
+            bool isOutpostTower = chosen.isOutpostTower;
+            bool isFortification = chosen.isFortification;
+            bool isRebuild = chosen.isRebuild;
+            std::optional<FeatureId> clearFirst = chosen.clearFirst;
 
             if (site)
             {

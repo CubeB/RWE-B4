@@ -24,6 +24,7 @@ namespace rwe
 {
     struct GameSimulation;
     struct UnitDefinition;
+    struct UnitState;
 
     /**
      * Turns the blackboard's picture of the economy into build orders for
@@ -453,6 +454,67 @@ namespace rwe
             const std::function<bool(const SimVector&)>& accept = nullptr,
             const std::function<bool(const SimVector&)>& admit = nullptr) const;
     private:
+        /**
+         * Everything the site search knows about the builder it is planning
+         * for. Gathered once per planning pass in update() rather than
+         * threaded through as twenty parameters, which is what this block
+         * needed before it was a function of its own.
+         */
+        struct BuilderContext
+        {
+            const UnitState& builder;
+            UnitId builderId;
+            const UnitDefinition& builderDef;
+            bool builderAtBase;
+            SimVector anchor;
+            const AiSideUnits& sideUnits;
+            const std::optional<OutpostDefencePlan>& outpost;
+            const std::optional<FortificationPlan>& fortify;
+            const std::optional<DefenceRebuildPlan>& rebuild;
+            const std::function<bool(const std::string&)>& isWaterStructure;
+            const std::function<bool(const SimVector&)>& siteReachable;
+        };
+
+        /** What one priority's site search decided. */
+        struct PrioritySite
+        {
+            std::optional<SimVector> site;
+            /**
+             * Set when this pass's site is the outpost plan's anchor, so the
+             * value gate after the site search knows how many extractors it
+             * is being asked to justify a tower for.
+             */
+            bool isOutpostTower{false};
+            /**
+             * And when it is a laser tower's fortification, which that gate
+             * does not ask about: it is part of a tower already judged worth it.
+             */
+            bool isFortification{false};
+            bool isRebuild{false};
+            /** A wreck to clear off the site before the build; see planDefenceRebuild. */
+            std::optional<FeatureId> clearFirst;
+            /**
+             * Set when this pass has already committed the builder to
+             * something -- the extractor-upgrade reclaim order, in
+             * particular -- and update() should return without going on to
+             * the value gate or the remaining priorities, exactly as the
+             * inlined search once did with its own early return.
+             */
+            bool stop{false};
+        };
+
+        PrioritySite choosePrioritySite(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            const AiTuningProfile& profile,
+            AiBlackboard& bb,
+            const ReachabilityMap& reachability,
+            std::minstd_rand& rng,
+            const std::string& next,
+            const UnitDefinition& nextDef,
+            const BuilderContext& ctx,
+            std::vector<PlayerCommand>& outCommands);
+
         int ticksSinceLastPlanning{0};
 
         /**
