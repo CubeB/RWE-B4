@@ -9,7 +9,7 @@
 namespace rwe
 {
     struct GameSimulation;
-    struct UnitState;
+    class UnitState;
 
     /**
      * The live unit behind a remembered contact, if it is still standing.

@@ -95,7 +95,8 @@ namespace rwe
         return MinimapSize{realWidth, realHeight};
     }
 
-    std::vector<char> trimMinimapBytes(const std::vector<char>& data, unsigned int width, unsigned int height, unsigned int newWidth, unsigned int newHeight)
+    // height is read by an assert alone, so a release build has no use for it.
+    std::vector<char> trimMinimapBytes(const std::vector<char>& data, unsigned int width, [[maybe_unused]] unsigned int height, unsigned int newWidth, unsigned int newHeight)
     {
         assert(newWidth <= width);
         assert(newHeight <= height);

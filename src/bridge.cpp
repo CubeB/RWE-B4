@@ -199,7 +199,7 @@ std::optional<std::vector<std::pair<int, int>>> getVideoModes()
     return modeList;
 }
 
-int main(int argc, char* argv[])
+int main(int /*argc*/, char* /*argv*/[])
 {
     rwe::CompositeVirtualFileSystem vfs;
     json j;

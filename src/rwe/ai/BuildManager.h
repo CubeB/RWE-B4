@@ -24,7 +24,7 @@ namespace rwe
 {
     struct GameSimulation;
     struct UnitDefinition;
-    struct UnitState;
+    class UnitState;
 
     /**
      * Turns the blackboard's picture of the economy into build orders for

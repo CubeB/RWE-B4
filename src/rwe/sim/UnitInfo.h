@@ -4,7 +4,7 @@
 
 namespace rwe
 {
-    struct UnitState;
+    class UnitState;
     struct UnitDefinition;
 
     struct UnitInfo

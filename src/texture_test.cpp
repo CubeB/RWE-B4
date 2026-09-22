@@ -63,7 +63,7 @@ namespace rwe
         {
         }
 
-        void beginFrame(const GafFrameEntry& entry, const GafFrameData& header) override
+        void beginFrame(const GafFrameEntry& /*entry*/, const GafFrameData& header) override
         {
             frameInfo = &(frames->emplace_back(*entryName, frameNumber, header.width, header.height));
             currentFrameHeader = header;
@@ -181,7 +181,7 @@ namespace rwe
     }
 }
 
-int main(int argc, char* argv[])
+int main(int /*argc*/, char* /*argv*/[])
 {
     auto searchPath = rwe::getSearchPath();
     if (!searchPath)

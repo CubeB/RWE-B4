@@ -696,17 +696,46 @@ else()
 endif()
 
 # Warnings are errors only where the tree has been shown to be clean. It
-# reached zero on MinGW64 gcc 16.2 on 2026-09-21, down from 284; gcc-14,
+# reached zero on MinGW64 gcc 16.2 on 2026-09-22, down from 284; gcc-14,
 # clang-18 and MSVC each warn about their own things and have not had the same
 # pass, so CI turns this on per job rather than the build turning it on for
 # everyone. A compiler upgrade must never break somebody's local build, which
 # is what an unconditional -Werror eventually does.
+#
+# Check that zero in a *clean* tree. The first reading of it was taken in an
+# incremental one, where make had nothing to rebuild and so nothing to warn
+# about, and it missed two targets outright -- texture_test and rwe_bridge
+# both carried unused parameters that CI found the moment it built them from
+# nothing.
 option(RWE_WERROR "Treat compiler warnings as errors" OFF)
 if(RWE_WERROR)
     if(MSVC)
         target_compile_options(librwe PUBLIC "/WX")
     else()
         target_compile_options(librwe PUBLIC "-Werror")
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            # Two exceptions, and they are the same exception twice: neither
+            # of these is a property of the source. Both fire from inside
+            # libstdc++ once the optimiser has inlined a container operation
+            # and lost track of which union member, or which side of a
+            # reallocation, it is looking at -- so which line they land on,
+            # if any, is a fact about the point release rather than about the
+            # code. A Release build of this tree draws six of them on gcc
+            # 16.2, every one through an ordinary push_back or insert:
+            # -Wmaybe-uninitialized over a std::string in a std::variant
+            # alternative the call cannot select (MetalMakerManager.cpp:66
+            # emits a SetOnOff and is told ModifyBuildQueue's name may be
+            # unset), and -Warray-bounds over vector<bool>'s bit iterators
+            # and over the small buffer a vector had before it grew
+            # (tad_events.cpp:449, tad.test.cpp:176). CI's gcc is whatever
+            # MSYS2 shipped that week -- 16.1 when this was written, against
+            # 16.2 here, and they disagree about where these land. Gating the
+            # build on them means CI breaks on somebody else's release. They
+            # stay visible; they just do not stop the build.
+            target_compile_options(librwe PUBLIC
+                "-Wno-error=maybe-uninitialized"
+                "-Wno-error=array-bounds")
+        endif()
     endif()
 endif()
 target_include_directories(librwe PUBLIC "src")
