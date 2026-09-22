@@ -76,17 +76,19 @@ namespace rwe
 
         /**
          * Two banks of land either side of a channel too deep for a kbot,
-         * running north to south -- the same idea as AiBehaviour.test.cpp's
-         * makeChannelTerrain (duplicated because that file is off limits to
-         * edit for this task), but wider: 24 heightmap tiles rather than 8,
+         * running north to south -- the same idea as ai_test_util.h's
+         * makeChannelTerrain, but wider: 24 heightmap tiles rather than 8,
          * world x roughly -192..192. A hull's own footprint is labelled by
          * its top-left corner, not its centre, so a channel only a couple of
          * tiles wider than the ship's 6x6 footprint leaves almost no column
          * that is a valid top-left for it; this width gives room for the
          * naval queries below to land on solid water without hand-picking
-         * exact tile-aligned coordinates.
+         * exact tile-aligned coordinates. It is not folded into the shared
+         * fixture because the two widths are both load-bearing: the AI tests'
+         * geometry (bank positions, unload destinations) is written against
+         * world x -64..64, and this test's against x -192..192.
          */
-        MapTerrain makeChannelTerrain()
+        MapTerrain makeWideChannelTerrain()
         {
             Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(60));
             for (int y = 0; y < 64; ++y)
@@ -99,7 +101,7 @@ namespace rwe
             return MapTerrain(std::move(heights), 30_ss);
         }
 
-        /** All dry: the control for makeChannelTerrain, with no navigable water at all. */
+        /** All dry: the control for makeWideChannelTerrain, with no navigable water at all. */
         MapTerrain makeDryTerrain()
         {
             Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(60));
@@ -205,7 +207,7 @@ namespace rwe
 
         SECTION("the whole channel becomes home water for a hull, and dry land does not")
         {
-            GameSimulation sim(makeChannelTerrain(), 0u, 0, 0);
+            GameSimulation sim(makeWideChannelTerrain(), 0u, 0, 0);
             addPlayer(sim, "human", GamePlayerType::Human, "ARM");
             auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
             defineLandUnits(sim);
@@ -255,7 +257,7 @@ namespace rwe
 
         SECTION("with no floating hull of any kind in the game data, the naval layer never floods either")
         {
-            GameSimulation sim(makeChannelTerrain(), 0u, 0, 0);
+            GameSimulation sim(makeWideChannelTerrain(), 0u, 0, 0);
             addPlayer(sim, "human", GamePlayerType::Human, "ARM");
             auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
             defineLandUnits(sim);
@@ -296,7 +298,7 @@ namespace rwe
         // six games, every one of them this gate, and not one ferry of either
         // kind ever started. After: ferries start and complete.
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeChannelTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeWideChannelTerrain(), 0u, 0, 0);
         addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineLandUnits(sim);
@@ -351,7 +353,7 @@ namespace rwe
     TEST_CASE("a sea transport ferries the army across water it cannot walk", "[ai]")
     {
         auto script = makeEmptyCobScript();
-        GameSimulation sim(makeChannelTerrain(), 0u, 0, 0);
+        GameSimulation sim(makeWideChannelTerrain(), 0u, 0, 0);
         auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineLandUnits(sim);

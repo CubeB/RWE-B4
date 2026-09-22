@@ -171,7 +171,16 @@ namespace rwe
         return tree;
     }
 
-    /** Two banks of land either side of a channel too deep for a kbot, running north to south. */
+    /**
+     * Two banks of land either side of a channel too deep for a kbot, running
+     * north to south. The channel is 8 heightmap tiles wide, world x -64..64
+     * -- narrow on purpose: every AI test here works in footprints labelled by
+     * centre and needs only a barrier with banks far enough apart to stand a
+     * base on. The sea-transport tests in TransportManager.test.cpp use their
+     * own makeWideChannelTerrain instead, because a hull's footprint is
+     * labelled by its top-left corner and this width leaves a 6x6 ship almost
+     * no valid column.
+     */
     inline MapTerrain makeChannelTerrain()
     {
         Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(60));
