@@ -61,6 +61,26 @@ namespace rwe
             return d;
         }
 
+        /**
+         * The whole map walked over once, for this player.
+         *
+         * Every test below that is about an occupant needs it, because the
+         * two halves of the fog rule pull opposite ways and one would
+         * otherwise mask the other: ground nobody has explored refuses the
+         * placement outright, and the question these tests ask -- what an
+         * undiscovered occupant does to it -- could then never be reached.
+         * Ground explored earlier and occupied since is exactly the case
+         * TOTALA-EXE.md S:27 is about.
+         */
+        void revealGround(GameSimulation& sim, PlayerId player)
+        {
+            auto bit = sim.losGroupBitFor(player);
+            for (auto& cell : sim.explored.getVector())
+            {
+                cell = static_cast<ExploredMask>(cell | bit);
+            }
+        }
+
         UnitDefinition makeScoutDef()
         {
             UnitDefinition d{};
@@ -87,6 +107,11 @@ namespace rwe
         sim.unitScriptDefinitions["HUT"] = *script;
         sim.unitDefinitions["SCOUT"] = makeScoutDef();
         sim.unitScriptDefinitions["SCOUT"] = *script;
+
+        // Both sides have walked this ground before; only what stands on it
+        // now is in question.
+        revealGround(sim, us);
+        revealGround(sim, them);
 
         // Spawned the real way, so that it stamps the occupancy grid: the
         // shared test helper puts a unit in the list without doing that, and
@@ -134,6 +159,7 @@ namespace rwe
         registerFogModel(sim);
         sim.unitDefinitions["HUT"] = makeHutDef();
         sim.unitScriptDefinitions["HUT"] = *script;
+        revealGround(sim, us);
 
         const auto& hut = sim.unitDefinitions.at("HUT");
         auto mc = sim.getAdHocMovementClass(hut.movementCollisionInfo);
@@ -157,5 +183,53 @@ namespace rwe
         REQUIRE_FALSE(both(width - fx, 5));
         REQUIRE_FALSE(both(5, height - fz));
         REQUIRE(both(width - fx - 1, height - fz - 1));
+    }
+
+    TEST_CASE("the placement box is red over ground nobody here has explored", "[fogplacement]")
+    {
+        // Reported from play on Coast To Coast: with the commander selected,
+        // placing a structure into the black showed the box "green where it
+        // can be placed and red where it cant, even though the land is
+        // unexplored". Green over ground nobody has looked at is a survey of
+        // the map taken with the cursor -- it says the terrain is flat, the
+        // water is shallow enough and nothing is standing there.
+        //
+        // This is the opposite half of the same rule as the test above, and
+        // the pair is the point: an undiscovered OCCUPANT is ignored, because
+        // refusing would announce it; undiscovered GROUND refuses, because
+        // allowing would announce it.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFogTerrain(), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        registerFogModel(sim);
+        sim.unitDefinitions["HUT"] = makeHutDef();
+        sim.unitScriptDefinitions["HUT"] = *script;
+
+        const auto& hut = sim.unitDefinitions.at("HUT");
+        auto mc = sim.getAdHocMovementClass(hut.movementCollisionInfo);
+
+        // Flat, empty, well inside the map, and never looked at.
+        REQUIRE(sim.canBeBuiltAt(mc, hut.yardMap, hut.yardMapContainsGeo, 20, 20));
+        REQUIRE_FALSE(sim.canBeBuiltAtAsSeenBy(mc, hut.yardMap, hut.yardMapContainsGeo, 20, 20, us));
+
+        SECTION("and green again once it has been")
+        {
+            revealGround(sim, us);
+            REQUIRE(sim.canBeBuiltAtAsSeenBy(mc, hut.yardMap, hut.yardMapContainsGeo, 20, 20, us));
+        }
+
+        SECTION("one unexplored corner is enough to keep it red")
+        {
+            // The whole map known except the cell one corner of the
+            // footprint stands on. It is the footprint that is asked about
+            // and not its centre, so this stays red: a building half on
+            // known ground is half a survey.
+            revealGround(sim, us);
+            auto bit = sim.losGroupBitFor(us);
+            auto cell = sim.visionCellAt(sim.terrain.heightmapIndexToWorldCenter(20, 20));
+            sim.explored.set(cell.x, cell.y, static_cast<ExploredMask>(sim.explored.get(cell.x, cell.y) & ~bit));
+
+            REQUIRE_FALSE(sim.canBeBuiltAtAsSeenBy(mc, hut.yardMap, hut.yardMapContainsGeo, 20, 20, us));
+        }
     }
 }

@@ -1597,6 +1597,33 @@ namespace rwe
             return false;
         }
 
+        // Ground nobody on this side has ever looked at. The box is red over
+        // all of it, whatever the terrain underneath happens to be.
+        //
+        // This is the other half of the fog rule below, and it pulls the
+        // opposite way on purpose. Below, an undiscovered occupant is
+        // ignored, because refusing the placement would announce that
+        // something is standing there. Here the whole square is undiscovered,
+        // so a box that went green would announce that the ground is flat and
+        // clear -- a free survey of the map, taken by sweeping the cursor
+        // across the black with a building on it, which is a good deal more
+        // than one hidden tank. Reported from play on Coast To Coast: placing
+        // into unexplored ground showed "green where it can be placed and red
+        // where it cant, even though the land is unexplored".
+        //
+        // Every cell of the footprint, not its centre: a building half on
+        // known ground is half a survey.
+        for (unsigned int cellZ = y; cellZ < y + mc.footprintZ; ++cellZ)
+        {
+            for (unsigned int cellX = x; cellX < x + mc.footprintX; ++cellX)
+            {
+                if (!isExploredBy(player, terrain.heightmapIndexToWorldCenter(static_cast<int>(cellX), static_cast<int>(cellZ))))
+                {
+                    return false;
+                }
+            }
+        }
+
         auto region = occupiedGrid.tryToRegion(DiscreteRect(x, y, mc.footprintX, mc.footprintZ));
         if (!region)
         {

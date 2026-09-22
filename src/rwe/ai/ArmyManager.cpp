@@ -4,6 +4,7 @@
 #include <set>
 #include <rwe/ai/AiMapBounds.h>
 #include <rwe/ai/BuilderSafety.h>
+#include <rwe/ai/LineOfFire.h>
 #include <rwe/sim/GameSimulation.h>
 #include <array>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -1901,6 +1902,42 @@ namespace rwe
             }
         }
 
+        // Is there anybody at home to do the mending? Asked once for the
+        // pass, not once per unit: it walks every unit we own.
+        //
+        // Nothing in TA repairs itself, so a hurt unit sent back to a base
+        // with no construction unit in it stands at the anchor for
+        // mendWaitSeconds and walks out again no better than it left -- the
+        // whole round trip spent, and the wave a unit short for all of it
+        // (mendNeedsMender).
+        //
+        // A live mobile builder is the whole test. Not whether one is idle,
+        // and not mendDamagedUnits: a builder busy now is free later, and
+        // the commander mends as well as anything else does. What it rules
+        // out is the case there is no answer to -- nobody left who could.
+        bool menderAvailable = !profile.mendNeedsMender;
+        if (!menderAvailable)
+        {
+            for (const auto& [otherId, other] : sim.units)
+            {
+                if (other.owner != aiOwner || !other.isAlive())
+                {
+                    continue;
+                }
+                auto otherDefIt = sim.unitDefinitions.find(other.unitType);
+                if (otherDefIt == sim.unitDefinitions.end() || !otherDefIt->second.builder || !otherDefIt->second.isMobile)
+                {
+                    continue;
+                }
+                if (other.isBeingBuilt(otherDefIt->second))
+                {
+                    continue;
+                }
+                menderAvailable = true;
+                break;
+            }
+        }
+
         for (auto unitId : bb.combatUnits)
         {
             if (bb.scoutUnitId && *bb.scoutUnitId == unitId)
@@ -1923,7 +1960,14 @@ namespace rwe
                 auto leaveBelow = unit.unitType == bb.sideUnits.raider ? profile.retreatRaiderBelowPercent : profile.retreatLineBelowPercent;
                 auto waiting = bb.mendingUnits.find(unitId.value);
                 auto mending = waiting != bb.mendingUnits.end();
-                if (!mending && static_cast<int>(share) < leaveBelow)
+                // And the walk itself has to be worth making. In a corridor
+                // the way home runs back through our own army and takes long
+                // enough that the wave is a unit down while it is pushing --
+                // which is the shape of the complaint this answers. Past
+                // mendMaxWalkHome the unit stays and fights hurt.
+                auto withinWalkHome = profile.mendMaxWalkHome <= 0_ss
+                    || flatDistance(unit.position, *bb.baseAnchor) <= profile.mendMaxWalkHome;
+                if (!mending && static_cast<int>(share) < leaveBelow && menderAvailable && withinWalkHome)
                 {
                     waiting = bb.mendingUnits.emplace(unitId.value, bb.now).first;
                     mending = true;
@@ -1993,6 +2037,39 @@ namespace rwe
                 // hands it straight back -- so a unit stuck on something it
                 // cannot hurt often has an empty queue and a new order every
                 // pass, which is the loop itself rather than a way out of it.
+                // Is the ground in the way? Asked first, because it is the
+                // same question the stall clock below spends fifteen seconds
+                // arriving at, and it has a better answer than dropping the
+                // target: walk in until the shot clears (answerBlockedShots).
+                //
+                // Only once the unit is inside its own reach. A unit still
+                // walking to the fight is not being stopped by anything, and
+                // the line from where it set out says nothing about the line
+                // from where it will stand.
+                if (profile.answerBlockedShots)
+                {
+                    auto targetRef = sim.tryGetUnitState(*enemy);
+                    auto reach = longestWeaponRange(sim, sim.unitDefinitions.at(unit.unitType));
+                    if (targetRef && targetRef->get().isAlive() && reach > 0_ss
+                        && flatDistance(unit.position, targetRef->get().position) <= reach)
+                    {
+                        if (auto stand = positionForClearShot(sim, unit, targetRef->get()))
+                        {
+                            auto to = clampInsideVisibleMap(sim.terrain, *stand, 64_ss);
+                            // The stall clock is measuring this pairing and
+                            // would give up on it the moment the unit gets
+                            // its shot, the hit points not having moved
+                            // while it walked. Start it again from there.
+                            landTargetProgress.erase(std::make_pair(unitId.value, enemy->value));
+                            if (!isMovingTo(unit, to))
+                            {
+                                outCommands.push_back(moveCommand(unitId, to));
+                            }
+                            continue;
+                        }
+                    }
+                }
+
                 if (profile.answerStalledAttacks && profile.stalledAttackSeconds > 0)
                 {
                     auto targetRef = sim.tryGetUnitState(*enemy);

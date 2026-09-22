@@ -27,6 +27,39 @@ namespace rwe
         std::string fighter;
         /** Level-one bomber: Thunder, Shadow. 130 metal that reaches an extractor behind a wall of towers. */
         std::string bomber;
+        /**
+         * Advanced aircraft plant: ARMAAP, CORAAP. What the gunship comes
+         * from, and the only reason the AI has to build one.
+         *
+         * Reached the way the advanced kbot lab is reached, which is not the
+         * way the name suggests: page 3 of the LEVEL-ONE constructor's own
+         * menu carries the advanced plant of its own kind -- ARMCK3 offers
+         * ARMALAB and ARMCA3 offers ARMAAP. So the air constructor the AI
+         * already builds is the one unit that can put this up, and no
+         * tier-two constructor is needed first. Read out of the shipped
+         * menus with ui_probe rather than assumed.
+         */
+        std::string advancedAirPlant;
+
+        /**
+         * Gunship: ARMBRAWL, CORAPE. The air arm's anti-ground body, and the
+         * only thing the AI owns that can shoot at a ridge line from above
+         * it.
+         *
+         * The bomber makes one pass at one building. A gunship stands off a
+         * target and keeps firing, which is what an army does and what an
+         * army stopped by terrain cannot do: reported from a replay on
+         * Crystal Maze, where ground units "spend a lot of time attempting
+         * to shoot at enemy units through elevation" and the aircraft were
+         * "underutilised". LineOfFire.h is the ground arm's half of that
+         * answer; this is the other half, and it is the one that does not
+         * need the ground to cooperate.
+         *
+         * Level two, on the advanced plant's page and not the level-one
+         * plant's -- checked, because the first version of this named the
+         * level-one plant and would have been dead code.
+         */
+        std::string gunship;
         /** Air constructor: it flies, so no ground has to connect for it to reach a site. */
         std::string airConstructor;
         std::string vehiclePlant;

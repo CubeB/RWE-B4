@@ -156,6 +156,90 @@ namespace rwe
         }
     }
 
+    TEST_CASE("gunships go at what is holding the army up", "[ai]")
+    {
+        // A bomber makes one pass at the dearest thing the enemy owns. A
+        // gunship stands off what it is shooting and keeps shooting, which is
+        // what the ground army does and what a ground army stopped by a ridge
+        // cannot do. Reported from a replay on Crystal Maze, where the
+        // aircraft were "underutilised" while the ground war stood still
+        // against terrain.
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai");
+        auto enemy = addPlayer(sim, "enemy");
+        auto script = makeEmptyCobScript();
+
+        UnitDefinition dearDef;
+        dearDef.buildCostMetal = Metal(800.0f);
+        sim.unitDefinitions["DEARBUILDING"] = dearDef;
+        UnitDefinition kbotDef;
+        kbotDef.buildCostMetal = Metal(100.0f);
+        kbotDef.isMobile = true;
+        sim.unitDefinitions["KBOT"] = kbotDef;
+        sim.unitDefinitions["GUNSHIP"] = UnitDefinition{};
+
+        // The dear building at home; the thing in front of our wave, out at
+        // the other end of the map.
+        auto dearPos = SimVector(100_ss, 0_ss, 0_ss);
+        auto dearId = addUnitOfType(sim, "DEARBUILDING", enemy, dearPos, script);
+        auto blockerPos = SimVector(1500_ss, 0_ss, 0_ss);
+        auto blockerId = addUnitOfType(sim, "KBOT", enemy, blockerPos, script);
+
+        // Our wave, standing in front of it.
+        auto waveId = addUnitOfType(sim, "KBOT", ai, SimVector(1300_ss, 0_ss, 0_ss), script);
+
+        auto firstId = addUnitOfType(sim, "GUNSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto secondId = addUnitOfType(sim, "GUNSHIP", ai, SimVector(20_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.tacticalTickInterval = 1;
+
+        AiBlackboard bb;
+        bb.sideUnitsResolved = true;
+        bb.sideUnits.gunship = "GUNSHIP";
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+        bb.knownEnemies[dearId.value] = makeKnownBuilding(dearId, dearPos, "DEARBUILDING");
+        bb.knownEnemies[blockerId.value] = makeKnownGroundUnit(blockerId, blockerPos, "KBOT");
+        bb.combatUnits.push_back(waveId);
+        bb.attackGroup.insert(waveId.value);
+
+        ThreatMap threatMap(128, 128);
+        AirManager air;
+        std::vector<PlayerCommand> commands;
+
+        SECTION("with a wave out, the armed thing standing in front of it")
+        {
+            air.update(sim, ai, profile, threatMap, bb, commands);
+            for (auto id : {firstId, secondId})
+            {
+                auto attacks = ordersFor<AttackOrder>(commands, id);
+                REQUIRE(attacks.size() == 1);
+                REQUIRE(*std::get_if<UnitId>(&attacks.front().target) == blockerId);
+            }
+        }
+
+        SECTION("with no wave out, the bombers' target rather than the pad")
+        {
+            bb.attackGroup.clear();
+            bb.combatUnits.clear();
+            air.update(sim, ai, profile, threatMap, bb, commands);
+            for (auto id : {firstId, secondId})
+            {
+                auto attacks = ordersFor<AttackOrder>(commands, id);
+                REQUIRE(attacks.size() == 1);
+                REQUIRE(*std::get_if<UnitId>(&attacks.front().target) == dearId);
+            }
+        }
+
+        SECTION("a lone gunship waits for its pair, as a bomber does")
+        {
+            sim.getUnitState(secondId).markAsDeadNoCorpse();
+            commands.clear();
+            air.update(sim, ai, profile, threatMap, bb, commands);
+            REQUIRE(ordersFor<AttackOrder>(commands, firstId).empty());
+        }
+    }
+
     TEST_CASE("a lone bomber waits for a second one", "[ai]")
     {
         // Sent out alone, each new bomber flies at the dearest thing the

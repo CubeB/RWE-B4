@@ -908,11 +908,20 @@ namespace rwe
         bool canBeBuiltAt(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y) const;
 
         /**
-         * As canBeBuiltAt, but blind to occupants the given player has not
-         * discovered, so that refusing a placement cannot tell them something
-         * is there. The original allows the placement in that case and reports
-         * the failure when the builder arrives -- see TOTALA-EXE.md §27's
-         * correction.
+         * As canBeBuiltAt, but answered through one player's fog. Two rules,
+         * pulling opposite ways, and both of them are about not saying more
+         * than the player can see.
+         *
+         * Blind to occupants that player has not discovered, so that refusing
+         * a placement cannot tell them something is there. The original allows
+         * the placement in that case and reports the failure when the builder
+         * arrives -- see TOTALA-EXE.md §27's correction.
+         *
+         * And false outright over ground no line-of-sight group of theirs has
+         * explored, whatever the terrain there is like, so that a green box
+         * cannot tell them the ground is flat and clear. Sweeping the cursor
+         * across the black with a building on it would otherwise survey the
+         * map. Reported from play; see fogplacement.test.cpp.
          *
          * For the interface only. Nothing in the tick may call this: what it
          * answers depends on one player's fog, where canBeBuiltAt answers the

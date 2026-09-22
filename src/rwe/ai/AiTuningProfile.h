@@ -150,6 +150,33 @@ namespace rwe
         int stalledAttackSeconds{15};
         int stalledAttackForgetSeconds{60};
 
+        /**
+         * Ask the ground instead of waiting to be told by it.
+         *
+         * answerStalledAttacks above measures the symptom: fifteen seconds
+         * of shots that move nothing, and then the target is dropped. That
+         * is fifteen seconds of a unit standing in the open firing into a
+         * hillside, and dropping the target leaves it standing in the same
+         * place with nothing to do -- which is what a second replay, on
+         * Crystal Maze, reported as units spending "a lot of time
+         * attempting to shoot at enemy units through elevation" while an
+         * army that should have been advancing did not.
+         *
+         * So the unit asks whether the shot clears the ground between it
+         * and what it is aimed at (LineOfFire.h), and if it does not, walks
+         * in until it does. The answer is immediate and it is a step
+         * forward rather than a shrug. Both rules stay: this one knows
+         * about terrain and nothing else, and the stall clock still catches
+         * a wall of wrecks, a blocking feature and anything else that stops
+         * a round without being a hill.
+         *
+         * The simulation is untouched. It has no line-of-fire test and
+         * neither has the original, deliberately; this is the computer
+         * player doing what a human player does when the tracers stop
+         * landing.
+         */
+        bool answerBlockedShots{true};
+
         bool kiteWithLongerRange{true};
         SimScalar kiteRangeMargin{40_ss};
 
@@ -385,6 +412,30 @@ namespace rwe
         SimScalar mendHavenRadius{400_ss};
 
         /**
+         * Two things the walk home has to be worth, both reported from a
+         * replay on Crystal Maze: the retreat micro "doesn't do much good
+         * when an army should be advancing through a maze like map".
+         *
+         * mendNeedsMender: somebody has to be there to do the mending. The
+         * rule above sends a hurt unit home, stands it at the anchor for
+         * mendWaitSeconds and sends it back if nothing came -- and with no
+         * construction unit alive, or with mendDamagedUnits off, nothing
+         * ever comes. That is the whole round trip spent for nothing, and a
+         * unit missing from the wave for all of it.
+         *
+         * mendMaxWalkHome: and the trip has to be short enough to be worth
+         * making. On an open map a hurt unit is a few hundred units from
+         * the rally point. In a corridor it is a long walk back through its
+         * own army, and the wave it left is a unit down at exactly the
+         * moment it is pushing. Past this distance the unit stays with the
+         * wave and fights hurt -- which is what a player does, and what the
+         * wave needs from it. Zero switches the distance test off and
+         * restores the old behaviour.
+         */
+        bool mendNeedsMender{true};
+        SimScalar mendMaxWalkHome{1800_ss};
+
+        /**
          * An idle construction unit mends whatever of ours near the base is
          * most hurt, below mendBelowPercent of its hit points and within
          * mendRadius of the base. Nothing in TA repairs itself, so without
@@ -538,6 +589,19 @@ namespace rwe
         int surplusFactoryCap{4};
         /** With the store full, the fleet's size targets are multiplied by this. */
         int surplusFleetMultiplier{3};
+        /**
+         * And the same for the air plant's bombers, for the same reason and
+         * with the same gate: only once the store is full, so it never
+         * competes with a plan still being paid for.
+         *
+         * Without it the plant built its scout, its constructor, two
+         * fighters and four bombers and then idled for the rest of the
+         * game -- 850 metal of factory doing nothing while the store sat at
+         * the cap. Reported from a replay as the aircraft being
+         * "underutilised", and it is the cheap half of that answer; the
+         * gunship tier is the other half.
+         */
+        int surplusBomberMultiplier{3};
 
         // --- Level two ---
         /**
@@ -1818,6 +1882,23 @@ namespace rwe
          */
         int targetFighterCount{2};
         int targetBomberCount{4};
+        /**
+         * Gunships the air plant keeps on hand, and how many have to stand
+         * before any of them goes out.
+         *
+         * A gunship is the dearest thing the level-one plant builds and the
+         * only one of them that can hold a position: it stands off what it
+         * is shooting and keeps shooting, where a bomber makes one pass and
+         * goes home for another bomb. That is what makes it the answer to
+         * ground the army cannot cross -- it does not have to cross it.
+         *
+         * Three, and out in pairs, for the bombers' reason: sent one at a
+         * time each new aircraft flies at whatever is worst defended and is
+         * traded for a fraction of it.
+         */
+        int targetAdvancedAirPlantCount{1};
+        int targetGunshipCount{3};
+        int gunshipPackSize{2};
         /** How far a fighter will chase something before it is called home. */
         SimScalar fighterLeash{2400_ss};
         /**
@@ -1840,6 +1921,13 @@ namespace rwe
         SimScalar bomberClusterRadius{300_ss};
         /** How many have to be standing together before an army is worth a sortie. */
         int bomberMinClusterSize{3};
+        /**
+         * How far from the army a gunship will go looking for what is
+         * holding it up. Beyond this it falls back to the bombers' target
+         * list, so a gunship with no army to help is not a gunship standing
+         * on a pad.
+         */
+        SimScalar gunshipSupportRadius{1400_ss};
         /**
          * Air constructors. One is worth having on any map: it flies, so no
          * ground has to connect for it to reach a patch, and the expansion

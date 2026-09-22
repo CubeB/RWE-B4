@@ -67,7 +67,8 @@ namespace rwe
         ticksSinceLastUpdate = 0;
 
         const auto& s = bb.sideUnits;
-        if (!bb.sideUnitsResolved || (s.fighter.empty() && s.bomber.empty() && s.seaplaneFighter.empty() && s.torpedoSeaplane.empty()))
+        if (!bb.sideUnitsResolved
+            || (s.fighter.empty() && s.bomber.empty() && s.gunship.empty() && s.seaplaneFighter.empty() && s.torpedoSeaplane.empty()))
         {
             return;
         }
@@ -75,6 +76,7 @@ namespace rwe
         // Ours, finished and alive, in id order.
         std::vector<UnitId> fighters;
         std::vector<UnitId> bombers;
+        std::vector<UnitId> gunships;
         std::vector<UnitId> torpedoPlanes;
         for (const auto& [unitId, unit] : sim.units)
         {
@@ -90,6 +92,10 @@ namespace rwe
             if ((!s.fighter.empty() && unit.unitType == s.fighter) || (!s.seaplaneFighter.empty() && unit.unitType == s.seaplaneFighter))
             {
                 fighters.push_back(UnitId(unitId));
+            }
+            else if (!s.gunship.empty() && unit.unitType == s.gunship)
+            {
+                gunships.push_back(UnitId(unitId));
             }
             else if (!s.torpedoSeaplane.empty() && unit.unitType == s.torpedoSeaplane)
             {
@@ -108,7 +114,9 @@ namespace rwe
         // asked at all when we have no bombers -- the last of them walks the
         // known enemies twice.
         std::optional<UnitId> bomberTarget;
-        if (!bombers.empty())
+        // Asked when gunships are standing too, not only bombers: it is
+        // what a gunship falls back on when there is no army to help.
+        if (!bombers.empty() || !gunships.empty())
         {
             // One: is anything of theirs at our door that can shoot? Then it
             // is bombed whatever is covering it, nearest first, because that
@@ -260,6 +268,111 @@ namespace rwe
             if (bb.baseAnchor && unit.orders.empty() && unit.position.distanceSquared(*bb.baseAnchor) > (profile.fighterLeash * profile.fighterLeash))
             {
                 outCommands.push_back(moveCommand(unitId, *bb.baseAnchor));
+            }
+        }
+
+        // Gunships. They hold a position and keep firing, which is the one
+        // thing the rest of the air arm cannot do and the one thing a ground
+        // army stopped by a ridge needs done for it.
+        //
+        // So their first question is not the bombers' -- what is the dearest
+        // thing the enemy owns -- but what is standing in front of our army.
+        // A gunship is over the ridge rather than behind it, so the ground
+        // that is holding the wave up is not holding the gunship up, and
+        // that is the whole reason to spend the metal on one.
+        if (!gunships.empty())
+        {
+            // Where our wave is. Taken from the attack group rather than
+            // from every combat unit we own, for the reason the battlefield
+            // reclaim takes it from there: the reserve stands at the rally
+            // point, and a centroid dragged halfway home names a place where
+            // nothing is happening.
+            std::optional<SimVector> waveCentre;
+            {
+                SimScalar sumX = 0_ss;
+                SimScalar sumZ = 0_ss;
+                int counted = 0;
+                for (auto id : bb.combatUnits)
+                {
+                    if (bb.attackGroup.count(id.value) == 0)
+                    {
+                        continue;
+                    }
+                    auto ref = sim.tryGetUnitState(id);
+                    if (!ref || ref->get().isDead())
+                    {
+                        continue;
+                    }
+                    sumX += ref->get().position.x;
+                    sumZ += ref->get().position.z;
+                    ++counted;
+                }
+                if (counted > 0)
+                {
+                    auto divisor = intToSimScalar(counted);
+                    waveCentre = SimVector(sumX / divisor, 0_ss, sumZ / divisor);
+                }
+            }
+
+            std::optional<UnitId> gunshipTarget;
+            if (waveCentre)
+            {
+                // The armed ground enemy nearest the wave, under the same
+                // anti-air ceiling the bombers fly under. Armed, because an
+                // extractor behind the line is the bombers' business and not
+                // what the wave is stuck on.
+                auto reachSquared = profile.gunshipSupportRadius * profile.gunshipSupportRadius;
+                SimScalar nearest = 0_ss;
+                for (const auto& [_, enemy] : bb.knownEnemies)
+                {
+                    if (enemy.isAir || !enemy.isArmed || !inSightRecently(bb, profile, enemy))
+                    {
+                        continue;
+                    }
+                    auto enemyRef = contactStillStanding(sim, enemy);
+                    if (!enemyRef)
+                    {
+                        continue;
+                    }
+                    if (threatMap.antiAirCoverAt(enemy.lastKnownPosition) > static_cast<float>(profile.bomberMaxAntiAirCover))
+                    {
+                        continue;
+                    }
+                    auto distanceSquared = waveCentre->distanceSquared(enemy.lastKnownPosition);
+                    if (distanceSquared > reachSquared)
+                    {
+                        continue;
+                    }
+                    if (!gunshipTarget || distanceSquared < nearest)
+                    {
+                        nearest = distanceSquared;
+                        gunshipTarget = enemy.unitId;
+                    }
+                }
+            }
+            // No army to help, or nothing near it: fall in behind the
+            // bombers rather than stand on the pad.
+            if (!gunshipTarget)
+            {
+                gunshipTarget = bomberTarget;
+            }
+
+            auto gunshipsReady = static_cast<int>(gunships.size()) >= std::max(1, profile.gunshipPackSize);
+            for (auto unitId : gunships)
+            {
+                const auto& unit = sim.getUnitState(unitId);
+                if (gunshipTarget && gunshipsReady)
+                {
+                    if (!isAttackingUnit(unit, *gunshipTarget))
+                    {
+                        outCommands.push_back(attackCommand(unitId, *gunshipTarget));
+                    }
+                    continue;
+                }
+                if (bb.baseAnchor && unit.orders.empty() && unit.position.distanceSquared(*bb.baseAnchor) > (profile.fighterLeash * profile.fighterLeash))
+                {
+                    outCommands.push_back(moveCommand(unitId, *bb.baseAnchor));
+                }
             }
         }
 

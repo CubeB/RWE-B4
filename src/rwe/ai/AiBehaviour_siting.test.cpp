@@ -352,6 +352,53 @@ namespace rwe
             REQUIRE(metalUnder(*site) == 9u * 200u);
         }
 
+        SECTION("a footprint wider than the deposit is centred on it, not hung off its edge")
+        {
+            // A moho is 5x5 where the deposit under it is 3x3, so every
+            // placement centred on any of the deposit's nine cells covers
+            // all nine and they all tie on metal. The ring order then took
+            // the one nearest the anchor -- the deposit's near edge -- and
+            // the building came out with the rock in a corner of it.
+            // Reported from a replay on Crystal Maze: a moho "completely off
+            // of a metal spot, it wasn't at all central".
+            UnitDefinition mohoDef;
+            mohoDef.isMobile = false;
+            mohoDef.builder = false;
+            mohoDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{5u, 5u, 255u, 255u, 0u, 255u};
+            sim.unitDefinitions["MOHO"] = mohoDef;
+
+            paint(anchorHm.x + 6, anchorHm.y - 1, 3, 3);
+            BuildManager buildManager;
+            std::minstd_rand rng(1u);
+            auto site = buildManager.chooseMexSite(sim, "MOHO", anchor, 1600_ss, rng, {});
+            REQUIRE(site.has_value());
+
+            // The deposit runs x+6..x+8 by y-1..y+1, so its heart is
+            // (x+7, y) and a 5x5 centred there starts at (x+5, y-2).
+            auto rect = sim.computeFootprintRegion(*site, mohoDef.movementCollisionInfo);
+            CHECK(rect.x == anchorHm.x + 5);
+            CHECK(rect.y == anchorHm.y - 2);
+
+            // Every one of those placements already collected the whole
+            // deposit, which is why metal alone could not tell them apart.
+            CHECK(metalUnder(*site) == 9u * 200u);
+        }
+
+        SECTION("and a footprint the size of the deposit is placed exactly as before")
+        {
+            // The guard on the case above: where the metal test can already
+            // tell the placements apart, nothing has changed.
+            paint(anchorHm.x + 6, anchorHm.y - 1, 3, 3);
+            BuildManager buildManager;
+            std::minstd_rand rng(1u);
+            auto site = buildManager.chooseMexSite(sim, "MEX", anchor, 1600_ss, rng, {});
+            REQUIRE(site.has_value());
+            auto rect = sim.computeFootprintRegion(*site, mexDef.movementCollisionInfo);
+            CHECK(rect.x == anchorHm.x + 6);
+            CHECK(rect.y == anchorHm.y - 1);
+            CHECK(metalUnder(*site) == 9u * 200u);
+        }
+
         SECTION("but it does not walk past a spot to reach a richer deposit further off")
         {
             // A single cell three out, bare ground, then a 5x5 twelve out. The

@@ -668,6 +668,23 @@ namespace rwe
             runTicks(sim, controller, 20, commands);
             CHECK_FALSE(ordersFor<AttackOrder>(commands, kbotId).empty());
         }
+
+        SECTION("too far from home to be worth the walk, it fights hurt")
+        {
+            // From a replay on Crystal Maze: the retreat micro "doesn't do
+            // much good when an army should be advancing through a maze like
+            // map". In a corridor the way home runs back through our own
+            // army and takes long enough that the wave is a unit down while
+            // it is pushing (mendMaxWalkHome).
+            auto farId = addUnit(sim, "ARMPW", ai, SimVector(2400_ss, 0_ss, 0_ss), script);
+            addUnit(sim, "ARMPW", human, SimVector(2500_ss, 0_ss, 0_ss), script);
+            sim.getUnitState(farId).hitPoints = 20;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            CHECK(controller.getBlackboard().mendingUnits.count(farId.value) == 0);
+            CHECK_FALSE(ordersFor<AttackOrder>(commands, farId).empty());
+        }
     }
 
     TEST_CASE("a construction unit mends what came home hurt", "[ai]")

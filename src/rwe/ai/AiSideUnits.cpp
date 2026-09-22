@@ -42,6 +42,8 @@ namespace rwe
             units.airTransport = "CORVALK";
             units.fighter = "CORVENG";
             units.bomber = "CORSHAD";
+            units.advancedAirPlant = "CORAAP";
+            units.gunship = "CORAPE";
             units.airConstructor = "CORCA";
             units.vehiclePlant = "CORVP";
             units.scoutVehicle = "CORFAV";
@@ -102,6 +104,8 @@ namespace rwe
             units.airTransport = "ARMATLAS";
             units.fighter = "ARMFIG";
             units.bomber = "ARMTHUND";
+            units.advancedAirPlant = "ARMAAP";
+            units.gunship = "ARMBRAWL";
             units.airConstructor = "ARMCA";
             units.vehiclePlant = "ARMVP";
             units.scoutVehicle = "ARMFAV";
@@ -167,6 +171,8 @@ namespace rwe
         check(units.airTransport);
         check(units.fighter);
         check(units.bomber);
+        check(units.advancedAirPlant);
+        check(units.gunship);
         check(units.airConstructor);
         check(units.vehiclePlant);
         check(units.scoutVehicle);

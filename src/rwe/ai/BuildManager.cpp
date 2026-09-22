@@ -1193,6 +1193,52 @@ namespace rwe
             return total;
         };
 
+        // How squarely a footprint sits on the metal it covers: the squared
+        // distance between the footprint's centre and the centre of mass of
+        // the patch cells under it, both in half-cells so neither needs a
+        // fraction.
+        //
+        // patchMetalUnder alone cannot see this. A moho is 5x5 where the
+        // deposit it stands on is 3x3, so every placement centred on any of
+        // the deposit's nine cells covers all nine and they all tie on
+        // metal: the ring order below then took the one nearest the anchor,
+        // which is the deposit's near edge, and the building came out with
+        // the rock in a corner of it. Reported from a replay on Crystal
+        // Maze -- a moho "completely off of a metal spot, it wasn't at all
+        // central". The yield was right and the placement was not, and the
+        // placement is what the rest of the base has to be laid out around.
+        //
+        // The raw squared distance is comparable without dividing by the
+        // mass because it is only ever compared between candidates that
+        // already tie on patchMetalUnder, which is the same sum.
+        auto patchOffsetUnder = [&](const DiscreteRect& rect) {
+            long long total = 0;
+            long long sumX = 0;
+            long long sumZ = 0;
+            for (int y = rect.y; y < rect.y + static_cast<int>(rect.height); ++y)
+            {
+                for (int x = rect.x; x < rect.x + static_cast<int>(rect.width); ++x)
+                {
+                    if (x >= 0 && y >= 0 && x < metalGrid.getWidth() && y < metalGrid.getHeight() && metalGrid.get(x, y) > sim.surfaceMetal)
+                    {
+                        auto m = static_cast<long long>(metalGrid.get(x, y));
+                        total += m;
+                        sumX += m * ((2LL * x) + 1);
+                        sumZ += m * ((2LL * y) + 1);
+                    }
+                }
+            }
+            if (total == 0)
+            {
+                return 0LL;
+            }
+            auto centreX = (2LL * rect.x) + static_cast<long long>(rect.width);
+            auto centreZ = (2LL * rect.y) + static_cast<long long>(rect.height);
+            auto dx = sumX - (total * centreX);
+            auto dz = sumZ - (total * centreZ);
+            return (dx * dx) + (dz * dz);
+        };
+
         // Only cells that actually hold metal can win, and the map's patches
         // never move, so walk the known patches ring by ring instead of every
         // cell out to the radius. Sorting by (ring, dz, dx) visits them in
@@ -1290,6 +1336,7 @@ namespace rwe
 
             std::vector<SimVector> tiedCandidates;
             unsigned int bestMetal = 0;
+            long long bestOffset = 0;
             int bestRing = -1;
             // The best the deposit would give if every unit stepped off it.
             unsigned int bestIgnoringUnits = 0;
@@ -1313,16 +1360,24 @@ namespace rwe
                 }
                 auto metal = patchMetalUnder(rect);
                 bestIgnoringUnits = std::max(bestIgnoringUnits, metal);
-                // In ring order, so an equal find further out never displaces
-                // a nearer one: ties are kept to the ring that set the best.
-                if (metal > bestMetal)
+                if (metal == 0)
+                {
+                    continue;
+                }
+                auto offset = patchOffsetUnder(rect);
+                // The most metal, then the most squarely on it, then the
+                // nearest. In ring order, so an equal find further out never
+                // displaces a nearer one: ties are kept to the ring that set
+                // the best, and a later ring can never beat it on distance.
+                if (tiedCandidates.empty() || metal > bestMetal || (metal == bestMetal && offset < bestOffset))
                 {
                     bestMetal = metal;
+                    bestOffset = offset;
                     bestRing = ringCells[j].ring;
                     tiedCandidates.clear();
                     tiedCandidates.push_back(candidate);
                 }
-                else if (metal == bestMetal && metal > 0 && ringCells[j].ring == bestRing)
+                else if (metal == bestMetal && offset == bestOffset && ringCells[j].ring == bestRing)
                 {
                     tiedCandidates.push_back(candidate);
                 }
@@ -3151,6 +3206,7 @@ namespace rwe
         {
             want(s.airPlant);
         }
+
         auto energyToSpare = bb.energyStorage.value > 0.0f && bb.currentEnergy.value >= bb.energyStorage.value * 0.8f
             && bb.energyIncome.value > bb.energyDemand.value;
         if (total(s.solar) < profile.targetSolarCount && !(profile.solarOnDemand && energyToSpare))
@@ -3346,6 +3402,32 @@ namespace rwe
             if (bb.metalIncome.value >= static_cast<float>(2 * profile.techMinMetalIncome) && total(s.lab) >= 1 && total(s.advancedLab) < 1)
             {
                 want(s.advancedLab);
+            }
+            // And the air tier, which is the gunship and nothing else as
+            // far as this AI is concerned.
+            //
+            // A gunship stands off what it is shooting and keeps shooting,
+            // which is what a ground army does and what a ground army
+            // stopped by a ridge cannot do. So it is the arm that answers a
+            // map the ground war cannot cross -- reported from a replay on
+            // Crystal Maze, where the ground units spent the game firing
+            // into elevation and the aircraft were "underutilised".
+            //
+            // Here, with the surplus, and not up in the plan: ARMAAP is
+            // about 2600 metal, and above the extractors and the solars it
+            // would be bought with the metal that pays for them. A full
+            // store is income already going to waste, which is the one
+            // condition under which a plant this dear is free.
+            //
+            // Only the air constructor can put it up (see AiSideUnits::
+            // advancedAirPlant), which the AI already builds one of, and
+            // want() asks the build tree, so a side with none standing
+            // never takes the job.
+            if (!s.advancedAirPlant.empty() && !s.airConstructor.empty()
+                && total(s.airPlant) >= 1 && total(s.airConstructor) >= 1
+                && total(s.advancedAirPlant) < profile.targetAdvancedAirPlantCount)
+            {
+                want(s.advancedAirPlant);
             }
             if (navalFleetTarget(profile, bb) > 0)
             {
@@ -3653,9 +3735,35 @@ namespace rwe
                     // army.
                     next = s.fighter;
                 }
-                else if (!s.bomber.empty() && total(s.bomber) < profile.targetBomberCount)
+                else
                 {
-                    next = s.bomber;
+                    // Bombers, and more of them while the store is full:
+                    // an idle plant with the metal piled up is 850 metal
+                    // doing nothing (surplusBomberMultiplier).
+                    auto bomberTarget = profile.targetBomberCount;
+                    if (profile.surplusExpansion && bb.metalStorage.value > 0.0f
+                        && bb.currentMetal.value >= bb.metalStorage.value * 0.8f)
+                    {
+                        bomberTarget *= std::max(1, profile.surplusBomberMultiplier);
+                    }
+                    if (!s.bomber.empty() && total(s.bomber) < bomberTarget)
+                    {
+                        next = s.bomber;
+                    }
+                }
+            }
+            else if (!s.advancedAirPlant.empty() && factory.unitType == s.advancedAirPlant)
+            {
+                // The gunship, and nothing else. The rest of this plant's
+                // page -- the level-two fighter, bomber and missile
+                // aircraft -- are better versions of things the level-one
+                // plant already supplies, and the AI has no rule that would
+                // tell them apart from what it is already flying. The
+                // gunship is the one unit on it that does something nothing
+                // else the AI owns can do.
+                if (!s.gunship.empty() && total(s.gunship) < profile.targetGunshipCount)
+                {
+                    next = s.gunship;
                 }
             }
             else if (!s.vehiclePlant.empty() && factory.unitType == s.vehiclePlant)
@@ -4437,9 +4545,21 @@ namespace rwe
         // all of them. A fourth rule brings that builder back, which matters
         // more here than it looks: the order it is given never completes.
 
-        // Who, if anyone, is already working the field. The AI issues a
-        // patrol nowhere else, so a builder of ours carrying one is this
-        // rule's and no other's.
+        // Who, if anyone, is already working the field.
+        //
+        // "Carrying a reclaim order" is not the test and used to be. The
+        // ordinary harvest at the bottom of this pass issues reclaim orders
+        // too -- rocks and wrecks within 1200 of the anchor, which is what
+        // a commander spends the opening on -- so any builder clearing a
+        // rock at home answered to this, and two things followed from it:
+        // nobody was ever dispatched to the battlefield while it did, and
+        // the recall below pulled that builder to the anchor once a pass,
+        // taking it off the rock it was already standing on.
+        //
+        // Out on the field means out past the base's own reach. Nothing
+        // else issues a reclaim that far out, so this names the builder the
+        // rule below sent and no other.
+        const auto baseReclaimReachSquared = SimScalar(1200.0f * 1200.0f);
         std::optional<UnitId> fieldPatroller;
         for (const auto& [otherId, other] : sim.units)
         {
@@ -4452,11 +4572,34 @@ namespace rwe
             {
                 continue;
             }
-            if (std::get_if<ReclaimOrder>(&other.orders.front()) != nullptr)
+            auto reclaim = std::get_if<ReclaimOrder>(&other.orders.front());
+            if (reclaim == nullptr)
             {
-                fieldPatroller = UnitId(otherId);
-                break;
+                continue;
             }
+            std::optional<SimVector> spoilAt;
+            if (auto featureTarget = std::get_if<FeatureId>(&reclaim->target))
+            {
+                auto featureRef = sim.tryGetFeature(*featureTarget);
+                if (featureRef)
+                {
+                    spoilAt = featureRef->get().position;
+                }
+            }
+            else if (auto unitTarget = std::get_if<UnitId>(&reclaim->target))
+            {
+                auto targetRef = sim.tryGetUnitState(*unitTarget);
+                if (targetRef)
+                {
+                    spoilAt = targetRef->get().position;
+                }
+            }
+            if (!spoilAt || !bb.baseAnchor || bb.baseAnchor->distanceSquared(*spoilAt) <= baseReclaimReachSquared)
+            {
+                continue;
+            }
+            fieldPatroller = UnitId(otherId);
+            break;
         }
 
         // Where the wave is standing, and how much rubbish is standing with
@@ -4494,6 +4637,10 @@ namespace rwe
                         continue;
                     }
                     if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, feature.position))
+                    {
+                        continue;
+                    }
+                    if (siteUnderEnemyGuns(sim, profile, bb, feature.position))
                     {
                         continue;
                     }
@@ -4570,6 +4717,17 @@ namespace rwe
                     continue;
                 }
                 if (!profile.cheatModeOmniscient && !sim.isExploredBy(aiOwner, feature.position))
+                {
+                    continue;
+                }
+                // Not under a gun. The queue outlives the wave that
+                // justified it -- six orders, worked one after another --
+                // so a wreck beside an armed enemy is a builder walking at
+                // that enemy some seconds after the escort has moved on.
+                // Reported from a replay: a construction unit finished its
+                // job and "walked right towards an enemy army and got
+                // destroyed".
+                if (siteUnderEnemyGuns(sim, profile, bb, feature.position))
                 {
                     continue;
                 }
@@ -5508,6 +5666,16 @@ namespace rwe
                     continue;
                 }
                 if (builderIsShip && sim.terrain.getHeightAt(feature.position.x, feature.position.z) >= sim.terrain.getSeaLevel())
+                {
+                    continue;
+                }
+                // The same rule every build site has followed since the
+                // Crystal Maze measurement, which reclaim never did: a
+                // builder sent to a wreck under an armed enemy is a builder
+                // walked into that enemy. Within 1200 of the anchor is
+                // still well inside the reach of anything that has come to
+                // raid the base.
+                if (siteUnderEnemyGuns(sim, profile, bb, feature.position))
                 {
                     continue;
                 }

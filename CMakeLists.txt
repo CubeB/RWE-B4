@@ -192,6 +192,8 @@ set(SOURCE_FILES
     src/rwe/ai/AiBuildTree.h
     src/rwe/ai/EconomyManager.cpp
     src/rwe/ai/EconomyManager.h
+    src/rwe/ai/LineOfFire.cpp
+    src/rwe/ai/LineOfFire.h
     src/rwe/ai/MapIntel.cpp
     src/rwe/ai/MapIntel.h
     src/rwe/ai/MetalMakerManager.cpp
@@ -923,6 +925,7 @@ set(TEST_FILES
     src/rwe/ai/AiBehaviour_perception.test.cpp
     src/rwe/ai/AiBehaviour_siting.test.cpp
     src/rwe/ai/BuilderSafety.test.cpp
+    src/rwe/ai/LineOfFire.test.cpp
     src/rwe/ai/AiPersonality.test.cpp
     src/rwe/ai/MapIntel.test.cpp
     src/rwe/ai/ReachabilityMap.test.cpp
