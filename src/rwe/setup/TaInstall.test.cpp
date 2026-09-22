@@ -55,7 +55,7 @@ namespace rwe
             REQUIRE_FALSE(hasUpper);
         }
 
-        // The five in addToVfs, as of writing.
+        // The five addToVfs mounts.
         REQUIRE(taArchiveExtensions() == std::vector<std::string>{".hpi", ".ufo", ".ccx", ".gpf", ".gp3"});
     }
 

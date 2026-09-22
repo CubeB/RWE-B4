@@ -114,7 +114,6 @@ namespace rwe
             }
 
             default:
-                // skip unrecognised events
                 break;
         }
     }

@@ -1,11 +1,7 @@
 #pragma once
 
-// Minimal logging replacement for spdlog.
-// This project only used spdlog for basic file logging with timestamps,
-// so a full logging framework was unnecessary overhead and was blocking
-// the C++20 upgrade. If more advanced logging features are needed in the
-// future (async logging, log rotation, multiple sinks, etc.), consider
-// re-evaluating spdlog or another logging library.
+// Minimal logging replacement for spdlog used only for basic file logging
+// with timestamps.
 //
 // Usage:
 //   LOG_INFO << "Loaded " << count << " units from " << path;

@@ -54,18 +54,15 @@ namespace rwe
         {
             VectorMap<char, IdTag> m;
 
-            // add some elements
             auto idA = m.emplace('a');
             auto idB = m.emplace('b');
             auto idC = m.emplace('c');
             auto idD = m.emplace('d');
             auto idE = m.emplace('e');
 
-            // delete some (make some holes)
             m.remove(idD);
             m.remove(idB);
 
-            // add new elements to fill in the holes
             auto idF = m.emplace('f');
             auto idG = m.emplace('g');
             auto idH = m.emplace('h');

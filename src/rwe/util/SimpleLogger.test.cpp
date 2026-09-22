@@ -51,7 +51,6 @@ namespace rwe
             LOG_ERROR << "Error in " << "module" << ": " << "bad thing";
             LOG_WARN << "No args here";
 
-            // flush by replacing global logger
             setGlobalLogger(nullptr);
 
             auto lines = readLines(path);
@@ -143,7 +142,6 @@ namespace rwe
 
             auto lines = readLines(path);
             REQUIRE(lines.size() == 1);
-            // Verify timestamp matches [YYYY-MM-DD HH:MM:SS.mmm] pattern
             REQUIRE(lines[0][0] == '[');
             REQUIRE(lines[0][5] == '-');
             REQUIRE(lines[0][8] == '-');
