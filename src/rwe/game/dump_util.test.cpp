@@ -77,28 +77,40 @@ namespace rwe
     }
 
     /**
-     * The rule the field table exists to keep: a field the sync hash reads
-     * and the dump does not is a desync nobody can bisect. The documented
-     * hunt is RWE_HASH_LOG to find the tick, then RWE_STATE_DUMP to find the
-     * field -- and the second step can only show what the dump walks.
-     *
-     * This is issue #115's "nowhere left to hide", as far as a test can carry
-     * it. A null dump step beside a hash step is legal to the compiler, so
-     * nothing but this case will notice one.
+     * An omitted walk is a named, reasoned omission -- the variant shape
+     * makes the illegal combinations unrepresentable, but a blank reason
+     * string is still writable, and one of those teaches a reader who meets
+     * it nothing about why the field sits out. This names the row.
      */
-    TEST_CASE("every field the hash reads is one the dump writes", "[dump]")
+    TEST_CASE("every omission in the field table names its reason", "[dump]")
     {
-        std::vector<std::string> hashedButNotDumped;
+        std::vector<std::string> unnamed;
         for (const auto& field : unitStateFieldTable())
         {
-            if (field.hash != nullptr && field.dump == nullptr)
-            {
-                hashedButNotDumped.emplace_back(field.name);
-            }
+            std::visit(
+                [&](const auto& w)
+                {
+                    using T = std::decay_t<decltype(w)>;
+                    if constexpr (std::is_same_v<T, UnitStateFieldUnhashed>)
+                    {
+                        if (w.whyNotHashed == nullptr || w.whyNotHashed[0] == '\0')
+                        {
+                            unnamed.emplace_back(field.name);
+                        }
+                    }
+                    else if constexpr (std::is_same_v<T, UnitStateFieldSaveOnly>)
+                    {
+                        if (w.whyNotHashed == nullptr || w.whyNotHashed[0] == '\0' || w.whyNotLoaded == nullptr || w.whyNotLoaded[0] == '\0')
+                        {
+                            unnamed.emplace_back(field.name);
+                        }
+                    }
+                },
+                field.walks);
         }
 
-        CAPTURE(hashedButNotDumped);
-        REQUIRE(hashedButNotDumped.empty());
+        CAPTURE(unnamed);
+        REQUIRE(unnamed.empty());
     }
 
 }

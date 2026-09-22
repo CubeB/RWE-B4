@@ -457,6 +457,31 @@ namespace rwe
         REQUIRE(deadB->corpseLevel == 3);
     }
 
+    TEST_CASE("a unit json missing a mayBeMissing key loads its default", "[saveload]")
+    {
+        // commandFireShotFired is the row that opts in: saves written before
+        // the key existed simply do not carry it, so the load walk hands its
+        // step a null value instead of failing on the missing key, and the
+        // step reads the absence as the member's own default.
+        auto simA = makeBaseSim();
+        buildScenario(simA);
+        simA.tick();
+
+        auto us = PlayerId(0);
+        auto markedId = spawnUnit(simA, "TANK", us, SimVector(300_ss, 0_ss, 300_ss));
+        simA.getUnitState(markedId).commandFireShotFired = true;
+
+        auto saved = saveSimulationToJson(simA);
+        for (auto& uj : saved.at("units"))
+        {
+            uj.erase("commandFireShotFired");
+        }
+
+        auto simB = makeBaseSim();
+        REQUIRE_NOTHROW(loadSimulationFromJson(saved, simB));
+        REQUIRE(!simB.getUnitState(markedId).commandFireShotFired);
+    }
+
     TEST_CASE("an old save's units from before mobile units were shaded come back shaded", "[saveload]")
     {
         // Until 2026-09-06 every piece of a mobile unit was made unshaded, and

@@ -64,18 +64,18 @@ namespace rwe
     /**
      * The desync dump's page of the unit, walked from the field table
      * rather than from a hand-written list. The dump's share of the table
-     * covers every row that carries a dump step -- a deliberately smaller
-     * set than the save's, keyed by the same names so the two files can be
-     * read against each other.
+     * is exactly its hashed rows -- a deliberately smaller set than the
+     * save's, keyed by the same names so the two files can be read against
+     * each other.
      */
     nlohmann::json dumpJson(const UnitState& u)
     {
         nlohmann::json j = nlohmann::json::object();
         for (const auto& field : unitStateFieldTable())
         {
-            if (field.dump)
+            if (const auto* h = std::get_if<UnitStateFieldHashed>(&field.walks))
             {
-                j[field.name] = field.dump(u);
+                j[field.name] = h->dump(u);
             }
         }
         return j;
