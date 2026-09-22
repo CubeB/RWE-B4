@@ -3,5 +3,10 @@
   "instructions": ["CLAUDE.md"],
   "skills": {
     "paths": [".claude/skills"]
+  },
+  "permission": {
+    "external_directory": {
+      "~/.rwe/**": "allow"
+    }
   }
 }
