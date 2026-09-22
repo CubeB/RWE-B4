@@ -27,6 +27,9 @@
 #include <rwe/pathfinding/PathFindingService.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
+#include <rwe/sim/MovementClassCollisionService.h>
+#include <rwe/sim/MovementClassDefinition.h>
+#include <rwe/sim/MovementClassId.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/util/Index.h>
@@ -65,6 +68,25 @@ namespace rwe
             return MapTerrain(std::move(heights), 0_ss);
         }
 
+        /**
+         * Flat land either side of a channel too deep for the walker. The two
+         * banks are separate terrain components, so a goal across it is
+         * unreachable no matter what units are doing -- which is what lets a
+         * reachability precheck that ignores units prove it without searching.
+         */
+        MapTerrain makeChannelTerrain(int size, int channelX, int channelWidth)
+        {
+            Grid<unsigned char> heights(size, size, static_cast<unsigned char>(60));
+            for (int y = 0; y < size; ++y)
+            {
+                for (int x = channelX; x < channelX + channelWidth; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(0));
+                }
+            }
+            return MapTerrain(std::move(heights), 30_ss);
+        }
+
         std::shared_ptr<CobScript> makeEmptyScript()
         {
             auto script = std::make_shared<CobScript>();
@@ -88,6 +110,24 @@ namespace rwe
             d.sightDistance = 100;
             d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
             return d;
+        }
+
+        /**
+         * Gives the walker a named movement class, so terrain is a real
+         * barrier to it.
+         *
+         * An ad-hoc movement class has no registered walkable grid, and the
+         * search only consults terrain through that grid -- so without this
+         * the water in the pressed-water scenario is invisible and the goal
+         * is reachable straight across it. Real ground units name a class
+         * from MOVEINFO.TDF, so this is the representative case.
+         */
+        MovementClassId registerWalkerClass(GameSimulation& sim)
+        {
+            MovementClassDefinition mc{"BENCHWALK", 2u, 2u, 0u, 0u, 255u, 255u};
+            auto id = sim.movementClassDatabase.registerMovementClass(mc);
+            sim.movementClassCollisionService.registerMovementClass(id, computeWalkableGrid(sim.terrain, mc));
+            return id;
         }
 
         /** Something solid to route around, so the searches are not straight lines. */
@@ -151,6 +191,18 @@ namespace rwe
             }
             return fallback;
         }
+
+        const char* argStr(int argc, char** argv, const char* name, const char* fallback)
+        {
+            for (int i = 1; i + 1 < argc; ++i)
+            {
+                if (std::strcmp(argv[i], name) == 0)
+                {
+                    return argv[i + 1];
+                }
+            }
+            return fallback;
+        }
     }
 }
 
@@ -169,13 +221,34 @@ int main(int argc, char** argv)
     const int obstacleCount = argInt(argc, argv, "--obstacles", 90);
     const int noRelax = argInt(argc, argv, "--no-relax", 0);
     const int spacing = argInt(argc, argv, "--spacing", 48);
+    const std::string scenario = argStr(argc, argv, "--scenario", "spread");
+    // RWE_BENCH_HASH=1 prints the sync hash every tick, so a change to the
+    // pathfinder can be checked against a build without it: two builds that
+    // agree on every hash ran the same simulation.
+    const bool logHashes = std::getenv("RWE_BENCH_HASH") != nullptr;
 
     // 256 heightmap cells is 4096 world units across -- about the size of a
     // real four-player map, and long enough that a crossing is a real search.
     const int mapCells = 256;
     const auto halfWorld = SimScalar(static_cast<float>(mapCells) * 16.0f / 2.0f);
 
-    GameSimulation sim(makeTerrain(mapCells), 0u, 0, 0);
+    // The pressed scenarios are the shape that makes the first pass fail: the
+    // unit starts hard against the barrier with the goal a few cells beyond
+    // it, so the walk can get no closer than where it stands, the goal is
+    // never relaxed, and the A* runs out over the whole reachable component.
+    // One barrier is water, which a terrain reachability precheck can prove
+    // unreachable without searching; the other is wall units, which it cannot
+    // see. Running both says how much of the exhausted-search tail is terrain
+    // and how much is units, which is what decides the fix.
+    const bool pressedWater = scenario == "pressed-water";
+    const bool pressedWall = scenario == "pressed-wall";
+    const bool pressed = pressedWater || pressedWall;
+
+    GameSimulation sim(
+        pressedWater ? makeChannelTerrain(mapCells, 124, 8) : makeTerrain(mapCells),
+        0u,
+        0,
+        0);
     if (budget > 0)
     {
         sim.pathFindingService.expansionBudgetPerTick = budget;
@@ -188,44 +261,68 @@ int main(int argc, char** argv)
     auto script = makeEmptyScript();
     auto player = addPlayer(sim);
     sim.unitDefinitions["walker"] = makeWalkerDef();
+    sim.unitDefinitions["walker"].movementCollisionInfo = UnitDefinition::NamedMovementClass{registerWalkerClass(sim)};
     sim.unitDefinitions["wall"] = makeWallDef();
     std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
     sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
 
     BenchRandom rng(12345u);
 
-    // Three broken bands across the route rather than a scatter, so a
-    // crossing has to find a gap instead of drifting round one rock. Each
-    // band is a run of blocks with a few missing at random.
     int wallsPlaced = 0;
-    const int bandX[3] = {-700, 0, 700};
-    for (int band = 0; band < 3 && wallsPlaced < obstacleCount; ++band)
+    if (pressedWall)
     {
-        for (int z = -1400; z <= 1400 && wallsPlaced < obstacleCount; z += 96)
+        // A continuous north-south wall of wall units at world x 0, placed
+        // every 64 world units -- exactly the 4x4 footprint -- so no 2x2
+        // walker can squeeze through. It reaches the map edge at both ends,
+        // so there is no way round it either.
+        for (int z = -2048; z <= 2048; z += 64)
         {
-            // Roughly one block in six missing, which is the gap to find.
-            if (rng.between(0, 5) == 0)
-            {
-                continue;
-            }
-            auto x = SimScalar(static_cast<float>(bandX[band] + rng.between(-24, 24)));
-            if (spawn(sim, "wall", player, SimVector(x, 0_ss, SimScalar(static_cast<float>(z))), script))
+            if (spawn(sim, "wall", player, SimVector(0_ss, 0_ss, SimScalar(static_cast<float>(z))), script))
             {
                 ++wallsPlaced;
             }
         }
     }
+    else if (!pressed)
+    {
+        // Three broken bands across the route rather than a scatter, so a
+        // crossing has to find a gap instead of drifting round one rock. Each
+        // band is a run of blocks with a few missing at random.
+        const int bandX[3] = {-700, 0, 700};
+        for (int band = 0; band < 3 && wallsPlaced < obstacleCount; ++band)
+        {
+            for (int z = -1400; z <= 1400 && wallsPlaced < obstacleCount; z += 96)
+            {
+                // Roughly one block in six missing, which is the gap to find.
+                if (rng.between(0, 5) == 0)
+                {
+                    continue;
+                }
+                auto x = SimScalar(static_cast<float>(bandX[band] + rng.between(-24, 24)));
+                if (spawn(sim, "wall", player, SimVector(x, 0_ss, SimScalar(static_cast<float>(z))), script))
+                {
+                    ++wallsPlaced;
+                }
+            }
+        }
+    }
 
     // The walkers stand along the west edge, a clear footprint apart so that
-    // none of them is walled in by its neighbours, and all head east.
+    // none of them is walled in by its neighbours, and all head east. The
+    // pressed scenarios instead put a single rank hard against the barrier.
     std::vector<UnitId> walkers;
     walkers.reserve(static_cast<std::size_t>(unitCount));
     int placed = 0;
     const int columnHeight = 56;
+    const auto pressedX = SimScalar(static_cast<float>(pressedWater ? -80 : -64));
     for (int i = 0; placed < unitCount && i < unitCount * 8; ++i)
     {
-        auto x = -halfWorld + SimScalar(96.0f) + SimScalar(static_cast<float>((i / columnHeight) * spacing));
-        auto z = SimScalar(static_cast<float>(((i % columnHeight) - (columnHeight / 2)) * spacing));
+        auto x = pressed
+            ? pressedX
+            : -halfWorld + SimScalar(96.0f) + SimScalar(static_cast<float>((i / columnHeight) * spacing));
+        auto z = pressed
+            ? SimScalar(static_cast<float>((i - (unitCount / 2)) * spacing))
+            : SimScalar(static_cast<float>(((i % columnHeight) - (columnHeight / 2)) * spacing));
         if (auto id = spawn(sim, "walker", player, SimVector(x, 0_ss, z), script))
         {
             walkers.push_back(*id);
@@ -233,6 +330,7 @@ int main(int argc, char** argv)
         }
     }
 
+    std::cout << "scenario " << scenario << "\n";
     std::cout << "map " << mapCells << " cells, " << placed << " units, " << wallsPlaced << " obstacles\n";
     std::cout << "budget " << sim.pathFindingService.expansionBudgetPerTick
               << " expansions a tick, no per-search cap\n";
@@ -243,8 +341,17 @@ int main(int argc, char** argv)
     // real behaviour but not the one being measured here.
     for (std::size_t i = 0; i < walkers.size(); ++i)
     {
-        auto z = SimScalar(static_cast<float>((static_cast<int>(i % 56) - 28) * 48));
-        auto destination = SimVector(halfWorld - SimScalar(96.0f), 0_ss, z);
+        SimVector destination;
+        if (pressed)
+        {
+            // Directly across the barrier from where the unit stands.
+            destination = SimVector(SimScalar(96.0f), 0_ss, sim.getUnitState(walkers[i]).position.z);
+        }
+        else
+        {
+            auto z = SimScalar(static_cast<float>((static_cast<int>(i % 56) - 28) * 48));
+            destination = SimVector(halfWorld - SimScalar(96.0f), 0_ss, z);
+        }
         sim.getUnitState(walkers[i]).orders.push_back(MoveOrder(destination));
     }
 
@@ -275,6 +382,11 @@ int main(int argc, char** argv)
         {
             ++ticksWithFullQueue;
         }
+
+        if (logHashes)
+        {
+            std::cout << "hash " << tick << " " << sim.computeHash().value << "\n";
+        }
     }
 
     // How many actually arrived, and how many are still waiting on a route.
@@ -298,6 +410,7 @@ int main(int argc, char** argv)
     }
 
     std::cout << std::fixed << std::setprecision(2);
+    std::cout << "final hash " << sim.computeHash().value << "\n";
     std::cout << "ticks " << tickCount
               << "  mean tick " << (static_cast<double>(totalMicros) / tickCount / 1000.0) << " ms"
               << "  worst " << (static_cast<double>(worstMicros) / 1000.0) << " ms"
