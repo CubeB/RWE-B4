@@ -1745,12 +1745,10 @@ namespace rwe
     {
         auto mapNames = sceneContext.vfs->getFileNames("maps", ".ota");
 
-        // Keep only maps that have a multiplayer schema
         mapNames.erase(std::remove_if(mapNames.begin(), mapNames.end(), [this](const auto& e) { return !hasMultiplayerSchema(e); }), mapNames.end());
 
         for (auto& e : mapNames)
         {
-            // chop off the extension
             e.resize(e.size() - 4);
         }
 

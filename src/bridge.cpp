@@ -40,11 +40,9 @@ std::vector<std::pair<std::string, std::string>> getMapNames(rwe::CompositeVirtu
 
     for (auto& e : mapNames)
     {
-        // chop off the extension
         e.first.resize(e.first.size() - 4);
     }
 
-    // Keep only maps that have a multiplayer schema
     mapNames.erase(std::remove_if(mapNames.begin(), mapNames.end(), [&vfs](const auto& e) { return !hasMultiplayerSchema(vfs, e.second, e.first); }), mapNames.end());
 
     return mapNames;

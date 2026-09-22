@@ -135,7 +135,6 @@ namespace rwe
 
         auto sdlContext = sdlManager.getSdlContext();
 
-        // require a stencil buffer of some kind
         if (!sdlContext->glSetAttribute(SDL_GL_STENCIL_SIZE, 1))
         {
             throw std::runtime_error(SDL_GetError());
@@ -233,7 +232,6 @@ namespace rwe
 
         doGlewInit();
 
-        // log opengl context info
         LOG_INFO << "OpenGL version: " << glGetString(GL_VERSION);
         LOG_INFO << "OpenGL vendor: " << glGetString(GL_VENDOR);
         LOG_INFO << "OpenGL renderer: " << glGetString(GL_RENDERER);
@@ -296,10 +294,8 @@ namespace rwe
         audioService.setMusicVolume(static_cast<float>(globalConfig.musicVolume) / 100.0f);
         audioService.setMusicEnabled(globalConfig.musicEnabled);
         audioService.setSoundEnabled(globalConfig.soundMode != 0);
-        // Allocate a pool of tracks for sound playback
         audioService.allocateTracks(256);
 
-        // load sound definitions
         LOG_INFO << "Loading global sound definitions";
         auto allSoundBytes = vfs.readFile("gamedata/ALLSOUND.TDF");
         if (!allSoundBytes)

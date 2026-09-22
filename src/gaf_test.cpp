@@ -102,7 +102,6 @@ public:
 
     void frameLayer(const LayerData& data) override
     {
-        // copy the layer onto the frame
         for (std::size_t y = 0; y < data.height; ++y)
         {
             for (std::size_t x = 0; x < data.width; ++x)

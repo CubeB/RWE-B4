@@ -195,7 +195,6 @@ namespace rwe
 
     void LoadingNetworkService::startListening()
     {
-        // go back to waiting for the next message
         socket.async_receive_from(
             asio::buffer(receiveBuffer.data(), receiveBuffer.size()),
             currentRemoteEndpoint,

@@ -150,7 +150,6 @@ namespace rwe
 
         vfs.emplaceFileSystem<DirectoryFileSystem>(searchPath);
 
-        // scan for HPIs to add
         for (auto it = hpiExtensions.rbegin(); it != hpiExtensions.rend(); ++it)
         {
             addHpisWithExtension(vfs, searchPath, *it);

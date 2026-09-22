@@ -273,7 +273,6 @@ namespace rwe
 
         std::vector<FrameInfo> frames;
 
-        // load all the textures into memory
         for (const auto& gafName : gafs)
         {
             // skip team-color textures -- we'll handle these separately
@@ -299,7 +298,6 @@ namespace rwe
             }
         }
 
-        // figure out how to pack the textures into an atlas
         std::vector<AtlasItem> frameRefs;
         frameRefs.reserve(frames.size());
         for (auto& f : frames)
@@ -333,7 +331,6 @@ namespace rwe
                 });
         });
 
-        // pack the textures
         Grid<Color> atlas(packInfo.width, packInfo.height);
         Grid<unsigned char> indexAtlas(packInfo.width, packInfo.height);
         std::unordered_map<std::string, Rectangle2f> atlasMap;

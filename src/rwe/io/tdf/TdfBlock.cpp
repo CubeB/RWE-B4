@@ -97,7 +97,6 @@ namespace rwe
 
     std::optional<std::reference_wrapper<const TdfBlock>> TdfBlock::findBlock(const std::string& name) const
     {
-        // find the key in the block
         auto it = blocks.find(name);
         if (it == blocks.end())
         {
@@ -109,7 +108,6 @@ namespace rwe
 
     std::optional<std::reference_wrapper<const std::string>> TdfBlock::findValue(const std::string& name) const
     {
-        // find the key in the block
         auto it = properties.find(name);
         if (it == properties.end())
         {

@@ -138,7 +138,6 @@ namespace rwe
 
     int AudioService::findFreeTrack()
     {
-        // Search unreserved tracks for a free one
         for (unsigned int i = reservedCount; i < tracks.size(); ++i)
         {
             if (!sdlMixerContext->trackPlaying(tracks[i].get()))

@@ -106,7 +106,6 @@ namespace rwe
 
         std::vector<FrameInfo> frames;
 
-        // load all the textures into memory
         for (const auto& gafName : gafs)
         {
             auto bytes = vfs->readFile("textures/" + gafName);
@@ -125,7 +124,6 @@ namespace rwe
             }
         }
 
-        // figure out how to pack the textures into an atlas
         std::vector<FrameInfo*> frameRefs;
         frameRefs.reserve(frames.size());
         for (auto& f : frames)
@@ -139,7 +137,6 @@ namespace rwe
             return Size(roundUpToPowerOfTwo(f->data.getWidth()), roundUpToPowerOfTwo(f->data.getHeight()));
         });
 
-        // pack the textures
         Grid<Color> atlas(packInfo.width, packInfo.height);
         std::unordered_map<FrameId, Rectangle2f> atlasMap;
 

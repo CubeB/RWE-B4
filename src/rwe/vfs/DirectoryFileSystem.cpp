@@ -144,7 +144,6 @@ namespace rwe
             const auto& e = *it;
             if (e.status().type() == fs::file_type::directory)
             {
-                // recurse into directory
                 auto innerDirectoryName = e.path().filename();
                 auto innerPath = fs::path(directory) / innerDirectoryName;
                 auto innerEntries = getFileNamesRecursive(innerPath.string(), extension);
