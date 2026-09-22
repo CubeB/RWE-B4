@@ -1,4 +1,5 @@
 #include "UnitPathFinder.h"
+#include <algorithm>
 
 namespace rwe
 {
@@ -25,7 +26,12 @@ namespace rwe
 
     void UnitPathFinder::setAcceptableDistance(unsigned int distance)
     {
-        acceptableDistance = distance;
+        // The loosest of whatever is asked for, because two things now ask.
+        // beginSearch relaxes a goal something is standing on to "next to
+        // it", and the first pass then relaxes it again to whatever it could
+        // actually walk to; taking the last would let the second TIGHTEN the
+        // first and put the exhaustive search back.
+        acceptableDistance = std::max(acceptableDistance, distance);
     }
 
     bool UnitPathFinder::isGoal(const Point& vertex)

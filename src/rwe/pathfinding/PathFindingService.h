@@ -40,6 +40,34 @@ namespace rwe
         bool relaxGoalWithFirstPass{true};
 
         /**
+         * Whether a goal something is already standing on is relaxed, before
+         * the search starts, to the nearest cell the unit could stand on.
+         *
+         * On, and a constant of the build for the reason the other two are:
+         * two peers disagreeing about it would path differently. It is a
+         * member only so that path_bench can measure with and without it.
+         *
+         * See beginSearch for what it is worth and why. Off restores the
+         * behaviour where such a search runs to exhaustion unless the first
+         * pass happens to rescue it.
+         */
+        bool relaxBlockedGoal{true};
+
+        /**
+         * How far out from a blocked goal to look for a cell the unit could
+         * actually stand on, in grid cells.
+         *
+         * Eight, which is a crowd about seventeen cells across -- big enough
+         * for the ring of units that gathers round an attack target, small
+         * enough that the look costs at most a few hundred footprint tests
+         * against a search that would otherwise cost tens of thousands of
+         * expansions. Nothing standable inside it leaves the goal alone.
+         * A constant of the build; a member so path_bench can sweep it.
+         */
+        int blockedGoalSearchRadius{8};
+
+
+        /**
          * Diagnostics for `path_bench`, and for nothing else: they are only
          * counted, never read by the simulation, so they cannot change an
          * outcome and are neither saved nor hashed.
@@ -72,6 +100,27 @@ namespace rwe
             long long ticksWithQueue{0};
             /** The deepest the queue has been. */
             long long maxQueue{0};
+            /**
+             * Expansions spent on searches that found nothing -- every
+             * reachable cell looked at, no route there.
+             *
+             * Beside the total, this is what says whether a saturated budget
+             * is the cost of routing an army or the cost of a handful of
+             * units asking for somewhere they cannot get to. Those are
+             * different faults with different fixes, and the totals alone
+             * cannot tell them apart.
+             */
+            long long expansionsExhausted{0};
+            /** And expansions thrown away when a goal moved mid-search. */
+            long long expansionsAbandoned{0};
+            /** The worst single search, which is what sets the worst wait. */
+            long long maxSearchExpansions{0};
+            /** Searches begun with something standing on the goal cell. */
+            long long searchesGoalBlocked{0};
+            /** Of those, the ones given a standable cell to aim at instead. */
+            long long searchesGoalRelaxed{0};
+            /** Searches where the first pass could not improve on the start at all. */
+            long long searchesWalkStuck{0};
         };
         Counters counters;
 

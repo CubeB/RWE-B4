@@ -11,6 +11,51 @@
 
 namespace rwe
 {
+    namespace
+    {
+        /**
+         * The nearest cell to `goal` that this unit could stand on, as an
+         * octileDistanceScore from the goal, looking no further than
+         * `radius` cells.
+         *
+         * Rings outward, so the first hit is the nearest. Empty when there
+         * is nothing standable inside the radius, which leaves the goal
+         * exactly as it was.
+         */
+        std::optional<unsigned int> nearestStandableScore(const AbstractUnitPathFinder& finder, const Point& goal, int radius)
+        {
+            for (int r = 1; r <= radius; ++r)
+            {
+                std::optional<unsigned int> best;
+                for (int dy = -r; dy <= r; ++dy)
+                {
+                    for (int dx = -r; dx <= r; ++dx)
+                    {
+                        if (std::max(std::abs(dx), std::abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        Point p(goal.x + dx, goal.y + dy);
+                        if (!finder.isWalkableOutsideSearch(p))
+                        {
+                            continue;
+                        }
+                        auto score = octileDistanceScore(p, goal);
+                        if (!best || score < *best)
+                        {
+                            best = score;
+                        }
+                    }
+                }
+                if (best)
+                {
+                    return best;
+                }
+            }
+            return std::nullopt;
+        }
+    }
+
     /**
      * A search that has been started and may not have finished.
      *
@@ -31,6 +76,8 @@ namespace rwe
         /** The footprint the search started from, which sizes its waypoints. */
         DiscreteRect start;
         Point goal;
+        /** What this search has cost so far, for the attribution counters. */
+        long long expansions{0};
         std::unique_ptr<AbstractUnitPathFinder> pathFinder;
     };
 
@@ -69,6 +116,7 @@ namespace rwe
         // The goal moved, or the unit stopped moving: the search in flight has
         // nothing to say. Throw it away now rather than leaving a stale search
         // for a save to write down or update() to discover.
+        counters.expansionsAbandoned += activeSearch->expansions;
         abandonSearch();
         ++counters.searchesAbandoned;
         return false;
@@ -137,6 +185,7 @@ namespace rwe
                     : nullptr;
                 if (movingState == nullptr || movingState->pathDestination != activeSearch->destination)
                 {
+                    counters.expansionsAbandoned += activeSearch->expansions;
                     abandonSearch();
                     ++counters.searchesAbandoned;
                     continue;
@@ -172,6 +221,7 @@ namespace rwe
             auto expansions = activeSearch->pathFinder->stepSearch(static_cast<unsigned int>(remainingBudget));
             remainingBudget -= static_cast<int>(expansions);
             counters.expansions += static_cast<long long>(expansions);
+            activeSearch->expansions += static_cast<long long>(expansions);
 
             if (!activeSearch->pathFinder->isSearchFinished())
             {
@@ -185,7 +235,13 @@ namespace rwe
 
             assert(!requests.empty() && requests.front().unitId == activeSearch->unitId);
 
+            counters.maxSearchExpansions = std::max(counters.maxSearchExpansions, activeSearch->expansions);
+
             auto path = finishSearch(simulation);
+            if (path.destinationUnreachable)
+            {
+                counters.expansionsExhausted += activeSearch->expansions;
+            }
 
             auto& unit = simulation.getUnitState(activeSearch->unitId);
             auto movingState = std::get_if<NavigationStateMoving>(&unit.navigationState.state);
@@ -242,6 +298,11 @@ namespace rwe
                  << " exhausted=" << (counters.searchesExhausted - last.searchesExhausted)
                  << " relaxed=" << (counters.searchesRelaxed - last.searchesRelaxed)
                  << " bugwalk=" << (counters.bugWalkSteps - last.bugWalkSteps)
+                 << " wasted=" << (counters.expansionsExhausted - last.expansionsExhausted) << "+" << (counters.expansionsAbandoned - last.expansionsAbandoned)
+                 << " worst=" << counters.maxSearchExpansions
+                 << " goalblocked=" << (counters.searchesGoalBlocked - last.searchesGoalBlocked)
+                 << "/" << (counters.searchesGoalRelaxed - last.searchesGoalRelaxed)
+                 << " walkstuck=" << (counters.searchesWalkStuck - last.searchesWalkStuck)
                  << " queued/tick=" << (ticks > 0 ? static_cast<double>(deferred) / static_cast<double>(ticks) : 0.0)
                  << " ticks with a queue=" << waiting << "/" << ticks
                  << " deepest ever=" << counters.maxQueue;
@@ -271,6 +332,56 @@ namespace rwe
                 goal = Point(goalRegion.x, goalRegion.y);
 
                 auto finder = std::make_unique<UnitPathFinder>(&simulation, &simulation.movementClassCollisionService, unitId, movementClassId, start.width, start.height, goal, &scratch);
+                // Something is standing on the goal, so the goal is not a
+                // cell this unit can ever occupy, and asking A* for it is
+                // asking it to prove a negative over the whole map.
+                //
+                // Nine searches in ten are this, measured on Crystal Maze --
+                // an attack order paths to the cell the target is standing
+                // on, and a move order onto a building or into a crowd is
+                // the same shape. Most were rescued by the first pass below,
+                // which relaxes the goal to whatever it could walk to; the
+                // ones it could not rescue ran to exhaustion, and though
+                // they were only 15% of searches they were 78% of every
+                // expansion the budget ever spent. One of them closed 80716
+                // vertices, which is twenty ticks of the whole budget for
+                // one unit, with every other unit waiting behind it.
+                //
+                // So the goal is relaxed up front rather than left to the
+                // first pass, and to the nearest cell the unit could
+                // actually STAND on rather than simply to the neighbours:
+                // when a crowd has gathered round the target the ring is
+                // blocked too, and relaxing by one cell rescues nothing. A
+                // few hundred footprint tests outward from the goal find the
+                // edge of whatever is in the way, however big it is.
+                //
+                // It is not a cap and nothing is truncated -- TOTALA-EXE.md
+                // S:87 -- it is a goal the unit can reach in place of one it
+                // cannot, so the search still returns the shortest route to
+                // it. That is what makes it safe where a limit on the work
+                // would not be: a search that must go the long way round a
+                // wall is untouched, because it was never the goal test that
+                // was holding it up.
+                //
+                // Measured in path_bench's crowded case (--units 200 --crowd
+                // 1 --spacing 16), off against on: 105 -> 115 units arrived,
+                // 13777 -> 3520 expansions a search, 160 -> 116 searches run
+                // to exhaustion, and the request queue cleared on 184 more
+                // ticks of the 900. The two configurations where the goal is
+                // NOT blocked come out byte-identical, which is the other
+                // half of what wanted showing.
+                if (!finder->isWalkableOutsideSearch(goal))
+                {
+                    ++counters.searchesGoalBlocked;
+                    if (relaxBlockedGoal)
+                    {
+                        if (auto reachable = nearestStandableScore(*finder, goal, blockedGoalSearchRadius))
+                        {
+                            finder->setAcceptableDistance(*reachable);
+                            ++counters.searchesGoalRelaxed;
+                        }
+                    }
+                }
 
                 // The cheap first pass runs before the search is seeded: it
                 // asks about cells outside a search on purpose, and seeding
@@ -289,7 +400,7 @@ namespace rwe
                 pathFinder = std::move(finder);
             });
 
-        activeSearch = std::unique_ptr<ActiveSearch>(new ActiveSearch{unitId, destination, start, goal, std::move(pathFinder)});
+        activeSearch = std::unique_ptr<ActiveSearch>(new ActiveSearch{unitId, destination, start, goal, 0, std::move(pathFinder)});
     }
 
     UnitPath PathFindingService::finishSearch(const GameSimulation& simulation)
@@ -345,7 +456,13 @@ namespace rwe
 
         // A point destination is walked to exactly, not to the middle of the
         // cell it happens to sit in. A rect destination has no such point.
-        if (!unreachable)
+        //
+        // Only when the search really finished on the goal cell, though. A
+        // relaxed goal finishes NEXT to it -- which is the whole point of
+        // relaxing it -- and snapping the last waypoint onto the destination
+        // would send the unit walking into the thing standing there after
+        // all, which is the scraping this was meant to stop.
+        if (!unreachable && simplifiedPath.back() == search.goal)
         {
             if (const auto* position = std::get_if<SimVector>(&search.destination))
             {
@@ -384,6 +501,7 @@ namespace rwe
         auto reachable = octileDistanceScore(result.closest, goal);
         if (reachable == 0 || reachable >= octileDistanceScore(start, goal))
         {
+            ++counters.searchesWalkStuck;
             // Either it is standing on the answer already, or the walk got
             // nowhere and has nothing to offer. Let the search do what it
             // did before.

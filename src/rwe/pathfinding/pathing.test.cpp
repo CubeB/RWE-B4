@@ -4,6 +4,7 @@
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/pathfinding/UnitPathFinder.h>
+#include <rwe/pathfinding/pathfinding_utils.h>
 #include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
@@ -230,6 +231,76 @@ namespace rwe
         for (const auto& p : result.path)
         {
             REQUIRE(p.y == 4);
+        }
+    }
+
+    TEST_CASE("a goal something is standing on is answered next to it", "[pathing]")
+    {
+        // Measured on Crystal Maze with RWE_PATH_PROFILE=1: nine path
+        // requests in ten aim at a cell something is standing on, because
+        // that is what an attack order is -- the goal resolves to the
+        // target's own position. A cell with a unit on it is not walkable,
+        // so A* can only answer by closing every cell it can reach, and
+        // although such searches were 15% of the total they spent 78% of
+        // every expansion the budget had.
+        //
+        // PathFindingService relaxes such a goal before the search starts,
+        // to the nearest cell the unit could actually stand on. It is a
+        // relaxation and not a cap: the search still returns the shortest
+        // route to the relaxed goal, so nothing that merely takes a long
+        // time is cut short.
+        //
+        // This exercises the pathfinder half of it -- what setAcceptableDistance
+        // does to a blocked goal -- since the service's own gate is not
+        // reachable from here.
+        auto script = makeEmptyCobScript();
+
+        SECTION("without the relaxation the search closes the reachable map")
+        {
+            GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+            auto player = addPlayer(sim);
+            auto wall = addWallDef(sim);
+            auto tankId = addTank(sim, player, 2, 32, script);
+            placeWall(sim, wall, 40, 32);
+
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, tankId, std::nullopt, 1u, 1u, Point(40, 32));
+            auto result = pathFinder.findPath(Point(2, 32));
+
+            // Nothing can stand where the wall is, so there is no route to
+            // the goal itself and the search has to prove it.
+            REQUIRE(result.type == AStarPathType::Partial);
+            REQUIRE(result.exhausted);
+            INFO("closed " << result.closedVertices.size());
+            REQUIRE(result.closedVertices.size() > 1000);
+        }
+
+        SECTION("relaxed to the cell beside it, the same walk is a short search")
+        {
+            GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+            auto player = addPlayer(sim);
+            auto wall = addWallDef(sim);
+            auto tankId = addTank(sim, player, 2, 32, script);
+            placeWall(sim, wall, 40, 32);
+
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, tankId, std::nullopt, 1u, 1u, Point(40, 32));
+            // Ten is one straight step, in the units octileDistanceScore
+            // counts in; this is what the service works out for itself by
+            // looking outward from the goal for somewhere standable.
+            pathFinder.setAcceptableDistance(10);
+            auto result = pathFinder.findPath(Point(2, 32));
+
+            REQUIRE(result.type == AStarPathType::Complete);
+            REQUIRE_FALSE(result.exhausted);
+            REQUIRE_FALSE(result.path.empty());
+
+            // It stops beside the wall rather than on it.
+            auto last = result.path.back();
+            CHECK(octileDistanceScore(last, Point(40, 32)) <= 10);
+            CHECK(last != Point(40, 32));
+
+            // And it cost a fraction of the sweep above.
+            INFO("closed " << result.closedVertices.size());
+            CHECK(result.closedVertices.size() < 1000);
         }
     }
 

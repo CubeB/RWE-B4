@@ -19,6 +19,12 @@
  * --budget and --cap override the compiled-in numbers so a sweep can be run
  * without rebuilding. Everything else about the simulation is fixed, so two
  * runs differing only in the budget are comparable.
+ *
+ * --crowd sends every unit at ONE point instead of spreading them down the
+ * far edge, and stands something on it from tick zero. That is the shape of
+ * nine real path requests in ten -- an attack order paths to the cell the
+ * target stands on -- and --no-relax-blocked turns off the relaxation that
+ * answers it, so the two together are the A/B.
  */
 
 #include <rwe/grid/Grid.h>
@@ -168,6 +174,8 @@ int main(int argc, char** argv)
     const int budget = argInt(argc, argv, "--budget", 0);
     const int obstacleCount = argInt(argc, argv, "--obstacles", 90);
     const int noRelax = argInt(argc, argv, "--no-relax", 0);
+    const int noRelaxBlocked = argInt(argc, argv, "--no-relax-blocked", 0);
+    const int crowd = argInt(argc, argv, "--crowd", 0);
     const int spacing = argInt(argc, argv, "--spacing", 48);
 
     // 256 heightmap cells is 4096 world units across -- about the size of a
@@ -183,6 +191,10 @@ int main(int argc, char** argv)
     if (noRelax != 0)
     {
         sim.pathFindingService.relaxGoalWithFirstPass = false;
+    }
+    if (noRelaxBlocked != 0)
+    {
+        sim.pathFindingService.relaxBlockedGoal = false;
     }
 
     auto script = makeEmptyScript();
@@ -239,11 +251,25 @@ int main(int argc, char** argv)
 
     // Spread the destinations down the east edge. Sending every unit at one
     // point means the first arrivals block the goal and everyone behind them
-    // searches the whole map to conclude it cannot be reached, which is a
-    // real behaviour but not the one being measured here.
+    // search the whole map to conclude it cannot be reached -- which is a
+    // real behaviour, and --crowd is how to measure it. It is also the
+    // ordinary case in a real game rather than a corner: nine path requests
+    // in ten on Crystal Maze aim at a cell something is standing on, because
+    // that is what an attack order is.
+    auto crowdPoint = SimVector(halfWorld - SimScalar(96.0f), 0_ss, 0_ss);
+    if (crowd != 0)
+    {
+        // Something standing ON the goal from tick zero, which is what makes
+        // this the attack-order case rather than merely a converging one:
+        // waiting for a walker to arrive and block it takes longer than the
+        // bench runs.
+        spawn(sim, "wall", player, crowdPoint, script);
+    }
     for (std::size_t i = 0; i < walkers.size(); ++i)
     {
-        auto z = SimScalar(static_cast<float>((static_cast<int>(i % 56) - 28) * 48));
+        auto z = crowd != 0
+            ? 0_ss
+            : SimScalar(static_cast<float>((static_cast<int>(i % 56) - 28) * 48));
         auto destination = SimVector(halfWorld - SimScalar(96.0f), 0_ss, z);
         sim.getUnitState(walkers[i]).orders.push_back(MoveOrder(destination));
     }
@@ -320,6 +346,18 @@ int main(int argc, char** argv)
         std::cout << "  mean " << (c.expansions / c.searches) << " per search";
     }
     std::cout << "\n";
+
+    // Where the expansions went, which the totals above cannot say. A budget
+    // spent routing an army and a budget spent proving a handful of goals
+    // unreachable look identical until they are split.
+    std::cout << "expansions: exhausted " << c.expansionsExhausted
+              << "  abandoned " << c.expansionsAbandoned
+              << "  worst single search " << c.maxSearchExpansions;
+    if (c.expansions > 0)
+    {
+        std::cout << "  (" << ((c.expansionsExhausted * 100) / c.expansions) << "% of all expansions found nothing)";
+    }
+    std::cout << std::endl;
 
     return 0;
 }

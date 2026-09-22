@@ -172,6 +172,51 @@ Everything else lives in a subject file. **The numbers never move**, so a
 Recorded so these do not get "fixed" back later by someone comparing against the
 original:
 
+- **A goal something is standing on is relaxed to the nearest cell the unit
+  could stand on.** The original aims a search at the goal cell and has no
+  notion of settling for somewhere beside it; RWE already relaxes a goal it
+  cannot reach, using the cheap first pass (§87), and this is the same idea
+  applied before the search rather than after the walk fails.
+
+  It is here because the case is not a corner. Measured on Crystal Maze with
+  `RWE_PATH_PROFILE=1`, **nine path requests in ten aim at a cell something is
+  standing on** — that is what an attack order is, since the goal resolves to
+  the target's own position, and a move order onto a building or into a crowd
+  has the same shape. A cell with a unit on it is not walkable, so A\* can only
+  answer by closing every cell it can reach: such searches were about 15% of
+  the total and spent **78% of every expansion the budget had**, the worst of
+  them closing 80716 vertices — twenty ticks of the whole budget for one unit,
+  with a hundred units queued behind it. The visible symptom was units scraping
+  along walls, because a unit whose search has not landed walks the
+  straight-line stand-in (`0x44F3F2`, §87) and a straight line into a maze wall
+  is a unit sliding along it.
+
+  Relaxing by a single cell is not enough: when a crowd has gathered round the
+  target the ring is blocked too. `PathFindingService::beginSearch` therefore
+  rings outward from the goal, up to `blockedGoalSearchRadius` (eight) cells,
+  for the nearest cell the unit could actually stand on, and accepts arrival
+  there. A few hundred footprint tests in place of tens of thousands of
+  expansions.
+
+  It relaxes the goal and caps nothing, which is what makes it safe: the
+  search still returns the shortest route to the relaxed goal, and a search
+  that must go the long way round a wall is untouched, because it was never
+  the goal test holding that up. A limit on the *work* was tried first and
+  rejected: "give up after N expansions without ever getting nearer the goal"
+  cannot tell "has not found the way round yet" from "there is no way round".
+  The case that killed it was one wall across a 64×64 map with the gap at one
+  end — a perfectly good route of 1534 vertices whose longest run without
+  getting any nearer was over a thousand, so every limit small enough to catch
+  a sealed goal also cut that route off at the wall. A relaxation has no such
+  failure mode, which is why it is the one that shipped.
+
+  Measured in `path_bench`'s crowded case (`--units 200 --crowd 1 --spacing
+  16`), off against on: **105 → 115 units arrived, 13777 → 3520 expansions a
+  search**, 160 → 116 searches run to exhaustion, and the request queue cleared
+  on 184 more ticks of 900. The two configurations where the goal is not
+  blocked come out byte-identical. `--no-relax-blocked` restores the original
+  behaviour.
+
 - **Detection is evaluated live, every tick.** The original answers "can this
   player see that unit" out of a snapshot: `0x40AA40` rebuilds each player's
   enemy list only every 30 ticks (`0x40AD20`), so a target can be up to a
