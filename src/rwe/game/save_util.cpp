@@ -218,10 +218,7 @@ namespace rwe
             json j = json::object();
             for (const auto& field : unitStateFieldTable())
             {
-                if (field.save)
-                {
-                    j[field.name] = field.save(u, ctx);
-                }
+                j[field.name] = std::visit([&](const auto& w) { return w.save(u, ctx); }, field.walks);
             }
             return j;
         }
@@ -237,10 +234,23 @@ namespace rwe
         {
             for (const auto& field : unitStateFieldTable())
             {
-                if (field.load)
+                if (std::holds_alternative<UnitStateFieldSaveOnly>(field.walks))
                 {
-                    field.load(j.at(field.name), u, ctx);
+                    continue;
                 }
+                const json value = (field.mayBeMissing && !j.contains(field.name))
+                    ? json()
+                    : j.at(field.name);
+                std::visit(
+                    [&](const auto& w)
+                    {
+                        using T = std::decay_t<decltype(w)>;
+                        if constexpr (!std::is_same_v<T, UnitStateFieldSaveOnly>)
+                        {
+                            w.load(value, u, ctx);
+                        }
+                    },
+                    field.walks);
             }
         }
 

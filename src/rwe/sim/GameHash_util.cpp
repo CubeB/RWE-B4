@@ -106,9 +106,9 @@ namespace rwe
         GameHash hash(0);
         for (const auto& field : unitStateFieldTable())
         {
-            if (field.hash)
+            if (const auto* h = std::get_if<UnitStateFieldHashed>(&field.walks))
             {
-                hash += field.hash(u);
+                hash += h->hash(u);
             }
         }
         return hash;
