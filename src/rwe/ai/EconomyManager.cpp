@@ -59,6 +59,21 @@ namespace rwe
                      << ", advanced constructor " << (bb.sideUnits.advancedConstructor.empty() ? "(none)" : bb.sideUnits.advancedConstructor)
                      << ", advanced assault " << (bb.sideUnits.advancedAssault.empty() ? "(none)" : bb.sideUnits.advancedAssault)
                      << ", level two is worth " << bb.advancedArmyValueRatio << "x level one per metal";
+            // And the air arm, for the same reason: the tier is reached
+            // through the air constructor's own third page rather than
+            // through the advanced lab, so "no advanced aircraft plant" can
+            // mean the data does not define one, or that nothing of ours can
+            // build one, and those want telling apart from a log.
+            LOG_INFO << "AI side " << player.side << " air: plant " << (bb.sideUnits.airPlant.empty() ? "(none)" : bb.sideUnits.airPlant)
+                     << ", constructor " << (bb.sideUnits.airConstructor.empty() ? "(none)" : bb.sideUnits.airConstructor)
+                     << ", advanced plant " << (bb.sideUnits.advancedAirPlant.empty() ? "(none)" : bb.sideUnits.advancedAirPlant)
+                     << ", gunship " << (bb.sideUnits.gunship.empty() ? "(none)" : bb.sideUnits.gunship)
+                     << ", repair pad " << (bb.sideUnits.airRepairPad.empty() ? "(none)" : bb.sideUnits.airRepairPad)
+                     << "; the advanced plant is buildable by the air constructor: "
+                     << (!bb.sideUnits.advancedAirPlant.empty() && !bb.sideUnits.airConstructor.empty()
+                                 && bb.buildTree.canBuild(bb.sideUnits.airConstructor, bb.sideUnits.advancedAirPlant)
+                             ? "yes"
+                             : "no");
         }
         bb.currentMetal = player.metal;
         bb.currentEnergy = player.energy;
