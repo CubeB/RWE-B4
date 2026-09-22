@@ -1,122 +1,102 @@
 # RWE: B4
 
-**Bot bot boom boom** — four B's, so B4 for short.
+> **Bot bot boom boom** — four B's, so B4 for short.
 
-A fork of [Robot War Engine](https://github.com/MHeasell/rwe) by
+A real-time strategy engine that plays Total Annihilation's own data as it
+ships. A fork of [Robot War Engine](https://github.com/MHeasell/rwe) by
 [Michael Heasell](https://github.com/MHeasell), which is a lovely bit of work.
-It reads Total Annihilation's own data as it ships — HPI archives, 3DO models,
-GAF sprites, TNT terrain, FBI and TDF definitions, and COB unit scripts running
-in a virtual machine written for them — runs a deterministic lockstep
-simulation in fixed-point maths so peers stay in sync across platforms, and
-builds its interface out of the game's own GUI files rather than by eye.
+
+[![Build](https://github.com/CubeB/RWE-B4/actions/workflows/build.yml/badge.svg?branch=revival)](https://github.com/CubeB/RWE-B4/actions/workflows/build.yml)
+[![Latest release](https://img.shields.io/github/v/release/CubeB/RWE-B4?include_prereleases&label=download)](https://github.com/CubeB/RWE-B4/releases)
+[![Upstream](https://img.shields.io/badge/upstream-MHeasell%2Frwe-lightgrey)](https://github.com/MHeasell/rwe)
+
+**[Download](#download) · [Install](#install) · [Controls](#controls) ·
+[Build](#build) · [Documentation](#documentation)**
+
+---
+
+## What it is
+
+The engine reads the original game's files directly — HPI archives, 3DO
+models, GAF sprites, TNT terrain, FBI and TDF definitions, and COB unit
+scripts running in a virtual machine written for them. It runs a deterministic
+lockstep simulation in fixed-point maths so peers stay in step across
+platforms, and it builds its interface out of the game's own GUI files rather
+than by eye.
+
+**No game data ships here.** You supply your own copy of Total Annihilation.
+
+## What is different in this fork
 
 B4 works on the layer above: taking behaviours the engine already reproduces
-and pinning them to what the original executable actually does. That is a long
-tail of small fidelity work, and it is the easy end of the problem — the
-foundation was already there.
+and pinning them to what the original executable actually does.
 
-448 commits ahead of upstream `master`, and the suite stands at **654 cases /
-72,613 assertions**, green on Debug and Release.
+Most of that work was **read out of `TotalA.exe` rather than guessed at**.
+`docs/TOTALA-EXE.md` indexes over a hundred numbered findings across thirteen
+subject documents — the flight model, fog of war and line of sight, the damage
+pipeline, target selection, the economy, the nanolathe, the interface,
+transports, the music system, and the renderer's own rasteriser — with the
+probe scripts that produced them in `tools/exe/`.
 
-## What is different here
-
-Most of the work is behavioural, and most of it was **read out of `TotalA.exe`
-rather than guessed at**. `docs/TOTALA-EXE.md` is a hundred and three sections of
-findings — the flight model, fog of war and line of sight, the damage pipeline,
-target selection, the economy, the nanolathe, the interface, transports, the
-music system, the renderer's own rasteriser — with the probe scripts that
-produced them in `tools/exe/`. Three companion documents cover the shaded
-rasteriser, wrecks, and how an attacking aircraft decides where to go.
-
-That method earns its keep by being checkable. Several plausible readings of
-that binary turn out to be wrong, and only replaying the arithmetic against
-real unit data catches them: the radar rule had a cap that made the altitude
-bonus dead code on every shipped unit, and the D-gun's trail turned out to be
-`noexplode` letting a round detonate without being consumed rather than
-anything to do with `beamweapon`.
+That method earns its keep by being checkable, because several plausible
+readings of that binary turn out to be wrong. Only replaying the arithmetic
+against real unit data catches them: the radar rule had a cap that made the
+altitude bonus dead code on every shipped unit, and the D-gun's trail turned
+out to be `noexplode` letting a round detonate without being consumed, rather
+than anything to do with `beamweapon`.
 
 Beyond that:
 
-- **Full save and load.** The whole simulation round-trips — units with their
-  COB virtual machines mid-thought, projectiles mid-flight, spreading fires,
-  the economy, the RNG — proven by a hash harness rather than by inspection.
-- **A skirmish AI** that runs inside the deterministic tick and emits ordinary
-  player commands.
-- **The front end**: the movies (the GOG release ships them as `.ZRB`, which
-  are Smacker files — RWE grew its own decoder), situational music on the
-  original's own thresholds, the in-game menus, options, and window modes.
-- **Performance.** Eight hundred units went from 8 fps to 36 by measuring the
-  simulation rather than the renderer, and then from 36 to the 60 Hz vsync cap
-  by profiling the frame. Both passes are documented with the numbers, because
-  in both of them the obvious suspect was the wrong one.
-
-`docs/index.html` is the full status page and `docs/ROADMAP.md` the plan.
-`CLAUDE.md` is the working guide to the codebase and its hazards.
-
-## Credit
-
-Robot War Engine is by [Michael Heasell](https://github.com/MHeasell) and its
-contributors — the engine, the format parsers, the COB virtual machine and the
-deterministic simulation all come from there. Worth a look:
-<https://github.com/MHeasell/rwe>
-
-Total Annihilation is Cavedog Entertainment's. This fork ships no game data
-— you supply your own.
-
-## Build Status
-
-[![GitHub Build Status](https://github.com/CubeB/RWE-B4/actions/workflows/build.yml/badge.svg?branch=revival)](https://github.com/CubeB/RWE-B4/actions/workflows/build.yml)
+| | |
+|---|---|
+| **Full save and load** | The whole simulation round-trips — units with their COB virtual machines mid-thought, projectiles mid-flight, spreading fires, the economy, the RNG — proven by a hash harness rather than by inspection. |
+| **A skirmish AI** | Runs inside the deterministic tick and emits ordinary player commands, so it is part of the simulation rather than bolted beside it. |
+| **The front end** | The movies (the GOG release ships them as `.ZRB`, which are Smacker files — RWE grew its own decoder), situational music on the original's own thresholds, the in-game menus, options and window modes. |
+| **Performance** | Eight hundred units went from 8 fps to 36 by measuring the simulation rather than the renderer, then from 36 to the 60 Hz vsync cap by profiling the frame. Both passes are documented with the numbers, because in both the obvious suspect was the wrong one. |
 
 ## Download
 
-Pre-release builds live on the releases page:
+Pre-release builds are on the [releases
+page](https://github.com/CubeB/RWE-B4/releases). Every tag carries a Windows
+installer, a Windows zip and a Linux AppImage.
 
-https://github.com/CubeB/RWE-B4/releases
+They are pre-releases in the plain sense: cut from `revival` when a tag goes
+up, rather than off a stable line. Take them as somewhere between the roadmap
+and a finished game.
 
-Every tag there carries three things: a Windows installer, a Windows zip and a
-Linux AppImage. They are pre-releases in the plain sense of the word — cut from
-`revival` when a tag goes up rather than off a stable line — so take them as
-somewhere between the roadmap and a finished game. Either way you supply your
-own copy of Total Annihilation; see below.
-
-Building from source is the other route, and the MSYS2/MinGW64 one is what this
-fork is developed and tested against daily; CI covers Linux (gcc/clang) and
-Windows (MSVC and MinGW64) in both Debug and Release.
-
-Source code:
-
-https://github.com/CubeB/RWE-B4
-
-Upstream:
-
-https://github.com/MHeasell/rwe
-
-## How to Install
+## Install
 
 You need your own copy of Total Annihilation. Then:
 
-    rwe_setup
-    rwe
+```
+rwe_setup
+rwe
+```
 
 `rwe_setup` finds the installation, copies the archives, the films and the
-soundtrack into the data directory the engine reads, and tells you what it did.
-It looks in the GOG and Cavedog registry entries and the usual install
-locations; if it cannot find yours, point it at the directory holding
+soundtrack into the data directory the engine reads, and tells you what it
+did. It looks in the GOG and Cavedog registry entries and the usual install
+locations. If it cannot find yours, point it at the directory holding
 `totala1.hpi`:
 
-    rwe_setup --from "C:/GOG Games/Total Annihilation"
+```
+rwe_setup --from "C:/GOG Games/Total Annihilation"
+```
 
-Useful flags: `--dry-run` says what it would do and changes nothing; `--link`
-hard-links instead of copying, which is instant and saves about a gigabyte when
-the data and the installation are on one volume; `--to <path>` writes somewhere
-other than the default. Running it twice is safe — it copies only what is
-missing or half-written.
+| Flag | What it does |
+|---|---|
+| `--dry-run` | Says what it would do and changes nothing. |
+| `--link` | Hard-links instead of copying — instant, and saves about a gigabyte when the data and the installation share a volume. |
+| `--to <path>` | Writes somewhere other than the default. |
 
-Start the game with `rwe`. If the data is missing it will say so and point you
-back here rather than failing with a filesystem error.
+Running it twice is safe: it copies only what is missing or half-written.
+Start the game with `rwe`. If the data is missing it says so and points you
+back here, rather than failing with a filesystem error.
 
 <details>
-<summary>What it does, if you would rather do it by hand</summary>
+<summary><b>What it does, if you would rather do it by hand</b></summary>
+
+<br>
 
 The engine reads one data directory — `%AppData%/RWE/Data` on Windows,
 `$HOME/.rwe/Data` elsewhere — and mounts every `.hpi`, `.ufo`, `.ccx`, `.gpf`
@@ -131,291 +111,260 @@ under its own `Data` folder, and `music` for the soundtrack. So:
 The lookups are case-insensitive, so the mixed casing the GOG release ships
 (`1.ZRB` beside `2.zrb`) needs no renaming.
 
+```bash
+mkdir -p "$HOME/.rwe/Data/movies" "$HOME/.rwe/Data/music"
+cp /path/to/totala/*.hpi /path/to/totala/*.ufo /path/to/totala/*.ccx \
+   /path/to/totala/*.gpf /path/to/totala/*.gp3 "$HOME/.rwe/Data"
+cp /path/to/totala/Data/*.[zZ][rR][bB] "$HOME/.rwe/Data/movies"
+cp /path/to/totala/music/*.mp3 "$HOME/.rwe/Data/music"
+```
+
+`rwe --data-path <dir>` overrides the location at runtime.
+
 </details>
 
-## How to Play
+## Controls
 
-General:
-- Scroll through the map using the arrow keys (UP, DOWN, LEFT, RIGHT).
+**Camera and game**
 
-Units:
-- Left click to select units.
-- Right click to move units to the clicked area on the map.
-- To deselect units, left click on the map itself, off the unit.
-- To attack, with the unit selected, press A and select where to attack.
-- To stop units attacking, select them and press S.
+| Key | Action |
+|---|---|
+| Arrow keys | Scroll the map |
+| `+` / `-` (or keypad) | Game speed |
+| `Pause` | Pause |
+| `Tab` or `F2` | Game menu |
+| `Esc` | Close the menu, else cancel the cursor mode, else deselect |
+| `T` | Track the selection |
+| `` ` `` | Health bars |
 
-Debugging:
-- To show the global debug menu, press F11.
-  This contains debugging options that are relevant globally,
-  regardless of whether the engine is in-game or in a menu.
-- To show the in-game debug menu, press F10.
-  This can only be done while loaded into a game.
-  This contains debugging options specific to the in-game world
-  such as spawning units.
+**Units**
 
-## Development Status
+| Key | Action |
+|---|---|
+| Left click | Select. Right click to move. |
+| `Ctrl`+`A` | Select everything on screen |
+| `Ctrl`+`S` | Stop |
+| `Ctrl`+`F` | Attack mode |
+| `Ctrl`+`Z` | Attack-ground mode |
+| `Ctrl`+`W` | Guard mode |
+| `Ctrl`+`P` | Move mode |
+| `Ctrl`+`D` | Self-destruct |
+| `Ctrl`+`C` | Select and track the commander |
+| `Ctrl`+digit | Bind a control group |
+| digit | Recall a group (`0` is the tenth) |
+| `Shift`+digit | Add the selection to a group |
 
-This fork's status page is `docs/index.html` — what has been added since the
-last upstream update, the roadmap, and what is still to do. The findings that
-drive the behavioural work are in `docs/TOTALA-EXE.md`.
+**Debug**
 
-Upstream posts its own progress updates to a thread on the TAUniverse forums:
+| Key | Action |
+|---|---|
+| `F1` | Help overlay |
+| `F10` | In-game debug window — spawning units and the like, in a loaded game |
+| `F11` | Global debug window, in or out of a game |
 
-http://www.tauniverse.com/forum/showthread.php?t=45555
+`docs/TOTALA-EXE-KEYBOARD.md` has what the original binds and where RWE still
+differs.
 
-## How to Build
-
-First fetch the source code:
-
-    git clone https://github.com/CubeB/RWE-B4.git
-    cd RWE-B4
-    git submodule update --init --recursive
-
-### Windows with Visual Studio
-
-Get the RWE MSVC libraries bundle.
-A python 3 script is provided that will do this for you:
-
-    cd /path/to/rwe
-    python ./fetch-msvc-libs.py
-
-Alternatively you can double-click the script in Explorer
-and it should run that way.
-
-If the script completes successfully you should have a `libs/_msvc` folder containing various library files.
-
-Now open Visual Studio 2017, go to `File > Open > CMake...`
-and select the `CMakeLists.txt` in the `rwe` folder.
-Choose `x64-Debug` in the build configuration dropdown.
-Finally, go to `CMake > Debug from Build Folder > rwe.exe`
-to build and launch RWE.
-
-### Windows with MSYS2
-
-Download and install MSYS2 (http://www.msys2.org/)
-
-Choose to run at the end of install, and in the terminal that opens install the required packages:
-
-    pacman -S git make unzip mingw-w64-x86_64-cmake mingw-w64-x86_64-toolchain
-    pacman -S \
-      mingw-w64-x86_64-SDL2 \
-      mingw-w64-x86_64-SDL2_image \
-      mingw-w64-x86_64-SDL2_mixer \
-      mingw-w64-x86_64-glew \
-      mingw-w64-x86_64-smpeg2 \
-      mingw-w64-x86_64-zlib \
-      mingw-w64-x86_64-libpng
-
-Close the terminal, and open the `MSYS2 MinGW64` terminal
-(a shortcut should be in the start menu under MSYS2 - the default install points to C:\msys64\mingw64.exe starting in C:\msys64 directory)
-
-Compile protobuf:
-
-    cd /path/to/rwe
-    cd libs
-    ./build-protobuf.sh
-
-Generate and build the project:
-
-    cd /path/to/rwe
-    mkdir build
-    cd build
-    cmake .. -G 'Unix Makefiles'
-    make
-
-Once built, launch RWE from the top-level directory:
-
-    cd /path/to/rwe
-    build/rwe.exe
-
-### Windows with Visual Studio Code
-Install Visual Studio Code, and open it. Under extensions, search for C/C++, and install the C/C++ Extension Pack from Microsoft, which includes CMake Tools and C/C++ development extensions. Now VS Code should be able to recognize C/C++ and compilers, and understand the CMake build configuration used by RWE.
-
-#### Open the project in VS Code:
-File > Open Folder, choose the root directory of the RWE repository (where CMakeLists.txt is). At the bottom of the VS Code window you should see CMake: [Debug]: Ready and probably No Kit Selected. Click No Kit Selected to choose which compiler to use. VS Code should auto-detect compilers on your machine, so if none are listed here, install Visual Studio or MSYS2 first and try again.
-Once a toolset is selected, CMake will configure itself for the project, with its output in the OUTPUT window. When that's done, you should be able to build by clicking the Build button there on the bottom or hit F7.
-
-### Linux/macOS
-You can build without TA game assets, but to run the game rwe will need to know where they are.
-rwe looks in $HOME/.rwe/Data by default. 
-> After building, you can also override it at runtime, e.g. `./rwe --data-path "$HOME/src/TA/Total Annihilation"`
-
-To fill in the default data directory, build `rwe_setup` alongside the engine
-and run it — it handles the films and the soundtrack as well as the archives,
-which a plain `cp` of the archives does not:
+## Build
 
 ```bash
-./rwe_setup --from "/path/to/totala"
+git clone https://github.com/CubeB/RWE-B4.git
+cd RWE-B4
+git submodule update --init --recursive
 ```
 
-Or do it by hand, remembering that `movies/` and `music/` are read by name:
+SDL3 and its mixer are vendored as submodules and built with the project, so
+there are no SDL packages to install.
+
+CI covers Linux (gcc-14, clang-18), Windows MSVC 2026 and Windows MinGW64, in
+both Debug and Release. **MSYS2/MinGW64 is what this fork is developed and
+tested against daily.**
+
+<details>
+<summary><b>Windows — MSYS2 / MinGW64</b> (the recommended route)</summary>
+
+<br>
+
+Install [MSYS2](https://www.msys2.org/), then in the terminal it opens:
 
 ```bash
-mkdir -p $HOME/.rwe/Data
-cp /path/to/totala/*.hpi /path/to/totala/*.ufo /path/to/totala/*.ccx \
-   /path/to/totala/*.gpf /path/to/totala/*.gp3 $HOME/.rwe/Data
-mkdir -p $HOME/.rwe/Data/movies $HOME/.rwe/Data/music
-cp /path/to/totala/Data/*.[zZ][rR][bB] $HOME/.rwe/Data/movies
-cp /path/to/totala/music/*.mp3 $HOME/.rwe/Data/music
+pacman -S git make unzip autoconf automake libtool \
+  mingw-w64-x86_64-cmake \
+  mingw-w64-x86_64-toolchain \
+  mingw-w64-x86_64-glew \
+  mingw-w64-x86_64-zlib \
+  mingw-w64-x86_64-libpng
 ```
 
-#### Devbox
-The easiest way to get a working build environment is with [Devbox](https://www.jetify.com/devbox),
-which uses Nix to provide dependencies automatically.
+Close it, and open the **MSYS2 MinGW64** terminal (start menu, under MSYS2).
+Build protobuf once:
+
 ```bash
-curl -fsSL https://get.jetify.com/devbox | bash # installs devbox (one-time)
-# From the rwe repo base dir:
-devbox shell  # Enters the dev environment - uses devbox.json to pull in dependencies. May take a while the first time.
+cd /path/to/rwe/libs && ./build-protobuf.sh
+```
+
+Then the project:
+
+```bash
+cd /path/to/rwe
 mkdir build && cd build
 cmake .. -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=Debug
-make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)  # -j isn't necessary, but builds with multiple threads and will reduce build time
-./rwe_test # run tests, of course
-# run the game- this should work for MacOS, tho in Linux the devbox/nix build may have a quirk that gives you OpenGL related errors on launch
-./rwe
-# If you see "Could not get EGL display" or other OpenGL related errors on launch, try this instead of `./rwe`
-# This script just runs rwe with LD_LIBRARY_PATH set to a good guess of which dirs your video drivers exist in.
-./run.sh
+make -j$(nproc)
 ```
 
+Run it from the top level: `build/rwe.exe`. Tests: `build/rwe_test`.
 
-#### Ubuntu
-> Note: these steps may be a bit out of date, but the Devbox build above should work fine on Ubuntu.
-> If you want a native build environment, take a look at devbox.json to get an idea of the dependencies required.
-Install the necessary packages:
+</details>
 
-    sudo add-apt-repository ppa:ubuntu-toolchain-r/test
-    sudo apt-get update
-    sudo apt-get install \
-      gcc-7 \
-      g++-7 \
-      libsdl2-dev \
-      libsdl2-image-dev \
-      libsdl2-mixer-dev \
-      libglew-dev \
-      zlib1g-dev \
-      libpng-dev
+<details>
+<summary><b>Windows — Visual Studio</b></summary>
 
-Ensure you have a recent version of CMake (3.8+).
-The one provided by your package manager may not be new enough.
-Here's how you might install CMake:
+<br>
 
-    wget 'https://cmake.org/files/v3.8/cmake-3.8.2-Linux-x86_64.tar.gz'
-    tar -xf cmake-3.8.2-Linux-x86_64.tar.gz
-    export CMAKE_MODULE_PATH=$(pwd)/cmake-3.8.2-Linux-x86_64/share/cmake-3.8/Modules
-    export PATH=$(pwd)/cmake-3.8.2-Linux-x86_64/bin:$PATH
+Fetch the prebuilt MSVC library bundle (or double-click the script in
+Explorer):
 
-Compile protobuf:
-    cd /path/to/rwe
-    cd libs
-    ./build-protobuf.sh
+```
+python fetch-msvc-libs.py
+```
 
-Now build the code:
+That leaves a `libs/_msvc` folder. Then open the folder in Visual Studio
+(`File > Open > CMake...`, selecting `CMakeLists.txt`), pick an `x64` build
+configuration, and build the `rwe.exe` target. CI builds this configuration
+with Visual Studio 2026.
 
-    cd /path/to/rwe
-    mkdir build
-    cd build
-    export CC=gcc-7 CXX=g++-7
-    cmake .. -G 'Unix Makefiles'
-    make
+</details>
 
-Note if LLVM/clang is installed, export CC=clang CXX=clang++ should also work.
+<details>
+<summary><b>Windows — Visual Studio Code</b></summary>
 
-Finally, launch RWE from the top-level project directory:
+<br>
 
-    cd /path/to/rwe
-    build/rwe
+Install the **C/C++ Extension Pack** from Microsoft, which brings CMake Tools
+with it. `File > Open Folder` on the repository root.
 
-## The Launcher
+At the bottom of the window you should see `CMake: [Debug]: Ready` and
+probably `No Kit Selected` — click that to choose a compiler. If none are
+listed, install Visual Studio or MSYS2 first. CMake then configures itself,
+and `F7` builds.
 
-The launcher application provides the multiplayer lobby for RWE.
+</details>
 
-### Motivation
+<details>
+<summary><b>Linux and macOS</b></summary>
 
-Multiplayer is implemented via a separate application
-rather than by recreating the original in-game multiplayer lobby
-for the following reasons.
+<br>
 
-In the future, the goal is to improve the multiplayer lobby experience
-beyond what is supported by the orignal TA multiplayer lobby.
-The RWE launcher will eventually support managing installed mods,
-and will ensure that all players in a multiplayer game
-have the same mods enabled before RWE is launched.
-It is impractical to achieve this with an implementation
-of the original multiplayer lobby inside RWE
-because RWE is primarily driven by the supplied game data,
-and this data dictates the design and layout of screens,
-as well as what screens are even available.
-An interface that manages mods must exist and work
-independently of any individual mod's game data.
-In this context, original TA data is also a mod
-that may or may not be available.
+**Devbox** is the quickest way to a working environment, using Nix to supply
+the dependencies:
 
-The engine codebase is already quite large and unwieldy.
-It is written in C++ for performance,
-but this does not provide a great development experience.
-The multiplayer lobby is not performance-critical,
-and given what we want to accomplish in future,
-it seems more practical to use a different platform
-that provides a better developer experience
-and is more suited to building traditional GUI applications.
+```bash
+curl -fsSL https://get.jetify.com/devbox | bash   # one-time
+devbox shell                                      # from the repo root
+mkdir build && cd build
+cmake .. -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=Debug
+make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+./rwe_test
+./rwe
+```
 
-### Technology Choices
+A Nix-provided environment can leave the engine unable to find your video
+drivers. If launching gives `Could not get EGL display` or another OpenGL
+error, point it at the system ones:
 
-The launcher is an Electron application written in TypeScript
-with React and Redux.
+```bash
+LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH ./rwe
+```
 
-### How to Build and Run for Development
+**Native**, on Ubuntu 24.04 (what CI uses):
 
-First go to the launcher directory and install the required npm modules.
+```bash
+sudo apt-get install -y \
+  gcc-14 g++-14 cmake \
+  libglew-dev zlib1g-dev libpng-dev \
+  libasound2-dev libpulse-dev libpipewire-0.3-dev \
+  libwayland-dev wayland-protocols libxkbcommon-dev libdecor-0-dev
 
-    cd path/to/rwe/launcher
-    npm install
+cd libs && ./build-protobuf.sh && cd ..
+mkdir build && cd build
+export CC=gcc-14 CXX=g++-14        # or clang-18 / clang++-18
+cmake .. -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=Debug
+make -j$(nproc)
+```
 
-Then start the webpack dev server
+`devbox.json` lists the dependencies if you are on another distribution.
 
-    npm run server
+</details>
 
-The server will start up and stay running until interrupted.
-It serves the compiled application code during development
-and provides hot-reloading.
+## The launcher
 
-Open another terminal session for the next step,
-launching the application itself.
+The multiplayer lobby is a separate Electron application in TypeScript, with
+React and Redux. It talks to the engine over JSON IPC through `rwe_bridge`.
 
-For development, you will need to set the `RWE_HOME` environment variable
-to a directory containing the `rwe` and `rwe_bridge` programs.
+It is separate on purpose. The lobby is not performance-critical, and the
+long-term goal is to manage installed mods and make sure every player in a
+game has the same ones enabled before the engine launches. That cannot live
+inside RWE, because RWE is driven by the supplied game data — which dictates
+what screens exist at all. An interface that manages mods has to work when no
+particular mod is loaded, and original TA data is itself just one more mod
+that may or may not be present.
 
-    export RWE_HOME=/my/installed/rwe/dir
+<details>
+<summary><b>Building and running it</b></summary>
 
-Now you can start the application.
+<br>
 
-    npm start
+```bash
+cd launcher
+npm ci
+npm run server      # webpack dev server, serves the app with hot reload
+```
 
-The application window should now appear.
+In a second terminal, point `RWE_HOME` at a directory holding `rwe` and
+`rwe_bridge`, then start the app:
 
-The launcher expects to talk to a master server
-that manages the list of publicly available games.
-In development, the launcher will try to connect
-to a master server instance running on the local machine.
-To start a master server instance locally,
-open another terminal session and run the following:
+```bash
+export RWE_HOME=/my/installed/rwe/dir
+npm start
+```
 
-    npm run master-server
+The launcher expects a master server managing the list of public games, and in
+development it looks for one on the local machine. In a third terminal:
 
-The master server will start up and stay running until interrupted.
-Any running launcher instances should automatically connect
-to the master server.
+```bash
+npm run master-server
+```
 
-### How To Package
+Running launchers connect to it automatically.
 
-For releases, the launcher must be bundled up
-as a complete Electron application.
-To do this, run the following:
+| Command | |
+|---|---|
+| `npm run tsc` | Type check |
+| `npm test` | Jest tests |
+| `npm run lint` | ESLint |
+| `npm run package` | Bundle for release, into e.g. `rwe-launcher-win32-x64` |
 
-    npm run package
+</details>
 
-The built application will be written out to a subdirectory
-whose name depends on the target platform.
-For example, for 64-bit Windows the directory name is
-`rwe-launcher-win32-x64`.
+## Documentation
+
+| | |
+|---|---|
+| [`docs/index.html`](docs/index.html) | Status page — what has landed, and what has not |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | The plan |
+| [`docs/TOTALA-EXE.md`](docs/TOTALA-EXE.md) | Index to the findings read out of the original binary |
+| [`docs/TA-DEMOS.md`](docs/TA-DEMOS.md) | The `.tad`/`.ted` demo format, and the conformance corpus built from it |
+| [`docs/PROFILING.md`](docs/PROFILING.md) | The per-phase tick and frame timers, and how to read them |
+| `CLAUDE.md` | Working guide to the codebase and its hazards |
+
+## Credit
+
+Robot War Engine is by [Michael Heasell](https://github.com/MHeasell) and its
+contributors. The engine, the format parsers, the COB virtual machine and the
+deterministic simulation all come from there, and it is worth a look:
+<https://github.com/MHeasell/rwe>
+
+Upstream posts progress to a [thread on the TAUniverse
+forums](http://www.tauniverse.com/forum/showthread.php?t=45555).
+
+Total Annihilation is Cavedog Entertainment's. This fork ships none of it.
