@@ -243,6 +243,8 @@ namespace rwe
             || setInt("antiAirMobileCount", p.antiAirMobileCount)
             || setInt("targetRadarCount", p.targetRadarCount)
             || setInt("targetMetalMakerCount", p.targetMetalMakerCount)
+            || setInt("starvedMetalMakerCount", p.starvedMetalMakerCount)
+            || setInt("starvedMetalMakerPasses", p.starvedMetalMakerPasses)
             || setInt("targetAirPlantCount", p.targetAirPlantCount)
             || setInt("targetVehiclePlantCount", p.targetVehiclePlantCount)
             || setFloat("isolatedLandArmyCapMinWaterFraction", p.isolatedLandArmyCapMinWaterFraction)

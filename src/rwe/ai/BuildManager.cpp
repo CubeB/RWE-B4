@@ -3121,7 +3121,31 @@ namespace rwe
         auto makers = total(s.metalMaker) + total(s.floatingMetalMaker);
         auto surplusBuysAnother = profile.maxSurplusMetalMakerCount > 0 && makers < profile.maxSurplusMetalMakerCount
             && bb.energyIncome.value - bb.energyDemand.value > 75.0f;
-        if ((metalShort || surplusBuysAnother) && energyRich && (makers < profile.targetMetalMakerCount || surplusBuysAnother) && total(s.lab) >= 1)
+
+        // And the case the flat ceiling of two was wrong for: the map has
+        // run out. No free deposit left on our side, metal short, energy at
+        // the cap with generation still ahead of demand -- there is nothing
+        // else for a builder to do with the ground, and the energy is going
+        // on the floor whether or not a maker drinks it.
+        //
+        // The gate is "no free deposit" rather than "few", which is what
+        // keeps this off the map maxSurplusMetalMakerCount was measured and
+        // rejected on: a side that still has somewhere to expand to should
+        // expand. See outOfPatchesMetalMakerCount for the numbers from Dark
+        // Side that asked for it.
+        //
+        // And the case the flat ceiling of two is wrong for: an economy
+        // that has been stuck for minutes rather than stalled for a tick.
+        // bb.starvedRichPasses counts the unbroken run and is kept in
+        // update(), which is where the planning pass is counted.
+        auto ceiling = profile.targetMetalMakerCount;
+        if (profile.starvedMetalMakerCount > ceiling && metalShort && energyRich
+            && bb.starvedRichPasses >= profile.starvedMetalMakerPasses)
+        {
+            ceiling = profile.starvedMetalMakerCount;
+        }
+
+        if ((metalShort || surplusBuysAnother) && energyRich && (makers < ceiling || surplusBuysAnother) && total(s.lab) >= 1)
         {
             want(s.metalMaker);
             // The floating one second, and counted against the same target,
@@ -4867,6 +4891,19 @@ namespace rwe
         keepBuildersOutOfFights(sim, aiOwner, profile, bb, outCommands);
 
         ++ticksSinceLastPlanning;
+        // How long the economy has been stuck, counted once a planning pass
+        // because that is the rate the answer is used at. Both halves have
+        // to hold at once, and either one failing puts it back to nothing:
+        // what wants measuring is an unbroken run and not an average.
+        if (ticksSinceLastPlanning >= profile.buildPlannerTickInterval)
+        {
+            auto metalShortNow = bb.metalStalled
+                || (bb.metalStorage.value > 0.0f && bb.currentMetal.value < bb.metalStorage.value * 0.1f);
+            auto energyRichNow = bb.energyStorage.value > 0.0f
+                && bb.currentEnergy.value >= bb.energyStorage.value * 0.8f
+                && bb.energyIncome.value > bb.energyDemand.value;
+            bb.starvedRichPasses = (metalShortNow && energyRichNow) ? bb.starvedRichPasses + 1 : 0;
+        }
         if (ticksSinceLastPlanning < profile.buildPlannerTickInterval)
         {
             return;

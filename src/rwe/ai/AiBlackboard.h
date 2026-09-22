@@ -306,6 +306,18 @@ namespace rwe
          */
         bool airWorthIt{false};
 
+        /**
+         * Planning passes in a row on which metal has been short while
+         * energy was at the cap and still coming in faster than it goes out.
+         *
+         * A field because buildPriorities, which reads it, has no
+         * GameSimulation and no memory of its own -- the same reason
+         * airWorthIt is one. Reset to zero the moment either half stops
+         * being true, so it counts a state of affairs and not an average.
+         * See AiTuningProfile::starvedMetalMakerCount.
+         */
+        int starvedRichPasses{0};
+
         // --- Losses ---
         /**
          * Our completed buildings as of last tick, keyed by raw unit id.
@@ -492,6 +504,7 @@ namespace rwe
          * formed yet.
          */
         bool waveSpent{false};
+
         /**
          * A detachment sent at the enemy's outlying economy rather than at
          * the main target, by raw id. Drawn from the units gathering for the

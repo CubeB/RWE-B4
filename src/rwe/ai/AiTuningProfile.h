@@ -302,6 +302,40 @@ namespace rwe
          */
         int maxSurplusMetalMakerCount{0};
         /**
+         * Makers allowed while the economy is stuck: metal short and energy
+         * at the cap with generation still ahead of demand, and that true on
+         * starvedMetalMakerPasses planning passes in a row. Zero keeps the
+         * flat ceiling of targetMetalMakerCount.
+         *
+         * This is the case maxSurplusMetalMakerCount above was switched off
+         * for, and the reason it was switched off does not apply to it. That
+         * measurement asked whether a maker is worth a builder's time and
+         * found it is not -- true when the builder has an extractor to build
+         * instead. It does not follow when the builder has been unable to
+         * turn that time into metal for minutes on end, which is what the
+         * run of passes tests and what a single stalled tick does not.
+         *
+         * Watched on Dark Side, ARM against CORE, forty minutes. CORE ended
+         * on 6 extractors and 8 metal a second, metal-stalled for 39% of the
+         * game, with 68894 energy thrown away at the cap -- and one maker
+         * standing. ARM: 16 extractors, 19 a second, stalled 8%, 13302
+         * wasted, two makers. Both sides had patches left on their own side
+         * of the map that they never managed to take, which is why the first
+         * version of this gated on "no free deposit" and never fired.
+         *
+         * A maker costs no metal at all, only energy and the time to build
+         * it, so what it spends is exactly the two things in surplus.
+         */
+        int starvedMetalMakerCount{6};
+        /**
+         * Planning passes of unbroken metal starvation with energy to spare
+         * before starvedMetalMakerCount applies. The planner runs every
+         * buildPlannerTickInterval ticks, so 120 passes is about two minutes
+         * of it being continuously true -- long enough that a stall while a
+         * lab is paid for does not count as being stuck.
+         */
+        int starvedMetalMakerPasses{120};
+        /**
          * The vehicle plant ahead of the air plant, except where the map needs
          * aircraft. The plan had it the other way round, the vehicle plant
          * waiting on an air plant that itself waits to be affordable: CORE on

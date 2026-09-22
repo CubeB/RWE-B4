@@ -535,6 +535,98 @@ namespace rwe
         }
     }
 
+    TEST_CASE("an economy stuck for minutes turns its spare energy into metal", "[ai]")
+    {
+        // Watched on Dark Side, ARM against CORE, forty minutes. CORE ended
+        // on six extractors and 8 metal a second, metal-stalled for 39% of
+        // the game, with 68894 energy thrown away at the cap -- and one
+        // metal maker standing, because targetMetalMakerCount is a flat
+        // ceiling of two. ARM was better off and still threw away 13302.
+        //
+        // The surplus rule that would have built more
+        // (maxSurplusMetalMakerCount) is off by default and rightly so: it
+        // was measured on Great Divide and lost, because a builder's time is
+        // worth more spent on another extractor. What that does not cover is
+        // a builder that has been unable to turn its time into metal for
+        // minutes on end, which is what the run of passes below tests and
+        // what a single stalled tick does not.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(200_ss, 0_ss, 200_ss), script);
+
+        // defineWorld has the maker in the build tree but not in the unit
+        // table, so it is defined here as the switching test defines it.
+        auto maker = makeDef(false, false, false, "", 50u);
+        maker.onOffable = true;
+        maker.makesMetal = Metal(1.0f);
+        sim.unitDefinitions["ARMMAKR"] = maker;
+
+        // The flat ceiling, already standing.
+        addUnit(sim, "ARMMAKR", ai, SimVector(120_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMMAKR", ai, SimVector(160_ss, 0_ss, 0_ss), script);
+
+        // Generation genuinely ahead of demand, which is half of what the
+        // rule reads: the test world's solar collector makes nothing by
+        // default.
+        auto solar = sim.unitDefinitions.at("ARMSOLAR");
+        solar.energyMake = Energy(20.0f);
+        sim.unitDefinitions["ARMSOLAR"] = solar;
+        for (int i = 0; i < 8; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(-200.0f - (i * 40.0f)), 0_ss, 0_ss), script);
+        }
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        REQUIRE(profile.targetMetalMakerCount == 2);
+        REQUIRE(profile.starvedMetalMakerCount > 2);
+
+        // Metal short, energy at the cap: the other half.
+        auto& player = sim.getPlayer(ai);
+        player.maxMetal = Metal(1000.0f);
+        player.metal = Metal(0.0f);
+        player.maxEnergy = Energy(1000.0f);
+        player.energy = Energy(1000.0f);
+
+        auto wantsAnotherMaker = [&]() {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            auto types = buildOrderTypes(commands);
+            return std::find(types.begin(), types.end(), "ARMMAKR") != types.end();
+        };
+
+        SECTION("stuck long enough: another maker")
+        {
+            // The run-length is what the game supplies and a fixture cannot
+            // sit through, so it is asked for on the first pass here and
+            // pinned as a rule by the section below.
+            profile.starvedMetalMakerPasses = 0;
+            CHECK(wantsAnotherMaker());
+        }
+
+        SECTION("stalled once is not stuck: the flat ceiling holds")
+        {
+            // One planning pass of starvation against a default that wants
+            // a hundred and twenty of them in a row. This is the half of the
+            // rule that keeps it off a side that is merely saving up.
+            REQUIRE(profile.starvedMetalMakerPasses > 1);
+            CHECK_FALSE(wantsAnotherMaker());
+        }
+
+        SECTION("switched off, the flat ceiling of two is back")
+        {
+            profile.starvedMetalMakerPasses = 0;
+            profile.starvedMetalMakerCount = 0;
+            CHECK_FALSE(wantsAnotherMaker());
+        }
+    }
+
     TEST_CASE("a metal maker is told to switch once, not once a tick", "[ai]")
     {
         // A command takes half a second to land, and the maker reads as it
