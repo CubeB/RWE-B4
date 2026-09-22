@@ -193,7 +193,7 @@ int main(int argc, char* argv[])
             std::cout << "Usage: ai_arena --map <name> --ai-arena <seconds> [options]\n"
                       << "  --map <name>            map to play on\n"
                       << "  --ai-arena <seconds>    game length cap\n"
-                      << "  --player <spec>         name;Computer;SIDE;colour (repeatable)\n"
+                      << "  --player <spec>         name;Computer;SIDE;colour[;team] (repeatable)\n"
                       << "  --seed <n>              vary the simulation seed\n"
                       << "  --ai-difficulty <d>     idle | easy | standard | hard | brutal\n"
                       << "  --start-location <m>    fixed | random\n"
