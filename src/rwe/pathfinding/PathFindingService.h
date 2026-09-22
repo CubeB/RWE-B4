@@ -237,7 +237,32 @@ namespace rwe
         /** Turns a finished search into waypoints. Leaves the finder idle. */
         UnitPath finishSearch(const GameSimulation& simulation);
 
-        void relaxGoalToWhatIsReachable(UnitPathFinder& pathFinder, const Point& start, const Point& goal);
+        /** What the cheap first pass found, and what it was able to do with it. */
+        struct FirstPass
+        {
+            /** The closest cell the walk stood on; only meaningful when it ran. */
+            Point closest;
+            /** Whether the walk ran at all. */
+            bool walked{false};
+            /** Whether it got closer than the start, which relaxes the goal. */
+            bool relaxed{false};
+        };
+
+        /**
+         * Runs the cheap first pass. If it got closer to the goal than the
+         * unit already is, relaxes the goal to what it reached. A goal in
+         * another terrain region is the shape where the walk ran and could
+         * get no closer, which is what the caller short-circuits on.
+         */
+        FirstPass relaxGoalToWhatIsReachable(UnitPathFinder& pathFinder, const Point& start, const Point& goal);
+
+        /**
+         * Whether the goal lies in a different terrain region from the start,
+         * so that no route can exist whatever the units are doing. False when
+         * the movement class has no registered terrain grid, which is every
+         * ad-hoc class -- terrain is invisible to those searches anyway.
+         */
+        bool terrainUnreachable(const GameSimulation& simulation, MovementClassId movementClass, const Point& start, const Point& goal) const;
 
         SimVector getWorldCenter(const GameSimulation& simulation, const DiscreteRect& discreteRect);
     };

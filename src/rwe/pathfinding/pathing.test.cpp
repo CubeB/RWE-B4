@@ -472,6 +472,58 @@ namespace rwe
         REQUIRE(cell.x > 2);
     }
 
+    TEST_CASE("a goal across water is resolved without flooding the reachable map", "[pathing]")
+    {
+        // The goal lies in a different terrain region from the unit, so no
+        // route can exist. The cheap first pass cannot get any closer than
+        // where the unit stands -- it is hard against the water -- which used
+        // to leave the A* to run out over the whole reachable component
+        // before it could say the obvious. The service now reads the terrain
+        // regions and finishes at once.
+        auto script = makeEmptyCobScript();
+
+        // Land either side of a channel too deep for the walker. Sea level 30
+        // and the channel at 0 makes it depth 30, past the class's 0.
+        Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(60));
+        for (int y = 0; y < 64; ++y)
+        {
+            for (int x = 30; x < 34; ++x)
+            {
+                heights.set(x, y, static_cast<unsigned char>(0));
+            }
+        }
+        GameSimulation sim(MapTerrain(std::move(heights), 30_ss), 0u, 0, 0);
+        auto player = addPlayer(sim);
+
+        // Terrain only reaches the search through a named movement class's
+        // registered walkable grid, so the walker needs one.
+        MovementClassDefinition walkerClass{"BENCHWALK", 1u, 1u, 0u, 0u, 255u, 255u};
+        auto classId = sim.movementClassDatabase.registerMovementClass(walkerClass);
+        sim.movementClassCollisionService.registerMovementClass(classId, computeWalkableGrid(sim.terrain, walkerClass));
+
+        UnitDefinition tank = makeTankDef(255u);
+        tank.movementCollisionInfo = UnitDefinition::NamedMovementClass{classId};
+        sim.unitDefinitions["tank"] = tank;
+
+        // Hard against the west bank, directly opposite the goal on the east.
+        auto tankId = addUnitOfType(sim, "tank", player, cellCenter(sim, 29, 32), script);
+        sim.getUnitState(tankId).orders.push_back(MoveOrder(cellCenter(sim, 40, 32)));
+
+        for (int i = 0; i < 200 && !sim.getUnitState(tankId).orders.empty(); ++i)
+        {
+            sim.tick();
+        }
+
+        // Proving the place cannot be reached must not cost a sweep of every
+        // cell the unit can get to.
+        REQUIRE(sim.pathFindingService.counters.expansions < 200);
+
+        // The order completed, and the unit stopped on its own bank.
+        REQUIRE(sim.getUnitState(tankId).orders.empty());
+        auto cell = sim.terrain.worldToHeightmapCoordinate(sim.getUnitState(tankId).position);
+        REQUIRE(cell.x < 30);
+    }
+
     TEST_CASE("a build order for a site the builder cannot reach is dropped", "[pathing]")
     {
         auto script = makeEmptyCobScript();

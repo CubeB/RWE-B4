@@ -88,6 +88,13 @@ namespace rwe
         /** What this search has cost so far, for the attribution counters. */
         long long expansions{0};
         std::unique_ptr<AbstractUnitPathFinder> pathFinder;
+        /**
+         * A finished answer for a search that was proven pointless before it
+         * ran: the goal is in a different terrain region, so no route can
+         * exist. The A* would have run out over every cell the unit can reach
+         * to say so; this says it at once. Empty for an ordinary search.
+         */
+        std::optional<AStarPathInfo<Point, PathCost>> immediateResult;
     };
 
     // Out of line, all four of them, because ActiveSearch is incomplete in the
@@ -227,19 +234,22 @@ namespace rwe
                 ++counters.searches;
             }
 
-            auto expansions = activeSearch->pathFinder->stepSearch(static_cast<unsigned int>(remainingBudget));
-            remainingBudget -= static_cast<int>(expansions);
-            counters.expansions += static_cast<long long>(expansions);
-            activeSearch->expansions += static_cast<long long>(expansions);
-
-            if (!activeSearch->pathFinder->isSearchFinished())
+            if (!activeSearch->immediateResult)
             {
-                // The tick ran out before the search did. Everything it has
-                // worked out stays where it is, and next tick carries on from
-                // here rather than starting again -- which is the whole point
-                // of the exercise, and what the original does at 0x40EEAF.
-                ++counters.searchesSuspended;
-                break;
+                auto expansions = activeSearch->pathFinder->stepSearch(static_cast<unsigned int>(remainingBudget));
+                remainingBudget -= static_cast<int>(expansions);
+                counters.expansions += static_cast<long long>(expansions);
+                activeSearch->expansions += static_cast<long long>(expansions);
+
+                if (!activeSearch->pathFinder->isSearchFinished())
+                {
+                    // The tick ran out before the search did. Everything it has
+                    // worked out stays where it is, and next tick carries on from
+                    // here rather than starting again -- which is the whole point
+                    // of the exercise, and what the original does at 0x40EEAF.
+                    ++counters.searchesSuspended;
+                    break;
+                }
             }
 
             assert(!requests.empty() && requests.front().unitId == activeSearch->unitId);
@@ -332,6 +342,7 @@ namespace rwe
             unitDefinition.movementCollisionInfo, [&](const UnitDefinition::NamedMovementClass& mc) { return std::make_optional(mc.movementClassId); }, [&](const auto&) { return std::optional<MovementClassId>(); });
 
         std::unique_ptr<AbstractUnitPathFinder> pathFinder;
+        std::optional<AStarPathInfo<Point, PathCost>> immediateResult;
         auto goal = Point(0, 0);
         auto goalRelaxed = false;
 
@@ -397,9 +408,24 @@ namespace rwe
                 // The cheap first pass runs before the search is seeded: it
                 // asks about cells outside a search on purpose, and seeding
                 // stamps the scratch it would otherwise be reading.
-                relaxGoalToWhatIsReachable(*finder, startPoint, goal);
+                auto firstPass = relaxGoalToWhatIsReachable(*finder, startPoint, goal);
                 finder->beginSearch(startPoint);
                 pathFinder = std::move(finder);
+
+                if (firstPass.walked && !firstPass.relaxed && movementClassId && terrainUnreachable(simulation, *movementClassId, startPoint, goal))
+                {
+                    // The goal is in another terrain region, so no route can
+                    // exist and the first pass could get no closer than the
+                    // cell it reached. Finishing at once says so for the cost
+                    // of the walk, where the A* would have run out over the
+                    // whole reachable component to say the same.
+                    std::vector<Point> route{startPoint};
+                    if (firstPass.closest != startPoint)
+                    {
+                        route.push_back(firstPass.closest);
+                    }
+                    immediateResult = AStarPathInfo<Point, PathCost>{AStarPathType::Partial, std::move(route), {}, true};
+                }
             },
             [&](const DiscreteRect& rect) {
                 // expand the goal rect to take into account our own collision rect
@@ -411,13 +437,15 @@ namespace rwe
                 pathFinder = std::move(finder);
             });
 
-        activeSearch = std::unique_ptr<ActiveSearch>(new ActiveSearch{unitId, destination, start, goal, goalRelaxed, 0, std::move(pathFinder)});
+        activeSearch = std::unique_ptr<ActiveSearch>(new ActiveSearch{unitId, destination, start, goal, goalRelaxed, 0, std::move(pathFinder), std::move(immediateResult)});
     }
 
     UnitPath PathFindingService::finishSearch(const GameSimulation& simulation)
     {
         auto& search = *activeSearch;
-        auto path = search.pathFinder->takeResult();
+        auto path = search.immediateResult
+            ? std::move(*search.immediateResult)
+            : search.pathFinder->takeResult();
         lastPathDebugInfo = AStarPathInfo<Point, PathCost>{path.type, path.path, std::move(path.closedVertices), path.exhausted};
 
         assert(path.path.size() >= 1);
@@ -488,15 +516,17 @@ namespace rwe
         return UnitPath{std::move(waypoints), unreachable};
     }
 
-    void PathFindingService::relaxGoalToWhatIsReachable(UnitPathFinder& pathFinder, const Point& start, const Point& goal)
+    PathFindingService::FirstPass PathFindingService::relaxGoalToWhatIsReachable(UnitPathFinder& pathFinder, const Point& start, const Point& goal)
     {
+        FirstPass pass{start};
+
         // A walk is cheap and the answer is worth having: if it reaches the
         // goal there is nothing to relax, and if it does not, the search can
         // stop at anything as close as the walk managed rather than proving
         // the whole reachable map is not the goal.
         if (!relaxGoalWithFirstPass)
         {
-            return;
+            return pass;
         }
 
         auto result = bugWalk(
@@ -507,10 +537,12 @@ namespace rwe
             BugWalkStepLimit);
 
         counters.bugWalkSteps += result.steps;
+        pass.walked = true;
+        pass.closest = result.closest;
 
         if (result.reachedGoal)
         {
-            return;
+            return pass;
         }
 
         auto reachable = octileDistanceScore(result.closest, goal);
@@ -520,11 +552,48 @@ namespace rwe
             // Either it is standing on the answer already, or the walk got
             // nowhere and has nothing to offer. Let the search do what it
             // did before.
-            return;
+            return pass;
         }
 
         pathFinder.setAcceptableDistance(reachable);
         ++counters.searchesRelaxed;
+        pass.relaxed = true;
+        return pass;
+    }
+
+    bool PathFindingService::terrainUnreachable(const GameSimulation& simulation, MovementClassId movementClass, const Point& start, const Point& goal) const
+    {
+        const auto* components = simulation.movementClassCollisionService.tryGetComponentGrid(movementClass);
+        if (components == nullptr)
+        {
+            return false;
+        }
+
+        // A cell off the labelled grid is one no footprint fits at, so it is
+        // not walkable and a route to it cannot exist -- but a start off the
+        // grid means the unit is somewhere the search cannot describe, and
+        // then nothing can be concluded.
+        auto componentAt = [&](const Point& p) -> std::optional<int> {
+            if (p.x < 0 || p.y < 0 || p.x >= components->getWidth() || p.y >= components->getHeight())
+            {
+                return std::nullopt;
+            }
+            return components->get(p.x, p.y);
+        };
+
+        auto startComponent = componentAt(start);
+        if (!startComponent || *startComponent == 0)
+        {
+            return false;
+        }
+
+        auto goalComponent = componentAt(goal);
+        if (!goalComponent)
+        {
+            return true;
+        }
+
+        return *goalComponent == 0 || *goalComponent != *startComponent;
     }
 
     SimVector PathFindingService::getWorldCenter(const GameSimulation& simulation, const DiscreteRect& rect)
