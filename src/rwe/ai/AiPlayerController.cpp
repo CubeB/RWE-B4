@@ -381,6 +381,9 @@ namespace rwe
                      << " (+" << player.previousEnergyProductionBuffer.value << "/-" << player.previousDesiredEnergyConsumptionBuffer.value << " per s)"
                      << ", idle builders " << blackboard.idleBuilderCount << ", army " << blackboard.armySize
                      << ", known enemies " << blackboard.knownEnemies.size()
+                     // Who the war is against, which with more than one enemy
+                     // is the whole of where the army is going.
+                     << ", fighting " << (blackboard.focusEnemy ? std::to_string(blackboard.focusEnemy->value) : std::string("nobody"))
                      // Both gate whether a ferry can run at all: hasUnreachableGround
                      // gates refreshExpansionSite, wantsTransport is what BuildManager
                      // reads before building one. Each was computed every pass and

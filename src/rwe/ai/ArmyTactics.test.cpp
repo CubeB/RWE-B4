@@ -194,6 +194,49 @@ namespace rwe
             REQUIRE(bb.raidGroup.empty());
             REQUIRE_FALSE(bb.raidTarget.has_value());
         }
+
+        SECTION("and not a third party's base, however soft and however near")
+        {
+            // The rule above keeps a raid clear of the base we are fighting.
+            // With more than one enemy that leaves ANOTHER enemy's base as a
+            // legal target: far from the one being avoided, undefended
+            // because nobody has been at it, and nearer to us than the
+            // outlying extractor -- so nearest-first picks it every time.
+            // Sending the raiding party off to open a second war is the
+            // opposite of concentrating, which is what the focus is for.
+            auto thirdParty = addPlayer(sim, "third");
+
+            auto outlyingBuildingId = addUnitOfType(sim, "UNIT", enemy, outlyingBuildingPos, script);
+            auto third = makeKnownBuilding(outlyingBuildingId, outlyingBuildingPos);
+            third.owner = enemy;
+            bb.knownEnemies[outlyingBuildingId.value] = third;
+
+            // Theirs, nearer, and nothing covering it.
+            auto thirdPartyPos = SimVector(0_ss - 900_ss, 0_ss, 0_ss);
+            auto thirdPartyId = addUnitOfType(sim, "UNIT", thirdParty, thirdPartyPos, script);
+            auto other = makeKnownBuilding(thirdPartyId, thirdPartyPos);
+            other.owner = thirdParty;
+            bb.knownEnemies[thirdPartyId.value] = other;
+            REQUIRE(bb.baseAnchor->distance(thirdPartyPos) < bb.baseAnchor->distance(outlyingBuildingPos));
+
+            SECTION("fighting one of them, the other is left alone")
+            {
+                bb.focusEnemy = enemy;
+                army.update(sim, ai, profile, threatMap, bb, commands);
+
+                REQUIRE(bb.raidTarget.has_value());
+                CHECK(bb.raidTarget->distanceSquared(outlyingBuildingPos) == 0_ss);
+            }
+
+            SECTION("fighting nobody in particular, the nearest wins as it did")
+            {
+                bb.focusEnemy.reset();
+                army.update(sim, ai, profile, threatMap, bb, commands);
+
+                REQUIRE(bb.raidTarget.has_value());
+                CHECK(bb.raidTarget->distanceSquared(thirdPartyPos) == 0_ss);
+            }
+        }
     }
 
     TEST_CASE("a unit that has outrun the wave waits for it", "[ai]")

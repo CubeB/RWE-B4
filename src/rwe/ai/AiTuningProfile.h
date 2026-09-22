@@ -1995,6 +1995,36 @@ namespace rwe
          */
         bool huntEnemyCommander{true};
         /**
+         * Fight one enemy at a time: the nearest, by where we believe it
+         * lives. Off, every enemy is treated as one, which is what the AI
+         * always did and which only ever worked because it was only ever
+         * measured against one opponent.
+         *
+         * enemyBasePosition is a centroid of every enemy building known.
+         * With three opponents on a four-corner map that lands in the middle
+         * of the map, where nobody lives: attackBaseRadius then finds
+         * nothing inside it and falls back to the whole map, and the
+         * commander that gets hunted is whichever one has the lowest unit id.
+         * Neither is a decision about where to concentrate; both are what
+         * falls out of averaging three enemies into one.
+         *
+         * The nearest rather than the weakest or the one that hurt us most.
+         * A wave spends its time walking, so the nearest is the one the most
+         * of an attack is actually spent attacking; and if one of them is
+         * coming for us, it is the nearest by the time it arrives.
+         */
+        bool focusOneEnemy{true};
+        /**
+         * How much closer another enemy must be before the war moves to it.
+         *
+         * Without a margin the focus changes hands every time a scout sees a
+         * new building, and a wave that keeps being given a new objective
+         * never reaches any of them. 600 is about two building footprints
+         * more than a whole map crossing is wide, so a swap means a real
+         * difference and not a redrawn centroid.
+         */
+        SimScalar focusSwitchMargin{600_ss};
+        /**
          * Fighters and bombers the air plant keeps on hand. The plant has
          * only ever built one 40-metal scout and then stood idle for the rest
          * of the game, which is 850 metal of factory doing nothing; a bomber

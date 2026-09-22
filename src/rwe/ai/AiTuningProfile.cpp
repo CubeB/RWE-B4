@@ -406,6 +406,8 @@ namespace rwe
             || setScalar("raidAvoidBaseRadius", p.raidAvoidBaseRadius)
             || setScalar("attackBaseRadius", p.attackBaseRadius)
             || setBool("huntEnemyCommander", p.huntEnemyCommander)
+            || setBool("focusOneEnemy", p.focusOneEnemy)
+            || setScalar("focusSwitchMargin", p.focusSwitchMargin)
             || setInt("targetFighterCount", p.targetFighterCount)
             || setInt("targetBomberCount", p.targetBomberCount)
             || setInt("airWorthItEnemyDefences", p.airWorthItEnemyDefences)

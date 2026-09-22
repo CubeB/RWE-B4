@@ -45,6 +45,15 @@ namespace rwe
          * the tests, which predate it, keep meaning what they meant.
          */
         bool isCommander{false};
+        /**
+         * Whose it is. Kept on the record rather than looked up when wanted,
+         * because a remembered contact outlives the unit it was taken from:
+         * once the unit is gone the simulation can no longer say who owned
+         * it, and with more than one enemy that is the whole question.
+         *
+         * Defaulted for the same reason isCommander is.
+         */
+        PlayerId owner{};
     };
 
     /** A completed building of ours, remembered so that losing it can be noticed. */
@@ -371,7 +380,23 @@ namespace rwe
         // --- Enemy ---
         /** Keyed by the enemy unit's raw id so iteration is deterministic. */
         std::map<unsigned int, KnownEnemy> knownEnemies;
-        /** Centroid of the enemy's known buildings, if any have been seen. */
+        /**
+         * Which enemy the war is being fought against.
+         *
+         * With one opponent this is that opponent and nothing here matters.
+         * With three, the centroid of every enemy building we have seen is a
+         * point in the middle of the map where none of them lives -- on a
+         * four-corner map it is very nearly the exact centre -- and a wave
+         * sent at it walks into the open ground between three enemies and
+         * fights all of them. So one is chosen and the rest are left alone
+         * until it is finished. See AiTuningProfile::focusOneEnemy.
+         */
+        std::optional<PlayerId> focusEnemy;
+        /**
+         * Centroid of the known buildings of the enemy we are fighting, if
+         * any have been seen. Of ALL enemies when there is no focus, which
+         * is what it always was.
+         */
         std::optional<SimVector> enemyBasePosition;
         /**
          * Where their commander was when we last had eyes on it.

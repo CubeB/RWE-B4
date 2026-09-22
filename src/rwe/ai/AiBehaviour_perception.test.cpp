@@ -73,6 +73,128 @@ namespace rwe
         }
     }
 
+    TEST_CASE("with three enemies the AI fights one of them", "[ai]")
+    {
+        // "The AI needs to know where to concentrate its efforts."
+        //
+        // enemyBasePosition was the centroid of every enemy building known,
+        // which is the right answer to "where does the enemy live" only when
+        // there is one enemy. With three on a four-corner map it is very
+        // nearly the centre of the map, where none of them lives: the wave
+        // walks into the open ground between three opponents and fights all
+        // of them, attackBaseRadius finds nothing within 900 of a point
+        // nobody built on and falls back to ranging the whole map, and the
+        // commander that gets hunted is whichever has the lowest unit id.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(256, 256), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        auto near = addPlayer(sim, "near", GamePlayerType::Computer, "ARM");
+        auto far = addPlayer(sim, "far", GamePlayerType::Computer, "ARM");
+        auto further = addPlayer(sim, "further", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        auto nearBase = SimVector(600_ss, 0_ss, 0_ss);
+        auto farBase = SimVector(0_ss, 0_ss, -1800_ss);
+        auto furtherBase = SimVector(-1800_ss, 0_ss, 1800_ss);
+
+        // The centroid of all three is nowhere near any of them, which is
+        // the whole complaint. Worked out here so the test says what it is
+        // discriminating against rather than only that it discriminates.
+        auto allThree = SimVector(
+            (nearBase.x + farBase.x + furtherBase.x) / 3_ss,
+            0_ss,
+            (nearBase.z + farBase.z + furtherBase.z) / 3_ss);
+        REQUIRE(allThree.distance(nearBase) > 900_ss);
+        REQUIRE(allThree.distance(farBase) > 900_ss);
+        REQUIRE(allThree.distance(furtherBase) > 900_ss);
+
+        auto addBase = [&](PlayerId owner, const SimVector& where) {
+            addUnit(sim, "ARMSOLAR", owner, where, script);
+            addUnit(sim, "ARMCOM", owner, where + SimVector(60_ss, 0_ss, 0_ss), script);
+        };
+
+        SECTION("the nearest of them, and its base is what the wave is given")
+        {
+            addBase(near, nearBase);
+            addBase(far, farBase);
+            addBase(further, furtherBase);
+
+            // Omniscient so that all three are seen at once: what is under
+            // test is the choice between them, not the finding of them.
+            AiPlayerController controller(ai, makeDefaultBrutalProfile(), 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 4, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.focusEnemy.has_value());
+            CHECK(*bb.focusEnemy == near);
+            REQUIRE(bb.enemyBasePosition.has_value());
+            CHECK(bb.enemyBasePosition->distance(nearBase) < 200_ss);
+
+            // And the commander it hunts is that enemy's, not another's.
+            REQUIRE(bb.enemyCommanderPosition.has_value());
+            CHECK(bb.enemyCommanderPosition->distance(nearBase) < 200_ss);
+        }
+
+        SECTION("switched off, it averages all three into a place nobody lives")
+        {
+            addBase(near, nearBase);
+            addBase(far, farBase);
+            addBase(further, furtherBase);
+
+            auto profile = makeDefaultBrutalProfile();
+            profile.focusOneEnemy = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 4, commands);
+
+            const auto& bb = controller.getBlackboard();
+            CHECK_FALSE(bb.focusEnemy.has_value());
+            REQUIRE(bb.enemyBasePosition.has_value());
+            // Not any of their bases: the fault, pinned.
+            CHECK(bb.enemyBasePosition->distance(nearBase) > 900_ss);
+            CHECK(bb.enemyBasePosition->distance(farBase) > 900_ss);
+            CHECK(bb.enemyBasePosition->distance(furtherBase) > 900_ss);
+        }
+
+        SECTION("a nearer one found later takes the war over")
+        {
+            // Only the far one to start with, so the war begins against it.
+            addBase(far, farBase);
+            AiPlayerController controller(ai, makeDefaultBrutalProfile(), 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 4, commands);
+            REQUIRE(controller.getBlackboard().focusEnemy == far);
+
+            // Then a much nearer one turns up: 600 against 1800, which beats
+            // the margin comfortably.
+            addBase(near, nearBase);
+            runTicks(sim, controller, 4, commands);
+            CHECK(controller.getBlackboard().focusEnemy == near);
+        }
+
+        SECTION("but one barely nearer does not, or no wave ever arrives")
+        {
+            addBase(far, farBase);
+            auto profile = makeDefaultBrutalProfile();
+            REQUIRE(profile.focusSwitchMargin > 0_ss);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 4, commands);
+            REQUIRE(controller.getBlackboard().focusEnemy == far);
+
+            // Nearer, but by less than the margin. A focus that changes hands
+            // on every redrawn centroid gives the wave a new objective every
+            // pass, and it arrives nowhere.
+            auto barely = SimVector(0_ss, 0_ss, 0_ss - (1800_ss - (profile.focusSwitchMargin / 2_ss)));
+            addBase(further, barely);
+            runTicks(sim, controller, 4, commands);
+            CHECK(controller.getBlackboard().focusEnemy == far);
+        }
+    }
+
     TEST_CASE("their commander is a thing the AI knows it has seen", "[ai]")
     {
         // The unit whose death ends the game. The AI had no way to refer to

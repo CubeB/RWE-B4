@@ -1424,6 +1424,17 @@ namespace rwe
             {
                 continue;
             }
+            // Of the enemy we are fighting, where there is one. The rule
+            // below keeps a raid clear of their base, and with three
+            // opponents that leaves ANOTHER opponent's base as a legal
+            // target -- far from the one we are avoiding, and often
+            // undefended, so it is exactly what the nearest-first pick
+            // would choose. Sending the raiding party to open a second war
+            // is the opposite of concentrating.
+            if (bb.focusEnemy && enemy.owner != *bb.focusEnemy)
+            {
+                continue;
+            }
             if (bb.enemyBasePosition && bb.enemyBasePosition->distanceSquared(enemy.lastKnownPosition) < avoidSquared)
             {
                 continue;
