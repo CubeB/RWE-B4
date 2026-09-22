@@ -977,6 +977,7 @@ set(TEST_FILES
     src/rwe/game/EndGameStats.test.cpp
     src/rwe/game/dump_util.test.cpp
     src/rwe/game/DesyncReport.test.cpp
+    src/rwe/game/aicommandfeed.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp
     src/rwe/geometry/Circle2f.test.cpp
     src/rwe/geometry/CollisionMesh.test.cpp

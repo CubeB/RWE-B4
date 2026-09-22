@@ -21,6 +21,7 @@
 #include <rwe/game/DesyncReport.h>
 #include <rwe/game/GameScene_util.h>
 #include <rwe/game/OrderButtons.h>
+#include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
 #include <rwe/render/render_prof.h>
@@ -437,6 +438,17 @@ namespace rwe
             // player per tick, and anywhere else means guessing how many
             // ticks this frame is about to dispatch.
             pushReplayCommandsForTick(sceneTime.value);
+        }
+        else
+        {
+            // What the computer players asked for on the tick just run, a tick
+            // at a time. Here rather than in update() because the buffer is
+            // drained a set per player per tick and has to be filled the same
+            // way: fed per frame, the delay on an AI order became a function
+            // of how many ticks that frame dispatched, which is not the same
+            // number on two peers of a network game. A recording feeds every
+            // player from the file above instead, this one included.
+            feedAiCommands(simulation, *playerCommandService, aiCommandBufferDepth());
         }
 
         if (auto desync = playerCommandService->checkHashes(); desync)

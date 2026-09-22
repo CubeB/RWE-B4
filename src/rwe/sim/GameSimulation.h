@@ -578,9 +578,9 @@ namespace rwe
         std::vector<PlayerId> aiPlayerOrder;
 
         // Commands the AI controllers want issued, keyed by the AI's
-        // PlayerId. Drained each scene tick by GameScene::update via
-        // takeAiCommandsForPlayer(). One element per tick — accumulate, then
-        // drain, then refill.
+        // PlayerId. Drained once per simulation tick -- never once per
+        // frame, see feedAiCommands -- via takeAiCommandsForPlayer().
+        // One element per tick — accumulate, then drain, then refill.
         std::unordered_map<PlayerId, std::vector<PlayerCommand>> aiPendingCommands;
 
         explicit GameSimulation(MapTerrain&& terrain, unsigned char surfaceMetal, int minWindSpeed, int maxWindSpeed);

@@ -29,6 +29,23 @@ namespace rwe
         return static_cast<unsigned int>(highCommandLatencyMillis / 16.0f) + 1;
     }
 
+    /**
+     * How deep a computer player's command buffer is kept: a constant, and the
+     * same constant on every peer.
+     *
+     * A computer player's orders never cross the network -- every peer runs its
+     * own copy of the AI over the same simulation and gets the same orders --
+     * so there is no round trip to cover for, and taking the figure from one
+     * would make the tick an AI order lands on a function of somebody's ping.
+     * It is the no-peer depth, which is what a single-player game and the
+     * headless arena have always used, so the delay between the AI deciding and
+     * the simulation acting is exactly what it was.
+     */
+    inline unsigned int aiCommandBufferDepth()
+    {
+        return commandBufferTargetForRttMillis(0.0f);
+    }
+
     class PlayerCommandService
     {
     private:
