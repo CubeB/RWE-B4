@@ -40,7 +40,10 @@ namespace rwe
             unitMeshFrom3do(objects.front()));
 
         std::vector<std::pair<std::string, UnitPieceMeshInfo>> meshes;
-        extractMeshes(*graphics, atlasMap, teamAtlasMap, atlasColorMap, objects.front(), meshes);
+        if (graphics != nullptr)
+        {
+            extractMeshes(*graphics, atlasMap, teamAtlasMap, atlasColorMap, objects.front(), meshes);
+        }
 
         return UnitMeshInfo{std::move(d), std::move(meshes), std::move(selectionMesh)};
     }
@@ -62,7 +65,10 @@ namespace rwe
             unitMeshFrom3do(objects.front()));
 
         std::vector<std::pair<std::string, UnitPieceMeshInfo>> meshes;
-        extractMeshes(*graphics, atlasMap, teamAtlasMap, atlasColorMap, objects.front(), meshes);
+        if (graphics != nullptr)
+        {
+            extractMeshes(*graphics, atlasMap, teamAtlasMap, atlasColorMap, objects.front(), meshes);
+        }
 
         return ProjectileMeshInfo{std::move(d), std::move(meshes)};
     }

@@ -1089,10 +1089,6 @@ namespace rwe
         /** An aircraft's exhaust: small warm sparks dropped under a thruster piece, left behind as a trail. */
         void emitVtolFromPiece(UnitId unitId, const std::string& pieceName, unsigned int divisor);
 
-        void modifyBuildQueue(UnitId unitId, const std::string& unitType, int count);
-
-        void modifyStockpileQueue(UnitId unitId, int count);
-
         void onChannelFinished(int channel);
 
         static Matrix4f worldToMinimapMatrix(const MapTerrain& terrain, const Rectangle2f& minimapRect);
@@ -1157,8 +1153,6 @@ namespace rwe
 
         /** Drops the queued build order whose footprint covers position (a shift-click on a planned building). */
         void localPlayerCancelBuildOrder(UnitId unitId, const SimVector& position);
-
-        void cancelBuildOrderAt(UnitId unitId, const SimVector& position);
 
         /** The position of the unit's queued build order whose footprint covers position, if any. */
         std::optional<SimVector> plannedBuildOrderAt(UnitId unitId, const SimVector& position) const;
@@ -1260,14 +1254,6 @@ namespace rwe
 
         /** Order another round for the unit's stockpiled weapon, or take one off the queue. */
         void localPlayerModifyStockpile(UnitId unitId, int count);
-
-        void issueUnitOrder(UnitId unitId, const UnitOrder& order);
-
-        void enqueueUnitOrder(UnitId unitId, const UnitOrder& order);
-
-        void stopUnit(UnitId unitId);
-
-        void setFireOrders(UnitId unitId, UnitFireOrders orders);
 
         void startTrack();
 

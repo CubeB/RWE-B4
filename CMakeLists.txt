@@ -330,6 +330,8 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_util.cpp
     src/rwe/game/featureplacement.cpp
     src/rwe/game/GameScene_util.h
+    src/rwe/game/GameSimulationLoader.cpp
+    src/rwe/game/GameSimulationLoader.h
     src/rwe/game/InGameSoundsInfo.cpp
     src/rwe/game/InGameSoundsInfo.h
     src/rwe/game/OrderButtons.cpp
@@ -341,6 +343,8 @@ set(SOURCE_FILES
     src/rwe/game/PlayerColorIndex.cpp
     src/rwe/game/PlayerColorIndex.h
     src/rwe/game/PlayerCommand.h
+    src/rwe/game/PlayerCommandApplication.cpp
+    src/rwe/game/PlayerCommandApplication.h
     src/rwe/game/PlayerCommandService.cpp
     src/rwe/game/PlayerCommandService.h
     src/rwe/game/ProjectileRenderType.h
@@ -348,6 +352,8 @@ set(SOURCE_FILES
     src/rwe/game/ReplayFile.h
     src/rwe/game/SceneTime.cpp
     src/rwe/game/SceneTime.h
+    src/rwe/game/SimDiagnostics.cpp
+    src/rwe/game/SimDiagnostics.h
     src/rwe/game/UnitPieceMeshInfo.cpp
     src/rwe/game/UnitPieceMeshInfo.h
     src/rwe/game/UnitSoundType.h
@@ -1159,6 +1165,11 @@ target_link_libraries(battle_test librwe)
 
 add_executable(path_bench src/path_bench.cpp)
 target_link_libraries(path_bench librwe)
+
+# The arena with no window: same simulation and tick loop as `rwe --ai-arena`,
+# no SDL, no GL. For CI and any machine without a display.
+add_executable(ai_arena src/ai_arena.cpp)
+target_link_libraries(ai_arena librwe)
 
 # Watches a recorded game. Its own executable rather than a switch on rwe.exe
 # because watching one is a separate thing to do, with its own list of what

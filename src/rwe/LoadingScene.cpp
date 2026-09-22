@@ -3,71 +3,20 @@
 #include <algorithm>
 #include <rwe/util/CrashHandler.h>
 #include <rwe/util/SpanStream.h>
-#include <rwe/LoadingScene_util.h>
-#include <rwe/ai/AiBuildTree.h>
-#include <rwe/ai/AiPersonality.h>
 #include <rwe/ai/AiPlayerController.h>
-#include <rwe/game/DownloadMenus.h>
-#include <rwe/game/ReplayFile.h>
-#include <rwe/game/featureplacement.h>
-#include <set>
-#include <rwe/ai/AiTuningProfile.h>
 #include <rwe/atlas_util.h>
-#include <rwe/collections/SimpleVectorMap.h>
-#include <rwe/game/FeatureMediaInfo.h>
 #include <rwe/game/GameNetworkService.h>
-#include <rwe/game/MapTerrainGraphics.h>
-#include <rwe/geometry/CollisionMesh.h>
-#include <rwe/io/fbi/io.h>
-#include <rwe/io/featuretdf/io.h>
-#include <rwe/io/lostdf/io.h>
-#include <rwe/io/moveinfotdf/MovementClassTdf.h>
-#include <rwe/io/moveinfotdf/io.h>
+#include <rwe/game/InGameSoundsInfo.h>
+#include <rwe/game/PlayerColorIndex.h>
 #include <rwe/io/ota/ota.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/tnt/TntArchive.h>
-#include <rwe/io/weapontdf/WeaponTdf.h>
-#include <rwe/sim/FeatureDefinitionId.h>
-#include <rwe/ui/UiLabel.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
     const Viewport MenuUiViewport(0, 0, 640, 480);
-
-    std::seed_seq seedFromGameParameters(const GameParameters& params)
-    {
-        std::vector<unsigned int> initialVec;
-        if (params.randomSeed)
-        {
-            initialVec.push_back(*params.randomSeed);
-        }
-        std::copy(params.mapName.begin(), params.mapName.end(), std::back_inserter(initialVec));
-
-        for (const auto& e : params.players)
-        {
-            if (!e)
-            {
-                initialVec.push_back(0);
-                continue;
-            }
-
-            initialVec.push_back(e->color.value);
-            initialVec.push_back(e->energy.value);
-            initialVec.push_back(e->metal.value);
-            if (e->name)
-            {
-                std::copy(e->name->begin(), e->name->end(), std::back_inserter(initialVec));
-            }
-            else
-            {
-                initialVec.push_back(0);
-            }
-        }
-
-        return std::seed_seq(initialVec.begin(), initialVec.end());
-    }
 
     GameParameters::GameParameters(const std::string& mapName, unsigned int schemaIndex)
         : mapName(mapName),
@@ -175,347 +124,44 @@ namespace rwe
         auto ota = parseOta(parseTdfFromString(otaStr));
 
         auto mapInfo = loadMap(mapName, ota, schemaIndex);
-        std::unordered_set<std::string> requiredFeatureNames;
-        for (const auto& f : mapInfo.features)
-        {
-            requiredFeatureNames.insert(f.second);
-        }
 
-        auto dataMaps = loadDefinitions(meshService, requiredFeatureNames);
+        GameLoadServices services{
+            sceneContext.vfs,
+            sceneContext.pathMapping,
+            sceneContext.palette,
+            sceneContext.guiPalette,
+            audioLookup,
+            &meshService,
+            sceneContext.textureService,
+            sceneContext.audioService};
 
-        auto movementClassCollisionService = createMovementClassCollisionService(mapInfo.terrain, dataMaps.movementClassDatabase);
-
-        // The wind speed range goes through as the map wrote it. The original
-        // caps what a generator can make out of it by clamping the ratio, not
-        // the speed, so clamping the speed here as well would have left a map
-        // whose minimum is above the cap with an empty range to draw from.
-        GameSimulation simulation(std::move(mapInfo.terrain), mapInfo.surfaceMetal, std::max(0, mapInfo.minWindSpeed), std::max(0, mapInfo.maxWindSpeed));
-        simulation.tidalStrength = std::max(0, mapInfo.tidalStrength);
-        simulation.killMul = mapInfo.killMul;
-        simulation.timeMul = mapInfo.timeMul;
-
-        // The skirmish options the simulation itself has to know about. They
-        // go in before any player is added: Mapped hands a player its explored
-        // grid at the moment that grid is created. Start Location is not among
-        // them because it is spent here, dealing out the map's start
-        // positions, and never consulted again.
-        simulation.lineOfSightMode = gameParameters.lineOfSight;
-        simulation.mappingMode = gameParameters.mapping;
-        simulation.commanderDeathMode = gameParameters.commanderDeath;
-
-        simulation.unitDefinitions = std::move(dataMaps.unitDefinitions);
-        simulation.weaponDefinitions = std::move(dataMaps.weaponDefinitions);
-
-        // A death weapon that does not exist. The shipped data has one:
-        // eleven units -- eight of Core Contingency's, the torpedo seaplanes
-        // among them, and three of the v3.1 patch's -- say
-        // ExplodeAs=MEDIUM_UNITEX, and no weapon file anywhere defines it
-        // (MEDIUM_UNIT is what was meant). The original evidently shrugs,
-        // since those units die in it without incident. RWE looked the name
-        // up unchecked the moment one died and the game ended with
-        // "unordered_map::at" -- found the day the AI first built seaplanes.
-        // Cleared here, once, so neither the simulation nor the scene has a
-        // name to trip on: the unit dies with no blast, as it must there.
-        for (auto& [unitType, definition] : simulation.unitDefinitions)
-        {
-            for (auto* deathWeapon : {&definition.explodeAs, &definition.selfDestructAs})
-            {
-                if (!deathWeapon->empty() && simulation.weaponDefinitions.count(*deathWeapon) == 0
-                    && simulation.weaponDefinitions.count(toUpper(*deathWeapon)) == 0)
-                {
-                    LOG_WARN << "Unit " << unitType << " dies as " << *deathWeapon << ", which no weapon file defines; it will die without a blast";
-                    deathWeapon->clear();
-                }
-            }
-        }
-        simulation.movementClassDatabase = std::move(dataMaps.movementClassDatabase);
-        simulation.movementClassCollisionService = std::move(movementClassCollisionService);
-        simulation.unitModelDefinitions = dataMaps.modelDefinitions;
-        simulation.unitScriptDefinitions = loadCobScripts(*sceneContext.vfs);
-        simulation.featureDefinitions = std::move(dataMaps.featureDefinitions);
-        simulation.featureNameIndex = std::move(dataMaps.featureNameIndex);
-        simulation.losTables = std::move(dataMaps.losTables);
-
-        // Two features drawn on one cell: the original keeps the later one
-        // unless the earlier is indestructible, and never places anything
-        // on the attribute grid's last row or column. Settled here, in the
-        // order the map lists them, so addFeature below never has to refuse
-        // one -- when it refused, it kept the earlier feature, which on
-        // twenty-seven of the official maps is the wrong one.
-        const auto& heightmap = simulation.terrain.getHeightMap();
-        auto placement = resolveFeatureOverlaps(
-            mapInfo.features,
-            heightmap.getWidth() - 1,
-            heightmap.getHeight() - 1,
-            [&](const std::string& name) {
-                const auto& d = simulation.getFeatureDefinition(simulation.tryGetFeatureDefinitionId(name).value());
-                return FeaturePlacementInfo{d.footprintX, d.footprintZ, d.indestructible};
-            });
-        LOG_INFO << "Map features: " << placement.placed.size() << " placed, "
-                 << placement.replaced << " replaced by a later feature, "
-                 << placement.dropped << " dropped";
-
-        for (const auto& [pos, featureName] : placement.placed)
-        {
-            auto featureId = simulation.tryGetFeatureDefinitionId(featureName).value();
-            if (!simulation.addFeature(featureId, pos.x, pos.y))
-            {
-                LOG_WARN << "Map feature " << featureName << " at " << pos.x << "," << pos.y << " could not be placed";
-            }
-        }
-
-        auto seedSeq = seedFromGameParameters(gameParameters);
-        simulation.rng.seed(seedSeq);
+        auto loaded = loadGameSimulation(services, gameParameters, std::move(mapInfo.data), ota);
 
         auto minimap = sceneContext.textureService->getMinimap(mapName);
 
         GameCameraState worldCameraState;
 
-        std::optional<PlayerId> localPlayerId;
-
         auto playerCommandService = std::make_unique<PlayerCommandService>();
 
-        std::array<std::optional<PlayerId>, 10> gamePlayers;
         std::vector<GameNetworkService::EndpointInfo> endpointInfos;
 
         for (Index i = 0; i < getSize(gameParameters.players); ++i)
         {
             const auto& params = gameParameters.players[i];
-            if (params)
-            {
-                auto playerType = std::visit(IsComputerVisitor(), params->controller) ? GamePlayerType::Computer : GamePlayerType::Human;
-                GamePlayerInfo gpi{params->name, playerType, params->color, GamePlayerStatus::Alive, params->side, params->metal, params->energy, params->metal, params->energy, params->metal, params->energy, params->teamId};
-                auto playerId = simulation.addPlayer(gpi);
-                gamePlayers[i] = playerId;
-                playerCommandService->registerPlayer(playerId);
-
-                if (std::visit(IsHumanVisitor(), params->controller))
-                {
-                    if (localPlayerId)
-                    {
-                        throw std::runtime_error("Multiple local human players found");
-                    }
-
-                    localPlayerId = gamePlayers[i];
-                }
-
-                if (auto networkInfo = std::get_if<PlayerControllerTypeNetwork>(&params->controller); networkInfo != nullptr)
-                {
-                    endpointInfos.emplace_back(playerId, networkService.getEndpoint(i));
-                }
-            }
-        }
-        if (!localPlayerId && (gameParameters.aiArenaSeconds || gameParameters.replayFile))
-        {
-            // Nobody is playing: this is a measurement run, or a recording of
-            // a game between computer players being watched back. The scene
-            // still needs a point of view, because the camera, the fog it
-            // draws and the interface all hang off a local player, so the
-            // first slot stands in. It keeps its AI controller -- GameScene
-            // knows not to push an empty command buffer on top of the AI's
-            // for a local player that is a computer -- so this really is
-            // every player being played by the AI.
-            for (Index i = 0; i < getSize(gamePlayers); ++i)
-            {
-                if (gamePlayers[i])
-                {
-                    localPlayerId = gamePlayers[i];
-                    LOG_INFO << "AI arena: no human player, watching from slot " << i;
-                    break;
-                }
-            }
-        }
-        if (!localPlayerId)
-        {
-            throw std::runtime_error("No local player!");
-        }
-
-        // What the map looks like, read once before anyone moves. Every AI
-        // gets the same copy: it describes ground, not a player's situation.
-        //
-        // The start positions are in here because a human has them too -- the
-        // lobby draws them on the map preview. Which one the enemy actually
-        // took is not, and cannot be, since the AI is handed the list and not
-        // the deal; it has to scout for that like anybody else.
-        std::vector<SimVector> declaredStartPositions;
-        {
-            const auto& startSchema = ota.schemas.at(schemaIndex);
-            // StartPos keys are 1-based and a map may leave gaps in them, so
-            // scan the whole range the slot table can hold rather than
-            // stopping at the first one missing.
-            for (int n = 1; n <= 10; ++n)
-            {
-                auto it = findStartPosition(startSchema, n);
-                if (!it)
-                {
-                    continue;
-                }
-                auto world = simulation.terrain.topLeftCoordinateToWorld(SimVector(SimScalar(it->xPos), 0_ss, SimScalar(it->zPos)));
-                world.y = simulation.terrain.getHeightAt(world.x, world.z);
-                declaredStartPositions.push_back(world);
-            }
-        }
-        auto mapIntel = analyseMap(simulation.terrain, std::move(declaredStartPositions));
-        LOG_INFO << "Map " << mapName << " reads as " << mapCharacterName(mapIntel.character)
-                 << " (" << static_cast<int>(mapIntel.waterFraction * 100.0f) << "% water, "
-                 << mapIntel.startPositions.size() << " start positions)";
-
-        // What each builder is allowed to build, read out of the same build
-        // menus the human's panels are drawn from. The engine enforces no
-        // tech tree of its own -- a BuildOrder naming any type at all becomes
-        // a nanoframe -- so without this the AI quietly builds things no
-        // player could order from that unit, and cannot know that the
-        // advanced constructor is the only way to a fusion plant. See
-        // docs/ai-architecture-proposal.md §15.2.
-        std::set<std::string> knownUnitTypes;
-        for (const auto& [unitType, unitDefinition] : simulation.unitDefinitions)
-        {
-            knownUnitTypes.insert(unitType);
-        }
-        auto buildTree = buildTreeFromBuilderGuis(dataMaps.builderGuisDatabase, knownUnitTypes);
-        LOG_INFO << "AI build tree: " << buildTree.buildableBy.size() << " builders with a build menu";
-
-        // Read once, and only if some seat asks for a personality.
-        std::optional<std::vector<AiPersonality>> aiPersonalities;
-
-        // Instantiate one AiPlayerController per Computer player.
-        // The controller's RNG is sub-seeded from simulation.rng so its
-        // sequence is part of the seeded sim and survives replays
-        // (docs/ai-architecture-proposal.md §12-Q6).
-        for (Index i = 0; i < getSize(simulation.players); ++i)
-        {
-            const auto& player = simulation.players[i];
-            if (player.type != GamePlayerType::Computer)
+            if (!params || !loaded.gamePlayers[i])
             {
                 continue;
             }
-            PlayerId aiPlayerId(i);
+            auto playerId = *loaded.gamePlayers[i];
+            playerCommandService->registerPlayer(playerId);
 
-            // The battle harness drives every unit itself. An AI here
-            // would take its own side over and the fight would stop
-            // being the thing under test.
-            if (gameParameters.battleTestUnitsPerSide)
+            if (auto networkInfo = std::get_if<PlayerControllerTypeNetwork>(&params->controller); networkInfo != nullptr)
             {
-                continue;
-            }
-
-            // The personality chosen for this seat, if any. The seat is the
-            // lobby's slot, which is not the player's index once an empty
-            // slot has been skipped.
-            std::optional<AiPersonality> personality;
-            for (Index slot = 0; slot < getSize(gamePlayers); ++slot)
-            {
-                if (gamePlayers[slot] != aiPlayerId || !gameParameters.players[slot] || !gameParameters.players[slot]->aiPersonality)
-                {
-                    continue;
-                }
-                const auto& name = *gameParameters.players[slot]->aiPersonality;
-                if (!aiPersonalities)
-                {
-                    aiPersonalities = loadAiPersonalities(aiPersonalityDirectory());
-                }
-                personality = findAiPersonality(*aiPersonalities, name);
-                if (!personality)
-                {
-                    // A saved game can outlive the file it was played with;
-                    // the game still loads, as the difficulty's own.
-                    LOG_WARN << "Player " << i << ": no AI personality called " << name << ", playing the default";
-                }
-            }
-
-            // Every computer player in a game shares the difficulty chosen for
-            // the game (--ai-difficulty, rwe.cfg or the skirmish menu), unless
-            // its personality names one of its own.
-            auto profile = makeProfileForDifficulty(personality && personality->difficulty ? *personality->difficulty : gameParameters.aiDifficulty);
-            // What this player's faction plays differently, before its
-            // personality and any --ai-tune, so that either can set a knob
-            // back.
-            applyFactionDefaults(profile, player.side);
-            if (personality)
-            {
-                if (auto knob = applyAiPersonality(profile, *personality))
-                {
-                    LOG_WARN << "Player " << i << ": the " << personality->name << " personality sets " << *knob << ", which is no AI knob";
-                }
-                LOG_INFO << "Player " << i << " plays the " << personality->name << " personality";
-            }
-            for (const auto& entry : gameParameters.aiTuning)
-            {
-                auto colon = entry.find(':');
-                auto equals = entry.find('=');
-                if (colon == std::string::npos || equals == std::string::npos || equals < colon)
-                {
-                    throw std::runtime_error("--ai-tune wants <player>:<knob>=<value>, got " + entry);
-                }
-                if (std::stoul(entry.substr(0, colon)) != static_cast<unsigned long>(i))
-                {
-                    continue;
-                }
-                auto knob = entry.substr(colon + 1, equals - colon - 1);
-                auto value = entry.substr(equals + 1);
-                // A misspelt knob that silently did nothing would make an
-                // arena comparison between two identical AIs look like a
-                // result, so it is fatal.
-                if (!applyAiTuning(profile, knob, value))
-                {
-                    throw std::runtime_error("--ai-tune: no such AI knob: " + knob);
-                }
-                LOG_INFO << "Player " << i << " AI knob " << knob << " = " << value;
-            }
-            if (gameParameters.replayFile)
-            {
-                // Watching rather than playing: the commands come out of the
-                // file, so a thinking AI would only add its own on top.
-                //
-                // The controller is still CONSTRUCTED, and that is the whole
-                // point of idling it here rather than skipping it. Building
-                // one draws a value from simulation.rng, and the start
-                // positions are dealt from that same stream a few lines
-                // further down -- skip the draw and every commander spawns
-                // somewhere else, which is a divergence on the very first
-                // tick and looks like anything except an off-by-one in the
-                // random number generator.
-                profile.idle = true;
-            }
-            LOG_INFO << "Player " << i << " is a computer player at " << aiDifficultyName(profile.difficulty) << " difficulty";
-
-            // Pull a single value from the sim RNG to seed the AI's
-            // sub-RNG. This keeps AI choices reproducible across clients
-            // that share `simulation.rng`'s seed.
-            const std::uint64_t aiSeed = static_cast<std::uint64_t>(simulation.rng());
-
-            simulation.addAiController(
-                aiPlayerId,
-                std::make_unique<AiPlayerController>(aiPlayerId, std::move(profile), aiSeed, mapIntel, buildTree));
-        }
-
-        // Which of the map's start positions each filled slot takes. Fixed
-        // leaves slot n on the map's StartPos n; Random permutes that same
-        // set, so every position is still used exactly once and none is
-        // invented. The deal is drawn from the simulation's RNG, which every
-        // peer seeded identically, so everyone lays the players out the same
-        // way. It has to happen here, while the simulation is still ours --
-        // a few lines further down it is moved into the GameScene.
-        std::vector<Index> filledSlots;
-        std::vector<int> mapStartPositions;
-        for (Index i = 0; i < getSize(gameParameters.players); ++i)
-        {
-            if (gameParameters.players[i])
-            {
-                filledSlots.push_back(i);
-                mapStartPositions.push_back(static_cast<int>(i) + 1);
+                endpointInfos.emplace_back(playerId, networkService.getEndpoint(i));
             }
         }
 
-        auto dealtStartPositions = dealStartPositions(mapStartPositions, gameParameters.startLocation, simulation.rng);
-
-        std::array<std::optional<int>, 10> startPositionForSlot;
-        for (Index k = 0; k < getSize(filledSlots); ++k)
-        {
-            startPositionForSlot[filledSlots[k]] = dealtStartPositions[k];
-        }
-
-        auto gameNetworkService = std::make_unique<GameNetworkService>(*localPlayerId, std::stoi(gameParameters.localNetworkPort), endpointInfos, playerCommandService.get());
+        auto gameNetworkService = std::make_unique<GameNetworkService>(*loaded.localPlayerId, std::stoi(gameParameters.localNetworkPort), endpointInfos, playerCommandService.get());
 
         auto minimapDots = sceneContext.textureService->getGafEntry("anims/FX.GAF", "radlogo");
         if (minimapDots->sprites.size() != 10)
@@ -555,7 +201,7 @@ namespace rwe
         auto gameScene = std::make_unique<GameScene>(
             sceneContext,
             std::move(playerCommandService),
-            std::move(dataMaps.gameMediaDatabase),
+            std::move(loaded.dataMaps.gameMediaDatabase),
             worldCameraState,
             atlasInfo.textureAtlas,
             std::move(atlasInfo.teamTextureAtlases),
@@ -563,9 +209,9 @@ namespace rwe
             std::move(atlasInfo.teamPaletteIndexAtlases),
             atlasInfo.shadeTableTexture,
             atlasInfo.alphaTableTexture,
-            std::move(simulation),
+            std::move(loaded.simulation),
             std::move(mapInfo.terrainGraphics),
-            std::move(dataMaps.builderGuisDatabase),
+            std::move(loaded.dataMaps.builderGuisDatabase),
             std::move(gameNetworkService),
             minimap,
             minimapDots,
@@ -574,7 +220,7 @@ namespace rwe
             consoleFont,
             speechFont,
             gameParameters,
-            *localPlayerId,
+            *loaded.localPlayerId,
             audioLookup,
             std::move(stateLogStream));
 
@@ -612,18 +258,18 @@ namespace rwe
             // seat, so this is the backstop for the command line and the
             // harnesses. It still ends the game, but it says which map and
             // which slot rather than naming a key.
-            auto startPos = findStartPosition(schema, *startPositionForSlot[i]);
+            auto startPos = findStartPosition(schema, *loaded.startPositionForSlot[i]);
             if (!startPos)
             {
                 throw std::runtime_error(
-                    "Map \"" + mapName + "\" has no start position for player slot " + std::to_string(*startPositionForSlot[i])
+                    "Map \"" + mapName + "\" has no start position for player slot " + std::to_string(*loaded.startPositionForSlot[i])
                     + " (schema " + std::to_string(schemaIndex) + " declares " + std::to_string(countStartPositions(schema)) + ")");
             }
 
             auto worldStartPos = gameScene->getTerrain().topLeftCoordinateToWorld(SimVector(SimScalar(startPos->xPos), 0_ss, SimScalar(startPos->zPos)));
             worldStartPos.y = gameScene->getTerrain().getHeightAt(worldStartPos.x, worldStartPos.z);
 
-            if (*gamePlayers[i] == *localPlayerId)
+            if (*loaded.gamePlayers[i] == *loaded.localPlayerId)
             {
                 humanStartPos = worldStartPos;
             }
@@ -632,13 +278,13 @@ namespace rwe
             {
                 // No commander: the harness fills the field itself, and a
                 // commander standing in it would only distort the fight.
-                battlePlayers.push_back(*gamePlayers[i]);
+                battlePlayers.push_back(*loaded.gamePlayers[i]);
                 battleSpawns.push_back(worldStartPos);
                 continue;
             }
 
             const auto& sideData = getSideData(player->side);
-            gameScene->spawnCompletedUnit(sideData.commander, *gamePlayers[i], worldStartPos);
+            gameScene->spawnCompletedUnit(sideData.commander, *loaded.gamePlayers[i], worldStartPos);
         }
 
         // No `battlePlayers.size() >= 2` guard here on purpose: a one-player
@@ -691,45 +337,13 @@ namespace rwe
 
         auto tileTextures = getTileTextures(tnt);
 
-        auto dataGrid = getMapData(tnt);
-
-        Grid<TntTileAttributes> mapAttributes(tnt.getHeader().width, tnt.getHeader().height);
-        tnt.readMapAttributes(mapAttributes.getData());
-
-        auto heightGrid = getHeightGrid(mapAttributes);
-
-        MapTerrain terrain(
-            std::move(heightGrid),
-            SimScalar(tnt.getHeader().seaLevel));
+        auto data = readMapData(tnt, ota, schemaIndex);
 
         MapTerrainGraphics terrainGraphics(
             std::move(tileTextures),
-            std::move(dataGrid));
+            std::move(data.tileData));
 
-        const auto& schema = ota.schemas.at(schemaIndex);
-
-        auto featureNames = getFeatureNames(tnt);
-        std::vector<std::pair<Point, std::string>> features;
-
-        mapAttributes.forEachIndexed([&](auto c, const auto& e) {
-            switch (e.feature)
-            {
-                case TntTileAttributes::FeatureNone:
-                case TntTileAttributes::FeatureUnknown:
-                case TntTileAttributes::FeatureVoid:
-                    break;
-                default:
-                    features.emplace_back(Point(c.x, c.y), featureNames.at(e.feature));
-            }
-        });
-
-        // add features from the OTA schema
-        for (const auto& f : schema.features)
-        {
-            features.emplace_back(Point(f.xPos, f.zPos), f.featureName);
-        }
-
-        return LoadMapResult{std::move(terrain), static_cast<unsigned char>(schema.surfaceMetal), ota.minWindSpeed, ota.maxWindSpeed, ota.tidalStrength, ota.killMul, ota.timeMul, std::move(features), std::move(terrainGraphics)};
+        return LoadMapResult{std::move(data), std::move(terrainGraphics)};
     }
 
     std::vector<TextureArrayRegion> LoadingScene::getTileTextures(TntArchive& tnt)
@@ -789,481 +403,6 @@ namespace rwe
         return it->second;
     }
 
-    void LoadingScene::loadFeatureMedia(MeshService& meshService, std::unordered_map<std::string, UnitModelDefinition>& modelDefinitions, GameMediaDatabase& gameMediaDatabase, const FeatureTdf& tdf)
-    {
-        FeatureMediaInfo f;
-
-        f.world = tdf.world;
-        f.description = tdf.description;
-        f.category = tdf.category;
-
-        if (!tdf.object.empty())
-        {
-            auto normalizedObjectName = toUpper(tdf.object);
-
-            if (modelDefinitions.find(normalizedObjectName) == modelDefinitions.end())
-            {
-                auto meshInfo = meshService.loadProjectileMesh(normalizedObjectName);
-                modelDefinitions.insert({normalizedObjectName, std::move(meshInfo.modelDefinition)});
-                for (const auto& m : meshInfo.pieceMeshes)
-                {
-                    gameMediaDatabase.addUnitPieceMesh(normalizedObjectName, m.first, m.second);
-                }
-            }
-            f.renderInfo = FeatureObjectInfo{normalizedObjectName};
-        }
-        else
-        {
-            FeatureSpriteInfo spriteInfo;
-            spriteInfo.transparentAnimation = tdf.animTrans;
-            spriteInfo.transparentShadow = tdf.shadTrans;
-            if (!tdf.fileName.empty() && !tdf.seqName.empty())
-            {
-                spriteInfo.animation = sceneContext.textureService->getGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqName);
-            }
-            if (!spriteInfo.animation)
-            {
-                spriteInfo.animation = sceneContext.textureService->getDefaultSpriteSeries();
-            }
-
-            if (!tdf.fileName.empty() && !tdf.seqNameShad.empty())
-            {
-                // Some third-party features have broken shadow anim names (e.g. "empty"),
-                // ignore them if they don't exist.
-                spriteInfo.shadowAnimation = sceneContext.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqNameShad);
-            }
-            if (!tdf.fileName.empty() && !tdf.seqNameBurn.empty())
-            {
-                spriteInfo.burnAnimation = sceneContext.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqNameBurn);
-            }
-            f.renderInfo = std::move(spriteInfo);
-        }
-
-        f.fileName = tdf.fileName;
-
-        // The reclaim sequence plays as a one-off particle where the feature stood.
-        if (!tdf.fileName.empty() && !tdf.seqNameReclamate.empty())
-        {
-            if (auto anim = sceneContext.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqNameReclamate))
-            {
-                gameMediaDatabase.addSpriteSeries(tdf.fileName, tdf.seqNameReclamate, *anim);
-            }
-        }
-
-        f.seqNameReclamate = tdf.seqNameReclamate;
-
-        f.seqNameBurn = tdf.seqNameBurn;
-        f.seqNameBurnShad = tdf.seqNameBurnShad;
-
-        f.seqNameDie = tdf.seqNameDie;
-
-        gameMediaDatabase.addFeature(std::move(f));
-    }
-
-    void LoadingScene::loadFeature(MeshService& meshService, GameMediaDatabase& gameMediaDatabase, const std::unordered_map<std::string, FeatureTdf>& tdfs, DataMaps& dataMaps, const std::string& initialFeatureName)
-    {
-        auto nextId = dataMaps.featureDefinitions.getNextId();
-        std::unordered_map<std::string, FeatureDefinitionId> openSet{{toUpper(initialFeatureName), nextId}};
-        nextId = FeatureDefinitionId(nextId.value + 1);
-        for (std::deque<std::string> featuresToLoad{{initialFeatureName}}; !featuresToLoad.empty(); featuresToLoad.pop_front())
-        {
-            const auto& featureName = featuresToLoad.front();
-
-            const auto& tdf = tdfs.at(toUpper(featureName));
-
-            FeatureDefinition f;
-
-            f.name = featureName;
-
-            f.footprintX = tdf.footprintX;
-            f.footprintZ = tdf.footprintZ;
-            f.height = SimScalar(tdf.height);
-
-            f.reclaimable = tdf.reclaimable;
-            f.autoreclaimable = tdf.autoreclaimable;
-            if (!tdf.featureReclamate.empty())
-            {
-                f.featureReclamate = getFeatureId(nextId, dataMaps.featureNameIndex, featuresToLoad, openSet, tdf.featureReclamate);
-            }
-            f.metal = tdf.metal;
-            f.energy = tdf.energy;
-
-            f.flamable = tdf.flamable;
-            if (!tdf.featureBurnt.empty())
-            {
-                f.featureBurnt = getFeatureId(nextId, dataMaps.featureNameIndex, featuresToLoad, openSet, tdf.featureBurnt);
-            }
-            f.burnMin = tdf.burnMin;
-            f.burnMax = tdf.burnMax;
-            f.sparkTime = tdf.sparkTime;
-            f.spreadChance = tdf.spreadChance;
-            f.burnWeapon = tdf.burnWeapon;
-
-            f.geothermal = tdf.geothermal;
-
-
-            f.reproduce = tdf.reproduce;
-            f.reproduceArea = tdf.reproduceArea;
-
-            f.noDisplayInfo = tdf.noDisplayInfo;
-
-            f.permanent = tdf.permanent;
-
-            f.blocking = tdf.blocking;
-
-            f.indestructible = tdf.indestructible;
-            f.damage = tdf.damage;
-            if (!tdf.featureDead.empty())
-            {
-                f.featureDead = getFeatureId(nextId, dataMaps.featureNameIndex, featuresToLoad, openSet, tdf.featureDead);
-            }
-
-            auto id = dataMaps.featureDefinitions.insert(f);
-            dataMaps.featureNameIndex.insert({toUpper(featureName), id});
-
-            loadFeatureMedia(meshService, dataMaps.modelDefinitions, gameMediaDatabase, tdf);
-        }
-    }
-
-    LoadingScene::DataMaps LoadingScene::loadDefinitions(MeshService& meshService, const std::unordered_set<std::string>& requiredFeatures)
-    {
-        DataMaps dataMaps;
-
-        // read sound categories
-        {
-            auto path = sceneContext.pathMapping->gamedata + "/SOUND.TDF";
-            auto bytes = sceneContext.vfs->readFile(path);
-            if (!bytes)
-            {
-                throw std::runtime_error("Failed to read " + path);
-            }
-
-            std::string soundString(bytes->data(), bytes->size());
-            auto sounds = parseSoundTdf(parseTdfFromString(soundString));
-            for (auto& s : sounds)
-            {
-                const auto& c = s.second;
-                preloadSound(dataMaps.gameMediaDatabase, c.select1);
-                preloadSound(dataMaps.gameMediaDatabase, c.unitComplete);
-                preloadSound(dataMaps.gameMediaDatabase, c.activate);
-                preloadSound(dataMaps.gameMediaDatabase, c.deactivate);
-                preloadSound(dataMaps.gameMediaDatabase, c.ok1);
-                preloadSound(dataMaps.gameMediaDatabase, c.arrived1);
-                preloadSound(dataMaps.gameMediaDatabase, c.cant1);
-                preloadSound(dataMaps.gameMediaDatabase, c.underAttack);
-                preloadSound(dataMaps.gameMediaDatabase, c.build);
-                preloadSound(dataMaps.gameMediaDatabase, c.repair);
-                preloadSound(dataMaps.gameMediaDatabase, c.working);
-                preloadSound(dataMaps.gameMediaDatabase, c.cloak);
-                preloadSound(dataMaps.gameMediaDatabase, c.uncloak);
-                preloadSound(dataMaps.gameMediaDatabase, c.capture);
-                preloadSound(dataMaps.gameMediaDatabase, c.count5);
-                preloadSound(dataMaps.gameMediaDatabase, c.count4);
-                preloadSound(dataMaps.gameMediaDatabase, c.count3);
-                preloadSound(dataMaps.gameMediaDatabase, c.count2);
-                preloadSound(dataMaps.gameMediaDatabase, c.count1);
-                preloadSound(dataMaps.gameMediaDatabase, c.count0);
-                preloadSound(dataMaps.gameMediaDatabase, c.cancelDestruct);
-                dataMaps.gameMediaDatabase.addSoundClass(s.first, std::move(s.second));
-            }
-        }
-
-        // read movement classes
-        {
-            auto path = sceneContext.pathMapping->gamedata + "/MOVEINFO.TDF";
-            auto bytes = sceneContext.vfs->readFile(path);
-            if (!bytes)
-            {
-                throw std::runtime_error("Failed to read " + path);
-            }
-
-            std::string movementString(bytes->data(), bytes->size());
-            auto classes = parseMoveInfoTdf(parseTdfFromString(movementString));
-            for (auto& c : classes)
-            {
-                auto movementClassDefinition = parseMovementClassDefinition(c.second);
-                dataMaps.movementClassDatabase.registerMovementClass(movementClassDefinition);
-            }
-        }
-
-        // read the line of sight ray tables
-        {
-            auto path = sceneContext.pathMapping->gamedata + "/LOS.TDF";
-            std::optional<LosTables> tables;
-            if (auto bytes = sceneContext.vfs->readFile(path); bytes)
-            {
-                try
-                {
-                    std::string losString(bytes->data(), bytes->size());
-                    tables = parseLosTdf(parseTdfFromString(losString));
-                }
-                catch (const std::exception& e)
-                {
-                    LOG_WARN << "Failed to parse " << path << ": " << e.what();
-                }
-            }
-
-            if (tables)
-            {
-                dataMaps.losTables = std::move(*tables);
-            }
-            else
-            {
-                // Not fatal: without the authored fans, generate ray fans of
-                // the same shape so a game can still be played.
-                LOG_WARN << "Could not read " << path << ", generating line of sight tables instead";
-                dataMaps.losTables = generateLosTables(DefaultLosTableCount - 1);
-            }
-        }
-
-        // read weapons
-        {
-            auto weaponFiles = sceneContext.vfs->getFileNames(sceneContext.pathMapping->weapons, ".tdf");
-
-            for (const auto& fileName : weaponFiles)
-            {
-                auto bytes = sceneContext.vfs->readFile(sceneContext.pathMapping->weapons + "/" + fileName);
-                if (!bytes)
-                {
-                    throw std::runtime_error("File in listing could not be read: " + fileName);
-                }
-
-                std::string tdfString(bytes->data(), bytes->size());
-                auto entries = parseWeaponTdf(parseTdfFromString(tdfString));
-
-                for (auto& pair : entries)
-                {
-                    auto weaponDefinition = parseWeaponDefinition(pair.second);
-                    auto weaponMediaInfo = parseWeaponMediaInfo(*sceneContext.palette, *sceneContext.guiPalette, pair.second);
-
-                    preloadSound(dataMaps.gameMediaDatabase, weaponMediaInfo.soundStart);
-                    preloadSound(dataMaps.gameMediaDatabase, weaponMediaInfo.soundHit);
-                    preloadSound(dataMaps.gameMediaDatabase, weaponMediaInfo.soundWater);
-
-                    if (auto modelRenderType = std::get_if<ProjectileRenderTypeModel>(&weaponMediaInfo.renderType); modelRenderType != nullptr)
-                    {
-                        auto meshInfo = meshService.loadProjectileMesh(modelRenderType->objectName);
-                        dataMaps.modelDefinitions.insert({modelRenderType->objectName, std::move(meshInfo.modelDefinition)});
-                        for (const auto& m : meshInfo.pieceMeshes)
-                        {
-                            dataMaps.gameMediaDatabase.addUnitPieceMesh(modelRenderType->objectName, m.first, m.second);
-                        }
-                    }
-
-                    if (weaponMediaInfo.explosionAnim)
-                    {
-                        auto anim = sceneContext.textureService->getGafEntry("anims/" + weaponMediaInfo.explosionAnim->gafName + ".gaf", weaponMediaInfo.explosionAnim->animName);
-                        dataMaps.gameMediaDatabase.addSpriteSeries(weaponMediaInfo.explosionAnim->gafName, weaponMediaInfo.explosionAnim->animName, anim);
-                    }
-                    if (weaponMediaInfo.waterExplosionAnim)
-                    {
-                        auto anim = sceneContext.textureService->getGafEntry("anims/" + weaponMediaInfo.waterExplosionAnim->gafName + ".gaf", weaponMediaInfo.waterExplosionAnim->animName);
-                        dataMaps.gameMediaDatabase.addSpriteSeries(weaponMediaInfo.waterExplosionAnim->gafName, weaponMediaInfo.waterExplosionAnim->animName, anim);
-                    }
-
-                    dataMaps.gameMediaDatabase.addWeapon(toUpper(pair.first), std::move(weaponMediaInfo));
-
-                    dataMaps.weaponDefinitions.insert({toUpper(pair.first), std::move(weaponDefinition)});
-                }
-            }
-        }
-
-        std::unordered_set<std::string> requiredFeaturesSet;
-        for (const auto& f : requiredFeatures)
-        {
-            requiredFeaturesSet.insert(toUpper(f));
-        }
-
-        // read unit FBIs
-        {
-            auto fbis = sceneContext.vfs->getFileNames(sceneContext.pathMapping->units, ".fbi");
-
-            for (const auto& fbiName : fbis)
-            {
-                auto bytes = sceneContext.vfs->readFile(sceneContext.pathMapping->units + "/" + fbiName);
-                if (!bytes)
-                {
-                    throw std::runtime_error("File in listing could not be read: " + fbiName);
-                }
-
-                std::string fbiString(bytes->data(), bytes->size());
-                auto fbi = parseUnitFbi(parseTdfFromString(fbiString));
-
-                auto unitDefinition = parseUnitDefinition(fbi, dataMaps.movementClassDatabase);
-                dataMaps.unitDefinitions.insert({toUpper(fbi.unitName), std::move(unitDefinition)});
-
-                // Read the unit's gui pages if it has any. This used to be
-                // gated on Builder=1, which is wrong: the six launchers that
-                // stockpile a round -- ARMSILO, CORSILO, ARMAMD, CORFMD,
-                // ARMEMP, CORTRON -- all say Builder=0 in their FBI and all
-                // ship a page of their own, whose single live gadget is the
-                // MAKENUKE or MAKEANTI button that orders the round. Gating on
-                // the flag left those pages on disk and the button with no way
-                // to reach it. A page only exists if <unitname><n>.GUI does, so
-                // asking for one costs a failed VFS lookup per unit and nothing
-                // more.
-                auto guiPages = loadBuilderGui(fbi.unitName);
-                if (guiPages)
-                {
-                    dataMaps.builderGuisDatabase.addBuilderGui(fbi.unitName, std::move(*guiPages));
-                }
-
-                auto meshInfo = meshService.loadUnitMesh(fbi.objectName);
-                dataMaps.modelDefinitions.insert({toUpper(fbi.objectName), std::move(meshInfo.modelDefinition)});
-                for (const auto& m : meshInfo.pieceMeshes)
-                {
-                    dataMaps.gameMediaDatabase.addUnitPieceMesh(fbi.objectName, m.first, m.second);
-                }
-
-                dataMaps.gameMediaDatabase.addSelectionCollisionMesh(fbi.objectName, std::make_shared<CollisionMesh>(std::move(meshInfo.selectionMesh.collisionMesh)));
-                dataMaps.gameMediaDatabase.addSelectionQuad(fbi.objectName, meshInfo.selectionMesh.corners);
-
-                if (!fbi.corpse.empty())
-                {
-                    requiredFeaturesSet.insert(toUpper(fbi.corpse));
-                }
-            }
-        }
-
-        // The buttons the expansions and patches add to builders that already
-        // ship pages, through download/*.tdf rather than new GUI files. Read
-        // once every builder's own pages are in, because an entry can land
-        // on one of those pages as well as past the end of them. See
-        // DownloadMenus.h.
-        {
-            std::vector<DownloadMenuEntry> downloadEntries;
-            for (const auto& name : sceneContext.vfs->getFileNames(sceneContext.pathMapping->downloads, ".tdf"))
-            {
-                auto bytes = sceneContext.vfs->readFile(sceneContext.pathMapping->downloads + "/" + name);
-                if (!bytes)
-                {
-                    continue;
-                }
-                try
-                {
-                    auto entries = parseDownloadMenuEntries(parseListTdfFromBytes(*bytes));
-                    downloadEntries.insert(downloadEntries.end(), entries.begin(), entries.end());
-                }
-                catch (const std::exception& e)
-                {
-                    // Six of these come from third-party downloadable units;
-                    // one that will not parse costs its own buttons, not the load.
-                    LOG_WARN << "Skipping download menu file " << name << ": " << e.what();
-                }
-            }
-            auto placed = applyDownloadMenuEntries(dataMaps.builderGuisDatabase, downloadEntries);
-            LOG_INFO << "Download menus: " << placed.placed << " buttons placed, " << placed.skipped << " skipped";
-        }
-
-        // read feature TDFs
-        {
-            auto files = sceneContext.vfs->getFileNamesRecursive("features", ".tdf");
-
-            std::unordered_map<std::string, FeatureTdf> featureTdfs;
-
-            for (const auto& name : files)
-            {
-                auto bytes = sceneContext.vfs->readFile("features/" + name);
-                if (!bytes)
-                {
-                    throw std::runtime_error("Failed to read feature " + name);
-                }
-
-                std::string tdfString(bytes->data(), bytes->size());
-
-                auto tdfRoot = parseTdfFromString(tdfString);
-                for (const auto& e : tdfRoot.blocks)
-                {
-                    auto featureTdf = parseFeatureTdf(*e.second);
-                    featureTdfs.insert({toUpper(e.first), featureTdf});
-                }
-            }
-
-            // actually parse and load assets for features that we require
-            for (const auto& featureName : requiredFeaturesSet)
-            {
-                loadFeature(meshService, dataMaps.gameMediaDatabase, featureTdfs, dataMaps, featureName);
-            }
-        }
-
-        // preload smoke
-        {
-            auto anim = sceneContext.textureService->getGafEntry("anims/FX.GAF", "smoke 1");
-            dataMaps.gameMediaDatabase.addSpriteSeries("FX", "smoke 1", anim);
-            auto anim2 = sceneContext.textureService->getGafEntry("anims/FX.GAF", "smoke 2");
-            dataMaps.gameMediaDatabase.addSpriteSeries("FX", "smoke 2", anim2);
-        }
-
-        // preload weapon sprites
-        {
-            auto anim = sceneContext.textureService->getGafEntry("anims/FX.GAF", "cannonshell");
-            dataMaps.gameMediaDatabase.addSpriteSeries("FX", "cannonshell", anim);
-        }
-        {
-            auto anim = sceneContext.textureService->getGafEntry("anims/FX.GAF", "plasmasm");
-            dataMaps.gameMediaDatabase.addSpriteSeries("FX", "plasmasm", anim);
-        }
-        {
-            auto anim = sceneContext.textureService->getGafEntry("anims/FX.GAF", "plasmamd");
-            dataMaps.gameMediaDatabase.addSpriteSeries("FX", "plasmamd", anim);
-        }
-        {
-            auto anim = sceneContext.textureService->getGafEntry("anims/FX.GAF", "ultrashell");
-            dataMaps.gameMediaDatabase.addSpriteSeries("FX", "ultrashell", anim);
-        }
-        {
-            auto anim = sceneContext.textureService->getGafEntry("anims/FX.GAF", "flamestream");
-            dataMaps.gameMediaDatabase.addSpriteSeries("FX", "flamestream", anim);
-        }
-
-        // Explosion and fire sprites used by exploding unit pieces (COB `explode`).
-        for (const auto& name : {"Explosion", "Explode2", "Explode3", "Explode4", "Explode5", "Nuke1", "fire1"})
-        {
-            if (auto anim = sceneContext.textureService->tryGetGafEntry("anims/FX.GAF", name))
-            {
-                dataMaps.gameMediaDatabase.addSpriteSeries("FX", name, *anim);
-            }
-        }
-
-        // The strip the Space key slides up from the bottom of the screen
-        // (TOTALA-EXE.md S:108): commongui's LIGHTBAR, of which the original
-        // draws frame 1, 507 by 32.
-        if (auto anim = sceneContext.textureService->tryGetGafEntry("anims/commongui.gaf", "LIGHTBAR"))
-        {
-            dataMaps.gameMediaDatabase.addSpriteSeries("COMMONGUI", "LIGHTBAR", *anim);
-        }
-
-        // In-game titles: TA's own PAUSED / VICTORY / DEFEAT artwork.
-        for (const auto& name : {"igpaused", "igvictory", "igdefeat"})
-        {
-            auto anim = sceneContext.textureService->getGafEntry("anims/IGTITLES.GAF", name);
-            dataMaps.gameMediaDatabase.addSpriteSeries("IGTITLES", name, anim);
-        }
-
-        return dataMaps;
-    }
-
-    void LoadingScene::preloadSound(GameMediaDatabase& meshDb, const std::optional<std::string>& soundName)
-    {
-        if (!soundName)
-        {
-            return;
-        }
-
-        preloadSound(meshDb, *soundName);
-    }
-
-    void LoadingScene::preloadSound(GameMediaDatabase& meshDb, const std::string& soundName)
-    {
-        auto sound = sceneContext.audioService->loadSound(soundName);
-        if (!sound)
-        {
-            return; // sometimes sound categories name invalid sounds
-        }
-
-        meshDb.addSound(soundName, *sound);
-    }
-
     std::optional<AudioService::SoundHandle> LoadingScene::lookUpSound(const std::string& key)
     {
         auto soundBlock = audioLookup->findBlock(key);
@@ -1279,26 +418,5 @@ namespace rwe
         }
 
         return sceneContext.audioService->loadSound(*soundName);
-    }
-
-    std::optional<std::vector<std::vector<GuiEntry>>> LoadingScene::loadBuilderGui(const std::string& unitName)
-    {
-        std::vector<std::vector<GuiEntry>> entries;
-        for (int i = 1; auto rawGui = sceneContext.vfs->readFile(sceneContext.pathMapping->guis + "/" + unitName + std::to_string(i) + ".GUI"); ++i)
-        {
-            auto parsedGui = parseGuiFromBytes(*rawGui);
-            if (!parsedGui)
-            {
-                throw std::runtime_error("Failed to parse unit builder GUI: " + unitName + std::to_string(i));
-            }
-            entries.push_back(std::move(*parsedGui));
-        }
-
-        if (entries.empty())
-        {
-            return std::nullopt;
-        }
-
-        return entries;
     }
 }

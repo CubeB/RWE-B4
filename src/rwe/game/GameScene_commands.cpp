@@ -18,6 +18,7 @@
 #include <rwe/camera_util.h>
 #include <rwe/game/GameScene_util.h>
 #include <rwe/game/OrderButtons.h>
+#include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
 #include <rwe/render/render_prof.h>
@@ -355,91 +356,6 @@ namespace rwe
 
         unconfirmedStockpileDelta[unitId] += count;
         refreshStockpileGuiTotal();
-    }
-
-    void GameScene::issueUnitOrder(UnitId unitId, const UnitOrder& order)
-    {
-        auto unit = tryGetUnit(unitId);
-        if (unit)
-        {
-            // Whatever it was doing (building, reclaiming) stops now, so the
-            // arm is stowed and the nano spray ends; a later order to the same
-            // target starts cleanly with StartBuilding.
-            UnitBehaviorService(&simulation).interruptCurrentTask(unitId);
-            unit->get().clearOrders();
-            unit->get().addOrder(order);
-        }
-    }
-
-    void GameScene::enqueueUnitOrder(UnitId unitId, const UnitOrder& order)
-    {
-        auto unit = tryGetUnit(unitId);
-        if (unit)
-        {
-            // An idle unit has nothing to queue behind, so this order starts
-            // straight away — which means an aircraft part-way through setting
-            // down has to break off and get back in the air for it.
-            if (unit->get().orders.empty())
-            {
-                UnitBehaviorService(&simulation).interruptCurrentTask(unitId);
-            }
-            unit->get().addOrder(order);
-        }
-    }
-
-    void GameScene::stopUnit(UnitId unitId)
-    {
-        auto unit = tryGetUnit(unitId);
-        if (unit)
-        {
-            UnitBehaviorService(&simulation).interruptCurrentTask(unitId);
-            unit->get().clearOrders();
-        }
-    }
-
-    void GameScene::cancelBuildOrderAt(UnitId unitId, const SimVector& position)
-    {
-        auto unit = tryGetUnit(unitId);
-        if (!unit)
-        {
-            return;
-        }
-        auto cell = simulation.terrain.worldToHeightmapCoordinate(position);
-        auto& orders = unit->get().orders;
-        for (auto it = orders.begin(); it != orders.end(); ++it)
-        {
-            auto buildOrder = std::get_if<BuildOrder>(&*it);
-            if (!buildOrder)
-            {
-                continue;
-            }
-            const auto& definition = simulation.unitDefinitions.at(buildOrder->unitType);
-            auto rect = simulation.computeFootprintRegion(buildOrder->position, definition.movementCollisionInfo);
-            if (cell.x >= rect.x && cell.x < rect.x + static_cast<int>(rect.width) && cell.y >= rect.y && cell.y < rect.y + static_cast<int>(rect.height))
-            {
-                // Only the plan is dropped; a building already started stays.
-                if (it == orders.begin() && std::holds_alternative<UnitBehaviorStateBuilding>(unit->get().behaviourState))
-                {
-                    return;
-                }
-                orders.erase(it);
-                return;
-            }
-        }
-    }
-
-    void GameScene::setFireOrders(UnitId unitId, UnitFireOrders orders)
-    {
-        auto unit = tryGetUnit(unitId);
-        if (unit)
-        {
-            unit->get().setFireOrders(orders);
-
-            if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit && *selectedUnit == unitId)
-            {
-                fireOrders.next(orders);
-            }
-        }
     }
 
     void GameScene::startTrack()
@@ -1847,33 +1763,6 @@ namespace rwe
         spawnWake(scattered() - emission.velocity, emission.velocity, emission.duration, 8, simulation.gameTime + GameTime(1), true);
     }
 
-    void GameScene::modifyBuildQueue(UnitId unitId, const std::string& unitType, int count)
-    {
-        auto unit = tryGetUnit(unitId);
-        if (unit)
-        {
-            unit->get().modifyBuildQueue(unitType, count);
-
-            updateUnconfirmedBuildQueueDelta(unitId, unitType, -count);
-            refreshBuildGuiTotal(unitId, unitType);
-        }
-    }
-
-    void GameScene::modifyStockpileQueue(UnitId unitId, int count)
-    {
-        simulation.modifyStockpileQueue(unitId, count);
-
-        auto it = unconfirmedStockpileDelta.find(unitId);
-        if (it != unconfirmedStockpileDelta.end())
-        {
-            it->second -= count;
-            if (it->second == 0)
-            {
-                unconfirmedStockpileDelta.erase(it);
-            }
-        }
-    }
-
     struct CorpseSpawnInfo
     {
         std::string featureName;
@@ -2822,77 +2711,39 @@ namespace rwe
 
     void GameScene::processUnitCommand(const PlayerUnitCommand& unitCommand)
     {
-        // A command is about half a second old by the time it lands -- it
-        // waits out the command buffer like everybody else's -- and the unit
-        // it names can have died in the meantime. Most of the handlers below
-        // looked it up with care; SetOnOff, SelfDestruct and the stockpile
-        // did not, and a lookup of a freed slot in the unit table throws
-        // "std::get: wrong index for variant", which ended the game. Found
-        // when the computer player switched off a metal maker that had just
-        // been shot. Asked once here, of the simulation's own state, so every
-        // peer drops the same command on the same tick.
-        if (!simulation.unitExists(unitCommand.unit))
+        // The simulation half is shared with the headless arena, so the two
+        // cannot drift. It drops a command naming a unit that has since died;
+        // the interface bookkeeping below must be dropped with it, or it would
+        // refresh a panel for a dead unit.
+        if (!applyUnitCommandToSimulation(simulation, unitCommand))
         {
             return;
         }
 
         match(
             unitCommand.command,
-            [&](const PlayerUnitCommand::IssueOrder& c) {
-                switch (c.issueKind)
-                {
-                    case PlayerUnitCommand::IssueOrder::IssueKind::Immediate:
-                        issueUnitOrder(unitCommand.unit, c.order);
-                        break;
-                    case PlayerUnitCommand::IssueOrder::IssueKind::Queued:
-                        enqueueUnitOrder(unitCommand.unit, c.order);
-                        break;
-                }
-            },
             [&](const PlayerUnitCommand::ModifyBuildQueue& c) {
-                modifyBuildQueue(unitCommand.unit, c.unitType, c.count);
+                updateUnconfirmedBuildQueueDelta(unitCommand.unit, c.unitType, -c.count);
+                refreshBuildGuiTotal(unitCommand.unit, c.unitType);
             },
             [&](const PlayerUnitCommand::ModifyStockpile& c) {
-                modifyStockpileQueue(unitCommand.unit, c.count);
-            },
-            [&](const PlayerUnitCommand::Stop&) {
-                stopUnit(unitCommand.unit);
+                auto it = unconfirmedStockpileDelta.find(unitCommand.unit);
+                if (it != unconfirmedStockpileDelta.end())
+                {
+                    it->second -= c.count;
+                    if (it->second == 0)
+                    {
+                        unconfirmedStockpileDelta.erase(it);
+                    }
+                }
             },
             [&](const PlayerUnitCommand::SetFireOrders& c) {
-                setFireOrders(unitCommand.unit, c.orders);
-            },
-            [&](const PlayerUnitCommand::SetMovementOrders& c) {
-                if (tryGetUnit(unitCommand.unit))
+                if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit && *selectedUnit == unitCommand.unit)
                 {
-                    simulation.setMoveOrders(unitCommand.unit, c.orders);
+                    fireOrders.next(c.orders);
                 }
             },
-            [&](const PlayerUnitCommand::SetOnOff& c) {
-                if (c.on)
-                {
-                    simulation.activateUnit(unitCommand.unit);
-                }
-                else
-                {
-                    simulation.deactivateUnit(unitCommand.unit);
-                }
-            },
-            [&](const PlayerUnitCommand::SetCloak& c) {
-                // This only records what the unit is asking for. Whether it
-                // actually cloaks is settled a second at a time by the energy
-                // and by how close the nearest enemy is standing.
-                if (tryGetUnit(unitCommand.unit))
-                {
-                    simulation.setCloakRequested(unitCommand.unit, c.cloaked);
-                }
-            },
-            [&](const PlayerUnitCommand::CancelBuildOrder& c) {
-                cancelBuildOrderAt(unitCommand.unit, c.position);
-            },
-            [&](const PlayerUnitCommand::SelfDestruct&) {
-                // Starts the countdown, or cancels it if pressed again.
-                simulation.toggleSelfDestruct(unitCommand.unit);
-            });
+            [](const auto&) {});
     }
 
     bool GameScene::leftClickMode() const
