@@ -169,6 +169,10 @@ Two things that pass measurement teaches, both worth knowing before making any o
 
 GitHub Actions (`.github/workflows/build.yml`) runs Linux (gcc-14, clang-18 on ubuntu-24.04) and Windows (MSVC 2026, MinGW64) builds in both Debug and Release configurations.
 
+## Contributing
+
+`revival` is the working branch and the default. **Only the maintainer pushes to it directly.** Everyone else — human or agent — raises a pull request against it: one branch per issue, named `<issue>-<slug>` like the existing branches, labels applied as you open it. CI runs on the PR the same as it would on a push.
+
 ## Labels
 
 Every issue and pull request carries **two** labels, one from each axis: where
