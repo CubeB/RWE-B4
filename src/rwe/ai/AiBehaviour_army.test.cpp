@@ -87,6 +87,121 @@ namespace rwe
         }
     }
 
+    TEST_CASE("an army that will never reach the threshold attacks anyway", "[ai]")
+    {
+        // Watched on Dark Side, ARM against CORE, forty minutes. CORE's
+        // faction default puts attackArmySize at fourteen; on that map its
+        // economy never carried more than six, so it was in Attack for 7
+        // status samples out of 80 and in Boom or Defend for 68, and at the
+        // end every one of its combat units was standing within 440 of its
+        // own commander while ARM's were three quarters of the way across
+        // the map. Reported, fairly, as the armies just sitting in base.
+        //
+        // attackArmySize is the number that says a wave is worth sending.
+        // Where the economy cannot reach it, it is instead the number that
+        // says never attack -- and six that never leave cannot even trade.
+        // So the build-up has a deadline: see attackPatienceSeconds.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        // Something of theirs to go at, far enough off not to be an intruder.
+        addUnit(sim, "ARMSOLAR", human, SimVector(900_ss, 0_ss, 900_ss), script);
+
+        // An army of three against a threshold of twenty: the shape of the
+        // game above, where the threshold is simply out of reach.
+        for (int i = 0; i < 3; ++i)
+        {
+            addUnit(sim, "ARMPW", ai, SimVector(SimScalar(-100.0f - (i * 40.0f)), 0_ss, 0_ss), script);
+        }
+
+        auto profile = makeDefaultBrutalProfile();
+        profile.scoutCount = 0;
+        profile.attackArmySize = 20;
+        REQUIRE(profile.retreatArmySize <= 3);
+
+        SECTION("before the deadline it goes on building up, as it always did")
+        {
+            profile.attackPatienceSeconds = 60;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 40, commands);
+            CHECK(controller.getBlackboard().phase == GamePhase::Boom);
+        }
+
+        SECTION("once the deadline passes it attacks with what it has")
+        {
+            // One second of patience, and rather more than that of ticking.
+            profile.attackPatienceSeconds = 1;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 3 * SimTicksPerSecond, commands);
+            CHECK(controller.getBlackboard().phase == GamePhase::Attack);
+        }
+
+        SECTION("switched off, it never attacks at all -- which is the fault")
+        {
+            profile.attackPatienceSeconds = 0;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 3 * SimTicksPerSecond, commands);
+            CHECK(controller.getBlackboard().phase == GamePhase::Boom);
+        }
+
+        SECTION("and it still needs something worth sending")
+        {
+            // Below retreatArmySize a wave is spent the moment it forms, so
+            // patience alone is not enough.
+            GameSimulation bare(makeFlatTerrain(64, 64), 0u, 0, 0);
+            addPlayer(bare, "human", GamePlayerType::Human, "ARM");
+            auto lonely = addPlayer(bare, "ai", GamePlayerType::Computer, "ARM");
+            defineWorld(bare);
+            addUnit(bare, "ARMCOM", lonely, SimVector(0_ss, 0_ss, 0_ss), script);
+            addUnit(bare, "ARMLAB", lonely, SimVector(100_ss, 0_ss, 0_ss), script);
+            addUnit(bare, "ARMSOLAR", PlayerId(0), SimVector(900_ss, 0_ss, 900_ss), script);
+
+            profile.attackPatienceSeconds = 1;
+            AiPlayerController controller(lonely, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(bare, controller, 3 * SimTicksPerSecond, commands);
+            CHECK(controller.getBlackboard().phase == GamePhase::Boom);
+        }
+
+        SECTION("and being raided in the meantime does not restart the clock")
+        {
+            // The first version of this measured time in the current Boom,
+            // and on the map it was written for it never fired once: a side
+            // being raided goes Boom, Defend, Boom, Defend all game -- CORE
+            // did it thirty-one times in that run -- and each new Boom put
+            // the clock back to nothing. So the clock runs from the last
+            // tick spent ATTACKING, which a raid does not touch.
+            profile.attackPatienceSeconds = 2;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+
+            // Into Boom, so the clock starts.
+            runTicks(sim, controller, 20, commands);
+            REQUIRE(controller.getBlackboard().phase == GamePhase::Boom);
+
+            // Raided for most of the waiting time, then the raider dies.
+            auto raiderId = addUnit(sim, "ARMPW", human, SimVector(250_ss, 0_ss, 0_ss), script);
+            runTicks(sim, controller, 2 * SimTicksPerSecond, commands);
+            REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
+            sim.killUnit(raiderId);
+
+            // The deadline has passed while it was defending, so the wave
+            // goes as soon as there is nothing at the gates. Measured from
+            // the Boom it would have re-entered, there would be seconds
+            // left to wait and the army would stay at home.
+            runTicks(sim, controller, SimTicksPerSecond, commands);
+            CHECK(controller.getBlackboard().phase == GamePhase::Attack);
+        }
+    }
+
     TEST_CASE("construction units keep out of fights nothing of ours covers", "[ai]")
     {
         auto script = makeEmptyCobScript();

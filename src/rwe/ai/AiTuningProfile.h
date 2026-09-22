@@ -1811,6 +1811,31 @@ namespace rwe
          */
         bool attackInWaves{true};
         /**
+         * How long to go on building up before attacking with whatever has
+         * been managed, when attackArmySize is out of reach.
+         *
+         * attackArmySize is the number that says a wave is worth sending.
+         * On a map whose economy cannot sustain that number it is instead
+         * the number that says never attack: CORE's faction default of
+         * fourteen against an army that peaked at six on Dark Side, which
+         * spent the game in Boom and Defend with its army standing at home.
+         * That is worse than sending six, because six that never leave
+         * cannot even trade.
+         *
+         * So: once this long has passed since the last tick spent attacking
+         * and there are at least retreatArmySize to send, the wave goes
+         * anyway. Four minutes, which a side whose economy works never
+         * reaches -- it passes attackArmySize inside a minute of entering
+         * Boom -- so this is a floor under the rule and not a change to it.
+         * Zero switches it off and restores the fixed threshold.
+         *
+         * Measured against time since the last ATTACK and not time in the
+         * current Boom: a side under pressure flips between Boom and Defend
+         * all game, and a clock restarted on each new Boom never reaches
+         * four minutes. See AiBlackboard::lastAttackPhase.
+         */
+        int attackPatienceSeconds{240};
+        /**
          * With more armed intruders near the base than we have combat units,
          * hold at the rally point and fight what comes within reach, rather
          * than charging the nearest one. Two kbots sent at a raiding party

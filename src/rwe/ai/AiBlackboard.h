@@ -506,6 +506,26 @@ namespace rwe
         bool waveSpent{false};
 
         /**
+         * The last tick spent in the Attack phase, or the first tick of the
+         * first build-up if there has never been one.
+         *
+         * attackArmySize is a fixed number, and a side whose economy cannot
+         * reach it never attacks at all. Watched on Dark Side: CORE's
+         * faction default is fourteen, its army peaked at six, and over
+         * forty minutes it was in Attack for 7 status samples out of 80 and
+         * in Boom or Defend for 68. Its whole army stood in its own base at
+         * the end, which is exactly what was reported.
+         *
+         * Time since the last ATTACK rather than time in the current Boom,
+         * because a side being raided flips between Boom and Defend all
+         * game -- CORE did it thirty-one times in one run -- and a clock
+         * that restarted on each new Boom never got anywhere. Defend does
+         * not reset this one.
+         *
+         * See AiTuningProfile::attackPatienceSeconds.
+         */
+        GameTime lastAttackPhase{0};
+        /**
          * A detachment sent at the enemy's outlying economy rather than at
          * the main target, by raw id. Drawn from the units gathering for the
          * next wave, never from the wave that is already out.

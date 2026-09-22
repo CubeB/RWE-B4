@@ -392,6 +392,7 @@ namespace rwe
             || setInt("tacticalTickInterval", p.tacticalTickInterval)
             || setInt("attackArmySize", p.attackArmySize)
             || setInt("retreatArmySize", p.retreatArmySize)
+            || setInt("attackPatienceSeconds", p.attackPatienceSeconds)
             || setBool("attackInWaves", p.attackInWaves)
             || setBool("holdWhenOutnumbered", p.holdWhenOutnumbered)
             || setInt("commanderDefendsAloneMaxIntruders", p.commanderDefendsAloneMaxIntruders)

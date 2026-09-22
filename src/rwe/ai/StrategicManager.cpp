@@ -1,4 +1,5 @@
 #include "StrategicManager.h"
+#include <rwe/sim/SimTicksPerSecond.h>
 
 namespace rwe
 {
@@ -50,7 +51,19 @@ namespace rwe
                 auto haveTarget = bb.enemyBasePosition || !bb.knownEnemies.empty();
                 auto fleet = static_cast<int>(bb.navalCombatUnits.size()) - (bb.navalScoutUnitId ? 1 : 0);
                 auto fleetReady = profile.attackNavalSize > 0 && fleet >= profile.attackNavalSize;
-                if ((bb.armySize >= profile.attackArmySize || fleetReady) && haveTarget)
+
+                // Waited long enough. attackArmySize is a fixed number, and
+                // on a map whose economy cannot reach it it is the number
+                // that says never attack -- see
+                // AiTuningProfile::attackPatienceSeconds for the game that
+                // asked for this. Something to send is still required: below
+                // retreatArmySize a wave is spent the moment it forms.
+                auto waited = profile.attackPatienceSeconds > 0
+                    && bb.lastAttackPhase.value > 0
+                    && bb.now.value >= bb.lastAttackPhase.value + (static_cast<unsigned int>(profile.attackPatienceSeconds) * SimTicksPerSecond)
+                    && bb.armySize >= profile.retreatArmySize;
+
+                if ((bb.armySize >= profile.attackArmySize || fleetReady || waited) && haveTarget)
                 {
                     bb.phase = GamePhase::Attack;
                 }
@@ -77,6 +90,17 @@ namespace rwe
             case GamePhase::Tech:
             case GamePhase::Endgame:
                 break;
+        }
+
+        // The clock behind attackPatienceSeconds, running from the last
+        // tick spent attacking rather than from the start of this build-up:
+        // being driven back into Defend over and over must not keep
+        // restarting it, which is how the first version of this never fired
+        // on the map that asked for it. The first build-up starts it, so an
+        // AI that has never attacked is not overdue on tick one.
+        if (bb.phase == GamePhase::Attack || (bb.lastAttackPhase.value == 0 && bb.phase == GamePhase::Boom))
+        {
+            bb.lastAttackPhase = bb.now;
         }
 
         (void)countOf;
