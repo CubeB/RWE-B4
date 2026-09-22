@@ -127,7 +127,6 @@ namespace rwe
         }
         unit.cobEnvironment->createThread("SetMaxReloadTime", {(maxReloadTicks * 1000) / SimTicksPerSecond});
 
-        // set speed for metal extractors
         if (unitDefinition.extractsMetal != Metal(0))
         {
             auto footprint = sim->computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
@@ -137,7 +136,6 @@ namespace rwe
 
         runUnitCobScripts(*sim, unitId);
 
-        // measure z distances for ballistics
         for (int i = 0; i < getSize(unit.weapons); ++i)
         {
             auto& weapon = unit.weapons[i];
@@ -234,10 +232,8 @@ namespace rwe
         // place by now, the arm goes away.
         updatePendingArmStow(unitInfo);
 
-        // Run unit and weapon AI
         if (!paralyzed && !unitInfo.state->isBeingBuilt(*unitInfo.definition))
         {
-            // check our build queue
             if (!unitInfo.state->buildQueue.empty())
             {
                 auto& entry = unitInfo.state->buildQueue.front();
@@ -286,7 +282,6 @@ namespace rwe
             // A damaged aircraft breaks off what it is doing and goes home.
             maybeBreakOffToRepairPad(unitInfo);
 
-            // check our orders
             if (!unitInfo.state->orders.empty())
             {
                 RWE_SIMPROF("b.orders");
@@ -298,7 +293,6 @@ namespace rwe
                 // references to elements already in it.
                 auto& order = unitInfo.state->orders.front();
 
-                // process move orders
                 if (handleOrder(unitInfo, order))
                 {
                     unitInfo.state->orders.pop_front();
@@ -464,7 +458,6 @@ namespace rwe
 
             updateMoveRateBand(unitInfo);
 
-            // do physics transitions
             match(
                 unitInfo.state->physics,
                 [&](const UnitPhysicsInfoGround& p) {
@@ -788,7 +781,6 @@ namespace rwe
 
         if (auto idleState = std::get_if<UnitWeaponStateIdle>(&weapon->state); idleState != nullptr)
         {
-            // attempt to acquire a target
             if (weaponDefinition.interceptor)
             {
                 // An interceptor never looks for a unit: the auto-target scan
@@ -1159,7 +1151,6 @@ namespace rwe
             return;
         }
 
-        // wait for burst reload
         auto gameTime = sim->gameTime;
         if (gameTime < fireInfo->readyTime)
         {
@@ -1210,7 +1201,6 @@ namespace rwe
             sim->addResourceDelta(id, -weaponDefinition.energyPerShot, -weaponDefinition.metalPerShot);
         }
 
-        // spawn a projectile from the firing point
         if (!fireInfo->firingPiece)
         {
             auto scriptName = getQueryScriptName(weaponIndex);
@@ -1362,7 +1352,6 @@ namespace rwe
             --weapon->stockedRounds;
         }
 
-        // If we just started the burst, set the reload timer
         if (fireInfo->burstsFired == 0)
         {
             unit.cobEnvironment->createThread(getFireScriptName(weaponIndex));
@@ -1407,7 +1396,6 @@ namespace rwe
         fireInfo->readyTime = gameTime + deltaSecondsToTicks(weaponDefinition.burstInterval);
         if (fireInfo->burstsFired >= weaponDefinition.burst)
         {
-            // we finished our burst, we are reloading now
             attackInfo->attackInfo = UnitWeaponStateAttacking::IdleInfo{};
         }
     }
@@ -1684,7 +1672,6 @@ namespace rwe
             return true;
         }
 
-        // check for collision at the new position.
         //
         // The cells the unit already stands on do not count against it: a unit
         // dropped inside a blocking feature -- a corpse over the ground it
@@ -1710,7 +1697,6 @@ namespace rwe
             return false;
         }
 
-        // we passed all collision checks, update accordingly
         auto footprintRegion = sim->computeFootprintRegion(unitInfo.state->position, unitInfo.definition->movementCollisionInfo);
         sim->moveUnitOccupiedArea(footprintRegion, newFootprintRegion, unitInfo.id);
 
@@ -3059,7 +3045,6 @@ namespace rwe
 
         if (!targetPosition)
         {
-            // target has gone away, throw away this order
             return true;
         }
 
@@ -3083,7 +3068,6 @@ namespace rwe
         }
         else
         {
-            // we're in range, aim weapons
             for (unsigned int i = 0; i < 2; ++i)
             {
                 match(
@@ -3796,20 +3780,17 @@ namespace rwe
         // TODO: real allied check here
         if (!target || !target->get().isOwnedBy(unitInfo.state->owner))
         {
-            // unit is dead or a traitor, abandon order
             return true;
         }
         auto& targetUnit = target->get();
 
 
-        // assist building
         if (auto bs = std::get_if<UnitBehaviorStateBuilding>(&targetUnit.behaviourState); unitInfo.definition->builder && bs)
         {
             buildExistingUnit(unitInfo, bs->targetUnit);
             return false;
         }
 
-        // assist factory building
         if (auto fs = std::get_if<FactoryBehaviorStateBuilding>(&targetUnit.factoryState); unitInfo.definition->builder && fs)
         {
             if (fs->targetUnit)
@@ -4669,7 +4650,6 @@ namespace rwe
 
                 if (!gotResources)
                 {
-                    // we don't have resources available to build -- wait
                     state.targetUnit->second = std::nullopt;
                     return false;
                 }
@@ -4902,7 +4882,6 @@ namespace rwe
         }
         else
         {
-            // check to see if our goal has moved from its original location
             auto resolvedDestination = resolvePathDestination(*unitInfo.state, goal);
             if (resolvedDestination != movingState->pathDestination)
             {
@@ -4916,11 +4895,8 @@ namespace rwe
                 movingState->pathRequested = true;
             }
 
-            // if we are colliding, request a new path
             if (unitInfo.state->inCollision && !movingState->pathRequested)
             {
-                // only request a new path if we don't have one yet,
-                // or we've already had our current one for a bit
                 if (!movingState->path || (sim->gameTime - movingState->path->pathCreationTime) >= GameTime(30))
                 {
                     sim->requestPath(unitInfo.id);
@@ -4929,7 +4905,6 @@ namespace rwe
             }
         }
 
-        // if a path is available, attempt to follow it
         if (movingState->path)
         {
             auto groundPhysics = std::get_if<UnitPhysicsInfoGround>(&unitInfo.state->physics);
@@ -5075,7 +5050,6 @@ namespace rwe
 
         if (!targetPosition)
         {
-            // target has gone away, throw away this order
             return true;
         }
 
@@ -5134,7 +5108,6 @@ namespace rwe
             return false;
         }
 
-        // we're in range, start reclaiming
         return deployReclaimArm(unitInfo, target);
     }
 
@@ -5192,7 +5165,6 @@ namespace rwe
             return false;
         }
 
-        // we're close enough -- actually build the unit
         return deployBuildArm(unitInfo, targetUnitId);
     }
 
@@ -5279,7 +5251,6 @@ namespace rwe
 
         if (!gotResources)
         {
-            // we don't have resources available to build -- wait
             buildingState->nanoParticleOrigin = std::nullopt;
             return false;
         }
@@ -5333,7 +5304,6 @@ namespace rwe
                 // mod data rather than engine behaviour.
                 if (!unitInfo.definition->canFly && !unitInfo.state->inBuildStance)
                 {
-                    // We are not in the correct stance to build the unit yet, wait.
                     return false;
                 }
 
@@ -5424,7 +5394,6 @@ namespace rwe
 
                 if (!unitInfo.state->inBuildStance)
                 {
-                    // We are not in the correct stance to build the unit yet, wait.
                     return false;
                 }
 

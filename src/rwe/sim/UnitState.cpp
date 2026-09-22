@@ -180,7 +180,6 @@ namespace rwe
 
         auto deltaHp = newProgressHp - oldProgressHp;
 
-        // add HP up to the maximum
         if (hitPoints + deltaHp >= unitDefinition.maxHitPoints)
         {
             hitPoints = unitDefinition.maxHitPoints;
@@ -208,7 +207,6 @@ namespace rwe
 
         auto deltaHp = oldProgressHp - newProgressHp;
 
-        // take HP off down to zero
         hitPoints = deltaHp >= hitPoints ? 0 : hitPoints - deltaHp;
 
         return buildTimeCompleted == 0;
