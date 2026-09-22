@@ -73,6 +73,65 @@ namespace rwe
         }
     }
 
+    TEST_CASE("their commander is a thing the AI knows it has seen", "[ai]")
+    {
+        // The unit whose death ends the game. The AI had no way to refer to
+        // it: knownEnemies recorded whether a contact was a building, armed
+        // or an aircraft, and nothing else, so the army could be sent at a
+        // solar collector and not at the one target that wins.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        auto theirCommanderPos = SimVector(100_ss, 0_ss, 0_ss);
+
+        SECTION("in sight, it is recorded and its place is the objective")
+        {
+            auto theirs = addUnit(sim, "ARMCOM", human, theirCommanderPos, script);
+            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 2, commands);
+
+            const auto& bb = controller.getBlackboard();
+            auto known = bb.knownEnemies.find(theirs.value);
+            REQUIRE(known != bb.knownEnemies.end());
+            CHECK(known->second.isCommander);
+            REQUIRE(bb.enemyCommanderPosition.has_value());
+            CHECK(bb.enemyCommanderPosition->distance(theirCommanderPos) < 20_ss);
+        }
+
+        SECTION("anything else of theirs is not their commander")
+        {
+            // The flag comes off the unit definition rather than off the
+            // unit's type name, so a side whose commander is called
+            // something else is covered and a kbot never is.
+            auto theirs = addUnit(sim, "ARMPW", human, theirCommanderPos, script);
+            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 2, commands);
+
+            const auto& bb = controller.getBlackboard();
+            auto known = bb.knownEnemies.find(theirs.value);
+            REQUIRE(known != bb.knownEnemies.end());
+            CHECK_FALSE(known->second.isCommander);
+            CHECK_FALSE(bb.enemyCommanderPosition.has_value());
+        }
+
+        SECTION("out of sight it is not known at all")
+        {
+            // Beyond the commander's 300-unit sight. An honest AI does not
+            // get to hunt what it has never found.
+            addUnit(sim, "ARMCOM", human, SimVector(450_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 2, commands);
+            CHECK_FALSE(controller.getBlackboard().enemyCommanderPosition.has_value());
+        }
+    }
+
     TEST_CASE("the AI only knows what it can see, unless it cheats", "[ai]")
     {
         auto script = makeEmptyCobScript();

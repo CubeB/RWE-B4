@@ -1460,10 +1460,27 @@ namespace rwe
         ticksSinceLastUpdate = 0;
 
         // Decide where the army is going this pass.
+        //
+        // The objective is their commander, and failing that their base.
+        // Killing the commander ends the game and taking the base wins it;
+        // everything else the wave might walk at is a detour, and the one
+        // that kept being chosen -- the highest value cell the threat map
+        // could find anywhere -- is a detour the raiding parties are already
+        // out making.
         bb.attackTarget.reset();
         if (bb.phase == GamePhase::Attack)
         {
-            bb.attackTarget = threatMap.bestAttackTarget(profile.threatAversion.value);
+            if (profile.huntEnemyCommander)
+            {
+                bb.attackTarget = bb.enemyCommanderPosition;
+            }
+            if (!bb.attackTarget)
+            {
+                bb.attackTarget = threatMap.bestAttackTarget(
+                    profile.threatAversion.value,
+                    bb.enemyBasePosition,
+                    profile.attackBaseRadius);
+            }
             if (!bb.attackTarget && bb.enemyBasePosition)
             {
                 bb.attackTarget = bb.enemyBasePosition;

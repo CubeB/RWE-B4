@@ -73,7 +73,7 @@ namespace rwe
             }
             const auto& def = sim.unitDefinitions.at(unit.unitType);
             auto armed = !def.weapon1.empty() || !def.weapon2.empty() || !def.weapon3.empty();
-            bb.knownEnemies[unitId.value] = KnownEnemy{unitId, unit.unitType, unit.position, bb.now, !def.isMobile, armed, def.canFly};
+            bb.knownEnemies[unitId.value] = KnownEnemy{unitId, unit.unitType, unit.position, bb.now, !def.isMobile, armed, def.canFly, def.commander};
             if (def.canFly)
             {
                 bb.lastEnemyAirSeenAt = bb.now;
@@ -84,6 +84,7 @@ namespace rwe
         // buildings. Counting their aircraft on the same walk, because that is
         // what decides whether anti-air is worth any metal.
         bb.enemyBasePosition.reset();
+        bb.enemyCommanderPosition.reset();
         bb.knownEnemyAirCount = 0;
         SimVector sum(0_ss, 0_ss, 0_ss);
         int buildings = 0;
@@ -102,6 +103,14 @@ namespace rwe
             {
                 sum = sum + enemy.lastKnownPosition;
                 ++buildings;
+            }
+            // The first one in the walk, which is the lowest unit id, so two
+            // enemy commanders are answered in an order that does not depend
+            // on anything but the simulation. knownEnemies is keyed by that
+            // id for the same reason.
+            if (enemy.isCommander && !bb.enemyCommanderPosition)
+            {
+                bb.enemyCommanderPosition = enemy.lastKnownPosition;
             }
         }
 

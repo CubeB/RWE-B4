@@ -98,8 +98,24 @@ namespace rwe
 
         float antiGroundAtCell(int x, int y) const { return antiGround.get(x, y); }
 
-        /** The enemy cell worth attacking most: value minus threat. */
-        std::optional<SimVector> bestAttackTarget(float threatAversion) const;
+        /**
+         * The enemy cell worth attacking most: value minus threat.
+         *
+         * With a base position and a radius, the pick is confined to cells
+         * within that radius of it, and only falls back to the whole map
+         * when nothing of theirs is known to stand there. That is what makes
+         * the wave's objective their base rather than the softest building
+         * anywhere: value minus threat, left to range over the whole map,
+         * prefers an undefended outlying extractor to a defended base for as
+         * long as the base is defended -- which is for ever.
+         *
+         * Picking off the outliers is the raiding party's job, and it uses
+         * the same radius from the other side (raidAvoidBaseRadius).
+         */
+        std::optional<SimVector> bestAttackTarget(
+            float threatAversion,
+            const std::optional<SimVector>& basePosition = std::nullopt,
+            SimScalar baseRadius = 0_ss) const;
 
         SimVector cellCenter(int x, int y) const;
         Point cellAt(const SimVector& position) const;

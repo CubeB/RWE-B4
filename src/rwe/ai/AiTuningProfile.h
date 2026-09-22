@@ -1959,6 +1959,42 @@ namespace rwe
         /** A raid target must be at least this far from the enemy's base. */
         SimScalar raidAvoidBaseRadius{900_ss};
         /**
+         * The wave's objective is confined to this far from the enemy's base,
+         * so that what it attacks is their base. Zero lets the pick range
+         * over the whole map, which is what it used to do.
+         *
+         * The pick is value minus defence (see ThreatMap::bestAttackTarget),
+         * and a base worth taking is a base with defences on it. Left to
+         * range, that arithmetic prefers an outlying extractor to the base
+         * for as long as the base is defended, which is for ever: the wave
+         * marches off to the far corner while the thing that has to fall
+         * stands untouched. Picking off outliers is what the raiding party
+         * is for, and 900 is exactly the radius it avoids
+         * (raidAvoidBaseRadius), so the two divide the map between them.
+         *
+         * If nothing of theirs is known to stand inside the radius -- early
+         * on, when all we have seen is one extractor -- the pick falls back
+         * to the whole map, so this can only ever narrow a choice that was
+         * already being made.
+         */
+        SimScalar attackBaseRadius{900_ss};
+        /**
+         * Their commander is the objective, ahead of their base.
+         *
+         * Killing it is how the game is won. The AI had no notion of it at
+         * all: bestAttackTarget scores cells holding enemy BUILDINGS, so the
+         * one unit whose death ends the game was not a target the army could
+         * be given, and the only thing that ever shot at it was whatever
+         * happened to be in range of it already.
+         *
+         * The wave walks at the last place we saw it. A remembered contact
+         * is dropped as soon as anything of ours looks at that place and
+         * finds nothing (PerceptionManager::refresh), so this does not lead
+         * the army around after a ghost; and a commander is normally in its
+         * own base, so most of the time this and the base agree.
+         */
+        bool huntEnemyCommander{true};
+        /**
          * Fighters and bombers the air plant keeps on hand. The plant has
          * only ever built one 40-metal scout and then stood idle for the rest
          * of the game, which is 850 metal of factory doing nothing; a bomber

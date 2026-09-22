@@ -34,6 +34,14 @@ namespace rwe
             return enemy;
         }
 
+        /** As above, but of a named type, so its cost and its guns are its own. */
+        KnownEnemy makeKnownBuildingOfType(UnitId id, const SimVector& position, const std::string& type)
+        {
+            auto enemy = makeKnownBuilding(id, position);
+            enemy.unitType = type;
+            return enemy;
+        }
+
         std::vector<UnitId> ascendingIds(std::vector<UnitId> ids)
         {
             std::sort(ids.begin(), ids.end(), [](UnitId a, UnitId b) { return a.value < b.value; });
@@ -428,6 +436,161 @@ namespace rwe
             profile.attackNavalSize = 0;
             strategic.update(profile, bb);
             REQUIRE(bb.phase == GamePhase::Boom);
+        }
+    }
+    TEST_CASE("the wave's objective is their commander, then their base", "[ai]")
+    {
+        // "The overall objective for the AI should always be to destroy the
+        // enemy base and be sending units to destroy the enemy commander."
+        //
+        // It was doing neither, and not by oversight in one place. The wave
+        // walked at whatever cell the threat map scored highest, and that
+        // score is value minus defence -- so a base worth taking, which is a
+        // base with guns on it, loses to any undefended extractor anywhere
+        // on the map for as long as the guns are there. Picking off outliers
+        // is what the raiding party is for. And the commander was not a
+        // candidate at all: the threat map scores cells holding BUILDINGS,
+        // so the one unit whose death ends the game could not be handed to
+        // the army as an objective.
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai");
+        auto enemy = addPlayer(sim, "enemy");
+        auto script = makeEmptyCobScript();
+
+        UnitDefinition kbotDef{};
+        kbotDef.isMobile = true;
+        sim.unitDefinitions["KBOT"] = kbotDef;
+
+        // Their base: a plant with a gun standing over it. The gun is what
+        // makes the base the wrong answer to "value minus defence", and a
+        // base without one is not a base worth the name.
+        WeaponDefinition gun{};
+        gun.maxRange = 300_ss;
+        gun.reloadTime = 1_ss;
+        gun.burst = 1;
+        gun.damage["DEFAULT"] = 100u;
+        sim.weaponDefinitions["GUN"] = gun;
+
+        UnitDefinition plantDef{};
+        plantDef.isMobile = false;
+        plantDef.buildCostMetal = Metal(500.0f);
+        sim.unitDefinitions["PLANT"] = plantDef;
+
+        UnitDefinition towerDef{};
+        towerDef.isMobile = false;
+        towerDef.buildCostMetal = Metal(150.0f);
+        towerDef.weapon1 = "GUN";
+        sim.unitDefinitions["TOWER"] = towerDef;
+
+        // Their outlying economy: worth MORE than the plant and covered by
+        // nothing, so the old rule prefers it and the new one does not.
+        UnitDefinition mexDef{};
+        mexDef.isMobile = false;
+        mexDef.buildCostMetal = Metal(700.0f);
+        sim.unitDefinitions["MEX"] = mexDef;
+
+        auto basePos = SimVector(800_ss, 0_ss, 0_ss);
+        auto towerPos = SimVector(860_ss, 0_ss, 0_ss);
+        auto outlierPos = SimVector(-800_ss, 0_ss, 800_ss);
+        // Well outside attackBaseRadius of their base, which is what makes
+        // it the raiding party's business and not the wave's.
+        REQUIRE(basePos.distance(outlierPos) > 900_ss);
+
+        auto plantId = addUnitOfType(sim, "PLANT", enemy, basePos, script);
+        auto towerId = addUnitOfType(sim, "TOWER", enemy, towerPos, script);
+        auto mexId = addUnitOfType(sim, "MEX", enemy, outlierPos, script);
+
+        std::vector<UnitId> units;
+        units.push_back(addUnitOfType(sim, "KBOT", ai, SimVector(0_ss, 0_ss, 0_ss), script));
+        units.push_back(addUnitOfType(sim, "KBOT", ai, SimVector(40_ss, 0_ss, 0_ss), script));
+        units = ascendingIds(units);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.tacticalTickInterval = 1;
+        // Two rules that sit above the one under test and would answer
+        // first: shooting whatever is already in reach, and turning on an
+        // army met on the road.
+        profile.engageRadius = 50_ss;
+        profile.waveMeetEnemyCount = 0;
+        // And the detachment that has a target of its own.
+        profile.raidingParties = false;
+
+        AiBlackboard bb;
+        bb.phase = GamePhase::Attack;
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+        bb.enemyBasePosition = basePos;
+        bb.combatUnits = units;
+        for (auto unitId : units)
+        {
+            bb.attackGroup.insert(unitId.value);
+        }
+        bb.knownEnemies[plantId.value] = makeKnownBuildingOfType(plantId, basePos, "PLANT");
+        bb.knownEnemies[towerId.value] = makeKnownBuildingOfType(towerId, towerPos, "TOWER");
+        bb.knownEnemies[mexId.value] = makeKnownBuildingOfType(mexId, outlierPos, "MEX");
+
+        ThreatMap threatMap(128, 128);
+        threatMap.rebuild(sim, ai, bb, true);
+
+        // Where the wave is told to walk. Read off the orders rather than
+        // off the blackboard, because what matters is where the units go.
+        auto objective = [&](const AiTuningProfile& p) {
+            ArmyManager army;
+            std::vector<PlayerCommand> commands;
+            army.update(sim, ai, p, threatMap, bb, commands);
+            auto moves = ordersFor<MoveOrder>(commands, units[0]);
+            REQUIRE(!moves.empty());
+            return moves.front().destination;
+        };
+
+        SECTION("their commander outranks their base")
+        {
+            // Out in the open, away from their base: the case worth having,
+            // because it is the one where the two objectives disagree.
+            auto commanderPos = SimVector(0_ss, 0_ss, -800_ss);
+            REQUIRE(profile.huntEnemyCommander);
+            bb.enemyCommanderPosition = commanderPos;
+
+            auto destination = objective(profile);
+            CHECK(commanderPos.distance(destination) < 100_ss);
+        }
+
+        SECTION("without a commander, the objective is inside their base")
+        {
+            REQUIRE(profile.attackBaseRadius > 0_ss);
+            auto destination = objective(profile);
+            CHECK(basePos.distance(destination) <= profile.attackBaseRadius);
+            // And specifically the plant, not the gun standing beside it:
+            // inside the base, value minus defence is still what chooses,
+            // and there it is the right question.
+            CHECK(destination.x < 830_ss);
+        }
+
+        SECTION("switched off, it walks to the far corner as it used to")
+        {
+            // The fault, pinned. Both knobs off is the old behaviour
+            // exactly: two kbots sent the length of the map after a metal
+            // extractor while the plant and the commander stand.
+            auto old = profile;
+            old.huntEnemyCommander = false;
+            old.attackBaseRadius = 0_ss;
+            bb.enemyCommanderPosition = SimVector(0_ss, 0_ss, -800_ss);
+
+            auto destination = objective(old);
+            CHECK(outlierPos.distance(destination) < 100_ss);
+        }
+
+        SECTION("nothing of theirs known in their base: the pick ranges the map again")
+        {
+            // Early on, all we have seen is one extractor in the open. A
+            // radius with nothing inside it must not leave the wave with no
+            // objective at all, so the pick falls back to the whole map --
+            // which here is the only target there is.
+            bb.knownEnemies.erase(plantId.value);
+            bb.knownEnemies.erase(towerId.value);
+            threatMap.rebuild(sim, ai, bb, true);
+
+            auto destination = objective(profile);
+            CHECK(outlierPos.distance(destination) < 100_ss);
         }
     }
 }

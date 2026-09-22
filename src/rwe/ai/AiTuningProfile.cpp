@@ -404,6 +404,8 @@ namespace rwe
             || setBool("raidingParties", p.raidingParties)
             || setInt("raidPartySize", p.raidPartySize)
             || setScalar("raidAvoidBaseRadius", p.raidAvoidBaseRadius)
+            || setScalar("attackBaseRadius", p.attackBaseRadius)
+            || setBool("huntEnemyCommander", p.huntEnemyCommander)
             || setInt("targetFighterCount", p.targetFighterCount)
             || setInt("targetBomberCount", p.targetBomberCount)
             || setInt("airWorthItEnemyDefences", p.airWorthItEnemyDefences)

@@ -325,14 +325,26 @@ namespace rwe
         return bestScoutTarget(from, [](int, int, const SimVector&) { return true; });
     }
 
-    std::optional<SimVector> ThreatMap::bestAttackTarget(float threatAversion) const
+    std::optional<SimVector> ThreatMap::bestAttackTarget(
+        float threatAversion,
+        const std::optional<SimVector>& basePosition,
+        SimScalar baseRadius) const
     {
         // Only cells holding an enemy building can be a target, and the
         // rebuild pass already noted which those are, so there is no need to
         // sweep the whole map again. The list is in the same scan order the
         // sweep used, so the pick is unchanged.
+        //
+        // Both answers are collected in the one walk: the best cell in their
+        // base, and the best anywhere. The first is what the wave wants; the
+        // second is what it gets when we have not found their base yet, or
+        // when everything we know of theirs is outside it.
         std::optional<SimVector> best;
         float bestScore = 0.0f;
+        std::optional<SimVector> bestInBase;
+        float bestInBaseScore = 0.0f;
+        auto confine = basePosition && baseRadius > 0_ss;
+        auto radiusSquared = baseRadius * baseRadius;
         auto width = getWidth();
         const auto& economicCells = economic.getVector();
         const auto& antiGroundCells = antiGround.getVector();
@@ -344,12 +356,18 @@ namespace rwe
                 continue;
             }
             auto score = value - (antiGroundCells[index] * threatAversion);
+            auto center = cellCenter(index % width, index / width);
             if (!best || score > bestScore)
             {
                 bestScore = score;
-                best = cellCenter(index % width, index / width);
+                best = center;
+            }
+            if (confine && basePosition->distanceSquared(center) <= radiusSquared && (!bestInBase || score > bestInBaseScore))
+            {
+                bestInBaseScore = score;
+                bestInBase = center;
             }
         }
-        return best;
+        return bestInBase ? bestInBase : best;
     }
 }

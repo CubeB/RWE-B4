@@ -40,6 +40,11 @@ namespace rwe
         bool isBuilding;
         bool isArmed;
         bool isAir;
+        /**
+         * Their commander. Defaulted so that the aggregate initialisers in
+         * the tests, which predate it, keep meaning what they meant.
+         */
+        bool isCommander{false};
     };
 
     /** A completed building of ours, remembered so that losing it can be noticed. */
@@ -368,6 +373,22 @@ namespace rwe
         std::map<unsigned int, KnownEnemy> knownEnemies;
         /** Centroid of the enemy's known buildings, if any have been seen. */
         std::optional<SimVector> enemyBasePosition;
+        /**
+         * Where their commander was when we last had eyes on it.
+         *
+         * Killing it is how the game is won, so it is the objective the wave
+         * is given ahead of anything else (AiTuningProfile::huntEnemyCommander).
+         * A remembered contact is kept until we look at the place we last saw
+         * it and find nothing -- see PerceptionManager::refresh -- so a
+         * commander that has walked off stops being a target the first time
+         * anything of ours looks at where it was, rather than leading the
+         * army to an empty field indefinitely.
+         *
+         * Nothing here decides whether we can reach it. The wave walks at it
+         * and meets what is in the way, which is the same contract the base
+         * position has.
+         */
+        std::optional<SimVector> enemyCommanderPosition;
         /** How many aircraft we currently believe the enemy has. */
         int knownEnemyAirCount{0};
         /** The most ARMED enemy aircraft known at once, all game. Aircraft are seen in glimpses, so the count of the moment undersells the raid that is coming back. */
