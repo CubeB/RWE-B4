@@ -129,7 +129,8 @@ int main(int argc, char* argv[])
                       << "  --data-path <path>    Game data search path (repeatable)\n"
                       << "  --map <name>          Launch directly into a game on this map\n"
                       << "  --port <port>         Network port (default: 1337)\n"
-                      << "  --player <spec>       Player spec: name;type;side;color (repeatable)\n"
+                      << "  --player <spec>       Player spec: name;type;side;color[;team] (repeatable)\n"
+                      << "                        Players sharing a team number are allies\n"
                       << "  --dir-<name> <dir>    Override directory name for a data category\n"
                       << std::endl;
             return 0;

@@ -506,7 +506,10 @@ namespace rwe
         }
 
         auto components = rwe::utf8Split(playerString, ';');
-        if (components.size() != 4)
+        // The team is optional and last, so every spec written before there
+        // was one still means what it meant: nobody on a team, everybody
+        // fighting alone.
+        if (components.size() != 4 && components.size() != 5)
         {
             throw std::runtime_error("Invalid player arg");
         }
@@ -516,6 +519,21 @@ namespace rwe
         auto side = parseSideFromString(components[2]);
         auto color = parseColorFromString(components[3]);
 
-        return PlayerInfo{name, controller, side, color, Metal(1000), Energy(1000)};
+        std::optional<int> teamId;
+        if (components.size() == 5 && !components[4].empty())
+        {
+            try
+            {
+                teamId = std::stoi(components[4]);
+            }
+            catch (const std::exception&)
+            {
+                throw std::runtime_error("Invalid team in player arg: " + components[4]);
+            }
+        }
+
+        auto info = PlayerInfo{name, controller, side, color, Metal(1000), Energy(1000)};
+        info.teamId = teamId;
+        return info;
     }
 }

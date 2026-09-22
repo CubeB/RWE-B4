@@ -916,6 +916,7 @@ if(WIN32)
 endif()
 
 set(TEST_FILES
+    src/rwe/GameLaunch.test.cpp
     src/rwe/ai/AiPlayerController.test.cpp
     src/rwe/ai/AiBehaviour.test.cpp
     src/rwe/ai/AiBehaviour_army.test.cpp
