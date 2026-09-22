@@ -396,13 +396,21 @@ Everything tagged `[tad]` alone is still a decoder test.
       appears and never waits for `INBUILDSTANCE`; three CORCA cells joined the
       fixture on the ordinary delta convention, and `aircraftbuild.test.cpp`
       covers the behaviour in the real simulation.
-- [ ] The weapon classes with no model yet: `vlaunch` (3 cells), torpedoes (4),
-      `cruise` (1) and `burst` (7, now including `CANNON_FIDO`, which the
-      ballistic pass reclassified out of its table -- six shells off one
-      trigger were never a flight time). A sixth is listed and not modelled:
-      **ballistic selfprop**, flown by the motor off a ballistic launch angle,
-      of which `ROCKET_HEAVY` is the only one and nothing in the corpus fires
-      it. They should reuse the footprint stop.
+- [ ] The weapon classes with no model yet: `vlaunch` (3 cells), torpedoes (4)
+      and `burst` (7, now including `CANNON_FIDO`, which the ballistic pass
+      reclassified out of its table -- six shells off one trigger were never a
+      flight time). One more is listed and not modelled: **ballistic selfprop**,
+      flown by the motor off a ballistic launch angle, of which `ROCKET_HEAVY`
+      is the only one and nothing in the corpus fires it. They should reuse the
+      footprint stop. `cruise` (1) no longer needs a model: it is scored
+      without one (PR #82). Its clause sits in the aim point, which a round
+      that cannot steer never asks for, so `CORHRK` flies the motor class's
+      drift bound and reads +0 at 65% over 291 pairings, and not one pairing's
+      answer changed -- only which ones were scored. A cruise weapon that
+      *can* steer stays separately classed and unscored, "cruise steering", on
+      the precedent that names "ballistic selfprop"; nothing in this data set
+      is one. `docs/TA-DEMOS.md`, "And `cruise` has left the table
+      altogether".
 - [x] Why 53,706 shots drew no damage, which was blocking the hit/miss half
       (2026-09-18). `tad_episodes --miss-buckets` sorts them: **36% structural**,
       the largest single bucket being 13,991 rounds whose victim died before

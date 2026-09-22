@@ -399,6 +399,22 @@ original:
   pixels. The picture is read back after the scene draws and before the
   cursor and the debug windows go on top; whether the original's included
   its cursor is not decoded (§77).
+- **A weapon silent about `tolerance` gets 256, not the original's
+  bits-driven default.** Finding `tolerance` zero, the original picks 2000
+  (`0x7D0`, about 11°) when `unit+0x110` bits 2–3 are set and 150 (`0x96`,
+  about 0.8°) otherwise (`0x49D895`–`0x49D8B2`); what the bits mean is
+  unsettled (§91). RWE substitutes 256 (`src/rwe/io/weapontdf/WeaponTdf.cpp`),
+  and only weapons silent about both `tolerance` and `pitchTolerance` land on
+  it: a weapon that names a tolerance and stays quiet about pitch gets that
+  named figure for pitch too, per `0x49D8B4` — the sixty shipped weapons that
+  do so are unaffected, as is the one (`vtol_emg`) that sets both. 256 is
+  kept rather than either decoded figure because both hang on `unit+0x110`
+  bits 2–3, whose meaning is unknown — 2000 only for the units that carry
+  them and 150 for everything else, so neither can be chosen without a guess
+  about which units they belong to. The number itself is a hand-set value
+  from before the decode, loosened from 182 for playability, and no recorded
+  rationale ties it to anything; it is left standing because the honest
+  alternatives are a guess between two unknowns.
 
 ---
 
@@ -439,9 +455,13 @@ original:
   minimap rings (§25), the placement box (§27) and the sweep (§28) are unknown,
   and RWE uses greens of its own choosing. Settling it needs a runtime memory
   dump, not more static reading -- break on `0x466FA8` and read `edx`.
-- **The anti-missile coverage ring** (§25) is decoded -- one dashed ring per
-  `interceptor` weapon on an `antiweapons` unit, radius `coverage - 512` -- but
-  not drawn.
+- ~~The anti-missile coverage ring is decoded but not drawn~~ **Drawn,
+  2026-09-05** (commit b1f096f6). `renderMinimapCoverageRings`
+  (`src/rwe/game/GameScene_render.cpp`) draws one ring per `interceptor`
+  weapon, dashed while the launcher holds a round and solid while it is empty,
+  both kinds clipped to the minimap. The `antiweapons`-not-parsed half of the
+  old entry was a divergence and is recorded in §88. What RWE does with the
+  decode is in TOTALA-EXE-INTERFACE.md, "What RWE does with all this".
 - ~~Why a construction aircraft finishes a build one tick early~~ Resolved: two
   increments on the creation tick, because `VTOL_MobileBuild` discards its stance
   wait's answer and a pending COB event re-runs the lathe in the same tick; see
@@ -454,7 +474,8 @@ original:
 - **`unit+0x110` bits 2–3.** They pick the loose 2000 default over the tight 150
   when a weapon names no tolerance (§11), and are tested at only three places —
   `0x40458A`, `0x4057D9` and `0x49D899` — none of which says what they mean. RWE
-  keeps its own 256 default rather than guess.
+  keeps its own 256 default rather than guess, which is recorded as a divergence
+  in §88.
 - **`holdtime` has no known reader** — see §11. `aimrate` is not a key the
   original recognises at all, so there is nothing there to find.
 - **`DefaultMissionType`** is decoded (§9) but not ported. RWE seeds a new
@@ -469,11 +490,16 @@ original:
   same thing. Hold Position is still honoured only in that such a unit is never
   given an attack order to begin with, and the mode is still not consulted
   anywhere else the original consults it.
-- **Smoke does not drift downwind.** The vector and the ×8 scaling are decoded
-  (§4, §7) but RWE has no map wind, so every puff goes straight up. The lift
-  itself is right: RWE's half a unit a tick is the original's gravity × 4 on the
-  112 that nearly every map uses, though it will not track a map that sets
-  gravity to something else.
+- ~~Smoke does not drift downwind~~ **The wind is ported; the smoke still
+  ignores it** (#111). `GameSimulation::currentWindVector` exists and is hashed
+  (commit 72f8b402), and it pushes ballistic rounds and bombs off course, the
+  shape of `0x49BD10`. The smoke particles have not been wired to it:
+  `updateParticles` (`src/rwe/game/GameScene_util.cpp`) adds only the
+  particle's own velocity, and every smoke spawn sets that purely vertical, so
+  a puff still goes straight up. Issue #111. The lift itself is right: RWE's
+  half a unit a tick is the original's gravity × 4 on the 112 that nearly
+  every map uses, though it will not track a map that sets gravity to
+  something else.
 - The **explosion smoke** (`0x472630` from `0x420AE1`, three puffs seven ticks
   apart) and the **30-second burning wreck plume** (`0x48644B`) are decoded but
   not ported; RWE's explosions and wreckage do not smoke afterwards.
