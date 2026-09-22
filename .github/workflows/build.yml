@@ -66,6 +66,23 @@ jobs:
           npm test
           npm run lint
 
+  # MSVC puts the class key into the decorated name, so `struct Foo;` against
+  # `class Foo { ... };` is two types to its linker and an unresolved external
+  # to nobody else. gcc and clang are entitled to ignore the difference and
+  # do, which is what made it a thirty-minute round trip through the Windows
+  # jobs to learn about -- see tools/class-key.sh. It needs no build and no
+  # submodules, so it gets a runner of its own and answers in seconds, beside
+  # those jobs rather than behind them.
+  class-keys:
+    # `labeled` is in the trigger list so that adding ci:full re-runs CI without
+    # needing an empty push behind it. Any other label should not.
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:full'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: class keys
+        run: ./tools/class-key.sh src
+
   # A pull request builds one configuration -- Linux gcc-14 Debug, which is
   # the one that runs the test suite with asserts live. Everything else waits
   # for the merge to revival, or for a `ci:full` label on the pull request.
