@@ -404,6 +404,106 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a team game is over when one team is left", "[gameoptions]")
+    {
+        // computeWinStatus waited for exactly one player to be left standing.
+        // Allies do not fight each other, so in a team game it waited for
+        // ever: a 2v2 whose losing pair had both been wiped out went on
+        // running to whatever time limit was over it, with the winners
+        // walking around an empty map. On the arena harness that reads as
+        // "ended=timeout" on a game that was decided twenty minutes earlier.
+        auto script = makeOptionsScript();
+
+
+        auto fourPlayers = [&](GameSimulation& sim, std::optional<int> teamA, std::optional<int> teamB) {
+            std::vector<PlayerId> ids;
+            for (int i = 0; i < 4; ++i)
+            {
+                auto id = addOptionsPlayer(sim, "p" + std::to_string(i));
+                sim.getPlayer(id).teamId = (i % 2 == 0) ? teamA : teamB;
+                ids.push_back(id);
+            }
+            return ids;
+        };
+
+        SECTION("two allies left is a win, not an undecided game")
+        {
+            GameSimulation sim(makeOptionsTerrain(), 0u, 0, 0);
+            auto ids = fourPlayers(sim, 1, 2);
+            defineOptionsUnit(sim, "tank", 100u);
+            std::vector<UnitId> tanks;
+            for (int i = 0; i < 4; ++i)
+            {
+                tanks.push_back(addOptionsUnit(sim, "tank", ids[i], SimVector(SimScalar(i * 64.0f), 0_ss, 0_ss), script));
+            }
+
+            REQUIRE(std::holds_alternative<WinStatusUndecided>(sim.computeWinStatus()));
+
+            // One of the other team goes: still a game, one against two.
+            sim.killPlayer(ids[1]);
+            sim.tick();
+            CHECK(std::holds_alternative<WinStatusUndecided>(sim.computeWinStatus()));
+
+            // And the other. Two allies are left and it is over.
+            sim.killPlayer(ids[3]);
+            sim.tick();
+            auto status = sim.computeWinStatus();
+            REQUIRE(std::holds_alternative<WinStatusWon>(status));
+            CHECK(std::get<WinStatusWon>(status).winner == ids[0]);
+        }
+
+        SECTION("without teams, two left is still a game -- as it always was")
+        {
+            // The free-for-all case, which must not move: a player on no team
+            // is nobody's ally, including another player on no team.
+            GameSimulation sim(makeOptionsTerrain(), 0u, 0, 0);
+            auto ids = fourPlayers(sim, std::nullopt, std::nullopt);
+            defineOptionsUnit(sim, "tank", 100u);
+            for (int i = 0; i < 4; ++i)
+            {
+                addOptionsUnit(sim, "tank", ids[i], SimVector(SimScalar(i * 64.0f), 0_ss, 0_ss), script);
+            }
+
+            sim.killPlayer(ids[1]);
+            sim.killPlayer(ids[3]);
+            sim.tick();
+            CHECK(std::holds_alternative<WinStatusUndecided>(sim.computeWinStatus()));
+
+            sim.killPlayer(ids[2]);
+            sim.tick();
+            auto status = sim.computeWinStatus();
+            REQUIRE(std::holds_alternative<WinStatusWon>(status));
+            CHECK(std::get<WinStatusWon>(status).winner == ids[0]);
+        }
+
+        SECTION("a team-mate of nobody does not win alongside a team")
+        {
+            // Three on a team and one alone. While the loner stands there is
+            // a game, whatever the other three have between them.
+            GameSimulation sim(makeOptionsTerrain(), 0u, 0, 0);
+            std::vector<PlayerId> ids;
+            for (int i = 0; i < 4; ++i)
+            {
+                auto id = addOptionsPlayer(sim, "p" + std::to_string(i));
+                sim.getPlayer(id).teamId = i < 3 ? std::make_optional(1) : std::nullopt;
+                ids.push_back(id);
+            }
+            defineOptionsUnit(sim, "tank", 100u);
+            for (int i = 0; i < 4; ++i)
+            {
+                addOptionsUnit(sim, "tank", ids[i], SimVector(SimScalar(i * 64.0f), 0_ss, 0_ss), script);
+            }
+
+            CHECK(std::holds_alternative<WinStatusUndecided>(sim.computeWinStatus()));
+
+            sim.killPlayer(ids[3]);
+            sim.tick();
+            auto status = sim.computeWinStatus();
+            REQUIRE(std::holds_alternative<WinStatusWon>(status));
+            CHECK(std::get<WinStatusWon>(status).winner == ids[0]);
+        }
+    }
+
     TEST_CASE("what losing the commander costs", "[gameoptions]")
     {
         auto script = makeOptionsScript();

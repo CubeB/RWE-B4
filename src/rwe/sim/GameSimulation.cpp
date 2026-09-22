@@ -2356,28 +2356,48 @@ namespace rwe
 
     WinStatus GameSimulation::computeWinStatus() const
     {
+        // The first player still standing, and whether anybody still
+        // standing is on a different side from them. Allies do not fight
+        // each other, so a rule that waits for one player to be left waits
+        // for ever in a team game: a 2v2 whose losing pair had both been
+        // wiped out went on running until whatever time limit was over it,
+        // with the winners walking around an empty map.
+        //
+        // Two players are on different sides unless both name the same team.
+        // A player on no team is nobody's ally, including of another player
+        // on no team, which is what makes a free-for-all behave exactly as
+        // it did.
         std::optional<PlayerId> livingPlayer;
+        std::optional<int> livingTeam;
         for (Index i = 0; i < getSize(players); ++i)
         {
             const auto& p = players[i];
 
-            if (p.status == GamePlayerStatus::Alive)
+            if (p.status != GamePlayerStatus::Alive)
             {
-                if (livingPlayer)
-                {
-                    // multiple players are alive, the game is not over
-                    return WinStatusUndecided();
-                }
-                else
-                {
-                    livingPlayer = PlayerId(i);
-                }
+                continue;
+            }
+
+            if (!livingPlayer)
+            {
+                livingPlayer = PlayerId(i);
+                livingTeam = p.teamId;
+                continue;
+            }
+
+            if (!livingTeam || !p.teamId || *livingTeam != *p.teamId)
+            {
+                // Somebody is left who is not on their side.
+                return WinStatusUndecided();
             }
         }
 
         if (livingPlayer)
         {
-            // one player is alive, declare them the winner
+            // Named by their lowest player id where a team has won, because
+            // WinStatusWon carries one player. Everything that reads it
+            // wants somebody to credit, and the arena report prints every
+            // player's standing anyway.
             return WinStatusWon{*livingPlayer};
         }
 
