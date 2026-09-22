@@ -60,6 +60,19 @@ namespace rwe
          * level-one plant and would have been dead code.
          */
         std::string gunship;
+
+        /**
+         * Air repair pad: ARMASP, CORASP. Level two, on page 2 of the
+         * advanced constructor's menu.
+         *
+         * The simulation has done the whole of this for some time and the AI
+         * has never built one: a damaged aircraft below three quarters health
+         * looks for a pad inside 3840, breaks off whatever it is doing, lands,
+         * is mended and goes back to it (`sim/airbase.test.cpp`). Without a
+         * pad, every aircraft the AI owns is a one-way trade -- which is most
+         * of why its air arm has never been worth what it cost.
+         */
+        std::string airRepairPad;
         /** Air constructor: it flies, so no ground has to connect for it to reach a site. */
         std::string airConstructor;
         std::string vehiclePlant;

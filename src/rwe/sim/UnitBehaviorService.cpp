@@ -3820,6 +3820,19 @@ namespace rwe
             }
         }
 
+        // Guarding the frame itself rather than the factory making it. A
+        // player picks the thing they want finished, and both orders mean
+        // the same job; without this the guard fell through to "stay close"
+        // below, walked to within 200 of the pad and stood there watching.
+        // Same reach rule as the repair path: measured to the factory when
+        // the frame is on its pad.
+        if (unitInfo.definition->builder
+            && targetUnit.isBeingBuilt(sim->unitDefinitions.at(targetUnit.unitType)))
+        {
+            buildExistingUnit(unitInfo, guardOrder.target, factoryBuilding(guardOrder.target));
+            return false;
+        }
+
         // Nothing to help with. An aircraft does not park over what it is
         // guarding: a guard order on something that can fly becomes
         // VTOL_Follow (0x40FBE0, chosen at 0x43F4C7), and with no work to copy
@@ -4033,7 +4046,16 @@ namespace rwe
         if (target.isBeingBuilt(targetDefinition))
         {
             // Repairing an unfinished unit means finishing its construction.
-            return buildExistingUnit(unitInfo, repairOrder.target);
+            //
+            // If it is still on a factory's pad, the reach is measured to the
+            // factory and not to it. A frame there stands at the middle of a
+            // building nothing can walk into, so a builder measuring its arm
+            // to the frame walks as close as the yard allows, finds itself
+            // short and stands there for the rest of the game -- which is
+            // what a play-test reported of a commander told to repair a unit
+            // under construction in a factory. The guard path has measured to
+            // the factory since S:57; this one never did.
+            return buildExistingUnit(unitInfo, repairOrder.target, factoryBuilding(repairOrder.target));
         }
 
         if (target.hitPoints >= targetDefinition.maxHitPoints)
@@ -5114,6 +5136,19 @@ namespace rwe
 
         // we're in range, start reclaiming
         return deployReclaimArm(unitInfo, target);
+    }
+
+    std::optional<UnitId> UnitBehaviorService::factoryBuilding(UnitId frameId) const
+    {
+        for (const auto& [id, unit] : sim->units)
+        {
+            auto fs = std::get_if<FactoryBehaviorStateBuilding>(&unit.factoryState);
+            if (fs && fs->targetUnit && fs->targetUnit->first == frameId)
+            {
+                return UnitId(id);
+            }
+        }
+        return std::nullopt;
     }
 
     bool UnitBehaviorService::buildExistingUnit(UnitInfo unitInfo, UnitId targetUnitId, std::optional<UnitId> standNextTo)

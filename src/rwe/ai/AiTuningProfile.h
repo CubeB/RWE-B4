@@ -1896,6 +1896,21 @@ namespace rwe
          * time each new aircraft flies at whatever is worst defended and is
          * traded for a fraction of it.
          */
+        /**
+         * How many armed enemy buildings it takes before the air tier counts
+         * as worth its metal (AiBlackboard::airWorthIt), on top of the two
+         * cases that need no counting: a map the ground arm cannot cross,
+         * and an enemy already flying.
+         *
+         * A wall of towers is the thing a ground army cannot walk through
+         * and an aircraft does not have to, which is the whole argument for
+         * the air tier and the one S:16.3 made for the bomber. Four is a
+         * wall rather than a picket, and it is a guess: nothing has measured
+         * where the line belongs.
+         */
+        int airWorthItEnemyDefences{4};
+        /** Air repair pads wanted. One mends every aircraft inside 3840, which is most of a map. */
+        int targetAirRepairPadCount{1};
         int targetAdvancedAirPlantCount{1};
         int targetGunshipCount{3};
         int gunshipPackSize{2};

@@ -1144,6 +1144,89 @@ namespace rwe
         }
     }
 
+    TEST_CASE("whether the air tier is worth having is decided from the game, not from a list", "[ai]")
+    {
+        // The economy streams, so what the metal is worth spending on has a
+        // different answer at minute three and minute twenty. This is the air
+        // half of that judgement (AiBlackboard::airWorthIt): it is what puts
+        // the advanced aircraft plant in the plan, and what lets the saving
+        // rule wait the long window for it instead of skipping past to a
+        // solar collector every pass for the rest of the game.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+
+        SECTION("a plain land map with nothing of theirs standing: not yet")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            CHECK_FALSE(controller.getBlackboard().airWorthIt);
+        }
+
+        SECTION("a wall of their towers: yes")
+        {
+            // A wall is what a ground army cannot walk through and an
+            // aircraft does not have to. Four of them, which is the default
+            // airWorthItEnemyDefences.
+            REQUIRE(profile.airWorthItEnemyDefences == 4);
+            for (int i = 0; i < 4; ++i)
+            {
+                addUnit(sim, "ARMLLT", human, SimVector(SimScalar(800.0f + (i * 80.0f)), 0_ss, 800_ss), script);
+            }
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            CHECK(controller.getBlackboard().airWorthIt);
+        }
+
+        SECTION("three towers is a picket, not a wall")
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                addUnit(sim, "ARMLLT", human, SimVector(SimScalar(800.0f + (i * 80.0f)), 0_ss, 800_ss), script);
+            }
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            CHECK_FALSE(controller.getBlackboard().airWorthIt);
+        }
+
+        SECTION("their extractors are not a wall however many there are")
+        {
+            // Armed is the test, not merely built. An unarmed building is
+            // what a bomber is FOR, not a reason the ground cannot get there.
+            for (int i = 0; i < 8; ++i)
+            {
+                addUnit(sim, "ARMMEX", human, SimVector(SimScalar(800.0f + (i * 80.0f)), 0_ss, 800_ss), script);
+            }
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            CHECK_FALSE(controller.getBlackboard().airWorthIt);
+        }
+
+        SECTION("switched off, no number of towers moves it")
+        {
+            profile.airWorthItEnemyDefences = 0;
+            for (int i = 0; i < 8; ++i)
+            {
+                addUnit(sim, "ARMLLT", human, SimVector(SimScalar(800.0f + (i * 80.0f)), 0_ss, 800_ss), script);
+            }
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            CHECK_FALSE(controller.getBlackboard().airWorthIt);
+        }
+    }
+
     TEST_CASE("what the enemy is made of leans the lab's shares", "[ai]")
     {
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);

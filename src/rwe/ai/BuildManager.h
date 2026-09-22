@@ -742,6 +742,14 @@ namespace rwe
          * `builderType` actually has a button for. Every rule reads as a need
          * of the base; the filter is what turns that into this builder's job.
          */
+        /**
+         * Decide whether aircraft are worth spending a tier on and record it
+         * on the blackboard (AiBlackboard::airWorthIt). Once a pass, before
+         * any builder is planned, because both the build plan and the saving
+         * rule read it.
+         */
+        void updateAirWorthIt(const AiTuningProfile& profile, AiBlackboard& bb) const;
+
         std::vector<std::string> buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::optional<FortificationPlan>& fortify, const std::optional<DefenceRebuildPlan>& rebuild, const std::string& builderType, bool enemyNavalSeen) const;
 
         void planFactories(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const;

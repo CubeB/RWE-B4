@@ -3207,6 +3207,38 @@ namespace rwe
             want(s.airPlant);
         }
 
+        // The advanced aircraft plant, which is the gunship and nothing else
+        // as far as this AI is concerned, and then the pad that makes an
+        // aircraft something other than a one-way trade.
+        //
+        // In the plan rather than in the surplus rules below, which is where
+        // this sat first. At about 2600 metal it is never affordable out of
+        // an ordinary minute's income, so the surplus was the only thing
+        // that could ever have bought it -- and that made a strategic
+        // decision wait on a full store. The saving rule is the right
+        // mechanism: it holds the metal for the thing at the top of the list
+        // and lets the economy through underneath, which is how the advanced
+        // lab already gets paid for. See worthTheLongWait below.
+        //
+        // Only the air constructor can put either up (see AiSideUnits::
+        // advancedAirPlant), and want() asks the build tree, so a side with
+        // none standing never takes the job.
+        if (profile.techLevelTwo && incomeSupportsTech && bb.airWorthIt
+            && !s.advancedAirPlant.empty() && !s.airConstructor.empty()
+            && total(s.airPlant) >= 1 && total(s.airConstructor) >= 1
+            && total(s.advancedAirPlant) < profile.targetAdvancedAirPlantCount)
+        {
+            want(s.advancedAirPlant);
+        }
+        if (!s.airRepairPad.empty() && total(s.advancedAirPlant) >= 1
+            && total(s.airRepairPad) < profile.targetAirRepairPadCount)
+        {
+            // AiSideUnits has already dropped the slot unless the data
+            // makes it a real pad -- IsAirBase and a worker time -- so
+            // there is nothing left to test here.
+            want(s.airRepairPad);
+        }
+
         auto energyToSpare = bb.energyStorage.value > 0.0f && bb.currentEnergy.value >= bb.energyStorage.value * 0.8f
             && bb.energyIncome.value > bb.energyDemand.value;
         if (total(s.solar) < profile.targetSolarCount && !(profile.solarOnDemand && energyToSpare))
@@ -3402,32 +3434,6 @@ namespace rwe
             if (bb.metalIncome.value >= static_cast<float>(2 * profile.techMinMetalIncome) && total(s.lab) >= 1 && total(s.advancedLab) < 1)
             {
                 want(s.advancedLab);
-            }
-            // And the air tier, which is the gunship and nothing else as
-            // far as this AI is concerned.
-            //
-            // A gunship stands off what it is shooting and keeps shooting,
-            // which is what a ground army does and what a ground army
-            // stopped by a ridge cannot do. So it is the arm that answers a
-            // map the ground war cannot cross -- reported from a replay on
-            // Crystal Maze, where the ground units spent the game firing
-            // into elevation and the aircraft were "underutilised".
-            //
-            // Here, with the surplus, and not up in the plan: ARMAAP is
-            // about 2600 metal, and above the extractors and the solars it
-            // would be bought with the metal that pays for them. A full
-            // store is income already going to waste, which is the one
-            // condition under which a plant this dear is free.
-            //
-            // Only the air constructor can put it up (see AiSideUnits::
-            // advancedAirPlant), which the AI already builds one of, and
-            // want() asks the build tree, so a side with none standing
-            // never takes the job.
-            if (!s.advancedAirPlant.empty() && !s.airConstructor.empty()
-                && total(s.airPlant) >= 1 && total(s.airConstructor) >= 1
-                && total(s.advancedAirPlant) < profile.targetAdvancedAirPlantCount)
-            {
-                want(s.advancedAirPlant);
             }
             if (navalFleetTarget(profile, bb) > 0)
             {
@@ -4762,6 +4768,43 @@ namespace rwe
         return false;
     }
 
+    void BuildManager::updateAirWorthIt(const AiTuningProfile& profile, AiBlackboard& bb) const
+    {
+        // Are aircraft worth spending a tier on? Asked every pass, because
+        // the economy streams and the answer at minute three is not the
+        // answer at minute twenty.
+        //
+        // Three ways it comes out yes, and none of them is a list of unit
+        // types. The map keeps the ground arm from reaching everything --
+        // the same test buildPriorities calls airMatters, read off the map
+        // the way a player reads it off the preview. They are flying, so we
+        // need something that can answer them. Or they have put up enough
+        // standing guns that walking at them has stopped working: a wall of
+        // towers is exactly what a ground army cannot cross and an aircraft
+        // does not have to, which is the argument S:16.3 made for the bomber
+        // and the one the gunship inherits.
+        auto airMatters = (bb.mapIntel.valid && bb.mapIntel.character != MapCharacter::Land) || bb.hasUnreachableGround;
+
+        int enemyStaticDefences = 0;
+        for (const auto& [_, enemy] : bb.knownEnemies)
+        {
+            if (enemy.isBuilding && enemy.isArmed && !enemy.isAir)
+            {
+                ++enemyStaticDefences;
+            }
+        }
+
+        auto was = bb.airWorthIt;
+        bb.airWorthIt = airMatters || bb.enemyAirThreat
+            || (profile.airWorthItEnemyDefences > 0 && enemyStaticDefences >= profile.airWorthItEnemyDefences);
+        if (bb.airWorthIt != was)
+        {
+            LOG_INFO << "AI build: the air tier is " << (bb.airWorthIt ? "worth having" : "no longer worth having")
+                     << " (map " << (airMatters ? "wants it" : "does not") << ", their aircraft " << (bb.enemyAirThreat ? "seen" : "not seen")
+                     << ", " << enemyStaticDefences << " standing guns of theirs known)";
+        }
+    }
+
     void BuildManager::update(
         const GameSimulation& sim,
         PlayerId aiOwner,
@@ -4772,6 +4815,7 @@ namespace rwe
         std::minstd_rand& rng,
         std::vector<PlayerCommand>& outCommands)
     {
+        updateAirWorthIt(profile, bb);
         keepBuildersOutOfFights(sim, aiOwner, profile, bb, outCommands);
 
         ++ticksSinceLastPlanning;
@@ -5340,7 +5384,26 @@ namespace rwe
                     || (!sideUnits.underwaterFusion.empty() && next == sideUnits.underwaterFusion)
                     || (!sideUnits.mohoExtractor.empty() && next == sideUnits.mohoExtractor)
                     || (!sideUnits.heavyPlasmaTower.empty() && next == sideUnits.heavyPlasmaTower)
-                    || (!sideUnits.heavyLaserTower.empty() && next == sideUnits.heavyLaserTower);
+                    || (!sideUnits.heavyLaserTower.empty() && next == sideUnits.heavyLaserTower)
+                    || (!sideUnits.advancedAirPlant.empty() && next == sideUnits.advancedAirPlant)
+                    || (!sideUnits.airRepairPad.empty() && next == sideUnits.airRepairPad);
+                // And the first air plant, while the air tier is worth
+                // having at all.
+                //
+                // This is the one on the list that is not level two, and it
+                // is here because of what it unlocks rather than what it is:
+                // it is the only door to the air constructor, and the air
+                // constructor is the only unit that can put up the advanced
+                // plant. Judged against the ordinary minute it is 850 metal
+                // the planner skips past to a solar collector every pass, so
+                // on a map where the ground cannot reach everything the AI
+                // could never buy the one thing that could.
+                //
+                // Only the first. Once one stands the capability is bought,
+                // and a second is an ordinary factory competing with the
+                // rest on ordinary terms.
+                auto isFirstAirPlant = bb.airWorthIt && !sideUnits.airPlant.empty() && next == sideUnits.airPlant
+                    && countOf(bb.ownedTotalCounts, sideUnits.airPlant) == 0;
                 // So is the one answer the AI has to a hull at its shipyard.
                 // The torpedo launcher is only wanted once an enemy ship has
                 // actually been seen, so by the time it is on this list it is
@@ -5352,7 +5415,7 @@ namespace rwe
                 // cannot answer that ship itself: it walks the seabed there,
                 // and nothing but a waterweapon fires from under the sea.
                 auto isThreatAnswer = !sideUnits.torpedoLauncher.empty() && next == sideUnits.torpedoLauncher;
-                auto window = (isLevelTwo || isThreatAnswer) ? profile.techSaveUpSeconds : profile.saveUpSeconds;
+                auto window = (isLevelTwo || isThreatAnswer || isFirstAirPlant) ? profile.techSaveUpSeconds : profile.saveUpSeconds;
                 if (!canAfford(bb, estimate))
                 {
                     // Deliberately NOT gated on whether the map has room for

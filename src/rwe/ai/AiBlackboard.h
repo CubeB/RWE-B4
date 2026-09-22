@@ -289,6 +289,23 @@ namespace rwe
         /** True when the map has ground the base cannot walk to (islands, far banks). */
         bool hasUnreachableGround{false};
 
+        /**
+         * Whether aircraft are worth spending a tier on, judged this pass
+         * rather than decided once.
+         *
+         * The economy streams, so what the metal is worth spending on is a
+         * question with a different answer at minute three and minute
+         * twenty. This is the air half of that: true when the map keeps the
+         * ground arm from reaching everything, when the enemy is flying, or
+         * when they have put up enough standing guns that walking at them
+         * has stopped working. Read by the build plan, which wants the air
+         * tier while it holds, and by the saving rule, which is willing to
+         * wait the long window for it.
+         *
+         * Written by BuildManager once a planning pass.
+         */
+        bool airWorthIt{false};
+
         // --- Losses ---
         /**
          * Our completed buildings as of last tick, keyed by raw unit id.

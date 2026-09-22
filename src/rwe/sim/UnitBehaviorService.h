@@ -359,6 +359,22 @@ namespace rwe
 
         bool buildExistingUnit(UnitInfo unitInfo, UnitId targetUnitId, std::optional<UnitId> standNextTo = std::nullopt);
 
+        /**
+         * The factory, if any, whose pad the given unit is being built on.
+         *
+         * There is no back pointer from a frame to the factory making it --
+         * the factory names the frame and not the other way round -- so this
+         * walks the unit list. It is only ever asked about a unit that is
+         * still being built, which is a short window, and only when a builder
+         * has been told to finish it.
+         *
+         * What it is for is the reach test in buildExistingUnit: a frame on a
+         * pad stands at the middle of a building nothing can walk into, so a
+         * builder measuring its arm to the frame is permanently out of range.
+         * See the comment there.
+         */
+        std::optional<UnitId> factoryBuilding(UnitId frameId) const;
+
         void changeState(UnitState& unit, const UnitBehaviorState& newState);
 
         /**

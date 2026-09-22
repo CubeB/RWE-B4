@@ -44,6 +44,7 @@ namespace rwe
             units.bomber = "CORSHAD";
             units.advancedAirPlant = "CORAAP";
             units.gunship = "CORAPE";
+            units.airRepairPad = "CORASP";
             units.airConstructor = "CORCA";
             units.vehiclePlant = "CORVP";
             units.scoutVehicle = "CORFAV";
@@ -106,6 +107,7 @@ namespace rwe
             units.bomber = "ARMTHUND";
             units.advancedAirPlant = "ARMAAP";
             units.gunship = "ARMBRAWL";
+            units.airRepairPad = "ARMASP";
             units.airConstructor = "ARMCA";
             units.vehiclePlant = "ARMVP";
             units.scoutVehicle = "ARMFAV";
@@ -173,6 +175,19 @@ namespace rwe
         check(units.bomber);
         check(units.advancedAirPlant);
         check(units.gunship);
+        check(units.airRepairPad);
+        // A pad has to be one. A damaged aircraft looks for a unit that is
+        // IsAirBase, is a builder and is switched on (unitIsAnUsableAirBase);
+        // a building that is not all three would be a thousand metal of
+        // decoration, so the slot is dropped rather than built against.
+        if (!units.airRepairPad.empty())
+        {
+            const auto& padDefinition = sim.unitDefinitions.at(units.airRepairPad);
+            if (!padDefinition.isAirBase || !padDefinition.builder)
+            {
+                units.airRepairPad.clear();
+            }
+        }
         check(units.airConstructor);
         check(units.vehiclePlant);
         check(units.scoutVehicle);

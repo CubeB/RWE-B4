@@ -401,6 +401,8 @@ namespace rwe
             || setScalar("raidAvoidBaseRadius", p.raidAvoidBaseRadius)
             || setInt("targetFighterCount", p.targetFighterCount)
             || setInt("targetBomberCount", p.targetBomberCount)
+            || setInt("airWorthItEnemyDefences", p.airWorthItEnemyDefences)
+            || setInt("targetAirRepairPadCount", p.targetAirRepairPadCount)
             || setInt("targetAdvancedAirPlantCount", p.targetAdvancedAirPlantCount)
             || setInt("targetGunshipCount", p.targetGunshipCount)
             || setInt("gunshipPackSize", p.gunshipPackSize)

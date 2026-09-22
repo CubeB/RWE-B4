@@ -340,6 +340,26 @@ namespace rwe
             return d;
         }
 
+        /**
+         * A pad in the middle of the yard and impassable everywhere else,
+         * which is the shape of a real plant: the unit it is making stands on
+         * ground the yard keeps everything else off. Without the open cells
+         * the frame cannot be placed at all once the plant occupies its own
+         * footprint, and with the whole yard open the builder walks in and
+         * the reach rules are never asked.
+         */
+        void openTheYardPad(UnitDefinition& plant)
+        {
+            auto& yard = *plant.yardMap;
+            for (int z = 2; z <= 3; ++z)
+            {
+                for (int x = 3; x <= 4; ++x)
+                {
+                    yard.set(x, z, YardMapCell::GroundPassable);
+                }
+            }
+        }
+
         UnitDefinition makeShortArmedBuilderDef()
         {
             UnitDefinition d{};
@@ -368,8 +388,15 @@ namespace rwe
         auto player = addPlayer(sim);
         registerModel(sim);
 
-        sim.unitDefinitions["plant"] = makeBigPlantDef();
-        sim.unitDefinitions["builder"] = makeShortArmedBuilderDef();
+        // Upper case and spawned the real way, both for the reasons the case
+        // below gives: a lower-case type is invisible to the spawn path, and
+        // addUnitOfType does not stamp the occupancy grid. Without the stamp
+        // the builder walks straight through the plant to the frame, and this
+        // case goes green against a simulation with no reach rule in it at
+        // all -- which is what it was doing until the case below was written.
+        sim.unitDefinitions["PLANT"] = makeBigPlantDef();
+        openTheYardPad(sim.unitDefinitions["PLANT"]);
+        sim.unitDefinitions["BUILDER"] = makeShortArmedBuilderDef();
         sim.unitDefinitions["TANK"] = makeTankDef();
         // Long enough to still be under construction once the builder has
         // walked in. The plant on its own finishes three hundred points well
@@ -377,17 +404,19 @@ namespace rwe
         // for honest reasons, saying nothing about its reach.
         sim.unitDefinitions["TANK"].buildTime = 3000u;
         sim.unitScriptDefinitions["TANK"] = *script;
+        sim.unitScriptDefinitions["PLANT"] = *script;
+        sim.unitScriptDefinitions["BUILDER"] = *script;
 
-        auto plantId = addUnitOfType(sim, "plant", player, SimVector(200_ss, 0_ss, 200_ss), script);
+        auto plantId = sim.trySpawnUnit("PLANT", player, SimVector(200_ss, 0_ss, 200_ss), std::nullopt).value();
         sim.getUnitState(plantId).inBuildStance = true;
         sim.getUnitState(plantId).buildQueue.push_back(std::make_pair(std::string("TANK"), 1));
 
         // Well outside the yard, so it has to walk in.
-        auto builderId = addUnitOfType(sim, "builder", player, SimVector(360_ss, 0_ss, 200_ss), script);
+        auto builderId = sim.trySpawnUnit("BUILDER", player, SimVector(360_ss, 0_ss, 200_ss), std::nullopt).value();
         sim.getUnitState(builderId).inBuildStance = true;
         sim.getUnitState(builderId).orders.push_back(GuardOrder(plantId));
 
-        tick(sim, 120);
+        tick(sim, 150);
 
         auto frame = findFrame(sim, "TANK");
         REQUIRE(frame.has_value());
@@ -401,5 +430,81 @@ namespace rwe
         auto before = progressOf(sim, "TANK");
         tick(sim, 20);
         REQUIRE(progressOf(sim, "TANK") - before == 100u);
+    }
+
+    TEST_CASE("a builder told to finish the frame itself reaches it too", "[guardassist]")
+    {
+        // Reported from play: a commander set to guard or repair a unit being
+        // built in a factory "would never move close enough to actually begin
+        // assisting in its fabrication".
+        //
+        // The guard-the-factory path has measured its reach to the factory
+        // since the case above, because a frame on a pad stands at the middle
+        // of a building nothing can walk into. Two paths did not: a repair
+        // order on the frame, and a guard order aimed at the frame rather
+        // than at the plant. Both are the same job asked for in the words a
+        // player happens to use, and both left the builder parked outside --
+        // the repair one permanently out of arm's length, the guard one
+        // falling through to "stay close" and simply watching.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        registerModel(sim);
+
+        // Upper case, because createUnit upper-cases the type before
+        // tryAddUnit looks it up again: a lower-case key is invisible to the
+        // spawn path and throws rather than failing the assertion you were
+        // looking at.
+        sim.unitDefinitions["PLANT"] = makeBigPlantDef();
+        openTheYardPad(sim.unitDefinitions["PLANT"]);
+        sim.unitDefinitions["BUILDER"] = makeShortArmedBuilderDef();
+        sim.unitDefinitions["TANK"] = makeTankDef();
+        sim.unitDefinitions["TANK"].buildTime = 3000u;
+        sim.unitScriptDefinitions["TANK"] = *script;
+
+        // Spawned the real way, so the plant stamps the occupancy grid.
+        // This is the whole point of the case: addUnitOfType puts a unit in
+        // the list without occupying anything, so a builder simply walks
+        // through the plant to the frame and every reach test passes for the
+        // wrong reason. YardMapCell::Ground is impassable, and a yard the
+        // builder cannot enter is what puts the frame out of arm's length.
+        sim.unitScriptDefinitions["PLANT"] = *script;
+        sim.unitScriptDefinitions["BUILDER"] = *script;
+        auto plantId = sim.trySpawnUnit("PLANT", player, SimVector(200_ss, 0_ss, 200_ss), std::nullopt).value();
+        sim.getUnitState(plantId).inBuildStance = true;
+        sim.getUnitState(plantId).buildQueue.push_back(std::make_pair(std::string("TANK"), 1));
+
+        auto builderId = sim.trySpawnUnit("BUILDER", player, SimVector(360_ss, 0_ss, 200_ss), std::nullopt).value();
+        sim.getUnitState(builderId).inBuildStance = true;
+
+        // Let the plant stand the frame up, so there is something to name.
+        tick(sim, 30);
+        auto frame = findFrame(sim, "TANK");
+        REQUIRE(frame.has_value());
+
+        auto worksOnTheFrame = [&]() {
+            tick(sim, 120);
+            auto building = std::get_if<UnitBehaviorStateBuilding>(&sim.getUnitState(builderId).behaviourState);
+            REQUIRE(building != nullptr);
+            REQUIRE(building->targetUnit == *frame);
+            // Two from the plant and three from the builder.
+            auto before = progressOf(sim, "TANK");
+            tick(sim, 20);
+            CHECK(progressOf(sim, "TANK") - before == 100u);
+        };
+
+        SECTION("told to repair it")
+        {
+            sim.getUnitState(builderId).orders.push_back(RepairOrder(*frame));
+            worksOnTheFrame();
+        }
+
+        SECTION("told to guard it")
+        {
+            sim.getUnitState(builderId).orders.push_back(GuardOrder(*frame));
+            worksOnTheFrame();
+            // Guarding is not finishing: the order stands.
+            CHECK(sim.getUnitState(builderId).orders.size() == 1);
+        }
     }
 }
