@@ -524,6 +524,73 @@ namespace rwe
         REQUIRE(cell.x < 30);
     }
 
+    TEST_CASE("answering across water still costs the tick something", "[pathing]")
+    {
+        // A search answered from the terrain regions spends no expansions,
+        // and the update loop is bounded by expansions. So a queue full of
+        // goals across the same water was answered in its entirety on one
+        // tick, however many units were in it and however far each of their
+        // walks ran before giving up. The walk is what gets charged now,
+        // because it is the work that was actually done.
+        auto script = makeEmptyCobScript();
+
+        Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(60));
+        for (int y = 0; y < 64; ++y)
+        {
+            for (int x = 30; x < 34; ++x)
+            {
+                heights.set(x, y, static_cast<unsigned char>(0));
+            }
+        }
+        GameSimulation sim(MapTerrain(std::move(heights), 30_ss), 0u, 0, 0);
+        auto player = addPlayer(sim);
+
+        MovementClassDefinition walkerClass{"BENCHWALK", 1u, 1u, 0u, 0u, 255u, 255u};
+        auto classId = sim.movementClassDatabase.registerMovementClass(walkerClass);
+        sim.movementClassCollisionService.registerMovementClass(classId, computeWalkableGrid(sim.terrain, walkerClass));
+
+        UnitDefinition tank = makeTankDef(255u);
+        tank.movementCollisionInfo = UnitDefinition::NamedMovementClass{classId};
+        sim.unitDefinitions["tank"] = tank;
+
+        // A rank of them along the west bank, every one ordered across.
+        const int rank = 12;
+        for (int i = 0; i < rank; ++i)
+        {
+            auto id = addUnitOfType(sim, "tank", player, cellCenter(sim, 29, 20 + i), script);
+            sim.getUnitState(id).orders.push_back(MoveOrder(cellCenter(sim, 40, 20 + i)));
+        }
+
+        // Small enough that a dozen walks cannot fit inside it. The figure
+        // is not a property of anything: it is chosen to be smaller than
+        // what a dozen of these walks cost, so that the charge has to show.
+        sim.pathFindingService.expansionBudgetPerTick = 8;
+
+        // Twice: the first tick is where the orders turn into requests, and
+        // the service has already run by the time they do.
+        sim.tick();
+        sim.tick();
+
+        // Some of them were answered and the rest are still queued. Before
+        // the charge, every one of the twelve was answered on this tick.
+        auto answered = sim.pathFindingService.counters.searches;
+        CHECK(answered > 0);
+        CHECK(answered < rank);
+
+        // And it is the charge doing it and not the expansions, of which a
+        // goal in another region spends none.
+        CHECK(sim.pathFindingService.counters.expansions == 0);
+
+        // The queue still drains: what changed is how many ticks it takes,
+        // not whether it finishes.
+        for (int i = 0; i < 200 && !sim.pathRequests.empty(); ++i)
+        {
+            sim.tick();
+        }
+        CHECK(sim.pathRequests.empty());
+        CHECK(sim.pathFindingService.counters.searches >= rank);
+    }
+
     TEST_CASE("a build order for a site the builder cannot reach is dropped", "[pathing]")
     {
         auto script = makeEmptyCobScript();

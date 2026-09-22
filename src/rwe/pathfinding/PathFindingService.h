@@ -246,6 +246,12 @@ namespace rwe
             bool walked{false};
             /** Whether it got closer than the start, which relaxes the goal. */
             bool relaxed{false};
+            /**
+             * What the walk cost. Charged to the tick's budget when the walk
+             * is the whole answer, since no expansions are spent then and
+             * nothing else would bound the tick.
+             */
+            unsigned int steps{0};
         };
 
         /**

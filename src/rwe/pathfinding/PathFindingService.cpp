@@ -95,6 +95,15 @@ namespace rwe
          * to say so; this says it at once. Empty for an ordinary search.
          */
         std::optional<AStarPathInfo<Point, PathCost>> immediateResult;
+        /**
+         * What the walk that produced immediateResult cost.
+         *
+         * An immediate answer spends no expansions, so it is what the tick's
+         * budget is charged for instead. Without it the update loop has
+         * nothing to bound it and empties the whole request queue on one
+         * tick, however long each of those walks was.
+         */
+        unsigned int immediateWalkSteps{0};
     };
 
     // Out of line, all four of them, because ActiveSearch is incomplete in the
@@ -251,6 +260,26 @@ namespace rwe
                     break;
                 }
             }
+            else
+            {
+                // An answer that came out of the terrain regions spends no
+                // expansions, so the budget above cannot bound this loop:
+                // with a queue full of goals across the same water, every one
+                // of them is answered on the same tick. That is the point of
+                // the change and it is not in itself wrong -- but each of
+                // those searches still paid for the walk that answered it,
+                // and nothing was charging for that.
+                //
+                // So the walk is what gets charged, because it is the work
+                // that was actually done. It leaves the case this was written
+                // for alone: in pressed-water a walk is a dozen steps, the
+                // unit having started hard against the water and got nowhere,
+                // so a hundred-odd searches still finish on one tick. Where
+                // the walk is long -- pressed-wall measures 495 steps a
+                // search -- the tick now stops after a handful instead of
+                // running the whole queue dry.
+                remainingBudget -= std::max(1, static_cast<int>(activeSearch->immediateWalkSteps));
+            }
 
             assert(!requests.empty() && requests.front().unitId == activeSearch->unitId);
 
@@ -345,6 +374,7 @@ namespace rwe
         std::optional<AStarPathInfo<Point, PathCost>> immediateResult;
         auto goal = Point(0, 0);
         auto goalRelaxed = false;
+        unsigned int immediateWalkSteps = 0;
 
         match(
             destination,
@@ -425,6 +455,7 @@ namespace rwe
                         route.push_back(firstPass.closest);
                     }
                     immediateResult = AStarPathInfo<Point, PathCost>{AStarPathType::Partial, std::move(route), {}, true};
+                    immediateWalkSteps = firstPass.steps;
                 }
             },
             [&](const DiscreteRect& rect) {
@@ -437,7 +468,7 @@ namespace rwe
                 pathFinder = std::move(finder);
             });
 
-        activeSearch = std::unique_ptr<ActiveSearch>(new ActiveSearch{unitId, destination, start, goal, goalRelaxed, 0, std::move(pathFinder), std::move(immediateResult)});
+        activeSearch = std::unique_ptr<ActiveSearch>(new ActiveSearch{unitId, destination, start, goal, goalRelaxed, 0, std::move(pathFinder), std::move(immediateResult), immediateWalkSteps});
     }
 
     UnitPath PathFindingService::finishSearch(const GameSimulation& simulation)
@@ -539,6 +570,7 @@ namespace rwe
         counters.bugWalkSteps += result.steps;
         pass.walked = true;
         pass.closest = result.closest;
+        pass.steps = result.steps;
 
         if (result.reachedGoal)
         {
