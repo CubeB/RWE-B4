@@ -3,9 +3,8 @@
 
 /**
  * Towers and teeth: where they stand, which way they face, when they get
-  * fortified and what one has to be worth.
+ * fortified and what one has to be worth.
  *
- * Split out of AiBehaviour.test.cpp, which was 6,906 lines over 58 commits.
  * The fixtures these share are in ai_test_util.h.
  */
 namespace rwe

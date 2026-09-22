@@ -3,9 +3,8 @@
 
 /**
  * What the AI knows and when: scouting, losing a building, noticing
-  * aircraft, and the knobs that scale how hard it reacts.
+ * aircraft, and the knobs that scale how hard it reacts.
  *
- * Split out of AiBehaviour.test.cpp, which was 6,906 lines over 58 commits.
  * The fixtures these share are in ai_test_util.h.
  */
 namespace rwe

@@ -3,9 +3,8 @@
 
 /**
  * What the army does with itself: gathering, attacking, breaking off, and
-  * going home to be mended.
+ * going home to be mended.
  *
- * Split out of AiBehaviour.test.cpp, which was 6,906 lines over 58 commits.
  * The fixtures these share are in ai_test_util.h.
  */
 namespace rwe

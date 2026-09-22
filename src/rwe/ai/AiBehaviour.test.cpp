@@ -4,9 +4,6 @@
 /**
  * The AI's economy: what it builds first, what it can pay for, when it techs,
  * and what its builders are put on.
- *
- * This file is what remained of a 6,906-line AiBehaviour.test.cpp after the
- * other six subjects were split out beside it.
  */
 namespace rwe
 {

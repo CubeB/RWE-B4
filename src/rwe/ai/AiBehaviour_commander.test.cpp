@@ -3,9 +3,8 @@
 
 /**
  * The commander, the one unit whose loss ends the game, and so the one with
-  * a behaviour of its own.
+ * a behaviour of its own.
  *
- * Split out of AiBehaviour.test.cpp, which was 6,906 lines over 58 commits.
  * The fixtures these share are in ai_test_util.h.
  */
 namespace rwe
