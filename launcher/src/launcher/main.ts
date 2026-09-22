@@ -18,9 +18,8 @@ if (!development) {
   });
 }
 
-// We intentionally load "remote" content during development
-// because we use the webpack-dev-server
-// to provide hot-reload features.
+// Dev content is served remotely (webpack-dev-server) for hot reload,
+// so the usual Electron security warnings do not apply here.
 if (development) {
   process.env["ELECTRON_DISABLE_SECURITY_WARNINGS"] = "1";
   if (!process.env["RWE_MASTER_SERVER"]) {
@@ -37,7 +36,6 @@ if (!process.env["RWE_HOME"]) {
 let mainWindow: Electron.BrowserWindow | null;
 
 function createWindow() {
-  // Create the browser window.
   const windowOptions: BrowserWindowConstructorOptions = {
     height: 600,
     width: 800,
@@ -55,7 +53,6 @@ function createWindow() {
   }
   mainWindow = new BrowserWindow(windowOptions);
 
-  // and load the index.html of the app.
   if (development) {
     mainWindow.loadURL("http://localhost:8080/index.html");
   } else {
@@ -69,18 +66,11 @@ function createWindow() {
     });
   }
 
-  // Emitted when the window is closed.
   mainWindow.on("closed", () => {
-    // Dereference the window object, usually you would store windows
-    // in an array if your app supports multi windows, this is the time
-    // when you should delete the corresponding element.
     mainWindow = null;
   });
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
 app.on("ready", () =>
   installExtensions().then(() => {
     // Hide menu bar in release mode to discourage users
@@ -92,7 +82,6 @@ app.on("ready", () =>
   })
 );
 
-// Quit when all windows are closed.
 app.on("window-all-closed", () => {
   // On OS X it is common for applications and their menu bar
   // to stay active until the user quits explicitly with Cmd + Q
@@ -109,5 +98,3 @@ app.on("activate", () => {
   }
 });
 
-// In this file you can include the rest of your app"s specific main process
-// code. You can also put them in separate files and require them here.
