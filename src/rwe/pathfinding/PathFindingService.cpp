@@ -76,6 +76,15 @@ namespace rwe
         /** The footprint the search started from, which sizes its waypoints. */
         DiscreteRect start;
         Point goal;
+        /**
+         * Whether the goal was relaxed because something was standing on it.
+         *
+         * finishSearch needs to know: a relaxed search finishes NEXT to the
+         * goal, so the two places that would otherwise snap the last
+         * waypoint onto the exact destination must not, or the unit is sent
+         * walking into the thing standing there after all.
+         */
+        bool goalRelaxed{false};
         /** What this search has cost so far, for the attribution counters. */
         long long expansions{0};
         std::unique_ptr<AbstractUnitPathFinder> pathFinder;
@@ -324,6 +333,7 @@ namespace rwe
 
         std::unique_ptr<AbstractUnitPathFinder> pathFinder;
         auto goal = Point(0, 0);
+        auto goalRelaxed = false;
 
         match(
             destination,
@@ -378,6 +388,7 @@ namespace rwe
                         if (auto reachable = nearestStandableScore(*finder, goal, blockedGoalSearchRadius))
                         {
                             finder->setAcceptableDistance(*reachable);
+                            goalRelaxed = true;
                             ++counters.searchesGoalRelaxed;
                         }
                     }
@@ -400,7 +411,7 @@ namespace rwe
                 pathFinder = std::move(finder);
             });
 
-        activeSearch = std::unique_ptr<ActiveSearch>(new ActiveSearch{unitId, destination, start, goal, 0, std::move(pathFinder)});
+        activeSearch = std::unique_ptr<ActiveSearch>(new ActiveSearch{unitId, destination, start, goal, goalRelaxed, 0, std::move(pathFinder)});
     }
 
     UnitPath PathFindingService::finishSearch(const GameSimulation& simulation)
@@ -436,8 +447,12 @@ namespace rwe
             // (or as close to it as we can get). Two points even so: the
             // follower walks the segment between the corner behind the unit
             // and the one ahead of it, so a path always has both.
+            // Not when the goal was relaxed, for the reason the longer
+            // path below does not snap either: the unit is standing as close
+            // as it can get, and pointing it at the exact destination sends
+            // it walking into whatever is on that cell.
             const auto* position = std::get_if<SimVector>(&search.destination);
-            auto only = (unreachable || position == nullptr) ? unit.position : *position;
+            auto only = (unreachable || search.goalRelaxed || position == nullptr) ? unit.position : *position;
             return UnitPath{std::vector<SimVector>{unit.position, only}, unreachable};
         }
 
@@ -462,7 +477,7 @@ namespace rwe
         // relaxing it -- and snapping the last waypoint onto the destination
         // would send the unit walking into the thing standing there after
         // all, which is the scraping this was meant to stop.
-        if (!unreachable && simplifiedPath.back() == search.goal)
+        if (!unreachable && !search.goalRelaxed && simplifiedPath.back() == search.goal)
         {
             if (const auto* position = std::get_if<SimVector>(&search.destination))
             {
