@@ -9,18 +9,15 @@
 #include <rwe/TextureService.h>
 #include <rwe/game/BuilderGuisDatabase.h>
 #include <rwe/game/GameScene.h>
+#include <rwe/game/GameSimulationLoader.h>
 #include <rwe/game/MapTerrainGraphics.h>
 #include <rwe/game/PlayerColorIndex.h>
-#include <rwe/io/featuretdf/FeatureTdf.h>
 #include <rwe/io/ota/ota.h>
 #include <rwe/io/sidedatatdf/SideData.h>
 #include <rwe/io/tnt/TntArchive.h>
 #include <rwe/render/TextureArrayRegion.h>
 #include <rwe/sim/Energy.h>
-#include <rwe/sim/LosTables.h>
 #include <rwe/sim/Metal.h>
-#include <rwe/sim/MovementClassDatabase.h>
-#include <rwe/sim/SimVector.h>
 #include <rwe/ui/UiFactory.h>
 #include <rwe/ui/UiLightBar.h>
 #include <rwe/ui/UiPanel.h>
@@ -73,14 +70,7 @@ namespace rwe
 
         struct LoadMapResult
         {
-            MapTerrain terrain;
-            unsigned char surfaceMetal;
-            int minWindSpeed;
-            int maxWindSpeed;
-            int tidalStrength;
-            int killMul;
-            int timeMul;
-            std::vector<std::pair<Point, std::string>> features;
+            MapData data;
             MapTerrainGraphics terrainGraphics;
         };
 
@@ -90,30 +80,6 @@ namespace rwe
 
         const SideData& getSideData(const std::string& side) const;
 
-        struct DataMaps
-        {
-            BuilderGuisDatabase builderGuisDatabase;
-            GameMediaDatabase gameMediaDatabase;
-            MovementClassDatabase movementClassDatabase;
-            std::unordered_map<std::string, UnitDefinition> unitDefinitions;
-            std::unordered_map<std::string, UnitModelDefinition> modelDefinitions;
-            std::unordered_map<std::string, WeaponDefinition> weaponDefinitions;
-            SimpleVectorMap<FeatureDefinition, FeatureDefinitionIdTag> featureDefinitions;
-            std::unordered_map<std::string, FeatureDefinitionId> featureNameIndex;
-            LosTables losTables;
-        };
-
-        DataMaps loadDefinitions(MeshService& meshService, const std::unordered_set<std::string>& requiredFeatures);
-
-        void preloadSound(GameMediaDatabase& meshDb, const std::string& soundName);
-
-        void preloadSound(GameMediaDatabase& meshDb, const std::optional<std::string>& soundName);
-
         std::optional<AudioService::SoundHandle> lookUpSound(const std::string& key);
-
-        std::optional<std::vector<std::vector<GuiEntry>>> loadBuilderGui(const std::string& unitName);
-
-        void loadFeature(MeshService& meshService, GameMediaDatabase& gameMediaDatabase, const std::unordered_map<std::string, FeatureTdf>& tdfs, DataMaps& dataMaps, const std::string& initialFeatureName);
-        void loadFeatureMedia(MeshService& meshService, std::unordered_map<std::string, UnitModelDefinition>& modelDefinitions, GameMediaDatabase& gameMediaDatabase, const FeatureTdf& tdf);
     };
 }
