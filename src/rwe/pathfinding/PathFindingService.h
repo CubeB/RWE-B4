@@ -66,6 +66,12 @@ namespace rwe
             long long searchesSuspended{0};
             /** Searches thrown away because what asked for them had moved on. */
             long long searchesAbandoned{0};
+            /** Ticks update() has run, which is what the rest are per. */
+            long long ticks{0};
+            /** Ticks that ended with anything still waiting. */
+            long long ticksWithQueue{0};
+            /** The deepest the queue has been. */
+            long long maxQueue{0};
         };
         Counters counters;
 
@@ -75,6 +81,20 @@ namespace rwe
         PathFindingService& operator=(PathFindingService&&) noexcept;
 
         void update(GameSimulation& simulation);
+
+        /**
+         * Writes the counters above to the log every ten seconds, as deltas,
+         * when RWE_PATH_PROFILE is set in the environment. Off otherwise, and
+         * a pure observer either way -- it reads counters the simulation
+         * never reads and writes nothing the simulation can see.
+         *
+         * What it is for: a unit whose search has not landed yet is walking
+         * the straight-line stand-in, and a straight line into a wall is a
+         * unit sliding along the wall. So "are units waiting for paths, and
+         * for how long" is the question behind a complaint about units
+         * sliding, and the queue depth is the only place it can be answered.
+         */
+        void logCounters(const GameSimulation& simulation);
 
         /** Throws away a search that is part way through. */
         void abandonSearch();

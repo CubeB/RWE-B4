@@ -89,6 +89,18 @@ namespace rwe
         mutable std::map<std::pair<unsigned int, unsigned int>, LandTargetProgress> landTargetProgress;
         /** Unit, then target: when that unit may look at that target again. */
         mutable std::map<std::pair<unsigned int, unsigned int>, GameTime> landTargetGivenUp;
+        /**
+         * Unit, then target: how many times that unit has moved to try to
+         * get a shot at it.
+         *
+         * Giving up is the second answer and not the first. A unit whose
+         * shots are not arriving is usually in the wrong place rather than
+         * facing the wrong enemy -- the ground is in the way, or a wall of
+         * wrecks is, or the shot has not the elevation for it -- and all of
+         * those have the same fix, which is to stand somewhere else. See
+         * AiTuningProfile::stalledAttackRepositionTries.
+         */
+        mutable std::map<std::pair<unsigned int, unsigned int>, int> landTargetRepositions;
 
         /**
          * The open water nearest a place the fleet is sailing towards, and

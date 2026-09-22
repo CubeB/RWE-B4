@@ -177,6 +177,32 @@ namespace rwe
          */
         bool answerBlockedShots{true};
 
+        /**
+         * How many times a unit will move to try to get a shot at something
+         * before giving up on it, and how far across the line of fire each
+         * move goes.
+         *
+         * answerStalledAttacks used to answer "nothing I fire is arriving"
+         * by dropping the target and standing still, which is the right
+         * diagnosis and the wrong treatment: the unit is usually in the
+         * wrong place rather than facing the wrong enemy. Reported from a
+         * replay, in as many words -- units "firing but failing to inflict
+         * damage should recalculate their position so theyre not firing
+         * into elevated terrain".
+         *
+         * So it moves instead: to a spot with a clear shot when the ground
+         * is what is in the way (LineOfFire), and otherwise a step across
+         * the line and a little closer, alternating sides, which is what
+         * gets a unit out from behind a wall of wrecks or a corner. The
+         * clock restarts at each new position, so each attempt is judged on
+         * its own. Only when the moves have been spent is the target
+         * dropped, which is where the old behaviour resumes.
+         *
+         * Zero tries restores that old behaviour exactly.
+         */
+        int stalledAttackRepositionTries{2};
+        SimScalar stalledAttackSidestep{240_ss};
+
         bool kiteWithLongerRange{true};
         SimScalar kiteRangeMargin{40_ss};
 
@@ -1936,6 +1962,37 @@ namespace rwe
         SimScalar bomberClusterRadius{300_ss};
         /** How many have to be standing together before an army is worth a sortie. */
         int bomberMinClusterSize{3};
+
+        /**
+         * What a bombing run is worth, term by term. See AirManager's second
+         * question, which is where all four are spent.
+         *
+         * bomberFactoryWeight multiplies a factory's metal: a plant is not
+         * worth 1900, it is worth everything it would have built next.
+         *
+         * bomberCoverPenalty grades the anti-air cover inside the ceiling
+         * bomberMaxAntiAirCover sets, rather than only at it. A ceiling on
+         * its own has two settings, "fly at the middle of their base" and
+         * "refuse every target on the map"; the penalty is what makes a
+         * lightly-picketed extractor beat a dearer thing under three flak.
+         *
+         * bomberSortieScale is the distance from home at which a target is
+         * worth half what it would be next door -- the run is a round trip
+         * and we die at the far end of it.
+         *
+         * bomberLeaveToArmyRadius and bomberArmyReachDiscount are the rule
+         * that keeps the two arms from bombing the same thing: what our own
+         * wave is already walking onto is worth a quarter of its value to
+         * us, because it will die regardless and the ground cannot reach
+         * what the aircraft ought to be spending itself on.
+         *
+         * Every one of them is a guess until the arena says otherwise.
+         */
+        float bomberFactoryWeight{2.0f};
+        float bomberCoverPenalty{1.0f};
+        SimScalar bomberSortieScale{2400_ss};
+        SimScalar bomberLeaveToArmyRadius{700_ss};
+        float bomberArmyReachDiscount{0.25f};
         /**
          * How far from the army a gunship will go looking for what is
          * holding it up. Beyond this it falls back to the bombers' target

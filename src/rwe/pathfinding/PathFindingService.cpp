@@ -6,6 +6,8 @@
 #include <rwe/pathfinding/pathfinding_utils.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
+#include <algorithm>
+#include <cstdlib>
 
 namespace rwe
 {
@@ -203,6 +205,47 @@ namespace rwe
         }
 
         counters.deferredRequests += static_cast<long long>(requests.size());
+        ++counters.ticks;
+        if (!requests.empty())
+        {
+            ++counters.ticksWithQueue;
+            counters.maxQueue = std::max(counters.maxQueue, static_cast<long long>(requests.size()));
+        }
+
+        logCounters(simulation);
+    }
+
+    void PathFindingService::logCounters(const GameSimulation& simulation)
+    {
+        static const bool on = std::getenv("RWE_PATH_PROFILE") != nullptr;
+        if (!on)
+        {
+            return;
+        }
+
+        constexpr long long reportEvery = 300;
+        if (counters.ticks % reportEvery != 0)
+        {
+            return;
+        }
+
+        static Counters last{};
+        auto ticks = counters.ticks - last.ticks;
+        auto searches = counters.searches - last.searches;
+        auto deferred = counters.deferredRequests - last.deferredRequests;
+        auto waiting = counters.ticksWithQueue - last.ticksWithQueue;
+        LOG_INFO << "path profile t=" << simulation.gameTime.value
+                 << " searches=" << searches
+                 << " expansions=" << (counters.expansions - last.expansions)
+                 << " suspended=" << (counters.searchesSuspended - last.searchesSuspended)
+                 << " abandoned=" << (counters.searchesAbandoned - last.searchesAbandoned)
+                 << " exhausted=" << (counters.searchesExhausted - last.searchesExhausted)
+                 << " relaxed=" << (counters.searchesRelaxed - last.searchesRelaxed)
+                 << " bugwalk=" << (counters.bugWalkSteps - last.bugWalkSteps)
+                 << " queued/tick=" << (ticks > 0 ? static_cast<double>(deferred) / static_cast<double>(ticks) : 0.0)
+                 << " ticks with a queue=" << waiting << "/" << ticks
+                 << " deepest ever=" << counters.maxQueue;
+        last = counters;
     }
 
     void PathFindingService::beginSearch(const GameSimulation& simulation, UnitId unitId, const PathDestination& destination, const std::optional<DiscreteRect>& startOverride)

@@ -247,16 +247,62 @@ namespace rwe
             }
         };
 
-        SECTION("after stalledAttackSeconds it drops the target")
+        // Giving up on the target is how the attack order comes off: a move
+        // to where the unit already stands. Moving to try for a shot is the
+        // same kind of command to somewhere else, so the two are told apart
+        // by where they point and not by their being there at all.
+        auto standsStill = [&](const MoveOrder& order) {
+            return order.destination.distance(sim.getUnitState(kbotId).position) < 8_ss;
+        };
+
+        SECTION("first it moves, because the fault is usually where it stands")
         {
+            // Reported from a replay: units "firing but failing to inflict
+            // damage should recalculate their position so theyre not firing
+            // into elevated terrain". Dropping the target answers the wrong
+            // half of that -- the enemy is worth shooting, the spot is not.
             dud();
+            REQUIRE(profile.stalledAttackRepositionTries > 0);
             AiPlayerController controller(ai, profile, 42u, MapIntel{});
             std::vector<PlayerCommand> commands;
             runAttacking(controller, commands, (profile.stalledAttackSeconds + 2) * 30);
 
-            // Told to stop: a move to where it already stands is how the
-            // attack order comes off.
-            REQUIRE_FALSE(ordersFor<MoveOrder>(commands, kbotId).empty());
+            auto moves = ordersFor<MoveOrder>(commands, kbotId);
+            REQUIRE_FALSE(moves.empty());
+            for (const auto& move : moves)
+            {
+                CHECK_FALSE(standsStill(move));
+            }
+        }
+
+        SECTION("when the moves are spent it drops the target after all")
+        {
+            dud();
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            // Long enough for every reposition plus the give-up: the clock
+            // restarts at each new position, so each attempt costs a full
+            // stalledAttackSeconds. The unit does not actually move -- this
+            // harness never applies the AI's own commands -- so every
+            // attempt fails, which is the case being pinned.
+            runAttacking(controller, commands, (profile.stalledAttackRepositionTries + 1) * (profile.stalledAttackSeconds + 2) * 30);
+
+            auto moves = ordersFor<MoveOrder>(commands, kbotId);
+            REQUIRE_FALSE(moves.empty());
+            CHECK(standsStill(moves.back()));
+        }
+
+        SECTION("with the repositioning off, it drops the target at once as it used to")
+        {
+            dud();
+            profile.stalledAttackRepositionTries = 0;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runAttacking(controller, commands, (profile.stalledAttackSeconds + 2) * 30);
+
+            auto moves = ordersFor<MoveOrder>(commands, kbotId);
+            REQUIRE_FALSE(moves.empty());
+            CHECK(standsStill(moves.front()));
         }
 
         SECTION("while it is getting hurt, it stays on it")

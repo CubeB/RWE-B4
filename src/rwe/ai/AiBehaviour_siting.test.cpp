@@ -835,6 +835,74 @@ namespace rwe
         REQUIRE((clearX || clearZ));
     }
 
+    TEST_CASE("a base with nowhere left still does not build across the plant's door", "[ai]")
+    {
+        // The case above is the roomy one, where keeping the lane costs
+        // nothing. This is the one that was actually happening: reported
+        // from a replay, "one of the core vehicle factories got blocked when
+        // trying to produce units ... there should be enough space for units
+        // to filter between structures in the base".
+        //
+        // collectBuildableSites ends "sites.empty() ? crowded : sites", and
+        // the crowded list is everything that fits but stands too close to
+        // something already up. On a cramped map that fallback is not the
+        // exception it was written as, it is the ordinary path -- so the
+        // factory's lane, which every other rule in the file protects, was
+        // given away on every building the AI put up there.
+        //
+        // The search is clamped to one ring here, which is the compact way
+        // to say "a base with nowhere left": ring one is 80 world units out
+        // for a 3x3, which is inside a 7x7 neighbour's margin whichever way
+        // it lies.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+
+        UnitDefinition solarDef;
+        solarDef.isMobile = false;
+        solarDef.builder = false;
+        solarDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 3u, 255u, 255u, 0u, 255u};
+        sim.unitDefinitions["SOLAR"] = solarDef;
+
+        UnitDefinition neighbourDef;
+        neighbourDef.isMobile = false;
+        neighbourDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{7u, 7u, 255u, 255u, 0u, 255u};
+
+        auto anchor = SimVector(0_ss, 0_ss, 0_ss);
+        auto profile = makeDefaultStandardProfile();
+        // One ring, and no widening: (3 + 2) * 16 is 80 world units a ring.
+        profile.maxMexSearchRadius = 100_ss;
+        profile.buildSiteFallbackRadius = 100_ss;
+
+        std::minstd_rand rng(1u);
+        BuildManager buildManager;
+
+        SECTION("the neighbour is a factory: nothing goes up")
+        {
+            auto factoryDef = neighbourDef;
+            factoryDef.builder = true;
+            sim.unitDefinitions["NEIGHBOUR"] = factoryDef;
+            addUnitOfType(sim, "NEIGHBOUR", ai, anchor, script);
+
+            CHECK_FALSE(buildManager.chooseBuildSite(sim, profile, siteTestBlackboard(), "SOLAR", anchor, rng).has_value());
+        }
+
+        SECTION("the same neighbour, not a factory: the crowded site is taken")
+        {
+            // The control, and the whole reason the section above means
+            // anything: the same geometry, the same one ring, the same
+            // crowding. Only the neighbour's being able to build differs,
+            // and a packed base is better off with the solar collector than
+            // without it.
+            auto storeDef = neighbourDef;
+            storeDef.builder = false;
+            sim.unitDefinitions["NEIGHBOUR"] = storeDef;
+            addUnitOfType(sim, "NEIGHBOUR", ai, anchor, script);
+
+            CHECK(buildManager.chooseBuildSite(sim, profile, siteTestBlackboard(), "SOLAR", anchor, rng).has_value());
+        }
+    }
+
     TEST_CASE("the site search widens when nothing fits, and only then", "[ai]")
     {
         // The island start that was costing the AI its entire game. A 6x6

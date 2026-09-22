@@ -2091,18 +2091,77 @@ namespace rwe
                         else if (bb.now.value - progress.since.value > static_cast<unsigned int>(profile.stalledAttackSeconds) * SimTicksPerSecond)
                         {
                             // Nothing of ours has moved its hit points in all
-                            // that time, so this unit stops trying and leaves
-                            // it alone for stalledAttackForgetSeconds. The
-                            // order has to come off as well as the target be
-                            // forgotten: the rules below only move a unit
-                            // whose queue is empty, so one still holding the
-                            // attack would go on firing. A move to where it
-                            // already stands is the cheapest way to say stop.
+                            // that time. Which is a diagnosis and not yet a
+                            // treatment: the unit is usually in the wrong
+                            // place rather than facing the wrong enemy, and
+                            // "from here" was always the operative part of
+                            // it. The ground may be in the way, a wall of
+                            // wrecks may be, or the shot may not have the
+                            // elevation for it, and all three are answered
+                            // by standing somewhere else. Reported from a
+                            // replay in as many words -- units "firing but
+                            // failing to inflict damage should recalculate
+                            // their position so theyre not firing into
+                            // elevated terrain".
+                            //
+                            // So it moves first, stalledAttackRepositionTries
+                            // times, and only then gives up on the target.
+                            auto& tries = landTargetRepositions[key];
+                            if (tries < profile.stalledAttackRepositionTries)
+                            {
+                                ++tries;
+                                const auto& target = targetRef->get();
+                                // Where the ground says to stand, if the
+                                // ground is the problem. Otherwise a step
+                                // across the line of fire and a little
+                                // closer, to the other side each time: that
+                                // is what clears a corner or the end of a
+                                // wreck field, which no terrain test can see.
+                                auto stand = positionForClearShot(sim, unit, target);
+                                if (!stand)
+                                {
+                                    auto toTarget = target.position - unit.position;
+                                    toTarget.y = 0_ss;
+                                    auto forward = toTarget.normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+                                    SimVector across(-forward.z, 0_ss, forward.x);
+                                    if (tries % 2 == 0)
+                                    {
+                                        across = -across;
+                                    }
+                                    stand = unit.position + (across * profile.stalledAttackSidestep)
+                                        + (forward * (profile.stalledAttackSidestep / 2_ss));
+                                }
+                                auto to = clampInsideVisibleMap(sim.terrain, *stand, 64_ss);
+                                // The clock restarts, so the new position is
+                                // judged on its own rather than inheriting
+                                // the old one's failure.
+                                progress.hitPoints = target.hitPoints;
+                                progress.since = bb.now;
+                                LOG_INFO << "AI army: unit " << unitId.value << " moves to get a shot at " << target.unitType
+                                         << " " << enemy->value << " (attempt " << tries << " of " << profile.stalledAttackRepositionTries << ")";
+                                if (!isMovingTo(unit, to))
+                                {
+                                    outCommands.push_back(moveCommand(unitId, to));
+                                }
+                                continue;
+                            }
+
+                            // Moved and still nothing: it is the target that
+                            // is wrong after all, and not the ground under
+                            // our feet. It is left alone for
+                            // stalledAttackForgetSeconds. The order has to
+                            // come off as well as the target be forgotten --
+                            // the rules below only move a unit whose queue is
+                            // empty, so one still holding the attack would go
+                            // on firing -- and a move to where it already
+                            // stands is the cheapest way to say stop.
                             landTargetGivenUp[key] =
                                 GameTime(bb.now.value + (static_cast<unsigned int>(std::max(0, profile.stalledAttackForgetSeconds)) * SimTicksPerSecond));
                             landTargetProgress.erase(key);
+                            landTargetRepositions.erase(key);
                             LOG_INFO << "AI army: unit " << unitId.value << " gives up on " << targetRef->get().unitType
-                                     << " " << enemy->value << ", nothing it fired from here moved its hit points";
+                                     << " " << enemy->value << ", nothing it fired moved its hit points from "
+                                     << profile.stalledAttackRepositionTries << " position(s)";
                             outCommands.push_back(moveCommand(unitId, unit.position));
                             continue;
                         }

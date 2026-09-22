@@ -107,12 +107,45 @@ namespace rwe
             }
         }
 
-        // Where the bombers go. A bombing run is a trade, and the dearest
-        // thing the enemy owns is also the thing standing deepest inside
-        // their anti-air, so flying at it trades an aircraft for a fraction
-        // of a building. Three questions, asked in order, and none of them
-        // asked at all when we have no bombers -- the last of them walks the
-        // known enemies twice.
+        // Where our wave is. Taken from the attack group rather than from
+        // every combat unit we own, for the reason the battlefield reclaim
+        // takes it from there: the reserve stands at the rally point, and a
+        // centroid dragged halfway home names a place where nothing is
+        // happening. Both arms want it -- the gunships to find what the wave
+        // is stuck on, the bombers to leave alone what the wave is about to
+        // kill anyway.
+        std::optional<SimVector> waveCentre;
+        if (!bombers.empty() || !gunships.empty())
+        {
+            SimScalar sumX = 0_ss;
+            SimScalar sumZ = 0_ss;
+            int counted = 0;
+            for (auto id : bb.combatUnits)
+            {
+                if (bb.attackGroup.count(id.value) == 0)
+                {
+                    continue;
+                }
+                auto ref = sim.tryGetUnitState(id);
+                if (!ref || ref->get().isDead())
+                {
+                    continue;
+                }
+                sumX += ref->get().position.x;
+                sumZ += ref->get().position.z;
+                ++counted;
+            }
+            if (counted > 0)
+            {
+                auto divisor = intToSimScalar(counted);
+                waveCentre = SimVector(sumX / divisor, 0_ss, sumZ / divisor);
+            }
+        }
+
+        // Where the bombers go. A bombing run is a trade, and it has to be
+        // worth flying: three questions, asked in order, and none of them
+        // asked at all when we have no aircraft -- the last of them walks
+        // the known enemies twice.
         std::optional<UnitId> bomberTarget;
         // Asked when gunships are standing too, not only bombers: it is
         // what a gunship falls back on when there is no army to help.
@@ -148,14 +181,43 @@ namespace rwe
                 }
             }
 
-            // Two: the dearest building of theirs that is lightly covered or
-            // not covered at all. Buildings first because that is what a
-            // bomber is for -- it reaches the extractor behind the wall of
-            // towers, which nothing else of ours can.
+            // Two: which building of theirs is worth the sortie. Buildings
+            // first because that is what a bomber is for -- it reaches the
+            // extractor behind the wall of towers, which nothing else of
+            // ours can.
+            //
+            // This used to be the dearest one under a ceiling of anti-air
+            // cover, which is the shape that put every bomber the AI ever
+            // built into the middle of the enemy base: the dearest thing
+            // they own is the thing they have built their guns around, and a
+            // cover ceiling either lets that through or refuses every target
+            // on the map. Reported from a replay, in as many words -- "make
+            // bombers more intelligent in their selection of target".
+            //
+            // So it scores rather than maximises, and the four terms are the
+            // four things that decide whether a run is worth flying:
+            //
+            //   value  -- what it costs them, with a factory counted for
+            //             more than its metal (bomberFactoryWeight), because
+            //             a plant is not a loss of 1900 metal, it is the
+            //             loss of everything it would have built next;
+            //   cover  -- graded inside the ceiling rather than only at it
+            //             (bomberCoverPenalty), so a lightly-picketed
+            //             extractor beats a dearer one under three flak;
+            //   reach  -- the flight is a round trip and we die at the far
+            //             end of it (bomberSortieScale);
+            //   ours   -- what our own army is already walking onto is worth
+            //             a fraction of what it is worth to us
+            //             (bomberLeaveToArmyRadius), because bombing it
+            //             spends an aircraft on a thing that was going to
+            //             die regardless, and the ground cannot reach what
+            //             we ought to be spending the aircraft on.
+            //
+            // Every weight is on the profile and every one of them is a
+            // guess until the arena says otherwise.
             if (!bomberTarget)
             {
-                float bestValue = -1.0f;
-                SimScalar bestDistanceSquared = 0_ss;
+                float bestScore = 0.0f;
                 for (const auto& [_, enemy] : bb.knownEnemies)
                 {
                     if (!enemy.isBuilding)
@@ -172,16 +234,39 @@ namespace rwe
                     {
                         continue;
                     }
-                    if (threatMap.antiAirCoverAt(enemy.lastKnownPosition) > static_cast<float>(profile.bomberMaxAntiAirCover))
+                    auto cover = threatMap.antiAirCoverAt(enemy.lastKnownPosition);
+                    if (cover > static_cast<float>(profile.bomberMaxAntiAirCover))
                     {
                         continue;
                     }
-                    auto value = defIt->second.buildCostMetal.value;
-                    auto distanceSquared = bb.baseAnchor ? bb.baseAnchor->distanceSquared(enemy.lastKnownPosition) : 0_ss;
-                    if (value > bestValue || (value == bestValue && bomberTarget && distanceSquared < bestDistanceSquared))
+
+                    const auto& def = defIt->second;
+                    auto score = static_cast<float>(def.buildCostMetal.value);
+                    // A factory is the immobile thing that builds: killing
+                    // one is worth more than the metal standing in it.
+                    if (!def.isMobile && def.builder)
                     {
-                        bestValue = value;
-                        bestDistanceSquared = distanceSquared;
+                        score *= std::max(1.0f, profile.bomberFactoryWeight);
+                    }
+                    if (cover > 0.0f && profile.bomberCoverPenalty > 0.0f)
+                    {
+                        score /= 1.0f + (cover * profile.bomberCoverPenalty);
+                    }
+                    if (bb.baseAnchor && profile.bomberSortieScale > 0_ss)
+                    {
+                        auto reach = bb.baseAnchor->distance(enemy.lastKnownPosition) / profile.bomberSortieScale;
+                        score /= 1.0f + std::max(0.0f, reach.value);
+                    }
+                    if (waveCentre
+                        && waveCentre->distanceSquared(enemy.lastKnownPosition)
+                            <= (profile.bomberLeaveToArmyRadius * profile.bomberLeaveToArmyRadius))
+                    {
+                        score *= std::max(0.0f, profile.bomberArmyReachDiscount);
+                    }
+
+                    if (!bomberTarget || score > bestScore)
+                    {
+                        bestScore = score;
                         bomberTarget = enemy.unitId;
                     }
                 }
@@ -282,38 +367,6 @@ namespace rwe
         // that is the whole reason to spend the metal on one.
         if (!gunships.empty())
         {
-            // Where our wave is. Taken from the attack group rather than
-            // from every combat unit we own, for the reason the battlefield
-            // reclaim takes it from there: the reserve stands at the rally
-            // point, and a centroid dragged halfway home names a place where
-            // nothing is happening.
-            std::optional<SimVector> waveCentre;
-            {
-                SimScalar sumX = 0_ss;
-                SimScalar sumZ = 0_ss;
-                int counted = 0;
-                for (auto id : bb.combatUnits)
-                {
-                    if (bb.attackGroup.count(id.value) == 0)
-                    {
-                        continue;
-                    }
-                    auto ref = sim.tryGetUnitState(id);
-                    if (!ref || ref->get().isDead())
-                    {
-                        continue;
-                    }
-                    sumX += ref->get().position.x;
-                    sumZ += ref->get().position.z;
-                    ++counted;
-                }
-                if (counted > 0)
-                {
-                    auto divisor = intToSimScalar(counted);
-                    waveCentre = SimVector(sumX / divisor, 0_ss, sumZ / divisor);
-                }
-            }
-
             std::optional<UnitId> gunshipTarget;
             if (waveCentre)
             {

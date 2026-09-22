@@ -337,6 +337,8 @@ namespace rwe
         {
             DiscreteRect rect;
             int margin{0};
+            /** A factory's lane is the one that may never be given up; see collectBuildableSites. */
+            bool factory{false};
         };
 
         /**
@@ -372,9 +374,39 @@ namespace rwe
                     continue;
                 }
                 auto rect = sim.computeFootprintRegion(unit.position, defIt->second.movementCollisionInfo);
-                buildings.push_back(PlacementObstacle{rect, isFactory(defIt->second) ? factoryClearanceTiles : buildingClearanceTiles});
+                auto isAFactory = isFactory(defIt->second);
+                buildings.push_back(PlacementObstacle{rect, isAFactory ? factoryClearanceTiles : buildingClearanceTiles, isAFactory});
             }
             return buildings;
+        }
+
+        /**
+         * Does a footprint sit across a factory's exit lane?
+         *
+         * Asked of the crowded fallback in collectBuildableSites, where
+         * every other lane has already been given up on. The factory's is
+         * not given up on, for the reason factoryClearanceTiles exists: a
+         * building packed against a solar collector is a tight base, and a
+         * building packed across a vehicle plant's door is a plant that
+         * never finishes anything again.
+         */
+        bool blocksAFactoryLane(const std::vector<PlacementObstacle>& buildings, const DiscreteRect& rect)
+        {
+            for (const auto& b : buildings)
+            {
+                if (!b.factory)
+                {
+                    continue;
+                }
+                if (rect.x - b.margin < b.rect.x + b.rect.width
+                    && b.rect.x - b.margin < rect.x + rect.width
+                    && rect.y - b.margin < b.rect.y + b.rect.height
+                    && b.rect.y - b.margin < rect.y + rect.height)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /**
@@ -579,6 +611,22 @@ namespace rwe
                         }
                         if (!clearsStandingBuildings(standing, rect, ownMargin))
                         {
+                            // Crowded, which is allowed as a last resort --
+                            // but not across a factory's door, which is not
+                            // a last resort, it is worse than not building.
+                            //
+                            // Reported from a replay: "one of the core
+                            // vehicle factories got blocked when trying to
+                            // produce units ... there should be enough space
+                            // for units to filter between structures in the
+                            // base". A cramped base reaches this fallback
+                            // for every building it puts up, so on a map
+                            // like Crystal Maze it is the ordinary path and
+                            // not the exception the comment below imagines.
+                            if (blocksAFactoryLane(standing, rect))
+                            {
+                                continue;
+                            }
                             crowded.push_back(BuildableSite{candidate, ring});
                             continue;
                         }
@@ -1173,7 +1221,7 @@ namespace rwe
             {
                 continue;
             }
-            factories.push_back(PlacementObstacle{sim.computeFootprintRegion(unit.position, factoryDefIt->second.movementCollisionInfo), factoryClearanceTiles});
+            factories.push_back(PlacementObstacle{sim.computeFootprintRegion(unit.position, factoryDefIt->second.movementCollisionInfo), factoryClearanceTiles, true});
         }
 
         // Metal under a footprint placed at a cell; only patches count, not the

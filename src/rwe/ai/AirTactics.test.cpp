@@ -156,6 +156,161 @@ namespace rwe
         }
     }
 
+    TEST_CASE("what a bombing run is worth is more than the metal standing under it", "[ai]")
+    {
+        // The second question used to be "which is dearest, under a ceiling
+        // of anti-air", which has two settings and no middle: it either sent
+        // every bomber at the middle of their base or refused every target
+        // on the map. Reported from a replay -- "make bombers more
+        // intelligent in their selection of target". Three of the four terms
+        // that replaced it are pinned here; the fourth, distance, is the one
+        // the old rule already had as a tie-break.
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai");
+        auto enemy = addPlayer(sim, "enemy");
+        auto script = makeEmptyCobScript();
+
+        // Two buildings the same distance from home, so that whichever wins
+        // wins on the term under test and not on the walk.
+        auto eastPos = SimVector(900_ss, 0_ss, 0_ss);
+        auto southPos = SimVector(0_ss, 0_ss, 900_ss);
+
+        sim.unitDefinitions["BOMBER"] = UnitDefinition{};
+
+        auto profile = makeDefaultStandardProfile();
+        profile.tacticalTickInterval = 1;
+        // Narrowed, so the door rule is not what answers any of this.
+        profile.bomberHomeDefenseRadius = 200_ss;
+
+        AiBlackboard bb;
+        bb.sideUnitsResolved = true;
+        bb.sideUnits.bomber = "BOMBER";
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+
+        auto bomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        [[maybe_unused]] auto secondBomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(20_ss, 0_ss, 0_ss), script);
+
+        auto bombedTarget = [&](const AiTuningProfile& p, ThreatMap& threatMap) {
+            AirManager air;
+            std::vector<PlayerCommand> commands;
+            air.update(sim, ai, p, threatMap, bb, commands);
+            auto attacks = ordersFor<AttackOrder>(commands, bomberId);
+            REQUIRE(attacks.size() == 1);
+            auto target = std::get_if<UnitId>(&attacks.front().target);
+            REQUIRE(target != nullptr);
+            return *target;
+        };
+
+        SECTION("a factory is worth more than the metal standing in it")
+        {
+            // A plant is not a loss of 500 metal, it is the loss of
+            // everything it would have built next -- which is why the
+            // cheaper of the two is the one worth the sortie.
+            UnitDefinition factoryDef;
+            factoryDef.buildCostMetal = Metal(500.0f);
+            factoryDef.isMobile = false;
+            factoryDef.builder = true;
+            sim.unitDefinitions["FACTORY"] = factoryDef;
+
+            UnitDefinition storeDef;
+            storeDef.buildCostMetal = Metal(800.0f);
+            storeDef.isMobile = false;
+            storeDef.builder = false;
+            sim.unitDefinitions["STORE"] = storeDef;
+
+            auto factoryId = addUnitOfType(sim, "FACTORY", enemy, eastPos, script);
+            auto storeId = addUnitOfType(sim, "STORE", enemy, southPos, script);
+            bb.knownEnemies[factoryId.value] = makeKnownBuilding(factoryId, eastPos, "FACTORY");
+            bb.knownEnemies[storeId.value] = makeKnownBuilding(storeId, southPos, "STORE");
+
+            ThreatMap threatMap(128, 128);
+            threatMap.rebuild(sim, ai, bb, true);
+
+            REQUIRE(profile.bomberFactoryWeight > 1.0f);
+            CHECK(bombedTarget(profile, threatMap) == factoryId);
+
+            // And the weight is what does it: turned off, the dearer thing
+            // wins as it always did.
+            auto plain = profile;
+            plain.bomberFactoryWeight = 1.0f;
+            CHECK(bombedTarget(plain, threatMap) == storeId);
+        }
+
+        SECTION("cover is graded inside the ceiling, not only at it")
+        {
+            // One gun is well under bomberMaxAntiAirCover, so the ceiling
+            // has nothing to say about either of these. The old rule would
+            // have flown at whichever was dearer and, these being equal,
+            // whichever the map happened to name first.
+            UnitDefinition plainDef;
+            plainDef.buildCostMetal = Metal(400.0f);
+            sim.unitDefinitions["PLAINBUILDING"] = plainDef;
+            addAntiAirType(sim, "AATURRET");
+
+            auto coveredId = addUnitOfType(sim, "PLAINBUILDING", enemy, eastPos, script);
+            auto clearId = addUnitOfType(sim, "PLAINBUILDING", enemy, southPos, script);
+            bb.knownEnemies[coveredId.value] = makeKnownBuilding(coveredId, eastPos, "PLAINBUILDING");
+            bb.knownEnemies[clearId.value] = makeKnownBuilding(clearId, southPos, "PLAINBUILDING");
+
+            auto aaPos = eastPos;
+            auto aaId = addUnitOfType(sim, "AATURRET", enemy, aaPos, script);
+            bb.knownEnemies[aaId.value] = makeKnownGroundUnit(aaId, aaPos, "AATURRET");
+
+            ThreatMap threatMap(128, 128);
+            threatMap.rebuild(sim, ai, bb, true);
+            // The setup itself: one gun, and the ceiling is two, so nothing
+            // here is being refused outright.
+            REQUIRE(threatMap.antiAirCoverAt(eastPos) >= 1.0f);
+            REQUIRE(threatMap.antiAirCoverAt(eastPos) <= static_cast<float>(profile.bomberMaxAntiAirCover));
+            REQUIRE(threatMap.antiAirCoverAt(southPos) == 0.0f);
+
+            CHECK(bombedTarget(profile, threatMap) == clearId);
+
+            // With the penalty off the two are worth the same again, so the
+            // covered one is no longer avoided: the grading is what did it.
+            auto plain = profile;
+            plain.bomberCoverPenalty = 0.0f;
+            CHECK(bombedTarget(plain, threatMap) == coveredId);
+        }
+
+        SECTION("what our own army is walking onto is left to our own army")
+        {
+            // An aircraft spent on a thing the wave is about to kill anyway
+            // is an aircraft not spent on the thing the wave cannot reach.
+            UnitDefinition plainDef;
+            plainDef.buildCostMetal = Metal(400.0f);
+            sim.unitDefinitions["PLAINBUILDING"] = plainDef;
+            UnitDefinition kbotDef;
+            kbotDef.isMobile = true;
+            sim.unitDefinitions["KBOT"] = kbotDef;
+
+            auto ourSideId = addUnitOfType(sim, "PLAINBUILDING", enemy, eastPos, script);
+            auto farSideId = addUnitOfType(sim, "PLAINBUILDING", enemy, southPos, script);
+            bb.knownEnemies[ourSideId.value] = makeKnownBuilding(ourSideId, eastPos, "PLAINBUILDING");
+            bb.knownEnemies[farSideId.value] = makeKnownBuilding(farSideId, southPos, "PLAINBUILDING");
+
+            // Our wave, standing 300 off the eastern one and 1082 off the
+            // other, against a default leave-to-the-army radius of 700.
+            auto wavePos = SimVector(900_ss, 0_ss, 300_ss);
+            auto waveId = addUnitOfType(sim, "KBOT", ai, wavePos, script);
+            bb.combatUnits.push_back(waveId);
+            bb.attackGroup.insert(waveId.value);
+            REQUIRE(wavePos.distance(eastPos) < profile.bomberLeaveToArmyRadius);
+            REQUIRE(wavePos.distance(southPos) > profile.bomberLeaveToArmyRadius);
+
+            ThreatMap threatMap(128, 128);
+            threatMap.rebuild(sim, ai, bb, true);
+
+            CHECK(bombedTarget(profile, threatMap) == farSideId);
+
+            // Without the discount the two are worth the same, and the
+            // bomber goes back to bombing what the army is already on.
+            auto plain = profile;
+            plain.bomberArmyReachDiscount = 1.0f;
+            CHECK(bombedTarget(plain, threatMap) == ourSideId);
+        }
+    }
+
     TEST_CASE("gunships go at what is holding the army up", "[ai]")
     {
         // A bomber makes one pass at the dearest thing the enemy owns. A
