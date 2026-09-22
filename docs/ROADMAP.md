@@ -314,7 +314,22 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
 
 - [ ] Launcher dependency refresh: Electron 22 → current LTS, React 16 → 18, Redux Toolkit; drop `react-hot-loader`. Re-run `npm audit` (dependabot PRs #166/#167 still open).
 - [ ] Host a public master server (currently "connect to localhost" in dev); fix non-recommended port (#60).
-- [ ] Desync detection UX: `GameHash` mismatch → show which tick, dump state (`dump_util`) for bug reports.
+- [x] Desync detection UX: `GameHash` mismatch → show which tick, dump state (`dump_util`) for bug reports.
+      The mismatch names the **first** tick the peers disagreed on rather than
+      the one it was noticed on, which is a round trip later; every peer names
+      the same tick, because every peer compares the same two ordered hash
+      streams. Each writes `rwe-desync-tick<n>-player<p>.json` beside the log --
+      the mismatch, every peer's hash for it, the build, then the hashed state --
+      where the old code wrote `rwe-dump-<rand()>.json` into whatever directory
+      the game started in and said only "Desync detected". Two findings came out
+      of building it. The check was **quietly off in any game with a computer
+      player in it**: every player got a hash buffer, only the local peer and the
+      network endpoints ever filled one, and a buffer nobody fills stalls the
+      comparison for everybody -- hash sources are now registered separately from
+      players. And the single-player game was pushing a hash a tick into a deque
+      nothing ever drained. `RWE_DESYNC_AT=<tick>` on one peer counterfeits a
+      desync without touching the simulation, which is how it was checked: two
+      peers on loopback both named tick 200 and both wrote their dump.
 - [ ] In-game chat (upstream `network-chat` branch is a 1‑commit scaffold; start from it or from scratch).
 - [x] Replays: record the `PlayerCommand` stream + seed; playback through the same sim.
       `--record-replay <file>` writes one, `--replay <file>` watches it, and the

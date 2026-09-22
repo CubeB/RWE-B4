@@ -84,6 +84,18 @@ The saved sim state can differ *before* the hash does, because some sim
 state is saved and not hashed.
 _Avoid_: out of sync, drift
 
+**Desync report** (`DesyncReport`):
+What a peer knows when it notices a desync: the first tick the peers
+disagreed on, and every peer's sync hash for it. Distinct from the tick it
+was noticed on, which is a round trip later and differs per peer.
+_Avoid_: desync dump (that is the file the report writes)
+
+**Hash source**:
+A peer that runs its own simulation and so reports a sync hash: this
+machine and the machines on the other end of the network. A computer
+player is a player and not a hash source.
+_Avoid_: peer (a hash source is a peer; not every player is)
+
 **Hashed state**:
 Sim state the sync hash reads. Must be initialised by the time the object
 exists, and kept in step across the hash, the save and the dump.

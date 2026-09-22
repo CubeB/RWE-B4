@@ -18,6 +18,7 @@
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/Mesh.h>
 #include <rwe/camera_util.h>
+#include <rwe/game/DesyncReport.h>
 #include <rwe/game/GameScene_util.h>
 #include <rwe/game/OrderButtons.h>
 #include <rwe/game/dump_util.h>
@@ -438,13 +439,12 @@ namespace rwe
             pushReplayCommandsForTick(sceneTime.value);
         }
 
-        if (!playerCommandService->checkHashes())
+        if (auto desync = playerCommandService->checkHashes(); desync)
         {
-            std::ofstream dumpFile;
-            dumpFile.open("rwe-dump-" + std::to_string(std::rand()) + ".json");
-            dumpFile << dumpJson(simulation);
-            dumpFile.close();
-            throw std::runtime_error("Desync detected");
+            auto dumpPath = writeDesyncDump(*desync, localPlayerId, sceneTime, simulation);
+            auto description = describeDesync(*desync, localPlayerId, sceneTime, dumpPath);
+            LOG_ERROR << description;
+            throw std::runtime_error(description);
         }
 
         auto playerCommands = playerCommandService->tryPopCommands();

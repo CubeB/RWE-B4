@@ -361,6 +361,8 @@ set(SOURCE_FILES
     src/rwe/game/UnitSoundType.h
     src/rwe/game/WeaponMediaInfo.cpp
     src/rwe/game/WeaponMediaInfo.h
+    src/rwe/game/DesyncReport.cpp
+    src/rwe/game/DesyncReport.h
     src/rwe/game/dump_util.cpp
     src/rwe/game/dump_util.h
     src/rwe/game/save_util.cpp
@@ -974,6 +976,7 @@ set(TEST_FILES
     src/rwe/game/PlayerCommand_speed.test.cpp
     src/rwe/game/EndGameStats.test.cpp
     src/rwe/game/dump_util.test.cpp
+    src/rwe/game/DesyncReport.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp
     src/rwe/geometry/Circle2f.test.cpp
     src/rwe/geometry/CollisionMesh.test.cpp
