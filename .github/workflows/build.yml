@@ -183,13 +183,11 @@ jobs:
       - name: build AppImage
         if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
         run: |
-          # Install into AppDir layout
           mkdir -p AppDir/usr/bin AppDir/usr/share/rwe
           cp build/rwe build/rwe_bridge AppDir/usr/bin/
           cp -r shaders AppDir/usr/share/rwe/
           cp LICENSE README.md AppDir/usr/share/rwe/
 
-          # Create desktop entry
           mkdir -p AppDir/usr/share/applications
           cat > AppDir/usr/share/applications/rwe.desktop <<'DESKTOP'
           [Desktop Entry]
@@ -211,11 +209,9 @@ jobs:
             -pointsize 72 -annotate 0 'RWE' \
             AppDir/usr/share/icons/hicolor/256x256/apps/rwe.png
 
-          # Download linuxdeploy
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x linuxdeploy-x86_64.AppImage
 
-          # Build AppImage
           VERSION=$(git describe --tags --always)
           export VERSION
           ./linuxdeploy-x86_64.AppImage \

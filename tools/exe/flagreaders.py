@@ -22,7 +22,6 @@ import sys
 
 LISTING = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "totala.asm")
 
-# The flag word's offset within the weapon definition.
 FLAGS_OFFSET = "0x111"
 
 bit = int(sys.argv[1])
