@@ -311,6 +311,85 @@ namespace rwe
         }
     }
 
+    TEST_CASE("an aircraft with nothing to do waits at an air base", "[ai]")
+    {
+        // Reported from a replay on Dark Side: "Arm was building brawlers in
+        // its vehicle plant". It was not -- every one was queued at the
+        // advanced aircraft plant, which the log says plainly -- but the
+        // idle ones were sitting on the vehicle plant, because an aircraft
+        // with nothing to do was sent to bb.baseAnchor, the centre of mass
+        // of everything we own. That lands on a building as often as not,
+        // and on that map it landed on the vehicle plant.
+        //
+        // So they wait at an air base instead, and at the repair pad first
+        // of the three: the simulation mends an aircraft that lands on one
+        // (sim/airbase.test.cpp), so one waiting there goes back out whole.
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai");
+        auto script = makeEmptyCobScript();
+
+        sim.unitDefinitions["GUNSHIP"] = UnitDefinition{};
+        UnitDefinition buildingDef;
+        buildingDef.isMobile = false;
+        sim.unitDefinitions["VEHICLEPLANT"] = buildingDef;
+        sim.unitDefinitions["AIRPLANT"] = buildingDef;
+        sim.unitDefinitions["REPAIRPAD"] = buildingDef;
+
+        auto anchor = SimVector(0_ss, 0_ss, 0_ss);
+        auto plantPos = SimVector(600_ss, 0_ss, 0_ss);
+        auto padPos = SimVector(0_ss, 0_ss, 600_ss);
+
+        // Two of them, idle and well outside the leash, so the rule fires.
+        auto firstId = addUnitOfType(sim, "GUNSHIP", ai, SimVector(-900_ss, 0_ss, -900_ss), script);
+        auto secondId = addUnitOfType(sim, "GUNSHIP", ai, SimVector(-880_ss, 0_ss, -900_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.tacticalTickInterval = 1;
+        // Short, so that every candidate waiting place in this fixture is
+        // further off than the leash and the rule fires for all three.
+        profile.fighterLeash = 100_ss;
+
+        AiBlackboard bb;
+        bb.sideUnitsResolved = true;
+        bb.sideUnits.gunship = "GUNSHIP";
+        bb.baseAnchor = anchor;
+        // Nothing known, so there is no target and every gunship falls
+        // through to the waiting rule.
+
+        auto waitsAt = [&]() {
+            ThreatMap threatMap(128, 128);
+            AirManager air;
+            std::vector<PlayerCommand> commands;
+            air.update(sim, ai, profile, threatMap, bb, commands);
+            auto moves = ordersFor<MoveOrder>(commands, firstId);
+            REQUIRE(moves.size() == 1);
+            return moves.front().destination;
+        };
+
+        SECTION("with neither, the base anchor as before")
+        {
+            CHECK(waitsAt().distanceSquared(anchor) < (16_ss * 16_ss));
+        }
+
+        SECTION("with an air plant, the air plant")
+        {
+            bb.sideUnits.airPlant = "AIRPLANT";
+            addUnitOfType(sim, "AIRPLANT", ai, plantPos, script);
+            CHECK(waitsAt().distanceSquared(plantPos) < (16_ss * 16_ss));
+        }
+
+        SECTION("with a repair pad as well, the pad")
+        {
+            bb.sideUnits.airPlant = "AIRPLANT";
+            bb.sideUnits.airRepairPad = "REPAIRPAD";
+            addUnitOfType(sim, "AIRPLANT", ai, plantPos, script);
+            addUnitOfType(sim, "REPAIRPAD", ai, padPos, script);
+            CHECK(waitsAt().distanceSquared(padPos) < (16_ss * 16_ss));
+        }
+
+        (void)secondId;
+    }
+
     TEST_CASE("gunships go at what is holding the army up", "[ai]")
     {
         // A bomber makes one pass at the dearest thing the enemy owns. A

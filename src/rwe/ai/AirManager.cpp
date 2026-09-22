@@ -78,6 +78,21 @@ namespace rwe
         std::vector<UnitId> bombers;
         std::vector<UnitId> gunships;
         std::vector<UnitId> torpedoPlanes;
+        // Where an aircraft with nothing to do waits, best first: a repair
+        // pad, then the plant that built it.
+        //
+        // It used to wait over bb.baseAnchor, which is the centre of mass of
+        // everything we own -- the middle of the base, and just as often
+        // directly on top of a building. On Dark Side that was the vehicle
+        // plant, and every idle Brawler sat over it: watched, that reads as
+        // the vehicle plant building gunships, which is what was reported.
+        //
+        // The pad first because it is not only tidier. The simulation mends
+        // an aircraft that lands on a pad (sim/airbase.test.cpp), so one
+        // waiting there goes back out whole, and the AI has only just
+        // started building them.
+        std::optional<SimVector> repairPad;
+        std::optional<SimVector> airPlant;
         for (const auto& [unitId, unit] : sim.units)
         {
             if (unit.owner != aiOwner || !unit.isAlive())
@@ -88,6 +103,15 @@ namespace rwe
             if (defIt == sim.unitDefinitions.end() || unit.isBeingBuilt(defIt->second))
             {
                 continue;
+            }
+            if (!repairPad && !s.airRepairPad.empty() && unit.unitType == s.airRepairPad)
+            {
+                repairPad = unit.position;
+            }
+            else if (!airPlant && ((!s.advancedAirPlant.empty() && unit.unitType == s.advancedAirPlant)
+                        || (!s.airPlant.empty() && unit.unitType == s.airPlant)))
+            {
+                airPlant = unit.position;
             }
             if ((!s.fighter.empty() && unit.unitType == s.fighter) || (!s.seaplaneFighter.empty() && unit.unitType == s.seaplaneFighter))
             {
@@ -106,6 +130,12 @@ namespace rwe
                 bombers.push_back(UnitId(unitId));
             }
         }
+
+        // Anything of the three, in that order. Everything else in this file
+        // still measures FROM bb.baseAnchor -- what is at our door, how far a
+        // sortie is -- because those are questions about the base and not
+        // about where to stand and wait.
+        auto waitPoint = repairPad ? repairPad : (airPlant ? airPlant : bb.baseAnchor);
 
         // Where our wave is. Taken from the attack group rather than from
         // every combat unit we own, for the reason the battlefield reclaim
@@ -350,9 +380,9 @@ namespace rwe
             // base rather than wander. A bomber already on its run has an
             // order and is left alone, so losing one mid-attack does not
             // recall the other.
-            if (bb.baseAnchor && unit.orders.empty() && unit.position.distanceSquared(*bb.baseAnchor) > (profile.fighterLeash * profile.fighterLeash))
+            if (waitPoint && unit.orders.empty() && unit.position.distanceSquared(*waitPoint) > (profile.fighterLeash * profile.fighterLeash))
             {
-                outCommands.push_back(moveCommand(unitId, *bb.baseAnchor));
+                outCommands.push_back(moveCommand(unitId, *waitPoint));
             }
         }
 
@@ -422,9 +452,9 @@ namespace rwe
                     }
                     continue;
                 }
-                if (bb.baseAnchor && unit.orders.empty() && unit.position.distanceSquared(*bb.baseAnchor) > (profile.fighterLeash * profile.fighterLeash))
+                if (waitPoint && unit.orders.empty() && unit.position.distanceSquared(*waitPoint) > (profile.fighterLeash * profile.fighterLeash))
                 {
-                    outCommands.push_back(moveCommand(unitId, *bb.baseAnchor));
+                    outCommands.push_back(moveCommand(unitId, *waitPoint));
                 }
             }
         }
@@ -476,9 +506,9 @@ namespace rwe
                     }
                     continue;
                 }
-                if (bb.baseAnchor && unit.orders.empty() && unit.position.distanceSquared(*bb.baseAnchor) > (profile.fighterLeash * profile.fighterLeash))
+                if (waitPoint && unit.orders.empty() && unit.position.distanceSquared(*waitPoint) > (profile.fighterLeash * profile.fighterLeash))
                 {
-                    outCommands.push_back(moveCommand(unitId, *bb.baseAnchor));
+                    outCommands.push_back(moveCommand(unitId, *waitPoint));
                 }
             }
         }
@@ -528,17 +558,17 @@ namespace rwe
 
             // Nothing in the air: stand over the base. Cover that has flown
             // off after the last thing it chased is not cover.
-            if (!bb.baseAnchor)
+            if (!waitPoint)
             {
                 continue;
             }
-            if (unit.position.distanceSquared(*bb.baseAnchor) <= profile.fighterLeash * profile.fighterLeash)
+            if (unit.position.distanceSquared(*waitPoint) <= profile.fighterLeash * profile.fighterLeash)
             {
                 continue;
             }
-            if (!isMovingTo(unit, *bb.baseAnchor))
+            if (!isMovingTo(unit, *waitPoint))
             {
-                outCommands.push_back(moveCommand(unitId, *bb.baseAnchor));
+                outCommands.push_back(moveCommand(unitId, *waitPoint));
             }
         }
     }
