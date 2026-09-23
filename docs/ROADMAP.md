@@ -485,7 +485,36 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
       large `.ufo` (#93) and the "Expected property name" parse crash (#38),
       and both need the 2 GB V map pack that provoked them -- not on this
       machine, so they are blocked on fetching it rather than on any reading.
-- [ ] 3DO texture distortion (#7), GAF animation off-by-one (#82), shadows on water (#25).
+- [x] 3DO texture distortion (#7), GAF animation off-by-one (#82), shadows on
+      water (#25) -- B4 #9, closed 2026-09-23. **Texture distortion** was fixed
+      in `168d24e5`: the original does not split a textured quad into two
+      triangles, it scan-converts the whole quad and interpolates along both
+      edge chains, so a skewed quad is tessellated as a bilinear patch in
+      `mesh_util.cpp` and a parallelogram is left alone, the two mappings
+      agreeing there. The solar collector is what showed it -- trapezoid panels
+      under a strongly striped texture, kinked along the diagonal.
+      **Shadows on water** were decoded and declined, which is written up at
+      the end of `TOTALA-EXE-RENDER.md` §100: a building's projection is drawn
+      flat at the ground under it wherever that ground is, a finished unit's
+      copy is not cut at the water line, and the only water test in either
+      pass is the one on map features in §3. Nothing here departs from the
+      original, so it is not in §88 or `compatibility.md` either. It went the
+      other way in the code, in fact: a floating building's shadow used to be
+      lifted to the surface with `rweMax(groundHeight, seaLevel)` and now sits
+      on the sea bed where the projected pass puts it.
+      **The animation off-by-one** is `GameScene::renderTime`. Everything that
+      moves is drawn as `lerp(previous, current, interpolationFraction)`, so a
+      frame shows the world between the end of tick `gameTime - 1` and the end
+      of `gameTime` -- and a GAF animation keyed on `gameTime` ran a whole tick
+      ahead of the units it belonged to. Feature burn loops, sprite and wake
+      and nano particles, projectile sprites, muzzle flashes, the build-cycle
+      colours and the order-line march all take the render clock now, and so do
+      the two passes that *remove* finished effects, because a flash dropped a
+      tick early is a flash whose last frame is never drawn. The fraction is
+      deliberately not in the answer: every one of these steps on whole ticks,
+      and `floor((t - 1 + frac) / period)` is `(t - 1) / period` for any
+      fraction below one. A clock the player reads and a countdown are not
+      animations and still ask the simulation. `game/animationclock.test.cpp`.
 - [ ] Run the engine against Core Contingency, Battle Tactics, and the big community mods (TA:Escalation, TA:Mayhem) and log incompatibilities as issues.
 - [x] Invalid UTF‑8 resilience (#14, 2026-09-23). `ensureUtf8` in
       `util/rwe_string.h` is the boundary: valid input comes back byte for
@@ -506,7 +535,19 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
       of the split as latin1 again, and the arena's `run.json` threw on it and
       was left empty. And the trims passed a code point to `isspace`, which is
       undefined for a value that does not fit an unsigned char.
-- [ ] Compile a `docs/compatibility.md` of what TA behaviour is intentionally *not* replicated (bugs vs features).
+- [x] `docs/compatibility.md` (2026-09-23): what TA behaviour is intentionally
+      not replicated, and what of it is kept although it looks like a defect.
+      The plain-language face of `TOTALA-EXE.md` §88, grouped by *why* rather
+      than by subsystem, because the reason is the part that stops an entry
+      being "fixed" back later: the original's limit is gone, the simulation
+      has to stay deterministic, there is no palette to do the trick with, or
+      it was measured and the original's answer played worse. It opens with
+      the other list -- the quirks reproduced on purpose, from the purple halo
+      to the shade table's `& 0x1F` wrap to shells having no arc -- because
+      that is the one a player is more likely to be looking for. A table of
+      the four switches that offer both, all defaulting to the original, and a
+      run of one-line entries for the small ones. What is merely *not done* is
+      deliberately absent: that is §91 and this file.
 
 ### The demo conformance corpus
 

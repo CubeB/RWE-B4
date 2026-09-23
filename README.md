@@ -353,6 +353,7 @@ Running launchers connect to it automatically.
 | [`docs/index.html`](docs/index.html) | Status page — what has landed, and what has not |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | The plan |
 | [`docs/TOTALA-EXE.md`](docs/TOTALA-EXE.md) | Index to the findings read out of the original binary |
+| [`docs/compatibility.md`](docs/compatibility.md) | Where this engine and the original part company, and where they deliberately do not |
 | [`docs/TA-DEMOS.md`](docs/TA-DEMOS.md) | The `.tad`/`.ted` demo format, and the conformance corpus built from it |
 | [`docs/PROFILING.md`](docs/PROFILING.md) | The per-phase tick and frame timers, and how to read them |
 | `CLAUDE.md` | Working guide to the codebase and its hazards |

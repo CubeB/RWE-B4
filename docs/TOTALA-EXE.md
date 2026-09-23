@@ -170,7 +170,9 @@ Everything else lives in a subject file. **The numbers never move**, so a
 ## 88. Where RWE deliberately differs
 
 Recorded so these do not get "fixed" back later by someone comparing against the
-original:
+original. `docs/compatibility.md` is the same list in plain language, grouped by
+why rather than by subsystem, and adds the other half of the question -- the
+quirks of the original that RWE reproduces although they look like defects.
 
 - **A goal something is standing on is relaxed to the nearest cell the unit
   could stand on.** The original aims a search at the goal cell and has no

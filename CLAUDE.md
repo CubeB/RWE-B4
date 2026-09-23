@@ -258,6 +258,11 @@ of `TotalA.exe` instead of guessed at.
   attacking: the mission name table and its handlers, the bomber attack run,
   the fighter strafing pass, the gunship standoff ring, and what `hoverattack`
   and `maneuverleashlength` actually gate.
+- `docs/compatibility.md` -- the plain-language account of where RWE and the
+  original part company and where they deliberately do not: §88 regrouped by
+  why the difference exists, plus the original's quirks that are reproduced on
+  purpose. Written for a player or a modder; §88 stays the record for anyone
+  changing the code.
 - `docs/TA-PATCHES.md` — what the official v3.1 patch and the 2013 unofficial
   patch each changed, and what of it RWE needs. The short answer is that the
   GOG executable is already v3.1, so every engine fix the official patch made
