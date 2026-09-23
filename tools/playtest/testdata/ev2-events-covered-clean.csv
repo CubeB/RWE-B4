@@ -1,0 +1,3 @@
+player,unitType,category,isBuilding,startedTick,startedSeconds,completedTick,completedSeconds,diedTick,diedSeconds,x,z,enemiesNear,nearestEnemyType,friendlyArmyNear,friendlyTowersNear,deathCause,killerType,killerPlayer
+0,ARMMEX,economy,1,1500,150,1610,161,6000,600,1032,-856,2,CORAK,1,1,weapon,CORAK,1
+0,ARMSOLAR,economy,1,1800,180,2100,210,7200,720,1000,-900,1,ARMCRAWL,0,0,sunk,,

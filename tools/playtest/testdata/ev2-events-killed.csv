@@ -1,0 +1,5 @@
+player,unitType,category,isBuilding,startedTick,startedSeconds,completedTick,completedSeconds,diedTick,diedSeconds,x,z,enemiesNear,nearestEnemyType,friendlyArmyNear,friendlyTowersNear,deathCause,killerType,killerPlayer
+0,ARMMEX,economy,1,1500,150,1610,161,6000,600,1032,-856,0,,0,0,weapon,CORAK,1
+0,ARMSOLAR,economy,1,1800,180,2100,210,7200,720,1000,-900,3,ARMHARE,0,0,weapon,ARMHARE,0
+0,ARMCOM,commander,0,0,0,1,0,,,1162,-176,,,,,,,
+1,CORMEX,economy,1,2000,200,2110,211,7600,760,900,-800,2,CORAIR,0,0,weapon,CORAIR,0

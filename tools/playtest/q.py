@@ -56,13 +56,33 @@ Event types and their own fields:
 
     ai_perf
         player, pass, ms, calls, tick, kind ("spike"|"summary"), worst, spikes
+        (only when the run was made with RWE_AI_PROFILE: ms is wall-clock, so
+        profiler-gated logs are exempt from byte-determinism)
 
-    Decision events, ev = "<area>_<verb>", fields as applicable:
+    decision events, ev = "<area>_<verb>", fields as applicable:
         player, subject, unit, x, z, target, cost, why (snake_case tag), detail.
         Names: build_order, build_refusal, build_site_contested,
-        build_unaffordable, build_not_worth, build_tier_assessment,
-        factory_start, factory_hold_t2, transport_refusal, army_dispatch,
-        army_retreat, scout_assigned, ...
+        build_site_search, build_unaffordable, build_saving, build_not_worth, build_tier_assessment, build_builder_retreat,
+        build_commander_mend, build_defence_lost, builder_gone,
+        build_guard_request, factory_start, factory_refusal,
+        factory_queue_cleared, transport_refusal, scout_assigned,
+        army_commander_stays / _hands / _danger / _dgun, navy_sail,
+        navy_recall, army_reinforce, ...
+
+    factory_hold / factory_hold_t2   emit-on-change, not per tick:
+        a hold spell emits once when it begins, again when the held subject
+        changes, and once at its end (kind "drained"|"released"); held_for is
+        the spell's length in ticks at emission, subject the held unit type.
+
+    unit_death   per died unit (always on)
+        unit, player, subject (type), x, z, cause, killer_type, killer_player,
+        enemies_near, friendly_army_near, friendly_towers_near,
+        nearest_enemy_type, frame, born. cause is the engine-distinguishable
+        tag: weapon, self_destruct, reclaimed, carrier_died, unfinished;
+        killer_type/killer_player are null when no attacker was known.
+
+    ai_reachability   every 20 sim seconds
+        player, kind ("ground"|"commander"|"naval"), on, changed.
 """
 
 from __future__ import annotations
