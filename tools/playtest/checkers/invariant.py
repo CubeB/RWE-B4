@@ -98,7 +98,9 @@ def rule_result_units(events_path, result, events_rows: list) -> list:
     alive: dict = {}
     alive_lines: dict = {}
     for lineno, row in events_rows:
-        if num(row, "completedTick") is None or num(row, "diedTick") is not None:
+        # The result line counts units under construction, and the events CSV
+        # records every started unit, so alive here means merely not died.
+        if num(row, "diedTick") is not None:
             continue
         player = num(row, "player")
         if player is None:

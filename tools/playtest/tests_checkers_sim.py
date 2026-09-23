@@ -329,13 +329,13 @@ class InvariantTests(SimCheckerTestCase):
     def test_result_units_match_clean(self):
         run_dir = self.make_dir()
         self.copy(run_dir, "ai-arena-events.csv", "inv-events.csv")
-        self.write(run_dir, "game.log", result_line("decided", {0: 1, 1: 1}))
+        self.write(run_dir, "game.log", result_line("decided", {0: 2, 1: 1}))
         self.assertEqual(rules(invariant.check(run_dir), "I2:"), [])
 
     def test_result_units_mismatch_likely_bug(self):
         run_dir = self.make_dir()
         self.copy(run_dir, "ai-arena-events.csv", "inv-events.csv")
-        self.write(run_dir, "game.log", result_line("decided", {0: 1, 1: 2}))
+        self.write(run_dir, "game.log", result_line("decided", {0: 2, 1: 2}))
         found = rules(invariant.check(run_dir), "I2:")
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0].severity, "likely-bug")
