@@ -1579,6 +1579,92 @@ namespace rwe
         REQUIRE(unloads.front().destination.x < -64_ss);
     }
 
+    TEST_CASE("naval: an idle hull stands off its own yard rather than on it", "[ai]")
+    {
+        // Reported from play, twice over: "boats were blocking the factory
+        // after being made", and "core shipyard stopped building as it got
+        // blocked by a scout ship".
+        //
+        // A finished hull is handed a BuggerOffOrder, which clears the pad by
+        // one footprint and no further. updateNavy then measured both of its
+        // "come back" tests against navalHome -- which IS the shipyard -- so a
+        // hull at the doors was already home and was never told anything
+        // again. It stood there until the fleet sailed, and a friendly hull on
+        // a spawn point costs the yard ten failed tries and its queue entry
+        // (GameSimulation::retryBlockedSite).
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 0_ss, 0_ss), script);
+        auto yard = SimVector(-90_ss, 0_ss, 0_ss);
+        addUnit(sim, "ARMSY", ai, yard, script);
+        // One hull, just off the doors, with nothing to do. One and not three
+        // so that the fleet never gathers and the sortie never fires: what is
+        // under test is the hull that is NOT going anywhere.
+        auto hull = addUnit(sim, "ARMROY", ai, SimVector(-90_ss, 0_ss, 40_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+        // The scout borrows a hull, and a borrowed hull is not updateNavy's
+        // to command -- it skips it by name.
+        profile.navalScouting = false;
+
+        SECTION("it is sent out to the station, clear of the pad")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            auto moves = ordersFor<MoveOrder>(commands, hull);
+            REQUIRE(!moves.empty());
+            // Far enough out that the next hull off the slipway has room.
+            // Measured from the yard, which is what the clearance is about.
+            auto out = moves.back().destination;
+            REQUIRE(out.distanceSquared(yard) >= (profile.navalRallyDistance * profile.navalRallyDistance) * 0.9_ssf);
+            // And still inside the radius the gather count uses, or a hull
+            // standing by would stop counting towards the fleet that sails.
+            auto gatherRadius = profile.rallyDistance * 2_ss;
+            REQUIRE(out.distanceSquared(yard) <= gatherRadius * gatherRadius);
+        }
+
+        SECTION("and it is not sent out again once it is there")
+        {
+            // The station is navalRallyDistance out and the "on the yard"
+            // test is half of that, so a hull standing by reads as neither
+            // on the pad nor drifted. Without that gap it would be ordered
+            // to the same point on every tactical pass for the whole game.
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> first;
+            runTicks(sim, controller, 20, first);
+            auto moves = ordersFor<MoveOrder>(first, hull);
+            REQUIRE(!moves.empty());
+
+            // Put it where it was told to go, with nothing left to do.
+            sim.getUnitState(hull).position = moves.back().destination;
+            sim.getUnitState(hull).orders.clear();
+
+            std::vector<PlayerCommand> second;
+            runTicks(sim, controller, 20, second);
+            REQUIRE(ordersFor<MoveOrder>(second, hull).empty());
+        }
+
+        SECTION("navalRallyDistance=0 restores the old behaviour exactly")
+        {
+            profile.navalRallyDistance = 0_ss;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(ordersFor<MoveOrder>(commands, hull).empty());
+        }
+    }
+
     TEST_CASE("a fleet can call the attack, but only when asked to", "[ai]")
     {
         // The phase machine counted armySize, which counts combatUnits, and

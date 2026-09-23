@@ -948,6 +948,70 @@ namespace rwe
         }
     }
 
+    std::optional<SimVector> ArmyManager::navalRallyPoint(
+        const GameSimulation& sim,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        const SimVector& navalHome) const
+    {
+        if (profile.navalRallyDistance <= 0_ss)
+        {
+            return std::nullopt;
+        }
+        if (navalRallyMemo && navalRallyMemo->home.distanceSquared(navalHome) == 0_ss)
+        {
+            return navalRallyMemo->station;
+        }
+
+        // Sixteen bearings, and the first that is deep water on our own sea
+        // with deep water all the way out to it. The walk out matters: a
+        // point across a spit from the yard passes the water-body test --
+        // that test is about connectivity and not about this line -- and a
+        // hull sent to it goes the long way round the spit, which is the
+        // opposite of standing by.
+        static const float bearings[16][2] = {
+            {1.0f, 0.0f}, {0.9239f, 0.3827f}, {0.7071f, 0.7071f}, {0.3827f, 0.9239f},
+            {0.0f, 1.0f}, {-0.3827f, 0.9239f}, {-0.7071f, 0.7071f}, {-0.9239f, 0.3827f},
+            {-1.0f, 0.0f}, {-0.9239f, -0.3827f}, {-0.7071f, -0.7071f}, {-0.3827f, -0.9239f},
+            {0.0f, -1.0f}, {0.3827f, -0.9239f}, {0.7071f, -0.7071f}, {0.9239f, -0.3827f}};
+
+        auto seaLevel = sim.terrain.getSeaLevel();
+        auto deepAt = [&](const SimVector& p, SimScalar depth) {
+            auto ground = sim.terrain.tryGetHeightAt(p.x, p.z);
+            return ground && *ground <= seaLevel - depth;
+        };
+
+        NavalRallyMemo memo{navalHome, std::nullopt};
+        for (const auto& b : bearings)
+        {
+            SimVector candidate(
+                navalHome.x + (profile.navalRallyDistance * SimScalar(b[0])),
+                seaLevel,
+                navalHome.z + (profile.navalRallyDistance * SimScalar(b[1])));
+            if (!deepAt(candidate, 20_ss) || !sameWaterBody(bb.mapIntel, sim.terrain, navalHome, candidate))
+            {
+                continue;
+            }
+            bool clearRun = true;
+            for (int step = 1; step <= 4 && clearRun; ++step)
+            {
+                auto t = SimScalar(static_cast<float>(step) / 5.0f);
+                SimVector sample(
+                    navalHome.x + ((candidate.x - navalHome.x) * t),
+                    seaLevel,
+                    navalHome.z + ((candidate.z - navalHome.z) * t));
+                clearRun = deepAt(sample, 12_ss);
+            }
+            if (clearRun)
+            {
+                memo.station = candidate;
+                break;
+            }
+        }
+        navalRallyMemo = memo;
+        return memo.station;
+    }
+
     void ArmyManager::updateNavy(
         const GameSimulation& sim,
         PlayerId aiOwner,
@@ -983,6 +1047,7 @@ namespace rwe
         {
             return;
         }
+        auto navalStation = navalRallyPoint(sim, profile, bb, *navalHome);
 
         // Whether there is a fleet, as opposed to a ship or two. The hull on
         // loan to ScoutManager is not part of it -- it is already busy, and
@@ -1372,13 +1437,39 @@ namespace rwe
             // Nothing worth fighting: hold the coast at home instead of
             // drifting, so the fleet is already where the next thing worth
             // shooting turns up.
+            //
+            // At the STATION rather than at the yard. A hull that has just
+            // been built is handed a BuggerOffOrder, which takes it one
+            // footprint off the pad and no further, and both tests below used
+            // to measure against navalHome -- which IS the shipyard -- so a
+            // hull at the doors was already where it was supposed to be and
+            // was never told to move again. Two hulls waiting on a third
+            // therefore parked across the mouth of the yard building it, and
+            // a spawn point a friendly hull is standing on is ten failed
+            // tries and a lost queue entry (GameSimulation::retryBlockedSite)
+            // for as long as it stands there. Reported from play: "boats were
+            // blocking the factory after being made", and "core shipyard
+            // stopped building as it got blocked by a scout ship".
+            //
+            // Distances are still measured from the yard. The station is
+            // navalRallyDistance from it and gatherRadius is twice
+            // rallyDistance, so a hull standing by still counts as gathered.
+            const auto& station = navalStation ? *navalStation : *navalHome;
             // A hull still out after the recall comes back whatever it was
-            // doing; one that is merely idle comes back when it has drifted.
-            bool recalled = !fleetReady && !atHome && !isMovingTo(ship, *navalHome);
-            if (recalled
-                || (ship.position.distanceSquared(*navalHome) > (profile.rallyDistance * profile.rallyDistance) && ship.orders.empty()))
+            // doing; one that is merely idle comes back when it has drifted
+            // OFF STATION. Drift used to be measured from the yard, which is
+            // what made a hull on the pad read as already in place: it is the
+            // one spot the old test could never object to. Measured from the
+            // station instead, the yard is rallyDistance-and-more away from
+            // where the hull should be, so sitting on it is drift like any
+            // other -- and a hull actually at the station is at zero and is
+            // never ordered anywhere on the next pass.
+            bool recalled = !fleetReady && !atHome && !isMovingTo(ship, station);
+            bool drifted = ship.position.distanceSquared(station) > (profile.rallyDistance * profile.rallyDistance)
+                && ship.orders.empty();
+            if (recalled || drifted)
             {
-                outCommands.push_back(moveCommand(shipId, *navalHome));
+                outCommands.push_back(moveCommand(shipId, station));
             }
         }
     }

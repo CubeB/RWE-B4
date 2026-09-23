@@ -458,6 +458,7 @@ namespace rwe
             || setScalar("defendRadius", p.defendRadius)
             || setScalar("engageRadius", p.engageRadius)
             || setScalar("rallyDistance", p.rallyDistance)
+            || setScalar("navalRallyDistance", p.navalRallyDistance)
             || setScalar("threatAversion", p.threatAversion)
             || setScalar("resourceCheatMultiplier", p.resourceCheatMultiplier);
     }

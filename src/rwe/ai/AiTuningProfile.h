@@ -2239,6 +2239,25 @@ namespace rwe
         SimScalar engageRadius{450_ss};
         /** Rally point sits this far from the base anchor, towards the enemy. */
         SimScalar rallyDistance{220_ss};
+        /**
+         * How far off its own shipyard a hull with nothing to do waits. 0
+         * puts it back at the yard, which is where every idle hull used to
+         * stand and is the bug this exists for: a new hull's BuggerOffOrder
+         * clears the pad by one footprint, and updateNavy then measured
+         * "home" against the shipyard itself, so a hull at the doors read as
+         * already in place and stayed there. Two waiting on a third block
+         * the yard that is building it, and a blocked spawn point costs ten
+         * failed tries and the queue entry.
+         *
+         * 320 rather than something tighter because the clearance a hull
+         * needs is not its own size: a factory hands the unit it built a
+         * bugger-off rect expanded by (footprint * 3) - 4 CELLS at 16 world
+         * units each, so a destroyer can legitimately come to rest 150 units
+         * out and still be on the next one's spawn point. And it has to stay
+         * inside the gather radius, which is twice rallyDistance (440), or a
+         * hull standing by would stop counting towards the fleet that sails.
+         */
+        SimScalar navalRallyDistance{320_ss};
         /** Weighting of enemy anti-ground threat against economic value when choosing targets. */
         SimScalar threatAversion{1_ss};
 
