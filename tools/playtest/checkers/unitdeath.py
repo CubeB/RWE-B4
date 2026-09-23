@@ -2,6 +2,11 @@
 death scan radius (D1), army dying detached from its own cover (D2), scouts
 dying early and alone (D3).
 
+The engine's events CSV may carry three appended columns — ``deathCause``,
+``killerType``, ``killerPlayer`` — from design §4 Phase 2. When present they
+ride along in each rule's evidence so a scan can say what actually killed the
+unit; they never change whether a rule fires.
+
 Thresholds come from ``thresholds.toml`` beside the checkers. TOML, not YAML:
 stdlib only, no PyYAML on the machines that run this.
 """
@@ -54,7 +59,7 @@ def read_events(events_path) -> list:
 
 
 def _death(lineno, row) -> dict:
-    return {
+    death = {
         "line": lineno,
         "player": num(row, "player"),
         "unitType": row.get("unitType") or "",
@@ -67,6 +72,13 @@ def _death(lineno, row) -> dict:
         "friendlyArmyNear": num(row, "friendlyArmyNear"),
         "friendlyTowersNear": num(row, "friendlyTowersNear"),
     }
+    # Death-cause columns exist only on newer run roots (design §4 Phase 2); a
+    # missing column reads as None and the keys stay out of the evidence.
+    for col in ("deathCause", "killerType", "killerPlayer"):
+        value = row.get(col)
+        if value not in (None, ""):
+            death[col] = value
+    return death
 
 
 def rule_d1(events_path, rows: list, t: dict) -> list:
