@@ -1,5 +1,7 @@
-import { execFile } from "child_process";
+import { spawn } from "child_process";
 import * as path from "path";
+import * as readline from "readline";
+import { Observable, Subject } from "rxjs";
 import { assertNever } from "../common/util";
 
 export interface RweArgsPlayerHuman {
@@ -43,6 +45,49 @@ export interface RweArgs {
   interface?: string;
   port?: number;
   players?: RweArgsPlayerSlot[];
+
+  /**
+   * Speak the bridge protocol on the game's own stdin and stdout: what it has
+   * to say about the game while it runs, and what we have to ask of it.
+   * See ControlChannel in the engine.
+   */
+  bridge?: boolean;
+
+  /**
+   * Record every command to a replay file of this name.
+   *
+   * Not only for watching afterwards: the recording is what a peer hands over
+   * when somebody asks to rejoin, nothing else keeping the commands, so a
+   * network game that may be rejoined is a network game that records.
+   */
+  recordReplay?: string;
+
+  /** A recording of the game so far, for joining one already in progress. */
+  rejoinFile?: string;
+
+  /** The tick that recording ends at, and this peer resumes at. */
+  rejoinTick?: number;
+}
+
+/** Something the running game has said. Undefined fields are simply absent. */
+export interface RweEvent {
+  event: string;
+  player?: number;
+  tick?: number;
+  file?: string;
+  reason?: string;
+}
+
+/** A game that is running, for as long as it is. */
+export interface RunningRwe {
+  /** What it has said, as it says it. Completes when the game exits. */
+  readonly events: Observable<RweEvent>;
+
+  /** Resolves when the game exits, and rejects if it exits badly. */
+  readonly finished: Promise<void>;
+
+  /** Asks the game to let a dropped player back in, by engine slot. */
+  requestRejoin(playerSlot: number): void;
 }
 
 function serializeHost(host: string): string {
@@ -89,6 +134,16 @@ function serializeRweArgs(args: RweArgs): string[] {
   if (args.port !== undefined) {
     out.push("--port", args.port.toString());
   }
+  if (args.bridge) {
+    out.push("--bridge");
+  }
+  if (args.recordReplay !== undefined) {
+    out.push("--record-replay", args.recordReplay);
+  }
+  if (args.rejoinFile !== undefined && args.rejoinTick !== undefined) {
+    out.push("--rejoin", args.rejoinFile);
+    out.push("--rejoin-tick", args.rejoinTick.toString());
+  }
   if (args.players) {
     for (const p of args.players) {
       switch (p.state) {
@@ -125,36 +180,75 @@ function quoteArg(arg: string) {
   return arg;
 }
 
-export function execRwe(args?: RweArgs): Promise<void> {
+export function execRwe(args?: RweArgs): RunningRwe {
   const rweHome = process.env["RWE_HOME"];
+  const events = new Subject<RweEvent>();
   if (!rweHome) {
-    return Promise.reject("Cannot launch RWE, RWE_HOME is not defined");
+    events.complete();
+    return {
+      events,
+      finished: Promise.reject("Cannot launch RWE, RWE_HOME is not defined"),
+      requestRejoin: () => undefined,
+    };
   }
 
-  const serializedArgs = args ? serializeRweArgs(args) : undefined;
+  const serializedArgs = args ? serializeRweArgs(args) : [];
+  console.log(
+    "Launching RWE with args: " + serializedArgs.map(quoteArg).join(" ")
+  );
 
-  return new Promise((resolve, reject) => {
-    if (serializedArgs) {
-      console.log(
-        "Launching RWE with args: " + serializedArgs.map(quoteArg).join(" ")
-      );
-    } else {
-      console.log("Launching RWE");
-    }
-    // FIXME: assumes windows
-    execFile(
-      path.join(rweHome, "rwe" + (process.platform === "win32" ? ".exe" : "")),
-      serializedArgs,
-      { cwd: rweHome },
-      (error: null | Error, stdout: any, stderr: any) => {
-        if (error) {
-          const exitCode = (error as any).code;
-          reject(`RWE exited with exit code ${exitCode}: ${error.message}`);
-          return;
-        }
+  // FIXME: assumes windows
+  const proc = spawn(
+    path.join(rweHome, "rwe" + (process.platform === "win32" ? ".exe" : "")),
+    serializedArgs,
+    { cwd: rweHome, stdio: ["pipe", "pipe", "inherit"] }
+  );
 
-        resolve();
+  if (proc.stdout) {
+    // One JSON object a line, and anything else ignored: the game's own log
+    // goes to a file, but nothing says a library it links will stay quiet.
+    const lines = readline.createInterface({ input: proc.stdout });
+    lines.on("line", line => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("{")) {
+        return;
       }
-    );
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (typeof parsed.event === "string") {
+          events.next(parsed as RweEvent);
+        }
+      } catch {
+        console.log("Ignoring a line from RWE that is not JSON: " + trimmed);
+      }
+    });
+  }
+
+  const finished = new Promise<void>((resolve, reject) => {
+    proc.on("error", error => {
+      events.complete();
+      reject(`RWE could not be started: ${error.message}`);
+    });
+    proc.on("close", code => {
+      events.complete();
+      if (code !== 0 && code !== null) {
+        reject(`RWE exited with exit code ${code}`);
+        return;
+      }
+      resolve();
+    });
   });
+
+  return {
+    events,
+    finished,
+    requestRejoin: (playerSlot: number) => {
+      if (!proc.stdin || proc.stdin.destroyed) {
+        return;
+      }
+      proc.stdin.write(
+        JSON.stringify({ command: "rejoin", player: playerSlot }) + "\n"
+      );
+    },
+  };
 }

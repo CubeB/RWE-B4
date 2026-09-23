@@ -1,7 +1,9 @@
 import { ModFingerprint } from "../../common/archives";
 import {
+  canRequestRejoin,
   canStartGame,
   CanStartGameError,
+  currentGameWrapperReducer,
   CurrentGameState,
   PlayerInfo,
   PlayerSlot,
@@ -32,6 +34,8 @@ function room(players: PlayerSlot[]): CurrentGameState {
     messages: [],
     mapName: "Coast To Coast",
     activeMods: ["ta"],
+    started: false,
+    droppedPlayerIds: [],
   };
 }
 
@@ -83,5 +87,92 @@ describe("canStartGame, on the archives everyone is about to play with", () => {
     const errors = errorsOf(room([player(1, ta("x")), player(2, ta("x"))]));
     expect(errors.map(e => e.type)).not.toContain("archives-differ");
     expect(errors.map(e => e.type)).not.toContain("archives-unchecked");
+  });
+});
+
+describe("canRequestRejoin, on who is offered their seat back", () => {
+  const inGame = (players: PlayerSlot[]): CurrentGameState => ({
+    ...room(players),
+    started: true,
+  });
+
+  it("offers it to a player whose own game dropped them", () => {
+    const state = {
+      ...inGame([player(1, ta("x")), player(2, ta("x"))]),
+      droppedPlayerIds: [1],
+    };
+    expect(canRequestRejoin(state, false)).toBe(true);
+  });
+
+  it("does not offer it while that player is still playing", () => {
+    // The game they are playing may be a different one, or this one about to
+    // end; either way there is nothing to rejoin while it is running.
+    const state = {
+      ...inGame([player(1, ta("x")), player(2, ta("x"))]),
+      droppedPlayerIds: [1],
+    };
+    expect(canRequestRejoin(state, true)).toBe(false);
+  });
+
+  it("does not offer it to somebody who was never dropped", () => {
+    const state = {
+      ...inGame([player(1, ta("x")), player(2, ta("x"))]),
+      droppedPlayerIds: [2],
+    };
+    expect(canRequestRejoin(state, false)).toBe(false);
+  });
+
+  it("does not offer it in a lobby whose game has not started", () => {
+    const state = { ...room([player(1, ta("x"))]), droppedPlayerIds: [1] };
+    expect(canRequestRejoin(state, false)).toBe(false);
+  });
+});
+
+describe("the room, as the rejoin goes through it", () => {
+  const started = (): CurrentGameState => ({
+    ...room([player(1, ta("x")), player(2, ta("x"))]),
+    started: true,
+  });
+
+  it("remembers a dropped player once, however many peers report them", () => {
+    let state = currentGameWrapperReducer(started(), {
+      type: "RECEIVE_PLAYER_DROPPED_FROM_GAME",
+      payload: { playerId: 2, tick: 500 },
+    })!;
+    state = currentGameWrapperReducer(state, {
+      type: "RECEIVE_PLAYER_DROPPED_FROM_GAME",
+      payload: { playerId: 2, tick: 500 },
+    })!;
+    expect(state.droppedPlayerIds).toEqual([2]);
+  });
+
+  it("stops calling them dropped once their recording is on its way", () => {
+    let state = currentGameWrapperReducer(started(), {
+      type: "RECEIVE_PLAYER_DROPPED_FROM_GAME",
+      payload: { playerId: 1, tick: 500 },
+    })!;
+    state = currentGameWrapperReducer(state, {
+      type: "RECEIVE_REJOIN_BUNDLE",
+      payload: { playerId: 1, tick: 620, data: new ArrayBuffer(8) },
+    })!;
+    expect(state.droppedPlayerIds).toEqual([]);
+  });
+
+  it("keeps a refusal meant for this player, and ignores one that is not", () => {
+    let state = currentGameWrapperReducer(started(), {
+      type: "RECEIVE_REJOIN_REFUSED",
+      payload: { playerId: 2, reason: "not for you" },
+    })!;
+    expect(state.rejoinRefusedReason).toBeUndefined();
+
+    state = currentGameWrapperReducer(state, {
+      type: "RECEIVE_REJOIN_REFUSED",
+      payload: { playerId: 1, reason: "nobody left to ask" },
+    })!;
+    expect(state.rejoinRefusedReason).toBe("nobody left to ask");
+
+    // And asking again clears it, so the last answer is the one shown.
+    state = currentGameWrapperReducer(state, { type: "SEND_REQUEST_REJOIN" })!;
+    expect(state.rejoinRefusedReason).toBeUndefined();
   });
 });

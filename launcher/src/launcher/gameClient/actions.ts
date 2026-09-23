@@ -206,6 +206,62 @@ export function receivePlayerArchivesChanged(
   };
 }
 
+export interface ReceivePlayerDroppedFromGameAction {
+  type: "RECEIVE_PLAYER_DROPPED_FROM_GAME";
+  payload: protocol.PlayerDroppedFromGameBroadcastPayload;
+}
+
+export function receivePlayerDroppedFromGame(
+  payload: protocol.PlayerDroppedFromGameBroadcastPayload
+): ReceivePlayerDroppedFromGameAction {
+  return {
+    type: "RECEIVE_PLAYER_DROPPED_FROM_GAME",
+    payload,
+  };
+}
+
+export interface ReceiveRejoinRequestedAction {
+  type: "RECEIVE_REJOIN_REQUESTED";
+  payload: protocol.RejoinRequestedPayload;
+}
+
+export function receiveRejoinRequested(
+  payload: protocol.RejoinRequestedPayload
+): ReceiveRejoinRequestedAction {
+  return {
+    type: "RECEIVE_REJOIN_REQUESTED",
+    payload,
+  };
+}
+
+export interface ReceiveRejoinBundleAction {
+  type: "RECEIVE_REJOIN_BUNDLE";
+  payload: protocol.RejoinBundlePayload;
+}
+
+export function receiveRejoinBundle(
+  payload: protocol.RejoinBundlePayload
+): ReceiveRejoinBundleAction {
+  return {
+    type: "RECEIVE_REJOIN_BUNDLE",
+    payload,
+  };
+}
+
+export interface ReceiveRejoinRefusedAction {
+  type: "RECEIVE_REJOIN_REFUSED";
+  payload: protocol.RejoinRefusedPayload;
+}
+
+export function receiveRejoinRefused(
+  payload: protocol.RejoinRefusedPayload
+): ReceiveRejoinRefusedAction {
+  return {
+    type: "RECEIVE_REJOIN_REFUSED",
+    payload,
+  };
+}
+
 export type GameClientAction =
   | ReceiveHandshakeResponseAction
   | ReceivePlayerJoinedAction
@@ -221,4 +277,8 @@ export type GameClientAction =
   | DisconnectGameAction
   | ReceiveMapChangedAction
   | ReceiveActiveModsChangedAction
-  | ReceivePlayerArchivesChangedAction;
+  | ReceivePlayerArchivesChangedAction
+  | ReceivePlayerDroppedFromGameAction
+  | ReceiveRejoinRequestedAction
+  | ReceiveRejoinBundleAction
+  | ReceiveRejoinRefusedAction;

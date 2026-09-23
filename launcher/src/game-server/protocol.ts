@@ -187,3 +187,59 @@ export const MapChanged = "map-changed";
 export interface MapChangedPayload {
   mapName: string;
 }
+
+// Letting a dropped player back in (#188).
+//
+// The engine can do all of it but move the bytes: the peer entitled to speak
+// for a dropped player can agree a tick and cut a recording of everything the
+// returning peer missed, but the only reliable connection anyone here holds is
+// the one to this server, for the lobby. So the lobby carries it. The engine
+// speaks to its own launcher over the bridge (--bridge, one JSON object a
+// line); these five messages are the rest of the path.
+
+// Emitted by a client whose game has declared a peer lost.
+export const PlayerDroppedFromGame = "player-dropped-from-game";
+export interface PlayerDroppedFromGamePayload {
+  /** The lobby's id, not the engine's slot: the launcher translates. */
+  playerId: number;
+  tick: number;
+}
+
+// Broadcast by the server so every launcher knows who is out of the game.
+export const PlayerDroppedFromGameBroadcast = "game-player-dropped";
+export interface PlayerDroppedFromGameBroadcastPayload {
+  playerId: number;
+  tick: number;
+}
+
+// Emitted by a client that has been dropped and wants back in. The server
+// passes it to the one peer entitled to answer it -- the lowest-numbered slot
+// still in the game, which is the same rule the engine uses to decide who may
+// declare a drop, computed here from the same facts.
+export const RequestRejoin = "request-rejoin";
+
+// Sent by the server to that peer.
+export const RejoinRequested = "rejoin-requested";
+export interface RejoinRequestedPayload {
+  playerId: number;
+}
+
+// Emitted by that peer's client once its game has cut the recording, and sent
+// on by the server to the player it is for. The recording is the whole game so
+// far as commands, which is kilobytes rather than megabytes -- what makes it
+// small is that a lockstep game's commands are all there is.
+export const RejoinBundle = "rejoin-bundle";
+export interface RejoinBundlePayload {
+  playerId: number;
+  /** The tick the returning peer resumes at, which its engine is told. */
+  tick: number;
+  data: ArrayBuffer;
+}
+
+// Either direction: it is not going to happen, and why. Sent by the peer that
+// was asked, and by the server when there is nobody to ask.
+export const RejoinRefused = "rejoin-refused";
+export interface RejoinRefusedPayload {
+  playerId: number;
+  reason: string;
+}

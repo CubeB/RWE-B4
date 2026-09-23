@@ -220,6 +220,17 @@ export function gameEnded(): GameEndedAction {
   };
 }
 
+export interface SendRequestRejoinAction {
+  type: "SEND_REQUEST_REJOIN";
+}
+
+/** The button a player who was dropped presses to ask for their seat back. */
+export function sendRequestRejoin(): SendRequestRejoinAction {
+  return {
+    type: "SEND_REQUEST_REJOIN",
+  };
+}
+
 export interface SendStartGameAction {
   type: "SEND_START_GAME";
 }
@@ -432,6 +443,7 @@ export type AppAction =
   | CloseSlotAction
   | ToggleReadyAction
   | SendStartGameAction
+  | SendRequestRejoinAction
   | LeaveGameAction
   | StartGameAction
   | GameEndedAction

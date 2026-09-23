@@ -11,6 +11,7 @@
 #include <rwe/Viewport.h>
 #include <rwe/ai/AiPersonality.h>
 #include <rwe/config.h>
+#include <rwe/game/ControlChannel.h>
 #include <rwe/game/PlayerColorIndex.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/sim/Energy.h>
@@ -123,6 +124,8 @@ int main(int argc, char* argv[])
                       << "  --replay <file>       watch a replay instead of playing\n"
                       << "  --rejoin <file>       rejoin a game in progress from its recording so far\n"
                       << "  --rejoin-tick <n>     the tick that recording ends at, and this peer resumes at\n"
+                      << "  --bridge              take commands from whoever launched this game on stdin\n"
+                      << "                        and report back on stdout, one JSON object a line\n"
                       << "  --width <pixels>      Window width (default: 800)\n"
                       << "  --height <pixels>     Window height (default: 600)\n"
                       << "  --fullscreen          Start in fullscreen mode (same as --window-mode fullscreen)\n"
@@ -143,6 +146,16 @@ int main(int argc, char* argv[])
 
         auto logger = args.contains("log") ? createLogger(fs::path(args.getString("log"))) : createLoggerInDir(*localDataPath);
         rwe::setGlobalLogger(logger);
+
+        // Before anything that might have something to say: a launcher that
+        // asked to be spoken to is listening from now on. Nothing is read from
+        // it until there is a game to ask about, and nothing it says ever
+        // reaches the simulation except as an ordinary command in this peer's
+        // own stream -- see ControlChannel.
+        if (args.contains("bridge"))
+        {
+            rwe::getControlChannel().start();
+        }
 
         // As early as the local data path is known: everything after this
         // point is covered, and the catch below only ever sees thrown

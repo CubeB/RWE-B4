@@ -17,6 +17,10 @@ import {
   receiveStartGame,
   receiveActiveModsChanged,
   receivePlayerArchivesChanged,
+  receivePlayerDroppedFromGame,
+  receiveRejoinRequested,
+  receiveRejoinBundle,
+  receiveRejoinRefused,
 } from "./actions";
 import { State } from "../state";
 import { EpicDependencies } from "../middleware/EpicDependencies";
@@ -46,6 +50,12 @@ export const gameClientEventsEpic = (
     ),
     clientService.onPlayerReady.pipe(rxop.map(receivePlayerReady)),
     clientService.onMapChanged.pipe(rxop.map(receiveMapChanged)),
-    clientService.onStartGame.pipe(rxop.map(receiveStartGame))
+    clientService.onStartGame.pipe(rxop.map(receiveStartGame)),
+    clientService.onPlayerDroppedFromGame.pipe(
+      rxop.map(receivePlayerDroppedFromGame)
+    ),
+    clientService.onRejoinRequested.pipe(rxop.map(receiveRejoinRequested)),
+    clientService.onRejoinBundle.pipe(rxop.map(receiveRejoinBundle)),
+    clientService.onRejoinRefused.pipe(rxop.map(receiveRejoinRefused))
   );
 };

@@ -29,6 +29,14 @@ export class GameClientService {
   private readonly _onPlayerReady = new Subject<protocol.PlayerReadyPayload>();
   private readonly _onMapChanged = new Subject<protocol.MapChangedPayload>();
   private readonly _onStartGame = new Subject<protocol.StartGamePayload>();
+  private readonly _onPlayerDroppedFromGame =
+    new Subject<protocol.PlayerDroppedFromGameBroadcastPayload>();
+  private readonly _onRejoinRequested =
+    new Subject<protocol.RejoinRequestedPayload>();
+  private readonly _onRejoinBundle =
+    new Subject<protocol.RejoinBundlePayload>();
+  private readonly _onRejoinRefused =
+    new Subject<protocol.RejoinRefusedPayload>();
 
   get onDisconnect(): Observable<void> {
     return this._onDisconnect;
@@ -74,6 +82,18 @@ export class GameClientService {
   }
   get onStartGame(): Observable<protocol.StartGamePayload> {
     return this._onStartGame;
+  }
+  get onPlayerDroppedFromGame(): Observable<protocol.PlayerDroppedFromGameBroadcastPayload> {
+    return this._onPlayerDroppedFromGame;
+  }
+  get onRejoinRequested(): Observable<protocol.RejoinRequestedPayload> {
+    return this._onRejoinRequested;
+  }
+  get onRejoinBundle(): Observable<protocol.RejoinBundlePayload> {
+    return this._onRejoinBundle;
+  }
+  get onRejoinRefused(): Observable<protocol.RejoinRefusedPayload> {
+    return this._onRejoinRefused;
   }
 
   connectToServer(
@@ -211,6 +231,34 @@ export class GameClientService {
     this.client.on(protocol.StartGame, (data: protocol.StartGamePayload) => {
       this._onStartGame.next(data);
     });
+
+    this.client.on(
+      protocol.PlayerDroppedFromGameBroadcast,
+      (data: protocol.PlayerDroppedFromGameBroadcastPayload) => {
+        this._onPlayerDroppedFromGame.next(data);
+      }
+    );
+
+    this.client.on(
+      protocol.RejoinRequested,
+      (data: protocol.RejoinRequestedPayload) => {
+        this._onRejoinRequested.next(data);
+      }
+    );
+
+    this.client.on(
+      protocol.RejoinBundle,
+      (data: protocol.RejoinBundlePayload) => {
+        this._onRejoinBundle.next(data);
+      }
+    );
+
+    this.client.on(
+      protocol.RejoinRefused,
+      (data: protocol.RejoinRefusedPayload) => {
+        this._onRejoinRefused.next(data);
+      }
+    );
   }
 
   disconnect() {
@@ -218,6 +266,44 @@ export class GameClientService {
       return;
     }
     this.client.close();
+  }
+
+  /** Says that this client's game has declared a peer lost. */
+  playerDroppedFromGame(playerId: number, tick: number) {
+    if (!this.client) {
+      return;
+    }
+    const payload: protocol.PlayerDroppedFromGamePayload = { playerId, tick };
+    this.client.emit(protocol.PlayerDroppedFromGame, payload);
+  }
+
+  /** Asks to be let back into the game this client was dropped from. */
+  requestRejoin() {
+    if (!this.client) {
+      return;
+    }
+    this.client.emit(protocol.RequestRejoin);
+  }
+
+  /**
+   * Hands over the recording a returning player needs. Sent as a binary
+   * payload, socket.io carrying one without base64 in it.
+   */
+  sendRejoinBundle(playerId: number, tick: number, data: ArrayBuffer) {
+    if (!this.client) {
+      return;
+    }
+    const payload: protocol.RejoinBundlePayload = { playerId, tick, data };
+    this.client.emit(protocol.RejoinBundle, payload);
+  }
+
+  /** Says that a rejoin that was asked for will not be happening. */
+  sendRejoinRefused(playerId: number, reason: string) {
+    if (!this.client) {
+      return;
+    }
+    const payload: protocol.RejoinRefusedPayload = { playerId, reason };
+    this.client.emit(protocol.RejoinRefused, payload);
   }
 
   sendChatMessage(message: string) {

@@ -57,7 +57,7 @@ const executeSideEffect = (se: SideEffect) => {
   switch (se.type) {
     case "LAUNCH_RWE": {
       return rx
-        .from(execRwe(se.args))
+        .from(execRwe(se.args).finished)
         .pipe(
           rxop.mapTo(undefined),
           rxop.catchError(() => rx.of(undefined)),

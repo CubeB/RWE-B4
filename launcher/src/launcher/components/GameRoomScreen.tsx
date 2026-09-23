@@ -22,6 +22,7 @@ import {
   openSelectMapDialog,
   openSlot,
   sendChatMessage,
+  sendRequestRejoin,
   sendStartGame,
   toggleReady,
   setActiveMods,
@@ -34,6 +35,7 @@ import { SelectModsDialog } from "./SelectModsDialog";
 import { dialogSelectMap } from "../mapsDialogActions";
 import {
   ChatMessage,
+  canRequestRejoin,
   canStartGame,
   CurrentGameState,
   PlayerSlot,
@@ -101,6 +103,12 @@ interface GameRoomScreenStateProps {
   mapDialogMinimapPath?: string;
   mapDialogMapInfo?: SelectedMapDetails;
   selectedMap?: string;
+
+  /** Whether this player is out of a game that is still being played. */
+  rejoinEnabled: boolean;
+
+  /** Why the last ask did not work, if it did not. */
+  rejoinRefusedReason?: string;
 }
 
 interface GameRoomScreenDispatchProps {
@@ -118,6 +126,7 @@ interface GameRoomScreenDispatchProps {
   onDialogSelectMap: (mapName: string) => void;
   onChangeMap: () => void;
   onChangeMods: (mods: string[]) => void;
+  onRequestRejoin: () => void;
 }
 
 interface GameRoomScreenProps
@@ -212,6 +221,25 @@ function UnconnectedGameRoomScreen(props: GameRoomScreenProps) {
             <Typography key={x}>{x}</Typography>
           ))}
         </div>
+        {props.rejoinEnabled && (
+          <div>
+            <Button
+              fullWidth
+              variant="contained"
+              color="secondary"
+              onClick={props.onRequestRejoin}
+            >
+              Rejoin Game
+            </Button>
+          </div>
+        )}
+        {props.rejoinRefusedReason && (
+          <div>
+            <Typography>
+              Could not rejoin: {props.rejoinRefusedReason}
+            </Typography>
+          </div>
+        )}
       </div>
       <MapSelectDialog
         open={props.mapDialogOpen}
@@ -305,6 +333,7 @@ function mapStateToProps(state: State): GameRoomScreenStateProps {
       startEnabled: false,
       startWarnings: [],
       mapDialogOpen: false,
+      rejoinEnabled: false,
     };
   }
 
@@ -332,6 +361,8 @@ function mapStateToProps(state: State): GameRoomScreenStateProps {
       mapDialog && mapDialog.selectedMap && room.mapCache[mapDialog.selectedMap]
         ? room.mapCache[mapDialog.selectedMap]
         : undefined,
+    rejoinEnabled: canRequestRejoin(game, state.isRweRunning),
+    rejoinRefusedReason: game.rejoinRefusedReason,
   };
 }
 
@@ -351,6 +382,7 @@ function mapDispatchToProps(dispatch: Dispatch): GameRoomScreenDispatchProps {
     onDialogSelectMap: (mapName: string) => dispatch(dialogSelectMap(mapName)),
     onChangeMap: () => dispatch(changeMap()),
     onChangeMods: (mods: string[]) => dispatch(setActiveMods(mods)),
+    onRequestRejoin: () => dispatch(sendRequestRejoin()),
   };
 }
 

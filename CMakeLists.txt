@@ -330,6 +330,8 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_peers.cpp
     src/rwe/game/GameScene_render.cpp
     src/rwe/game/panel_slide.cpp
+    src/rwe/game/ControlChannel.cpp
+    src/rwe/game/ControlChannel.h
     src/rwe/game/GameScene_rejoin.cpp
     src/rwe/game/GameScene_replay.cpp
     src/rwe/game/GameScene_util.cpp

@@ -49,6 +49,41 @@ export interface CurrentGameState {
   messages: ChatMessage[];
   mapName?: string;
   activeMods: string[];
+
+  /**
+   * Whether the game has been started. It stays true for the rest of the
+   * room's life: a room whose game has begun is never a lobby again, and a
+   * player whose own game has ended while this is true is one who can ask to
+   * rejoin.
+   */
+  started: boolean;
+
+  /**
+   * Players their own game has thrown out, as the peers still in it report
+   * them. What the rejoin button is offered on.
+   */
+  droppedPlayerIds: number[];
+
+  /** Why the last rejoin asked for did not happen, for the room to show. */
+  rejoinRefusedReason?: string;
+}
+
+/**
+ * Whether this player may ask for their seat back: they are in a game that has
+ * started, their own peers have declared them lost, and they are not playing.
+ * Whether they are playing is not this state's business, so it is asked for.
+ */
+export function canRequestRejoin(
+  room: CurrentGameState,
+  isGameRunning: boolean
+): boolean {
+  if (!room.started || isGameRunning) {
+    return false;
+  }
+  if (room.localPlayerId === undefined) {
+    return false;
+  }
+  return room.droppedPlayerIds.includes(room.localPlayerId);
 }
 
 export type CanStartGameError =
@@ -182,6 +217,40 @@ function currentGameReducer(
   action: AppAction
 ): CurrentGameState {
   switch (action.type) {
+    case "RECEIVE_START_GAME": {
+      return { ...room, started: true };
+    }
+    case "RECEIVE_PLAYER_DROPPED_FROM_GAME": {
+      // Said once by every peer still in the game, so it arrives as many
+      // times as there are peers and is remembered once.
+      if (room.droppedPlayerIds.includes(action.payload.playerId)) {
+        return room;
+      }
+      return {
+        ...room,
+        droppedPlayerIds: [...room.droppedPlayerIds, action.payload.playerId],
+      };
+    }
+    case "RECEIVE_REJOIN_BUNDLE": {
+      // On their way back in, so no longer out. The peers that stayed say so
+      // too, in their own time, when their games agree the rejoin tick.
+      return {
+        ...room,
+        droppedPlayerIds: room.droppedPlayerIds.filter(
+          x => x !== action.payload.playerId
+        ),
+        rejoinRefusedReason: undefined,
+      };
+    }
+    case "RECEIVE_REJOIN_REFUSED": {
+      if (action.payload.playerId !== room.localPlayerId) {
+        return room;
+      }
+      return { ...room, rejoinRefusedReason: action.payload.reason };
+    }
+    case "SEND_REQUEST_REJOIN": {
+      return { ...room, rejoinRefusedReason: undefined };
+    }
     case "RECEIVE_PLAYER_JOINED": {
       const newPlayer: PlayerSlot = {
         state: "filled",
@@ -327,6 +396,8 @@ export function currentGameWrapperReducer(
         mapName: action.payload.mapName,
         messages: [],
         activeMods: action.payload.activeMods,
+        started: false,
+        droppedPlayerIds: [],
       };
       return game;
     }

@@ -762,6 +762,7 @@ namespace rwe
         // stalled, and the push below would otherwise hold it back until a
         // tick that cannot run without it.
         updatePeerLiveness();
+        updateControlRequests();
         updateRejoinRequest();
         writeRejoinBundleIfDue();
 

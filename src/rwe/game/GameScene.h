@@ -1215,16 +1215,39 @@ namespace rwe
          */
         void beginRejoin(Replay&& catchUp, unsigned int atTick);
 
+        /**
+         * Asks for a dropped player to be let back in at a tick shortly ahead,
+         * and says whether it was taken up.
+         *
+         * Refused, with a reason, for a player who is not dropped, for one
+         * this peer is not the one to speak for, and for one already coming
+         * back. Public because the ask comes from outside the game: from the
+         * launcher over the bridge, or from the test hook that stands in for
+         * it.
+         */
+        bool requestRejoin(PlayerId player, std::string& reason);
+
     private:
         /** Leaves the catch-up behind once the rejoin tick has been reached. */
         void finishRejoinIfCaughtUp();
 
         /**
-         * Asks for a dropped player to be brought back, when something has
-         * asked for that. The hook a launcher will replace; today it reads
-         * RWE_REJOIN_TEST, which is how the network harness drives it.
+         * Asks for a dropped player to be brought back, when RWE_REJOIN_TEST
+         * says to. The network harness's hook, which needs no launcher; a real
+         * request comes through the bridge, below.
          */
         void updateRejoinRequest();
+
+        /**
+         * Does what the launcher has asked since the last frame, and tells it
+         * what has happened.
+         *
+         * A side channel in both directions -- see ControlChannel. What comes
+         * in becomes an ordinary command in this peer's own stream, exactly as
+         * a keypress would, and what goes out is read from state the
+         * simulation had already arrived at.
+         */
+        void updateControlRequests();
 
         /**
          * Names the recording a returning player needs, once this peer has run

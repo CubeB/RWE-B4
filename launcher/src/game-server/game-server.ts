@@ -79,6 +79,38 @@ export interface Room {
   adminState: AdminState;
   mapName?: string;
   activeMods: string[];
+
+  /**
+   * Players whose game has dropped them, in the order they were lost.
+   *
+   * Kept so that a rejoin can be sent to the one peer entitled to answer it.
+   * The engine's rule is the lowest-numbered slot that is neither the player
+   * in question nor itself dropped, computed rather than agreed; this is the
+   * same rule over the same facts, so the peer asked is the peer that will
+   * say yes. See rejoinHostFor.
+   */
+  droppedPlayerIds: number[];
+}
+
+/**
+ * The player whose game may let `playerId` back in: the lowest-numbered slot
+ * still in the game. Nothing if there is nobody left to ask, which is a game
+ * with one peer in it and nothing to rejoin.
+ */
+function rejoinHostFor(room: Room, playerId: number): number | undefined {
+  for (const slot of room.players) {
+    if (slot.state !== "filled") {
+      continue;
+    }
+    if (slot.player.id === playerId) {
+      continue;
+    }
+    if (room.droppedPlayerIds.includes(slot.player.id)) {
+      continue;
+    }
+    return slot.player.id;
+  }
+  return undefined;
 }
 
 function generateAdminKey() {
@@ -146,6 +178,7 @@ export class GameServer {
       players,
       adminState: { state: "unclaimed", adminKey },
       activeMods: [],
+      droppedPlayerIds: [],
     });
 
     return { gameId: id, adminKey };
@@ -253,6 +286,7 @@ export class GameServer {
         this.sendToRoom(roomId, protocol.PlayerJoined, playerJoined);
 
         socket.join(this.getRoomString(roomId));
+        socket.join(this.getPlayerString(roomId, playerId));
 
         socket.on(protocol.ChatMessage, (data: protocol.ChatMessagePayload) => {
           this.onChatMessage(roomId, playerId, data);
@@ -290,6 +324,27 @@ export class GameServer {
         socket.on(protocol.RequestStartGame, () => {
           this.onPlayerRequestStartGame(roomId, playerId);
         });
+        socket.on(
+          protocol.PlayerDroppedFromGame,
+          (data: protocol.PlayerDroppedFromGamePayload) => {
+            this.onPlayerDroppedFromGame(roomId, data);
+          }
+        );
+        socket.on(protocol.RequestRejoin, () => {
+          this.onRequestRejoin(roomId, playerId);
+        });
+        socket.on(
+          protocol.RejoinBundle,
+          (data: protocol.RejoinBundlePayload) => {
+            this.onRejoinBundle(roomId, playerId, data);
+          }
+        );
+        socket.on(
+          protocol.RejoinRefused,
+          (data: protocol.RejoinRefusedPayload) => {
+            this.onRejoinRefused(roomId, playerId, data);
+          }
+        );
         socket.on("disconnect", () => {
           this.onDisconnected(roomId, playerId);
         });
@@ -305,8 +360,127 @@ export class GameServer {
     return `room/${roomId}`;
   }
 
+  // Every socket joins a room of its own as well as the game's, so that a
+  // message meant for one player -- a rejoin request, the recording that
+  // answers it -- can be addressed without keeping a table of sockets.
+  private getPlayerString(roomId: number, playerId: number) {
+    return `room/${roomId}/player/${playerId}`;
+  }
+
+  private sendToPlayer(
+    roomId: number,
+    playerId: number,
+    event: string,
+    ...args: any[]
+  ) {
+    this.ns.to(this.getPlayerString(roomId, playerId)).emit(event, ...args);
+  }
+
   private sendToRoom(roomId: number, event: string, ...args: any[]) {
     this.ns.to(this.getRoomString(roomId)).emit(event, ...args);
+  }
+
+  private onPlayerDroppedFromGame(
+    roomId: number,
+    data: protocol.PlayerDroppedFromGamePayload
+  ) {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      return;
+    }
+
+    // Said by every peer that is still in the game, so it arrives once per
+    // peer and is remembered once. The tick they agreed on is the same tick,
+    // which is what makes a drop a fact about the game rather than about
+    // whoever noticed it first.
+    if (!room.droppedPlayerIds.includes(data.playerId)) {
+      room.droppedPlayerIds.push(data.playerId);
+      this.log(
+        `Player ${data.playerId} was dropped from game ${roomId} at tick ${data.tick}`
+      );
+    }
+
+    const payload: protocol.PlayerDroppedFromGameBroadcastPayload = {
+      playerId: data.playerId,
+      tick: data.tick,
+    };
+    this.sendToRoom(roomId, protocol.PlayerDroppedFromGameBroadcast, payload);
+  }
+
+  private onRequestRejoin(roomId: number, playerId: number) {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      return;
+    }
+
+    const refuse = (reason: string) => {
+      const payload: protocol.RejoinRefusedPayload = { playerId, reason };
+      this.sendToPlayer(roomId, playerId, protocol.RejoinRefused, payload);
+    };
+
+    if (!room.droppedPlayerIds.includes(playerId)) {
+      refuse("your game has not reported you as dropped");
+      return;
+    }
+
+    const host = rejoinHostFor(room, playerId);
+    if (host === undefined) {
+      refuse("there is nobody left in the game to let you back in");
+      return;
+    }
+
+    this.log(
+      `Player ${playerId} asked to rejoin game ${roomId}; asking ${host}`
+    );
+    const payload: protocol.RejoinRequestedPayload = { playerId };
+    this.sendToPlayer(roomId, host, protocol.RejoinRequested, payload);
+  }
+
+  private onRejoinBundle(
+    roomId: number,
+    playerId: number,
+    data: protocol.RejoinBundlePayload
+  ) {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      return;
+    }
+
+    if (rejoinHostFor(room, data.playerId) !== playerId) {
+      this.log(
+        `Ignoring a rejoin bundle for player ${data.playerId} from player ${playerId}, who was not asked for one`
+      );
+      return;
+    }
+
+    // Back in the game from the moment the recording exists: what follows is
+    // theirs to carry out, and the peers that stayed are already stalled at
+    // the tick it ends at.
+    room.droppedPlayerIds = room.droppedPlayerIds.filter(
+      x => x !== data.playerId
+    );
+
+    this.log(
+      `Relaying a rejoin bundle for player ${data.playerId} at tick ${data.tick}`
+    );
+    this.sendToPlayer(roomId, data.playerId, protocol.RejoinBundle, data);
+  }
+
+  private onRejoinRefused(
+    roomId: number,
+    playerId: number,
+    data: protocol.RejoinRefusedPayload
+  ) {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      return;
+    }
+
+    if (rejoinHostFor(room, data.playerId) !== playerId) {
+      return;
+    }
+
+    this.sendToPlayer(roomId, data.playerId, protocol.RejoinRefused, data);
   }
 
   private onChatMessage(roomId: number, playerId: number, message: string) {

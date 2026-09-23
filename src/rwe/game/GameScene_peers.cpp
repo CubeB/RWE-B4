@@ -1,6 +1,7 @@
 #include "GameScene.h"
 
 #include <algorithm>
+#include <rwe/game/ControlChannel.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
 
@@ -240,6 +241,10 @@ namespace rwe
             // means in the original, and it is the least new behaviour.
             printConsole(playerDisplayName(player) + " has left the game", Color(252, 252, 0));
             LOG_INFO << "Player " << player.value << " left the game at tick " << fromTick;
+
+            // The launcher hears it too, if one is listening: it is the half of
+            // this that can offer the player their seat back.
+            getControlChannel().sendPlayerDropped(player.value, fromTick);
         }
 
         gameNetworkService->forgetPeer(player);

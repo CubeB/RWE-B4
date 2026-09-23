@@ -1,6 +1,7 @@
 #include "GameScene.h"
 
 #include <cstdlib>
+#include <rwe/game/ControlChannel.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util/SimpleLogger.h>
 
@@ -101,6 +102,57 @@ namespace rwe
         gameNetworkService->setAcceptingCommands(true);
     }
 
+    bool GameScene::requestRejoin(PlayerId player, std::string& reason)
+    {
+        if (!playerCommandService->isDropped(player))
+        {
+            reason = "that player has not been dropped";
+            return false;
+        }
+
+        if (playerCommandService->droppingPlayerFor(player) != localPlayerId)
+        {
+            // Exactly one peer may say this, by the same rule that decides who
+            // may drop them -- two rejoins naming two ticks would reopen the
+            // stream in two places. Everyone else's ask is refused here rather
+            // than issued and ignored, so that a launcher is told to ask
+            // somebody else instead of waiting on a bundle nobody is cutting.
+            reason = "this peer is not the one to speak for that player";
+            return false;
+        }
+
+        if (rejoinBundleDue.find(player.value) != rejoinBundleDue.end())
+        {
+            reason = "that player is already on their way back";
+            return false;
+        }
+
+        auto atTick = sceneTime.value + RejoinTickMargin;
+        LOG_INFO << "Asking for player " << player.value << " to rejoin at tick " << atTick;
+        localPlayerCommandBuffer.push_back(PlayerRejoinedCommand{player, atTick});
+        rejoinBundleDue.emplace(player.value, atTick);
+        return true;
+    }
+
+    void GameScene::updateControlRequests()
+    {
+        for (const auto& request : getControlChannel().take())
+        {
+            if (request.command != "rejoin")
+            {
+                LOG_ERROR << "Bridge: nothing here answers to the command " << request.command;
+                continue;
+            }
+
+            std::string reason;
+            if (!requestRejoin(PlayerId(request.player), reason))
+            {
+                LOG_WARN << "Bridge: not asking for player " << request.player << " back: " << reason;
+                getControlChannel().sendRejoinRefused(request.player, reason);
+            }
+        }
+    }
+
     void GameScene::updateRejoinRequest()
     {
         // Read once and kept, like the chat test beside it: an environment
@@ -138,15 +190,9 @@ namespace rwe
         auto player = PlayerId(spec->first);
         if (!playerCommandService->isDropped(player))
         {
-            // Nothing to bring back yet.
-            return;
-        }
-
-        if (playerCommandService->droppingPlayerFor(player) != localPlayerId)
-        {
-            // Exactly one peer may say this, by the same rule that decides who
-            // may drop them -- two rejoins naming two ticks would reopen the
-            // stream in two places.
+            // Nothing to bring back yet. Waited for rather than refused: this
+            // runs every frame from the moment the game starts, and the drop
+            // it is waiting for is the whole point of the test.
             return;
         }
 
@@ -162,10 +208,11 @@ namespace rwe
         }
 
         rejoinRequested = true;
-        auto atTick = sceneTime.value + RejoinTickMargin;
-        LOG_INFO << "Asking for player " << player.value << " to rejoin at tick " << atTick;
-        localPlayerCommandBuffer.push_back(PlayerRejoinedCommand{player, atTick});
-        rejoinBundleDue.emplace(player.value, atTick);
+        std::string reason;
+        if (!requestRejoin(player, reason))
+        {
+            LOG_WARN << "RWE_REJOIN_TEST: not asking for player " << player.value << " back: " << reason;
+        }
     }
 
     void GameScene::writeRejoinBundleIfDue()
@@ -195,6 +242,7 @@ namespace rwe
                 LOG_ERROR << "Player " << it->first << " was agreed to rejoin at tick " << atTick
                           << ", but this peer is not recording a replay and so has nothing to hand them."
                           << " Start a game that may be rejoined with --record-replay.";
+                getControlChannel().sendRejoinRefused(it->first, "this peer is not recording a replay");
                 it = rejoinBundleDue.erase(it);
                 continue;
             }
@@ -215,12 +263,14 @@ namespace rwe
             {
                 LOG_ERROR << "Could not write the rejoin bundle for player " << it->first
                           << " to " << bundlePath.string();
+                getControlChannel().sendRejoinRefused(it->first, "the rejoin bundle could not be written");
                 it = rejoinBundleDue.erase(it);
                 continue;
             }
 
             LOG_INFO << "REJOIN-BUNDLE player=" << it->first << " tick=" << atTick
                      << " file=" << bundlePath.string();
+            getControlChannel().sendRejoinBundle(it->first, atTick, bundlePath.string());
             it = rejoinBundleDue.erase(it);
         }
     }

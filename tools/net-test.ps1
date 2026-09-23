@@ -20,6 +20,9 @@
 #                                              # show chat crossing the wire
 #   tools/net-test.ps1 -rejoin                 # kill a peer, then bring it back
 #                                              # and check it is still in step
+#   tools/net-test.ps1 -rejoin -bridge         # the same, asked for the way a
+#                                              # launcher asks: over the game's
+#                                              # own stdin and stdout
 #
 # Two things it is good for beyond drop handling: any change to the simulation
 # can be run past it to see whether two peers still agree, and RWE_DESYNC_AT
@@ -36,6 +39,7 @@ param(
     [int]$desyncAt = 0,
     [switch]$chat,
     [switch]$rejoin,
+    [switch]$bridge,
     [int]$rejoinAfter = 8,
     [string]$map = "Coast To Coast",
     [int]$basePort = 15337,
@@ -87,6 +91,40 @@ function Move-Offscreen([int]$procId) {
     return $false
 }
 
+# One line of the game's own output, or nothing if it has not said anything
+# within the time allowed. Async because a blocking read would hang the harness
+# for good on a game that has stopped saying anything.
+function Read-BridgeLine([int]$timeoutMs) {
+    # The outstanding read is kept rather than started afresh: a read that has
+    # not finished still owns the stream, and asking for a second one throws
+    # rather than waiting.
+    if (-not $script:bridgeRead) {
+        $script:bridgeRead = $script:bridgeProc.StandardOutput.ReadLineAsync()
+    }
+    if ($script:bridgeRead.Wait($timeoutMs)) {
+        $line = $script:bridgeRead.Result
+        $script:bridgeRead = $null
+        return $line
+    }
+    return $null
+}
+
+# Reads until an event of this name arrives, and hands back its fields.
+function Wait-BridgeEvent([string]$name, [int]$timeoutSeconds) {
+    $deadline = (Get-Date).AddSeconds($timeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $line = Read-BridgeLine 1000
+        if (-not $line) { continue }
+        try { $j = $line | ConvertFrom-Json } catch { continue }
+        # To the console and not down the pipeline: anything written out of a
+        # function is part of what that function returns, and this one returns
+        # the event.
+        Write-Host "bridge said: $line"
+        if ($j.event -eq $name) { return $j }
+    }
+    return $null
+}
+
 $names = @("Alice", "Bob", "Carol", "Dave", "Erin", "Frank", "Grace", "Heidi")
 $sides = @("ARM", "CORE")
 
@@ -114,7 +152,7 @@ for ($me = 0; $me -lt $peers; $me++) {
 
     # Ask for the killed peer back, a few seconds after it has been declared
     # lost. Only the peer entitled to say so acts on it; the rest ignore it.
-    if ($rejoin -and $me -ne $kill) { $env:RWE_REJOIN_TEST = "$kill`:$rejoinAfter" }
+    if ($rejoin -and $me -ne $kill -and -not $bridge) { $env:RWE_REJOIN_TEST = "$kill`:$rejoinAfter" }
 
     # Only one peer may counterfeit a desync: the report exists to show two
     # peers disagreeing, and both lying would be two peers agreeing again.
@@ -126,7 +164,24 @@ for ($me = 0; $me -lt $peers; $me++) {
     if ($chat) { $env:RWE_CHAT_TEST = "$(300 + (60 * $me)):hello from $($names[$me])" }
 
     $env:RWE_HASH_LOG = $hashes[$me]
-    $procs += Start-Process -FilePath $exe -ArgumentList $a -PassThru
+    if ($bridge -and $me -eq 0) {
+        # Redirected stdio, which Start-Process cannot give us: this is the
+        # channel a launcher holds, and the whole point of -bridge is to drive
+        # the rejoin through it rather than through the test environment
+        # variable. Only peer 0, that being the peer entitled to speak for a
+        # dropped player.
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $exe
+        $psi.Arguments = "$a --bridge"
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.WorkingDirectory = Split-Path $exe
+        $script:bridgeProc = [System.Diagnostics.Process]::Start($psi)
+        $procs += $script:bridgeProc
+    } else {
+        $procs += Start-Process -FilePath $exe -ArgumentList $a -PassThru
+    }
     Remove-Item Env:\RWE_DESYNC_AT -ErrorAction SilentlyContinue
     Remove-Item Env:\RWE_CHAT_TEST -ErrorAction SilentlyContinue
     Remove-Item Env:\RWE_REJOIN_TEST -ErrorAction SilentlyContinue
@@ -158,21 +213,46 @@ if ($rejoin) {
     # has to arrive at: by then its recording holds exactly the ticks that peer
     # is missing, and every peer is stalled waiting for it.
     Write-Output "waiting for the rejoin to be agreed and the bundle named"
-    $bundleLine = $null
-    for ($i = 0; $i -lt 120; $i++) {
-        Start-Sleep -Seconds 1
-        $bundleLine = Select-String -Path $logs[0] -Pattern "REJOIN-BUNDLE" -ErrorAction SilentlyContinue |
-            Select-Object -Last 1
-        if ($bundleLine) { break }
+    $atTick = 0
+    $bundleSrc = $null
+
+    if ($bridge) {
+        # The launcher's half, in three messages: the game says who it lost,
+        # the launcher asks for them back, and the game says where the
+        # recording they need is. Nothing here reads the log.
+        $dropped = Wait-BridgeEvent "player-dropped" 60
+        if (-not $dropped) {
+            Write-Output "RESULT: the game never reported a drop over the bridge"
+        } else {
+            Start-Sleep -Seconds $rejoinAfter
+            Write-Output "asking over the bridge for player $($dropped.player) back"
+            $script:bridgeProc.StandardInput.WriteLine("{""command"":""rejoin"",""player"":$($dropped.player)}")
+            $script:bridgeProc.StandardInput.Flush()
+            $bundleEvent = Wait-BridgeEvent "rejoin-bundle" 120
+            if ($bundleEvent) {
+                $atTick = [int]$bundleEvent.tick
+                $bundleSrc = $bundleEvent.file
+            }
+        }
+    } else {
+        $bundleLine = $null
+        for ($i = 0; $i -lt 120; $i++) {
+            Start-Sleep -Seconds 1
+            $bundleLine = Select-String -Path $logs[0] -Pattern "REJOIN-BUNDLE" -ErrorAction SilentlyContinue |
+                Select-Object -Last 1
+            if ($bundleLine) { break }
+        }
+        if ($bundleLine) {
+            $m = [regex]::Match($bundleLine.Line, "tick=(?<tick>\d+) file=(?<file>.+)$")
+            if (-not $m.Success) { throw "Could not read the bundle line: $($bundleLine.Line)" }
+            $atTick = [int]$m.Groups["tick"].Value
+            $bundleSrc = $m.Groups["file"].Value.Trim()
+        }
     }
 
-    if (-not $bundleLine) {
+    if (-not $bundleSrc) {
         Write-Output "RESULT: no bundle was named; the rejoin never got that far"
     } else {
-        $m = [regex]::Match($bundleLine.Line, "tick=(?<tick>\d+) file=(?<file>.+)$")
-        if (-not $m.Success) { throw "Could not read the bundle line: $($bundleLine.Line)" }
-        $atTick = [int]$m.Groups["tick"].Value
-        $bundleSrc = $m.Groups["file"].Value.Trim()
 
         # Copied rather than read in place, because the host is still writing
         # to it. This is the step a lobby would do over its own connection.
