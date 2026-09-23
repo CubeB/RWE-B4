@@ -18,6 +18,8 @@
 #                                              # tick 200, to fire the report
 #   tools/net-test.ps1 -chat                   # every peer says one line, to
 #                                              # show chat crossing the wire
+#   tools/net-test.ps1 -rejoin                 # kill a peer, then bring it back
+#                                              # and check it is still in step
 #
 # Two things it is good for beyond drop handling: any change to the simulation
 # can be run past it to see whether two peers still agree, and RWE_DESYNC_AT
@@ -33,6 +35,8 @@ param(
     [switch]$ai,
     [int]$desyncAt = 0,
     [switch]$chat,
+    [switch]$rejoin,
+    [int]$rejoinAfter = 8,
     [string]$map = "Coast To Coast",
     [int]$basePort = 15337,
     [string]$exe = "D:\RWE\build-release\rwe.exe",
@@ -40,6 +44,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# A rejoin needs somebody to have left. Killing the highest-numbered peer keeps
+# player 0 alive, which is the peer entitled to declare both the drop and the
+# return.
+if ($rejoin -and $kill -lt 0) { $kill = $peers - 1 }
 
 if (-not (Test-Path $exe)) { throw "No engine at $exe. Build the rwe target first." }
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
@@ -97,6 +106,16 @@ for ($me = 0; $me -lt $peers; $me++) {
     if ($ai) { $a += " --player `"Computer;Computer;$($sides[$peers % 2]);$peers`"" }
     $a += " --log `"$($logs[$me])`""
 
+    # Only a peer recording a replay can hand a returning one the ticks it
+    # missed, nothing else keeping the commands. Peer 0 is the one that will be
+    # asked for it, being the lowest-numbered peer and so the one entitled to
+    # declare both the drop and the rejoin.
+    if ($rejoin) { $a += " --record-replay `"$outDir\peer$me.rwereplay`"" }
+
+    # Ask for the killed peer back, a few seconds after it has been declared
+    # lost. Only the peer entitled to say so acts on it; the rest ignore it.
+    if ($rejoin -and $me -ne $kill) { $env:RWE_REJOIN_TEST = "$kill`:$rejoinAfter" }
+
     # Only one peer may counterfeit a desync: the report exists to show two
     # peers disagreeing, and both lying would be two peers agreeing again.
     if ($desyncAt -gt 0 -and $me -eq 0) { $env:RWE_DESYNC_AT = "$desyncAt" }
@@ -110,6 +129,7 @@ for ($me = 0; $me -lt $peers; $me++) {
     $procs += Start-Process -FilePath $exe -ArgumentList $a -PassThru
     Remove-Item Env:\RWE_DESYNC_AT -ErrorAction SilentlyContinue
     Remove-Item Env:\RWE_CHAT_TEST -ErrorAction SilentlyContinue
+    Remove-Item Env:\RWE_REJOIN_TEST -ErrorAction SilentlyContinue
 }
 Remove-Item Env:\RWE_HASH_LOG -ErrorAction SilentlyContinue
 
@@ -126,12 +146,68 @@ if ($kill -ge 0) {
     Start-Sleep -Seconds $killAfter
     Write-Output "killing player $kill"
     Stop-Process -Id $procs[$kill].Id -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds ($seconds - $killAfter)
+    # With -rejoin what matters is what happens after the kill, so the wait
+    # here is only as long as the drop takes to be declared.
+    if (-not $rejoin) { Start-Sleep -Seconds ($seconds - $killAfter) }
 } else {
     Start-Sleep -Seconds $seconds
 }
 
-$survivors = 0..($peers - 1) | Where-Object { $_ -ne $kill }
+if ($rejoin) {
+    # Peer 0 announces the bundle when it reaches the tick the returning peer
+    # has to arrive at: by then its recording holds exactly the ticks that peer
+    # is missing, and every peer is stalled waiting for it.
+    Write-Output "waiting for the rejoin to be agreed and the bundle named"
+    $bundleLine = $null
+    for ($i = 0; $i -lt 120; $i++) {
+        Start-Sleep -Seconds 1
+        $bundleLine = Select-String -Path $logs[0] -Pattern "REJOIN-BUNDLE" -ErrorAction SilentlyContinue |
+            Select-Object -Last 1
+        if ($bundleLine) { break }
+    }
+
+    if (-not $bundleLine) {
+        Write-Output "RESULT: no bundle was named; the rejoin never got that far"
+    } else {
+        $m = [regex]::Match($bundleLine.Line, "tick=(?<tick>\d+) file=(?<file>.+)$")
+        if (-not $m.Success) { throw "Could not read the bundle line: $($bundleLine.Line)" }
+        $atTick = [int]$m.Groups["tick"].Value
+        $bundleSrc = $m.Groups["file"].Value.Trim()
+
+        # Copied rather than read in place, because the host is still writing
+        # to it. This is the step a lobby would do over its own connection.
+        $bundle = "$outDir\rejoin-bundle.rwereplay"
+        Copy-Item -LiteralPath $bundleSrc -Destination $bundle -Force
+        Write-Output "bundle at tick $atTick copied from $bundleSrc"
+
+        $a = "--map `"$map`" --width 320 --height 240 --seed 7 --port $($basePort + $kill)"
+        for ($p = 0; $p -lt $peers; $p++) {
+            $side = $sides[$p % 2]
+            if ($p -eq $kill) { $a += " --player `"$($names[$p]);Human;$side;$p`"" }
+            else              { $a += " --player `"$($names[$p]);Network,[::1]:$($basePort + $p);$side;$p`"" }
+        }
+        if ($ai) { $a += " --player `"Computer;Computer;$($sides[$peers % 2]);$peers`"" }
+        $a += " --log `"$($logs[$kill])`" --rejoin `"$bundle`" --rejoin-tick $atTick"
+
+        $env:RWE_HASH_LOG = $hashes[$kill]
+        $procs[$kill] = Start-Process -FilePath $exe -ArgumentList $a -PassThru
+        Remove-Item Env:\RWE_HASH_LOG -ErrorAction SilentlyContinue
+        Write-Output "player $kill restarted to rejoin at tick $atTick, pid $($procs[$kill].Id)"
+
+        for ($i = 0; $i -lt 200; $i++) {
+            Start-Sleep -Milliseconds 250
+            if (Move-Offscreen $procs[$kill].Id) { break }
+        }
+
+        Start-Sleep -Seconds $seconds
+        $rejoinSucceeded = $true
+    }
+}
+
+# A rejoin run compares the peer that left as well: that it agrees with the
+# peers that stayed over the whole game, the ticks it was not there for
+# included, is the only thing that says the rejoin worked.
+$survivors = if ($rejoinSucceeded) { 0..($peers - 1) } else { 0..($peers - 1) | Where-Object { $_ -ne $kill } }
 foreach ($s in $survivors) {
     $last = Get-Content $hashes[$s] -ErrorAction SilentlyContinue | Select-Object -Last 1
     $exited = $procs[$s].HasExited

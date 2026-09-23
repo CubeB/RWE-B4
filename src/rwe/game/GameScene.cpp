@@ -299,16 +299,17 @@ namespace rwe
 
         sceneContext.audioService->reserveChannels(reservedChannelsCount);
 
-        // A peer rejoining a game in progress starts listening only once it has
-        // wound itself forward, in finishRejoinIfCaughtUp. Its command buffers
-        // are being filled from the recording until then, and a set arriving
-        // live would be appended to the same buffers in the middle of that --
-        // landing at whichever tick the catch-up had reached rather than at the
-        // one it belongs to. The peers that stayed lose nothing by waiting:
-        // an unacked set is resent until it is taken.
-        if (!rejoiningAtTick)
+        gameNetworkService->start();
+
+        // A peer rejoining a game in progress listens from the start but takes
+        // nothing until it has wound itself forward: its command buffers are
+        // being filled from the recording, and a set arriving live would be
+        // appended to those same buffers mid-wind. The service has to be
+        // running all the same, because the scene asks it for the round trip
+        // time every frame and waits for the answer.
+        if (rejoiningAtTick)
         {
-            gameNetworkService->start();
+            gameNetworkService->setAcceptingCommands(false);
         }
 
         recreateWorldRenderTextures();
@@ -764,6 +765,15 @@ namespace rwe
         updateRejoinRequest();
         writeRejoinBundleIfDue();
 
+        // Here as well as at the top of tryTickGame, because a peer winding
+        // itself forward arrives at the rejoin tick on the same frame the
+        // recording runs out -- and a recording that has run out dispatches no
+        // more ticks, so the check that lives in the tick would never be
+        // reached. Whichever of the two fires first, it fires on the frame the
+        // last wound tick was run and the block below then fills the command
+        // buffer the same frame.
+        finishRejoinIfCaughtUp();
+
         auto targetCommandBufferSize = commandBufferTargetForRttMillis(gameNetworkService->getMaxAverageRttMillis());
 
         auto bufferedCommandCount = playerCommandService->bufferedCommandCount(localPlayerId);
@@ -908,7 +918,11 @@ namespace rwe
         // The recording has run out. Pause rather than carry on ticking a
         // game with no more commands coming, which looks like the viewer has
         // frozen when in fact it has finished.
-        if (replayPlayback && !replaySeekTarget && !replayReachedEnd
+        //
+        // Not for a peer winding itself forward: its recording running out is
+        // the moment it goes live, not the end of anything, and a bundle is
+        // cut to end exactly there. Pausing would be a game that never starts.
+        if (replayPlayback && !replaySeekTarget && !replayReachedEnd && !rejoiningAtTick
             && sceneTime.value >= replayPlayback->lastTick)
         {
             replayReachedEnd = true;

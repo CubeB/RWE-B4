@@ -175,9 +175,34 @@ namespace rwe
 
             if (round.empty())
             {
-                // Nobody is reporting for this tick, which happens only in a
-                // game whose every hash source has been dropped. There is
-                // nothing to compare and nothing to advance towards.
+                // Nobody reports for this tick, for one of two reasons.
+                //
+                // Every source may have been dropped, and then there is
+                // nothing to compare and nothing to advance towards. Or this
+                // peer may have joined a game in progress, where every source
+                // including its own starts at the rejoin tick while this
+                // counter still stands at 1 -- and since it is only ever
+                // advanced by a round being compared, it would stand there for
+                // the rest of the game and no hash would ever be looked at.
+                // Move it up to the first tick anybody reports; the ticks
+                // skipped are ticks no source has, and were compared by the
+                // peers that were there for them.
+                std::optional<SceneTime> earliest;
+                for (const auto& p : gameTimeBuffers)
+                {
+                    auto it = hashSourceFromTick.find(p.first);
+                    if (it != hashSourceFromTick.end() && (!earliest || it->second < *earliest))
+                    {
+                        earliest = it->second;
+                    }
+                }
+
+                if (earliest && *earliest > nextHashTick)
+                {
+                    nextHashTick = *earliest;
+                    continue;
+                }
+
                 return std::nullopt;
             }
 
@@ -199,6 +224,37 @@ namespace rwe
         }
 
         return std::nullopt;
+    }
+
+    bool PlayerCommandService::needsCommandsForTick(PlayerId player, unsigned int tick) const
+    {
+        std::scoped_lock<std::mutex> lock(mutex);
+
+        if (isDroppedLocked(player))
+        {
+            return false;
+        }
+
+        auto it = pushedCount.find(player);
+        return (it == pushedCount.end() ? 0u : it->second) < tick;
+    }
+
+    void PlayerCommandService::rewindTo(unsigned int tick)
+    {
+        std::scoped_lock<std::mutex> lock(mutex);
+
+        for (auto& p : commandBuffers)
+        {
+            p.second.clear();
+            pushedCount[p.first] = tick;
+        }
+
+        poppedRounds = tick;
+
+        for (auto it = droppedFromTick.begin(); it != droppedFromTick.end();)
+        {
+            it = it->second >= tick ? droppedFromTick.erase(it) : std::next(it);
+        }
     }
 
     std::vector<PlayerId> PlayerCommandService::playersNotReady() const

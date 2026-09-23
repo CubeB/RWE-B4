@@ -226,6 +226,13 @@ namespace rwe
         return result.get_future().get();
     }
 
+    void GameNetworkService::setAcceptingCommands(bool value)
+    {
+        asio::post(ioContext, [this, value]() {
+            acceptingCommands = value;
+        });
+    }
+
     float GameNetworkService::getMaxAverageRttMillis()
     {
         std::promise<float> result;
@@ -447,6 +454,16 @@ namespace rwe
         }
 
         EndpointInfo& endpoint = *endpointIt;
+
+        if (!acceptingCommands)
+        {
+            // Winding forward into a game in progress. Nothing is taken and so
+            // nothing is acked, and the sender keeps every set until it is --
+            // but the packet still counts as having been heard, which is what
+            // stops this peer being declared lost while it catches up.
+            endpoint.lastPacketTime = getTimestamp();
+            return;
+        }
 
         const auto& message = outerMessage.game_update();
 

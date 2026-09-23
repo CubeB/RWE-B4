@@ -213,6 +213,38 @@ namespace rwe
         bool isDropped(PlayerId player) const;
 
         /**
+         * Whether this player still owes the simulation their set for tick
+         * `tick`, counting the sets from one as the rest of this class does.
+         *
+         * It is what a recording has to ask before supplying one, because a
+         * recording supplies a set per player per tick unconditionally and two
+         * things make that wrong. A dropped player's stream is closed, and
+         * everything pushed to it is discarded. And a rejoin fills in every
+         * tick below the one it reopens at, so a recording replayed across
+         * that point would supply those ticks a second time -- which does not
+         * lose them, it *delays* them: the buffer runs that many sets long and
+         * every later tick of that player's game is popped that many ticks
+         * late. On a peer winding itself forward into a game in progress that
+         * surplus is the margin the rejoin was agreed with, some hundred ticks
+         * of its own commands standing between it and the game, and it sends
+         * nothing at all until they drain. See pushReplayCommandsForTick.
+         */
+        bool needsCommandsForTick(PlayerId player, unsigned int tick) const;
+
+        /**
+         * Puts every stream back to the start of tick `tick`: nothing buffered,
+         * every player having supplied exactly that many sets, and every drop
+         * that happens at or after it undone.
+         *
+         * Only a recording does this, and only when the viewer jumps backwards
+         * to a keyframe. The scene time moves and the streams have to move with
+         * it, because the recording is about to supply the same ticks again --
+         * and the drop the viewer has just wound back past has not happened
+         * where it now stands, its command being ahead of it in the file.
+         */
+        void rewindTo(unsigned int tick);
+
+        /**
          * Which player is the one to declare `dropped` lost: the lowest-numbered
          * peer that is neither the player in question nor already dropped.
          *

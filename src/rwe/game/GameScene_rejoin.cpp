@@ -40,16 +40,20 @@ namespace rwe
         LOG_INFO << "Rejoin: winding forward to tick " << (atTick - 1) << " from a recording of "
                  << catchUp.commands.size() << " ticks with commands, last at tick " << catchUp.lastTick;
 
-        if (catchUp.lastTick + 1 < atTick)
+        // The scene counts its ticks from zero and records each one before
+        // advancing, so winding forward until the scene time reads atTick-1
+        // has run ticks 0 to atTick-2 -- which is what the recording has to
+        // cover. Anything less and the ticks between would be simulated empty
+        // here and not anywhere else, which is a desync rather than a rejoin;
+        // the peers that stayed resume at the rejoin tick and have nothing
+        // below it left to send. Refuse, as the drop's own checks do.
+        auto lastNeeded = atTick >= 2 ? atTick - 2 : 0;
+        if (catchUp.lastTick < lastNeeded)
         {
-            // The recording stops short of where this peer has to arrive, and
-            // the ticks between are ones nobody can supply: the peers that
-            // stayed resume their streams at the rejoin tick and have nothing
-            // below it left to send. Refuse here rather than run on and
-            // desync, which is the same trade the drop's own refusals make.
             throw std::runtime_error(
                 "Rejoin bundle ends at tick " + std::to_string(catchUp.lastTick)
-                + " but the rejoin is at tick " + std::to_string(atTick));
+                + " but a rejoin at tick " + std::to_string(atTick)
+                + " needs it through tick " + std::to_string(lastNeeded));
         }
 
         rejoiningAtTick = atTick;
@@ -63,6 +67,14 @@ namespace rwe
         // a game being joined, not a recording being watched, so the fog and
         // the spectator's whole-map view stay as the lobby set them.
         replayPlayback = std::move(catchUp);
+
+        // Wound rather than watched. Without this the catch-up runs at the
+        // rate the recorded game did, which for a game an hour old is an hour
+        // -- with every peer stalled at the rejoin tick for the whole of it.
+        // The seek path fills the tick accumulator past what one frame will
+        // dispatch, so the winding runs at whatever rate the machine manages,
+        // and it stops itself on arrival.
+        replaySeekTarget = atTick - 1;
     }
 
     void GameScene::finishRejoinIfCaughtUp()
@@ -86,7 +98,7 @@ namespace rwe
         rejoiningAtTick = std::nullopt;
 
         // Only now: see the comment at the other end of this, in onCreate.
-        gameNetworkService->start();
+        gameNetworkService->setAcceptingCommands(true);
     }
 
     void GameScene::updateRejoinRequest()
@@ -187,13 +199,28 @@ namespace rwe
                 continue;
             }
 
-            // The recording is flushed record by record as it is written, so
-            // what is on disk now is exactly ticks 1 to atTick-1 for every
-            // player. Naming it is all this has to do: carrying it to the
-            // returning peer is the lobby's job, over the connection it
-            // already holds for that.
+            // A finished replay of its own rather than the live recording,
+            // because a tick with no commands writes nothing and only the
+            // end-of-game record says how far a replay really ran. Cut here
+            // and carried by the lobby, over the connection it already holds
+            // for that.
+            // Through the last tick actually recorded, which is the one
+            // before the one about to run. Said that way rather than derived
+            // from atTick, because the two are the same number only as long as
+            // this fires on exactly the tick it is meant to.
+            auto lastRecorded = sceneTime.value > 0 ? sceneTime.value - 1 : 0;
+            auto bundlePath = replayWriter->path();
+            bundlePath.replace_extension(".rejoin" + std::to_string(atTick) + ".rwereplay");
+            if (!replayWriter->writeBundle(bundlePath, lastRecorded))
+            {
+                LOG_ERROR << "Could not write the rejoin bundle for player " << it->first
+                          << " to " << bundlePath.string();
+                it = rejoinBundleDue.erase(it);
+                continue;
+            }
+
             LOG_INFO << "REJOIN-BUNDLE player=" << it->first << " tick=" << atTick
-                     << " file=" << *gameParameters.recordReplayFile;
+                     << " file=" << bundlePath.string();
             it = rejoinBundleDue.erase(it);
         }
     }
@@ -215,6 +242,11 @@ namespace rwe
         // They may be dropped again later, and the second drop is as real as
         // the first; forgetting the first is what lets it be issued.
         dropIssued.erase(player.value);
+
+        // The returning peer has a whole game to load and wind through before
+        // it can answer, and silence is what the drop timer watches for. Left
+        // to itself it would undo this rejoin within the timeout.
+        rejoinGraceUntil[player.value] = getTimestamp() + RejoinGraceSeconds;
 
         pendingRejoins[player.value] = fromTick;
         resumeRejoiningPeers();
@@ -239,6 +271,16 @@ namespace rwe
                 // returning one is to be given. It will, within the few ticks
                 // the command buffer runs ahead by.
                 ++it;
+                continue;
+            }
+
+            if (player == localPlayerId)
+            {
+                // This peer is the one coming back. Its own stream is reopened
+                // by the loading scene, which knows where to resume from before
+                // there is a scene to ask; there is no forgotten endpoint here
+                // to remember, this peer never having lost itself.
+                it = pendingRejoins.erase(it);
                 continue;
             }
 

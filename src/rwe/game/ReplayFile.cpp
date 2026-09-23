@@ -276,7 +276,7 @@ namespace rwe
     }
 
     ReplayWriter::ReplayWriter(const fs::path& path, const ReplayHeader& header)
-        : out(path, std::ios::binary | std::ios::trunc)
+        : filePath(path), out(path, std::ios::binary | std::ios::trunc)
     {
         if (!out)
         {
@@ -322,6 +322,41 @@ namespace rwe
         {
             out.flush();
         }
+    }
+
+    bool ReplayWriter::writeBundle(const fs::path& to, unsigned int lastTick)
+    {
+        if (!out.is_open())
+        {
+            return false;
+        }
+
+        // Everything written so far is on disk once this returns: the records
+        // are flushed as they are written, but only when they carry something.
+        out.flush();
+
+        std::ifstream in(filePath, std::ios::binary);
+        std::ofstream copy(to, std::ios::binary | std::ios::trunc);
+        if (!in.is_open() || !copy.is_open())
+        {
+            return false;
+        }
+
+        copy << in.rdbuf();
+        if (!copy)
+        {
+            return false;
+        }
+
+        // The end-of-game record the live file has not got yet, saying how far
+        // this bundle runs. A replay is append-only, so its first N bytes are
+        // a valid replay of the first N bytes' worth of game, and this is the
+        // only thing that has to be said about where it was cut.
+        writeUint32Le(copy, lastTick);
+        writeUint32Le(copy, EndOfGameMarker);
+        writeUint32Le(copy, 0u);
+        copy.flush();
+        return static_cast<bool>(copy);
     }
 
     void ReplayWriter::close()

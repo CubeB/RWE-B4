@@ -216,6 +216,31 @@ namespace rwe
             REQUIRE(!service.checkHashes());
         }
 
+        SECTION("are compared at all on the peer that joined a game in progress")
+        {
+            // Every source starts at the rejoin tick there, this peer's own
+            // included -- so the comparison has to be moved up to meet them.
+            // Left where it starts it would wait for tick 1 from sources that
+            // have no tick 1, which is every tick of the rest of the game not
+            // compared and a desync that nothing would ever report.
+            PlayerCommandService service;
+            service.registerPlayer(PlayerId(0));
+            service.registerPlayer(PlayerId(1));
+            service.registerHashSource(PlayerId(0), SceneTime(900));
+            service.registerHashSource(PlayerId(1), SceneTime(900));
+
+            service.pushHash(PlayerId(0), GameHash(11));
+            service.pushHash(PlayerId(1), GameHash(11));
+            REQUIRE(!service.checkHashes());
+
+            service.pushHash(PlayerId(0), GameHash(12));
+            service.pushHash(PlayerId(1), GameHash(99));
+
+            auto report = service.checkHashes();
+            REQUIRE(report);
+            REQUIRE(report->tick == SceneTime(901));
+        }
+
         SECTION("name the right tick when they disagree after a rejoin")
         {
             PlayerCommandService service;
@@ -237,6 +262,85 @@ namespace rwe
             auto report = service.checkHashes();
             REQUIRE(report);
             REQUIRE(report->tick == SceneTime(11));
+        }
+    }
+
+    TEST_CASE("PlayerCommandService::needsCommandsForTick")
+    {
+        SECTION("is false for the ticks a rejoin filled in, and true from the one it reopened at")
+        {
+            // What a recording asks before supplying a set. It supplies one per
+            // player per tick whatever else is going on, so a peer winding
+            // itself forward across its own rejoin would otherwise supply the
+            // padded ticks a second time -- and carry every later tick of its
+            // own game that many ticks behind the rest.
+            PlayerCommandService service;
+            addPeers(service, 2);
+            pushEmpty(service, PlayerId(0), 600);
+            service.dropPlayer(PlayerId(1), 400);
+            runTicks(service, 500);
+
+            service.rejoinPlayer(PlayerId(1), 550);
+
+            REQUIRE(!service.needsCommandsForTick(PlayerId(1), 500));
+            REQUIRE(!service.needsCommandsForTick(PlayerId(1), 549));
+            REQUIRE(service.needsCommandsForTick(PlayerId(1), 550));
+            REQUIRE(service.needsCommandsForTick(PlayerId(1), 551));
+
+            // Their neighbour, who never left, is asked for every tick.
+            REQUIRE(service.needsCommandsForTick(PlayerId(0), 601));
+        }
+
+        SECTION("is false for a player whose stream is cut")
+        {
+            PlayerCommandService service;
+            addPeers(service, 2);
+            pushEmpty(service, PlayerId(0), 10);
+            service.dropPlayer(PlayerId(1), 4);
+
+            REQUIRE(!service.needsCommandsForTick(PlayerId(1), 9000));
+            REQUIRE(service.needsCommandsForTick(PlayerId(0), 11));
+        }
+    }
+
+    TEST_CASE("PlayerCommandService::rewindTo")
+    {
+        SECTION("puts every stream back where the recording is about to start again")
+        {
+            PlayerCommandService service;
+            addPeers(service, 2);
+            pushEmpty(service, PlayerId(0), 20);
+            pushEmpty(service, PlayerId(1), 20);
+            runTicks(service, 10);
+
+            service.rewindTo(5);
+
+            REQUIRE(service.bufferedCommandCount(PlayerId(0)) == 0);
+            REQUIRE(service.bufferedCommandCount(PlayerId(1)) == 0);
+            REQUIRE(service.needsCommandsForTick(PlayerId(0), 6));
+            REQUIRE(service.needsCommandsForTick(PlayerId(1), 6));
+
+            // And the ticks run from there are the ticks the file supplies.
+            pushEmpty(service, PlayerId(0), 1);
+            pushEmpty(service, PlayerId(1), 1);
+            REQUIRE(service.tryPopCommands());
+            REQUIRE(!service.needsCommandsForTick(PlayerId(0), 6));
+            REQUIRE(service.needsCommandsForTick(PlayerId(0), 7));
+        }
+
+        SECTION("undoes a drop the viewer has wound back past, and keeps one it has not")
+        {
+            PlayerCommandService service;
+            addPeers(service, 3);
+            service.dropPlayer(PlayerId(1), 3);
+            service.dropPlayer(PlayerId(2), 15);
+
+            service.rewindTo(5);
+
+            // Player 2 goes quiet at tick 15, which from tick 5 has not
+            // happened yet -- the command saying so is ahead in the file.
+            REQUIRE(!service.isDropped(PlayerId(2)));
+            REQUIRE(service.isDropped(PlayerId(1)));
         }
     }
 

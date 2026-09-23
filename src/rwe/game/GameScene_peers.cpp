@@ -116,6 +116,29 @@ namespace rwe
                 continue;
             }
 
+            if (auto grace = rejoinGraceUntil.find(peer.playerId.value); grace != rejoinGraceUntil.end())
+            {
+                if (peer.silence < timeout)
+                {
+                    // It is talking again: the rejoin has landed, and the
+                    // ordinary timer can have it back.
+                    rejoinGraceUntil.erase(grace);
+                }
+                else if (getTimestamp() < grace->second)
+                {
+                    // Still expected. Nothing is counted down at it, because
+                    // what a player watching wants to know is that somebody is
+                    // on their way back rather than how long until they are
+                    // given up on again.
+                    continue;
+                }
+                else
+                {
+                    LOG_WARN << "Player " << peer.playerId.value << " was expected to rejoin and has not";
+                    rejoinGraceUntil.erase(grace);
+                }
+            }
+
             if (peer.silence < timeout)
             {
                 auto remaining = std::chrono::duration_cast<std::chrono::seconds>(timeout - peer.silence).count() + 1;

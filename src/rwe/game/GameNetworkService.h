@@ -172,6 +172,22 @@ namespace rwe
         SequenceNumber nextSendSequence{0};
         SequenceNumber nextHashSequence{0};
 
+        /**
+         * Whether what arrives is handed to the simulation yet.
+         *
+         * False on a peer that is winding itself forward into a game in
+         * progress. Its command buffers are being filled from the recording,
+         * and a set arriving live would be appended to those same buffers
+         * mid-wind -- landing at whichever tick the catch-up had reached
+         * rather than at the one it belongs to.
+         *
+         * Not answered rather than not listened to: the service still runs,
+         * because the scene asks it for the round trip time every frame and
+         * waits for the answer. A set that is not taken is simply not acked,
+         * and the peer that sent it keeps sending it until it is.
+         */
+        bool acceptingCommands{true};
+
         std::array<char, 1500> sendBuffer;
         std::array<char, 1500> receiveBuffer;
         asio::ip::udp::endpoint currentRemoteEndpoint;
@@ -291,6 +307,13 @@ namespace rwe
          * newer one.
          */
         bool rememberPeer(PlayerId playerId, SequenceNumber fromSequence, SequenceNumber theirNextSequence);
+
+        /**
+         * Stops handing arriving commands and hashes to the simulation, or
+         * starts again. A peer winding itself forward into a game in progress
+         * starts with this off; see acceptingCommands.
+         */
+        void setAcceptingCommands(bool value);
 
     private:
         void run();

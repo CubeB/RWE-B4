@@ -1251,6 +1251,21 @@ namespace rwe
         static constexpr unsigned int RejoinTickMargin{120};
 
         /**
+         * Players agreed to rejoin, and how long the ordinary drop timer is
+         * held off for them.
+         *
+         * Without this a rejoin would be undone by the machinery that made it
+         * necessary: the returning peer is expected and silent, which is
+         * exactly what the drop timer watches for, and it has a whole game to
+         * load and wind through before it can say anything. The grace is long
+         * because being late costs only waiting, and cutting it short costs
+         * the rejoin.
+         */
+        std::unordered_map<unsigned int, Timestamp> rejoinGraceUntil;
+
+        static constexpr std::chrono::seconds RejoinGraceSeconds{180};
+
+        /**
          * Starts listening to any returning peer whose resume point this peer
          * has now submitted past. Called once a frame, and ordinarily does
          * nothing at all.

@@ -80,7 +80,14 @@ namespace rwe
         }
 
         // set up network
-        for (Index i = 0; i < getSize(gameParameters.players); ++i)
+        //
+        // Not for a recording. A replay of a network game carries the peers it
+        // was played against in its header, addresses and all, and every one of
+        // their commands in its body -- so there is nobody to connect to and
+        // nothing to ask them for. Left in, opening such a recording tried to
+        // resolve a host that was long gone and threw before the first frame.
+        // See the matching test in createGameScene.
+        for (Index i = 0; i < getSize(gameParameters.players) && !gameParameters.replayFile; ++i)
         {
             const auto& p = gameParameters.players[i];
             if (!p)
@@ -101,7 +108,21 @@ namespace rwe
 
         // wait for other players before starting
         networkService.setDoneLoading();
-        networkService.waitForAllToBeReady();
+        if (gameParameters.rejoinAtTick == 0)
+        {
+            networkService.waitForAllToBeReady();
+        }
+        else
+        {
+            // A peer rejoining a game in progress has nobody to agree a start
+            // with: the game started long ago, and the peers still in it
+            // answer this handshake with "already in game" for ever. What it
+            // waits for instead is the rejoin tick, which it reaches by
+            // winding the recording forward -- and the peers that stayed are
+            // stalled there waiting for exactly that.
+            LOG_INFO << "Rejoining at tick " << gameParameters.rejoinAtTick
+                     << "; not waiting for the other players to finish loading";
+        }
     }
 
     void LoadingScene::render()
@@ -155,7 +176,14 @@ namespace rwe
             auto playerId = *loaded.gamePlayers[i];
             playerCommandService->registerPlayer(playerId);
 
-            auto isRemote = std::get_if<PlayerControllerTypeNetwork>(&params->controller) != nullptr;
+            // Nobody is remote in a recording, whatever the header says: every
+            // player's commands come out of the file, nothing is sent to
+            // anyone, and there is no address to resolve. They stay network
+            // players in every other respect, which is what keeps them human
+            // players no AI drives and leaves the local seat where the
+            // recording had it.
+            auto isRemote = !gameParameters.replayFile
+                && std::get_if<PlayerControllerTypeNetwork>(&params->controller) != nullptr;
 
             // Only a peer running its own simulation has a sync hash to
             // report: this machine, and the machines on the other end of the

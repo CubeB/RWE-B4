@@ -47,6 +47,18 @@ namespace rwe
         auto tickIt = replayPlayback->commands.find(tick);
         for (Index i = 0; i < getSize(simulation.players); ++i)
         {
+            // The set number rather than the scene time: the scene counts its
+            // ticks from zero and the streams number their sets from one, so
+            // the set about to be popped is one above the tick about to run.
+            // False for a player whose stream has been cut, and for the ticks
+            // a rejoin has already filled in -- see needsCommandsForTick, and
+            // note that a recording crosses both of those in any game that
+            // lost a peer.
+            if (!playerCommandService->needsCommandsForTick(PlayerId(i), tick + 1))
+            {
+                continue;
+            }
+
             std::vector<PlayerCommand> commands;
             if (tickIt != replayPlayback->commands.end())
             {
@@ -334,6 +346,13 @@ namespace rwe
         clearSimulationForLoad(simulation);
         loadSimulationFromJson(nlohmann::json::from_cbor(keyframe), simulation);
         sceneTime = SceneTime(tick);
+
+        // The command streams follow the scene time: the recording is about to
+        // supply these ticks again, and the service has to be expecting them.
+        // A drop the viewer has wound back past is undone here too -- where it
+        // now stands that peer has not gone quiet yet, and the command saying
+        // so is ahead of it in the file.
+        playerCommandService->rewindTo(tick);
 
         // Everything the scene remembers about particular units is now about
         // units that may not exist, or may be somebody else in the same slot.

@@ -79,7 +79,26 @@ namespace rwe
 
         void close();
 
+        /**
+         * Writes everything recorded so far to `to` as a finished replay that
+         * runs through `lastTick`, and carries on recording here.
+         *
+         * This is what a peer rejoining a game in progress is handed. A copy
+         * of the live file will not serve, and the reason is the one thing a
+         * replay leaves out: a tick with no commands in it writes nothing, so
+         * a recording of a quiet minute ends, as far as a reader can tell, a
+         * minute before the game did. Only the end-of-game record says how far
+         * it really ran, and the live file has not got one yet.
+         *
+         * Returns false if the copy could not be written.
+         */
+        bool writeBundle(const std::filesystem::path& to, unsigned int lastTick);
+
+        /** Where this is recording, so a bundle can be cut from it. */
+        const std::filesystem::path& path() const { return filePath; }
+
     private:
+        std::filesystem::path filePath;
         std::ofstream out;
         unsigned int lastTickSeen{0};
     };
