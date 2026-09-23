@@ -1230,9 +1230,21 @@ namespace rwe
          * turns out warships and they sit beside it for the rest of the
          * game while the enemy does as it likes.
          *
-         * Three is a first guess and has not been through the arena. It is
-         * the smallest number that is a fleet rather than a scout, and small
-         * enough to matter on a map whose economy supports few hulls.
+         * Three was a first guess. It has been through the arena now
+         * (2026-09-23) and it stands: Brain Coral, ARM against ARM, 2400s,
+         * both players tuned to the same value, thirty seeds at 3 and at 5
+         * and ten at 8, judged on games decided and commanders killed. 3
+         * decided 18 of 30, 5 decided 13 of 30, 8 decided 3 of 10. Raising it
+         * does what it was meant to at the mechanism level and still loses --
+         * at 5 the fleet sails 97 times against 142 and is recalled 61
+         * against 105, so the sorties that happen stick better -- but fewer
+         * games end, and at 8 both sides merely finish bigger, which is what
+         * a game that never resolves looks like.
+         *
+         * Do not re-measure this on ten games. On the first ten seeds it read
+         * the other way round, 4 of 10 against 6 of 10, and the two arms
+         * swung about thirty points between seeds 1-10 and 11-30. Thirty is
+         * the minimum on this map.
          */
         int navalAttackFleetSize{3};
 
